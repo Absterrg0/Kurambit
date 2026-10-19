@@ -3,7 +3,7 @@ import {
   AuthEnvironmentMaintainScope,
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
-  ScheduledTaskId,
+  ThreadId,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -36,7 +36,7 @@ const groupOf = <const Tags extends ReadonlyArray<WsRpcMethod>>(...tags: Tags) =
 const connectionMiddleware = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
   Layer.merge(RpcAuthorization.layer(scopes), rpcInstrumentationLayer);
 const readOnlyConnection = connectionMiddleware([AuthOrchestrationReadScope]);
-const taskId = ScheduledTaskId.make("scheduled-task:instrumented");
+const threadId = ThreadId.make("thread:instrumented");
 const rpcSpanDefaults = { "rpc.transport": "websocket", "rpc.system": "effect-rpc" };
 
 const withTelemetry = <A, E, R>(
@@ -107,7 +107,7 @@ describe("WS RPC instrumentation middleware", () => {
             Layer.mergeAll(
               group.toLayerHandler(WS_METHODS.subscribeWorktreeSetup, () =>
                 Stream.concat(
-                  Stream.make({ jobs: [] }),
+                  Stream.make(null),
                   Stream.fromEffect(
                     Deferred.succeed(waiting, undefined).pipe(
                       Effect.andThen(Effect.never),
@@ -123,9 +123,9 @@ describe("WS RPC instrumentation middleware", () => {
 
         yield* TestClock.adjust(Duration.seconds(1));
         yield* TestClock.setTime(0);
-        const consumer = yield* Stream.runDrain(client[WS_METHODS.subscribeWorktreeSetup]({})).pipe(
-          Effect.forkChild,
-        );
+        const consumer = yield* Stream.runDrain(
+          client[WS_METHODS.subscribeWorktreeSetup]({ threadId }),
+        ).pipe(Effect.forkChild);
         yield* Deferred.await(waiting);
         yield* TestClock.adjust(Duration.millis(250));
         yield* TestClock.setTime(0);

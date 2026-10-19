@@ -200,6 +200,32 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(migrated.byThreadKey, refA).maximized).toBe(true);
   });
 
+  it("drops saved native device panels and PR dashboards while keeping browser tabs", () => {
+    const migrated = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "device:phone",
+          surfaces: [
+            { id: "browser:tab-a", kind: "preview", resourceId: "tab-a" },
+            { id: "device:phone", kind: "device", resourceId: "phone" },
+          ],
+        },
+        "env-1:pull-requests-panel": {
+          isOpen: true,
+          activeSurfaceId: "pull-request:1",
+          surfaces: [{ id: "pull-request:1", kind: "pull-request" }],
+        },
+      },
+    });
+    expect(migrated.byThreadKey["env-1:pull-requests-panel"]).toBeUndefined();
+    expect(selectThreadRightPanelState(migrated.byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [{ id: "browser:tab-a", kind: "preview", resourceId: "tab-a" }],
+    });
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({

@@ -199,9 +199,7 @@ interface CommitAndBranchSuggestion {
   commitMessage: string;
 }
 
-function isCommitAction(
-  action: GitStackedAction,
-): action is "commit" | "commit_push" | "commit_push_pr" {
+function isCommitAction(action: GitStackedAction): action is "commit" | "commit_push" {
   return action === "commit" || action === "commit_push";
 }
 
@@ -524,7 +522,7 @@ export const make = Effect.gen(function* () {
   const runCommitStep = Effect.fn("runCommitStep")(function* (
     settings: SourceControlTextGenerationSettings,
     cwd: string,
-    action: "commit" | "commit_push" | "commit_push_pr",
+    action: "commit" | "commit_push",
     branch: string | null,
     commitMessage?: string,
     preResolvedSuggestion?: CommitAndBranchSuggestion,
@@ -715,6 +713,13 @@ export const make = Effect.gen(function* () {
 
   const runStackedAction: GitManager["Service"]["runStackedAction"] = Effect.fn("runStackedAction")(
     function* (input, options) {
+      if (input.action === "create_pr" || input.action === "commit_push_pr") {
+        return yield* new GitManagerError({
+          operation: "runStackedAction",
+          cwd: input.cwd,
+          detail: "Hosted pull request actions are not supported.",
+        });
+      }
       const progress = yield* createProgressEmitter(input, options);
       const currentPhase = yield* Ref.make<Option.Option<GitActionProgressPhase>>(Option.none());
 

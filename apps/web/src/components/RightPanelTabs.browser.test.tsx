@@ -138,11 +138,8 @@ async function renderTabs(
         onAddBrowser={noop}
         onAddBrowserInProfile={noop}
         onAddTerminal={noop}
-        onAddPullRequest={noop}
-        onAddPullRequests={noop}
         onAddDiff={noop}
         onAddFiles={noop}
-        onAddDevice={noop}
         browserAvailable
         terminalAvailable={false}
         diffAvailable={false}

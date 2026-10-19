@@ -2203,6 +2203,7 @@ function OpenCommandPaletteDialog(props: {
       }
     }
 
+    if (addProjectCloneFlow.step !== "confirm") return;
     const rawDestination = (destinationPathInput ?? query).trim();
     if (
       !readEnvironmentScope(addProjectCloneFlow.environmentId, AuthSourceControlWriteScope) ||

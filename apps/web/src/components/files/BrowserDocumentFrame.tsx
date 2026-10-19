@@ -195,8 +195,6 @@ export function HtmlRenderDocument(props: {
       openContextLink(
         { ...modifiers, preventDefault: () => undefined, stopPropagation: () => undefined },
         url,
-        undefined,
-        props.threadRef.environmentId,
       )
     ) {
       return;

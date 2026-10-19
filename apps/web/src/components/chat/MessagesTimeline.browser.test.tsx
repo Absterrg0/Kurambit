@@ -21,20 +21,6 @@ import { MessagesTimeline } from "./MessagesTimeline";
 import { readTimelinePosition } from "./timelineScrollAnchoring";
 import { useComposerFocusState } from "./useComposerFocusState";
 
-const pullRequestQuery = vi.hoisted(() => ({ error: "Pull request not found" }));
-vi.mock(import("~/state/query"), async (original) => ({
-  ...(await original()),
-  useEnvironmentQuery: (() => ({
-    data: null,
-    dataUpdatedAt: 0,
-    error: pullRequestQuery.error,
-    failure: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => {},
-  })) as never,
-}));
-
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const CREATED_AT = "2026-03-17T19:12:28.000Z";
 
@@ -1069,17 +1055,8 @@ describe("timeline tooltip scroll dismissal", () => {
   const openPopup = () =>
     document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null;
 
-  async function renderTooltip(pullRequest: boolean, outside: boolean) {
-    const tooltip = pullRequest ? (
-      <PullRequestLinkPreview
-        link={<button>message link</button>}
-        originalUrl="https://example.com"
-        target={{
-          environmentId: ENVIRONMENT_ID,
-          input: { projectId: "project-1" as never, repository: "pingdotgg/t3code", number: 1 },
-        }}
-      />
-    ) : (
+  async function renderTooltip(outside: boolean) {
+    const tooltip = (
       <Tooltip>
         <TooltipTrigger delay={50}>message link</TooltipTrigger>
         <TooltipPopup>https://example.com</TooltipPopup>
@@ -1110,7 +1087,7 @@ describe("timeline tooltip scroll dismissal", () => {
   }
 
   it("leaves tooltips outside the timeline open when it scrolls", async () => {
-    const { trigger, scrollable } = await renderTooltip(false, true);
+    const { trigger, scrollable } = await renderTooltip(true);
     await userEvent.hover(trigger);
     await vi.waitFor(() => expect(openPopup()).toBe("https://example.com"));
     await scroll(scrollable);
@@ -1118,7 +1095,7 @@ describe("timeline tooltip scroll dismissal", () => {
   });
 
   it("keeps a hovered tooltip open on a wheel that does not scroll", async () => {
-    const { trigger, scrollable } = await renderTooltip(false, false);
+    const { trigger, scrollable } = await renderTooltip(false);
     await userEvent.hover(trigger);
     await vi.waitFor(() => expect(openPopup()).toBe("https://example.com"));
     await act(async () => {

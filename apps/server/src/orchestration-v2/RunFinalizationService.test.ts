@@ -1,10 +1,5 @@
 import { assert, it, vi } from "@effect/vitest";
-import {
-  CheckpointScopeId,
-  RunId,
-  ThreadId,
-  type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
@@ -73,7 +68,17 @@ it.effect("refreshes workspace and local Git after a turn without hosted lookups
               refreshLocalStatus: (cwd) =>
                 Effect.sync(() => {
                   refreshed.push(`git:${cwd}`);
-                  return null;
+                  return {
+                    isRepo: false,
+                    hasPrimaryRemote: false,
+                    isDefaultRef: false,
+                    refName: null,
+                    hasWorkingTreeChanges: false,
+                    workingTree: { files: [], insertions: 0, deletions: 0 },
+                    hasUpstream: false,
+                    aheadCount: 0,
+                    behindCount: 0,
+                  };
                 }),
             }),
             Layer.mock(ProjectionStore.ProjectionStoreV2)({}),

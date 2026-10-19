@@ -131,10 +131,6 @@
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"
     },
-    "./webhook-address": {
-      "types": "./src/webhookAddress.ts",
-      "default": "./src/webhookAddress.ts"
-    },
     "./delayed-status": {
       "types": "./src/delayedStatus.ts",
       "default": "./src/delayedStatus.ts"
@@ -351,10 +347,6 @@
       "types": "./src/state/mcpApps.ts",
       "default": "./src/state/mcpApps.ts"
     },
-    "./review-guide-tour": {
-      "types": "./src/reviewGuideTour.ts",
-      "default": "./src/reviewGuideTour.ts"
-    },
     "./state/query-persistence": {
       "types": "./src/state/queryPersistence.ts",
       "default": "./src/state/queryPersistence.ts"
@@ -368,12 +360,10 @@
     "@pierre/diffs": "catalog:",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
-    "effect": "catalog:",
-    "three": "0.180.0"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@types/three": "0.180.0",
     "vite-plus": "catalog:"
   }
 }
