@@ -8,11 +8,13 @@ import {
   MaximizeIcon,
   MinimizeIcon,
   MonitorPlayIcon,
+  MoreHorizontalIcon,
   PanelRightIcon,
   PlayIcon,
   RefreshCwIcon,
   SquareIcon,
   TriangleAlertIcon,
+  WrenchIcon,
   XIcon,
 } from "lucide-react";
 import type { GameAction, ScopedThreadRef } from "@t3tools/contracts";
@@ -20,11 +22,12 @@ import { GAME_TEMPLATES } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
 import { gameEnvironment } from "../../state/game";
-import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameAssetsPanel } from "./GameAssetsPanel";
@@ -66,12 +69,7 @@ export function GameStage({
   onAskAgent: (text: string) => void;
 }) {
   const navigate = useNavigate();
-  const query = useEnvironmentQuery(
-    gameEnvironment.status({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  );
+  const query = useIsGameThreadStatus(threadRef);
   const canOperate = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const chatWidth = useGameWorkspaceStore((state) => state.chatWidth);
@@ -141,18 +139,22 @@ export function GameStage({
       : null);
   const noticeVisible =
     message ?? (operation !== null && operationVisible ? operation.message : null);
-  // The strip is one line: a failure's excerpt belongs in the card, and its
-  // headline (with the full text in the tooltip) is what the strip has room for.
-  const strip = building
-    ? null
-    : failureVisible !== null
-      ? (failureVisible.split("\n")[0] ?? failureVisible)
-      : noticeVisible;
-  const showStrip = strip !== null && phase.kind !== "failed";
   // One status line, and a failure outranks the staleness it just caused.
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
+  const stagePhaseLabel =
+    phase.kind === "playing"
+      ? "Playing"
+      : phase.kind === "ready"
+        ? "Ready to play"
+        : phase.kind === "never-built"
+          ? "No build yet"
+          : phase.kind === "failed"
+            ? "Build failed"
+            : phase.kind === "tools-missing"
+              ? "Game tools missing"
+              : null;
   const nativeRunning = data.processes.some((process) => process.operation === "native");
   const runningSomething =
     busy !== null ||
@@ -214,102 +216,15 @@ export function GameStage({
       aria-label={`${data.manifest.name} game stage`}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2 pl-3">
         <Gamepad2Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <h2 className="min-w-0 truncate text-sm font-semibold">
+        <h2 className="shrink-0 truncate text-sm font-semibold">
           <TruncatedText text={data.manifest.name} />
         </h2>
-        <span className="hidden truncate text-xs text-muted-foreground xl:inline">
+        <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">
           {template?.name ?? `Godot ${data.manifest.engine.version}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button
-            size="sm"
-            disabled={!canOperate || building}
-            onClick={() => void perform("preview")}
-          >
-            <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-            {webBuild === undefined ? "Build & play" : "Play"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!canOperate || building}
-            onClick={() => void perform("rebuild")}
-          >
-            Rebuild
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!canOperate || !runningSomething}
-            onClick={() => void perform("stop")}
-          >
-            <SquareIcon className="size-3.5" aria-hidden="true" />
-            Stop
-          </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="Run native"
-                  disabled={!canOperate || building || nativeRunning}
-                  onClick={() => void perform("native")}
-                />
-              }
-            >
-              <MonitorPlayIcon className="size-3.5" aria-hidden="true" />
-              Run native
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              {nativeRunning
-                ? "The native game window is already running"
-                : "Run the game in its own window"}
-            </TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={fullscreen ? "Leave fullscreen" : "Fullscreen"}
-                  disabled={phase.kind !== "playing"}
-                  onClick={toggleFullscreen}
-                />
-              }
-            >
-              {fullscreen ? (
-                <MinimizeIcon className="size-3.5" aria-hidden="true" />
-              ) : (
-                <MaximizeIcon className="size-3.5" aria-hidden="true" />
-              )}
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              {fullscreen ? "Leave fullscreen" : "Fullscreen"}
-            </TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Export Linux build"
-                  disabled={!canOperate || building}
-                  onClick={() => void perform("export-linux")}
-                />
-              }
-            >
-              <DownloadIcon className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">Export a Linux build</TooltipPopup>
-          </Tooltip>
-        </div>
-      </header>
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+        <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
         <ToggleGroup
           aria-label="Game workspace"
           className="shrink-0"
@@ -332,37 +247,38 @@ export function GameStage({
             </Toggle>
           ))}
         </ToggleGroup>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          {staleChipVisible ? (
-            <span className="flex shrink-0 items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground">
-              <TriangleAlertIcon className="size-3" aria-hidden="true" />
-              Rebuild to see latest changes
-            </span>
-          ) : null}
+        <div
+          data-game-stage-status
+          className="flex min-w-0 flex-1 items-center justify-center px-1"
+        >
           {building ? (
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <RefreshCwIcon className="size-3.5 shrink-0" aria-hidden="true" />
-              <TruncatedText text={buildingMessage} />
+              <RefreshCwIcon
+                className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+              <TruncatedText text={buildingMessage} className="max-w-64" />
               {buildingStartedAt === null ? null : (
                 <GameElapsed since={buildingStartedAt} className="shrink-0" />
               )}
             </span>
-          ) : showStrip ? (
-            <span
-              className={cn(
-                "flex min-w-0 items-center gap-1.5 text-xs",
-                failureVisible !== null ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {failureVisible !== null ? (
-                <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-              ) : null}
-              <TruncatedText text={strip} className="min-w-16 max-w-md" />
-              {failureVisible === null ? null : (
-                <Button size="xs" variant="ghost" onClick={() => askAgentToFix(failureVisible)}>
-                  Ask agent to fix
-                </Button>
-              )}
+          ) : failureVisible !== null ? (
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-destructive-foreground">
+              <TriangleAlertIcon
+                className="size-3.5 shrink-0 text-destructive"
+                aria-hidden="true"
+              />
+              <TruncatedText
+                text={failureVisible.split("\n")[0] ?? failureVisible}
+                className="max-w-64"
+              />
+              <Button size="xs" variant="ghost" onClick={() => askAgentToFix(failureVisible)}>
+                Ask agent to fix
+              </Button>
+            </span>
+          ) : noticeVisible !== null ? (
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <TruncatedText text={noticeVisible} className="max-w-64" />
               <Button
                 size="icon-micro"
                 variant="ghost"
@@ -376,7 +292,140 @@ export function GameStage({
                 <XIcon className="size-3" aria-hidden="true" />
               </Button>
             </span>
-          ) : null}
+          ) : staleChipVisible ? (
+            <button
+              type="button"
+              disabled={!canOperate || building}
+              onClick={() => void perform("rebuild")}
+              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground transition-colors hover:bg-warning/20 disabled:cursor-default"
+            >
+              <TriangleAlertIcon className="size-3" aria-hidden="true" />
+              Rebuild to see latest changes
+            </button>
+          ) : (
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              {stagePhaseLabel === null ? null : (
+                <>
+                  {phase.kind === "playing" ? (
+                    <span
+                      className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <span className="truncate">{stagePhaseLabel}</span>
+                </>
+              )}
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            disabled={!canOperate || building}
+            onClick={() => void perform("preview")}
+          >
+            <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
+            {webBuild === undefined ? "Build & play" : "Play"}
+          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Rebuild the web build"
+                  className="hidden md:inline-flex"
+                  disabled={!canOperate || building}
+                  onClick={() => void perform("rebuild")}
+                />
+              }
+            >
+              <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Rebuild the web build</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Stop the game"
+                  disabled={!canOperate || !runningSomething}
+                  onClick={() => void perform("stop")}
+                />
+              }
+            >
+              <SquareIcon className="size-3.5" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Stop the game and its preview</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Run native"
+                  className="hidden lg:inline-flex"
+                  disabled={!canOperate || building || nativeRunning}
+                  onClick={() => void perform("native")}
+                />
+              }
+            >
+              <MonitorPlayIcon className="size-3.5" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              {nativeRunning
+                ? "The native game window is already running"
+                : "Run the game in its own window"}
+            </TooltipPopup>
+          </Tooltip>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="More game actions"
+                  data-game-stage-more=""
+                />
+              }
+            >
+              <MoreHorizontalIcon className="size-4" aria-hidden="true" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem disabled={!canOperate || building} onClick={() => void perform("rebuild")}>
+                <RefreshCwIcon />
+                Rebuild the web build
+              </MenuItem>
+              <MenuItem
+                disabled={!canOperate || building || nativeRunning}
+                onClick={() => void perform("native")}
+              >
+                <MonitorPlayIcon />
+                {nativeRunning ? "Game window is running" : "Run native"}
+              </MenuItem>
+              <MenuItem
+                disabled={!canOperate || building}
+                onClick={() => void perform("export-linux")}
+              >
+                <DownloadIcon />
+                Export Linux build
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
+                {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+                {fullscreen ? "Leave fullscreen" : "Fullscreen"}
+              </MenuItem>
+              <MenuItem
+                onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+              >
+                <WrenchIcon />
+                Game tools settings
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -393,7 +442,7 @@ export function GameStage({
             <TooltipPopup side="bottom">{chatCollapsed ? "Show chat" : "Hide chat"}</TooltipPopup>
           </Tooltip>
         </div>
-      </div>
+      </header>
       {tab === "play" ? (
         <GamePlaySurface
           phase={phase}

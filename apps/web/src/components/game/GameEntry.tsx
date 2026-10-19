@@ -1,6 +1,4 @@
 import { useGameDialogStore } from "./gameDialogStore";
-import { ComposerFooterModeControls } from "../chat/ComposerFooterModeControls";
-import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { ensureLocalApi } from "../../localApi";
 import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
@@ -12,7 +10,6 @@ import {
   type EnvironmentId,
   type GameTemplateId,
   type ModelSelection,
-  type RuntimeMode,
 } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { Badge } from "../ui/badge";
@@ -101,15 +98,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const navigate = useNavigate();
   const dialog = useGameDialogStore((state) => state.dialog);
   const setDialog = useGameDialogStore((state) => state.show);
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("full-access");
-  const supportedModes = entries.find((entry) => entry.instanceId === model.instanceId)?.snapshot
-    .supportedRuntimeModes;
-  const compatibleModes = runtimeModeOptions.filter(
-    (mode) => !supportedModes?.length || supportedModes.includes(mode),
-  );
-  const chosenMode = compatibleModes.includes(runtimeMode)
-    ? runtimeMode
-    : (compatibleModes[0] ?? "full-access");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [template, setTemplate] = useState<GameTemplateId>(DEFAULT_GAME_TEMPLATE);
@@ -148,7 +136,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
               brief,
               artDirection,
               modelSelection: model,
-              runtimeMode: chosenMode,
             },
           })
         : await open({ environmentId, input: { path: directory, modelSelection: model } });
@@ -301,22 +288,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     setSelection({ instanceId, model: selectedModel })
                   }
                 />
-                {dialog === "create" ? (
-                  <div className="flex items-center">
-                    <span className="text-sm">Runtime mode</span>
-                    <ComposerFooterModeControls
-                      interactionMode="default"
-                      showInteractionModeToggle={false}
-                      runtimeMode={chosenMode}
-                      runtimeModeOptions={compatibleModes.map((mode) => ({
-                        mode,
-                        ...runtimeModeConfig[mode],
-                      }))}
-                      onRuntimeModeChange={setRuntimeMode}
-                      onToggleInteractionMode={() => {}}
-                    />
-                  </div>
-                ) : null}
                 {error ? (
                   <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
                     {error}

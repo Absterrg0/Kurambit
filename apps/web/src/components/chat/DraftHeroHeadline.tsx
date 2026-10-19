@@ -7,7 +7,7 @@ import { FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 
-import { openCommandPalette } from "~/commandPaletteBus";
+import { useGameDialogStore } from "../game/gameDialogStore";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -42,7 +42,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
-const ADD_PROJECT_VALUE = "add-project";
+const OPEN_GAME_VALUE = "open-game";
 
 interface PickerItem {
   readonly value: string;
@@ -72,7 +72,9 @@ export function DraftHeroHeadline({
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  const openAddProject = () => openCommandPalette({ open: "add-project" });
+  // A project without a game manifest is not useful in Game Studio, so the
+  // empty state opens the game folder dialog rather than the generic flow.
+  const openGameFolder = () => useGameDialogStore.getState().show("open");
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const openProjectDraft = useNewThreadHandler();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -144,7 +146,7 @@ export function DraftHeroHeadline({
 
   const pickerItems: readonly PickerItem[] = [
     ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-    { value: ADD_PROJECT_VALUE, label: "Add project" },
+    { value: OPEN_GAME_VALUE, label: "Open a game folder" },
   ];
   const pickerSearch = pickerQuery.trim();
   const filteredPickerItems =
@@ -152,7 +154,7 @@ export function DraftHeroHeadline({
       ? pickerItems
       : pickerItems.filter(
           (item) =>
-            item.value !== ADD_PROJECT_VALUE &&
+            item.value !== OPEN_GAME_VALUE &&
             pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label),
         );
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
@@ -278,7 +280,7 @@ export function DraftHeroHeadline({
             const entry = projectEntryByKey.get(item.value);
             return (
               <ComboboxItem key={item.value} hideIndicator value={item}>
-                {item.value === ADD_PROJECT_VALUE ? (
+                {item.value === OPEN_GAME_VALUE ? (
                   <FolderPlusIcon className="size-4 shrink-0" />
                 ) : entry ? (
                   <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
@@ -305,20 +307,20 @@ export function DraftHeroHeadline({
   ) : (
     <button
       type="button"
-      onClick={openAddProject}
+      onClick={openGameFolder}
       className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      {activeProjectTitle ?? "Open a game"}
     </button>
   );
 
   const headingLabel = isScratchDraft
-    ? "What should we work on?"
+    ? "What should we make?"
     : hasResolvedProject
-      ? `What should we build in ${activeProjectDisplayName}?`
+      ? `What should change in ${activeProjectDisplayName}?`
       : canChooseProject
-        ? `${activeProjectDisplayName ?? "Choose a project"} to start`
-        : "Add a project to start";
+        ? `${activeProjectDisplayName ?? "Choose a game"} to start`
+        : "Open a game to start";
 
   const noProjectShortcut = shortcutLabelForCommand(keybindings, "chat.newWithoutProject");
   const orStartWithoutProject =
@@ -339,7 +341,7 @@ export function DraftHeroHeadline({
             />
           }
         >
-          or start without a project
+          or start without a game
         </TooltipTrigger>
         {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
       </Tooltip>
@@ -352,13 +354,13 @@ export function DraftHeroHeadline({
         className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       >
         {isScratchDraft ? (
-          <>What should we work on?</>
+          <>What should we make?</>
         ) : hasResolvedProject ? (
-          <>What should we build in {projectSelector}?</>
+          <>What should change in {projectSelector}?</>
         ) : canChooseProject ? (
           <>{projectSelector} to start</>
         ) : (
-          <>Add a project to start</>
+          <>Open a game to start</>
         )}
       </h1>
       {}

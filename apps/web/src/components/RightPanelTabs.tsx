@@ -103,6 +103,8 @@ interface RightPanelTabsProps {
   onCloseAllSurfaces: () => void;
   onMoveSurface?: (surfaceId: string, toIndex: number) => void;
   onCopyFilePath: (relativePath: string) => void;
+  /** Surfaces this surface should not offer at all, not merely disabled. */
+  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff">;
   onAddBrowser: () => void;
   /**
    * Separate from `onAddBrowser` on purpose: that one is passed directly as a
@@ -260,6 +262,8 @@ function SurfaceMenuItem(props: {
 }
 
 function RightPanelEmptyState(props: {
+  /** Surfaces this surface should not offer at all, not merely disabled. */
+  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff">;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -273,40 +277,42 @@ function RightPanelEmptyState(props: {
 }) {
   const [highlight, setHighlight] = useState(-1);
 
-  const actions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
-      onClick: props.onAddDiff,
-    },
-  ] as const;
+  const actions = (
+    [
+      {
+        label: "Browser",
+        icon: Globe2,
+        shortcut: "B",
+        available: props.browserAvailable,
+        disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
+        onClick: props.onAddBrowser,
+      },
+      {
+        label: "Terminal",
+        icon: TerminalSquare,
+        shortcut: "T",
+        available: props.terminalAvailable,
+        disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
+        onClick: props.onAddTerminal,
+      },
+      {
+        label: "Files",
+        icon: Files,
+        shortcut: "F",
+        available: props.filesAvailable,
+        disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
+        onClick: props.onAddFiles,
+      },
+      {
+        label: "Diff",
+        icon: FileDiff,
+        shortcut: "D",
+        available: props.diffAvailable,
+        disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
+        onClick: props.onAddDiff,
+      },
+    ] as const
+  ).filter((action) => !props.excludedAddSurfaces?.includes(action.label));
 
   type SurfaceAction = (typeof actions)[number];
 
@@ -786,40 +792,42 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   };
 
-  const addSurfaceActions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
-    },
-  ] as const;
+  const addSurfaceActions = (
+    [
+      {
+        label: "Browser",
+        icon: Globe2,
+        shortcut: "B",
+        available: props.browserAvailable,
+        disabledReason: SURFACE_DISABLED_REASONS.browser,
+        onClick: props.onAddBrowser,
+      },
+      {
+        label: "Terminal",
+        icon: TerminalSquare,
+        shortcut: "T",
+        available: props.terminalAvailable,
+        disabledReason: SURFACE_DISABLED_REASONS.terminal,
+        onClick: props.onAddTerminal,
+      },
+      {
+        label: "Files",
+        icon: Files,
+        shortcut: "F",
+        available: props.filesAvailable,
+        disabledReason: SURFACE_DISABLED_REASONS.files,
+        onClick: props.onAddFiles,
+      },
+      {
+        label: "Diff",
+        icon: FileDiff,
+        shortcut: "D",
+        available: props.diffAvailable,
+        disabledReason: SURFACE_DISABLED_REASONS.diff,
+        onClick: props.onAddDiff,
+      },
+    ] as const
+  ).filter((action) => !props.excludedAddSurfaces?.includes(action.label));
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
@@ -1168,6 +1176,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            excludedAddSurfaces={props.excludedAddSurfaces}
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}

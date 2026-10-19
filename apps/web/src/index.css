@@ -214,8 +214,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     );
   --color-zinc-25: oklch(99.2% 0 0);
   /* The game viewport, like an engine's stage: always dark, in both themes,
-     because a light letterbox around a rendered game looks broken. */
-  --color-stage: oklch(17% 0 0);
+     because a light letterbox around a rendered game looks broken. Kept off
+     pure black so the frame reads as a picture on a surface, not a hole. */
+  --color-stage: oklch(22% 0.006 255);
   --color-stage-foreground: oklch(96% 0 0);
   --color-stage-muted: oklch(72% 0 0);
   --color-stage-subtle: oklch(48% 0 0);

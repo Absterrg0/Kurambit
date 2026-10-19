@@ -39,6 +39,7 @@ import {
   type EnvironmentId,
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
+  type GameAction,
   type ProjectId,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
@@ -59,7 +60,11 @@ import {
   LinkIcon,
   MessageSquareIcon,
   MonitorIcon,
+  MonitorPlayIcon,
   MoonIcon,
+  PlayIcon,
+  SquareIcon,
+  WrenchIcon,
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
@@ -110,6 +115,9 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
+import { gameEnvironment } from "../state/game";
+import { useGameWorkspaceStore } from "../gameWorkspaceStore";
+import { useIsGameThread } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -698,6 +706,12 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
+  const activeThreadRef =
+    activeThread === null ? null : scopeThreadRef(activeThread.environmentId, activeThread.id);
+  // The same signal the game stage uses: the palette only leads with game
+  // commands where the workspace has a game.
+  const isGameThread = useIsGameThread(activeThreadRef);
+  const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -1453,6 +1467,62 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (isGameThread && activeThreadRef !== null) {
+    const threadRef = activeThreadRef;
+    const runGameAction = (action: GameAction) => async (): Promise<void> => {
+      const result = await gameAction({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, action },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      if (!result.value.success) throw new Error(result.value.message);
+    };
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:game-play",
+        title: "Play game",
+        searchTerms: ["play", "run", "preview", "game"],
+        icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("preview"),
+      },
+      {
+        kind: "action",
+        value: "action:game-rebuild",
+        title: "Rebuild game",
+        searchTerms: ["rebuild", "build", "export", "game"],
+        icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("rebuild"),
+      },
+      {
+        kind: "action",
+        value: "action:game-stop",
+        title: "Stop game",
+        searchTerms: ["stop", "close", "quit", "game"],
+        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("stop"),
+      },
+      {
+        kind: "action",
+        value: "action:game-native",
+        title: "Run native",
+        searchTerms: ["run", "native", "window", "game"],
+        icon: <MonitorPlayIcon className={ITEM_ICON_CLASS} />,
+        run: runGameAction("native"),
+      },
+      {
+        kind: "action",
+        value: "action:game-toggle-chat",
+        title: "Toggle chat",
+        searchTerms: ["chat", "hide", "show", "stage", "game"],
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.chat.toggle",
+        run: async () => {
+          useGameWorkspaceStore.getState().toggleChat();
+        },
+      },
+    );
+  }
   for (const [mode, title] of [
     ["create", "New game"],
     ["open", "Open game"],
@@ -1518,7 +1588,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (scratchTargetEnvironmentId !== null) {
+  if (scratchTargetEnvironmentId !== null && !isGameThread) {
     actionItems.push({
       kind: "action",
       value: "action:new-thread-without-project",
@@ -1593,7 +1663,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }
 
-  if (activeThreadReferenceCopyTarget !== null) {
+  if (activeThreadReferenceCopyTarget !== null && !isGameThread) {
     actionItems.push({
       kind: "action",
       value: "action:copy-thread-reference",
@@ -1669,7 +1739,7 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  if (newProjectEnvironmentOptions.length > 0) {
+  if (!isGameThread && newProjectEnvironmentOptions.length > 0) {
     actionItems.push({
       kind: "action",
       value: "action:new-project",
@@ -1683,29 +1753,31 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  actionItems.push({
-    kind: "action",
-    value: "action:add-project",
-    searchTerms: [
-      "add project",
-      "folder",
-      "directory",
-      "browse",
-      "clone",
-      "remote",
-      "repository",
-      "repo",
-      "git",
-      "url",
-      "environment",
-    ],
-    title: "Add project",
-    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
-    run: async () => {
-      openAddProjectFlow();
-    },
-  });
+  if (!isGameThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:add-project",
+      searchTerms: [
+        "add project",
+        "folder",
+        "directory",
+        "browse",
+        "clone",
+        "remote",
+        "repository",
+        "repo",
+        "git",
+        "url",
+        "environment",
+      ],
+      title: "Add project",
+      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        openAddProjectFlow();
+      },
+    });
+  }
 
   const changeThemeItem: CommandPaletteSubmenuItem = {
     kind: "submenu",

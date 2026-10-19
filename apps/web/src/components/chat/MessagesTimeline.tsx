@@ -175,7 +175,8 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
-import { ChangedFilesCard } from "./ChangedFilesTree";
+import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
+import { GameChangeSummary } from "../game/GameChangeSummary";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
@@ -311,6 +312,8 @@ interface TimelineRowSharedState {
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
+  /** A game turn leads with what changed in the game, not a repository diff. */
+  gameThread: boolean;
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
@@ -464,6 +467,8 @@ interface MessagesTimelineProps {
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
   displayThreadKey?: string;
+  /** Render game-shaped turn summaries and hide coding setup surfaces. */
+  gameThread?: boolean;
   paintOnly?: boolean;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
@@ -570,6 +575,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   turnDiffSummaries,
   routeThreadKey,
   displayThreadKey,
+  gameThread = false,
   paintOnly = false,
   onOpenTurnDiff,
   onOpenThread,
@@ -1216,6 +1222,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listRef,
     timestampFormat,
     routeThreadKey,
+    gameThread,
     threadRef: citationThreadRef,
     markdownCwd,
     resolvedTheme,
@@ -4002,6 +4009,35 @@ function AssistantChangedFilesSectionInner({
   );
   const onFileContextMenu = useFileContextMenuHandler(ctx.activeThreadEnvironmentId);
 
+  const onFileContextMenuHandler = (
+    filePath: string,
+    event: Parameters<ChangedFileContextMenuHandler>[1],
+  ) =>
+    onFileContextMenu(
+      {
+        environmentId: ctx.activeThreadEnvironmentId,
+        filePath,
+        workspaceRoot: ctx.workspaceRoot,
+        repositoryRoot:
+          thread?.worktreePath == null ? activeProject?.repositoryIdentity?.rootPath : undefined,
+      },
+      event,
+    );
+  if (ctx.gameThread) {
+    return (
+      <GameChangeSummary
+        runId={turnSummary.runId}
+        files={checkpointFiles}
+        allDirectoriesExpanded={allDirectoriesExpanded}
+        resolvedTheme={resolvedTheme}
+        onToggleAllDirectories={() =>
+          setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
+        }
+        onOpenTurnDiff={onOpenTurnDiff}
+        onFileContextMenu={onFileContextMenuHandler}
+      />
+    );
+  }
   return (
     <ChangedFilesCard
       runId={turnSummary.runId}
@@ -4012,20 +4048,7 @@ function AssistantChangedFilesSectionInner({
         setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
       }
       onOpenTurnDiff={onOpenTurnDiff}
-      onFileContextMenu={(filePath, event) =>
-        onFileContextMenu(
-          {
-            environmentId: ctx.activeThreadEnvironmentId,
-            filePath,
-            workspaceRoot: ctx.workspaceRoot,
-            repositoryRoot:
-              thread?.worktreePath == null
-                ? activeProject?.repositoryIdentity?.rootPath
-                : undefined,
-          },
-          event,
-        )
-      }
+      onFileContextMenu={onFileContextMenuHandler}
     />
   );
 }

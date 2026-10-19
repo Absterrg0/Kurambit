@@ -169,6 +169,7 @@ import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
+import { useIsGameThread } from "../hooks/useIsGameThread";
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
@@ -347,7 +348,6 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
-import { gameEnvironment } from "../state/game";
 import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -1642,19 +1642,21 @@ export default function ChatView(props: ChatViewProps) {
   const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
-  // A thread is a game thread when its workspace answers game status. The
-  // stage reads the same query atom, so a thread still costs one request.
-  const gameStatusQuery = useEnvironmentQuery(
-    activeThreadRef
-      ? gameEnvironment.status({
-          environmentId: activeThreadRef.environmentId,
-          input: { threadId: activeThreadRef.threadId },
-        })
-      : null,
-  );
-  const isGameThread = gameStatusQuery.data !== null;
+  const isGameThread = useIsGameThread(activeThreadRef);
   const gameChatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const gameChatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
+  const fitGameChatWidth = useGameWorkspaceStore((state) => state.fitChatWidth);
+  // A remembered chat width may be wider than this window can spare. Fit it
+  // once per thread and whenever the workspace resizes, before the stage is
+  // laid out, so the game never starts squeezed.
+  useEffect(() => {
+    if (!isGameThread || workspaceLayoutElement === null) return;
+    fitGameChatWidth(workspaceLayoutElement.clientWidth);
+    return observeResize(workspaceLayoutElement, (entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width !== undefined && width > 0) fitGameChatWidth(width);
+    });
+  }, [isGameThread, workspaceLayoutElement, fitGameChatWidth]);
   const panelTerminalIds = new Set(
     rightPanelState.surfaces.flatMap((surface) =>
       surface.kind === "terminal" ? surface.terminalIds : [],
@@ -5372,6 +5374,7 @@ export default function ChatView(props: ChatViewProps) {
         );
       },
       "terminal.toggle": () => {
+        if (isGameThread) return false;
         if (!terminalUiState.terminalOpen && !canReadTerminal && !canOperateTerminal) return false;
         toggleTerminalVisibilityStable();
       },
@@ -5388,7 +5391,10 @@ export default function ChatView(props: ChatViewProps) {
       "rightPanel.toggleMaximized": ({ event }) => {
         if (!event.repeat) toggleRightPanelMaximizedStable();
       },
-      "threadPanel.toggle": () => toggleThreadPanelStable(),
+      "threadPanel.toggle": () => {
+        if (isGameThread) return false;
+        toggleThreadPanelStable();
+      },
       "rightPanel.close": ({ event }) => {
         if (!activeRightPanelSurface) return false;
         if (!event.repeat) closeRightPanelSurfaceStable(activeRightPanelSurface);
@@ -7584,7 +7590,8 @@ export default function ChatView(props: ChatViewProps) {
   const panelToggleControls = (
     <PanelLayoutControls
       {...panelToggleControlProps}
-      showThreadPanelControl={!inlineRightPanelOwnsTitleBar}
+      showThreadPanelControl={!inlineRightPanelOwnsTitleBar && !isGameThread}
+      showTerminalControl={!isGameThread}
     />
   );
   const threadPanelHeaderControl = (
@@ -7594,6 +7601,7 @@ export default function ChatView(props: ChatViewProps) {
     >
       <PanelLayoutControls
         {...panelToggleControlProps}
+        showThreadPanelControl={!isGameThread}
         showTerminalControl={false}
         showRightPanelControl={false}
       />
@@ -7700,6 +7708,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             activeProject={activeProject ?? null}
             parentThreadLink={parentThreadLink}
+            gameThread={isGameThread}
             onOpenThread={onOpenRelatedThreadStable}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
             onNewThreadInProject={handleNewThreadInActiveProjectStable}
@@ -7788,7 +7797,7 @@ export default function ChatView(props: ChatViewProps) {
                     activeThreadShell?.hasPendingUserInput === true)
                 }
                 activeTurnStartedAt={paintOnlyDisplayedTimeline ? null : activeWorkStartedAt}
-                worktreeSetup={paintOnlyDisplayedTimeline ? null : worktreeSetup}
+                worktreeSetup={paintOnlyDisplayedTimeline || isGameThread ? null : worktreeSetup}
                 onCancelWorktreeSetup={onCancelWorktreeSetupStable}
                 {...(paintOnlyDisplayedTimeline
                   ? {}
@@ -7800,7 +7809,10 @@ export default function ChatView(props: ChatViewProps) {
                   ? { onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocallyStable }
                   : {})}
                 {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
-                isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
+                isPreparingWorktree={
+                  !paintOnlyDisplayedTimeline && !isGameThread && isPreparingWorktree
+                }
+                gameThread={isGameThread}
                 footer={
                   paintOnlyDisplayedTimeline ? null : pendingHandoff === null ? (
                     threadStatusLine
@@ -8073,6 +8085,7 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               runtimeMode={runtimeMode}
                               interactionMode={interactionMode}
+                              gameThread={isGameThread}
                               lockedProvider={modelPickerLockedProvider}
                               providerStatuses={providerStatuses as ServerProvider[]}
                               providerCatalogKnown={serverConfig !== null}
@@ -8094,6 +8107,7 @@ export default function ChatView(props: ChatViewProps) {
                               gitCwd={gitCwd}
                               restingControlsHost={restingComposerControlsHost}
                               restingControlsHaveLeadingContext={
+                                !isGameThread &&
                                 mountComposerContextStrip &&
                                 (isGitRepo || showComposerEnvironmentIndicator)
                               }
@@ -8170,7 +8184,7 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </ComposerSurface.ContextStrip>
                           ) : null}
-                          {mountComposerContextStrip && (
+                          {mountComposerContextStrip && !isGameThread ? (
                             <div className="pointer-events-auto">
                               <BranchToolbar
                                 forceNewWorktree={multipleModelSelections !== null}
@@ -8209,7 +8223,7 @@ export default function ChatView(props: ChatViewProps) {
                                 contextStripVisible={showComposerContextStrip}
                               />
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                     </ComposerSurface.Shell>
@@ -8331,6 +8345,7 @@ export default function ChatView(props: ChatViewProps) {
           desktopByTabId={activePreviewState.desktopByTabId}
           previewRuntimeTabId={resolvePreviewRuntimeTabId}
           terminalLabelsById={activeTerminalLabelsById}
+          excludedAddSurfaces={isGameThread ? ["Terminal", "Diff"] : undefined}
           onActivate={activateRightPanelSurfaceStable}
           onCloseSurface={closeRightPanelSurfaceStable}
           onCloseOtherSurfaces={closeOtherRightPanelSurfacesStable}
@@ -8376,6 +8391,7 @@ export default function ChatView(props: ChatViewProps) {
             desktopByTabId={activePreviewState.desktopByTabId}
             previewRuntimeTabId={resolvePreviewRuntimeTabId}
             terminalLabelsById={activeTerminalLabelsById}
+            excludedAddSurfaces={isGameThread ? ["Terminal", "Diff"] : undefined}
             onActivate={activateRightPanelSurfaceStable}
             onCloseSurface={closeRightPanelSurfaceStable}
             onCloseOtherSurfaces={closeOtherRightPanelSurfacesStable}
