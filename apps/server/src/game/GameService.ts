@@ -240,7 +240,7 @@ const make = Effect.gen(function* () {
         .catch(() => null),
     );
     if (built === null) return false;
-    return yield* Effect.tryPromise({
+    const stale = yield* Effect.tryPromise({
       try: async () => {
         const stack = [NodePath.join(root, godotProject)];
         while (stack.length > 0) {
@@ -257,6 +257,7 @@ const make = Effect.gen(function* () {
       catch: (cause) =>
         new GameOperationError({ operation: "Web playtest", path: index, reason: "io", cause }),
     });
+    return !stale;
   });
   const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
     if (!(yield* webBuildFresh(root, (yield* projects.read(root)).godotProject))) {
