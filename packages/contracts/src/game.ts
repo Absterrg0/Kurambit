@@ -12,7 +12,7 @@ export const GameAsset = Schema.Struct({
   thumbnail: Schema.optionalKey(Schema.String),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals(["3d-explorer", "blank"]);
+export const GameTemplateId = Schema.Literals(["3d-explorer", "2d-platformer", "blank"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
@@ -32,6 +32,13 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     description:
       "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
     dimension: "3d",
+  },
+  {
+    id: "2d-platformer",
+    name: "2D Platformer",
+    description:
+      "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
+    dimension: "2d",
   },
   {
     id: "blank",

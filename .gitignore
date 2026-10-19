@@ -45,3 +45,5 @@ node_modules/
 
 # pnpm content-addressable store; never belongs in the repo.
 .pnpm-store/
+apps/server/templates/*/godot/.godot/
+apps/server/templates/*/godot/**/*.import

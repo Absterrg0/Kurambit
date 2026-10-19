@@ -1114,7 +1114,7 @@ const buildRidgeFar = () => {
   for (let index = 0; index < 90; index++) {
     const x = Math.floor(random() * SKY_WIDTH);
     const y = 8 + Math.floor(random() * 70);
-    canvas.pixel(x, y, withAlpha(palette.star, 120 + Math.floor(random() * 100)));
+    canvas.pixel(x, y, withAlpha(palette.star, 170 + Math.floor(random() * 85)));
   }
   return canvas;
 };
@@ -1143,7 +1143,7 @@ const buildRidgeMid = () => {
         const halfWidth = Math.max(1, Math.round((trunkHeight - step) * 0.56));
         for (let dx = -halfWidth; dx <= halfWidth; dx++)
           canvas.pixelWrapped(baseX + dx, groundY - step, palette.ridgeMid);
-        canvas.pixelWrapped(baseX, groundY - step, shift(palette.ridgeMid, -0.03));
+        canvas.pixelWrapped(baseX, groundY - step, shift(palette.ridgeMid, 0.06));
       }
       continue;
     }
