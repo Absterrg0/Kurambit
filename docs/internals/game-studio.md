@@ -20,8 +20,9 @@ the panel, an agent can do through a tool, and the reverse.
 New games start from a template under `apps/server/templates/<id>/`: `template.json` (catalog
 metadata), `TEMPLATE.md` (the architecture guide, copied to the game root; the game's AGENTS.md
 tells the agent to read it first), and `godot/`, which becomes the game's Godot project. Text files
-substitute `{{GAME_NAME}}`, or `{{GAME_NAME_STRING}}` for engine config values that need a quoted,
-escaped string literal (`config/name`); every other file is copied byte for byte. The templates
+substitute `{{GAME_NAME}}` or, inside a quoted Godot string, `{{GAME_NAME_ESCAPED}}` — the game name
+escaped for a string literal, so a name containing `"` or `\` cannot corrupt a scene or
+`project.godot`; every other file is copied byte for byte. The templates
 directory resolves relative to the running module — `apps/server/templates` in the dev tree,
 `dist/templates` in the packed server — and `apps/server/scripts/cli.ts build` copies it into
 `dist`. That single rule is why the CLI archive stages `templates/` beside the executable, next to

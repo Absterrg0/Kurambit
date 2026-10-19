@@ -1,12 +1,13 @@
 ; Engine configuration for the 3d-explorer starter template.
-; config/name is substituted with a JSON string literal, so quotes and
-; backslashes in the game name cannot corrupt this file.
+; Inside every quoted string, {{GAME_NAME_ESCAPED}} is substituted with the
+; game name escaped for a Godot string literal, so quotes and backslashes in
+; the name cannot corrupt this file.
 
 config_version=5
 
 [application]
 
-config/name={{GAME_NAME_STRING}}
+config/name="{{GAME_NAME_ESCAPED}}"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"

@@ -106,7 +106,8 @@ it.live.skipIf(!available)(
             const projects = yield* GameProjectService.GameProjectService;
             const game = yield* GameService.GameService;
             const created = yield* projects.create({
-              name: "Relic Run",
+              // A name with quotes and a backslash: the template's own files must survive it.
+              name: 'Relic Run "Best" \\ 2',
               parentDirectory: parent,
               template: "3d-explorer",
               brief: "Explode into a courtyard of floating ruins and collect every relic.",

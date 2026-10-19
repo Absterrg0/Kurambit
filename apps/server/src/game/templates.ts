@@ -4,8 +4,12 @@ import * as Path from "effect/Path";
 import { GameOperationError, type GameTemplateId } from "@t3tools/contracts";
 
 const gameNamePlaceholder = "{{GAME_NAME}}";
-/** Quoted, escaped variant for engine config values: a name containing `"` or `\` cannot break them. */
-const gameNameStringPlaceholder = "{{GAME_NAME_STRING}}";
+/**
+ * Escaped variant for engine string literals. It carries no quotes of its own, so
+ * template authors write `config/name="{{GAME_NAME_ESCAPED}}"`, and a game name
+ * containing `"` or `\` cannot break the file it lands in.
+ */
+const gameNameEscapedPlaceholder = "{{GAME_NAME_ESCAPED}}";
 
 // Text files receive placeholder substitution; everything else is copied byte for byte.
 const textFileExtensions = [".godot", ".tscn", ".tres", ".gd", ".cfg", ".md", ".json"];
@@ -15,7 +19,7 @@ export const isTemplateTextFile = (relativePath: string): boolean =>
 
 export const substituteGameName = (text: string, gameName: string): string =>
   text
-    .replaceAll(gameNameStringPlaceholder, JSON.stringify(gameName))
+    .replaceAll(gameNameEscapedPlaceholder, JSON.stringify(gameName).slice(1, -1))
     .replaceAll(gameNamePlaceholder, gameName);
 
 export const resolveTemplatesDirectory = Effect.fn("GameTemplates.resolveDirectory")(function* () {

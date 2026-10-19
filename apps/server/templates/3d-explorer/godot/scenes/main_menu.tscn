@@ -75,7 +75,7 @@ theme_override_constants/separation = 12
 [node name="Title" type="Label" parent="Menu/Panel/Box"]
 theme_override_colors/font_color = Color(1, 0.96, 0.9, 1)
 theme_override_font_sizes/font_size = 64
-text = "{{GAME_NAME}}"
+text = "{{GAME_NAME_ESCAPED}}"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Menu/Panel/Box"]
