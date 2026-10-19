@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/goal.gd" id="1_goal"]
+[ext_resource type="Texture2D" path="res://assets/sprites/door.png" id="2_door"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_goal"]
+size = Vector2(22, 28)
+
+[node name="Goal" type="Area2D"]
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("1_goal")
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture = ExtResource("2_door")
+offset = Vector2(0, -16)
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+position = Vector2(0, -15)
+shape = SubResource("RectangleShape2D_goal")

@@ -1,0 +1,99 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/settings_menu.gd" id="1_settings"]
+
+[node name="SettingsPanel" type="PanelContainer"]
+offset_right = 260.0
+offset_bottom = 150.0
+script = ExtResource("1_settings")
+
+[node name="Box" type="VBoxContainer" parent="."]
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Box"]
+theme_override_font_sizes/font_size = 20
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="Audio" type="VBoxContainer" parent="Box"]
+theme_override_constants/separation = 4
+
+[node name="Master" type="HBoxContainer" parent="Box/Audio"]
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Box/Audio/Master"]
+custom_minimum_size = Vector2(80, 0)
+theme_override_font_sizes/font_size = 13
+text = "Master"
+
+[node name="Slider" type="HSlider" parent="Box/Audio/Master"]
+custom_minimum_size = Vector2(180, 0)
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.85
+
+[node name="Value" type="Label" parent="Box/Audio/Master"]
+custom_minimum_size = Vector2(46, 0)
+theme_override_font_sizes/font_size = 13
+text = "85%"
+horizontal_alignment = 2
+
+[node name="Music" type="HBoxContainer" parent="Box/Audio"]
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Box/Audio/Music"]
+custom_minimum_size = Vector2(80, 0)
+theme_override_font_sizes/font_size = 13
+text = "Music"
+
+[node name="Slider" type="HSlider" parent="Box/Audio/Music"]
+custom_minimum_size = Vector2(180, 0)
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.6
+
+[node name="Value" type="Label" parent="Box/Audio/Music"]
+custom_minimum_size = Vector2(46, 0)
+theme_override_font_sizes/font_size = 13
+text = "60%"
+horizontal_alignment = 2
+
+[node name="Sfx" type="HBoxContainer" parent="Box/Audio"]
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Box/Audio/Sfx"]
+custom_minimum_size = Vector2(80, 0)
+theme_override_font_sizes/font_size = 13
+text = "Effects"
+
+[node name="Slider" type="HSlider" parent="Box/Audio/Sfx"]
+custom_minimum_size = Vector2(180, 0)
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.9
+
+[node name="Value" type="Label" parent="Box/Audio/Sfx"]
+custom_minimum_size = Vector2(46, 0)
+theme_override_font_sizes/font_size = 13
+text = "90%"
+horizontal_alignment = 2
+
+[node name="Video" type="VBoxContainer" parent="Box"]
+theme_override_constants/separation = 4
+
+[node name="Shake" type="CheckButton" parent="Box/Video"]
+theme_override_font_sizes/font_size = 13
+text = "Camera shake"
+button_pressed = true
+
+[node name="Spacer" type="Control" parent="Box"]
+custom_minimum_size = Vector2(0, 4)
+mouse_filter = 2
+
+[node name="Back" type="Button" parent="Box"]
+custom_minimum_size = Vector2(200, 0)
+size_flags_horizontal = 4
+text = "Back"

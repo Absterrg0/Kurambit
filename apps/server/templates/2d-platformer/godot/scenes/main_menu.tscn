@@ -1,0 +1,128 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_menu"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings_menu.tscn" id="2_settings"]
+[ext_resource type="Texture2D" path="res://assets/backgrounds/ridge_mid.png" id="3_ridge"]
+[ext_resource type="Texture2D" path="res://assets/backgrounds/veg_near.png" id="4_veg"]
+
+[sub_resource type="Gradient" id="Gradient_sky"]
+offsets = PackedFloat32Array(0, 0.45, 0.72, 0.9, 1)
+colors = PackedColorArray(0.09, 0.1, 0.21, 1, 0.17, 0.14, 0.32, 1, 0.33, 0.19, 0.35, 1, 0.55, 0.26, 0.33, 1, 0.88, 0.48, 0.31, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture_sky"]
+gradient = SubResource("Gradient_sky")
+width = 64
+height = 128
+fill_from = Vector2(0.5, 0)
+fill_to = Vector2(0.5, 1)
+
+[sub_resource type="Gradient" id="Gradient_vignette"]
+offsets = PackedFloat32Array(0, 0.55, 1)
+colors = PackedColorArray(0, 0, 0, 0, 0, 0, 0, 0, 0.02, 0.02, 0.05, 0.75)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture_vignette"]
+gradient = SubResource("Gradient_vignette")
+width = 128
+height = 128
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(0.66, 1)
+
+[node name="MainMenu" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_menu")
+
+[node name="Sky" type="TextureRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = SubResource("GradientTexture_sky")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Ridge" type="TextureRect" parent="."]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -150.0
+mouse_filter = 2
+texture = ExtResource("3_ridge")
+expand_mode = 1
+stretch_mode = 1
+texture_repeat = 2
+
+[node name="Veg" type="TextureRect" parent="."]
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -96.0
+mouse_filter = 2
+texture = ExtResource("4_veg")
+expand_mode = 1
+stretch_mode = 1
+texture_repeat = 2
+
+[node name="Vignette" type="TextureRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = SubResource("GradientTexture_vignette")
+expand_mode = 1
+
+[node name="Menu" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Menu"]
+
+[node name="Box" type="VBoxContainer" parent="Menu/Panel"]
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Menu/Panel/Box"]
+theme_override_colors/font_color = Color(1, 0.95, 0.86, 1)
+theme_override_font_sizes/font_size = 34
+text = "{{GAME_NAME_ESCAPED}}"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Menu/Panel/Box"]
+theme_override_colors/font_color = Color(0.78, 0.83, 0.95, 1)
+theme_override_font_sizes/font_size = 13
+text = "Two levels of running, jumping and coin hunting."
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="Menu/Panel/Box"]
+custom_minimum_size = Vector2(0, 14)
+mouse_filter = 2
+
+[node name="Play" type="Button" parent="Menu/Panel/Box"]
+custom_minimum_size = Vector2(210, 0)
+size_flags_horizontal = 4
+text = "Play"
+
+[node name="Settings" type="Button" parent="Menu/Panel/Box"]
+custom_minimum_size = Vector2(210, 0)
+size_flags_horizontal = 4
+text = "Settings"
+
+[node name="Quit" type="Button" parent="Menu/Panel/Box"]
+custom_minimum_size = Vector2(210, 0)
+size_flags_horizontal = 4
+text = "Quit"
+
+[node name="Hint" type="Label" parent="Menu/Panel/Box"]
+theme_override_colors/font_color = Color(0.66, 0.72, 0.88, 1)
+theme_override_font_sizes/font_size = 11
+text = "Arrows / WASD move · Space jumps · Shift sprints · Esc pauses"
+horizontal_alignment = 1
+
+[node name="SettingsPanel" parent="." instance=ExtResource("2_settings")]
+visible = false
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2

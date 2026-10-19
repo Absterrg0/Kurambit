@@ -1048,31 +1048,25 @@ const buildDust = () => {
 };
 
 /** HUD icons: a heart for a life, a coin for the counter. */
-const buildIcons = () => {
-  const canvas = new Canvas(48, 16);
-  const HEART = [
-    "..kkk.kkk..",
-    ".khhhkhhhk.",
-    "khhhhHhhhHk",
-    "khhhhhhhhhk",
-    ".khhhhhhhk.",
-    "..khhhhhk..",
-    "...khhhk...",
-    "....khk....",
-    ".....k.....",
-  ];
-  const heart = (frame, body, hi, dark) => frame.matrix(2, 3, HEART, { k: dark, h: body, H: hi });
-  const full = new Canvas(16, 16);
-  heart(full, palette.slime, palette.slimeHi, palette.slimeDeep);
-  const empty = new Canvas(16, 16);
-  heart(
-    empty,
-    withAlpha(palette.slime, 60),
-    withAlpha(palette.slimeHi, 70),
-    withAlpha(palette.slimeDeep, 120),
-  );
-  paste(canvas, full, 0, 0);
-  paste(canvas, empty, 16, 0);
+const HEART = [
+  "..kkk.kkk..",
+  ".khhhkhhhk.",
+  "khhhhHhhhHk",
+  "khhhhhhhhhk",
+  ".khhhhhhhk.",
+  "..khhhhhk..",
+  "...khhhk...",
+  "....khk....",
+  ".....k.....",
+];
+
+const buildHeart = (body, hi, dark) => {
+  const canvas = new Canvas(16, 16);
+  canvas.matrix(2, 3, HEART, { k: dark, h: body, H: hi });
+  return canvas;
+};
+
+const buildCoinIcon = () => {
   const coin = new Canvas(16, 16);
   coin.ellipse(7.5, 7.5, 6, 6, palette.gold);
   coin.ellipse(7.5, 7.5, 4.4, 4.4, palette.goldMid);
@@ -1081,8 +1075,7 @@ const buildIcons = () => {
   for (let y = 3; y < 12; y++) coin.pixel(13, y, palette.goldDark);
   for (let x = 3; x < 12; x++) coin.pixel(x, 1, palette.goldHi);
   coin.pixel(6, 6, palette.goldHi);
-  paste(canvas, coin, 32, 0);
-  return canvas;
+  return coin;
 };
 
 // ---------------------------------------------------------------- backgrounds
@@ -1244,7 +1237,13 @@ const main = () => {
   const checkpoint = buildCheckpoint();
   const door = buildDoor();
   const dust = buildDust();
-  const icons = buildIcons();
+  const heartFull = buildHeart(palette.slime, palette.slimeHi, palette.slimeDeep);
+  const heartEmpty = buildHeart(
+    withAlpha(palette.slime, 60),
+    withAlpha(palette.slimeHi, 70),
+    withAlpha(palette.slimeDeep, 130),
+  );
+  const coinIcon = buildCoinIcon();
   const ridgeFar = buildRidgeFar();
   const ridgeMid = buildRidgeMid();
   const vegNear = buildVegNear();
@@ -1256,7 +1255,9 @@ const main = () => {
   write("sprites/checkpoint.png", checkpoint);
   write("sprites/door.png", door);
   write("sprites/dust.png", dust);
-  write("sprites/icons.png", icons);
+  write("sprites/heart_full.png", heartFull);
+  write("sprites/heart_empty.png", heartEmpty);
+  write("sprites/coin_icon.png", coinIcon);
   write("backgrounds/ridge_far.png", ridgeFar);
   write("backgrounds/ridge_mid.png", ridgeMid);
   write("backgrounds/veg_near.png", vegNear);
@@ -1269,7 +1270,8 @@ const main = () => {
     ["checkpoint", checkpoint],
     ["door", door],
     ["dust", dust],
-    ["icons", icons],
+    ["heart_full", heartFull],
+    ["coin_icon", coinIcon],
     ["bg_ridge_far", ridgeFar],
     ["bg_ridge_mid", ridgeMid],
     ["bg_veg_near", vegNear],

@@ -1,0 +1,47 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="SpriteFrames" path="res://assets/sprites/player_frames.tres" id="2_frames"]
+[ext_resource type="Script" path="res://scripts/game_camera.gd" id="3_camera"]
+[ext_resource type="Texture2D" path="res://assets/sprites/dust.png" id="4_dust"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
+size = Vector2(10, 14)
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_dust"]
+direction = Vector2(0, -1)
+spread = 62.0
+gravity = Vector2(0, 190)
+initial_velocity_min = 18.0
+initial_velocity_max = 62.0
+scale_min = 0.7
+scale_max = 1.5
+color = Color(1, 0.96, 0.9, 0.85)
+
+[node name="Player" type="CharacterBody2D"]
+collision_layer = 2
+collision_mask = 1
+floor_snap_length = 4.0
+script = ExtResource("1_player")
+
+[node name="Body" type="AnimatedSprite2D" parent="."]
+offset = Vector2(0, -8)
+sprite_frames = ExtResource("2_frames")
+animation = &"idle"
+
+[node name="Collision" type="CollisionShape2D" parent="."]
+position = Vector2(0, -7)
+shape = SubResource("RectangleShape2D_player")
+
+[node name="Dust" type="CPUParticles2D" parent="."]
+position = Vector2(0, -3)
+emitting = false
+amount = 9
+texture = ExtResource("4_dust")
+lifetime = 0.36
+one_shot = true
+explosiveness = 1.0
+process_material = SubResource("ParticleProcessMaterial_dust")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+script = ExtResource("3_camera")
