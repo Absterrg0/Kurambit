@@ -1,8 +1,17 @@
-import { AuthOrchestrationReadScope, EnvironmentHttpApi, requiredScopesForProjectMutation } from "@t3tools/contracts";
+import {
+  AuthOrchestrationReadScope,
+  EnvironmentHttpApi,
+  requiredScopesForProjectMutation,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import { annotateEnvironmentRequest, failEnvironmentInternal, failEnvironmentInvalidRequest, requireEnvironmentScope } from "../auth/http.ts";
+import {
+  annotateEnvironmentRequest,
+  failEnvironmentInternal,
+  failEnvironmentInvalidRequest,
+  requireEnvironmentScope,
+} from "../auth/http.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as ProjectService from "./ProjectService.ts";
 import { projectMutationOperation } from "./ProjectMutation.ts";
@@ -46,9 +55,7 @@ export const layer = HttpApiBuilder.group(
             yield* requireEnvironmentScope(scope);
           }
           const operation = projectMutationOperation(projects, args.payload);
-          return yield* startup
-            .enqueueCommand(operation)
-            .pipe(Effect.catch(failProjectMutation));
+          return yield* startup.enqueueCommand(operation).pipe(Effect.catch(failProjectMutation));
         }),
       );
   }),

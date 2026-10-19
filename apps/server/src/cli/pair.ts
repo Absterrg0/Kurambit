@@ -95,10 +95,8 @@ const probeEnvironmentDescriptor = (
       Effect.timeout(PAIR_PROBE_TIMEOUT),
       Effect.mapError(() => ({ _tag: "unreachable" }) as const),
     );
-    // Bad-gateway family means a proxy (Tailscale Serve) answered for a
-    // backend that is gone — a stale mapping, not a live occupant. Treating
-    // it as unreachable lets `t3 pair --tailscale` repair its own mapping
-    // after the server's port changed.
+    // Bad-gateway family means a proxy answered for a backend that is gone —
+    // a stale mapping, not a live occupant.
     if (response.status === 502 || response.status === 503 || response.status === 504) {
       return { _tag: "unreachable" } as const;
     }
@@ -221,8 +219,6 @@ const makePairServerConfig = Effect.fn(function* (input: {
     resourceMonitorPath: undefined,
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
-    tailscaleServeEnabled: false,
-    tailscaleServePort: 443,
   });
 });
 

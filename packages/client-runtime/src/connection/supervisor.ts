@@ -1,4 +1,3 @@
-
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -18,12 +17,24 @@ import * as Tracer from "effect/Tracer";
 import type { ConnectionCatalogEntry, ConnectionRoute } from "./catalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import * as ConnectionDriver from "./driver.ts";
-import { type ConnectionAttemptError, type ConnectionTarget, ConnectionTransientError, type NetworkStatus, type PreparedConnection, type SupervisorConnectionState } from "./model.ts";
+import {
+  type ConnectionAttemptError,
+  type ConnectionTarget,
+  ConnectionTransientError,
+  type NetworkStatus,
+  type PreparedConnection,
+  type SupervisorConnectionState,
+} from "./model.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 
 import * as ConnectionWakeups from "./wakeups.ts";
-import { connectionRouteId, connectionRoutes, entryWithRoutes, type ReportedEndpoint } from "./routes.ts";
+import {
+  connectionRouteId,
+  connectionRoutes,
+  entryWithRoutes,
+  type ReportedEndpoint,
+} from "./routes.ts";
 
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 300_000;

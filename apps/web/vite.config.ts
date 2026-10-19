@@ -10,7 +10,10 @@ import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import * as Hash from "effect/Hash";
 import pkg from "./package.json" with { type: "json" };
 
-import { DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES, DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
+import {
+  DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
+  DEV_PROXIED_PATH_PREFIXES,
+} from "@t3tools/shared/devProxy";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";

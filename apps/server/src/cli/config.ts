@@ -1,5 +1,9 @@
 import * as NetService from "@t3tools/shared/Net";
-import { OtlpHeadersFromString, OtlpProtocol, type SignalExport } from "@t3tools/shared/observability";
+import {
+  OtlpHeadersFromString,
+  OtlpProtocol,
+  type SignalExport,
+} from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@t3tools/contracts";
@@ -139,7 +143,6 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-
 });
 
 const DevAuthTokenConfig = Config.Redacted("T3CODE_DEV_AUTH_TOKEN").pipe(
@@ -173,8 +176,6 @@ export interface CliServerFlags {
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
-  readonly tailscaleServeEnabled: Option.Option<boolean>;
-  readonly tailscaleServePort: Option.Option<number>;
 }
 
 export interface CliAuthLocationFlags {
@@ -249,8 +250,6 @@ export const resolveServerConfig = (
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
-      tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
-      tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     } satisfies CliServerFlags;
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
@@ -356,8 +355,6 @@ export const resolveServerConfig = (
       ),
       () => Boolean(devUrl),
     );
-    const tailscaleServeEnabled = false;
-    const tailscaleServePort = 443;
     const staticDir = devUrl ? undefined : yield* ServerConfig.resolveStaticDir();
     const host = Option.getOrElse(
       resolveOptionPrecedence(
@@ -435,8 +432,6 @@ export const resolveServerConfig = (
       resourceMonitorPath,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
-      tailscaleServeEnabled,
-      tailscaleServePort,
     };
 
     return config;
@@ -458,8 +453,6 @@ export const resolveCliAuthConfig = (
       bootstrapFd: Option.none(),
       autoBootstrapProjectFromCwd: Option.none(),
       logWebSocketEvents: Option.none(),
-      tailscaleServeEnabled: Option.none(),
-      tailscaleServePort: Option.none(),
     },
     cliLogLevel,
   );

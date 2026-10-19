@@ -1,12 +1,15 @@
 import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
-import { REMOTE_CAPABLE_EDITOR_IDS, type EditorId, type EnvironmentId, type RemoteOpenTarget } from "@t3tools/contracts";
+import {
+  REMOTE_CAPABLE_EDITOR_IDS,
+  type EditorId,
+  type EnvironmentId,
+  type RemoteOpenTarget,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";
-
-
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { environmentPresentations } from "~/state/presentation";

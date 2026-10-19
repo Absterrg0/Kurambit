@@ -1,4 +1,12 @@
-import type { DesktopBridge, DesktopPreviewOpenLinkEvent, DesktopPreviewPointerEvent, DesktopPreviewRecordingInputEvent, DesktopPreviewRecordingFrame, DesktopPreviewTabState, DesktopSnapShotEvent } from "@t3tools/contracts";
+import type {
+  DesktopBridge,
+  DesktopPreviewOpenLinkEvent,
+  DesktopPreviewPointerEvent,
+  DesktopPreviewRecordingInputEvent,
+  DesktopPreviewRecordingFrame,
+  DesktopPreviewTabState,
+  DesktopSnapShotEvent,
+} from "@t3tools/contracts";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";

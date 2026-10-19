@@ -6,7 +6,6 @@ it.effect("publishes only the loopback backend", () =>
     const exposure = yield* DesktopServerExposure.DesktopServerExposure;
     const state = yield* exposure.configureFromSettings({ port: 4888 });
     assert.equal(state.mode, "local-only");
-    assert.isFalse(state.tailscaleServeEnabled);
     const config = yield* exposure.backendConfig;
     assert.equal(config.bindHost, "127.0.0.1");
     assert.equal(config.httpBaseUrl.href, "http://127.0.0.1:4888/");

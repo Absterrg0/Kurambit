@@ -1,8 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-
-
 import * as IpcChannels from "../channels.ts";
 import { makeSyncIpcMethod } from "../DesktopIpc.ts";
 
@@ -13,4 +11,3 @@ export const getLocalEnvironmentEnabled = makeSyncIpcMethod({
     return true;
   }),
 });
-

@@ -48,8 +48,6 @@ const layerServerExposure = Layer.succeed(DesktopServerExposure.DesktopServerExp
     port: 4888,
     bindHost: "0.0.0.0",
     httpBaseUrl: new URL("http://127.0.0.1:4888"),
-    tailscaleServeEnabled: true,
-    tailscaleServePort: 8443,
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
   getAdvertisedEndpoints: Effect.succeed([]),
@@ -165,8 +163,6 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.bootstrap.port, 4888);
         assert.equal(first.bootstrap.host, "0.0.0.0");
         assert.equal(first.bootstrap.t3Home, environment.baseDir);
-        assert.equal(first.bootstrap.tailscaleServeEnabled, true);
-        assert.equal(first.bootstrap.tailscaleServePort, 8443);
         assert.match(first.bootstrap.desktopBootstrapSecret ?? "", /^[0-9a-f]{64}$/i);
         assert.equal(
           second.bootstrap.desktopBootstrapSecret,

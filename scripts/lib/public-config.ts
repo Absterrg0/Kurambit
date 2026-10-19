@@ -19,9 +19,11 @@ export function loadRepoEnv({
 } = {}): Record<string, string | undefined> {
   const rootEnv = readEnvFile(NodePath.join(repoRoot, ".env"));
   const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
-  return Object.fromEntries(Object.entries({ ...rootEnv, ...localEnv, ...baseEnv }).filter(([name]) =>
-    !/(?:CLERK|RELAY|EXPO_PUBLIC|T3CODE_MOBILE_OTLP)/.test(name),
-  ));
+  return Object.fromEntries(
+    Object.entries({ ...rootEnv, ...localEnv, ...baseEnv }).filter(
+      ([name]) => !/(?:CLERK|RELAY|EXPO_PUBLIC|T3CODE_MOBILE_OTLP)/.test(name),
+    ),
+  );
 }
 
 function readEnvFile(path: string): Record<string, string | undefined> {

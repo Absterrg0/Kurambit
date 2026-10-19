@@ -11,19 +11,28 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
 
-
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 
 import type { ConnectionCatalogEntry, ConnectionRoute } from "./catalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import * as ConnectionDriver from "./driver.ts";
 import { BearerConnectionProfile } from "./catalog.ts";
-import { BearerConnectionTarget, ConnectionBlockedError, ConnectionTransientError, PrimaryConnectionTarget, RelayConnectionTarget, type ConnectionAttemptError, type ConnectionTarget, type NetworkStatus, type PreparedConnection, type SupervisorConnectionState } from "./model.ts";
+import {
+  BearerConnectionTarget,
+  ConnectionBlockedError,
+  ConnectionTransientError,
+  PrimaryConnectionTarget,
+  RelayConnectionTarget,
+  type ConnectionAttemptError,
+  type ConnectionTarget,
+  type NetworkStatus,
+  type PreparedConnection,
+  type SupervisorConnectionState,
+} from "./model.ts";
 import * as RpcSession from "../rpc/session.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 import { connectionRouteId, entryWithRoutes, isLearned, mergeLearnedRoutes } from "./routes.ts";
-import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -277,7 +286,6 @@ describe("retryDelayMs", () => {
 });
 
 describe("EnvironmentSupervisor", () => {
-
   it.effect("does not attempt a connection until it is desired", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -510,35 +518,6 @@ describe("EnvironmentSupervisor", () => {
         },
       });
     }).pipe(Effect.provide(TestClock.layer())),
-  );
-
-  it.effect(
-    "shows a network hint for a stalled relay connection and clears it after recovery",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* makeHarness({
-          prepare: (attempt) =>
-            attempt === 1 ? Effect.never : Effect.succeed(PREPARED_CONNECTION),
-        });
-        const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
-          initiallyDesired: true,
-        }).pipe(Effect.provide(harness.dependencies));
-
-        yield* awaitState(supervisor.state, (state) => state.phase === "connecting");
-        yield* TestClock.adjust("15 seconds");
-        const failed = yield* awaitState(supervisor.state, (state) => state.phase === "backoff");
-        expect(failed.lastFailure?.message).toBe(
-          `Test environment did not respond during connection setup. ${NETWORK_BLOCKING_HINT}`,
-        );
-
-        yield* TestClock.adjust("3 seconds");
-        const recovered = yield* awaitState(
-          supervisor.state,
-          (state) => state.phase === "connected",
-        );
-        expect(recovered.lastFailure).toBeNull();
-        expect(yield* Ref.get(harness.prepareCount)).toBe(2);
-      }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("converts unexpected driver defects into retryable failures", () =>

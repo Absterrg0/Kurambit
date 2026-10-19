@@ -3,7 +3,11 @@ import * as Schema from "effect/Schema";
 import { SnapShotSource } from "./chatAttachment.ts";
 import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
-import type { BrowserImportResult, BrowserImportSource, BrowserImportSourceId } from "./browserImport.ts";
+import type {
+  BrowserImportResult,
+  BrowserImportSource,
+  BrowserImportSourceId,
+} from "./browserImport.ts";
 
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 
@@ -11,7 +15,10 @@ import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
 
-import type { DesktopAppActivationRequest, DesktopAppActivationResponse } from "./desktopAppActivation.ts";
+import type {
+  DesktopAppActivationRequest,
+  DesktopAppActivationResponse,
+} from "./desktopAppActivation.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -479,16 +486,12 @@ export interface DesktopServerExposureState {
   mode: DesktopServerExposureMode;
   endpointUrl: string | null;
   advertisedHost: string | null;
-  tailscaleServeEnabled: boolean;
-  tailscaleServePort: number;
 }
 
 export const DesktopServerExposureStateSchema = Schema.Struct({
   mode: DesktopServerExposureModeSchema,
   endpointUrl: Schema.NullOr(Schema.String),
   advertisedHost: Schema.NullOr(Schema.String),
-  tailscaleServeEnabled: Schema.Boolean,
-  tailscaleServePort: Schema.Number,
 });
 
 export interface PickFolderOptions {

@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@t3tools/contracts";
 
-import { filterAvailableSettingsSearchItems, getSettingsSearchTargetScope, getThreadAutoSettlementSearchAvailability, isSettingsOverviewVisible, isSettingsSearchScopeAvailable, searchableSetting, searchSettings, SETTINGS_SEARCH_ITEMS, type SettingsSearchItem } from "./settingsSearch";
+import {
+  filterAvailableSettingsSearchItems,
+  getSettingsSearchTargetScope,
+  getThreadAutoSettlementSearchAvailability,
+  isSettingsOverviewVisible,
+  isSettingsSearchScopeAvailable,
+  searchableSetting,
+  searchSettings,
+  SETTINGS_SEARCH_ITEMS,
+  type SettingsSearchItem,
+} from "./settingsSearch";
 
 const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   {

@@ -7,7 +7,13 @@ import * as NodeModule from "node:module";
 // plist is CommonJS; Node cannot load its named exports from an ES module.
 import Plist from "plist";
 
-import { createPackageWithOptions, extractAll, getRawHeader, statFile, type DirectoryRecord } from "@electron/asar";
+import {
+  createPackageWithOptions,
+  extractAll,
+  getRawHeader,
+  statFile,
+  type DirectoryRecord,
+} from "@electron/asar";
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -18,9 +24,16 @@ import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" wit
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
-import { BRAND_ASSET_PATHS, resolveWebAssetBrandForChannel, type WebAssetBrand } from "./lib/brand-assets.ts";
+import {
+  BRAND_ASSET_PATHS,
+  resolveWebAssetBrandForChannel,
+  type WebAssetBrand,
+} from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
-import { findInlinedExternalPackages, selectCliRuntimeExternalDependencies } from "./lib/cli-external-packages.ts";
+import {
+  findInlinedExternalPackages,
+  selectCliRuntimeExternalDependencies,
+} from "./lib/cli-external-packages.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 import { selectDesktopRuntimeExternalDependencies } from "./lib/desktop-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
@@ -1424,7 +1437,6 @@ const AzureTrustedSigningOptionsConfig = Config.all({
   ),
 });
 
-
 export function createStageWorkspaceConfig(input: {
   readonly platform: typeof BuildPlatform.Type;
   readonly arch: typeof BuildArch.Type;
@@ -1461,8 +1473,6 @@ export function createStageWorkspaceConfig(input: {
   };
 }
 
-
-
 export function createStagePatchedDependencies(
   patchedDependencies: Record<string, string>,
   dependencies: Record<string, unknown>,
@@ -1473,8 +1483,6 @@ export function createStagePatchedDependencies(
     ),
   );
 }
-
-
 
 function getPatchedDependencyPackageName(patchKey: string): string {
   const versionSeparator = patchKey.lastIndexOf("@");
@@ -2712,7 +2720,10 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
   // their win32 ones. The Windows primary never loads those, so they stay packed.
   // ASAR matches absolute filenames without dot:true during unpacking. An
   // explicit prefix keeps native addons unpacked inside disk-backed .t3/tmp.
-  const sourceGlob = input.sourceDir.split(path.sep).join("/").replace(/[?*()[\]{}]/g, "[$&]");
+  const sourceGlob = input.sourceDir
+    .split(path.sep)
+    .join("/")
+    .replace(/[?*()[\]{}]/g, "[$&]");
   const unpackGlobs = WINDOWS_SERVER_ASAR_UNPACK_GLOBS.map((glob) => `${sourceGlob}/${glob}`);
   for (const entry of yield* fs.readDirectory(input.sourceDir, { recursive: true })) {
     if (!entry.endsWith(".node")) continue;
@@ -3061,6 +3072,34 @@ export const validateWindowsPackagedPayload = Effect.fn(
       missingFiles: ["resource-monitor/t3-resource-monitor.exe"],
     });
   }
+
+  const fileCount = yield* countPayloadFiles(packagedAppDir);
+  if (fileCount > fileLimit) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "file-limit-exceeded",
+      packagedAppDir,
+      fileCount,
+      fileLimit,
+    });
+  }
+
+  yield* verifyWindowsPrimaryFffNativeLoad({
+    packagedAppDir,
+    asarPath,
+    appExecutableName: input.appExecutableName,
+    targetArch: input.targetArch,
+    verbose: input.verbose ?? false,
+  });
+
+  yield* verifyPackagedBundleIsSelfContained({
+    asarPath,
+    verbose: input.verbose ?? false,
+  });
+
+  yield* Effect.log(
+    `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,
+  );
+  return { packagedAppDir, fileCount, unpackedFiles } as const;
 });
 
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
@@ -3637,5 +3676,3 @@ if (import.meta.main) {
     NodeRuntime.runMain,
   );
 }
-
-

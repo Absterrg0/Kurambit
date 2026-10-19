@@ -6,7 +6,11 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { commandLabel } from "./KeybindingsSettings.logic";
-import { validateSettingsScopeSearch, type ResolvedSettingsScope, type SettingsScopeSearch } from "./settingsScope";
+import {
+  validateSettingsScopeSearch,
+  type ResolvedSettingsScope,
+  type SettingsScopeSearch,
+} from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
@@ -774,9 +778,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "connections-environment",
     title: "This machine",
     to: "/settings/connections",
-    searchTerms: [
-      "connections local server status",
-    ],
+    searchTerms: ["connections local server status"],
   },
 
   {

@@ -204,8 +204,6 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       desktopBootstrapSecret: input.bootstrapSecret,
       // Failed Windows probes leave server hydration enabled for another attempt.
       shellEnvironmentPrepared: input.shellEnvironmentPrepared,
-      tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
-      tailscaleServePort: backendExposure.tailscaleServePort,
       desktopTelemetryFd: 4,
       desktopTelemetryControlFd: 5,
       desktopBrowserFd: 6,

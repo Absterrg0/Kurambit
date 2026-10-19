@@ -15,7 +15,61 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { BundleNotSelfContainedError, BuildCommandFailedError, DesktopDmgBackgroundSourceMissingError, createStageWorkspaceConfig, createStagePatchedDependencies, readWorkspaceConfig, createBuildConfig, DESKTOP_FILE_EXCLUSIONS, DESKTOP_EXTRA_RESOURCES, LINUX_FILE_EXCLUSIONS, MAC_FILE_EXCLUSIONS, InvalidMockUpdateServerPortError, LinuxIconResizeError, LinuxDesktopBuildPrerequisitesMissingError, MacDesktopBuildPrerequisitesMissingError, MacPasskeySigningConfigurationResolutionError, packWindowsServerAsar, preflightLinuxDesktopBuild, preflightMacDesktopBuild, renderMacPasskeyEntitlements, resolveMacWebAuthnEntitlements, resolveMacPasskeySigningConfiguration, resolveDesktopRuntimeDependencies, resolveMergedStageDependencies, resolveFffNativeDependencies, resolveDesktopBuildIconAssets, resolveDesktopProductName, resolveDesktopUpdateChannel, resolveDesktopWebAssetBrand, resolveResourceMonitorRustTargets, resolveWindowsServerAsarIgnoreGlobs, resourceMonitorExecutableName, resolveGitHubPublishConfig, resolveMockUpdateServerPort, resolveMockUpdateServerUrl, resolvePackageManagerUserAgent, stageLinuxIconSize, stageDesktopDmgBackground, stageResourceMonitor, stageLinuxCaptureHelper, STAGE_INSTALL_ARGS, ancestorNodeModulesPaths, copyDirectoryPreservingSymlinks, LinuxBrowserSecretHostError, stageBrowserSecret, validateWindowsPackagedPayload, WindowsPrimaryNativeProbeError, WindowsPackagedPayloadValidationError, WINDOWS_NATIVE_ASAR_UNPACK_GLOB, stageCursorSdkPlatformPackages, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT, WINDOWS_SERVER_ASAR_IGNORE_GLOBS, WINDOWS_SERVER_ASAR_RESOURCE } from "./build-desktop-artifact.ts";
+import {
+  BundleNotSelfContainedError,
+  BuildCommandFailedError,
+  DesktopDmgBackgroundSourceMissingError,
+  createStageWorkspaceConfig,
+  createStagePatchedDependencies,
+  readWorkspaceConfig,
+  createBuildConfig,
+  DESKTOP_FILE_EXCLUSIONS,
+  DESKTOP_EXTRA_RESOURCES,
+  LINUX_FILE_EXCLUSIONS,
+  MAC_FILE_EXCLUSIONS,
+  InvalidMockUpdateServerPortError,
+  LinuxIconResizeError,
+  LinuxDesktopBuildPrerequisitesMissingError,
+  MacDesktopBuildPrerequisitesMissingError,
+  MacPasskeySigningConfigurationResolutionError,
+  packWindowsServerAsar,
+  preflightLinuxDesktopBuild,
+  preflightMacDesktopBuild,
+  renderMacPasskeyEntitlements,
+  resolveMacWebAuthnEntitlements,
+  resolveMacPasskeySigningConfiguration,
+  resolveDesktopRuntimeDependencies,
+  resolveMergedStageDependencies,
+  resolveFffNativeDependencies,
+  resolveDesktopBuildIconAssets,
+  resolveDesktopProductName,
+  resolveDesktopUpdateChannel,
+  resolveDesktopWebAssetBrand,
+  resolveResourceMonitorRustTargets,
+  resolveWindowsServerAsarIgnoreGlobs,
+  resourceMonitorExecutableName,
+  resolveGitHubPublishConfig,
+  resolveMockUpdateServerPort,
+  resolveMockUpdateServerUrl,
+  resolvePackageManagerUserAgent,
+  stageLinuxIconSize,
+  stageDesktopDmgBackground,
+  stageResourceMonitor,
+  stageLinuxCaptureHelper,
+  STAGE_INSTALL_ARGS,
+  ancestorNodeModulesPaths,
+  copyDirectoryPreservingSymlinks,
+  LinuxBrowserSecretHostError,
+  stageBrowserSecret,
+  validateWindowsPackagedPayload,
+  WindowsPrimaryNativeProbeError,
+  WindowsPackagedPayloadValidationError,
+  WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
+  stageCursorSdkPlatformPackages,
+  WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
+  WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
+  WINDOWS_SERVER_ASAR_RESOURCE,
+} from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -140,8 +194,6 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   const appExecutableName = "t3code.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
-
-
 
   return {
     stageDistDir,
@@ -277,7 +329,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
         {
           "example-electron": "0.0.37",
-            "@effect/platform-node": "4.0.0-beta.59",
+          "@effect/platform-node": "4.0.0-beta.59",
           effect: "4.0.0-beta.59",
         },
       ),

@@ -9,8 +9,6 @@ export interface DesktopServerExposureBackendConfig {
   readonly port: number;
   readonly bindHost: string;
   readonly httpBaseUrl: URL;
-  readonly tailscaleServeEnabled: boolean;
-  readonly tailscaleServePort: number;
 }
 
 export class DesktopServerExposure extends Context.Service<
@@ -29,8 +27,6 @@ const state: DesktopServerExposureState = {
   mode: "local-only",
   endpointUrl: null,
   advertisedHost: null,
-  tailscaleServeEnabled: false,
-  tailscaleServePort: 443,
 };
 
 export const layer = Layer.effect(
@@ -45,8 +41,6 @@ export const layer = Layer.effect(
           port,
           bindHost: "127.0.0.1",
           httpBaseUrl: new URL(`http://127.0.0.1:${port}`),
-          tailscaleServeEnabled: false,
-          tailscaleServePort: 443,
         })),
       ),
       getAdvertisedEndpoints: Ref.get(portRef).pipe(

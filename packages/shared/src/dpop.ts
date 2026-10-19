@@ -7,7 +7,25 @@ import * as Schema from "effect/Schema";
 
 import { DpopPublicJwk as DpopPublicJwkSchema, normalizeDpopHtu } from "./dpopCommon.ts";
 import type { DpopPublicJwk as DpopPublicJwkType } from "./dpopCommon.ts";
-import { stableStringify } from "./relaySigning.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// RFC 7638 thumbprints hash the JWK members in lexicographic key order.
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
 
 const DPOP_TYP = "dpop+jwt";
 const DPOP_ALG = "ES256";
