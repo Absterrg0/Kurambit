@@ -95,15 +95,6 @@ import {
   FilesystemBrowseError,
 } from "./filesystem.ts";
 import {
-  AgentSessionImportInput,
-  AgentSessionImportProjectChangedError,
-  AgentSessionImportProjectNotFoundError,
-  AgentSessionImportResult,
-  AgentSessionScanInput,
-  AgentSessionScanResult,
-  AgentSessionScanError,
-} from "./agentSessions.ts";
-import {
   AssetAccessError,
   AssetCreateUrlInput,
   AssetCreateUrlResult,
@@ -311,8 +302,6 @@ export const WS_METHODS = {
 
   filesystemBrowse: "filesystem.browse",
   filesystemGetMetadata: "filesystem.getMetadata",
-  agentSessionsScan: "agentSessions.scan",
-  agentSessionsImport: "agentSessions.import",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -845,23 +834,6 @@ const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   payload: FilesystemBrowseInput,
   success: FilesystemBrowseResult,
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
-});
-
-const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
-  payload: AgentSessionScanInput,
-  success: AgentSessionScanResult,
-  error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
-});
-
-const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
-  payload: AgentSessionImportInput,
-  success: AgentSessionImportResult,
-  error: Schema.Union([
-    AgentSessionImportProjectChangedError,
-    AgentSessionImportProjectNotFoundError,
-    AgentSessionScanError,
-    EnvironmentAuthorizationError,
-  ]),
 });
 
 const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
@@ -1428,8 +1400,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsFilesystemGetMetadataRpc,
-  WsAgentSessionsScanRpc,
-  WsAgentSessionsImportRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,

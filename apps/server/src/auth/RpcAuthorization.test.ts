@@ -57,15 +57,6 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("requires write access to import agent session history", () => {
-    expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsScan)).toBe(
-      AuthOrchestrationReadScope,
-    );
-    expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsImport)).toBe(
-      AuthOrchestrationOperateScope,
-    );
-  });
-
   it("separates ACP Registry discovery from provisioning", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverSearchAcpRegistry)).toBe(
       AuthOrchestrationReadScope,

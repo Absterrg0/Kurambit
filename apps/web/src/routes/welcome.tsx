@@ -4,9 +4,8 @@ import { EnvironmentId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 
-import { NoProjectsHero } from "../components/NoProjectsHero";
+import { GamesHome } from "../components/game/GamesHome";
 import { WelcomeWizard } from "../components/onboarding/WelcomeWizard";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 
 const decodeEnvironmentId = Schema.decodeOption(EnvironmentId);
 
@@ -21,7 +20,6 @@ export const Route = createFileRoute("/welcome")({
 });
 
 function WelcomeRouteView() {
-  const { authGateState } = Route.useRouteContext();
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const resumeEnvironmentId = hash.startsWith("agents:")
@@ -31,23 +29,14 @@ function WelcomeRouteView() {
   // Never reopen setup while the destination route is still loading.
   const isWelcomeRoute = useLocation({ select: (location) => location.pathname === "/welcome" });
   const [dismissed, setDismissed] = useState(false);
-  const openNewThread = useNewThreadHandler();
-  const localAvailable = authGateState.status === "authenticated";
   return (
     <>
-      <NoProjectsHero />
+      <GamesHome />
       {isWelcomeRoute && !dismissed ? (
         <WelcomeWizard
-          localAvailable={localAvailable}
           resumeEnvironmentId={resumeEnvironmentId}
-          onDone={async (projectRef) => {
+          onDone={async () => {
             setDismissed(true);
-            if (projectRef !== undefined) {
-              await openNewThread(projectRef, { replace: true }).catch(() =>
-                navigate({ to: "/", replace: true }),
-              );
-              return;
-            }
             await navigate({ to: "/", replace: true });
           }}
         />

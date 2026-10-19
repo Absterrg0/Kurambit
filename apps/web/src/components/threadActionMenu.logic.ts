@@ -51,7 +51,7 @@ export function buildDraftActionMenuItems(options: {
       ],
     },
     ...(options.hasProject
-      ? [{ id: "project-settings" as const, label: "Project settings", icon: "settings" }]
+      ? [{ id: "project-settings" as const, label: "Game settings", icon: "settings" }]
       : []),
     {
       id: "discard",
@@ -164,7 +164,7 @@ export function buildThreadActionMenuItems(
           {
             id: "filter-by-project" as const,
             label: state.projectFilter.isActive
-              ? "Show all projects"
+              ? "Show all games"
               : `Filter by ${state.projectFilter.label}`,
             icon: "folder-tree",
           },
@@ -204,7 +204,7 @@ export function buildThreadActionMenuItems(
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
       ],
     },
-    { id: "project-settings", label: "Project settings", icon: "settings" },
+    { id: "project-settings", label: "Game settings", icon: "settings" },
     {
       id: "archive",
       label: "Archive thread",

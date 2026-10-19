@@ -195,16 +195,36 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     />
                   </label>
                 ) : null}
-                <label className="flex flex-col gap-1 text-sm">
-                  {dialog === "create" ? "Parent folder" : "Game folder"}
-                  <Input
-                    value={directory}
-                    onChange={(event) => setDirectory(event.target.value)}
-                    placeholder={dialog === "create" ? "~/Games" : "/path/to/game"}
-                    required={dialog === "open"}
-                    disabled={busy || pickingFolder}
-                  />
-                </label>
+                <div className="flex flex-col gap-1 text-sm">
+                  <label htmlFor="game-directory">
+                    {dialog === "create" ? "Parent folder" : "Game folder"}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        id="game-directory"
+                        value={directory}
+                        onChange={(event) => setDirectory(event.target.value)}
+                        placeholder={dialog === "create" ? "~/Games" : "/path/to/game"}
+                        required={dialog === "open"}
+                        disabled={busy || pickingFolder}
+                      />
+                    </div>
+                    {isElectron ? (
+                      <div className="shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy || pickingFolder}
+                          onClick={() => void chooseFolder()}
+                        >
+                          {pickingFolder ? "Choosing folder…" : "Choose folder"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
                 {dialog === "create" ? (
                   <>
                     <label className="flex flex-col gap-1 text-sm">
@@ -225,19 +245,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       />
                     </label>
                   </>
-                ) : null}
-                {isElectron ? (
-                  <div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy || pickingFolder}
-                      onClick={() => void chooseFolder()}
-                    >
-                      {pickingFolder ? "Choosing folder…" : "Choose folder"}
-                    </Button>
-                  </div>
                 ) : null}
                 <ProviderModelPicker
                   environmentId={environmentId}

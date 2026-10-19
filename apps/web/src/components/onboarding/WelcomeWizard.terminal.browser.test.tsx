@@ -45,8 +45,6 @@ const state = vi.hoisted(() => ({
   close: vi.fn<(request: Request<TerminalCloseInput>) => Promise<CommandResult>>(),
   refresh: vi.fn(),
   pair: vi.fn(),
-  createProject: vi.fn(),
-  importThreads: vi.fn(),
   complete: vi.fn<() => Promise<void>>(),
   done: vi.fn(),
 }));
@@ -87,26 +85,8 @@ vi.mock(import("../../state/terminal"), async (original) => ({
 }));
 vi.mock(import("../../state/use-atom-command"), async (original) => ({
   ...(await original()),
-  useAtomCommand: ((
-    command: "open" | "write" | "close" | "refresh" | "pair" | "createProject" | "importThreads",
-  ) => state[command]) as never,
-}));
-vi.mock(import("../../state/agentSessions"), async (original) => ({
-  ...(await original()),
-  agentSessionImport: "importThreads" as never,
-}));
-vi.mock(import("../../state/projects"), async (original) => ({
-  ...(await original()),
-  projectEnvironment: { create: "createProject" } as never,
-}));
-vi.mock(import("../../state/entities"), async (original) => ({
-  ...(await original()),
-  readProjects: () => [],
-  useProjects: () => [],
-}));
-vi.mock(import("../../onboarding/useProjectScans"), async (original) => ({
-  ...(await original()),
-  useProjectScans: () => [],
+  useAtomCommand: ((command: "open" | "write" | "close" | "refresh" | "pair") =>
+    state[command]) as never,
 }));
 vi.mock(import("../../onboarding/firstRun"), async (original) => ({
   ...(await original()),
@@ -225,7 +205,7 @@ async function enterRemoteAgents() {
   await act(async () =>
     root.render(
       <RegistryContext.Provider value={appAtomRegistry}>
-        <WelcomeWizard localAvailable onDone={state.done} />
+        <WelcomeWizard onDone={state.done} />
       </RegistryContext.Provider>,
     ),
   );
@@ -296,10 +276,9 @@ describe("welcome agent terminal setup", () => {
     expect(state.open).not.toHaveBeenCalled();
     expect(state.write).not.toHaveBeenCalled();
     expect(state.close).not.toHaveBeenCalled();
-    await click("Continue");
-    await click("Do not import projects");
+    await click("Start making games");
     expect(state.complete).toHaveBeenCalledOnce();
-    expect(state.done).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(state.done).toHaveBeenCalledExactlyOnceWith();
   });
 
   it("rejects a retained install action after revocation and allows a terminal-only regrant", async () => {
@@ -413,8 +392,9 @@ describe("welcome agent terminal setup", () => {
     await click("Close");
     expect(hasViewport()).toBe(false);
     expect(state.close).not.toHaveBeenCalled();
-    await click("Continue");
-    expect(pageText()).toContain("Import your projects");
+    await click("Start making games");
+    expect(state.complete).toHaveBeenCalledOnce();
+    expect(state.done).toHaveBeenCalledOnce();
   });
 
   it("settles accepted pretyping locally after revocation without closing the PTY", async () => {
