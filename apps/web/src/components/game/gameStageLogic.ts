@@ -30,22 +30,19 @@ const operationStartedAt = (operation: GameStatus["operation"]) =>
 
 export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
   const operation = input.operation;
-  if (input.busyStartedAt !== null)
+  const playable = input.hasWebBuild && input.previewUrl !== null;
+  // Work in flight only takes over the stage when there is nothing to play: a
+  // rebuild of a game that is already on screen keeps it running, and the new
+  // build reloads it when it lands.
+  if ((input.busyStartedAt !== null || operation?.state === "running") && !playable)
     return {
       kind: "building",
       message: operation?.state === "running" ? operation.message : "Starting…",
-      startedAt: input.busyStartedAt,
-    };
-  if (operation?.state === "running")
-    return {
-      kind: "building",
-      message: operation.message,
-      startedAt: operationStartedAt(operation),
+      startedAt: input.busyStartedAt ?? operationStartedAt(operation),
     };
   // A loaded game is never taken over by an unrelated failure: the failure
   // still shows in the stage's status strip. Only a failure that leaves nothing
   // to play becomes the whole state.
-  const playable = input.hasWebBuild && input.previewUrl !== null;
   const failure = input.localError ?? (operation?.state === "failed" ? operation.message : null);
   if (failure !== null && !playable) return { kind: "failed", message: failure };
   const serveFreshBuild = input.hasWebBuild && !input.webBuildStale;

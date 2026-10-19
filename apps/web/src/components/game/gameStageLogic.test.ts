@@ -76,6 +76,14 @@ it("keeps a loaded game running while a later failure is reported on the side", 
   });
 });
 
+it("keeps a loaded game on screen while a rebuild runs", () => {
+  // The iframe must survive the rebuild: the new build reloads it when it lands.
+  expect(deriveGameStagePhase({ ...PLAYING, operation: running(), busyStartedAt: 1_000 })).toEqual({
+    kind: "playing",
+    stale: false,
+  });
+});
+
 it("shows a build in flight with the second it started, local or from the server", () => {
   expect(deriveGameStagePhase({ ...BASE, busyStartedAt: 1_000 })).toEqual({
     kind: "building",

@@ -35,6 +35,15 @@ import { buildFailurePrompt, deriveGameStagePhase } from "./gameStageLogic";
 
 type GameStageTab = "play" | "assets" | "builds";
 
+const BUSY_LABELS: Record<GameAction, string> = {
+  preview: "Building the web preview",
+  rebuild: "Rebuilding the web preview",
+  native: "Starting the native game",
+  stop: "Stopping",
+  "export-linux": "Exporting the Linux build",
+  verify: "Verifying game tools",
+};
+
 const TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
   { value: "play", label: "Play" },
   { value: "assets", label: "Assets" },
@@ -114,7 +123,12 @@ export function GameStage({
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
   });
-  const building = phase.kind === "building";
+  const building = busy !== null || operationState === "running";
+  const buildingStartedAt =
+    busy?.startedAt ??
+    (operationState === "running" && data.operation !== null
+      ? Date.parse(data.operation.at)
+      : null);
   const operation = data.operation;
   const operationVisible =
     operation !== null &&
@@ -127,7 +141,7 @@ export function GameStage({
       : null);
   const noticeVisible =
     message ?? (operation !== null && operationVisible ? operation.message : null);
-  const strip = phase.kind === "building" ? null : (failureVisible ?? noticeVisible);
+  const strip = building ? null : (failureVisible ?? noticeVisible);
   const showStrip = strip !== null && phase.kind !== "failed";
   const staleChipVisible = phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false;
   const nativeRunning = data.processes.some((process) => process.operation === "native");
@@ -136,6 +150,10 @@ export function GameStage({
     operationState === "running" ||
     data.processes.length > 0 ||
     data.previewUrl !== null;
+  const buildingMessage =
+    operationState === "running" && data.operation !== null
+      ? data.operation.message
+      : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
   const frameKey = `${data.previewUrl ?? ""}#${webBuild?.updatedAt ?? ""}`;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
@@ -312,12 +330,12 @@ export function GameStage({
               Rebuild to see latest changes
             </span>
           ) : null}
-          {phase.kind === "building" ? (
+          {building ? (
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
               <RefreshCwIcon className="size-3.5 shrink-0" aria-hidden="true" />
-              <TruncatedText text={phase.message} />
-              {phase.startedAt === null ? null : (
-                <GameElapsed since={phase.startedAt} className="shrink-0" />
+              <TruncatedText text={buildingMessage} />
+              {buildingStartedAt === null ? null : (
+                <GameElapsed since={buildingStartedAt} className="shrink-0" />
               )}
             </span>
           ) : showStrip ? (

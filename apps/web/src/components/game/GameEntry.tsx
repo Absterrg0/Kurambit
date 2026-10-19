@@ -122,49 +122,48 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
     if (busy || pickingFolder) return;
     setPickingFolder(true);
     setError(null);
-    try {
-      const picked = await ensureLocalApi().dialogs.pickFolder({ initialPath: directory });
-      if (picked) setDirectory(picked);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setPickingFolder(false);
-    }
+    // No try/finally: React Compiler cannot analyse a finalizer, and the picker
+    // either answers or throws once, so cleanup follows the await.
+    const picked = await ensureLocalApi()
+      .dialogs.pickFolder({ initialPath: directory })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return null;
+      });
+    setPickingFolder(false);
+    if (picked) setDirectory(picked);
   };
   const submit = async () => {
     if (busy || pickingFolder || dialog === null) return;
     setBusy(true);
     setError(null);
-    try {
-      const result =
-        dialog === "create"
-          ? await create({
-              environmentId,
-              input: {
-                name,
-                parentDirectory: directory,
-                template,
-                brief,
-                artDirection,
-                modelSelection: model,
-                runtimeMode: chosenMode,
-              },
-            })
-          : await open({ environmentId, input: { path: directory, modelSelection: model } });
-      if (result._tag === "Failure") {
-        setError(String(squashAtomCommandFailure(result)));
-        return;
-      }
-      setDialog(null);
-      // The thread's own game stage takes over the workspace once its status
-      // resolves; there is no panel to open here any more.
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: { environmentId, threadId: result.value.threadId },
-      });
-    } finally {
-      setBusy(false);
+    const result =
+      dialog === "create"
+        ? await create({
+            environmentId,
+            input: {
+              name,
+              parentDirectory: directory,
+              template,
+              brief,
+              artDirection,
+              modelSelection: model,
+              runtimeMode: chosenMode,
+            },
+          })
+        : await open({ environmentId, input: { path: directory, modelSelection: model } });
+    setBusy(false);
+    if (result._tag === "Failure") {
+      setError(String(squashAtomCommandFailure(result)));
+      return;
     }
+    setDialog(null);
+    // The thread's own game stage takes over the workspace once its status
+    // resolves; there is no panel to open here any more.
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId: result.value.threadId },
+    });
   };
   return (
     <>
