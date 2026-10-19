@@ -127,6 +127,16 @@ const requireInput = Effect.fn("requireInput")(function* (inputPath: string, hin
   }
 });
 
+const requireDirectory = Effect.fn("requireDirectory")(function* (inputPath: string, hint: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const entries = yield* fs
+    .readDirectory(inputPath)
+    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+  if (entries.length === 0) {
+    return yield* new CliArchiveInputMissingError({ inputPath, hint });
+  }
+});
+
 /**
  * The tree is archived and unpacked on machines without pnpm, so the store
  * layout cannot be relied on to survive the trip.
@@ -459,6 +469,9 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
       ? path.join(serverDir, "dist-exe", executableName)
       : targetExecutable;
   const webClient = path.join(serverDir, "dist/client");
+  // Starter templates resolve from beside the bundle (apps/server/src/game/templates.ts),
+  // which inside a single-executable is the executable's own directory.
+  const templates = path.join(serverDir, "dist/templates");
   const resourceMonitorDir = Option.getOrElse(input.resourceMonitorDir, () =>
     path.join(serverDir, "dist/resource-monitor"),
   );
@@ -468,6 +481,10 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     `Run \`node apps/server/scripts/cli.ts build-exe --target ${targetKey}\` first.`,
   );
   yield* requireInput(path.join(webClient, "index.html"), "Run `vp run --filter t3 build` first.");
+  yield* requireDirectory(
+    templates,
+    "Run `node apps/server/scripts/cli.ts build` first; it bundles apps/server/templates into dist/templates.",
+  );
   yield* requireInput(
     resourceMonitorDir,
     "Build the resource monitor or pass --resource-monitor-dir.",
@@ -481,6 +498,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   yield* Effect.log(`[cli-archive] Staging ${stem}...`);
   yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
   yield* stageWebClient(webClient, path.join(contentDir, "client"));
+  yield* fs.copy(templates, path.join(contentDir, "templates"));
   yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
   yield* stageRuntimeExternals({
     repoRoot,

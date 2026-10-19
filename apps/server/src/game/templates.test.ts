@@ -20,6 +20,10 @@ it("substitutes the game name only in template text files", () => {
   expect(substituteGameName("{{GAME_NAME}} and {{GAME_NAME}}", "Tiny Quest")).toBe(
     "Tiny Quest and Tiny Quest",
   );
+  // The quoted variant is a JSON string literal, so it survives quotes and backslashes.
+  expect(substituteGameName("config/name={{GAME_NAME_STRING}}", 'The "Best" Game\\')).toBe(
+    'config/name="The \\"Best\\" Game\\\\"',
+  );
   for (const file of [
     "project.godot",
     "scenes/main.tscn",
@@ -65,7 +69,7 @@ it.effect("copies binaries byte for byte and substitutes only template text file
     yield* fs.writeFileString(path.join(templateDirectory, "TEMPLATE.md"), "# {{GAME_NAME}}\n");
     yield* fs.writeFileString(
       path.join(templateDirectory, "godot/project.godot"),
-      'config/name="{{GAME_NAME}}"\n',
+      "config/name={{GAME_NAME_STRING}}\n",
     );
     yield* fs.writeFileString(
       path.join(templateDirectory, "godot/scenes/main.tscn"),
@@ -82,15 +86,17 @@ it.effect("copies binaries byte for byte and substitutes only template text file
       templatesDirectory,
       templateId: "blank",
       gameRoot,
-      gameName: "Tiny Quest",
+      gameName: 'The "Best" Game\\',
     });
 
-    expect(yield* fs.readFileString(path.join(gameRoot, "TEMPLATE.md"))).toBe("# Tiny Quest\n");
+    expect(yield* fs.readFileString(path.join(gameRoot, "TEMPLATE.md"))).toBe(
+      '# The "Best" Game\\\n',
+    );
     expect(yield* fs.readFileString(path.join(gameRoot, "godot/project.godot"))).toBe(
-      'config/name="Tiny Quest"\n',
+      'config/name="The \\"Best\\" Game\\\\"\n',
     );
     expect(yield* fs.readFileString(path.join(gameRoot, "godot/scenes/main.tscn"))).toBe(
-      'script = "res://scripts/Tiny Quest.gd"\n',
+      'script = "res://scripts/The "Best" Game\\.gd"\n',
     );
     expect(yield* fs.readFileString(path.join(gameRoot, "godot/notes.txt"))).toBe(
       "{{GAME_NAME}} stays literal\n",
