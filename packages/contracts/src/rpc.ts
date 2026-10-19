@@ -168,7 +168,6 @@ import {
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
 import { ProviderInstanceId, ProviderInstanceMutation } from "./providerInstance.ts";
-import {} from "./pullRequest.ts";
 
 import {
   ORCHESTRATION_V2_WS_METHODS,
