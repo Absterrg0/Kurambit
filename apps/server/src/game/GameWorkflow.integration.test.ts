@@ -7,6 +7,7 @@ import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as GameService from "./GameService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -34,6 +35,7 @@ it.live.skipIf(!available)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(NodeServices.layer),
       );
       try {
         yield* Effect.scoped(
@@ -51,6 +53,9 @@ it.live.skipIf(!available)(
               },
             });
             const threadId = ThreadId.make("game-test-thread");
+            // The untouched starter template must import before the test rewrites the game.
+            const templateImported = yield* game.import(threadId);
+            expect(templateImported.success, templateImported.message).toBe(true);
             const asset = yield* game.blender(threadId, {
               id: "cube",
               script:

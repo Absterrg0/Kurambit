@@ -19,9 +19,11 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 ## Start a game
 
-Choose **New game** on the home screen or in the sidebar. Give it a name, a parent folder
-(`~/Games` by default), a brief, and optional art direction, then pick the agent and model. Game
-Studio creates the project folder, starts a thread with your brief, and opens the **Game** panel.
+Choose **New game** on the home screen or in the sidebar. Give it a name, pick a starter template
+(each one is a working Godot project the agent extends instead of starting from nothing), choose a
+parent folder (`~/Games` by default), write a brief and optional art direction, then pick the agent
+and model. Game Studio creates the project folder with the template's Godot project already in
+place, starts a thread with your brief, and opens the **Game** panel.
 
 The agent models assets in Blender, brings them into Godot, writes the scenes and GDScript, runs a
 headless gameplay test, and checks the web build in a headless browser before it reports back.
@@ -53,6 +55,7 @@ Stopping the agent's turn also stops any Blender or Godot work it started.
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
+- `TEMPLATE.md` describes the starter template it was built from and what to extend.
 - `art/blender/` holds the editable `.blend` files and `art/scripts/` the scripts behind them.
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor.
 - `builds/` holds exports and operation logs and is not committed.

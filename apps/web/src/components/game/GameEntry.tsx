@@ -6,10 +6,19 @@ import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { type EnvironmentId, type ModelSelection, type RuntimeMode } from "@t3tools/contracts";
+import {
+  DEFAULT_GAME_TEMPLATE,
+  GAME_TEMPLATES,
+  type EnvironmentId,
+  type GameTemplateId,
+  type ModelSelection,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { RadioGroup, Radio } from "../ui/radio-group";
 import { Textarea } from "../ui/textarea";
 import {
   Dialog,
@@ -105,6 +114,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
     : (compatibleModes[0] ?? "full-access");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
+  const [template, setTemplate] = useState<GameTemplateId>(DEFAULT_GAME_TEMPLATE);
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
   const [busy, setBusy] = useState(false);
@@ -135,6 +145,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
               input: {
                 name,
                 parentDirectory: directory,
+                template,
                 brief,
                 artDirection,
                 modelSelection: model,
@@ -194,6 +205,41 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       disabled={busy}
                     />
                   </label>
+                ) : null}
+                {dialog === "create" ? (
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span id="game-template-label">Starter template</span>
+                    <RadioGroup
+                      aria-labelledby="game-template-label"
+                      value={template}
+                      disabled={busy}
+                      onValueChange={(value) => {
+                        const picked = GAME_TEMPLATES.find((entry) => entry.id === value);
+                        if (picked) setTemplate(picked.id);
+                      }}
+                      className="grid grid-cols-1 sm:grid-cols-2"
+                    >
+                      {GAME_TEMPLATES.map((entry) => (
+                        <label
+                          key={entry.id}
+                          className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 px-3 py-3 hover:bg-accent/40"
+                        >
+                          <Radio value={entry.id} className="mt-0.5" />
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span className="flex items-center gap-2">
+                              <span className="font-medium text-foreground">{entry.name}</span>
+                              <Badge variant="outline" size="sm">
+                                {entry.dimension.toUpperCase()}
+                              </Badge>
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {entry.description}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </RadioGroup>
+                  </div>
                 ) : null}
                 <div className="flex flex-col gap-1 text-sm">
                   <label htmlFor="game-directory">

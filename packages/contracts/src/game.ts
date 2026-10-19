@@ -12,11 +12,35 @@ export const GameAsset = Schema.Struct({
   thumbnail: Schema.optionalKey(Schema.String),
   updatedAt: Schema.String,
 });
+export const GameTemplateId = Schema.Literals(["blank"]);
+export type GameTemplateId = typeof GameTemplateId.Type;
+export const GameTemplate = Schema.Struct({
+  id: GameTemplateId,
+  name: Schema.String,
+  description: Schema.String,
+  dimension: Schema.Literals(["2d", "3d"]),
+});
+export type GameTemplate = typeof GameTemplate.Type;
+/**
+ * The starter templates the New game dialog offers. Template files live under
+ * apps/server/templates/<id>/; a server test keeps this list and those folders in step.
+ */
+export const GAME_TEMPLATES: readonly GameTemplate[] = [
+  {
+    id: "blank",
+    name: "Blank",
+    description: "An empty Godot project: a camera, a light, and Web and Linux export presets.",
+    dimension: "3d",
+  },
+];
+export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
   brief: Schema.String,
   artDirection: Schema.String,
+  // Games created before starter templates existed have no template key.
+  template: Schema.optionalKey(GameTemplateId),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
@@ -35,6 +59,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "tool-missing",
       "wrong-version",
       "templates-missing",
+      "unknown-template",
+      "starter-templates-missing",
       "command-failed",
       "busy",
       "unsupported-platform",
@@ -56,6 +82,9 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "Use Godot 4.7.x and Blender 4.2 or later. Fix the executable path in Settings > General > Game tools. To use the managed version, clear the override and click Install tools in Game panel > Toolchain.",
       "templates-missing":
         "Install Godot export templates matching this executable's exact version at the path below. For managed tools, clear executable overrides in Settings > General > Game tools, then click Install tools in Game panel > Toolchain.",
+      "unknown-template": "Pick a starter template from the New game dialog.",
+      "starter-templates-missing":
+        "Game Studio's starter template files are missing. Reinstall or update the app.",
       "command-failed":
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
       busy: "Another operation is running for this game. Wait for it or press Stop.",
@@ -128,6 +157,7 @@ export type GameStatus = typeof GameStatus.Type;
 export const GameCreateInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   parentDirectory: Schema.String,
+  template: Schema.optionalKey(GameTemplateId),
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
   modelSelection: ModelSelection,

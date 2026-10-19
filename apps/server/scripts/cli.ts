@@ -95,6 +95,14 @@ const buildCmd = Command.make(
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
+
+      const templatesSource = path.join(serverDir, "templates");
+      if (yield* fs.exists(templatesSource)) {
+        yield* fs.copy(templatesSource, path.join(serverDir, "dist/templates"));
+        yield* Effect.log("[cli] Bundled game starter templates into dist/templates");
+      } else {
+        yield* Effect.logWarning("[cli] Starter templates not found — skipping template bundle.");
+      }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 

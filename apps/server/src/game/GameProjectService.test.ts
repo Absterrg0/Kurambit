@@ -3,15 +3,30 @@ import { it, expect } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId, type GameTemplateId } from "@t3tools/contracts";
 import { projectTestLayer } from "./gameTestLayers.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" };
+const gameProjectLayer = (registration = projectTestLayer()) =>
+  GameProjectService.layer.pipe(
+    Layer.provide(registration),
+    Layer.provideMerge(GameProcesses.layer),
+    Layer.provide(NodeServices.layer),
+  );
+const readFile = (file: string) => Effect.promise(() => NodeFSP.readFile(file, "utf8"));
+const exists = (path: string) =>
+  Effect.promise(() =>
+    NodeFSP.access(path).then(
+      () => true,
+      () => false,
+    ),
+  );
 it.effect(
   "scaffolds a portable Godot game, commits it, registers it, and launches the selected model with its brief",
   () =>
@@ -64,6 +79,8 @@ it.effect(
               "godot/scenes/coin.tscn",
               "godot/scripts/cube.gd",
             ]);
+            // The template survives a manifest re-encode (upsertAsset above).
+            expect((yield* projects.read(game.root)).template).toBe("blank");
             const processes = yield* GameProcesses.GameProcesses;
             const commit = yield* processes.run({
               root: game.root,
@@ -75,13 +92,10 @@ it.effect(
             return game;
           }).pipe(
             Effect.provide(
-              GameProjectService.layer.pipe(
-                Layer.provide(
-                  projectTestLayer((input) => {
-                    if (input.initialMessage) launch = input;
-                  }),
-                ),
-                Layer.provideMerge(GameProcesses.layer),
+              gameProjectLayer(
+                projectTestLayer((input) => {
+                  if (input.initialMessage) launch = input;
+                }),
               ),
             ),
           ),
@@ -91,22 +105,22 @@ it.effect(
         expect(launch?.runtimeMode).toBe("full-access");
         expect(launch?.initialMessage?.text).toContain("Collect three coins.");
         expect(launch?.initialMessage?.text).toContain("Clay");
-        expect(
-          yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(created.root, "CLAUDE.md"), "utf8"),
-          ),
-        ).toBe("@AGENTS.md\n");
-        expect(
-          yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(created.root, "godot/project.godot"), "utf8"),
-          ),
-        ).toContain("gl_compatibility");
-        const presets = yield* Effect.promise(() =>
-          NodeFSP.readFile(NodePath.join(created.root, "godot/export_presets.cfg"), "utf8"),
+        expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
+        expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
+          "gl_compatibility",
         );
+        const presets = yield* readFile(NodePath.join(created.root, "godot/export_presets.cfg"));
         expect(presets).toContain('name="Web"');
         expect(presets).toContain('name="Linux"');
         expect(presets).toContain("variant/thread_support=false");
+        // The blank starter template becomes the game's godot/ tree with the name substituted.
+        expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
+          'config/name="Tiny Quest"',
+        );
+        expect(yield* exists(NodePath.join(created.root, "godot/scenes/main.tscn"))).toBe(true);
+        expect(yield* readFile(NodePath.join(created.root, "TEMPLATE.md"))).toContain(
+          "# Tiny Quest — Blank starter template",
+        );
         expect(
           Object.keys(
             scaffoldFiles({
@@ -139,14 +153,7 @@ it.effect("rejects absent or invalid manifests and paths outside a game", () =>
           const invalid = yield* Effect.result(projects.read(root));
           expect(invalid._tag).toBe("Failure");
           expect(() => GameProjectService.insideGame(root, "../escape")).toThrow();
-        }).pipe(
-          Effect.provide(
-            GameProjectService.layer.pipe(
-              Layer.provide(projectTestLayer()),
-              Layer.provide(GameProcesses.layer),
-            ),
-          ),
-        ),
+        }).pipe(Effect.provide(gameProjectLayer())),
       );
     } finally {
       yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
@@ -161,12 +168,7 @@ it.effect("reopens a registered workspace after reconstructing the game service"
       (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
     );
     const registration = projectTestLayer();
-    const freshService = () =>
-      GameProjectService.layer.pipe(
-        Layer.provide(registration),
-        Layer.provide(GameProcesses.layer),
-        Layer.fresh,
-      );
+    const freshService = () => gameProjectLayer(registration).pipe(Layer.fresh);
     const created = yield* Effect.scoped(
       Effect.gen(function* () {
         const service = yield* GameProjectService.GameProjectService;
@@ -207,17 +209,72 @@ it.effect("passes the chosen runtime mode to the game thread", () =>
         });
       }).pipe(
         Effect.provide(
-          GameProjectService.layer.pipe(
-            Layer.provide(
-              projectTestLayer((input) => {
-                launch = input;
-              }),
-            ),
-            Layer.provide(GameProcesses.layer),
+          gameProjectLayer(
+            projectTestLayer((input) => {
+              launch = input;
+            }),
           ),
         ),
       );
       expect(launch?.runtimeMode).toBe("approval-required");
     }),
   ),
+);
+
+it.effect("rejects an unknown starter template and removes the folder it created", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-template-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const failure = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        return yield* Effect.result(
+          projects.create({
+            name: "Future Game",
+            parentDirectory: parent,
+            brief: "Go",
+            // A template id this build does not ship.
+            template: "3d-explorer" as GameTemplateId,
+            modelSelection: selection,
+          }),
+        );
+      }).pipe(Effect.provide(gameProjectLayer())),
+    );
+    expect(failure._tag).toBe("Failure");
+    if (failure._tag === "Failure") {
+      expect(failure.failure.operation).toBe("copy-template");
+      expect(failure.failure.reason).toBe("unknown-template");
+    }
+    expect(yield* exists(NodePath.join(parent, "future-game"))).toBe(false);
+  }),
+);
+
+it.effect("keeps a pre-existing folder when creation cannot adopt it", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-occupied-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const root = NodePath.join(parent, "occupied");
+    yield* Effect.promise(() => NodeFSP.mkdir(root));
+    yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "keep.txt"), "keep"));
+    const failure = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        return yield* Effect.result(
+          projects.create({
+            name: "Occupied",
+            parentDirectory: parent,
+            brief: "Go",
+            modelSelection: selection,
+          }),
+        );
+      }).pipe(Effect.provide(gameProjectLayer())),
+    );
+    expect(failure._tag).toBe("Failure");
+    if (failure._tag === "Failure") expect(failure.failure.reason).toBe("io");
+    expect(yield* readFile(NodePath.join(root, "keep.txt"))).toBe("keep");
+  }),
 );

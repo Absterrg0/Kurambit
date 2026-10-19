@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -155,6 +156,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(NodeServices.layer),
       );
       try {
         yield* Effect.scoped(

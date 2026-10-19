@@ -15,6 +15,17 @@ instead of acting on an arbitrary directory.
 The Game panel's buttons call the same `GameService` methods over RPC. Anything a user can do from
 the panel, an agent can do through a tool, and the reverse.
 
+## Starter templates
+
+New games start from a template under `apps/server/templates/<id>/`: `template.json` (catalog
+metadata), `TEMPLATE.md` (the architecture guide, copied to the game root; the game's AGENTS.md
+tells the agent to read it first), and `godot/`, which becomes the game's Godot project. Text files
+substitute `{{GAME_NAME}}`; every other file is copied byte for byte. The templates directory
+resolves relative to the running module — `apps/server/templates` in the dev tree, `dist/templates`
+in the packed server — and `apps/server/scripts/cli.ts build` copies it into `dist`, so the desktop
+artifact carries it too. `GAME_TEMPLATES` in the contracts is what the New game dialog lists; a
+server test keeps it in step with the folders.
+
 ## Why no third-party Blender/Godot MCP servers
 
 We evaluated ahujasid/mcp-for-blender, hi-godot/godot-ai and Coding-Solo/godot-mcp (all MIT):

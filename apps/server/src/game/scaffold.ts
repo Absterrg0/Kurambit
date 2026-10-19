@@ -1,11 +1,23 @@
-import type { GameCreateInput, GameManifest } from "@t3tools/contracts";
+import {
+  DEFAULT_GAME_TEMPLATE,
+  GAME_TEMPLATES,
+  type GameCreateInput,
+  type GameManifest,
+} from "@t3tools/contracts";
 
+/**
+ * Files the studio owns for every game. The starter template supplies the
+ * `godot/` tree and TEMPLATE.md; see templates.ts.
+ */
 export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
+  const template = input.template ?? DEFAULT_GAME_TEMPLATE;
+  const templateName = GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? template;
   const manifest: GameManifest = {
     schemaVersion: 1,
     name: input.name.trim(),
     brief: input.brief,
     artDirection: input.artDirection ?? "",
+    template,
     engine: { name: "godot", version: "4.7.2" },
     godotProject: "godot",
     assets: [],
@@ -13,11 +25,41 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
-    "AGENTS.md": `# Game Studio project\n\nBuild the game described in BRIEF.md. Use GDScript and Godot 4.7 Compatibility rendering. Keep scope focused on a playable core loop.\n\n## Layout\n\nThis root is the git repository. game.json is the studio manifest. The engine project is godot/. Editable Blender sources live in art/blender/, production scripts in art/scripts/, and thumbnails in art/previews/. Godot imports only GLB files under godot/assets/models/. builds/ and godot/.godot/ are ignored.\n\n## Tools\n\nCall game_status first for readiness, asset usage, scenes, builds and logs. If tools are missing, tell the user to install them with the Game panel.\n\nUse game_blender_run with a stable asset id and bpy script to create or revise an asset. The tool opens the existing .blend on revisions, runs your script, saves the source and script, exports GLB with modifiers, and renders a thumbnail unless disabled. For revisions, edit existing objects by name, or pass reset=true with a complete rebuild script to start from an empty scene at the same source/export paths. Re-running an object-creation script without reset duplicates objects. Keep the .blend sources. Re-export revisions to the same path so scene references remain valid. Do not put .blend files inside godot/.\n\nUse game_godot_import after each asset transfer or engine change. Fix every import and GDScript parse error. Assemble scenes and GDScript files using your normal file tools.\n\nWrite a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. A screenshot is not a gameplay test.\n\nUse game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser and returns screenshots and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.\n\n## Definition of done\n\nFinish every turn to this bar, then report to the user and end the turn:\n\n1. game_godot_test passes with your smoke test.\n2. game_web_playtest boots without console errors, and its after-steps screenshot shows the game responding to your steps.\n3. game_preview returns the playable URL; report it with the test results.\n\nPlaytest screenshots are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.\n`,
+    "AGENTS.md": `# Game Studio project
+
+Build the game described in BRIEF.md. Use GDScript and Godot 4.7 Compatibility rendering. Keep scope focused on a playable core loop.
+
+## Starter template
+
+This game started from the **${templateName}** starter template. Read TEMPLATE.md at the project root first: it describes the scenes, systems, conventions and tests you inherit. Extend the template's systems instead of replacing them, and keep its tests passing.
+
+## Layout
+
+This root is the git repository. game.json is the studio manifest. The engine project is godot/. Editable Blender sources live in art/blender/, production scripts in art/scripts/, and thumbnails in art/previews/. Godot imports only GLB files under godot/assets/models/. builds/ and godot/.godot/ are ignored.
+
+## Tools
+
+Call game_status first for readiness, asset usage, scenes, builds and logs. If tools are missing, tell the user to install them with the Game panel.
+
+Use game_blender_run with a stable asset id and bpy script to create or revise an asset. The tool opens the existing .blend on revisions, runs your script, saves the source and script, exports GLB with modifiers, and renders a thumbnail unless disabled. For revisions, edit existing objects by name, or pass reset=true with a complete rebuild script to start from an empty scene at the same source/export paths. Re-running an object-creation script without reset duplicates objects. Keep the .blend sources. Re-export revisions to the same path so scene references remain valid. Do not put .blend files inside godot/.
+
+Use game_godot_import after each asset transfer or engine change. Fix every import and GDScript parse error. Assemble scenes and GDScript files using your normal file tools.
+
+Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. A screenshot is not a gameplay test.
+
+Use game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser and returns screenshots and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.
+
+## Definition of done
+
+Finish every turn to this bar, then report to the user and end the turn:
+
+1. game_godot_test passes with your smoke test.
+2. game_web_playtest boots without console errors, and its after-steps screenshot shows the game responding to your steps.
+3. game_preview returns the playable URL; report it with the test results.
+
+Playtest screenshots are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.
+`,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",
-    "godot/project.godot": `config_version=5\n\n[application]\nconfig/name=${JSON.stringify(manifest.name)}\nrun/main_scene="res://scenes/main.tscn"\nconfig/features=PackedStringArray("4.7", "GL Compatibility")\n\n[display]\nwindow/size/viewport_width=960\nwindow/size/viewport_height=540\n\n[rendering]\nrenderer/rendering_method="gl_compatibility"\nrenderer/rendering_method.mobile="gl_compatibility"\nenvironment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)\n`,
-    "godot/scenes/main.tscn": `[gd_scene format=3]\n\n[node name="Main" type="Node3D"]\n\n[node name="Camera3D" type="Camera3D" parent="."]\nposition = Vector3(0, 2, 5)\ncurrent = true\n\n[node name="Light" type="DirectionalLight3D" parent="."]\nrotation_degrees = Vector3(-45, -30, 0)\n`,
-    "godot/export_presets.cfg": `[preset.0]\nname="Web"\nplatform="Web"\nrunnable=true\nadvanced_options=false\ndedicated_server=false\ncustom_features=""\nexport_filter="all_resources"\ninclude_filter=""\nexclude_filter="tests/*"\nexport_path="../builds/web/index.html"\nencryption_include_filters=""\nencryption_exclude_filters=""\nencrypt_pck=false\nencrypt_directory=false\n\n[preset.0.options]\ncustom_template/debug=""\ncustom_template/release=""\nvariant/extensions_support=false\nvariant/thread_support=false\nvram_texture_compression/for_desktop=true\nvram_texture_compression/for_mobile=false\nhtml/export_icon=true\nhtml/canvas_resize_policy=2\nprogressive_web_app/enabled=false\n\n[preset.1]\nname="Linux"\nplatform="Linux"\nrunnable=true\nadvanced_options=false\ndedicated_server=false\ncustom_features=""\nexport_filter="all_resources"\ninclude_filter=""\nexclude_filter="tests/*"\nexport_path="../builds/linux/game.x86_64"\nencrypt_pck=false\nencrypt_directory=false\n\n[preset.1.options]\ncustom_template/debug=""\ncustom_template/release=""\nbinary_format/embed_pck=true\ntexture_format/s3tc_bptc=true\ntexture_format/etc2_astc=false\nbinary_format/architecture="x86_64"\n`,
   };
 }

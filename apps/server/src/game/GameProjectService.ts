@@ -5,11 +5,15 @@ import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
+  DEFAULT_GAME_TEMPLATE,
   ProjectId,
   ThreadId,
   GameManifest,
@@ -25,6 +29,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { scaffoldFiles } from "./scaffold.ts";
+import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
   const target = NodePath.resolve(root, relative);
@@ -69,6 +74,8 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const read = (root: string) =>
     Effect.tryPromise({
       try: async () => {
@@ -159,62 +166,88 @@ const make = Effect.gen(function* () {
         });
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
       const root = NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir()), slug);
-      yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.mkdir(NodePath.dirname(root), { recursive: true });
-          await NodeFSP.mkdir(root); // Never adopt or overwrite an existing directory during creation.
-          for (const relative of [
-            "art/blender",
-            "art/scripts",
-            "art/previews",
-            "godot/assets/models",
-            "godot/scripts",
-            "godot/tests",
-            "builds/web",
-            "builds/linux",
-          ])
-            await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
-          for (const [relative, contents] of Object.entries(scaffoldFiles(input))) {
-            const file = NodePath.join(root, relative);
-            await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
-            await NodeFSP.writeFile(file, contents, { flag: "wx" });
-          }
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "scaffold-game", path: root, reason: "io", cause }),
+      const template = input.template ?? DEFAULT_GAME_TEMPLATE;
+      let created = false;
+      const removeCreatedRoot = Effect.promise(async () => {
+        if (!created) return;
+        await NodeFSP.rm(root, { recursive: true, force: true }).catch(() => {});
       });
-      for (const args of [
-        ["init"],
-        ["add", "."],
-        [
-          "-c",
-          "user.name=Game Studio",
-          "-c",
-          "user.email=studio@localhost",
-          "commit",
-          "-m",
-          "chore: create game project",
-        ],
-      ]) {
-        const result = yield* processes.run({
-          root,
-          executable: "git",
-          args,
-          operation: "git-init",
-          timeoutMs: 30_000,
+      return yield* Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(NodePath.dirname(root), { recursive: true });
+            await NodeFSP.mkdir(root); // Never adopt or overwrite an existing directory during creation.
+            created = true;
+            for (const relative of [
+              "art/blender",
+              "art/scripts",
+              "art/previews",
+              "godot/assets/models",
+              "godot/scripts",
+              "godot/tests",
+              "builds/web",
+              "builds/linux",
+            ])
+              await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
+            for (const [relative, contents] of Object.entries(scaffoldFiles(input))) {
+              const file = NodePath.join(root, relative);
+              await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+              await NodeFSP.writeFile(file, contents, { flag: "wx" });
+            }
+          },
+          catch: (cause) =>
+            new GameOperationError({ operation: "scaffold-game", path: root, reason: "io", cause }),
         });
-        if (result.exitCode !== 0)
-          return yield* new GameOperationError({
+        const templatesDirectory = yield* resolveTemplatesDirectory().pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+        yield* copyTemplateIntoGame({
+          templatesDirectory,
+          templateId: template,
+          gameRoot: root,
+          gameName: name,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+        for (const args of [
+          ["init"],
+          ["add", "."],
+          [
+            "-c",
+            "user.name=Game Studio",
+            "-c",
+            "user.email=studio@localhost",
+            "commit",
+            "-m",
+            "chore: create game project",
+          ],
+        ]) {
+          const result = yield* processes.run({
+            root,
+            executable: "git",
+            args,
             operation: "git-init",
-            path: result.logPath,
-            reason: "command-failed",
-            detail: commandDetail(result),
+            timeoutMs: 30_000,
           });
-      }
-      return yield* register(
-        root,
-        input,
-        `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`,
+          if (result.exitCode !== 0)
+            return yield* new GameOperationError({
+              operation: "git-init",
+              path: result.logPath,
+              reason: "command-failed",
+              detail: commandDetail(result),
+            });
+        }
+        return yield* register(
+          root,
+          input,
+          `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`,
+        );
+      }).pipe(
+        // A create that fails or is interrupted must not leave a half-made folder
+        // behind; never remove a directory this call did not create.
+        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : removeCreatedRoot)),
       );
     },
   );
