@@ -104,7 +104,7 @@ interface RightPanelTabsProps {
   onMoveSurface?: (surfaceId: string, toIndex: number) => void;
   onCopyFilePath: (relativePath: string) => void;
   /** Surfaces this surface should not offer at all, not merely disabled. */
-  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff">;
+  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff"> | undefined;
   onAddBrowser: () => void;
   /**
    * Separate from `onAddBrowser` on purpose: that one is passed directly as a
@@ -263,7 +263,7 @@ function SurfaceMenuItem(props: {
 
 function RightPanelEmptyState(props: {
   /** Surfaces this surface should not offer at all, not merely disabled. */
-  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff">;
+  excludedAddSurfaces?: ReadonlyArray<"Browser" | "Terminal" | "Files" | "Diff"> | undefined;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;

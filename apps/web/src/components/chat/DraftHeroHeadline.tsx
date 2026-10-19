@@ -238,8 +238,8 @@ export function DraftHeroHeadline({
       onValueChange={(item) => {
         if (!item) return;
         setPickerOpen(false);
-        if (item.value === ADD_PROJECT_VALUE) {
-          openAddProject();
+        if (item.value === OPEN_GAME_VALUE) {
+          openGameFolder();
           return;
         }
         const entry = projectEntryByKey.get(item.value);
