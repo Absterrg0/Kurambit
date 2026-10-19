@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { GameToolkit } from "./tools.ts";
+import { GameToolkit, GamePlaytestToolkit } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) =>
     McpInvocationContext.requireThreadScope(context, "Game Studio tools"),
@@ -66,4 +66,19 @@ const handlers = {
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
+// Contextual input typing comes from the satisfies check below.
+const playtestHandlers = {
+  game_web_playtest: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.webPlaytest(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GamePlaytestToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
+/**
+ * Registered separately over the HTTP transport so the playtest frames become
+ * real image content; see McpHttpServer.registerGameWebPlaytest.
+ */
+export const layerPlaytest = McpToolAccess.toLayer(GamePlaytestToolkit, playtestHandlers);

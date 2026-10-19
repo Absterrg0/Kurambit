@@ -1,4 +1,4 @@
-import { GameToolkit } from "./toolkits/game/tools.ts";
+import { GamePlaytestToolkit, GameToolkit, GameWebPlaytestTool } from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -20,6 +20,7 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contrac
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
+import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -544,12 +545,19 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
 });
 
 interface ImageToolResult {
-  readonly screenshot: {
+  readonly screenshot?: {
     readonly mimeType: "image/png";
     readonly data: string;
     readonly width: number;
     readonly height: number;
   };
+  /** Tools like game_web_playtest return several annotated frames. */
+  readonly screenshots?: ReadonlyArray<{
+    readonly mimeType: "image/png";
+    readonly data: string;
+    readonly width: number;
+    readonly height: number;
+  }>;
   readonly [key: string]: unknown;
 }
 
@@ -649,17 +657,31 @@ const registerImageTool = <T extends Tool.Any, E, R>(
             Effect.matchCauseEffect({
               onFailure: imageToolFailure(tool.name, operation, failureText),
               onSuccess: ({ encodedResult }) => {
-                const { screenshot, ...rest } = encodedResult as ImageToolResult;
+                const { screenshot, screenshots, ...rest } = encodedResult as ImageToolResult;
+                const frames = screenshots ?? (screenshot === undefined ? [] : [screenshot]);
                 const includeImage =
                   (payload as { readonly includeImage?: boolean } | undefined)?.includeImage !==
                   false;
                 const metadata = {
                   ...rest,
-                  screenshot: {
-                    mimeType: screenshot.mimeType,
-                    width: screenshot.width,
-                    height: screenshot.height,
-                  },
+                  ...(screenshot === undefined
+                    ? {}
+                    : {
+                        screenshot: {
+                          mimeType: screenshot.mimeType,
+                          width: screenshot.width,
+                          height: screenshot.height,
+                        },
+                      }),
+                  ...(screenshots === undefined
+                    ? {}
+                    : {
+                        screenshots: frames.map(({ mimeType, width, height }) => ({
+                          mimeType,
+                          width,
+                          height,
+                        })),
+                      }),
                 };
                 return Effect.succeed(
                   new McpSchema.CallToolResult({
@@ -668,13 +690,11 @@ const registerImageTool = <T extends Tool.Any, E, R>(
                     content: [
                       { type: "text", text: JSON.stringify(metadata) },
                       ...(includeImage
-                        ? [
-                            {
-                              type: "image" as const,
-                              data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
-                              mimeType: screenshot.mimeType,
-                            },
-                          ]
+                        ? frames.map((frame) => ({
+                            type: "image" as const,
+                            data: new Uint8Array(Buffer.from(frame.data, "base64")),
+                            mimeType: frame.mimeType,
+                          }))
                         : []),
                     ],
                   }),
@@ -707,6 +727,26 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
 });
 
 const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
+
+const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest")(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* GamePlaytestToolkit;
+  yield* registerImageTool(
+    GameWebPlaytestTool,
+    (payload) =>
+      built
+        .handle("game_web_playtest", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "playtest",
+    (error) => (error instanceof Error ? error.message : "Game web playtest failed."),
+  );
+});
 
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;
@@ -834,7 +874,10 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
-const layerGameToolkit = toolkitRegistration(GameToolkit, GameHandlers.layer);
+const layerGameToolkit = Layer.mergeAll(
+  imageToolRegistration(registerGameWebPlaytest(), GameHandlers.layerPlaytest),
+  toolkitRegistration(GameToolkit, GameHandlers.layer),
+);
 
 export const layer = Layer.mergeAll(
   layerGameToolkit,

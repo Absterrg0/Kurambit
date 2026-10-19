@@ -6,6 +6,8 @@ import {
   GameBlenderResult,
   GameOperationError,
   GameStatus,
+  GameWebPlaytestInput,
+  GameWebPlaytestResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as GameService from "../../../game/GameService.ts";
@@ -87,6 +89,19 @@ const StopTool = Tool.make("game_stop", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, false);
+const WebPlaytestTool = Tool.make("game_web_playtest", {
+  description:
+    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys, return screenshots and console errors. Use this as the final web check instead of building your own browser tooling.",
+  parameters: GameWebPlaytestInput,
+  success: GameWebPlaytestResult,
+  failure,
+  // Default "error" failureMode: the HTTP transport registers this tool behind
+  // McpHttpServer.registerImageTool, which turns failures into text results.
+  dependencies,
+}).annotate(Tool.Readonly, false);
+// Exported for the image-content transport registration in McpHttpServer.
+export const GameWebPlaytestTool = WebPlaytestTool;
+export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool);
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   BlenderTool,
