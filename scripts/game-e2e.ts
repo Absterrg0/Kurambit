@@ -77,7 +77,7 @@ const authenticate = async () => {
   // Mint a fresh, scoped client grant. Never print the credential or pairing URL.
   const { stdout } = await exec(
     process.execPath,
-    ["apps/server/src/bin.ts", "pair", "--home-dir", NodePath.resolve(values["home-dir"])],
+    ["apps/server/src/bin.ts", "pair", "--base-dir", NodePath.resolve(values["home-dir"])],
     { cwd: checkout, timeout: 30_000, maxBuffer: 1024 * 1024 },
   );
   const match = stdout.match(/Pairing URL:\s*(https?:\/\/\S+)/);
