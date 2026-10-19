@@ -224,6 +224,34 @@ it.effect("passes the chosen runtime mode to the game thread", () =>
   ),
 );
 
+it.effect("creates a game from an explicitly requested starter template", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-blank-")),
+    );
+    try {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const projects = yield* GameProjectService.GameProjectService;
+          const created = yield* projects.create({
+            name: "Plain Quest",
+            parentDirectory: parent,
+            brief: "Go",
+            template: "blank",
+            modelSelection: selection,
+          });
+          expect((yield* projects.read(created.root)).template).toBe("blank");
+          expect(yield* exists(NodePath.join(created.root, "godot/scenes/main.tscn"))).toBe(true);
+          expect(yield* readFile(NodePath.join(created.root, "TEMPLATE.md"))).toContain(
+            "Blank starter template",
+          );
+        }).pipe(Effect.provide(gameProjectLayer())),
+      );
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
+    }
+  }),
+);
 it.effect("rejects an unknown starter template and removes the folder it created", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(

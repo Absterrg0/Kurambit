@@ -20,11 +20,14 @@ the panel, an agent can do through a tool, and the reverse.
 New games start from a template under `apps/server/templates/<id>/`: `template.json` (catalog
 metadata), `TEMPLATE.md` (the architecture guide, copied to the game root; the game's AGENTS.md
 tells the agent to read it first), and `godot/`, which becomes the game's Godot project. Text files
-substitute `{{GAME_NAME}}`; every other file is copied byte for byte. The templates directory
-resolves relative to the running module — `apps/server/templates` in the dev tree, `dist/templates`
-in the packed server — and `apps/server/scripts/cli.ts build` copies it into `dist`, so the desktop
-artifact carries it too. `GAME_TEMPLATES` in the contracts is what the New game dialog lists; a
-server test keeps it in step with the folders.
+substitute `{{GAME_NAME}}`, or `{{GAME_NAME_STRING}}` for engine config values that need a quoted,
+escaped string literal (`config/name`); every other file is copied byte for byte. The templates
+directory resolves relative to the running module — `apps/server/templates` in the dev tree,
+`dist/templates` in the packed server — and `apps/server/scripts/cli.ts build` copies it into
+`dist`. That single rule is why the CLI archive stages `templates/` beside the executable, next to
+`client/`: a game created by an unpacked archive would otherwise fail to copy its `godot/` tree.
+`GAME_TEMPLATES` in the contracts is what the New game dialog lists, first entry first; a server
+test keeps it in step with the folders.
 
 ## Why no third-party Blender/Godot MCP servers
 
@@ -71,10 +74,10 @@ avoids SharedArrayBuffer, so the loopback static server needs no COOP/COEP heade
 track.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
-(SwiftShader), waits for Godot to boot, sends key presses, and returns screenshots and console
-errors. It launches its own browser without the SOCKS proxy that `html_preview` uses, because it
-only ever loads the game's own loopback server. Do not merge it into `htmlRender/headlessChrome.ts`:
-that launcher's proxy and sandbox flags protect untrusted HTML.
+(SwiftShader), waits for Godot to boot, sends key presses and canvas clicks, and returns screenshots
+and console errors. It launches its own browser without the SOCKS proxy that `html_preview` uses,
+because it only ever loads the game's own loopback server. Do not merge it into
+`htmlRender/headlessChrome.ts`: that launcher's proxy and sandbox flags protect untrusted HTML.
 
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
 re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`

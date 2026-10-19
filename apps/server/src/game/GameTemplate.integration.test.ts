@@ -73,7 +73,8 @@ const templatesInstalled = (() => {
   }
   return false;
 })();
-const available = NodeFS.existsSync(godotExecutable) && browserExecutable !== null;
+const available =
+  NodeFS.existsSync(godotExecutable) && browserExecutable !== null && templatesInstalled;
 // Evidence the playtest frames are read from: the orchestrator inspects these files.
 const evidenceDirectory = "/home/abstergo/Programming/Projects/game-studio-orch/t16-shots";
 

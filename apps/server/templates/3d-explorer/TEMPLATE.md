@@ -80,6 +80,13 @@ Relic positions are set so that the node origin sits **on the ground the relic f
 over** (the crystal is 0.95 above it); the smoke test teleports the player onto those
 origins, so keep the convention.
 
+Flat decoration — the dirt yard and the paved route — is `MeshInstance3D` only, without
+collision, with its top a couple of centimetres above the ground: a visible lip without a
+ledge to trip the character on. Anything the player should stand on needs a real collider
+(the ground strips, the bridge, the platforms). The lava pool is 0.95 m deep, so a player
+who falls in is hurt, knocked back, and can jump out; its hazard volume deliberately stops
+below the bridge deck, because standing on the bridge must never count as standing in lava.
+
 ## Recipes
 
 **Another level.** Copy `scenes/levels/level_01.tscn`, keep the container names, and point
