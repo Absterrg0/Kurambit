@@ -56,9 +56,23 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const chooseFolder = async () => {
+    if (busy || pickingFolder) return;
+    setPickingFolder(true);
+    setError(null);
+    try {
+      const picked = await ensureLocalApi().dialogs.pickFolder({ initialPath: directory });
+      if (picked) setDirectory(picked);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPickingFolder(false);
+    }
+  };
   const submit = async () => {
-    if (busy || dialog === null) return;
+    if (busy || pickingFolder || dialog === null) return;
     setBusy(true);
     setError(null);
     try {
@@ -121,7 +135,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
       <Dialog
         open={dialog !== null}
         onOpenChange={(value) => {
-          if (!value && !busy) setDialog(null);
+          if (!value && !busy && !pickingFolder) setDialog(null);
         }}
       >
         <DialogPopup>
@@ -157,7 +171,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 onChange={(event) => setDirectory(event.target.value)}
                 placeholder={dialog === "create" ? "~/Games" : "/path/to/game"}
                 required={dialog === "open"}
-                disabled={busy}
+                disabled={busy || pickingFolder}
               />
             </label>
             {dialog === "create" ? (
@@ -187,19 +201,10 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    void ensureLocalApi()
-                      .dialogs.pickFolder({ initialPath: directory })
-                      .then((picked) => {
-                        if (picked) setDirectory(picked);
-                      })
-                      .catch((cause: unknown) =>
-                        setError(cause instanceof Error ? cause.message : String(cause)),
-                      );
-                  }}
+                  disabled={busy || pickingFolder}
+                  onClick={() => void chooseFolder()}
                 >
-                  Choose folder
+                  {pickingFolder ? "Choosing folder…" : "Choose folder"}
                 </Button>
               </div>
             ) : null}
@@ -225,6 +230,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 type="submit"
                 disabled={
                   busy ||
+                  pickingFolder ||
                   !entries.some(
                     (entry) =>
                       entry.instanceId === model.instanceId && entry.enabled && entry.isAvailable,

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalFetchInEffect:off -- Run the real installed creative tools and loopback HTTP server, with isolated temporary game files.
+// @effect-diagnostics nodeBuiltinImport:off -- Run the real installed creative tools and loopback HTTP server, with isolated temporary game files.
 import { it, expect } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeFS from "node:fs";
@@ -38,6 +38,7 @@ it.live.skipIf(!available)(
           Effect.gen(function* () {
             const projects = yield* GameProjectService.GameProjectService;
             const game = yield* GameService.GameService;
+            const processes = yield* GameProcesses.GameProcesses;
             const created = yield* projects.create({
               name: "Real Cube Game",
               parentDirectory: parent,
@@ -93,14 +94,34 @@ it.live.skipIf(!available)(
             expect(tested.process?.stdout).toContain("SMOKE PASS");
             const web = yield* game.action(threadId, "preview");
             expect(web.success, web.message).toBe(true);
-            const html = yield* Effect.promise(() =>
-              fetch(web.url!).then((response) => response.text()),
-            );
+            const htmlPath = NodePath.join(created.root, "builds/logs/preview.html");
+            const htmlResponse = yield* processes.run({
+              root: created.root,
+              executable: "curl",
+              args: [
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--dump-header",
+                "-",
+                "--output",
+                htmlPath,
+                web.url!,
+              ],
+              operation: "curl-html",
+            });
+            expect(htmlResponse.exitCode, htmlResponse.stderr).toBe(0);
+            expect(htmlResponse.stdout).toContain("200 OK");
+            const html = yield* Effect.promise(() => NodeFSP.readFile(htmlPath, "utf8"));
             expect(html).toContain("canvas");
-            const wasm = yield* Effect.promise(() =>
-              fetch(`${web.url}index.wasm`, { method: "HEAD" }),
-            );
-            expect(wasm.headers.get("content-type")).toBe("application/wasm");
+            const wasm = yield* processes.run({
+              root: created.root,
+              executable: "curl",
+              args: ["--fail", "--silent", "--show-error", "--head", `${web.url}index.wasm`],
+              operation: "curl-wasm",
+            });
+            expect(wasm.exitCode, wasm.stderr).toBe(0);
+            expect(wasm.stdout).toContain("Content-Type: application/wasm");
             const linux = yield* game.export(threadId, "Linux");
             expect(linux.success, linux.message).toBe(true);
             const status = yield* game.status(threadId);
@@ -128,10 +149,14 @@ it.live.skipIf(!available)(
                 log: asset.process.logPath,
               },
               importExit: imported.process?.exitCode,
+              importLog: imported.process?.logPath,
               testOutput: tested.process?.stdout,
               web: web.path,
-              wasmMime: wasm.headers.get("content-type"),
+              webLog: web.process?.logPath,
+              htmlHeaders: htmlResponse.stdout,
+              wasmHeaders: wasm.stdout,
               linux: linux.path,
+              linuxLog: linux.process?.logPath,
               nativePid,
               stopped: true,
             };

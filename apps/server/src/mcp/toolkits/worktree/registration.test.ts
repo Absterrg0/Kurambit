@@ -143,6 +143,21 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("t3_worktree_status");
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
+      for (const name of [
+        "game_status",
+        "game_blender_run",
+        "game_godot_import",
+        "game_godot_test",
+        "game_export",
+        "game_preview",
+        "game_run_native",
+        "game_stop",
+      ]) {
+        expect(toolNames).toContain(name);
+        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(
+          name === "game_status",
+        );
+      }
 
       const handoff = tools.find((tool) => tool.name === "t3_worktree_handoff");
       expect(handoff?.annotations?.readOnlyHint).toBe(false);
