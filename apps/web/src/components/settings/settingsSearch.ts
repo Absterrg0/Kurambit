@@ -130,6 +130,14 @@ const SOURCE_CONTROL_HOST_SEARCH_ITEMS = sourceControlClients.definitions.flatMa
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: "game-tools",
+    title: "Game tools",
+    to: "/settings/general",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: ["blender godot executable paths install verify toolchain"],
+  },
+  {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
     title: "Keep worktrees with local changes",

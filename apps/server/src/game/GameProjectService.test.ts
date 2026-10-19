@@ -67,7 +67,7 @@ it.effect(
               GameProjectService.layer.pipe(
                 Layer.provide(
                   projectTestLayer((input) => {
-                    launch = input;
+                    if (input.initialMessage) launch = input;
                   }),
                 ),
                 Layer.provideMerge(GameProcesses.layer),
@@ -77,6 +77,7 @@ it.effect(
         );
         expect(created.root).toBe(NodePath.join(parent, "tiny-quest"));
         expect(launch?.modelSelection).toEqual(selection);
+        expect(launch?.runtimeMode).toBe("full-access");
         expect(launch?.initialMessage?.text).toContain("Collect three coins.");
         expect(launch?.initialMessage?.text).toContain("Clay");
         expect(
@@ -174,4 +175,38 @@ it.effect("reopens a registered workspace after reconstructing the game service"
     );
     expect(reopened.projectId).toBe(created.projectId);
   }).pipe(Effect.scoped),
+);
+
+it.effect("passes the chosen runtime mode to the game thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const parent = yield* Effect.acquireRelease(
+        Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-mode-"))),
+        (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+      );
+      let launch: ThreadLaunchService.ThreadLaunchInput | undefined;
+      yield* Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        yield* projects.create({
+          name: "Supervised",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+          runtimeMode: "approval-required",
+        });
+      }).pipe(
+        Effect.provide(
+          GameProjectService.layer.pipe(
+            Layer.provide(
+              projectTestLayer((input) => {
+                launch = input;
+              }),
+            ),
+            Layer.provide(GameProcesses.layer),
+          ),
+        ),
+      );
+      expect(launch?.runtimeMode).toBe("approval-required");
+    }),
+  ),
 );

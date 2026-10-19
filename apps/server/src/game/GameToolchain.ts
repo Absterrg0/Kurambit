@@ -208,9 +208,12 @@ const make = Effect.gen(function* () {
   });
   const verify = Effect.gen(function* () {
     const scratch = yield* Effect.tryPromise({
-      try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-studio-verify-")),
+      try: async () => {
+        await NodeFSP.mkdir(directory, { recursive: true });
+        return NodeFSP.mkdtemp(NodePath.join(directory, ".verify-"));
+      },
       catch: (cause) =>
-        new GameOperationError({ operation: "verify", path: NodeOS.tmpdir(), reason: "io", cause }),
+        new GameOperationError({ operation: "verify", path: directory, reason: "io", cause }),
     });
     return yield* Effect.gen(function* () {
       const blender = yield* executable("blender");

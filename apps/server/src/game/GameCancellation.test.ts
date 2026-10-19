@@ -65,7 +65,9 @@ for (const cancellation of ["interrupt", "stop"] as const) {
                   Effect.succeed({ path: executable, version: "4.7.2", templates: null }),
               }),
             ),
-            Layer.provide(Layer.mock(GamePreview.GamePreview)({ stop: () => Effect.void })),
+            Layer.provide(
+              Layer.mock(GamePreview.GamePreview)({ stop: () => Effect.void, url: () => null }),
+            ),
           );
           yield* Effect.gen(function* () {
             const game = yield* GameService.GameService;

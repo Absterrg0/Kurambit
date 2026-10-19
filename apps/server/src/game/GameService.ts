@@ -320,7 +320,7 @@ const make = Effect.gen(function* () {
                 await NodeFSP.writeFile(
                   NodePath.join(temporary, "run.py"),
                   blenderWrapper({
-                    reset: input.reset,
+                    reset: input.reset ?? false,
                     source: insideGame(root, asset.source),
                     script: insideGame(root, asset.script),
                     exported: insideGame(root, asset.export),

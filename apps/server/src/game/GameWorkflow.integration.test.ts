@@ -181,7 +181,7 @@ it.live.skipIf(!available)(
             };
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
-                "/tmp/game-studio-real-result.json",
+                NodePath.join(parent, "result.json"),
                 JSON.stringify(report, null, 2),
               ),
             );

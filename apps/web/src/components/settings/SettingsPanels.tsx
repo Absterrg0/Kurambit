@@ -1,3 +1,4 @@
+import { GameToolsSettings } from "./GameToolsSettings";
 import {
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
@@ -1906,6 +1907,9 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
+      {isEnvironmentScope ? (
+        <GameToolsSettings key={environmentId} environmentId={environmentId} />
+      ) : null}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}

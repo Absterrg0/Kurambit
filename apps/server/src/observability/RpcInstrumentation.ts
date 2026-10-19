@@ -20,6 +20,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameAction]: "game",
   [WS_METHODS.gameToolchainStatus]: "game",
   [WS_METHODS.gameInstall]: "game",
+  [WS_METHODS.gameVerify]: "game",
 
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
