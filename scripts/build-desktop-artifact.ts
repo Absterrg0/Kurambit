@@ -951,7 +951,6 @@ interface StagePackageJson {
   readonly packageManager: string;
   readonly description: string;
   readonly license: string;
-  readonly homepage: string;
   readonly author: string;
   readonly main: string;
   readonly build: Record<string, unknown>;

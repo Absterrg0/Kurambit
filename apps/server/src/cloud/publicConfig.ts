@@ -40,15 +40,6 @@ function readBuildTimeValue(value: string | undefined): string {
   return typeof value === "undefined" ? "" : value.trim();
 }
 
-function normalizeSecureUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
 const buildTimeRelayUrl =
   typeof __T3CODE_BUILD_RELAY_URL__ === "undefined"
     ? ""

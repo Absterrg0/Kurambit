@@ -8,6 +8,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
+const hasPty = NodeChildProcess.spawnSync("script", ["--version"]).status === 0;
+
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer terminal", () => {
   it.each([false, true])(
     "preserves download and install behavior (HTTP failure: %s)",
@@ -41,6 +43,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           response.end(`${checksum}  ${archiveName}\n`);
         } else if (fail) {
           response.writeHead(500).end();
+        } else if (!hasPty) {
+          response.writeHead(200, { "Content-Length": archive.length }).end(archive);
         } else {
           response.writeHead(200, { "Content-Length": archive.length });
           resumeDownload = () => response.end(archive.subarray(Math.floor(archive.length / 2)));
@@ -54,18 +58,24 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
         "'",
         "'\\''",
       );
-      const child = NodeChildProcess.spawn("script", ["-qec", `sh '${installer}'`, "/dev/null"], {
-        env: {
-          ...process.env,
-          TERM: "xterm",
-          NO_COLOR: "1",
-          T3CODE_VERSION: version,
-          GAME_STUDIO_HOME: NodePath.join(root, "home"),
-          T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-          T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+      const child = NodeChildProcess.spawn(
+        hasPty ? "script" : "sh",
+        hasPty
+          ? ["-qec", `sh '${installer}'`, "/dev/null"]
+          : [NodePath.resolve(import.meta.dirname, "install.sh")],
+        {
+          env: {
+            ...process.env,
+            TERM: "xterm",
+            NO_COLOR: "1",
+            T3CODE_VERSION: version,
+            GAME_STUDIO_HOME: NodePath.join(root, "home"),
+            T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+            T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      );
       const collect = (chunk: Buffer) => {
         output += chunk.toString();
         if (!sawPartialProgress && /\b[1-9]\d?%/.test(output)) {
@@ -89,9 +99,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(await NodeFSP.readdir(versions)).toEqual([]);
         } else {
           expect(code).toBe(0);
-          expect(sawPartialProgress).toBe(true);
-          expect(output).toContain("100%");
-          expect(output).toContain("0.1 / 0.1 MB");
+          if (hasPty) {
+            expect(sawPartialProgress).toBe(true);
+            expect(output).toContain("100%");
+            expect(output).toContain("0.1 / 0.1 MB");
+          }
           expect(output).toContain("Installed Game Studio 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),

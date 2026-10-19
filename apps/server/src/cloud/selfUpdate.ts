@@ -10,7 +10,6 @@ import {
 import * as Cause from "effect/Cause";
 
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 
