@@ -5,9 +5,16 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { ProviderInstanceId } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
+import * as GameProcesses from "./GameProcesses.ts";
+import * as GameProjectService from "./GameProjectService.ts";
+import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { previewBrowserTestLayer, projectTestLayer } from "./gameTestLayers.ts";
 
 const workspaceRoot = (() => {
   let directory = process.cwd();
@@ -45,14 +52,36 @@ const browserExecutable = (() => {
   return null;
 })();
 const available = NodeFS.existsSync(godotExecutable) && browserExecutable !== null;
-const sourceBuild = NodePath.join(
-  workspaceRoot,
-  ".t3",
-  "e2e-games",
-  "island-artifacts",
-  "builds",
-  "web",
-);
+// GameService.webPlaytest exports only when the Web build is stale, so this
+// test also needs matching web export templates on disk (any version subdir).
+const templatesInstalled = (() => {
+  const dataRoot = process.env.XDG_DATA_HOME ?? NodePath.join(NodeOS.homedir(), ".local/share");
+  const roots = [
+    NodePath.join(dataRoot, "godot/export_templates"),
+    NodePath.join(
+      GameToolchain.toolsDirectory(),
+      `godot-${GameToolchain.GODOT_VERSION}`,
+      "editor_data/export_templates",
+    ),
+  ];
+  try {
+    for (const root of roots) {
+      if (!NodeFS.existsSync(root)) continue;
+      for (const version of NodeFS.readdirSync(root))
+        for (const name of ["web_nothreads_release.zip", "web_nothreads_debug.zip"])
+          if (
+            NodeFS.existsSync(NodePath.join(root, version, version, name)) ||
+            NodeFS.existsSync(NodePath.join(root, version, name))
+          )
+            return true;
+    }
+  } catch {
+    // Unreadable template roots count as missing.
+  }
+  return false;
+})();
+const sourceProject = NodePath.join(workspaceRoot, ".t3", "e2e-games", "island-artifacts");
+const sourceBuild = NodePath.join(sourceProject, "builds", "web");
 const evidenceDirectory = "/home/abstergo/Programming/Projects/game-studio-orch/round7-evidence";
 
 it.live.skipIf(!available)(
@@ -100,4 +129,67 @@ it.live.skipIf(!available)(
       }
     }).pipe(Effect.provide(GamePreview.layer)),
   180_000,
+);
+
+it.live.skipIf(!available || !templatesInstalled)(
+  "GameService.webPlaytest boots the fixture game and reuses a fresh build",
+  () =>
+    Effect.gen(function* () {
+      const parent = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-webplaytest-")),
+      );
+      // preserveTimestamps keeps the fixture's godot/ sources older than its
+      // builds/web, so the service reuses the export instead of re-exporting.
+      const root = NodePath.join(parent, "fixture");
+      yield* Effect.promise(() =>
+        NodeFSP.cp(sourceProject, root, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+      );
+      const dependencies = GameService.layer.pipe(
+        Layer.provideMerge(GameProjectService.layer),
+        Layer.provideMerge(GameToolchain.layer),
+        Layer.provideMerge(GamePreview.layer),
+        Layer.provideMerge(GameProcesses.layer),
+        Layer.provide(projectTestLayer()),
+        Layer.provide(previewBrowserTestLayer(browserExecutable!)),
+        Layer.provide(ServerSettings.layerTest()),
+      );
+      try {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const projects = yield* GameProjectService.GameProjectService;
+            const game = yield* GameService.GameService;
+            const registered = yield* projects.open({
+              path: root,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-6.1-sol",
+              },
+            });
+            const index = NodePath.join(root, "builds/web/index.html");
+            const builtBefore = (yield* Effect.promise(() => NodeFSP.stat(index))).mtimeMs;
+            const result = yield* game.webPlaytest(registered.threadId, {
+              steps: [{ key: "ArrowUp", holdMs: 1000 }],
+            });
+            yield* Effect.log(result.message);
+            expect(result.booted).toBe(true);
+            expect(result.bootMs).not.toBeNull();
+            expect(result.success).toBe(true);
+            expect(result.screenshots.map((shot) => shot.label)).toEqual(["booted", "after-steps"]);
+            // The stale branch must not have re-exported behind the test's back.
+            expect((yield* Effect.promise(() => NodeFSP.stat(index))).mtimeMs).toBe(builtBefore);
+            // The browser profile is scratch and cleaned up with the run.
+            const logs = yield* Effect.promise(() =>
+              NodeFSP.readdir(NodePath.join(root, "builds/logs")),
+            );
+            expect(logs.some((entry) => entry.startsWith("playtest-"))).toBe(false);
+          }).pipe(Effect.provide(dependencies)),
+        );
+      } finally {
+        yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
+      }
+    }),
+  240_000,
 );
