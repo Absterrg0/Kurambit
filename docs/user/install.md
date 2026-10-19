@@ -25,12 +25,12 @@ afterwards, that directory is not on your `PATH` yet; the installer prints the
 line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
 `T3CODE_VERSION` to pin an exact version.
 
-| Task                                             | Command                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                                    |
-| Start the server without a browser               | `t3 serve`                                                              |
-| Move to the newest release                       | `t3 update`                                                             |
-| Remove it again                                  | `t3 uninstall`                                                          |
+| Task                                  | Command        |
+| ------------------------------------- | -------------- |
+| Start the server and open the web app | `t3`           |
+| Start the server without a browser    | `t3 serve`     |
+| Move to the newest release            | `t3 update`    |
+| Remove it again                       | `t3 uninstall` |
 
 Run `t3 help` or `t3 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `t3 ./my-project`. A bare directory name
@@ -149,4 +149,3 @@ For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 
 - [Working with threads](./thread-sidebar.md): start tasks and organize parallel work.
 - [Permission modes](./permission-modes.md): choose when agents ask before acting.
-- [Updating T3 Code](./updating.md): update the app and connected servers.

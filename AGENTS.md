@@ -1,26 +1,24 @@
-# T3 Code
+# Game Studio
 
-T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
+Game Studio is a local desktop app for making games with coding agents. It is a fork of T3 Code: a Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. Game Studio adds a game layer on top: agents build Godot games with Blender through the server's `game_*` tools, and users play, revise, and export them in the app. "Game Studio" is a working name.
 
-You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
-
-## What makes T3 Code special?
-
-We have over 500,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
+## What we keep
 
 ### 1. Open at the core
 
-T3 Code is truly open. We share our roadmap, we share how we think about things, and of course we share all our code. A large number of our users run forks. We work in the open, and should strive to stay that way.
+All code stays in this repository and inspectable. Keep upstream T3 Code copyright and license notices.
 
 ### 2. Performance without compromise
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of the performance of T3 Code. We regularly audit for performance regressions, often caused by sending too much data over websockets, css animations causing gpu spikes, lists being hard to render, and more. Make sure all changes are considerate of performance impact.
+Avoid sending too much data over websockets, continuously repainting animations, and lists that are expensive to render. Game previews and builds run in their own processes; keep the app itself light.
 
 ### 3. Local desktop and web UI
 
-Game Studio runs in Electron with a bundled local server, or as the same web UI
-served locally. New features must work in both. Remote machines, hosted accounts,
-SSH, WSL backends, relay, tunnels, and Tailscale sharing are outside the product.
+Game Studio runs in Electron with a bundled local server, or as the same web UI served locally. New features must work in both. Mobile clients, remote machines, hosted accounts, SSH, WSL backends, relay, tunnels, and Tailscale sharing are outside the product.
+
+### 4. One execution system
+
+Game operations are server services. Agents reach them through the `game_*` MCP tools every provider session already gets, and the Game panel calls the same services over RPC. Do not add game logic to provider adapters or configure separate MCP servers per provider. See [Game layer](docs/internals/game-studio.md).
 
 ## A note from Theo
 
@@ -30,39 +28,41 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
-Of note: Most T3 Code contributions will come from T3 Code itself, often controlled remotely. This means you should be careful about accessing data, killing dev servers, and other things that may damage the T3 Code instance that the contributor is using.
+Of note: Most contributions are made by agents running inside T3 Code or Game Studio on this same machine. Be careful about accessing data, killing dev servers, and other things that may damage the instance the contributor is using.
 
 ## A small glossary
 
 We need to be on the same page with terminology. When communicating, use this language:
 
-- **you** means the agent reading this file and changing T3 Code.
-- **we, us, and maintainers** mean Theo, Julius and the people building T3 Code. These are who you are talking to now.
-- **user** means the person using T3 Code to direct coding agents.
-- **agent** means the coding agent a user runs inside T3 Code. Depending on context, that may also include you.
-- **provider** means the agent runtime or harness T3 Code talks to, such as Codex, Claude, Cursor, or OpenCode.
-- **client** means the web, desktop, or mobile UI.
-- **environment** means one running T3 server and the machine, filesystem, provider credentials, and state it owns.
+- **you** means the agent reading this file and changing Game Studio.
+- **we, us, and maintainers** mean the people building Game Studio. These are who you are talking to now.
+- **user** means the person using Game Studio to make games by directing coding agents.
+- **agent** means the coding agent a user runs inside Game Studio. Depending on context, that may also include you.
+- **provider** means the agent runtime or harness Game Studio talks to, such as Codex, Claude, Cursor, or OpenCode.
+- **client** means the desktop app or the locally served web UI.
+- **environment** means one running Game Studio server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **T3 home** means the base data directory. Runtime state normally lives below its userdata directory.
+- **game** means a project whose root contains `game.json`: a git repository with Blender sources under `art/` and a Godot project under `godot/`.
+- **home** means the base data directory (`~/.game-studio`, `GAME_STUDIO_HOME`, or a dev checkout's `.t3`). Runtime state normally lives below its userdata directory.
 
 ## The three ways to hurt yourself
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port from `ss -H -ltnp` after confirming `/proc/<pid>/cwd` is your worktree.
-2. **Writing to the live install.** `~/.t3/userdata` is the developer's real T3 Code database, in use while you work. Reading it and copying from it are fine, and a good way to get real test data (see Test data). Never start a server against it, never open it read-write, never clean it up.
-3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
+2. **Writing to a live install.** `~/.t3/userdata` (T3 Code) and `~/.game-studio/userdata` (an installed Game Studio) are real databases that may be in use while you work. Reading and copying are fine. Never start a dev server against them, never open them read-write, never clean them up.
+3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and breaks every other origin the UI is opened from.
 
 ## Hit every surface
 
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
-- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
+- **Clients.** Desktop (wraps web, adds Electron shell/IPC) and the locally served web UI. Shared client logic lives in `packages/client-runtime`.
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
-- **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
-- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
+- **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools (game operations through the `game_*` toolkit). That only works when it is a service method, not handler code.
+- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow.
+- **Games.** Changes to game operations need to hold for both the Game panel and the agent tools, keep `.blend` sources and export paths stable, and stop only processes Game Studio started.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Local connections.** Keep desktop bearer authentication and local browser session cookies working, including MCP and preview streaming.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
@@ -70,7 +70,9 @@ The most common defect in this repo is a change that works on the path you teste
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
-- `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
+- `vp run dev` starts server and web; `vp run dev:desktop` starts the desktop app. In a linked git worktree, state defaults to that worktree's gitignored `.t3`. In a plain clone it defaults to `~/.game-studio`, so pass `--home-dir <checkout>/.t3` (for example `node scripts/dev-runner.ts dev --home-dir $PWD/.t3`). An explicit `--home-dir` always wins. `GAME_STUDIO_HOME` is the user-facing override; an inherited `T3CODE_HOME` is ignored on purpose.
+- `/tmp` may be RAM-backed. Keep builds, exports, and scratch files on disk, for example `TMPDIR=~/.gs-tmp`. Keep it short: Unix socket paths have a 108-character limit.
+- Godot and Blender are pinned and installed under `~/.local/share/game-studio/tools`; tests that need them skip when they are absent.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - Stop what you started, by the PID you tracked. See rule 1.
@@ -79,7 +81,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:
 
-- Run `vp run migrate-dev-db` with your dev server stopped. It rebuilds `<worktree>/.t3/userdata/statev2.sqlite` from a read-only snapshot of `~/.t3/userdata/statev2.sqlite`, the developer's real data. It keeps recent projects and their stopped threads, and drops scheduled tasks, pending work, and auth sessions, so your dev server never runs the developer's agents. Raise `--projects` and `--threads-per-project` for more data.
+- Run `vp run migrate-dev-db --source <path to a statev2.sqlite>` with your dev server stopped. It rebuilds `<worktree>/.t3/userdata/statev2.sqlite` from a read-only snapshot of the source. There is no default source, so you never import another install by accident. It keeps recent projects and their stopped threads, and drops pending work and auth sessions, so your dev server never runs someone else's agents. Raise `--projects` and `--threads-per-project` for more data.
 - Refresh `statev2.sqlite`, not `state.sqlite`. The server copies the V1 `state.sqlite` only when `statev2.sqlite` is missing.
 - Bring `secrets` and `settings.json` only if the flow under test needs them.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
@@ -91,9 +93,8 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
-- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
-
-For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
+- Upon request, user-visible frontend changes should get one integrated pass in a real client (`test-t3-app`). The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- Game-layer changes: `node scripts/game-e2e.ts --brief "..."` drives a running dev server like a client, creating a game with a real agent and checking preview, export, native run, revision (`--revise`) and cancellation (`--cancel-test`).
 
 ## Pull requests
 
@@ -115,7 +116,7 @@ Most code changes do not need an internal documentation change. Agents can read 
 - When a documented decision or constraint changes, rewrite or remove the affected text. Do not append another account of the new behavior. A new internal page needs a distinct, durable reason to exist.
 - `docs/user/` helps users accomplish tasks. Give each major feature a concise section explaining what it does, how to start, and anything unintuitive. A settings path is useful; descriptions of visible buttons, icons, layouts, animations, or every UI state are not. Before adding text, ask what task or decision it helps the user with.
 - Keep user docs in the shipped product's voice, without implementation details or contributor tooling. Update the relevant feature section when how to use it changes. A UI tweak does not need a documentation entry, and a new control does not need its own page.
-- `docs/operations/` holds maintainer setup, release, and debugging procedures. Keep instructions for operating an installed T3 Code server in the user guides.
+- `docs/operations/` holds maintainer setup, release, and debugging procedures. Keep instructions for operating an installed Game Studio in the user guides.
 
 ## Plans and work artifacts
 
@@ -132,10 +133,11 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 ## Where code lives
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site.
+- `apps/web` - React/Vite UI. `apps/desktop` wraps it in Electron.
+- `apps/server/src/game` - the game layer: toolchain, game projects, Blender/Godot operations, processes, preview and playtest. Its MCP tools are in `apps/server/src/mcp/toolkits/game`.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
-- `packages/client-runtime` - client code shared by web and mobile.
+- `packages/client-runtime` - client state and connection code shared by the web and desktop renderers.
 - `.repos/` - vendored read-only references. Prefer their patterns over invented ones. Never edit or import from them. Sync with `vpr sync:repos` when bumping the matching dependency.
 
 ## Taste
