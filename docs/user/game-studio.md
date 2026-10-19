@@ -38,7 +38,8 @@ docked to its right.
 
 - **Play** builds the web version when it is missing or older than the game's files, then plays it
   in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
-  it, and use **Fullscreen** to give it the whole screen.
+  it, and use **Fullscreen** to give it the whole screen. The line beside the game name says what the
+  stage is doing — playing, building, or waiting for a rebuild.
 - **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
   the stage says so and offers to rebuild.
 - **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio
@@ -48,13 +49,18 @@ docked to its right.
 - **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
   scenes or scripts that use it.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
-  or `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) to give the game the whole window.
+  or `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) to give the game the whole window. It starts narrow and
+  never takes more than about half the window, so the game stays the main surface.
 
 To change the game, write a follow-up in the thread, for example "make the rocks taller and spread the
 artifacts out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
 keep their references.
 
-Stopping the agent's turn also stops any Blender or Godot work it started.
+Each turn ends with a one-line summary of what changed in the game, such as "Changed 2 scenes ·
+3 scripts · 1 model". Select it to see the files and open the full diff.
+
+Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
+keeps running; use **Stop** in the stage to close it.
 
 ## What is in a game folder
 

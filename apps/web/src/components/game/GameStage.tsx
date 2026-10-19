@@ -24,7 +24,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
-import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { clampGameChatWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -198,10 +198,11 @@ export function GameStage({
     dragRef.current = { x: event.clientX, width: chatWidth };
     setDragging(true);
   };
+  const workspaceWidth = () => stageRef.current?.parentElement?.clientWidth ?? window.innerWidth;
   const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (drag === null) return;
-    setChatWidth(drag.width - (event.clientX - drag.x));
+    setChatWidth(clampGameChatWidth(drag.width - (event.clientX - drag.x), workspaceWidth()));
   };
   const endResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     dragRef.current = null;
@@ -308,7 +309,7 @@ export function GameStage({
                 <>
                   {phase.kind === "playing" ? (
                     <span
-                      className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+                      className="size-1.5 shrink-0 rounded-full bg-success"
                       aria-hidden="true"
                     />
                   ) : null}
@@ -489,8 +490,10 @@ export function GameStage({
           onPointerUp={endResize}
           onPointerCancel={endResize}
           onKeyDown={(event) => {
-            if (event.key === "ArrowLeft") setChatWidth(chatWidth + 24);
-            else if (event.key === "ArrowRight") setChatWidth(chatWidth - 24);
+            if (event.key === "ArrowLeft")
+              setChatWidth(clampGameChatWidth(chatWidth + 24, workspaceWidth()));
+            else if (event.key === "ArrowRight")
+              setChatWidth(clampGameChatWidth(chatWidth - 24, workspaceWidth()));
             else return;
             event.preventDefault();
           }}
