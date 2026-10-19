@@ -68,6 +68,10 @@ it.effect(
             expect(inventory.assets).toHaveLength(1);
             expect(inventory.assets[0]?.updatedAt).toBe("2026-10-19T01:00:00Z");
             expect(inventory.assets[0]?.usedBy).toEqual(["godot/scenes/coin.tscn"]);
+            // The stage letterboxes to the game's design resolution, and a game
+            // with no web build yet is stale by definition.
+            expect(inventory.viewport).toEqual({ width: 1280, height: 720 });
+            expect(inventory.webBuildStale).toBe(true);
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
                 NodePath.join(game.root, "godot/scripts/cube.gd"),

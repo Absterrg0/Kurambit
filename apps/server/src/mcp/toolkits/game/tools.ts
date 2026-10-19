@@ -67,7 +67,7 @@ const ExportTool = Tool.make("game_export", {
 }).annotate(Tool.Readonly, false);
 const PreviewTool = Tool.make("game_preview", {
   description:
-    "Rebuild this thread's real Web release, start its managed loopback static server, and return the playable URL. Open that URL with preview_open or preview_navigate to play-test through the app's existing browser. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
+    "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
   success: GameActionResult,
   failure,
   failureMode: "return",

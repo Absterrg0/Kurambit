@@ -145,12 +145,21 @@ export const GameProcessResult = Schema.Struct({
   logPath: Schema.String,
 });
 export type GameProcessResult = typeof GameProcessResult.Type;
+export const GameViewport = Schema.Struct({ width: Schema.Number, height: Schema.Number });
+export type GameViewport = typeof GameViewport.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
   toolchain: GameToolchainStatus,
   assets: Schema.Array(Schema.Struct({ ...GameAsset.fields, usedBy: Schema.Array(Schema.String) })),
   scenes: Schema.Array(Schema.String),
+  /**
+   * The design resolution from `godot/project.godot`, in which the web preview
+   * is framed. Falls back to Godot's own default when the project does not set one.
+   */
+  viewport: GameViewport,
+  /** A web build exists but game sources changed after it: play would be out of date. */
+  webBuildStale: Schema.Boolean,
   builds: Schema.Array(
     Schema.Struct({ target: Schema.String, path: Schema.String, updatedAt: Schema.String }),
   ),

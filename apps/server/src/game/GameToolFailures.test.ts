@@ -95,7 +95,15 @@ const withFixture = <A, E, R>(
           Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
             read: () => Effect.succeed(manifest),
-            inventory: () => Effect.succeed({ manifest, assets: [], scenes: [], builds: [] }),
+            inventory: () =>
+              Effect.succeed({
+                manifest,
+                assets: [],
+                scenes: [],
+                builds: [],
+                viewport: { width: 1152, height: 648 },
+                webBuildStale: true,
+              }),
           }),
         ),
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),

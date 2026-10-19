@@ -26,6 +26,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
+import { isWebBuildStale, webBuildIndex } from "./webBuild.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
@@ -242,38 +243,8 @@ const make = Effect.gen(function* () {
     });
     return result;
   });
-  // `builds/web` is a cache of the last export: a rebuild is needed when any
-  // game source is newer than its index.html, or the build itself is missing.
-  // Godot's own scratch (`.godot/`) is excluded because export rewrites it.
-  const webBuildFresh = Effect.fnUntraced(function* (root: string, godotProject: string) {
-    const index = NodePath.join(root, "builds/web/index.html");
-    const built = yield* Effect.promise(() =>
-      NodeFSP.stat(index)
-        .then((stat) => (stat.isFile() ? stat.mtimeMs : null))
-        .catch(() => null),
-    );
-    if (built === null) return false;
-    const stale = yield* Effect.tryPromise({
-      try: async () => {
-        const stack = [NodePath.join(root, godotProject)];
-        while (stack.length > 0) {
-          const directory = stack.pop()!;
-          for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
-            const path = NodePath.join(directory, entry.name);
-            if (entry.isDirectory()) {
-              if (entry.name !== ".godot") stack.push(path);
-            } else if ((await NodeFSP.stat(path)).mtimeMs > built) return true;
-          }
-        }
-        return false;
-      },
-      catch: (cause) =>
-        new GameOperationError({ operation: "Web playtest", path: index, reason: "io", cause }),
-    });
-    return !stale;
-  });
   const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
-    if (!(yield* webBuildFresh(root, (yield* projects.read(root)).godotProject))) {
+    if (yield* isWebBuildStale(root, (yield* projects.read(root)).godotProject)) {
       const exported = yield* exportGame(root, "Web");
       if (!exported.success)
         return yield* new GameOperationError({
@@ -550,11 +521,26 @@ const make = Effect.gen(function* () {
               process: null,
             };
           }
-          // Always rebuild: scenes and scripts can be edited by any provider outside this service.
-          const exported = yield* exportGame(root, "Web");
-          if (!exported.success) return exported;
+          // Play reuses a fresh web build; Rebuild forces a new export. Scenes
+          // and scripts can be edited by any provider outside this service, so
+          // the freshness check is the only thing that decides.
+          const manifest = yield* projects.read(root);
+          const needsExport =
+            action === "rebuild" || (yield* isWebBuildStale(root, manifest.godotProject));
+          if (needsExport) {
+            const exported = yield* exportGame(root, "Web");
+            if (!exported.success) return exported;
+            const url = yield* preview.open(root);
+            return { ...exported, message: "Web game is ready to play.", url };
+          }
           const url = yield* preview.open(root);
-          return { ...exported, message: "Web game is ready to play.", url };
+          return {
+            success: true,
+            message: "Loaded the existing web build.",
+            path: webBuildIndex(root),
+            url,
+            process: null,
+          };
         }),
       );
     }),

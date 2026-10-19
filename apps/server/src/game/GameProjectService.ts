@@ -28,6 +28,8 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
+import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
+import { isWebBuildStale } from "./webBuild.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
@@ -61,6 +63,8 @@ export class GameProjectService extends Context.Service<
         manifest: GameManifest;
         assets: readonly (GameAsset & { usedBy: string[] })[];
         scenes: string[];
+        viewport: GodotViewport;
+        webBuildStale: boolean;
         builds: { target: string; path: string; updatedAt: string }[];
       },
       GameOperationError
@@ -328,9 +332,15 @@ const make = Effect.gen(function* () {
       }),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
+      const webBuildStale = yield* isWebBuildStale(root, manifest.godotProject);
       return yield* Effect.tryPromise({
         try: async () => {
           const engineRoot = insideGame(root, manifest.godotProject);
+          const projectGodot = await NodeFSP.readFile(
+            NodePath.join(engineRoot, "project.godot"),
+            "utf8",
+          ).catch(() => "");
+          const viewport = parseGodotViewport(projectGodot);
           const scenes: string[] = [];
           const sourceFiles: string[] = [];
           const walk = async (directory: string) => {
@@ -380,7 +390,7 @@ const make = Effect.gen(function* () {
               /* A game need not have been built yet. */
             }
           }
-          return { manifest, assets, scenes, builds };
+          return { manifest, assets, scenes, builds, viewport, webBuildStale };
         },
         catch: (cause) =>
           new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
