@@ -17,7 +17,7 @@ const resolveWindowsUserData = (appDataDirectory: string) =>
   }).pipe(Effect.provide(DesktopPreReadyFileSystem.layer));
 
 it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
-  it.effect("migrates the legacy Windows profile state", () =>
+  it.effect("does not read or copy the legacy Windows profile state", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -27,13 +27,13 @@ it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
 
       const userData = yield* resolveWindowsUserData(root);
 
-      assert.equal(userData, path.join(root, "t3code-v2"));
-      assert.equal(yield* fileSystem.readFileString(path.join(userData, "Local State")), "keys");
+      assert.equal(userData, path.join(root, "game-studio"));
+      assert.isFalse(yield* fileSystem.exists(path.join(userData, "Local State")));
     }),
   );
 
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32" || process.getuid?.() === 0)(
-    "fails instead of treating an unreadable profile as missing",
+    "does not inspect an unreadable T3 profile",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -43,7 +43,7 @@ it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
 
         const exit = yield* Effect.exit(resolveWindowsUserData(root));
 
-        assert.isTrue(Exit.isFailure(exit));
+        assert.isTrue(Exit.isSuccess(exit));
       }),
   );
 });

@@ -421,9 +421,12 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   const path = yield* Path.Path;
 
   const sharedHome = path.resolve(options.sharedHome ?? path.join(NodeOS.homedir(), ".t3"));
-  const sourcePath = path.resolve(
-    input.source ?? path.join(sharedHome, "userdata", "statev2.sqlite"),
-  );
+  if (input.source === undefined) {
+    return yield* new MigrateDevDbSourceMissingError({
+      sourcePath: "Pass --source explicitly; Game Studio never imports a T3 database by default.",
+    });
+  }
+  const sourcePath = path.resolve(input.source);
 
   const baseDir =
     input.baseDir !== undefined
@@ -579,7 +582,7 @@ export const migrateDevDbCommand = Command.make(
     ),
     source: Flag.String("source").pipe(
       Flag.optional,
-      Flag.withDescription("Source database. Defaults to ~/.t3/userdata/statev2.sqlite."),
+      Flag.withDescription("Read-only source database. Required; there is no default."),
     ),
   },
   ({ projects, threadsPerProject, baseDir, source }) =>
@@ -606,7 +609,7 @@ export const migrateDevDbCommand = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Rebuild the worktree dev database from a pruned snapshot of the real ~/.t3 data, then run migrations.",
+    "Rebuild the worktree dev database from an explicitly selected read-only source, then run migrations.",
   ),
 );
 

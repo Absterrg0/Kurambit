@@ -1,18 +1,11 @@
 import { useAuth, useClerk } from "@clerk/react";
-import { ServerIcon, SmartphoneIcon } from "lucide-react";
+import { ServerIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
 
 export const T3_CONNECT_ACCOUNT_PAGES = [
-  {
-    label: "Mobile clients",
-    url: "mobile-clients",
-    icon: <SmartphoneIcon className="size-4" />,
-    content: <MobileClientsUserProfilePage />,
-  },
   {
     label: "T3 Connect",
     url: "t3-connect",

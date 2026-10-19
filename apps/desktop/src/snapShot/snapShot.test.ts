@@ -515,8 +515,8 @@ describe("findAccessibleWindow", () => {
   );
 
   it.each([
-    ["⠋ t3code", "t3code"],
-    ["t3code", "⠙ t3code"],
+    ["⠋ t3code", "game-studio"],
+    ["game-studio", "⠙ t3code"],
   ])("matches a Wayland spinner starting or stopping: %s → %s", (title, name) => {
     const windows = [{ name, bounds: captured.bounds }];
 
