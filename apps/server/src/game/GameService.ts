@@ -187,9 +187,10 @@ const make = Effect.gen(function* () {
     const engineStatus = toolStatus.tools.find((tool) => tool.tool === "godot");
     if (!engineStatus?.ready)
       return yield* new GameOperationError({
-        operation: "export",
+        operation: "Godot export",
         path: godot.templates ?? godot.path,
         reason: "templates-missing",
+        detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
     const imported = yield* importGame(root);
     if (!imported.success) return imported;

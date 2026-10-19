@@ -102,7 +102,7 @@ const make = Effect.gen(function* () {
         for (const candidate of candidates) {
           try {
             await NodeFSP.access(candidate, NodeFSP.constants.X_OK);
-            return candidate;
+            if ((await NodeFSP.stat(candidate)).isFile()) return candidate;
           } catch {
             /* Try the next permitted resolution source. */
           }
@@ -118,20 +118,37 @@ const make = Effect.gen(function* () {
       const stat = yield* Effect.tryPromise({
         try: () => NodeFSP.stat(selected),
         catch: (cause) =>
-          new GameOperationError({ operation: tool, path: selected, reason: "io", cause }),
+          new GameOperationError({
+            operation: tool,
+            path: selected,
+            reason: "tool-missing",
+            cause,
+          }),
       });
       const cached = probes.get(selected);
       let version: string;
       if (cached && cached.mtime === stat.mtimeMs && cached.size === stat.size)
         version = cached.version;
       else {
-        const result = yield* processes.run({
-          root: logRoot,
-          executable: selected,
-          args: ["--version"],
-          operation: `${tool}-version`,
-          timeoutMs: 20_000,
-        });
+        const result = yield* processes
+          .run({
+            root: logRoot,
+            executable: selected,
+            args: ["--version"],
+            operation: `${tool}-version`,
+            timeoutMs: 20_000,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: tool,
+                  path: selected,
+                  reason: "tool-missing",
+                  cause,
+                }),
+            ),
+          );
         version =
           (result.stdout + result.stderr).match(
             tool === "godot" ? /4\.\d+\.\d+\.[^\s]+/ : /Blender\s+\d+\.\d+\.\d+/,
@@ -141,7 +158,11 @@ const make = Effect.gen(function* () {
             operation: tool,
             path: selected,
             reason: result.exitCode !== 0 ? "command-failed" : "wrong-version",
-            detail: commandDetail(result),
+            detail:
+              `${tool} reported ${version}. ${result.exitCode !== 0 ? "The version check failed. Fix its path in Settings > General > Game tools, or clear the override and click Install tools in Game panel > Toolchain.\n" : ""}${commandDetail(result)}`.slice(
+                0,
+                4096,
+              ),
           });
         probes.set(selected, { mtime: stat.mtimeMs, size: stat.size, version });
       }
@@ -166,18 +187,7 @@ const make = Effect.gen(function* () {
         Effect.flatMap((resolved) =>
           Effect.promise(async () => {
             const hasTemplates =
-              resolved.templates === null ||
-              (
-                await Promise.all(
-                  [
-                    "web_nothreads_release.zip",
-                    "web_nothreads_debug.zip",
-                    "linux_release.x86_64",
-                    "linux_debug.x86_64",
-                    "version.txt",
-                  ].map((file) => awaitExists(NodePath.join(resolved.templates!, file))),
-                )
-              ).every(Boolean);
+              resolved.templates === null || (await hasExportTemplates(resolved.templates));
             return {
               tool,
               path: resolved.path,
@@ -188,7 +198,12 @@ const make = Effect.gen(function* () {
                 ? verified.get(resolved.path) === resolved.version
                   ? "Ready. Real headless verification passed."
                   : "Found. Verify to run a real headless smoke check."
-                : `Missing matching export templates at ${resolved.templates}. Install the managed tools.`,
+                : new GameOperationError({
+                    operation: "Godot export templates",
+                    path: resolved.templates!,
+                    reason: "templates-missing",
+                    detail: `Godot executable: ${resolved.path} (${resolved.version}).`,
+                  }).message,
             };
           }),
         ),
@@ -377,14 +392,16 @@ const make = Effect.gen(function* () {
         }
         const godotInstall = NodePath.join(directory, `godot-${GODOT_VERSION}`);
         if (
-          !(yield* Effect.promise(() =>
-            awaitExists(
-              NodePath.join(
-                godotInstall,
-                "editor_data/export_templates",
-                `${GODOT_VERSION}.stable/version.txt`,
-              ),
-            ),
+          !(yield* Effect.promise(
+            async () =>
+              (await awaitExists(NodePath.join(godotInstall, godotName.slice(0, -4)))) &&
+              (await hasExportTemplates(
+                NodePath.join(
+                  godotInstall,
+                  "editor_data/export_templates",
+                  `${GODOT_VERSION}.stable`,
+                ),
+              )),
           ))
         ) {
           const archive = yield* download(godotBase, godotName, "SHA512-SUMS.txt", "sha512");
@@ -462,6 +479,18 @@ const make = Effect.gen(function* () {
   });
   return GameToolchain.of({ executable, status, verify, install });
 });
+const hasExportTemplates = async (directory: string) =>
+  (
+    await Promise.all(
+      [
+        "web_nothreads_release.zip",
+        "web_nothreads_debug.zip",
+        "linux_release.x86_64",
+        "linux_debug.x86_64",
+        "version.txt",
+      ].map((file) => awaitExists(NodePath.join(directory, file))),
+    )
+  ).every(Boolean);
 const awaitExists = async (file: string) => {
   try {
     await NodeFSP.access(file);

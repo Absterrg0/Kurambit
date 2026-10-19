@@ -51,11 +51,11 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "invalid-project": "Open a folder containing a valid game.json, or create a new game.",
       "invalid-path": "Use a relative path inside the game project.",
       "tool-missing":
-        "Install the managed tools, or fix the executable path in server settings or GAME_STUDIO_BLENDER / GAME_STUDIO_GODOT.",
+        "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or GAME_STUDIO_BLENDER / GAME_STUDIO_GODOT. To use the managed version, clear the override and click Install tools in Game panel > Toolchain.",
       "wrong-version":
-        "Use Godot 4.7.x and Blender 4.2 or later. Fix the configured executable path or install the managed tools.",
+        "Use Godot 4.7.x and Blender 4.2 or later. Fix the executable path in Settings > General > Game tools. To use the managed version, clear the override and click Install tools in Game panel > Toolchain.",
       "templates-missing":
-        "Install export templates matching this Godot executable's exact version, or use the managed install.",
+        "Install Godot export templates matching this executable's exact version at the path below. For managed tools, clear executable overrides in Settings > General > Game tools, then click Install tools in Game panel > Toolchain.",
       "command-failed":
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
       busy: "Another operation is running for this game. Wait for it or press Stop.",
@@ -69,6 +69,15 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
 }
+// Tool failures are JSON objects, so include the computed recovery message explicitly.
+export const GameOperationFailure = Schema.Struct({
+  _tag: GameOperationError.fields._tag,
+  operation: GameOperationError.fields.operation,
+  path: GameOperationError.fields.path,
+  reason: GameOperationError.fields.reason,
+  detail: GameOperationError.fields.detail,
+  message: Schema.String,
+});
 export const GameToolStatus = Schema.Struct({
   tool: Schema.Literals(["blender", "godot"]),
   path: Schema.NullOr(Schema.String),

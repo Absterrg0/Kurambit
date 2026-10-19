@@ -50,6 +50,6 @@ it.effect("returns an actionable error for a bogus explicit path without falling
     );
     expect(result.tools.every((tool) => !tool.ready)).toBe(true);
     expect(result.tools[0]?.message).toContain("/no-such-studio/blender");
-    expect(result.tools[0]?.message).toContain("server settings");
+    expect(result.tools[0]?.message).toContain("Settings > General > Game tools");
   }),
 );
