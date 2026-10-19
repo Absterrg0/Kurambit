@@ -54,6 +54,15 @@ function AssetCard({
     </li>
   );
 }
+const BUSY_LABELS: Record<string, string> = {
+  install: "Installing tools",
+  verify: "Verifying tools",
+  preview: "Building the web preview",
+  rebuild: "Rebuilding the web preview",
+  native: "Starting the native game",
+  "export-linux": "Exporting the Linux build",
+  stop: "Stopping",
+};
 export function GamePanel({
   threadRef,
   visible,
@@ -131,6 +140,39 @@ export function GamePanel({
   const data = query.data;
   if (!data) return <div className="p-4 text-sm">{query.error ?? "Loading game…"}</div>;
   const running = busy !== null || data.operation?.state === "running" || data.toolchain.installing;
+  const toolchainReady = data.toolchain.tools.every((tool) => tool.ready);
+  const toolchainSection = (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Toolchain</h3>
+      {data.toolchain.tools.map((tool) => (
+        <div key={tool.tool} className="break-words text-xs">
+          <p className="font-medium">
+            {tool.tool} {tool.version ?? "missing"} {tool.verified ? "· verified" : ""}
+          </p>
+          <p className="text-muted-foreground">{tool.message}</p>
+          <p className="text-muted-foreground">{tool.path}</p>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canInstall || running || data.toolchain.installing}
+          onClick={() => void installTools()}
+        >
+          {busy === "install" || data.toolchain.installing ? "Installing tools…" : "Install tools"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canOperate || running}
+          onClick={() => void perform("verify")}
+        >
+          Verify
+        </Button>
+      </div>
+    </section>
+  );
   return (
     <div className="h-full space-y-5 overflow-auto p-4">
       <div className="flex items-center justify-between">
@@ -139,38 +181,7 @@ export function GamePanel({
           Refresh
         </Button>
       </div>
-      <section className="space-y-2">
-        <h3 className="text-sm font-medium">Toolchain</h3>
-        {data.toolchain.tools.map((tool) => (
-          <div key={tool.tool} className="break-words text-xs">
-            <p className="font-medium">
-              {tool.tool} {tool.version ?? "missing"} {tool.verified ? "· verified" : ""}
-            </p>
-            <p className="text-muted-foreground">{tool.message}</p>
-            <p className="text-muted-foreground">{tool.path}</p>
-          </div>
-        ))}
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!canInstall || running || data.toolchain.installing}
-            onClick={() => void installTools()}
-          >
-            {busy === "install" || data.toolchain.installing
-              ? "Installing tools…"
-              : "Install tools"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!canOperate || running}
-            onClick={() => void perform("verify")}
-          >
-            Verify
-          </Button>
-        </div>
-      </section>
+      {toolchainReady ? null : toolchainSection}
       <section className="space-y-2">
         <h3 className="text-sm font-medium">Build and play</h3>
         <div className="flex flex-wrap gap-2">
@@ -203,7 +214,7 @@ export function GamePanel({
         </div>
         {busy ? (
           <p role="status" className="text-sm">
-            {busy} is running…
+            {BUSY_LABELS[busy] ?? busy}…
           </p>
         ) : data.operation ? (
           <p className="whitespace-pre-wrap text-xs">
@@ -240,6 +251,22 @@ export function GamePanel({
         ))}
       </section>
       <section className="space-y-2">
+        <h3 className="text-sm font-medium">Brief</h3>
+        <p className="whitespace-pre-wrap text-sm">{data.manifest.brief}</p>
+        {data.manifest.artDirection ? (
+          <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+            Art direction: {data.manifest.artDirection}
+          </p>
+        ) : null}
+        <Button
+          size="sm"
+          variant="link"
+          onClick={() => useRightPanelStore.getState().openFile(threadRef, "BRIEF.md")}
+        >
+          Edit BRIEF.md
+        </Button>
+      </section>
+      <section className="space-y-2">
         <h3 className="text-sm font-medium">Assets</h3>
         {data.assets.length ? (
           <ul className="space-y-2">
@@ -257,6 +284,7 @@ export function GamePanel({
           </p>
         )}
       </section>
+      {toolchainReady ? toolchainSection : null}
     </div>
   );
 }

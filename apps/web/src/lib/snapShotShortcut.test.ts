@@ -103,7 +103,7 @@ describe("window capture shortcut labels", () => {
 });
 
 describe("window capture keybinding conflicts", () => {
-  it("finds an effective T3 Code keybinding on the current platform", () => {
+  it("finds an effective Game Studio keybinding on the current platform", () => {
     expect(
       snapShotKeybindingConflict(
         {

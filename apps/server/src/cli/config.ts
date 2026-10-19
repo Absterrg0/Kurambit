@@ -346,7 +346,8 @@ export const resolveServerConfig = (
         normalizedFlags.autoBootstrapProjectFromCwd,
         Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
       ),
-      () => mode === "web",
+      // Games are created or opened explicitly; the server's own directory is never a game.
+      () => false,
     );
     const logWebSocketEvents = Option.getOrElse(
       resolveOptionPrecedence(

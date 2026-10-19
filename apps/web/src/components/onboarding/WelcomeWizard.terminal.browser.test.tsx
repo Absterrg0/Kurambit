@@ -450,6 +450,6 @@ describe("welcome agent terminal setup", () => {
       writing.resolve(AsyncResult.success(undefined));
     });
     expect(state.close).not.toHaveBeenCalled();
-    expect(pageText()).toContain("Connect your computers");
+    expect(pageText()).toContain("Set up Game Studio");
   });
 });

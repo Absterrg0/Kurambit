@@ -11,7 +11,15 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { Dialog, DialogPopup, DialogTitle, DialogDescription } from "../ui/dialog";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { usePrimaryEnvironmentId, useEnvironmentProviders } from "../../state/environments";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -158,109 +166,115 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
         }}
       >
         <DialogPopup>
-          <DialogTitle>{dialog === "create" ? "New game" : "Open game"}</DialogTitle>
-          <DialogDescription>
-            {dialog === "create"
-              ? "Describe a game. Your selected agent will build it with Blender and Godot."
-              : "Open a game folder containing game.json."}
-          </DialogDescription>
           <form
-            className="mt-4 flex flex-col gap-4"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
             }}
           >
-            {dialog === "create" ? (
-              <label className="flex flex-col gap-1 text-sm">
-                Name
-                <Input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  maxLength={100}
+            <DialogHeader>
+              <DialogTitle>{dialog === "create" ? "New game" : "Open game"}</DialogTitle>
+              <DialogDescription>
+                {dialog === "create"
+                  ? "Describe a game. Your selected agent will build it with Blender and Godot."
+                  : "Open a game folder containing game.json."}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel>
+              <div className="flex flex-col gap-4">
+                {dialog === "create" ? (
+                  <label className="flex flex-col gap-1 text-sm">
+                    Name
+                    <Input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      required
+                      maxLength={100}
+                      disabled={busy}
+                    />
+                  </label>
+                ) : null}
+                <label className="flex flex-col gap-1 text-sm">
+                  {dialog === "create" ? "Parent folder" : "Game folder"}
+                  <Input
+                    value={directory}
+                    onChange={(event) => setDirectory(event.target.value)}
+                    placeholder={dialog === "create" ? "~/Games" : "/path/to/game"}
+                    required={dialog === "open"}
+                    disabled={busy || pickingFolder}
+                  />
+                </label>
+                {dialog === "create" ? (
+                  <>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Game brief
+                      <Textarea
+                        value={brief}
+                        onChange={(event) => setBrief(event.target.value)}
+                        required
+                        disabled={busy}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Art direction, optional
+                      <Textarea
+                        value={artDirection}
+                        onChange={(event) => setArtDirection(event.target.value)}
+                        disabled={busy}
+                      />
+                    </label>
+                  </>
+                ) : null}
+                {isElectron ? (
+                  <div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={busy || pickingFolder}
+                      onClick={() => void chooseFolder()}
+                    >
+                      {pickingFolder ? "Choosing folder…" : "Choose folder"}
+                    </Button>
+                  </div>
+                ) : null}
+                <ProviderModelPicker
+                  environmentId={environmentId}
+                  activeInstanceId={model.instanceId}
+                  model={model.model}
+                  lockedProvider={null}
+                  instanceEntries={entries}
+                  modelOptionsByInstance={options}
                   disabled={busy}
+                  onInstanceModelChange={(instanceId, selectedModel) =>
+                    setSelection({ instanceId, model: selectedModel })
+                  }
                 />
-              </label>
-            ) : null}
-            <label className="flex flex-col gap-1 text-sm">
-              {dialog === "create" ? "Parent folder" : "Game folder"}
-              <Input
-                value={directory}
-                onChange={(event) => setDirectory(event.target.value)}
-                placeholder={dialog === "create" ? "~/Games" : "/path/to/game"}
-                required={dialog === "open"}
-                disabled={busy || pickingFolder}
-              />
-            </label>
-            {dialog === "create" ? (
-              <>
-                <label className="flex flex-col gap-1 text-sm">
-                  Game brief
-                  <Textarea
-                    value={brief}
-                    onChange={(event) => setBrief(event.target.value)}
-                    required
-                    disabled={busy}
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  Art direction, optional
-                  <Textarea
-                    value={artDirection}
-                    onChange={(event) => setArtDirection(event.target.value)}
-                    disabled={busy}
-                  />
-                </label>
-              </>
-            ) : null}
-            {isElectron ? (
-              <div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy || pickingFolder}
-                  onClick={() => void chooseFolder()}
-                >
-                  {pickingFolder ? "Choosing folder…" : "Choose folder"}
-                </Button>
+                {dialog === "create" ? (
+                  <div className="flex items-center">
+                    <span className="text-sm">Runtime mode</span>
+                    <ComposerFooterModeControls
+                      interactionMode="default"
+                      showInteractionModeToggle={false}
+                      runtimeMode={chosenMode}
+                      runtimeModeOptions={compatibleModes.map((mode) => ({
+                        mode,
+                        ...runtimeModeConfig[mode],
+                      }))}
+                      onRuntimeModeChange={setRuntimeMode}
+                      onToggleInteractionMode={() => {}}
+                    />
+                  </div>
+                ) : null}
+                {error ? (
+                  <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
               </div>
-            ) : null}
-            <ProviderModelPicker
-              environmentId={environmentId}
-              activeInstanceId={model.instanceId}
-              model={model.model}
-              lockedProvider={null}
-              instanceEntries={entries}
-              modelOptionsByInstance={options}
-              disabled={busy}
-              onInstanceModelChange={(instanceId, selectedModel) =>
-                setSelection({ instanceId, model: selectedModel })
-              }
-            />
-            {dialog === "create" ? (
-              <div className="flex items-center">
-                <span className="text-sm">Runtime mode</span>
-                <ComposerFooterModeControls
-                  interactionMode="default"
-                  showInteractionModeToggle={false}
-                  runtimeMode={chosenMode}
-                  runtimeModeOptions={compatibleModes.map((mode) => ({
-                    mode,
-                    ...runtimeModeConfig[mode],
-                  }))}
-                  onRuntimeModeChange={setRuntimeMode}
-                  onToggleInteractionMode={() => {}}
-                />
-              </div>
-            ) : null}
-            {error ? (
-              <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
-            <div className="flex justify-end">
+            </DialogPanel>
+            <DialogFooter>
               <Button
                 type="submit"
                 disabled={
@@ -273,9 +287,15 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                   (dialog === "create" ? !canCreate : !canOpen)
                 }
               >
-                {busy ? "Creating thread…" : dialog === "create" ? "Create game" : "Open game"}
+                {busy
+                  ? dialog === "create"
+                    ? "Creating game…"
+                    : "Opening game…"
+                  : dialog === "create"
+                    ? "Create game"
+                    : "Open game"}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogPopup>
       </Dialog>
