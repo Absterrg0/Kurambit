@@ -16,11 +16,7 @@ import {
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
-import {
-  ServerUpdateAction,
-  ServerUpdateProgress,
-  ServerUpdatesAction,
-} from "../ServerUpdateAction";
+import { ServerUpdateProgress } from "../ServerUpdateAction";
 import { InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
@@ -110,7 +106,7 @@ export function useAutoBalanceUpdateBanner(
                 ) : !machine.remoteUpdate ? (
                   <>
                     <div className="text-muted-foreground">Manual update required</div>
-                    <ServerUpdateAction {...machine} />
+                    {null}
                   </>
                 ) : (
                   <div className="text-muted-foreground">
@@ -127,20 +123,7 @@ export function useAutoBalanceUpdateBanner(
     ),
     description:
       manual > 0 ? `${manual} ${manual === 1 ? "needs" : "need"} a manual update` : undefined,
-    actions:
-      running === 0 && targets.length > 0 ? (
-        <ServerUpdatesAction
-          targets={targets}
-          variant="ghost"
-          label={
-            failed > 0
-              ? "Retry"
-              : targets.length === machines.length
-                ? "Update all"
-                : `Update ${targets.length} ${targets.length === 1 ? "machine" : "machines"}`
-          }
-        />
-      ) : undefined,
+    actions: running === 0 && targets.length > 0 ? null : undefined,
     dismissLabel: "Dismiss update notice",
     ...(running
       ? {}

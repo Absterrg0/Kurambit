@@ -224,7 +224,7 @@ const requiredScopesForRpcCall = (
   if (method === WS_METHODS.projectsMutate) {
     return requiredScopesForProjectMutation(decodeProjectMutation(payload));
   }
-  const guarded = clientRpcRequiredScopes(method, payload);
+  const guarded = clientRpcRequiredScopes(method);
   if (guarded.length > 0) return guarded;
   return [requiredScopeForRpcMethod(method)];
 };

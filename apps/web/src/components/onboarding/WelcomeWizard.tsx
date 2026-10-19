@@ -87,7 +87,6 @@ const ONBOARDING_STAGES = ["Connect", "Agents", "Projects"] as const;
 const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some projects or conversations may be missing.";
 
 export function WelcomeWizard({
-  localAvailable,
   onDone,
   resumeEnvironmentId,
 }: {

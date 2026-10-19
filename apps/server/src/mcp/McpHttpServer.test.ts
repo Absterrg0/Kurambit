@@ -1,5 +1,3 @@
-import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
-import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -26,7 +24,6 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
-import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -70,19 +67,6 @@ const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" })),
   Layer.provideMerge(NodeServices.layer),
-);
-const layerPullRequestsTest = Layer.empty.pipe(
-  Layer.provideMerge(McpServer.McpServer.layer),
-  Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
-  Layer.provide(
-    Layer.mergeAll(
-      Layer.mock(ProjectService.ProjectService)({}),
-      Layer.empty,
-      Layer.mock(Orchestrator.OrchestratorV2)({}),
-      Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
-      NodeServices.layer,
-    ),
-  ),
 );
 
 const snapshotResult = {

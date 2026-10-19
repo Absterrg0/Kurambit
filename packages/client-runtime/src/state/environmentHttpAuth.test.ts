@@ -45,8 +45,7 @@ const PREPARED: PreparedConnection = {
   httpAuthorization: { _tag: "Bearer", token: "local-token" },
   target: TARGET,
 };
-const CURRENT_ORIGIN = "https://current.example.test";
-const RENEWED_ORIGIN = "https://renewed.example.test";
+
 const AUTH = {
   policy: "remote-reachable",
   bootstrapMethods: ["one-time-token"],
@@ -59,7 +58,7 @@ const SESSION = {
   scopes: ["orchestration:read", "orchestration:operate"],
   sessionMethod: "dpop-access-token",
 } satisfies AuthSessionState;
-const UNAUTHENTICATED_SESSION = { authenticated: false, auth: AUTH } satisfies AuthSessionState;
+
 const SHELL = {
   schemaVersion: 1,
   snapshotSequence: 1,
@@ -89,18 +88,6 @@ const THREAD_HISTORY = {
   nextCursor: null,
   hasMoreHistory: false,
 } satisfies OrchestrationV2ThreadHistoryPage;
-
-function credentialRejectedResponse(reason = "invalid_credential") {
-  return Response.json(
-    {
-      _tag: "EnvironmentAuthInvalidError",
-      code: "auth_invalid",
-      reason,
-      traceId: "trace-rejected",
-    },
-    { status: 401 },
-  );
-}
 
 function makeHarness(reply: (requestNumber: number) => Response | Promise<Response>) {
   const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];

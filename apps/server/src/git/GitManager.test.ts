@@ -133,35 +133,6 @@ function createBareRemote(): Effect.Effect<
   });
 }
 
-function configureRemote(
-  cwd: string,
-  remoteName: string,
-  remotePath: string,
-  fetchNamespace: string,
-): Effect.Effect<void, GitCommandError, GitVcsDriver.GitVcsDriver> {
-  return Effect.gen(function* () {
-    yield* runGit(cwd, ["config", `remote.${remoteName}.url`, remotePath]);
-    yield* runGit(cwd, [
-      "config",
-      "--replace-all",
-      `remote.${remoteName}.fetch`,
-      `+refs/heads/*:refs/remotes/${fetchNamespace}/*`,
-    ]);
-  });
-}
-
-function configureVisibleRemoteUrlWithLocalRewrite(
-  cwd: string,
-  remoteName: string,
-  visibleUrl: string,
-  localRemotePath: string,
-): Effect.Effect<void, GitCommandError, GitVcsDriver.GitVcsDriver> {
-  return Effect.gen(function* () {
-    yield* runGit(cwd, ["config", `remote.${remoteName}.url`, visibleUrl]);
-    yield* runGit(cwd, ["config", `url.${localRemotePath}.insteadOf`, visibleUrl]);
-  });
-}
-
 function createTextGeneration(
   overrides: Partial<FakeGitTextGeneration> = {},
 ): TextGeneration.TextGeneration["Service"] {
@@ -369,8 +340,6 @@ function makeManager(input?: {
     return { manager };
   });
 }
-
-const asThreadId = (threadId: string) => threadId as ThreadId;
 
 const layerGitManagerTest = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),

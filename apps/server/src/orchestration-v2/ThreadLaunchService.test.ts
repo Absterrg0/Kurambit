@@ -19,7 +19,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  OrchestrationV2ThreadProjectionJson,
   ScheduledTaskId,
   type ServerProvider,
   ThreadId,
@@ -35,7 +34,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import * as Schema from "effect/Schema";
+
 import * as TestClock from "effect/testing/TestClock";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -61,7 +60,7 @@ import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAda
 
 const projectId = ProjectId.make("project:launch-test");
 const otherProjectId = ProjectId.make("project:launch-other");
-const encodeThreadProjection = Schema.encodeEffect(OrchestrationV2ThreadProjectionJson);
+
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5.1-codex",

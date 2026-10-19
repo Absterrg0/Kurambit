@@ -3,44 +3,25 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
   EnvironmentId,
-  IsoDateTime,
   isProviderNativeSubagentThread,
   MessageId,
   type ModelSelection,
-  type OrchestrationV2ProviderCapabilities,
-  type OrchestrationV2ProviderSession,
-  type OrchestrationV2ProviderThread,
-  type OrchestrationV2ThreadProjection,
-  OrchestratorMcpCreateThreadsResult,
   OrchestratorMcpDelegateTaskResult,
-  OrchestratorMcpTaskCancelResult,
   OrchestratorMcpThreadInterruptResult,
-  OrchestratorMcpThreadListResult,
-  OrchestratorMcpThreadReadResult,
   OrchestratorMcpThreadSendResult,
-  OrchestratorMcpThreadWaitResult,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionDescriptor,
-  ProviderThreadId,
-  ProviderTurnId,
-  type ScheduledTask,
-  ScheduledTaskId,
-  type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
-  ThreadMetadataMcpUpdateResult,
-  TurnItemId,
 } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
+
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as PubSub from "effect/PubSub";
-import * as Ref from "effect/Ref";
+
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer } from "effect/ai";
@@ -65,8 +46,6 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { hasPendingChildRuns } from "./OrchestratorMcpService.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
@@ -75,45 +54,32 @@ const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
 
 // Effect returns a declared tool failure as `isError` with its encoded payload
 // as JSON text, never as `structuredContent`.
-const declaredFailure = (result: McpSchema.CallToolResult) => {
-  const text = result.content[0];
-  return result.isError === true && text?.type === "text" ? JSON.parse(text.text) : undefined;
-};
 
 const parentThreadId = ThreadId.make("thread:mcp-orchestrator-parent");
 const projectId = ProjectId.make("project:mcp-orchestrator");
 const codexInstanceId = ProviderInstanceId.make("codex");
-const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+
 const codexModel = "gpt-5.4";
-const claudeModel = "claude-sonnet-4-6";
+
 const parentPrompt = "Keep this parent turn active while orchestration tools are tested.";
 const delegatedPrompt = "Inspect the delegated API boundary and return the result.";
 const delegatedResult = "Delegated API boundary inspected.";
 const cancellationPrompt = "Remain active until the parent cancels this delegated task.";
-const createdThreadPrompt = "Complete the newly created ordinary thread.";
+
 const queuedFollowupPrompt = "Complete the queued follow-up and return the final result.";
 const queuedFollowupResult = "Queued delegated follow-up completed.";
 
-const decodeCreateThreadsResult = Schema.decodeUnknownEffect(OrchestratorMcpCreateThreadsResult);
 const decodeDelegateTaskResult = Schema.decodeUnknownEffect(OrchestratorMcpDelegateTaskResult);
-const decodeTaskCancelResult = Schema.decodeUnknownEffect(OrchestratorMcpTaskCancelResult);
+
 const decodeThreadInterruptResult = Schema.decodeUnknownEffect(
   OrchestratorMcpThreadInterruptResult,
 );
-const decodeThreadListResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadListResult);
-const decodeThreadReadResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadReadResult);
+
 const decodeThreadSendResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadSendResult);
-const decodeThreadWaitResult = Schema.decodeUnknownEffect(OrchestratorMcpThreadWaitResult);
-const decodeThreadUpdateResult = Schema.decodeUnknownEffect(ThreadMetadataMcpUpdateResult);
 
 const codexSelection = {
   instanceId: codexInstanceId,
   model: codexModel,
-} satisfies ModelSelection;
-
-const claudeSelection = {
-  instanceId: claudeInstanceId,
-  model: claudeModel,
 } satisfies ModelSelection;
 
 const delegatedTaskStatusTranscriptFile = new URL(
@@ -131,16 +97,6 @@ const readDelegatedTaskStatusTranscript = Effect.fn("readDelegatedTaskStatusTran
   },
   Effect.provide(NodeServices.layer),
 );
-
-interface CapturedTurn {
-  readonly instanceId: ProviderInstanceId;
-  readonly threadId: ThreadId;
-  readonly text: string;
-}
-
-function unsupported(driver: ProviderDriverKind, detail: string) {
-  return Effect.fail(new ProviderAdapter.ProviderAdapterProtocolError({ driver, detail }));
-}
 
 function makeProviderSnapshot(input: {
   readonly instanceId: ProviderInstanceId;
@@ -173,253 +129,6 @@ function makeProviderSnapshot(input: {
   };
 }
 
-function makeDeterministicAdapter(input: {
-  readonly instanceId: ProviderInstanceId;
-  readonly driver: ProviderDriverKind;
-  readonly capabilities: OrchestrationV2ProviderCapabilities;
-  readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
-  readonly shouldComplete: (turn: ProviderAdapter.ProviderAdapterV2TurnInput) => boolean;
-  readonly terminalGate?: (
-    turn: ProviderAdapter.ProviderAdapterV2TurnInput,
-  ) => Deferred.Deferred<void> | undefined;
-  readonly response: (turn: ProviderAdapter.ProviderAdapterV2TurnInput) => string;
-}): ProviderAdapter.ProviderAdapterV2["Service"] {
-  return {
-    instanceId: input.instanceId,
-    driver: input.driver,
-    getCapabilities: () => Effect.succeed(input.capabilities),
-    planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
-    openSession: (sessionInput) =>
-      Effect.gen(function* () {
-        const events = yield* PubSub.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
-        const now = yield* DateTime.now;
-        const providerSession: OrchestrationV2ProviderSession = {
-          id: sessionInput.providerSessionId,
-          driver: input.driver,
-          providerInstanceId: input.instanceId,
-          status: "ready",
-          cwd: sessionInput.runtimePolicy.cwd ?? process.cwd(),
-          model: sessionInput.modelSelection.model,
-          capabilities: input.capabilities,
-          createdAt: now,
-          updatedAt: now,
-          lastError: null,
-        };
-
-        const publish = (providerEvents: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>) =>
-          Effect.forEach(providerEvents, (event) => PubSub.publish(events, event), {
-            discard: true,
-          });
-        const runOrdinals = new Map<ProviderTurnId, number>();
-        const turnInputs = new Map<ProviderTurnId, ProviderAdapter.ProviderAdapterV2TurnInput>();
-
-        return {
-          instanceId: input.instanceId,
-          driver: input.driver,
-          providerSessionId: sessionInput.providerSessionId,
-          providerSession,
-          events: Stream.fromPubSub(events),
-          ensureThread: (threadInput) =>
-            Effect.gen(function* () {
-              const createdAt = yield* DateTime.now;
-              const nativeThreadId = `${input.driver}:${threadInput.threadId}`;
-              return {
-                id: ProviderThreadId.make(`provider-thread:${nativeThreadId}`),
-                driver: input.driver,
-                providerInstanceId: input.instanceId,
-                providerSessionId: sessionInput.providerSessionId,
-                appThreadId: threadInput.threadId,
-                ownerNodeId: null,
-                nativeThreadRef: {
-                  driver: input.driver,
-                  nativeId: nativeThreadId,
-                  strength: "strong",
-                },
-                nativeConversationHeadRef: null,
-                status: "idle",
-                firstRunOrdinal: null,
-                lastRunOrdinal: null,
-                handoffIds: [],
-                forkedFrom: null,
-                createdAt,
-                updatedAt: createdAt,
-              } satisfies OrchestrationV2ProviderThread;
-            }),
-          resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
-          startTurn: (turnInput) =>
-            Effect.gen(function* () {
-              yield* Ref.update(input.capturedTurns, (turns) => [
-                ...turns,
-                {
-                  instanceId: input.instanceId,
-                  threadId: turnInput.threadId,
-                  text: turnInput.message.text,
-                },
-              ]);
-              const eventTime = yield* DateTime.now;
-              const providerTurnId = ProviderTurnId.make(
-                `provider-turn:${input.instanceId}:${turnInput.threadId}:${turnInput.runOrdinal}`,
-              );
-              runOrdinals.set(providerTurnId, turnInput.runOrdinal);
-              turnInputs.set(providerTurnId, turnInput);
-              yield* publish([
-                {
-                  type: "provider_turn.updated",
-                  driver: input.driver,
-                  providerTurn: {
-                    id: providerTurnId,
-                    providerThreadId: turnInput.providerThread.id,
-                    nodeId: turnInput.rootNodeId,
-                    runAttemptId: turnInput.attemptId,
-                    nativeTurnRef: {
-                      driver: input.driver,
-                      nativeId: `native-turn:${turnInput.threadId}:${turnInput.runOrdinal}`,
-                      strength: "strong",
-                    },
-                    ordinal: turnInput.providerTurnOrdinal,
-                    status: "running",
-                    startedAt: eventTime,
-                    completedAt: null,
-                  },
-                },
-              ]);
-              const terminalGate = input.terminalGate?.(turnInput);
-              if (terminalGate !== undefined) {
-                yield* Deferred.await(terminalGate);
-              } else if (!input.shouldComplete(turnInput)) {
-                return;
-              }
-              const response = input.response(turnInput);
-              yield* publish([
-                {
-                  type: "provider_turn.updated",
-                  driver: input.driver,
-                  providerTurn: {
-                    id: providerTurnId,
-                    providerThreadId: turnInput.providerThread.id,
-                    nodeId: turnInput.rootNodeId,
-                    runAttemptId: turnInput.attemptId,
-                    nativeTurnRef: {
-                      driver: input.driver,
-                      nativeId: `native-turn:${turnInput.threadId}:${turnInput.runOrdinal}`,
-                      strength: "strong",
-                    },
-                    ordinal: turnInput.providerTurnOrdinal,
-                    status: "completed",
-                    startedAt: eventTime,
-                    completedAt: eventTime,
-                  },
-                },
-                {
-                  type: "turn_item.updated",
-                  driver: input.driver,
-                  turnItem: {
-                    id: TurnItemId.make(
-                      `turn-item:${input.instanceId}:${turnInput.threadId}:${turnInput.runOrdinal}:assistant`,
-                    ),
-                    threadId: turnInput.threadId,
-                    runId: turnInput.runId,
-                    nodeId: turnInput.rootNodeId,
-                    providerThreadId: turnInput.providerThread.id,
-                    providerTurnId,
-                    nativeItemRef: null,
-                    parentItemId: null,
-                    ordinal: turnInput.runOrdinal * 100 + 1,
-                    status: "completed",
-                    title: null,
-                    startedAt: eventTime,
-                    completedAt: eventTime,
-                    updatedAt: eventTime,
-                    type: "assistant_message",
-                    messageId: MessageId.make(
-                      `message:${input.instanceId}:${turnInput.threadId}:${turnInput.runOrdinal}:assistant`,
-                    ),
-                    text: response,
-                    streaming: false,
-                  },
-                },
-                {
-                  type: "turn.terminal",
-                  driver: input.driver,
-                  providerThreadId: turnInput.providerThread.id,
-                  providerTurnId,
-                  runOrdinal: turnInput.runOrdinal,
-                  status: "completed",
-                  failure: null,
-                  threadDisposition: "reusable",
-                },
-              ]);
-            }),
-          steerTurn: () => Effect.void,
-          interruptTurn: ({ providerThread, providerTurnId }) =>
-            Effect.gen(function* () {
-              const turnInput = turnInputs.get(providerTurnId);
-              const completedAt = yield* DateTime.now;
-              if (turnInput !== undefined) {
-                yield* publish([
-                  {
-                    type: "provider_turn.updated",
-                    driver: input.driver,
-                    providerTurn: {
-                      id: providerTurnId,
-                      providerThreadId: providerThread.id,
-                      nodeId: turnInput.rootNodeId,
-                      runAttemptId: turnInput.attemptId,
-                      nativeTurnRef: {
-                        driver: input.driver,
-                        nativeId: `native-turn:${turnInput.threadId}:${turnInput.runOrdinal}`,
-                        strength: "strong",
-                      },
-                      ordinal: turnInput.providerTurnOrdinal,
-                      status: "interrupted",
-                      startedAt: completedAt,
-                      completedAt,
-                    },
-                  },
-                ]);
-              }
-              yield* publish([
-                {
-                  type: "turn.terminal",
-                  driver: input.driver,
-                  providerThreadId: providerThread.id,
-                  providerTurnId,
-                  runOrdinal: runOrdinals.get(providerTurnId) ?? 1,
-                  status: "interrupted",
-                  failure: null,
-                  threadDisposition: "reusable",
-                },
-              ]);
-            }),
-          respondToRuntimeRequest: () => Effect.void,
-          readThreadSnapshot: () =>
-            unsupported(input.driver, "readThreadSnapshot is unused in this test"),
-          rollbackThread: () => unsupported(input.driver, "rollbackThread is unused in this test"),
-          forkThread: () => unsupported(input.driver, "forkThread is unused in this test"),
-        };
-      }),
-  };
-}
-
-function waitForProjection(
-  orchestrator: Orchestrator.OrchestratorV2Shape,
-  threadId: ThreadId,
-  predicate: (projection: OrchestrationV2ThreadProjection) => boolean,
-) {
-  return Effect.gen(function* () {
-    for (let attempt = 0; attempt < 1_000; attempt += 1) {
-      const projection = yield* orchestrator.getThreadProjection(threadId);
-      if (predicate(projection)) {
-        return projection;
-      }
-      yield* Effect.sleep("5 millis");
-    }
-    return yield* Effect.die(
-      new Error(`Timed out waiting for orchestration projection ${threadId}.`),
-    );
-  });
-}
-
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
   protocolVersion: "2025-06-18",
@@ -432,45 +141,6 @@ const client = McpSchema.McpServerClient.of({
   },
   getClient: Effect.die("unused"),
 });
-
-function scheduledTaskFromUpsert(input: ScheduledTaskUpsertInput): ScheduledTask {
-  const timestamp = IsoDateTime.make("2026-07-01T09:00:00.000Z");
-  return {
-    id: input.id ?? ScheduledTaskId.make(`scheduled-task:${input.commandId ?? "stub"}`),
-    title: input.title,
-    prompt: input.prompt,
-    enabled: input.enabled,
-    schedule:
-      input.schedule.type === "webhook"
-        ? {
-            type: "webhook",
-            signature:
-              input.schedule.signature == null
-                ? null
-                : {
-                    header: input.schedule.signature.header,
-                    encoding: input.schedule.signature.encoding,
-                    prefix: input.schedule.signature.prefix,
-                  },
-          }
-        : input.schedule,
-    projectId: input.projectId,
-    threadId: input.threadId ?? null,
-    workspaceStrategy: input.workspaceStrategy,
-    modelSelection: input.modelSelection,
-    runtimeMode: input.runtimeMode,
-    interactionMode: input.interactionMode,
-    createdBy: input.createdBy ?? "user",
-    creationSource: input.creationSource ?? "web",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    nextRunAt: null,
-    lastRunAt: null,
-    lastRunStatus: "never",
-    lastRunError: null,
-    runCount: 0,
-  };
-}
 
 const layerMemorySecretStore = Layer.sync(ServerSecretStore.ServerSecretStore, () => {
   const stored = new Map<string, Uint8Array>();

@@ -30,10 +30,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
-export function clientRpcRequiredScopes(
-  method: string,
-  input: unknown,
-): readonly AuthEnvironmentScope[] {
+export function clientRpcRequiredScopes(method: string): readonly AuthEnvironmentScope[] {
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method)
     ? [CLIENT_GUARDED_RPC_SCOPES[method as ClientGuardedRpcTag]]
     : [];

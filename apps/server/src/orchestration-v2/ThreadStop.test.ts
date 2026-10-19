@@ -67,7 +67,7 @@ const layerTest = ThreadManagementService.layer.pipe(
 
 const encodeEffectRequest = Schema.encodeSync(Schema.fromJsonString(OrchestrationEffectRequestV2));
 
-const createWatchingThread = (threadId: ThreadId, number: number) =>
+const createWatchingThread = (threadId: ThreadId) =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     yield* orchestrator.dispatch({
@@ -143,7 +143,7 @@ it.effect("Stop holds queues and stops the delegated tasks under the thread", ()
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const sql = yield* SqlClient.SqlClient;
     const parentThreadId = ThreadId.make("thread:stop-parent");
-    yield* createWatchingThread(parentThreadId, 1);
+    yield* createWatchingThread(parentThreadId);
     yield* send(parentThreadId, "first", "start_immediately");
     const childThreadId = yield* delegate(parentThreadId, "child task");
     const grandchildThreadId = yield* delegate(childThreadId, "grandchild task");
@@ -203,7 +203,7 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const threadId = ThreadId.make(`thread:stop-buffered:${type}`);
-      yield* createWatchingThread(threadId, 5);
+      yield* createWatchingThread(threadId);
       yield* send(threadId, "active", "start_immediately");
       yield* send(threadId, "user follow-up", "queue_after_active");
       for (const creationSource of ["provider", "server"] as const) {
@@ -257,7 +257,7 @@ it.effect("thread.stop accepts an idle thread with nothing to stop", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const threadId = ThreadId.make("thread:stop-idle");
-    yield* createWatchingThread(threadId, 3);
+    yield* createWatchingThread(threadId);
 
     yield* orchestrator.dispatch({
       type: "thread.stop",
@@ -281,7 +281,7 @@ it.effect("thread.stop keeps a restart continuation of the stopped run from star
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sql = yield* SqlClient.SqlClient;
     const threadId = ThreadId.make("thread:stop-restart");
-    yield* createWatchingThread(threadId, 8);
+    yield* createWatchingThread(threadId);
     yield* send(threadId, "work", "start_immediately");
     const now = yield* DateTime.now;
     const run = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
@@ -335,7 +335,7 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const sql = yield* SqlClient.SqlClient;
       const threadId = ThreadId.make("thread:stop-resumed-queue");
-      yield* createWatchingThread(threadId, 12);
+      yield* createWatchingThread(threadId);
       yield* send(threadId, "first", "start_immediately");
       yield* send(threadId, "queued", "queue_after_active");
       const now = yield* DateTime.now;
@@ -434,7 +434,7 @@ it.effect.each([
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const parentThreadId = ThreadId.make(`thread:stop-question-parent:${ending}`);
-      yield* createWatchingThread(parentThreadId, 20);
+      yield* createWatchingThread(parentThreadId);
       yield* send(parentThreadId, "first", "start_immediately");
       const childThreadId = yield* delegate(parentThreadId, `question task ${ending}`);
       const childRun = (yield* orchestrator.getThreadProjection(childThreadId)).runs[0]!;
@@ -498,7 +498,7 @@ it.effect("a delegated task that cannot be stopped fails the walk after its sibl
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const parentThreadId = ThreadId.make("thread:stop-partial");
-    yield* createWatchingThread(parentThreadId, 6);
+    yield* createWatchingThread(parentThreadId);
     yield* send(parentThreadId, "work", "start_immediately");
     const childThreadId = yield* delegate(parentThreadId, "stoppable task");
     const task = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents[0]!;
@@ -534,7 +534,7 @@ it.effect("thread.stop preserves a finished run", () =>
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const threadId = ThreadId.make("thread:stop-finished");
-    yield* createWatchingThread(threadId, 9);
+    yield* createWatchingThread(threadId);
     yield* send(threadId, "work", "start_immediately");
     const now = yield* DateTime.now;
     const run = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
@@ -561,7 +561,7 @@ it.effect("thread.stop marks a turn it cannot interrupt", () =>
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const threadId = ThreadId.make("thread:stop-lost-session");
-    yield* createWatchingThread(threadId, 11);
+    yield* createWatchingThread(threadId);
     yield* send(threadId, "work", "start_immediately");
     const now = yield* DateTime.now;
     const run = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
@@ -608,7 +608,7 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const sql = yield* SqlClient.SqlClient;
       const threadId = ThreadId.make("thread:native-child-stop");
-      yield* createWatchingThread(threadId, 20);
+      yield* createWatchingThread(threadId);
       yield* send(threadId, "owner", "start_immediately");
       yield* delegate(threadId, "native-child-fixture");
       const before = yield* orchestrator.getThreadProjection(threadId);

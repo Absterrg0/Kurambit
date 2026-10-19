@@ -869,17 +869,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const projectDefaultModelSelection = (
-    project: Effect.Success<ReturnType<typeof requireProject>>,
-  ) =>
-    project.defaultModelSelection === null
-      ? Effect.fail(
-          failure(
-            "invalid_request",
-            `Project ${project.id} has no default model, so this caller cannot pick one for it.`,
-          ),
-        )
-      : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
 
   const requireCapability = (scope: McpInvocationScope) =>
@@ -1014,15 +1003,6 @@ const make = Effect.gen(function* () {
     target: Pick<OrchestrationV2ThreadProjection, "thread">,
   ) =>
     parent === undefined || target.thread.id === parent.thread.id
-      ? Effect.void
-      : assertLiveCaller(scope, parent);
-
-  const assertLiveCallerForOtherProject = (
-    scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
-    projectId: ProjectId,
-  ) =>
-    parent === undefined || projectId === parent.thread.projectId
       ? Effect.void
       : assertLiveCaller(scope, parent);
 
@@ -1471,16 +1451,6 @@ const make = Effect.gen(function* () {
         Stream.runHead,
       );
     }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)), Effect.map(Option.flatten));
-
-  const withinLimits = (
-    limits: {
-      readonly runtimeMode: RuntimeMode;
-      readonly interactionMode: ProviderInteractionMode;
-    },
-    modes: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
-  ) =>
-    runtimeModeRank(modes.runtimeMode) <= runtimeModeRank(limits.runtimeMode) &&
-    interactionModeRank(modes.interactionMode) <= interactionModeRank(limits.interactionMode);
 
   return OrchestratorMcpService.of({
     requestSecret: (scope, input) =>

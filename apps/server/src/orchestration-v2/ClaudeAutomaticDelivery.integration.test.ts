@@ -9,7 +9,6 @@ import {
   NodeId,
   ProjectId,
   ProviderInstanceId,
-  ScheduledTaskUpsertInput,
   ThreadId,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
@@ -35,7 +34,7 @@ import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 
 const sessionId = "automatic-delivery-session";
 const settings = Schema.decodeSync(ClaudeSettings)({});
-const decodeScheduledTask = Schema.decodeEffect(ScheduledTaskUpsertInput);
+
 const refusal =
   "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.";
 const statusIds = ["status-1", "status-2", "status-3", "status-4"];

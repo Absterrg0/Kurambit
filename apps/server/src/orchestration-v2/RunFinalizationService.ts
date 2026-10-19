@@ -90,10 +90,10 @@ export const layerObserver = Layer.effect(
   Effect.gen(function* () {
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
     const vcsStatus = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
+
     return {
       refreshAfterTurn: () => Effect.void,
-      refresh: ({ cwd, threadId, runId }) =>
+      refresh: ({ cwd }) =>
         Effect.gen(function* () {
           yield* Effect.all([workspaceEntries.refresh(cwd), vcsStatus.refreshLocalStatus(cwd)], {
             concurrency: "unbounded",

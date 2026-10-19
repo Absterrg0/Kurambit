@@ -60,7 +60,7 @@ export function useProactivePanels(input: {
     proactivePanelObservationRef.current = observation;
     const {
       runningTurnId: previousRunningTurnId,
-      targetKey: previousTargetKey,
+
       userActionRevision,
     } = observation;
     const openSurface = selectActiveRightPanelSurface(panels.byThreadKey, threadRef);

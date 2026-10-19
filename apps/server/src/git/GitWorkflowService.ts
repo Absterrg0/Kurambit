@@ -260,14 +260,6 @@ export const make = Effect.gen(function* () {
     return true;
   });
 
-  const routeGitManager =
-    <Input extends { readonly cwd: string }, Output>(
-      operation: string,
-      run: (input: Input) => Effect.Effect<Output, GitManagerServiceError>,
-    ) =>
-    (input: Input) =>
-      ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
-
   return GitWorkflowService.of({
     isRepository: (cwd) =>
       registry.detect({ cwd }).pipe(

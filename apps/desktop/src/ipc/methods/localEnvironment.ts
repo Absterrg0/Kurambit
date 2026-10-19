@@ -7,7 +7,5 @@ import { makeSyncIpcMethod } from "../DesktopIpc.ts";
 export const getLocalEnvironmentEnabled = makeSyncIpcMethod({
   channel: IpcChannels.GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL,
   result: Schema.Boolean,
-  handler: Effect.fn("desktop.ipc.localEnvironment.getEnabled")(function* () {
-    return true;
-  }),
+  handler: () => Effect.succeed(true),
 });

@@ -1,4 +1,3 @@
-import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
 import {
   REMOTE_CAPABLE_EDITOR_IDS,
   type EditorId,
@@ -32,26 +31,13 @@ export interface RemoteOpenResolution {
 }
 
 const LOCAL_EXEC: RemoteOpenState = { mode: "local-exec" };
-const REMOTE_UNAVAILABLE: RemoteOpenState = { mode: "remote-unavailable" };
+
 const UNRESOLVED_REMOTE_OPEN: RemoteOpenResolution = {
   state: LOCAL_EXEC,
   isResolved: false,
 };
 
-function parseHostname(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-}
-
-export function resolveRemoteOpenState(input: {
-  readonly target: ConnectionTarget | null;
-  readonly sshAlias: string | null;
-  readonly remoteOpenTargets: ReadonlyArray<RemoteOpenTarget> | undefined;
-  readonly isDesktopRenderer: boolean;
-}): RemoteOpenState {
+export function resolveRemoteOpenState(): RemoteOpenState {
   return LOCAL_EXEC;
 }
 
@@ -71,15 +57,9 @@ const remoteOpenResolutionAtom = Atom.family((environmentId: EnvironmentId) =>
     if (entry === null) {
       return UNRESOLVED_REMOTE_OPEN;
     }
-    const profile = Option.getOrNull(entry.profile);
+
     const next: RemoteOpenResolution = {
-      state: resolveRemoteOpenState({
-        target: entry.target,
-        sshAlias:
-          profile !== null && profile._tag === "SshConnectionProfile" ? profile.target.alias : null,
-        remoteOpenTargets: presentation?.serverConfig?.remoteOpenTargets,
-        isDesktopRenderer: window.desktopBridge !== undefined,
-      }),
+      state: resolveRemoteOpenState(),
       isResolved: true,
     };
     const previous = Option.getOrNull(get.self<RemoteOpenResolution>());

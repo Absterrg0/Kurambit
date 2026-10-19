@@ -1,10 +1,4 @@
-import {
-  AuthStandardClientScopes,
-  EnvironmentId,
-  PRIMARY_LOCAL_ENVIRONMENT_ID,
-  type DesktopBridge,
-  type DesktopSshEnvironmentTarget,
-} from "@t3tools/contracts";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
@@ -24,74 +18,6 @@ import {
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
 } from "./platform.ts";
-
-const TARGET: DesktopSshEnvironmentTarget = {
-  alias: "devbox",
-  hostname: "devbox.example.test",
-  username: "developer",
-  port: 22,
-};
-
-function makeBridge(
-  calls: string[],
-  options?: {
-    readonly failDescriptor?: boolean;
-    readonly savedTokenRejected?: boolean;
-    readonly savedTokenPermissions?: ReadonlyArray<string>;
-  },
-): DesktopBridge {
-  return {
-    ensureSshEnvironment: async (
-      target: DesktopSshEnvironmentTarget,
-      ensureOptions?: { issuePairingToken?: boolean },
-    ) => {
-      calls.push("ensure");
-      return {
-        target,
-        httpBaseUrl: "http://127.0.0.1:3201/",
-        wsBaseUrl: "ws://127.0.0.1:3201/",
-        pairingToken: ensureOptions?.issuePairingToken === true ? "pairing-token" : null,
-      };
-    },
-    fetchSshSessionState: async () => {
-      calls.push("session");
-      return {
-        authenticated: options?.savedTokenRejected !== true,
-        permissions: options?.savedTokenPermissions ?? AuthStandardClientScopes,
-      };
-    },
-    fetchSshEnvironmentDescriptor: async () => {
-      calls.push("descriptor");
-      if (options?.failDescriptor === true) {
-        throw new Error("descriptor unavailable");
-      }
-      return {
-        environmentId: EnvironmentId.make("environment-ssh"),
-        label: "SSH environment",
-        platform: {
-          os: "linux",
-          arch: "x64",
-        },
-        serverVersion: "0.0.0-test",
-        capabilities: {
-          repositoryIdentity: true,
-        },
-      };
-    },
-    bootstrapSshBearerSession: async () => {
-      calls.push("token");
-      return {
-        access_token: "bearer-token",
-        issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-        token_type: "Bearer",
-        expires_in: 3_600,
-        scope: AuthStandardClientScopes.join(" "),
-      };
-    },
-  } as unknown as DesktopBridge;
-}
-
-describe("desktop SSH pairing", () => {});
 
 describe("desktop-local bearer cache", () => {
   const registration = {} as never;

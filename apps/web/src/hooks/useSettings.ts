@@ -556,7 +556,6 @@ export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
  * nowhere to go.
  */
 export function usePrimarySettingsAvailable(): boolean {
-  const primaryEnvironment = usePrimaryEnvironment();
   return true;
 }
 

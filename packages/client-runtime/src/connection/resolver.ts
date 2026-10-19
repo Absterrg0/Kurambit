@@ -6,18 +6,13 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+
 import * as HttpClient from "effect/http/HttpClient";
 
 import { appendClientConnectionParams } from "../authorization/remote.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
-import {
-  BearerConnectionCredential,
-  BearerConnectionProfile,
-  type ConnectionCatalogEntry,
-  SshConnectionProfile,
-} from "./catalog.ts";
+import { type ConnectionCatalogEntry } from "./catalog.ts";
 
 import { environmentMismatchError, mapRemoteEnvironmentError } from "./errors.ts";
 
@@ -50,10 +45,6 @@ export class ConnectionResolver extends Context.Service<
     >;
   }
 >()("@t3tools/client-runtime/connection/resolver/ConnectionResolver") {}
-
-const isBearerProfile = Schema.is(BearerConnectionProfile);
-const isSshProfile = Schema.is(SshConnectionProfile);
-const isBearerCredential = Schema.is(BearerConnectionCredential);
 
 function primarySocketUrl(
   target: PrimaryConnectionTarget,

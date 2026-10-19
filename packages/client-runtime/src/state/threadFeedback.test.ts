@@ -6,7 +6,6 @@ import { AsyncResult } from "effect/reactivity";
 import {
   beginCodexFeedbackSubmission,
   codexFeedbackNotice,
-  codexFeedbackMessage,
   parseCodexFeedbackCommand,
   submitCodexFeedback,
   type CodexFeedbackSubmission,

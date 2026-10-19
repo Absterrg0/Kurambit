@@ -168,7 +168,7 @@ import {
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
 import { ProviderInstanceId, ProviderInstanceMutation } from "./providerInstance.ts";
-import { PullRequestOperationError, PullRequestUnavailableError } from "./pullRequest.ts";
+import {} from "./pullRequest.ts";
 
 import {
   ORCHESTRATION_V2_WS_METHODS,
@@ -751,12 +751,6 @@ const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPo
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
 });
-
-const PullRequestRpcError = Schema.Union([
-  PullRequestUnavailableError,
-  PullRequestOperationError,
-  EnvironmentAuthorizationError,
-]);
 
 // Clone-backed project creation. `start` returns once the project exists and
 // the clone is running; progress arrives on the subscription.

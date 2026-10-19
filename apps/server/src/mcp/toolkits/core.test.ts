@@ -590,32 +590,6 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
   ),
 );
 
-function scheduledTask(id: string, runtimeMode: "auto" | "full-access"): never {
-  return {
-    id,
-    title: id,
-    prompt: "Check the build",
-    enabled: true,
-    projectId: "project-a",
-    threadId: null,
-    schedule: { type: "interval", everyMs: 3_600_000 },
-    workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
-    modelSelection: { instanceId: "codex", model: "gpt-5" },
-    runtimeMode,
-    interactionMode: "default",
-    createdBy: "user",
-    creationSource: "web",
-    nextRunAt: null,
-    lastRunStatus: "never",
-    lastRunAt: null,
-    lastRunThreadId: null,
-    lastRunError: null,
-    runCount: 0,
-    createdAt: "2026-10-01T00:00:00.000Z",
-    updatedAt: "2026-10-01T00:00:00.000Z",
-  } as never;
-}
-
 it.effect.each(["t3_thread_interrupt", "t3_workflow_stop"])(
   "a caller cannot use %s on a thread that runs above its own modes",
   (toolName) =>

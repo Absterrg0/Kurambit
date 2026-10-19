@@ -37,7 +37,6 @@ const connectionMiddleware = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
   Layer.merge(RpcAuthorization.layer(scopes), rpcInstrumentationLayer);
 const readOnlyConnection = connectionMiddleware([AuthOrchestrationReadScope]);
 const threadId = ThreadId.make("thread:instrumented");
-const rpcSpanDefaults = { "rpc.transport": "websocket", "rpc.system": "effect-rpc" };
 
 const withTelemetry = <A, E, R>(
   test: (ended: ReadonlyArray<Tracer.NativeSpan>) => Effect.Effect<A, E, R>,

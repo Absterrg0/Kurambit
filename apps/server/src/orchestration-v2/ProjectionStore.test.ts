@@ -15,8 +15,6 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
-import * as Tracer from "effect/Tracer";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -31,24 +29,6 @@ const modelSelection = {
 } satisfies ModelSelection;
 const driver = ProviderDriverKind.make("codex");
 const providerInstanceId = modelSelection.instanceId;
-const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
-const traceSqlStatements = () => {
-  const statements: Array<string> = [];
-  const tracer = Tracer.make({
-    span(options) {
-      const span = new Tracer.NativeSpan(options);
-      const end = span.end.bind(span);
-      span.end = (endTime, exit) => {
-        end(endTime, exit);
-        const query = span.attributes.get("db.query.text");
-        if (typeof query === "string") statements.push(query);
-      };
-      return span;
-    },
-  });
-  return { statements, tracer };
-};
 
 const addRolledBackRecoveryCandidate = Effect.fn("addRolledBackRecoveryCandidate")(function* (
   suffix: string,

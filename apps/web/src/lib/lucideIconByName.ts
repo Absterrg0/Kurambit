@@ -1,4 +1,3 @@
-/* oxlint-disable eslint/no-restricted-imports -- Resolves saved project icons by name, so it needs the whole set. */
 // Project icon overrides save lucide icons by kebab-case name. Import this module
 // lazily: it holds every lucide icon as one chunk, where `lucide-react/dynamic`
 // emits a separate chunk per icon (~1,900), which dominated build output.

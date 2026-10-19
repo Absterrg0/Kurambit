@@ -104,7 +104,7 @@ import {
   ThemePreviewCircle,
 } from "./settings/ThemePreviewCircles";
 import { readLocalApi } from "../localApi";
-import { desktopLocalBackendId } from "../connection/desktopLocal";
+
 import { filesystemEnvironment, useFilesystemReadAccess } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
@@ -122,7 +122,7 @@ import {
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import { useProjects, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -698,9 +698,7 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
-  const activeThreadServerConfig = useServerConfigs().get(
-    activeThread?.environmentId ?? ("" as EnvironmentId),
-  );
+
   const activeThreadReferenceCopyTarget =
     activeThread === null
       ? null
@@ -837,18 +835,7 @@ function OpenCommandPaletteDialog(props: {
   })();
   const defaultAddProjectEnvironmentId =
     addProjectEnvironmentOptions.find((option) => option.isConnected)?.environmentId ?? null;
-  const wslAddProjectEnvironmentOption =
-    addProjectEnvironmentOptions.find((option) => {
-      if (!option.isConnected) {
-        return false;
-      }
-      const environment = environments.find(
-        (candidate) => candidate.environmentId === option.environmentId,
-      );
-      return environment
-        ? desktopLocalBackendId(environment.entry.target)?.startsWith("wsl:") === true
-        : false;
-    }) ?? null;
+
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
@@ -1343,7 +1330,6 @@ function OpenCommandPaletteDialog(props: {
           ? "Clone from a remote URL"
           : `Clone ${label} ${addProjectRemoteSourcePathHint(source)}`;
       const readiness = readinessBySource(source);
-      const disabledHint = readiness.hint;
 
       const titleTrailingContent = undefined;
 

@@ -13,7 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import {
   BundleNotSelfContainedError,
@@ -79,40 +79,6 @@ const stagePackageExtensions = {
   "electron-webauthn": { peerDependenciesMeta: { typescript: { optional: true } } },
   "@electron-webauthn/macos": { peerDependenciesMeta: { typescript: { optional: true } } },
 };
-
-const makeLinuxCliArchiveFixture = Effect.fn("test.makeLinuxCliArchiveFixture")(function* (input: {
-  readonly root: string;
-  readonly stem: string;
-  readonly extraMembers?: ReadonlyArray<string>;
-  readonly omitMembers?: ReadonlyArray<string>;
-}) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const contentRoot = path.join(input.root, "content");
-  const members = [
-    `${input.stem}/t3`,
-    `${input.stem}/client/index.html`,
-    `${input.stem}/node_modules/node-pty/package.json`,
-    `${input.stem}/node_modules/node-pty/build/Release/pty.node`,
-    ...(input.extraMembers ?? []),
-  ].filter((member) => !(input.omitMembers ?? []).includes(member));
-  for (const member of members) {
-    const memberPath = path.join(contentRoot, member);
-    yield* fs.makeDirectory(path.dirname(memberPath), { recursive: true });
-    yield* fs.writeFileString(memberPath, member);
-  }
-  const archivePath = path.join(input.root, `${input.stem}.tar.gz`);
-  const tar = yield* spawner.spawn(
-    ChildProcess.make("tar", ["-czf", archivePath, "-C", contentRoot, "."], {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "pipe",
-    }),
-  );
-  assert.equal(Number(yield* tar.exitCode), 0);
-  return archivePath;
-});
 
 function mockProcess(exitCode: number, stdout = "") {
   const encodedStdout = new TextEncoder().encode(stdout);

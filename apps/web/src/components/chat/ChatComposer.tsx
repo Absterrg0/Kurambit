@@ -25,7 +25,6 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProjectId,
-  PullRequestListInput,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ThreadContextRecord,
@@ -236,7 +235,6 @@ import {
   previewAnnotationContextRecord,
   previewAnnotationFromRecord,
   reviewCommentContextId,
-  reviewCommentContextReference,
   reviewCommentContextRecord,
   reviewCommentFromRecord,
   terminalContextDraftFromRecord,
@@ -400,9 +398,7 @@ function SnapShotAttachmentFrame({
   );
 }
 
-const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
-const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
 
 const COMPOSER_SCROLL_COLLAPSE_THRESHOLD_PX = 24;
 const COMPOSER_SCROLL_GESTURE_RESET_MS = 120;

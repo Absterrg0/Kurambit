@@ -152,7 +152,6 @@ const SURFACE_UNAVAILABLE_HINTS = {
 } as const;
 
 type TabContextMenuAction =
-  | "rename"
   | "copy-path"
   | "toggle-mute"
   | "close"
@@ -537,7 +536,6 @@ function SurfaceIcon({
   previewUrl,
   previewCapturedUrl,
   theme,
-  environmentId,
 }: {
   surface: RightPanelSurface;
   previewUrl: string | null;
@@ -606,8 +604,6 @@ interface RightPanelTabHandlers {
   onClose: (surface: RightPanelSurface) => void;
   onAuxClick: (event: ReactMouseEvent, surface: RightPanelSurface) => void;
   onContextMenu: (event: ReactMouseEvent, surface: RightPanelSurface) => void;
-  onStartRename: (surfaceId: string) => void;
-  onFinishRename: (surfaceId: string, title: string) => void;
 }
 
 function handleTabMouseDown(event: ReactMouseEvent) {
@@ -631,8 +627,6 @@ function RightPanelTab(
     previewCapturedUrl: string | null;
     theme: "light" | "dark";
     environmentId: EnvironmentId | null;
-    renaming: boolean;
-    canRename: boolean;
     ownsDesktopTitleBar: boolean;
   },
 ) {
@@ -641,12 +635,10 @@ function RightPanelTab(
     title,
     audio,
     audioRuntimeTabId,
-    onActivate,
+
     onClose,
     onAuxClick,
     onContextMenu,
-    onStartRename,
-    onFinishRename,
   } = props;
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surface.id,
@@ -691,42 +683,20 @@ function RightPanelTab(
           <TooltipPopup>{audio === "muted" ? "Unmute tab" : "Mute tab"}</TooltipPopup>
         </Tooltip>
       )}
-      {props.renaming ? (
-        <input
-          aria-label="Device tab name"
-          className="w-24 min-w-0 rounded-sm bg-background px-1 outline-none ring-1 ring-inset ring-ring"
-          defaultValue={title}
-          ref={(element) => {
-            element?.focus();
-            element?.select();
-          }}
-          onBlur={(event) => onFinishRename(surface.id, event.currentTarget.value)}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              event.currentTarget.value = title;
-              event.currentTarget.blur();
-            }
-          }}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              className="cursor-pointer flex min-w-0 items-center"
+              onClick={() => props.onActivate(surface)}
+            >
+              <span className="truncate">{title}</span>
+            </button>
+          }
         />
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onDoubleClick={() => {}}
-                className="cursor-pointer flex min-w-0 items-center"
-                onClick={() => onActivate(surface)}
-              >
-                <span className="truncate">{title}</span>
-              </button>
-            }
-          />
-          <TooltipPopup>{title}</TooltipPopup>
-        </Tooltip>
-      )}
+        <TooltipPopup>{title}</TooltipPopup>
+      </Tooltip>
     </>
   );
   return (
@@ -758,7 +728,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
   const addSurfaceTriggerRef = useRef<HTMLButtonElement>(null);
-  const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
   const [tabScrollState, setTabScrollState] = useState({
     hasOverflow: false,
@@ -912,9 +881,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
     const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
     switch (action) {
-      case "rename":
-        setRenamingDevice(surface.id);
-        break;
       case "copy-path":
         if (surface.kind === "file" && surface.attachment === undefined) {
           props.onCopyFilePath(surface.relativePath);
@@ -962,10 +928,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       void handleTabContextMenu(event, surface);
     },
   );
-  const onStartRenameTab = useStableCallback((surfaceId: string) => setRenamingDevice(surfaceId));
-  const onFinishRenameTab = useStableCallback((surfaceId: string, title: string) => {
-    setRenamingDevice(null);
-  });
 
   useEffect(() => {
     if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
@@ -1053,7 +1015,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <RightPanelTab
                     key={surface.id}
                     surface={surface}
-                    dragDisabled={!props.onMoveSurface || renamingDevice === surface.id}
+                    dragDisabled={!props.onMoveSurface}
                     active={surface.id === props.activeSurfaceId}
                     pending={props.pendingSurfaceIds.has(surface.id)}
                     title={surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)}
@@ -1067,15 +1029,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     previewCapturedUrl={favicon.capturedUrl}
                     theme={resolvedTheme}
                     environmentId={props.environmentId}
-                    renaming={renamingDevice === surface.id}
-                    canRename={false}
                     ownsDesktopTitleBar={ownsDesktopTitleBar}
                     onActivate={onActivateTab}
                     onClose={onCloseTab}
                     onAuxClick={onTabAuxClick}
                     onContextMenu={onTabContextMenu}
-                    onStartRename={onStartRenameTab}
-                    onFinishRename={onFinishRenameTab}
                   />
                 );
               })}

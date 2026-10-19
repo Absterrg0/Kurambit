@@ -14,7 +14,7 @@ import {
 
 export { shouldBundleCliDependency };
 
-const repoEnv = loadRepoEnv();
+loadRepoEnv();
 const cliBuildChannel = /^[^-+]+-(?:nightly|preview)\./.test(packageJson.version)
   ? "nightly"
   : "latest";

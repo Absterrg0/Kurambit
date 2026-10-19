@@ -98,14 +98,6 @@ function layerEnvironment(
   );
 }
 
-const restoreEnv = (name: string, value: string | undefined) => {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-};
-
 const withHarness = <A, E, R>(
   effect: Effect.Effect<
     A,

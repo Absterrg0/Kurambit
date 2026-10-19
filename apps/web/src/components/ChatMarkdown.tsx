@@ -2282,7 +2282,6 @@ function useChatMarkdownState({
   text,
   cwd,
   threadRef,
-  pullRequestPanelRef,
   environmentId: explicitEnvironmentId,
   onTaskListChange,
   isStreaming = false,
@@ -2799,7 +2798,6 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   a: function MarkdownAnchor({ node, href, children, title: _title, ...props }) {
     const {
-      canOperateHost,
       canOperatePreview,
       cwd,
       environmentId,
@@ -2807,11 +2805,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
       markdownFileLinkMetaByHref,
       threadRef,
       openMarkdownMedia,
-      openDeferredMarkdownLink,
+
       linkTargetPreference,
       openExternalLinkInPreview,
-      projects,
-      pullRequestsEnabled,
+
       fileLinkChip,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
@@ -2854,7 +2851,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             ? plainHastText(node)
             : undefined;
       const isPullRequestAutolink = pullRequestCopy !== undefined;
-      const confirmBeforeOpen = pullRequestAutolink === "reference";
+
       const isSameDocumentLink = href?.startsWith("#") ?? false;
       const onClick = props.onClick;
       const canOpenInPreview =

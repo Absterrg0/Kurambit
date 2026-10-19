@@ -158,8 +158,8 @@ export class RpcPermissionGuard extends Context.Reference<{
   ) => Effect.Effect<void, EnvironmentAuthorizationError>;
 }>("@t3tools/client-runtime/rpc/RpcPermissionGuard", {
   defaultValue: () => ({
-    authorize: (_environmentId, method, input) => {
-      const scope = clientRpcRequiredScopes(method, input)[0];
+    authorize: (_environmentId, method) => {
+      const scope = clientRpcRequiredScopes(method)[0];
       return scope === undefined
         ? Effect.void
         : Effect.fail(
@@ -176,7 +176,7 @@ const authorizeRequest = Effect.fn("EnvironmentRpc.authorize")(function* (
   method: string,
   input: unknown,
 ) {
-  if (clientRpcRequiredScopes(method, input).length === 0) return;
+  if (clientRpcRequiredScopes(method).length === 0) return;
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const guard = yield* RpcPermissionGuard;
   yield* guard.authorize(supervisor.target.environmentId, method, input);

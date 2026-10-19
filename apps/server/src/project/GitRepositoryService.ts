@@ -7,20 +7,13 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import {
-  SourceControlProviderError,
   SourceControlRepositoryError,
   type SourceControlCloneRepositoryInput,
   type SourceControlCloneRepositoryResult,
-  type SourceControlCloneProtocol,
   SourceControlProviderKind,
-  type SourceControlPublishRepositoryInput,
-  type SourceControlPublishRepositoryResult,
-  type SourceControlRepositoryCloneUrls,
   type SourceControlRepositoryInfo,
-  type SourceControlRepositoryLookupInput,
 } from "@t3tools/contracts";
 
-import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
   parseGitCloneProgressLine,

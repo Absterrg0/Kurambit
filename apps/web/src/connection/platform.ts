@@ -4,10 +4,6 @@ import {
   Persistence,
 } from "@t3tools/client-runtime/platform";
 import {
-  BearerConnectionCredential,
-  BearerConnectionProfile,
-  BearerConnectionRegistration,
-  BearerConnectionTarget,
   type ConnectionAttemptError,
   ConnectionTransientError,
   Connectivity,
@@ -17,14 +13,10 @@ import {
   PrimaryConnectionTarget,
   Wakeups,
 } from "@t3tools/client-runtime/connection";
-import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
+
 import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
 import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
-import {
-  AuthStandardClientScopes,
-  type DesktopEnvironmentBootstrap,
-  PRIMARY_LOCAL_ENVIRONMENT_ID,
-} from "@t3tools/contracts";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -46,7 +38,7 @@ import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import { desktopLocalConnectionId, type DesktopSecondaryBootstrapsRead } from "./desktopLocal";
+import { type DesktopSecondaryBootstrapsRead } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
 import { clientPresentationMetadata } from "./clientMetadata";
 
@@ -189,58 +181,6 @@ const loadPrimaryConnectionRegistration = Effect.fn(
       wsBaseUrl: resolved.target.wsBaseUrl,
     }),
   });
-});
-
-const loadSecondaryConnectionRegistration = Effect.fn(
-  "web.connectionPlatform.loadSecondaryConnectionRegistration",
-)(function* (entry: DesktopEnvironmentBootstrap) {
-  if (
-    entry.httpBaseUrl === null ||
-    entry.wsBaseUrl === null ||
-    entry.bootstrapToken === undefined
-  ) {
-    return yield* new ConnectionTransientError({
-      reason: "endpoint-unavailable",
-      detail: `Desktop-local backend ${entry.id} is not ready yet.`,
-    });
-  }
-  const httpBaseUrl = entry.httpBaseUrl;
-  const wsBaseUrl = entry.wsBaseUrl;
-  const descriptor = yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
-    Effect.mapError(mapRemoteEnvironmentError),
-  );
-  const issuedAtEpochMs = yield* Clock.currentTimeMillis;
-  const access = yield* bootstrapRemoteBearerSession({
-    httpBaseUrl,
-    credential: entry.bootstrapToken,
-    scopes: AuthStandardClientScopes,
-    clientMetadata: clientMetadata(),
-  }).pipe(Effect.mapError(mapRemoteEnvironmentError));
-  // Keep the desktop pool's stable backend id in the connection id. The
-  // descriptor environment id still scopes projects and RPC state, while the
-  // backend id lets desktop-only operations (notably the WSL folder picker)
-  // route back to the instance that owns the environment.
-  const connectionId = desktopLocalConnectionId(entry.id);
-  const label = entry.label || descriptor.label;
-  return {
-    registration: new BearerConnectionRegistration({
-      target: new BearerConnectionTarget({
-        environmentId: descriptor.environmentId,
-        label,
-        connectionId,
-      }),
-      profile: new BearerConnectionProfile({
-        connectionId,
-        environmentId: descriptor.environmentId,
-        label,
-        httpBaseUrl,
-        wsBaseUrl,
-      }),
-      credential: new BearerConnectionCredential({ token: access.access_token }),
-    }),
-    expiresAtEpochMs: secondaryBearerExpiresAtEpochMs(issuedAtEpochMs, access.expires_in),
-    refreshAtEpochMs: secondaryBearerRefreshAtEpochMs(issuedAtEpochMs, access.expires_in),
-  };
 });
 
 // Poll cadence for the desktop bootstrap topology. There is no change event on
@@ -393,7 +333,6 @@ const layerPlatformConnectionSource = Layer.effect(
       });
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
-    const rejectedRef = yield* Ref.make(new Map<string, RejectedSecondaryBootstrap>());
 
     const buildPlatformRegistrations = Effect.gen(function* () {
       const previous = yield* Ref.get(cacheRef);
