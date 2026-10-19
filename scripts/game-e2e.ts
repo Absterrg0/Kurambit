@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off cryptoRandomUUID:off -- Maintainer CLI owns process, filesystem, logging, authentication, and HTTP boundaries.
-import { parseArgs, promisify } from "node:util";
-import { execFile } from "node:child_process";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off cryptoRandomUUID:off globalConsoleInEffect:off preferSchemaOverJson:off -- Maintainer CLI owns process, filesystem, logging, authentication, and HTTP boundaries.
+import * as NodeUtil from "node:util";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
+import * as Data from "effect/Data";
 import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Fiber from "effect/Fiber";
@@ -28,13 +29,13 @@ import {
   type GameStatus,
 } from "../packages/contracts/src/index.ts";
 
-const checkout = fileURLToPath(new URL("..", import.meta.url));
-const { values } = parseArgs({
+const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
+const { values } = NodeUtil.parseArgs({
   options: {
     url: { type: "string" },
-    "home-dir": { type: "string", default: path.join(checkout, ".t3") },
+    "home-dir": { type: "string", default: NodePath.join(checkout, ".t3") },
     name: { type: "string", default: `Tiny game ${Date.now()}` },
-    "parent-dir": { type: "string", default: path.join(checkout, ".t3/e2e-games") },
+    "parent-dir": { type: "string", default: NodePath.join(checkout, ".t3/e2e-games") },
     brief: { type: "string" },
     "art-direction": { type: "string", default: "Simple low-poly clay" },
     provider: { type: "string", default: "codex" },
@@ -54,7 +55,7 @@ if (values.help || !values.brief) {
 }
 const timeoutMs = Number(values["timeout-ms"]);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
-const exec = promisify(execFile);
+const exec = NodeUtil.promisify(NodeChildProcess.execFile);
 const makeClient = RpcClient.make(WsRpcGroup);
 type Client = Effect.Success<typeof makeClient>;
 const terminal = new Set(["completed", "failed", "interrupted", "cancelled", "rolled_back"]);
@@ -64,13 +65,19 @@ const timeline = (message: string) =>
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
-const promise = <A>(run: () => Promise<A>) => Effect.tryPromise(run);
+class HarnessError extends Data.TaggedError("HarnessError")<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
+const toError = (cause: unknown) =>
+  new HarnessError({ message: cause instanceof Error ? cause.message : String(cause), cause });
+const promise = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError });
 
 const authenticate = async () => {
   // Mint a fresh, scoped client grant. Never print the credential or pairing URL.
   const { stdout } = await exec(
     process.execPath,
-    ["apps/server/src/bin.ts", "pair", "--home-dir", path.resolve(values["home-dir"])],
+    ["apps/server/src/bin.ts", "pair", "--home-dir", NodePath.resolve(values["home-dir"])],
     { cwd: checkout, timeout: 30_000, maxBuffer: 1024 * 1024 },
   );
   const match = stdout.match(/Pairing URL:\s*(https?:\/\/\S+)/);
@@ -114,10 +121,10 @@ const waitForTurn = (
   client: Client,
   threadId: ThreadId,
   previous: ReadonlySet<RunId>,
-  options: { cancel?: boolean; onReady?: () => Effect.Effect<unknown, unknown> } = {},
+  options: { cancel?: boolean; onReady?: () => Effect.Effect<unknown, Error> } = {},
 ) =>
   Effect.gen(function* () {
-    const done = yield* Deferred.make<OrchestrationV2Run, unknown>();
+    const done = yield* Deferred.make<OrchestrationV2Run, HarnessError>();
     const seen = new Map<string, string>();
     let target: RunId | undefined;
     let interrupted = false;
@@ -146,7 +153,7 @@ const waitForTurn = (
           timeline("Interrupting turn during game tool");
           yield* client[O.dispatchCommand]({
             type: "run.interrupt",
-            commandId: CommandId.make(randomUUID()),
+            commandId: CommandId.make(NodeCrypto.randomUUID()),
             threadId,
             runId: item.runId,
             reason: "e2e cancellation test",
@@ -172,7 +179,7 @@ const waitForTurn = (
           }
         }),
       ),
-      Effect.catch((error) => Deferred.fail(done, error)),
+      Effect.catch((error) => Deferred.fail(done, toError(error))),
       Effect.forkChild,
     );
     try {
@@ -205,11 +212,11 @@ const printStatus = (status: GameStatus) => {
   );
 };
 const revisionSnapshot = async (root: string) => {
-  const manifest = JSON.parse(await fs.readFile(path.join(root, "game.json"), "utf8"));
+  const manifest = JSON.parse(await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8"));
   // Read GLB POSITION accessor bounds so this works for assets produced outside the wrapper too.
   const assets = await Promise.all(
     manifest.assets.map(async (asset: { id: string; export: string; updatedAt: string }) => {
-      const bytes = await fs.readFile(path.join(root, asset.export));
+      const bytes = await NodeFSP.readFile(NodePath.join(root, asset.export));
       const gltf = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString("utf8"));
       const positions =
         gltf.meshes?.flatMap((mesh: { primitives: { attributes: { POSITION: number } }[] }) =>
@@ -233,12 +240,7 @@ let gameRoot: string | undefined;
 const main = Effect.gen(function* () {
   const url = yield* promise(authenticate);
   const socket = Socket.layerWebSocket(url).pipe(
-    Layer.provide(
-      Layer.succeed(
-        Socket.WebSocketConstructor,
-        (socketUrl, protocols) => new WebSocket(socketUrl, protocols),
-      ),
-    ),
+    Layer.provide(Socket.layerWebSocketConstructorGlobal),
   );
   const protocol = Layer.effect(
     RpcClient.Protocol,
@@ -252,13 +254,13 @@ const main = Effect.gen(function* () {
   const client = yield* makeClient.pipe(Effect.provide(context));
   const created = yield* client[WS_METHODS.gameCreate]({
     name: values.name,
-    parentDirectory: path.resolve(values["parent-dir"]),
+    parentDirectory: NodePath.resolve(values["parent-dir"]),
     brief: values.brief!,
     artDirection: values["art-direction"],
     modelSelection: {
       instanceId: ProviderInstanceId.make(values.provider),
       model: values.model,
-      options: { reasoningEffort: values["reasoning-effort"] },
+      options: [{ id: "reasoningEffort", value: values["reasoning-effort"] }],
     },
     runtimeMode: "full-access",
   });
@@ -296,7 +298,7 @@ const main = Effect.gen(function* () {
       "Preview index.html has wrong content type or status",
     );
     assert((await index.text()).length > 0, "Preview HTML is empty");
-    const files = await fs.readdir(path.join(created.root, "builds/web"));
+    const files = await NodeFSP.readdir(NodePath.join(created.root, "builds/web"));
     const wasmFile = files.find((file) => file.endsWith(".wasm"));
     assert(wasmFile, "Web export contains no wasm");
     const wasm = await fetch(new URL(wasmFile, preview.url), {
@@ -334,9 +336,11 @@ const main = Effect.gen(function* () {
   const send = (text: string) =>
     client[O.dispatchCommand]({
       type: "message.dispatch",
-      commandId: CommandId.make(randomUUID()),
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make(NodeCrypto.randomUUID()),
       threadId: created.threadId,
-      messageId: MessageId.make(randomUUID()),
+      messageId: MessageId.make(NodeCrypto.randomUUID()),
       text,
       attachments: [],
       dispatchMode: { type: "start_immediately" },

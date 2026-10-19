@@ -107,7 +107,6 @@ import {
 } from "./composerMentionDrag";
 import {
   composerFloatingLayerProps,
-  useComposerMenuProps,
   isInsideCollapsedComposerControls,
   isInsideRestingComposerControlScope,
 } from "./composerEventScope";
@@ -136,7 +135,6 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
-import { useComposerMenuState } from "./useComposerMenuState";
 import { useComposerTriggerState } from "./useComposerTriggerState";
 import { useComposerFocusState } from "./useComposerFocusState";
 import { useComposerMultilinePrompt } from "./useComposerMultilinePrompt";
@@ -288,12 +286,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import {
-  ComposerControl,
-  ComposerControlIcon,
-  ComposerControlSeparator,
-  ComposerSelectControl,
-} from "./ComposerControl";
+import { ComposerControl, ComposerControlSeparator } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import {
@@ -1039,18 +1032,9 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
-import {
-  BotIcon,
-  CircleAlertIcon,
-  PaperclipIcon,
-  PencilRulerIcon,
-  PlayIcon,
-  ShieldIcon,
-  XIcon,
-} from "lucide-react";
+import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "lucide-react";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
