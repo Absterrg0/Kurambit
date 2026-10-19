@@ -418,42 +418,6 @@ function makeSnapshot(
   };
 }
 
-function makePullRequestSummary(input: {
-  readonly projectId: ProjectId;
-  readonly repository: string;
-  readonly number: number;
-  readonly state: "open" | "closed" | "merged";
-  readonly updatedAt?: string;
-}): PullRequestSummary {
-  return {
-    provider: SourceControlProviderKind.make("github"),
-    projectId: input.projectId,
-    repository: input.repository,
-    number: input.number,
-    title: "Pull request",
-    url: `https://example.test/${input.repository}/pull/${input.number}`,
-    state: input.state,
-    headBranch: "feature",
-    baseBranch: "main",
-    updatedAt: input.updatedAt ?? NOW,
-  };
-}
-
-function makeBranchPullRequest(state: "open" | "closed" | "merged") {
-  return {
-    number: 42,
-    title: "Pull request",
-    url: "https://example.test/owner/repository/pull/42",
-    baseRef: "main",
-    headRef: "feature",
-    state,
-    repositoryKey: "example.test/owner/repository",
-    updatedAt: NOW,
-    closedAt: state === "closed" ? NOW : null,
-    mergedAt: state === "merged" ? NOW : null,
-  } satisfies GitManager.GitBranchPullRequest;
-}
-
 interface HarnessOptions {
   readonly snapshot: SettlementSnapshot;
   readonly settings?: ContractServerSettings;
@@ -474,7 +438,6 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const candidateReads = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
   const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
   const settingsChanges = yield* PubSub.unbounded<ContractServerSettings>();
-  const mergedPullRequests = yield* PubSub.unbounded<PullRequestService.PullRequestMergeEvent>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
   const branchCalls = yield* Ref.make<
     ReadonlyArray<{ readonly cwd: string; readonly branch: string }>
@@ -589,12 +552,6 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     scriptRuns,
     publishEvent: (event: OrchestrationV2DomainEvent) => PubSub.publish(domainEvents, event),
     updateSettings,
-    publishMerge: PubSub.publish(mergedPullRequests, {
-      projectId: PROJECT_ID,
-      repository: "owner/repository",
-      number: 42,
-      mergedAt: NOW,
-    }),
     layer: ThreadSettlementService.layer.pipe(Layer.provide(layerDependencies)),
   };
 });
@@ -657,44 +614,6 @@ describe("ThreadSettlementServiceV2 worker", () => {
           expect(commands).toHaveLength(1);
           expect(commands[0]?.settledAt).toEqual(thread.latestRunCompletedAt);
           expect(commands[0]?.snapshotAt).toEqual(thread.updatedAt);
-        }).pipe(Effect.provide(fixture.layer));
-      }),
-    ),
-  );
-
-  it.effect("skips the branch recheck when a terminal link would settle nothing", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* TestClock.setTime(Date.parse(NOW));
-        const previous = {
-          projectId: PROJECT_ID,
-          repository: "owner/repository",
-          number: 1,
-          url: "https://example.test/owner/repository/pull/1",
-        };
-        const fixture = yield* makeHarness({
-          snapshot: makeSnapshot(
-            [
-              makeThread("resumed-manual", {
-                branch: "main",
-                linkedPullRequest: previous,
-                latestUserMessageAt: DateTime.makeUnsafe("2026-08-28T00:00:00.000Z"),
-              }),
-            ],
-            [makeProject()],
-          ),
-          settings: {
-            ...DEFAULT_SERVER_SETTINGS,
-            sidebarAutoSettleAfterDays: null,
-            sidebarAutoSettleOnMerge: true,
-          },
-        });
-        yield* Effect.gen(function* () {
-          const reactor = yield* ThreadSettlementService.ThreadSettlementServiceV2;
-          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
-          assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
-          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 1);
-          assert.deepStrictEqual(yield* Ref.get(fixture.branchCalls), []);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

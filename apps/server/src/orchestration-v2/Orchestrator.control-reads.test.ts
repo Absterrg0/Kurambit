@@ -537,12 +537,6 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const parentThreadId = ThreadId.make("thread:parent-pr");
     const projectId = ProjectId.make("project:parent-pr");
-    const parentPullRequest = {
-      projectId,
-      repository: "pingdotgg/t3code",
-      number: 123,
-      url: "https://github.com/pingdotgg/t3code/pull/123",
-    };
     yield* orchestrator.dispatch({
       type: "thread.create",
       commandId: CommandId.make("create-parent-pr"),
@@ -556,12 +550,6 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
       worktreePath: "/repo-worktree",
       createdBy: "user",
       creationSource: "web",
-    });
-    yield* orchestrator.dispatch({
-      type: "thread.metadata.update",
-      commandId: CommandId.make("link-parent-pr"),
-      threadId: parentThreadId,
-      linkedPullRequest: parentPullRequest,
     });
     yield* orchestrator.dispatch({
       type: "message.dispatch",
@@ -597,27 +585,6 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     assert.equal(child.thread.branch, parent.thread.branch);
     assert.equal(child.thread.worktreePath, parent.thread.worktreePath);
     assert.equal(child.thread.lineage.parentThreadId, parentThreadId);
-
-    const childPullRequest = {
-      ...parentPullRequest,
-      number: 456,
-      url: "https://github.com/pingdotgg/t3code/pull/456",
-    };
-    yield* orchestrator.dispatch({
-      type: "thread.metadata.update",
-      commandId: CommandId.make("link-child-pr"),
-      threadId: childThreadId,
-      linkedPullRequest: childPullRequest,
-    });
-    const linkedChild = yield* projections.getThreadProjection(childThreadId);
-    assert.deepEqual(linkedChild.thread.linkedPullRequest, childPullRequest);
-    assert.deepEqual(
-      linkedChild.thread.pullRequests?.map((link) => link.number),
-      [456],
-    );
-    const parentAfterChildLink = yield* projections.getThreadProjection(parentThreadId);
-    assert.deepEqual(parentAfterChildLink.thread.linkedPullRequest, parentPullRequest);
-    assert.deepEqual(parentAfterChildLink.thread.pullRequests, parent.thread.pullRequests);
   }).pipe(Effect.provide(layerTest)),
 );
 

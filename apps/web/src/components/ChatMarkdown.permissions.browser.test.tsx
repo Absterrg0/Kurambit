@@ -96,7 +96,7 @@ vi.mock(import("../localApi"), async (original) => ({
       shell: { openExternal: state.openExternal },
     }) as never,
 }));
-vi.mock(import("~/lib/openPullRequestLink"), async (original) => ({
+vi.mock(import("~/lib/openContextLink"), async (original) => ({
   ...(await original()),
   resolvePullRequestPreviewTarget: () => null,
   findProjectForChangeRequest: ((projects: readonly { id: ProjectId }[]) => projects[0]) as never,

@@ -536,7 +536,6 @@ function SurfaceIcon({
   previewCapturedUrl,
   theme,
   environmentId,
-  pullRequestStatusSeed,
 }: {
   surface: RightPanelSurface;
   previewUrl: string | null;
@@ -1065,7 +1064,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     theme={resolvedTheme}
                     environmentId={props.environmentId}
                     renaming={renamingDevice === surface.id}
-                    canRename={props.onRenameDevice !== undefined}
+                    canRename={false}
                     ownsDesktopTitleBar={ownsDesktopTitleBar}
                     onActivate={onActivateTab}
                     onClose={onCloseTab}

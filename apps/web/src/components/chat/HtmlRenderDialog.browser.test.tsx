@@ -22,7 +22,7 @@ vi.mock(import("~/browser/useOpenLink"), async (original) => ({
   ...(await original()),
   useOpenLink: () => openLink,
 }));
-vi.mock(import("~/lib/openPullRequestLink"), async (original) => ({
+vi.mock(import("~/lib/openContextLink"), async (original) => ({
   ...(await original()),
   useOpenChangeRequestLink: () => openChangeRequestLink,
 }));

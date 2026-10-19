@@ -51,9 +51,7 @@ interface SourceControlActionState<
 const ACTION_OPERATION = {
   init: "init",
   pull: "pull",
-  publishRepository: "publish_repository",
   runStackedAction: "run_change_request",
-  preparePullRequestThread: "prepare_pull_request_thread",
 } as const satisfies Record<SourceControlActionKind, VcsActionOperation>;
 
 function useAction<

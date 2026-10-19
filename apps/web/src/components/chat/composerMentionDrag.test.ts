@@ -2,8 +2,6 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   COMPOSER_MENTION_DRAG_TYPE,
-  COMPOSER_PULL_REQUEST_DRAG_TYPE,
-  encodePullRequestDragPayload,
   type ComposerMentionDropHost,
   composerMentionFromTreePath,
   dataTransferHasComposerMention,
@@ -38,10 +36,6 @@ const makeHost = (insertResult = true) => {
   const host: ComposerMentionDropHost = {
     insertMentionAtEnd: (text) => {
       log.push(`insert:${text}`);
-      return insertResult;
-    },
-    insertPullRequestAtEnd: (pullRequest) => {
-      log.push(`pr:${pullRequest.number}`);
       return insertResult;
     },
     setDragActive: (active) => void log.push(`active:${active}`),
@@ -129,36 +123,6 @@ describe("makeComposerMentionDragHandlers", () => {
     const { host, log } = makeHost();
     const handlers = makeComposerMentionDragHandlers(host);
     handlers.onDrop(makeDragEvent({ mention: "" }).event);
-    expect(log).toEqual(["active:false"]);
-  });
-
-  it("drops a pull request row as a pull request, not as text", () => {
-    const { host, log } = makeHost();
-    const handlers = makeComposerMentionDragHandlers(host);
-    const pullRequest = {
-      number: 18094,
-      title: "fix(server): queued runs land on the timeline where they started",
-      url: "https://github.com/pingdotgg/t3code/pull/18094",
-      headBranch: "fix/run-timeline-position",
-      baseBranch: "main",
-      state: "open",
-      isDraft: false,
-    } as const;
-    handlers.onDrop(
-      makeDragEvent({
-        format: COMPOSER_PULL_REQUEST_DRAG_TYPE,
-        mention: encodePullRequestDragPayload(pullRequest),
-      }).event,
-    );
-    expect(log).toEqual(["active:false", "pr:18094"]);
-  });
-
-  it("ignores a pull request payload that does not decode", () => {
-    const { host, log } = makeHost();
-    const handlers = makeComposerMentionDragHandlers(host);
-    handlers.onDrop(
-      makeDragEvent({ format: COMPOSER_PULL_REQUEST_DRAG_TYPE, mention: '{"number":0}' }).event,
-    );
     expect(log).toEqual(["active:false"]);
   });
 });

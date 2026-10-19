@@ -13,7 +13,6 @@ import { cn } from "../../lib/utils";
 import type { EnvironmentPresentation } from "../../state/environments";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
-import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { Button, InlineButton } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -65,11 +64,6 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
     }
     if (key === "worktreeSubmodules" && value in WORKTREE_SUBMODULES_LABELS) {
       return WORKTREE_SUBMODULES_LABELS[value as WorktreeSubmodules];
-    }
-    if (key === "pullRequestMergeMethod" && value in PULL_REQUEST_MERGE_METHOD_LABELS) {
-      return PULL_REQUEST_MERGE_METHOD_LABELS[
-        value as keyof typeof PULL_REQUEST_MERGE_METHOD_LABELS
-      ];
     }
     return value === "" ? "Empty" : value;
   }

@@ -641,8 +641,7 @@ export default function GitActionsControl({
     const actionStatus = statusOverride ?? gitStatusForActions;
     const actionBranch = actionStatus?.refName ?? null;
     const actionIsDefaultBranch = featureBranch ? false : isDefaultRef;
-    const actionCanCommit =
-      action === "commit" || action === "commit_push" || action === "commit_push_pr";
+    const actionCanCommit = action === "commit" || action === "commit_push";
     const includesCommit =
       actionCanCommit &&
       (action === "commit" || !!actionStatus?.hasWorkingTreeChanges || featureBranch);
@@ -651,12 +650,7 @@ export default function GitActionsControl({
       requiresDefaultBranchConfirmation(action, actionIsDefaultBranch) &&
       actionBranch
     ) {
-      if (
-        action !== "push" &&
-        action !== "create_pr" &&
-        action !== "commit_push" &&
-        action !== "commit_push_pr"
-      ) {
+      if (action !== "push" && action !== "commit_push") {
         return;
       }
       setPendingDefaultBranchAction({
@@ -880,10 +874,6 @@ export default function GitActionsControl({
     if (item.disabled) return;
     if (item.dialogAction === "push") {
       void runGitActionWithToast({ action: "push" });
-      return;
-    }
-    if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: "create_pr" });
       return;
     }
     setExcludedFiles(new Set());

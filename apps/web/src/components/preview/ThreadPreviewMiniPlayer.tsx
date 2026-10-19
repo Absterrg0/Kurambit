@@ -89,18 +89,11 @@ const RESIZE_HANDLES: ReadonlyArray<{
 
 export function ThreadPreviewMiniPlayer({ threadRef, miniPlayer }: Props) {
   const { source } = miniPlayer;
-  return source.kind === "browser" ? (
+  return (
     <BrowserMiniPlayer
       key={source.tabId}
       threadRef={threadRef}
       tabId={source.tabId}
-      miniPlayer={miniPlayer}
-    />
-  ) : (
-    <DeviceMiniPlayer
-      key={previewMiniPlayerSourceKey(source)}
-      threadRef={threadRef}
-      source={source}
       miniPlayer={miniPlayer}
     />
   );

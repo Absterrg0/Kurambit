@@ -1,4 +1,3 @@
-import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -15,6 +14,7 @@ import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as GitRepositoryService from "../../../project/GitRepositoryService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
@@ -42,6 +42,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.empty,
   Layer.mock(SecretRequests.SecretRequests)({}),
   Layer.mock(ProjectService.ProjectService)({}),
+  Layer.mock(GitRepositoryService.GitRepositoryService)({}),
   Layer.empty,
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),

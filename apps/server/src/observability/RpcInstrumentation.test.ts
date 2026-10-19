@@ -101,13 +101,13 @@ describe("WS RPC instrumentation middleware", () => {
     withTelemetry((ended) =>
       Effect.gen(function* () {
         const waiting = yield* Deferred.make<void>();
-        const group = groupOf(WS_METHODS.pullRequestsSubscribeRefreshes);
+        const group = groupOf(WS_METHODS.subscribeWorktreeSetup);
         const client = yield* RpcTest.makeClient(group).pipe(
           Effect.provide(
             Layer.mergeAll(
-              group.toLayerHandler(WS_METHODS.pullRequestsSubscribeRefreshes, () =>
+              group.toLayerHandler(WS_METHODS.subscribeWorktreeSetup, () =>
                 Stream.concat(
-                  Stream.make(1),
+                  Stream.make({ jobs: [] }),
                   Stream.fromEffect(
                     Deferred.succeed(waiting, undefined).pipe(
                       Effect.andThen(Effect.never),
@@ -123,9 +123,9 @@ describe("WS RPC instrumentation middleware", () => {
 
         yield* TestClock.adjust(Duration.seconds(1));
         yield* TestClock.setTime(0);
-        const consumer = yield* Stream.runDrain(
-          client[WS_METHODS.pullRequestsSubscribeRefreshes]({}),
-        ).pipe(Effect.forkChild);
+        const consumer = yield* Stream.runDrain(client[WS_METHODS.subscribeWorktreeSetup]({})).pipe(
+          Effect.forkChild,
+        );
         yield* Deferred.await(waiting);
         yield* TestClock.adjust(Duration.millis(250));
         yield* TestClock.setTime(0);
@@ -134,17 +134,17 @@ describe("WS RPC instrumentation middleware", () => {
         yield* Fiber.interrupt(consumer);
 
         const [rpcSpan] = rpcSpans(ended);
-        assert.equal(rpcSpan?.name, "ws.rpc.pullRequests.subscribeRefreshes");
+        assert.equal(rpcSpan?.name, "ws.rpc.subscribeWorktreeSetup");
         assert.equal(exitTag(rpcSpan), "Failure");
         const waitSpan = ended.find((span) => span.name === "refreshes.wait");
         assert.equal(parentSpanId(waitSpan), rpcSpan?.spanId);
 
         const snapshots = yield* Metric.snapshot;
         assert.equal(
-          requestCount(snapshots, WS_METHODS.pullRequestsSubscribeRefreshes, "interrupt")?.count,
+          requestCount(snapshots, WS_METHODS.subscribeWorktreeSetup, "interrupt")?.count,
           1,
         );
-        const duration = requestDuration(snapshots, WS_METHODS.pullRequestsSubscribeRefreshes);
+        const duration = requestDuration(snapshots, WS_METHODS.subscribeWorktreeSetup);
         assert.equal(duration?.count, 1);
         assert.equal(duration?.sum, 250);
       }),

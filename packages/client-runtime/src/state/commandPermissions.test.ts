@@ -12,7 +12,6 @@ import {
   AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
-  ScheduledTaskId,
   WS_METHODS,
   type AuthSessionState,
 } from "@t3tools/contracts";
@@ -50,7 +49,7 @@ const runtime = Atom.runtime(
     run: (_id: EnvironmentId, effect: Effect.Effect<unknown>) => effect,
   } as unknown as EnvironmentRegistry["Service"]),
 );
-const permissions = createCommandPermissions(runtime, WS_METHODS.scheduledTasksDelete);
+const permissions = createCommandPermissions(runtime, WS_METHODS.orchestrationDispatchCommand);
 const setup = Effect.gen(function* () {
   const registry = AtomRegistry.make();
   registry.mount(sessions(env));

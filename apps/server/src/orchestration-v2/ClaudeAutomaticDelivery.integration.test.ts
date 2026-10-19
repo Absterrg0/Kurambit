@@ -112,12 +112,7 @@ const result = (uuid: string, aborted: boolean) =>
     modelUsage: {},
   });
 
-const deliveries = [
-  "child completion",
-  "scheduled message",
-  "user steering",
-  "promoted queued message",
-] as const;
+const deliveries = ["child completion", "user steering", "promoted queued message"] as const;
 
 it.effect.each(deliveries)(
   "delivers %s with Claude's native pending-tool cancellation behavior",
@@ -289,25 +284,6 @@ it.effect.each(deliveries)(
             yield* orchestrator.dispatch(command);
             yield* orchestrator.dispatch(command);
             yield* orchestrator.recoverDelegatedTasks;
-          } else if (delivery === "scheduled message") {
-            yield* Effect.gen(function* () {
-              const { task } = yield* service.upsert(
-                yield* decodeScheduledTask({
-                  title: "Status check",
-                  prompt: "Check the four tasks.",
-                  enabled: true,
-                  schedule: { type: "interval", everyMs: 60_000 },
-                  projectId,
-                  threadId,
-                  workspaceStrategy: { type: "root" },
-                  modelSelection,
-                  runtimeMode: "full-access",
-                  interactionMode: "default",
-                }),
-              );
-              const ran = yield* service.runNow({ id: task.id });
-              assert.equal(ran.task.lastRunStatus, "succeeded");
-            }).pipe();
           } else if (delivery === "user steering") {
             yield* orchestrator.dispatch({
               type: "message.dispatch",

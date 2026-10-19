@@ -662,35 +662,6 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   );
 }
 
-function PullRequestLinksOpenInAppSetting() {
-  const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
-  const updateSettings = useUpdatePrimarySettings();
-
-  return (
-    <SettingsRow
-      {...searchableSetting("pull-request-links-open-in-app")}
-      description="Clicking a pull request link opens it in T3 Code. Turn off to open pull request links like any other link, on GitHub or your git host."
-      resetAction={
-        openInApp ? null : (
-          <SettingResetButton
-            label="open pull requests in T3 Code"
-            onClick={() => updateSettings({ pullRequestLinksOpenInApp: true })}
-          />
-        )
-      }
-      control={
-        <Switch
-          checked={openInApp}
-          onCheckedChange={(checked) =>
-            updateSettings({ pullRequestLinksOpenInApp: Boolean(checked) })
-          }
-          aria-label="Open pull requests in T3 Code"
-        />
-      }
-    />
-  );
-}
-
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
   const updateSettings = useUpdatePrimarySettings();
@@ -698,7 +669,7 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
+      description="Show the floating preview when an agent opens a browser unless the agent says otherwise."
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
           <SettingResetButton
@@ -1214,7 +1185,6 @@ export function IntegrationsSettingsPanel() {
         ) : (
           previewDefaults
         )}
-        <PullRequestLinksOpenInAppSetting />
       </SettingsSection>
     </SettingsPageContainer>
   );

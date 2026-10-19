@@ -147,9 +147,6 @@ async function renderTabs(
         terminalAvailable={false}
         diffAvailable={false}
         filesAvailable={false}
-        pullRequestAvailable={false}
-        pullRequestsAvailable={false}
-        deviceAvailable={false}
       >
         <div>content</div>
       </RightPanelTabs>,

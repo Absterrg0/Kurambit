@@ -2221,20 +2221,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           className="me-1 text-2xs text-muted-foreground/70"
           data-user-message-attribution="automation"
         >
-          {userMessage.scheduledTaskId ? (
-            <Link
-              to="/settings/scheduled-tasks"
-              search={{
-                environmentId: ctx.activeThreadEnvironmentId,
-                taskId: userMessage.scheduledTaskId,
-              }}
-              className="rounded-sm hover:text-muted-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              Sent by automation
-            </Link>
-          ) : (
-            "Sent by automation"
-          )}
+          Sent by automation
         </p>
       ) : userMessage.attribution === "t3code" ? (
         <p

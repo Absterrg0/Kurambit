@@ -14,14 +14,6 @@ const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"))
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
 const tabA = browserMiniPlayerSource("tab-a");
 const tabB = browserMiniPlayerSource("tab-b");
-const pixel: PreviewMiniPlayerSource = {
-  kind: "device",
-  hostId: "nucbox",
-  deviceId: "emulator-5580",
-  platform: "android",
-  name: "Pixel",
-};
-
 beforeEach(() => {
   usePreviewMiniPlayerStore.setState({ byThreadKey: {} });
 });
@@ -90,23 +82,5 @@ describe("previewMiniPlayerStore", () => {
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toMatchObject({ width: 460, position: { x: 1112, y: 275 }, lastInteraction: "drag" });
-  });
-
-  it("floats one source per thread, so a device replaces the browser tab", () => {
-    usePreviewMiniPlayerStore.getState().open(refA, tabA);
-    usePreviewMiniPlayerStore.getState().open(refA, pixel);
-    const floating = selectThreadPreviewMiniPlayer(
-      usePreviewMiniPlayerStore.getState().byThreadKey,
-      refA,
-    );
-
-    expect(floating).toMatchObject({ source: pixel });
-    expect(
-      selectThreadPreviewMiniPlayerTabId(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toBeNull();
-    usePreviewMiniPlayerStore.getState().open(refA, { ...pixel, name: "Renamed" });
-    expect(
-      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toBe(floating);
   });
 });

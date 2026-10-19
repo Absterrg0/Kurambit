@@ -86,9 +86,6 @@ async function renderPanel(overrides: Partial<ComponentProps<typeof RightPanelTa
         terminalAvailable={false}
         diffAvailable={false}
         filesAvailable
-        pullRequestAvailable={false}
-        pullRequestsAvailable={false}
-        deviceAvailable={false}
         {...overrides}
       >
         content

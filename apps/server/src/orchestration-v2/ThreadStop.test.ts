@@ -67,12 +67,6 @@ const layerTest = ThreadManagementService.layer.pipe(
 
 const encodeEffectRequest = Schema.encodeSync(Schema.fromJsonString(OrchestrationEffectRequestV2));
 
-const pullRequest = (number: number) => ({
-  host: "github.com",
-  repository: "pingdotgg/t3code",
-  number,
-});
-
 const createWatchingThread = (threadId: ThreadId, number: number) =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -90,7 +84,6 @@ const createWatchingThread = (threadId: ThreadId, number: number) =>
       createdBy: "user",
       creationSource: "web",
     });
-    yield* watch(threadId, number);
   });
 
 const send = (threadId: ThreadId, text: string, type: "start_immediately" | "queue_after_active") =>
@@ -143,7 +136,7 @@ const threadState = (threadId: ThreadId) =>
     };
   });
 
-it.effect("Stop ends watches, holds queues, and stops the delegated tasks under the thread", () =>
+it.effect("Stop holds queues and stops the delegated tasks under the thread", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -153,7 +146,6 @@ it.effect("Stop ends watches, holds queues, and stops the delegated tasks under 
     yield* createWatchingThread(parentThreadId, 1);
     yield* send(parentThreadId, "first", "start_immediately");
     const childThreadId = yield* delegate(parentThreadId, "child task");
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(childThreadId, 2))));
     const grandchildThreadId = yield* delegate(childThreadId, "grandchild task");
     yield* send(childThreadId, "child follow-up", "queue_after_active");
 
@@ -261,28 +253,26 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
     }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect(
-  "thread.stop ends an idle thread's watches and accepts a thread with nothing to stop",
-  () =>
-    Effect.gen(function* () {
-      const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const threadId = ThreadId.make("thread:stop-idle");
-      yield* createWatchingThread(threadId, 3);
+it.effect("thread.stop accepts an idle thread with nothing to stop", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const threadId = ThreadId.make("thread:stop-idle");
+    yield* createWatchingThread(threadId, 3);
 
-      yield* orchestrator.dispatch({
-        type: "thread.stop",
-        commandId: CommandId.make("stop-idle"),
-        threadId,
-      });
-      assert.deepEqual(yield* threadState(threadId), { runs: [], watched: [] });
+    yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("stop-idle"),
+      threadId,
+    });
+    assert.deepEqual(yield* threadState(threadId), { runs: [], watched: [] });
 
-      const again = yield* orchestrator.dispatch({
-        type: "thread.stop",
-        commandId: CommandId.make("stop-idle-again"),
-        threadId,
-      });
-      assert.lengthOf(again.storedEvents, 0);
-    }).pipe(Effect.provide(layerTest)),
+    const again = yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("stop-idle-again"),
+      threadId,
+    });
+    assert.lengthOf(again.storedEvents, 0);
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("thread.stop keeps a restart continuation of the stopped run from starting", () =>
@@ -539,7 +529,7 @@ it.effect("a delegated task that cannot be stopped fails the walk after its sibl
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("thread.stop on a finished thread refuses a late agent watch", () =>
+it.effect("thread.stop preserves a finished run", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -562,12 +552,11 @@ it.effect("thread.stop on a finished thread refuses a late agent watch", () =>
       commandId: CommandId.make("stop-finished"),
       threadId,
     });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 10))));
     assert.deepEqual(yield* threadState(threadId), { runs: ["completed"], watched: [] });
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is refused", () =>
+it.effect("thread.stop marks a turn it cannot interrupt", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -607,7 +596,6 @@ it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is
       commandId: CommandId.make("stop-lost-session"),
       threadId,
     });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 12))));
     assert.deepEqual(yield* threadState(threadId), { runs: ["running"], watched: [] });
   }).pipe(Effect.provide(layerTest)),
 );

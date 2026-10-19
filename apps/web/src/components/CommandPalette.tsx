@@ -140,11 +140,7 @@ import {
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import {
-  PULL_REQUESTS_PANEL_REF,
-  selectActiveRightPanel,
-  useRightPanelStore,
-} from "../rightPanelStore";
+import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
@@ -708,28 +704,14 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
-  const referenceThreadRef =
-    pathname === "/pull-requests"
-      ? environments.some(
-          (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
-        )
-        ? PULL_REQUESTS_PANEL_REF
-        : null
-      : activeThread
-        ? scopeThreadRef(activeThread.environmentId, activeThread.id)
-        : null;
   const activeThreadServerConfig = useServerConfigs().get(
     activeThread?.environmentId ?? ("" as EnvironmentId),
   );
   const activeThreadReferenceCopyTarget =
-    referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
+    activeThread === null
       ? null
       : resolveThreadReferenceCopyTarget({
-          threadId: referenceThreadRef.threadId,
-          openPanelPullRequestUrl,
-          pullRequests: activeThread?.pullRequests,
-          linkedPullRequestUrl:
-            activeThread?.linkedPullRequest?.url ?? activeThread?.branchPullRequest?.url ?? null,
+          threadId: activeThread.id,
         });
   const copyActiveThreadReference = async () => {
     const target = activeThreadReferenceCopyTarget;
@@ -1611,8 +1593,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:copy-thread-reference",
       searchTerms: ["copy", "pull request", "pr link", "thread id", "reference"],
-      title:
-        activeThreadReferenceCopyTarget.kind === "pull-request" ? "Copy PR link" : "Copy thread ID",
+      title: "Copy thread ID",
       description: activeThreadReferenceCopyTarget.value,
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",

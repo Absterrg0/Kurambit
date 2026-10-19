@@ -216,7 +216,7 @@ import {
   composerContextRecordsFromDraft,
   uploadedContextRecordFromDraft,
 } from "../composerContextPresentation";
-import { useOpenPrLink } from "~/lib/openPullRequestLink";
+import { useOpenPrLink } from "~/lib/openContextLink";
 import {
   collectInlineContextIds,
   stripInlineContextReferences,
@@ -409,8 +409,6 @@ function SnapShotAttachmentFrame({
 const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
-const EMPTY_PULL_REQUEST_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> =
-  [];
 
 const COMPOSER_SCROLL_COLLAPSE_THRESHOLD_PX = 24;
 const COMPOSER_SCROLL_GESTURE_RESET_MS = 120;
@@ -5549,23 +5547,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return setContextInsertionHandler(composerDraftTarget, insertContextReferencesAtCaretStable);
   }, [composerDraftTarget, insertContextReferencesAtCaretStable, setContextInsertionHandler]);
 
-  // File-tree drags land as mentions, pull request rows as their context chip. Handled in the capture phase so the
+  // File-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
   const composerMentionDragHandlers = makeComposerMentionDragHandlers({
     insertMentionAtEnd: (text) =>
       insertComposerTextAtEndStable(text, { ensureLeadingBoundary: true }),
-    insertPullRequestAtEnd: (pullRequest) => {
-      const comment = buildPullRequestReferenceContext(pullRequest);
-      const inserted = insertComposerTextAtEndStable(
-        `${formatInlineContextReference(reviewCommentContextReference(comment))} `,
-        { ensureLeadingBoundary: true },
-      );
-      if (inserted) {
-        addComposerDraftReviewComment(composerDraftTarget, comment, { appendReference: false });
-      }
-      return inserted;
-    },
     setDragActive: setIsDragOverComposer,
     onInsertRejected: () => {
       toastManager.add({
@@ -6468,9 +6455,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div role="status" aria-atomic="true" className="sr-only">
                 {composerSuggestionsVisible && composerMenuItems.length === 0
                   ? isComposerMenuLoading
-                    ? composerTriggerKind === "pull-request"
-                      ? "Finding pull request..."
-                      : "Searching workspace files..."
+                    ? "Searching workspace files..."
                     : composerMenuEmptyState
                   : ""}
               </div>

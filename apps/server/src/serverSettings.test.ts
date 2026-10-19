@@ -1,3 +1,4 @@
+import { sourceControlHostSecretName } from "./sourceControlHostSecrets.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
