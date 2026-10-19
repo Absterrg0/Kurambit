@@ -15,6 +15,8 @@ import {
   type GameActionResult,
   type GameBlenderInput,
   GameBlenderResult,
+  GameWebPlaytestInput,
+  GameWebPlaytestResult,
   type GameProcessResult,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -25,6 +27,8 @@ import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { blenderWrapper } from "./blenderScript.ts";
+import * as GameWebPlaytest from "./GameWebPlaytest.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
 export class GameService extends Context.Service<
   GameService,
@@ -48,6 +52,10 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       target: "Web" | "Linux",
     ) => Effect.Effect<GameActionResult, GameOperationError>;
+    readonly webPlaytest: (
+      threadId: ThreadId,
+      input: GameWebPlaytestInput,
+    ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
   }
 >()("t3/game/GameService") {}
 const decodeBlenderMetadata = Schema.decodeUnknownSync(
@@ -67,6 +75,7 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const preview = yield* GamePreview.GamePreview;
+  const browser = yield* PreviewBrowser.PreviewBrowser;
   const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
   const active = new Map<string, Deferred.Deferred<void>>();
   const exclusive = <A>(root: string, name: string, work: Effect.Effect<A, GameOperationError>) =>
@@ -220,6 +229,68 @@ const make = Effect.gen(function* () {
     });
     return result;
   });
+  // `builds/web` is a cache of the last export: a rebuild is needed when any
+  // game source is newer than its index.html, or the build itself is missing.
+  // Godot's own scratch (`.godot/`) is excluded because export rewrites it.
+  const webBuildFresh = Effect.fnUntraced(function* (root: string, godotProject: string) {
+    const index = NodePath.join(root, "builds/web/index.html");
+    const built = yield* Effect.promise(() =>
+      NodeFSP.stat(index)
+        .then((stat) => (stat.isFile() ? stat.mtimeMs : null))
+        .catch(() => null),
+    );
+    if (built === null) return false;
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const stack = [NodePath.join(root, godotProject)];
+        while (stack.length > 0) {
+          const directory = stack.pop()!;
+          for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
+            const path = NodePath.join(directory, entry.name);
+            if (entry.isDirectory()) {
+              if (entry.name !== ".godot") stack.push(path);
+            } else if ((await NodeFSP.stat(path)).mtimeMs > built) return true;
+          }
+        }
+        return false;
+      },
+      catch: (cause) =>
+        new GameOperationError({ operation: "Web playtest", path: index, reason: "io", cause }),
+    });
+  });
+  const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
+    if (!(yield* webBuildFresh(root, (yield* projects.read(root)).godotProject))) {
+      const exported = yield* exportGame(root, "Web");
+      if (!exported.success)
+        return yield* new GameOperationError({
+          operation: "Web playtest",
+          path: NodePath.join(root, "builds/web"),
+          reason: "command-failed",
+          detail: exported.message,
+        });
+    }
+    const url = yield* preview.open(root);
+    const executable = yield* browser.executable.pipe(
+      Effect.mapError(
+        (cause) =>
+          new GameOperationError({
+            operation: "Web playtest",
+            path: root,
+            reason: "tool-missing",
+            detail: `T3's headless browser is not ready. ${cause.message} Once the install finishes, retry game_web_playtest.`,
+          }),
+      ),
+    );
+    return yield* GameWebPlaytest.playtest({
+      executable,
+      url,
+      profileDirectory: NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`),
+      width: input.width ?? 960,
+      height: input.height ?? 540,
+      bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
+      steps: input.steps ?? [],
+    });
+  });
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
@@ -245,6 +316,8 @@ const make = Effect.gen(function* () {
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) => exportGame(root, target)),
+    webPlaytest: (threadId, input) =>
+      withRoot(threadId, "Web playtest", (root) => webPlaytest(root, input)),
     test: (threadId, script, timeoutMs = 60_000) =>
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {

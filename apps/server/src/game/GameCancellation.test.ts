@@ -13,6 +13,7 @@ import * as GameService from "./GameService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
+import { previewBrowserTestLayer } from "./gameTestLayers.ts";
 
 it.live.each(["interrupt", "stop"] as const)(
   "awaits child exit and clears tracked PIDs on %s",
@@ -67,6 +68,7 @@ it.live.each(["interrupt", "stop"] as const)(
           Layer.provide(
             Layer.mock(GamePreview.GamePreview)({ stop: () => Effect.void, url: () => null }),
           ),
+          Layer.provide(previewBrowserTestLayer()),
         );
         yield* Effect.gen(function* () {
           const game = yield* GameService.GameService;

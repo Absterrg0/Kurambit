@@ -14,7 +14,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { projectTestLayer } from "./gameTestLayers.ts";
+import { previewBrowserTestLayer, projectTestLayer } from "./gameTestLayers.ts";
 const managed = GameToolchain.toolsDirectory();
 const available =
   NodeFS.existsSync(NodePath.join(managed, "blender-4.5.14/blender")) &&
@@ -32,6 +32,7 @@ it.live.skipIf(!available)(
         Layer.provideMerge(GamePreview.layer),
         Layer.provideMerge(GameProcesses.layer),
         Layer.provide(projectTestLayer()),
+        Layer.provide(previewBrowserTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
       );
       try {

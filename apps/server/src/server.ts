@@ -680,6 +680,8 @@ const layerGame = GameService.layer.pipe(
   Layer.provideMerge(GameToolchain.layer),
   Layer.provide(GamePreview.layer),
   Layer.provide(GameProcesses.layer),
+  // Web playtest drives the same headless browser the html toolkit drives.
+  Layer.provide(PreviewBrowser.layer),
 );
 
 const layerMakeRoutes = Layer.mergeAll(

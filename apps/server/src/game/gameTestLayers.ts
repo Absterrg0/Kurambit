@@ -6,6 +6,22 @@ import { ThreadId, type Project, type OrchestrationV2ThreadShell } from "@t3tool
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+export function previewBrowserTestLayer(
+  executable?: string,
+  installed = Effect.succeed(Option.fromUndefinedOr(executable)),
+) {
+  return Layer.succeed(
+    PreviewBrowser.PreviewBrowser,
+    PreviewBrowser.PreviewBrowser.of({
+      executable:
+        executable === undefined
+          ? Effect.die("This test provides no headless browser.")
+          : Effect.succeed(executable),
+      installed,
+    }),
+  );
+}
 export function projectTestLayer(
   onLaunch?: (input: ThreadLaunchService.ThreadLaunchInput) => void,
 ) {
