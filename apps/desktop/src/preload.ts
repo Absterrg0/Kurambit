@@ -1,12 +1,4 @@
-import type {
-  DesktopBridge,
-  DesktopPreviewOpenLinkEvent,
-  DesktopPreviewPointerEvent,
-  DesktopPreviewRecordingInputEvent,
-  DesktopPreviewRecordingFrame,
-  DesktopPreviewTabState,
-  DesktopSnapShotEvent,
-} from "@t3tools/contracts";
+import type { DesktopBridge, DesktopPreviewOpenLinkEvent, DesktopPreviewPointerEvent, DesktopPreviewRecordingInputEvent, DesktopPreviewRecordingFrame, DesktopPreviewTabState, DesktopSnapShotEvent } from "@t3tools/contracts";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -92,8 +84,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL),
   getLocalEnvironmentEnabled: () =>
     ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL) !== false,
-  setLocalEnvironmentEnabled: (enabled) =>
-    ipcRenderer.invoke(IpcChannels.SET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL, enabled),
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) =>
     ipcRenderer.invoke(IpcChannels.SET_CLIENT_SETTINGS_CHANNEL, settings),

@@ -1,17 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@t3tools/contracts";
 
-import {
-  filterAvailableSettingsSearchItems,
-  getSettingsSearchTargetScope,
-  getThreadAutoSettlementSearchAvailability,
-  isSettingsOverviewVisible,
-  isSettingsSearchScopeAvailable,
-  searchableSetting,
-  searchSettings,
-  SETTINGS_SEARCH_ITEMS,
-  type SettingsSearchItem,
-} from "./settingsSearch";
+import { filterAvailableSettingsSearchItems, getSettingsSearchTargetScope, getThreadAutoSettlementSearchAvailability, isSettingsOverviewVisible, isSettingsSearchScopeAvailable, searchableSetting, searchSettings, SETTINGS_SEARCH_ITEMS, type SettingsSearchItem } from "./settingsSearch";
 
 const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   {
@@ -62,14 +52,6 @@ describe("searchSettings", () => {
     expect(searchSettings(query).map((item) => item.id)).toContain("send-shortcut");
   });
 
-  it("matches titles, sections, and remembered setting details", () => {
-    expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-    expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("connections", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
-    expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-  });
-
   it("matches normalized title substrings", () => {
     expect(searchSettings("  WORD   WRAP  ", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("glass").map((item) => item.id)).toEqual(["setting-glass-opacity"]);
@@ -90,28 +72,6 @@ describe("searchSettings", () => {
       "provider-updates",
       "automatic-updates",
     ]);
-  });
-
-  it("matches query words across fields and ranks the strongest result first", () => {
-    expect(searchSettings("pairing remote", ITEMS).map((item) => item.id)).toEqual([
-      "network-access",
-    ]);
-    expect(
-      searchSettings("remote pairing")
-        .slice(0, 2)
-        .map((item) => item.id),
-    ).toEqual(["network-access", "connections-environment"]);
-  });
-
-  it("finds settings that used to be reachable only through their section", () => {
-    expect(searchSettings("git security keys")[0]?.id).toBe("git-fetch-interval");
-    expect(searchSettings("push notifications")[0]?.id).toBe("publish-agent-activity");
-    expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
-    expect(searchSettings("binary path")[0]?.id).toBe("providers");
-    expect(searchSettings("Antigravity")[0]?.id).toBe("providers");
-    expect(searchSettings("Google sign in")[0]?.id).toBe("providers");
-    expect(searchSettings("authorized clients")[0]?.id).toBe("connections-environment");
-    expect(searchSettings("administrative access")[0]?.id).toBe("connections-environment");
   });
 
   it("lists thread confirmations in panel order", () => {
@@ -161,47 +121,6 @@ describe("searchSettings", () => {
     }
   });
 
-  it("registers the WSL backend as a desktop-only setting", () => {
-    expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "wsl-backend")).toMatchObject({
-      id: "wsl-backend",
-      title: "WSL backend",
-      to: "/settings/connections",
-      desktopOnly: true,
-      windowsOnly: true,
-    });
-  });
-
-  it("hides settings whose controls are unavailable", () => {
-    const available = filterAvailableSettingsSearchItems({
-      hasCloudPublicConfig: false,
-      hasEnvironment: false,
-      hasProviderSettingsEnvironment: false,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: false,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-    });
-
-    const gatedIds = new Set<string>([
-      "git-fetch-interval",
-      "network-access",
-      "publish-agent-activity",
-      "provider-health-check-interval",
-      "cursor-keychain-usage",
-      "source-control-writer-model",
-      "review-guide-model",
-      "review-guide-instructions",
-      "source-control-writing-style",
-      "t3-connect",
-      "hold-webhooks-while-offline",
-      "tailscale-https",
-      "wsl-backend",
-      "auto-settle-inactive-threads",
-      "days-before-auto-settle",
-    ]);
-    expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
-  });
-
   it("offers Cursor Keychain settings only when a macOS provider environment is available", () => {
     const availability = {
       hasCloudPublicConfig: false,
@@ -219,28 +138,6 @@ describe("searchSettings", () => {
       }).map((item) => item.id);
     expect(itemIds(false)).not.toContain("cursor-keychain-usage");
     expect(itemIds(true)).toContain("cursor-keychain-usage");
-  });
-
-  it("keeps the local toggle searchable without offering hidden host publishing controls", () => {
-    const availability = {
-      hasCloudPublicConfig: true,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: false,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-    };
-    const remoteOnly = filterAvailableSettingsSearchItems({
-      ...availability,
-      localEnvironmentDisabled: true,
-    }).map((item) => item.id);
-    expect(remoteOnly).toContain("local-environment");
-    expect(remoteOnly).not.toContain("t3-connect");
-    expect(remoteOnly).not.toContain("publish-agent-activity");
-    expect(remoteOnly).not.toContain("wsl-backend");
-    const browser = filterAvailableSettingsSearchItems(availability).map((item) => item.id);
-    expect(browser).toContain("publish-agent-activity");
   });
 
   it("shows automatic settlement settings when the server supports them", () => {

@@ -15,65 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import {
-  BundleNotSelfContainedError,
-  BuildCommandFailedError,
-  DesktopDmgBackgroundSourceMissingError,
-  createStageWorkspaceConfig,
-  createStagePatchedDependencies,
-  readWorkspaceConfig,
-  createBuildConfig,
-  DESKTOP_FILE_EXCLUSIONS,
-  DESKTOP_EXTRA_RESOURCES,
-  LINUX_FILE_EXCLUSIONS,
-  MAC_FILE_EXCLUSIONS,
-  InvalidMockUpdateServerPortError,
-  LinuxIconResizeError,
-  LinuxDesktopBuildPrerequisitesMissingError,
-  MacDesktopBuildPrerequisitesMissingError,
-  MacPasskeySigningConfigurationResolutionError,
-  packWindowsServerAsar,
-  preflightLinuxDesktopBuild,
-  preflightMacDesktopBuild,
-  renderMacPasskeyEntitlements,
-  resolveMacWebAuthnEntitlements,
-  resolveMacPasskeySigningConfiguration,
-  resolveDesktopRuntimeDependencies,
-  resolveMergedStageDependencies,
-  resolveFffNativeDependencies,
-  resolveDesktopBuildIconAssets,
-  resolveDesktopProductName,
-  resolveDesktopUpdateChannel,
-  resolveDesktopWebAssetBrand,
-  resolveResourceMonitorRustTargets,
-  resolveWindowsServerAsarIgnoreGlobs,
-  resourceMonitorExecutableName,
-  resolveGitHubPublishConfig,
-  resolveMockUpdateServerPort,
-  resolveMockUpdateServerUrl,
-  resolvePackageManagerUserAgent,
-  stageLinuxIconSize,
-  stageDesktopDmgBackground,
-  stageResourceMonitor,
-  stageLinuxCaptureHelper,
-  stageWslRuntimeArchive,
-  STAGE_INSTALL_ARGS,
-  ancestorNodeModulesPaths,
-  copyDirectoryPreservingSymlinks,
-  LinuxBrowserSecretHostError,
-  stageBrowserSecret,
-  validateWindowsPackagedPayload,
-  WindowsPrimaryNativeProbeError,
-  WindowsPackagedPayloadValidationError,
-  WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
-  stageCursorSdkPlatformPackages,
-  WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
-  WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
-  WINDOWS_SERVER_ASAR_RESOURCE,
-  WSL_RUNTIME_ARCHIVE_HASH_NAME,
-  WSL_RUNTIME_ARCHIVE_NAME,
-  wslRuntimeArchiveStem,
-} from "./build-desktop-artifact.ts";
+import { BundleNotSelfContainedError, BuildCommandFailedError, DesktopDmgBackgroundSourceMissingError, createStageWorkspaceConfig, createStagePatchedDependencies, readWorkspaceConfig, createBuildConfig, DESKTOP_FILE_EXCLUSIONS, DESKTOP_EXTRA_RESOURCES, LINUX_FILE_EXCLUSIONS, MAC_FILE_EXCLUSIONS, InvalidMockUpdateServerPortError, LinuxIconResizeError, LinuxDesktopBuildPrerequisitesMissingError, MacDesktopBuildPrerequisitesMissingError, MacPasskeySigningConfigurationResolutionError, packWindowsServerAsar, preflightLinuxDesktopBuild, preflightMacDesktopBuild, renderMacPasskeyEntitlements, resolveMacWebAuthnEntitlements, resolveMacPasskeySigningConfiguration, resolveDesktopRuntimeDependencies, resolveMergedStageDependencies, resolveFffNativeDependencies, resolveDesktopBuildIconAssets, resolveDesktopProductName, resolveDesktopUpdateChannel, resolveDesktopWebAssetBrand, resolveResourceMonitorRustTargets, resolveWindowsServerAsarIgnoreGlobs, resourceMonitorExecutableName, resolveGitHubPublishConfig, resolveMockUpdateServerPort, resolveMockUpdateServerUrl, resolvePackageManagerUserAgent, stageLinuxIconSize, stageDesktopDmgBackground, stageResourceMonitor, stageLinuxCaptureHelper, STAGE_INSTALL_ARGS, ancestorNodeModulesPaths, copyDirectoryPreservingSymlinks, LinuxBrowserSecretHostError, stageBrowserSecret, validateWindowsPackagedPayload, WindowsPrimaryNativeProbeError, WindowsPackagedPayloadValidationError, WINDOWS_NATIVE_ASAR_UNPACK_GLOB, stageCursorSdkPlatformPackages, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT, WINDOWS_SERVER_ASAR_IGNORE_GLOBS, WINDOWS_SERVER_ASAR_RESOURCE } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -161,7 +103,6 @@ const WINDOWS_PAYLOAD_FIXTURE_VERSION = "1.2.3";
 const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(function* (input: {
   readonly copyUnpackedNatives: boolean;
   readonly serverEntrySource?: string;
-  readonly wslRuntime?: "valid" | "loose-server-tree" | "missing-pty" | "bad-digest";
   readonly targetArch?: "x64" | "arm64";
   readonly ptyPrebuildArch?: "x64" | "arm64";
 }) {
@@ -200,37 +141,7 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
 
-  if (input.wslRuntime !== undefined) {
-    const stem = wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, input.targetArch ?? "x64");
-    const sourceArchivePath =
-      input.wslRuntime === "loose-server-tree"
-        ? yield* makeLinuxCliArchiveFixture({
-            root: path.join(tempDir, "wsl-runtime"),
-            stem: "apps",
-            omitMembers: ["apps/t3", "apps/client/index.html"],
-            extraMembers: ["apps/server/dist/bin.mjs", "node_modules/node-pty/package.json"],
-          })
-        : yield* makeLinuxCliArchiveFixture({
-            root: path.join(tempDir, "wsl-runtime"),
-            stem,
-            ...(input.wslRuntime === "missing-pty" || input.ptyPrebuildArch !== undefined
-              ? { omitMembers: [`${stem}/node_modules/node-pty/build/Release/pty.node`] }
-              : {}),
-            ...(input.ptyPrebuildArch !== undefined
-              ? {
-                  extraMembers: [
-                    `${stem}/node_modules/node-pty/prebuilds/linux-${input.ptyPrebuildArch}/pty.node`,
-                  ],
-                }
-              : {}),
-          });
-    const archivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
-    const hashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
-    yield* stageWslRuntimeArchive({ sourceArchivePath, archivePath, hashPath });
-    if (input.wslRuntime === "bad-digest") {
-      yield* fs.writeFileString(hashPath, `${"0".repeat(64)}\n`);
-    }
-  }
+
 
   return {
     stageDistDir,
@@ -350,8 +261,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(
       resolveDesktopRuntimeDependencies(
         {
-          "@clerk/electron": "catalog:",
-          "@clerk/electron-passkeys": "catalog:",
+          "example-electron": "catalog:",
+          "example-native": "catalog:",
           "@crowecawcaw/xa11y": "0.13.0",
           "@effect/platform-node": "catalog:",
           "@napi-rs/keyring": "^1.3.0",
@@ -365,14 +276,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           "playwright-core": "1.60.0",
         },
         {
-          "@clerk/electron": "0.0.37",
-          "@clerk/electron-passkeys": "0.0.3",
-          "@effect/platform-node": "4.0.0-beta.59",
+          "example-electron": "0.0.37",
+            "@effect/platform-node": "4.0.0-beta.59",
           effect: "4.0.0-beta.59",
         },
       ),
       {
-        "@clerk/electron-passkeys": "0.0.3",
         "@crowecawcaw/xa11y": "0.13.0",
         "@napi-rs/keyring": "^1.3.0",
         "ffi-rs": "1.3.2",
@@ -544,7 +453,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("unpacks native binaries while keeping their JavaScript and metadata archived", () => {
     for (const file of [
       "node_modules/@napi-rs/keyring/keyring.win32-x64-msvc.node",
-      "node_modules/@clerk/electron-passkeys/electron-passkeys.win32-x64-msvc.node",
+      "node_modules/example-native/electron-passkeys.win32-x64-msvc.node",
       "node_modules/@ff-labs/fff-bin-win32-x64/fff_c.dll",
       "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
       "node_modules/native/addon.so",
@@ -560,7 +469,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     for (const file of [
       "node_modules/@napi-rs/keyring/index.js",
       "node_modules/@napi-rs/keyring/keytar.js",
-      "node_modules/@clerk/electron-passkeys/index.js",
+      "node_modules/example-native/index.js",
     ]) {
       assert.isFalse(
         NodePath.matchesGlob(file, WINDOWS_NATIVE_ASAR_UNPACK_GLOB),
@@ -1403,27 +1312,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it("derives macOS passkey signing configuration from the Clerk publishable key", () => {
-    const configuration = resolveMacPasskeySigningConfiguration({
-      T3CODE_APPLE_TEAM_ID: "abc1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("example.clerk.accounts.dev$")}`,
-    });
-
-    assert.deepStrictEqual(configuration, {
-      appId: "dev.gamestudio.app",
-      teamId: "ABC1234567",
-      rpDomains: ["example.clerk.accounts.dev"],
-      provisioningProfilePath: "/tmp/t3code.provisionprofile",
-    });
-  });
-
   it("normalizes explicit macOS passkey RP domains and renders required entitlements", () => {
     const configuration = resolveMacPasskeySigningConfiguration({
       T3CODE_APPLE_TEAM_ID: "ABC1234567",
       T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS:
-        " Clerk.Example.com,example.clerk.accounts.dev,clerk.example.com ",
+      GAME_STUDIO_PASSKEY_RP_DOMAINS:
+        " Passkeys.Example.com,passkeys.example.test,passkeys.example.com ",
     });
     const entitlements = renderMacPasskeyEntitlements(configuration, {
       touchIdKeychainAccessGroup: undefined,
@@ -1431,12 +1325,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration.rpDomains, [
-      "clerk.example.com",
-      "example.clerk.accounts.dev",
+      "passkeys.example.com",
+      "passkeys.example.test",
     ]);
     assert.include(entitlements, "<string>ABC1234567.dev.gamestudio.app</string>");
-    assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
-    assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
+    assert.include(entitlements, "<string>webcredentials:passkeys.example.com</string>");
+    assert.include(entitlements, "<string>webcredentials:passkeys.example.test</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
     assert.notInclude(entitlements, "keychain-access-groups");
     assert.notInclude(entitlements, "com.apple.developer.web-browser.public-key-credential");
@@ -1491,7 +1385,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
 
     const entitlements = renderMacPasskeyEntitlements(
-      { ...configuration, rpDomains: ["clerk.example.com"], provisioningProfilePath: "" },
+      { ...configuration, rpDomains: ["passkeys.example.com"], provisioningProfilePath: "" },
       resolveMacWebAuthnEntitlements(
         profile(
           `${teamWildcardGroups}<key>com.apple.developer.web-browser.public-key-credential</key><true/>`,

@@ -1,33 +1,15 @@
-import { withLocalTracing as traceLocalHandlerWork } from "@t3tools/shared/relayTracing";
-import {
-  AuthOrchestrationReadScope,
-  EnvironmentHttpApi,
-  type OrchestrationProjectShell,
-} from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, EnvironmentHttpApi, type OrchestrationProjectShell } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentInternal,
-  failEnvironmentInvalidRequest,
-  failEnvironmentNotFound,
-  requireEnvironmentScope,
-} from "../auth/http.ts";
+import { annotateEnvironmentRequest, failEnvironmentInternal, failEnvironmentInvalidRequest, failEnvironmentNotFound, requireEnvironmentScope } from "../auth/http.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
-import {
-  buildBoundedThreadProjection,
-  decodeThreadHistoryCursor,
-  InvalidThreadHistoryCursorError,
-  THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
-  THREAD_HISTORY_PAGE_POLICY,
-  OLDER_THREAD_USER_TURN_LIMIT,
-} from "./threadHistoryPaging.ts";
+import { buildBoundedThreadProjection, decodeThreadHistoryCursor, InvalidThreadHistoryCursorError, THREAD_HISTORY_SNAPSHOT_ROW_LIMIT, THREAD_HISTORY_PAGE_POLICY, OLDER_THREAD_USER_TURN_LIMIT } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import { buildActiveShellSnapshot, loadShellSnapshotParts } from "./ShellStream.ts";
@@ -155,7 +137,6 @@ export const layer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           return yield* loadShellSnapshot().pipe(
-            traceLocalHandlerWork,
             Effect.catch((cause) =>
               failEnvironmentInternal("orchestration_snapshot_failed", cause),
             ),
@@ -170,7 +151,7 @@ export const layer = HttpApiBuilder.group(
           const snapshot = yield* loadThreadSnapshot(
             args.params.threadId,
             "orchestration_thread_snapshot_failed",
-          ).pipe(traceLocalHandlerWork);
+          );
           return {
             snapshotSequence: snapshot.snapshotSequence,
             projection: snapshot.projection,
@@ -184,7 +165,6 @@ export const layer = HttpApiBuilder.group(
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           return yield* threadManagement.getThreadTranscript(args.params.threadId).pipe(
             Effect.provideService(ServerEnvironment.ServerEnvironmentIdentity, environment),
-            traceLocalHandlerWork,
             Effect.catch(
               Effect.fnUntraced(function* (error) {
                 if (isThreadTranscriptTooLargeError(error)) {
@@ -208,7 +188,6 @@ export const layer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId).pipe(
-            traceLocalHandlerWork,
           );
           const bounded = buildBoundedThreadProjection({
             projection: snapshot.projection,
@@ -243,7 +222,6 @@ export const layer = HttpApiBuilder.group(
               args.query.view === "conversation",
             )
             .pipe(
-              traceLocalHandlerWork,
               Effect.catch(
                 Effect.fnUntraced(function* (cause) {
                   if (isThreadNotFound(cause))

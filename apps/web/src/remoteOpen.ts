@@ -1,18 +1,13 @@
 import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
-import {
-  REMOTE_CAPABLE_EDITOR_IDS,
-  type EditorId,
-  type EnvironmentId,
-  type RemoteOpenTarget,
-} from "@t3tools/contracts";
+import { REMOTE_CAPABLE_EDITOR_IDS, type EditorId, type EnvironmentId, type RemoteOpenTarget } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";
 
-import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
-import { isLoopbackHostname } from "~/environments/primary/target";
+
+
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { environmentPresentations } from "~/state/presentation";
 
@@ -54,32 +49,7 @@ export function resolveRemoteOpenState(input: {
   readonly remoteOpenTargets: ReadonlyArray<RemoteOpenTarget> | undefined;
   readonly isDesktopRenderer: boolean;
 }): RemoteOpenState {
-  const { target } = input;
-  if (target === null) {
-    return LOCAL_EXEC;
-  }
-  if (target._tag === "PrimaryConnectionTarget") {
-    // The desktop app manages its own primary backend, so it is always on this machine even
-    // when its URL is not loopback (wsl-only mode binds the WSL2 NAT address).
-    if (input.isDesktopRenderer) {
-      return LOCAL_EXEC;
-    }
-    const hostname = parseHostname(target.httpBaseUrl);
-    if (hostname !== null && isLoopbackHostname(hostname)) {
-      return LOCAL_EXEC;
-    }
-  } else if (isDesktopLocalConnectionTarget(target)) {
-    return LOCAL_EXEC;
-  }
-
-  if (input.sshAlias !== null && input.sshAlias.length > 0) {
-    return { mode: "remote-links", host: { kind: "ssh-alias", host: input.sshAlias } };
-  }
-  const advertised = input.remoteOpenTargets?.[0];
-  if (advertised !== undefined) {
-    return { mode: "remote-links", host: advertised };
-  }
-  return REMOTE_UNAVAILABLE;
+  return LOCAL_EXEC;
 }
 
 function remoteOpenStatesEqual(previous: RemoteOpenState, next: RemoteOpenState): boolean {

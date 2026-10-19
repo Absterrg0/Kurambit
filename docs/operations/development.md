@@ -35,28 +35,7 @@ Read ports from the `[dev-runner]` output. Worktrees derive stable preferences f
 but occupied ports can shift them. `T3CODE_PORT_OFFSET` or `T3CODE_DEV_INSTANCE` can select a
 different preference when needed.
 
-### Sharing and remote debugging
-
-`vp run dev --share` publishes the web port over the machine's tailnet and prints a pairing URL
-for that origin. Give the tester the complete URL, including its token. The dev runner removes
-its mapping on exit.
-
-Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies the backend through the browser's
-origin so the same build works over localhost and remote connections.
-
-Shared runs enable bundled dev to avoid a network round trip for each import level.
-`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. Two reload traps matter
-when changing this setup:
-
-- The web entry must dynamically import the app so React refresh initializes before application
-  chunks. Static imports can work on first load and fail after a route split.
-- Bundled dev rebuilds Tailwind through watched files. Its ordinary Vite hot-update hook expects
-  a server/module graph that Rolldown does not provide.
-
-The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts) and
-[Tailwind plugin](../../apps/web/vite/tailwind.ts).
-
-#### Reusable dev credential
+### Reusable dev credential
 
 Use this only on a hostname where you trust every service. Browsers send cookies to all ports
 on that hostname. Any service you visit there can receive the reusable admin credential,
@@ -201,12 +180,11 @@ rustup target add x86_64-pc-windows-msvc
 rustup target add aarch64-pc-windows-msvc
 ```
 
-NSIS is downloaded by electron-builder. WSL support additionally needs the Linux CLI archive
-passed as `--wsl-runtime`; see the
-[release runbook](./release.md#windows-payload-topology-and-update-validation).
+NSIS is downloaded by electron-builder.
 
 ### Signing and passkeys
 
 Add `--signed` after configuring the platform credentials in the
-[release runbook](./release.md). macOS passkeys need a signed, provisioned app; follow the
-[Connect setup](./connect-setup.md#desktop-passkeys) for local signing and renderer HMR.
+[release runbook](./release.md). Browser passkeys on macOS require a signed,
+provisioned app. Set `GAME_STUDIO_PASSKEY_RP_DOMAINS` to the relying-party domains
+covered by the provisioning profile.

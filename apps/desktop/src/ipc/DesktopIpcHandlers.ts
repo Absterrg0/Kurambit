@@ -4,66 +4,17 @@ import { receiveProviderAuthCallback, cancelProviderAuthCallback } from "./metho
 import * as DesktopIpc from "./DesktopIpc.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
-import {
-  clearConnectionCatalog,
-  getConnectionCatalog,
-  setConnectionCatalog,
-} from "./methods/connectionCatalog.ts";
-import {
-  getLocalEnvironmentEnabled,
-  setLocalEnvironmentEnabled,
-} from "./methods/localEnvironment.ts";
+import { clearConnectionCatalog, getConnectionCatalog, setConnectionCatalog } from "./methods/connectionCatalog.ts";
+import { getLocalEnvironmentEnabled } from "./methods/localEnvironment.ts";
 import { getAdvertisedEndpoints, getServerExposureState } from "./methods/serverExposure.ts";
-import {
-  checkForUpdate,
-  downloadUpdate,
-  getUpdateState,
-  installUpdate,
-  setUpdateChannel,
-} from "./methods/updates.ts";
-import {
-  getAppBranding,
-  getLocalEnvironmentBootstraps,
-  getLocalEnvironmentBearerToken,
-  getSystemLocale,
-  getWindowFullscreenState,
-  openExternal,
-  openSystemSettings,
-  checkSystemPermission,
-  pasteAsText,
-  probeRemoteEditors,
-  pickFolder,
-  pickProjectFavicon,
-  pickThemeFiles,
-  setTheme,
-  showContextMenu,
-} from "./methods/window.ts";
-import {
-  acknowledgeSnapShot,
-  checkSnapShotShortcut,
-  dismissSnapShotAnimation,
-  getSnapShotState,
-  setupSnapShot,
-  previewSnapShotConfig,
-  applySnapShotConfig,
-  listPendingSnapShots,
-  readSnapShot,
-  requestSnapShotPermissions,
-  setSnapShotAnimationDestination,
-  setSnapShotShortcutSuppressed,
-} from "./methods/snapShot.ts";
+import { checkForUpdate, downloadUpdate, getUpdateState, installUpdate, setUpdateChannel } from "./methods/updates.ts";
+import { getAppBranding, getLocalEnvironmentBootstraps, getLocalEnvironmentBearerToken, getSystemLocale, getWindowFullscreenState, openExternal, openSystemSettings, checkSystemPermission, pasteAsText, probeRemoteEditors, pickFolder, pickProjectFavicon, pickThemeFiles, setTheme, showContextMenu } from "./methods/window.ts";
+import { acknowledgeSnapShot, checkSnapShotShortcut, dismissSnapShotAnimation, getSnapShotState, setupSnapShot, previewSnapShotConfig, applySnapShotConfig, listPendingSnapShots, readSnapShot, requestSnapShotPermissions, setSnapShotAnimationDestination, setSnapShotShortcutSuppressed } from "./methods/snapShot.ts";
 import * as PreviewIpc from "./methods/preview.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import * as WebLinksIpc from "./methods/webLinks.ts";
-import {
-  completeLegacyLocalStorage,
-  takeLegacyLocalStorage,
-} from "./methods/legacyLocalStorage.ts";
-import {
-  getCliCommandState,
-  installCliCommand,
-  uninstallCliCommand,
-} from "./methods/cliCommand.ts";
+import { completeLegacyLocalStorage, takeLegacyLocalStorage } from "./methods/legacyLocalStorage.ts";
+import { getCliCommandState, installCliCommand, uninstallCliCommand } from "./methods/cliCommand.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
@@ -81,7 +32,6 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handleSync(getWindowFullscreenState);
   yield* ipc.handleSync(getLocalEnvironmentBootstraps);
   yield* ipc.handleSync(getLocalEnvironmentEnabled);
-  yield* ipc.handle(setLocalEnvironmentEnabled);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
 
   yield* ipc.handle(getClientSettings);

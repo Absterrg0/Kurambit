@@ -1,6 +1,6 @@
 # Connection runtime
 
-Web, the desktop renderer, and mobile share one connection owner per environment
+The local web UI and desktop renderer share one connection owner per environment
 in `packages/client-runtime`. Platform code supplies storage, credentials, network
 signals, and application lifecycle events. React views consume the runtime.
 Keeping retries and session lifetime here prevents competing reconnect loops when
@@ -18,32 +18,20 @@ failures wait for a wakeup instead of spending attempts on unchanged conditions.
 
 Foregrounding, an explicit retry, and an offline report probe the established
 session, and only a failed probe reconnects. Offline reports are often wrong, for
-example for a loopback server. A long mobile background suspension is the one
-exception: it replaces the session at once, because the OS can kill a socket
-without reporting closure, and a probe would hold a dead socket in "Resuming"
-until it times out. That fresh attempt runs even while the network reports
-offline. Foregrounding also wakes a pending retry immediately and
+example for a loopback server. Foregrounding also wakes a pending retry immediately and
 leaves an ordinary in-flight attempt alone.
 
 The [registry](../../packages/client-runtime/src/connection/registry.ts) scopes
 connections by environment. An involuntary disconnect retains the registration
 and cached data. Explicit removal closes the scope and clears credentials,
-projections, and platform-owned state such as drafts. Cloud-account changes apply
-to relay registrations; they must not discard directly paired environments.
+projections, and platform-owned state such as drafts. 
 
 ## HTTP authorization
 
-RPC sessions authenticate at socket upgrade, while HTTP requests need current
-credentials from the
-[authorization service](../../packages/client-runtime/src/authorization/service.ts).
-Replacing a healthy socket for HTTP renewal would interrupt conversations and
-change the transport generation without a transport failure. Credential expiry
-does not close the socket, and refresh failure belongs to the HTTP operation.
-
-Session listings must retain unrevoked connected sessions after credential expiry
-so an open connection does not disappear from connection management. This does
-not extend the credential's lifetime. New HTTP requests and socket upgrades still
-require valid credentials.
+RPC sessions authenticate at socket upgrade. HTTP requests use the same local
+browser session cookie, or the desktop's local bearer token. The desktop exchanges
+a bootstrap credential for a session and requests a fresh ticket for each WebSocket
+upgrade. Credentials stay inside the local HTTP client and authorization service.
 
 ## Transport health and data freshness are separate
 

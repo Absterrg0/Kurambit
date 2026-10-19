@@ -1,18 +1,8 @@
-import { withLocalTracing as traceLocalHandlerWork } from "@t3tools/shared/relayTracing";
-import {
-  AuthOrchestrationReadScope,
-  EnvironmentHttpApi,
-  requiredScopesForProjectMutation,
-} from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, EnvironmentHttpApi, requiredScopesForProjectMutation } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentInternal,
-  failEnvironmentInvalidRequest,
-  requireEnvironmentScope,
-} from "../auth/http.ts";
+import { annotateEnvironmentRequest, failEnvironmentInternal, failEnvironmentInvalidRequest, requireEnvironmentScope } from "../auth/http.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as ProjectService from "./ProjectService.ts";
 import { projectMutationOperation } from "./ProjectMutation.ts";
@@ -44,7 +34,6 @@ export const layer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           return yield* projects.snapshot.pipe(
-            traceLocalHandlerWork,
             Effect.catch((cause) => failEnvironmentInternal("project_snapshot_failed", cause)),
           );
         }),
@@ -59,7 +48,7 @@ export const layer = HttpApiBuilder.group(
           const operation = projectMutationOperation(projects, args.payload);
           return yield* startup
             .enqueueCommand(operation)
-            .pipe(traceLocalHandlerWork, Effect.catch(failProjectMutation));
+            .pipe(Effect.catch(failProjectMutation));
         }),
       );
   }),

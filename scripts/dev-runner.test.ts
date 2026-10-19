@@ -15,17 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import {
-  checkPortAvailabilityOnHosts,
-  createDevRunnerEnv,
-  devPortProbeHosts,
-  findFirstAvailableOffset,
-  getDevRunnerModeArgs,
-  isBrowserAllowedPort,
-  resolveModePortOffsets,
-  resolveOffset,
-  runDevRunnerWithInput,
-} from "./dev-runner.ts";
+import { checkPortAvailabilityOnHosts, createDevRunnerEnv, devPortProbeHosts, findFirstAvailableOffset, getDevRunnerModeArgs, isBrowserAllowedPort, resolveModePortOffsets, resolveOffset, runDevRunnerWithInput } from "./dev-runner.ts";
 
 const emptyConfigLayer = ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }));
 const netServiceLayer = Layer.succeed(NetService.NetService, {
@@ -955,84 +945,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
-    // A shared origin means a remote browser, where unbundled dev's
-    // per-module waterfall pays a tailnet round trip per import level. The
-    // runner defaults bundled dev on for the spawned stack, but only
-    // defaults: an explicit T3CODE_BUNDLED_DEV (even "0") must pass through.
-    describe("--share bundled dev default", () => {
-      const shareSpawnedEnv = (input: { readonly ambientBundledDev: string | undefined }) =>
-        Effect.gen(function* () {
-          let captured: Record<string, string | undefined> | undefined;
-          const spawnerLayer = Layer.succeed(
-            ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make((command) => {
-              const spawned = command as unknown as {
-                readonly command: string;
-                readonly args: ReadonlyArray<string>;
-                readonly options?: { readonly env?: Record<string, string | undefined> };
-              };
-              if (spawned.command === "vp") {
-                captured = spawned.options?.env;
-                return Effect.succeed(mockProcess(0));
-              }
-              return Effect.succeed(
-                ChildProcessSpawner.makeHandle({
-                  pid: ChildProcessSpawner.ProcessId(2),
-                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-                  isRunning: Effect.succeed(false),
-                  kill: () => Effect.void,
-                  unref: Effect.succeed(Effect.void),
-                  stdin: Sink.drain,
-                  stdout: spawned.args.includes("status")
-                    ? Stream.make(
-                        new TextEncoder().encode(
-                          JSON.stringify({ Self: { DNSName: "host.example.ts.net." } }),
-                        ),
-                      )
-                    : Stream.empty,
-                  stderr: Stream.empty,
-                  all: Stream.empty,
-                  getInputFd: () => Sink.drain,
-                  getOutputFd: () => Stream.empty,
-                }),
-              );
-            }),
-          );
-
-          yield* runDevRunnerWithInput({
-            ...devServerInput,
-            mode: "dev",
-            port: undefined,
-            share: true,
-          }).pipe(
-            Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
-            Effect.provideService(HostProcess.Platform, "linux"),
-            Effect.provideService(
-              HostProcess.Environment,
-              input.ambientBundledDev === undefined
-                ? {}
-                : { T3CODE_BUNDLED_DEV: input.ambientBundledDev },
-            ),
-          );
-
-          return captured;
-        });
-
-      it.effect("defaults T3CODE_BUNDLED_DEV=1 for a shared run", () =>
-        Effect.gen(function* () {
-          const env = yield* shareSpawnedEnv({ ambientBundledDev: undefined });
-          assert.equal(env?.T3CODE_BUNDLED_DEV, "1");
-        }),
-      );
-
-      it.effect("keeps an explicit T3CODE_BUNDLED_DEV=0 opt-out", () =>
-        Effect.gen(function* () {
-          const env = yield* shareSpawnedEnv({ ambientBundledDev: "0" });
-          assert.equal(env?.T3CODE_BUNDLED_DEV, "0");
-        }),
-      );
-    });
-
     it.effect("reports non-zero exits without manufacturing a cause", () => {
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
@@ -1184,7 +1096,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           const path = yield* Path.Path;
           const home = yield* spawnedHome({
             t3Home: undefined,
-            cwd: NodeOS.tmpdir(),
+            cwd: "/",
             ambientHome: "/home/user/.t3",
           });
           assert.equal(home, path.resolve("/home/user/.t3"));
@@ -1195,7 +1107,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         Effect.gen(function* () {
           const home = yield* spawnedHome({
             t3Home: undefined,
-            cwd: NodeOS.tmpdir(),
+            cwd: "/",
             ambientHome: undefined,
             upstreamHome: "/live-t3",
           });
@@ -1207,7 +1119,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         Effect.gen(function* () {
           const home = yield* spawnedHome({
             t3Home: undefined,
-            cwd: NodeOS.tmpdir(),
+            cwd: "/",
             ambientHome: undefined,
           });
           assert.equal(home, undefined);

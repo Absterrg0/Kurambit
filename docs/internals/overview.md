@@ -11,7 +11,7 @@ Provider processes, terminals, Git, and project files belong to the server. Shar
 domain state belongs in `packages/client-runtime`; clients supply platform services and UI.
 Keeping that logic shared prevents reconnect and multi-environment behavior from diverging between
 web and mobile. See [connection runtime](./connection-runtime.md) and
-[remote environments](./remote.md).
+the local connection runtime.
 
 The [RPC contract](../../packages/contracts/src/rpc.ts) is the boundary between independently
 versioned clients and servers. Subscriptions send the state a client needs, so a client viewing one
