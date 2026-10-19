@@ -141,3 +141,37 @@ it.effect("rejects absent or invalid manifests and paths outside a game", () =>
     }
   }),
 );
+
+it.effect("reopens a registered workspace after reconstructing the game service", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-reopen-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const registration = projectTestLayer();
+    const freshService = () =>
+      GameProjectService.layer.pipe(
+        Layer.provide(registration),
+        Layer.provide(GameProcesses.layer),
+        Layer.fresh,
+      );
+    const created = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        return yield* service.create({
+          name: "Reopen",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+        });
+      }).pipe(Effect.provide(freshService())),
+    );
+    const reopened = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        return yield* service.open({ path: created.root, modelSelection: selection });
+      }).pipe(Effect.provide(freshService())),
+    );
+    expect(reopened.projectId).toBe(created.projectId);
+  }).pipe(Effect.scoped),
+);

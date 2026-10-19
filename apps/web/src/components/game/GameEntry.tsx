@@ -1,9 +1,12 @@
+import { useGameDialogStore } from "./gameDialogStore";
+import { ComposerFooterModeControls } from "../chat/ComposerFooterModeControls";
+import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { ensureLocalApi } from "../../localApi";
 import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { type EnvironmentId, type ModelSelection } from "@t3tools/contracts";
+import { type EnvironmentId, type ModelSelection, type RuntimeMode } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -28,7 +31,38 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 export function GameEntry() {
   const environmentId = usePrimaryEnvironmentId();
-  return environmentId ? <GameEntryForEnvironment environmentId={environmentId} /> : null;
+  return environmentId ? <GameEntryButtons environmentId={environmentId} /> : null;
+}
+function GameEntryButtons({ environmentId }: { environmentId: EnvironmentId }) {
+  const canCreate = useAtomValue(gameEnvironment.create.permissionAtom(environmentId));
+  const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
+  return (
+    <div className="flex flex-wrap justify-center gap-2 p-2">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!canCreate}
+        onClick={() => useGameDialogStore.getState().show("create")}
+      >
+        New game
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={!canOpen}
+        onClick={() => useGameDialogStore.getState().show("open")}
+      >
+        Open game
+      </Button>
+    </div>
+  );
+}
+export function GameDialogHost() {
+  const environmentId = usePrimaryEnvironmentId();
+  const dialog = useGameDialogStore((state) => state.dialog);
+  return environmentId && dialog ? (
+    <GameEntryForEnvironment key={`${environmentId}:${dialog}`} environmentId={environmentId} />
+  ) : null;
 }
 function GameEntryForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
@@ -50,9 +84,19 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const create = useAtomCommand(gameEnvironment.create, { reportFailure: false });
   const open = useAtomCommand(gameEnvironment.open, { reportFailure: false });
   const navigate = useNavigate();
-  const [dialog, setDialog] = useState<"create" | "open" | null>(null);
+  const dialog = useGameDialogStore((state) => state.dialog);
+  const setDialog = useGameDialogStore((state) => state.show);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("full-access");
+  const supportedModes = entries.find((entry) => entry.instanceId === model.instanceId)?.snapshot
+    .supportedRuntimeModes;
+  const compatibleModes = runtimeModeOptions.filter(
+    (mode) => !supportedModes?.length || supportedModes.includes(mode),
+  );
+  const chosenMode = compatibleModes.includes(runtimeMode)
+    ? runtimeMode
+    : (compatibleModes[0] ?? "full-access");
   const [name, setName] = useState("");
-  const [directory, setDirectory] = useState("~/Games");
+  const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
   const [busy, setBusy] = useState(false);
@@ -86,6 +130,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 brief,
                 artDirection,
                 modelSelection: model,
+                runtimeMode: chosenMode,
               },
             })
           : await open({ environmentId, input: { path: directory, modelSelection: model } });
@@ -106,32 +151,6 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   };
   return (
     <>
-      <div className="flex flex-wrap justify-center gap-2 p-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canCreate}
-          onClick={() => {
-            setDirectory("~/Games");
-            setError(null);
-            setDialog("create");
-          }}
-        >
-          New game
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={!canOpen}
-          onClick={() => {
-            setDirectory("");
-            setError(null);
-            setDialog("open");
-          }}
-        >
-          Open game
-        </Button>
-      </div>
       <Dialog
         open={dialog !== null}
         onOpenChange={(value) => {
@@ -220,6 +239,22 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                 setSelection({ instanceId, model: selectedModel })
               }
             />
+            {dialog === "create" ? (
+              <div className="flex items-center">
+                <span className="text-sm">Runtime mode</span>
+                <ComposerFooterModeControls
+                  interactionMode="default"
+                  showInteractionModeToggle={false}
+                  runtimeMode={chosenMode}
+                  runtimeModeOptions={compatibleModes.map((mode) => ({
+                    mode,
+                    ...runtimeModeConfig[mode],
+                  }))}
+                  onRuntimeModeChange={setRuntimeMode}
+                  onToggleInteractionMode={() => {}}
+                />
+              </div>
+            ) : null}
             {error ? (
               <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
                 {error}

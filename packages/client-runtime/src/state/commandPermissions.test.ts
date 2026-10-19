@@ -68,6 +68,7 @@ describe("command permissions", () => {
           WS_METHODS.gameOpen,
           WS_METHODS.gameAction,
           WS_METHODS.gameInstall,
+          WS_METHODS.gameVerify,
         ] as const) {
           const command = createCommandPermissions(runtime, tag);
           registry.set(sessions(env), AsyncResult.success(grant(false)));
@@ -76,7 +77,9 @@ describe("command permissions", () => {
             "EnvironmentAuthorizationError",
           );
           const scope =
-            tag === WS_METHODS.gameInstall ? AuthSettingsWriteScope : AuthOrchestrationOperateScope;
+            tag === WS_METHODS.gameInstall || tag === WS_METHODS.gameVerify
+              ? AuthSettingsWriteScope
+              : AuthOrchestrationOperateScope;
           registry.set(
             sessions(env),
             AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),

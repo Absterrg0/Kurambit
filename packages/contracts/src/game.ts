@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 
@@ -121,6 +122,7 @@ export const GameCreateInput = Schema.Struct({
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
   modelSelection: ModelSelection,
+  runtimeMode: Schema.optionalKey(RuntimeMode),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
 export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });

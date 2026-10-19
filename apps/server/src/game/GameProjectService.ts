@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
     });
   const register = Effect.fnUntraced(function* (
     root: string,
-    input: Pick<GameCreateInput, "modelSelection">,
+    input: Pick<GameCreateInput, "modelSelection" | "runtimeMode">,
     message?: string,
   ) {
     const manifest = yield* read(root);
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
         projectId: project.id,
         title: manifest.name,
         modelSelection: input.modelSelection,
-        runtimeMode: "full-access",
+        runtimeMode: input.runtimeMode ?? "full-access",
         interactionMode: "default",
         workspaceStrategy: { type: "root" },
         ...(message ? { initialMessage: { text: message, attachments: [] } } : {}),

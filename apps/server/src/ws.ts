@@ -1802,6 +1802,7 @@ const layerWsRpc = (
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,
+        [WS_METHODS.gameVerify]: () => gameToolchain.verify,
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

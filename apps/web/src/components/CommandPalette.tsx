@@ -1,4 +1,5 @@
-"use client";
+import { useGameDialogStore } from "./game/gameDialogStore";
+("use client");
 
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -1576,6 +1577,31 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  for (const [mode, title] of [
+    ["create", "New game"],
+    ["open", "Open game"],
+  ] as const) {
+    actionItems.push({
+      kind: "action",
+      value: `action:game-${mode}`,
+      title,
+      searchTerms: [title, "game studio blender godot"],
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useGameDialogStore.getState().show(mode);
+      },
+    });
+  }
+  actionItems.push({
+    kind: "action",
+    value: "action:game-tools",
+    title: "Game tools",
+    searchTerms: ["game tools", "blender godot install verify executable paths"],
+    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/general", hash: "game-tools" });
+    },
+  });
 
   if (projects.length > 0) {
     const activeProjectTitle =

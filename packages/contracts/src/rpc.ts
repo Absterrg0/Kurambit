@@ -400,6 +400,7 @@ export const WS_METHODS = {
   gameAction: "game.action",
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
+  gameVerify: "game.verify",
 
   shellOpenInEditor: "shell.openInEditor",
 
@@ -1901,6 +1902,12 @@ const WsGameInstallRpc = Rpc.make(WS_METHODS.gameInstall, {
   error: gameError,
 });
 
+const WsGameVerifyRpc = Rpc.make(WS_METHODS.gameVerify, {
+  payload: Schema.Struct({}),
+  success: GameToolchainStatus,
+  error: gameError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
   WsGameCreateRpc,
@@ -1908,6 +1915,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameActionRpc,
   WsGameToolchainStatusRpc,
   WsGameInstallRpc,
+  WsGameVerifyRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
