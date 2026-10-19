@@ -69,6 +69,7 @@ func run() -> void:
 	await _check_restart()
 	await _check_death()
 	await _check_pause()
+	await _check_hazard()
 	await _check_menu()
 	_finish()
 
@@ -115,6 +116,10 @@ func _check_jump() -> void:
 
 func _check_relics() -> void:
 	_check(not _level.goal.unlocked, "gate starts locked")
+	# A locked gate must not end the run: touch it before collecting anything.
+	_player.global_position = _level.goal.global_position + Vector3(0.0, 0.4, 0.0)
+	await _frames(4)
+	_check(GameState.is_playing(), "the locked gate does not win the run")
 	var relics := _level.relics()
 	_check(relics.size() >= 5, "level has at least five relics")
 	var expected := 0
@@ -190,6 +195,18 @@ func _check_pause() -> void:
 	_check(
 		_player.global_position.distance_to(resumed) > 0.5, "player moves again after resuming"
 	)
+
+## The lava pool damages whoever stands in it and knocks them back out.
+func _check_hazard() -> void:
+	var health := GameState.health
+	# Clear of the bridge deck, so the player really stands in the lava.
+	_player.global_position = Vector3(-10.0, -0.7, 5.6)
+	# Long enough for the respawn invulnerability from the previous check to expire.
+	await _frames(100)
+	_check(GameState.health < health, "standing in lava costs health")
+	_check(_player.is_invulnerable(), "hazard damage grants brief invulnerability")
+	_player.global_position = _level.spawn_transform().origin
+	await _frames(4)
 
 ## The title screen is a scene like any other: loading it here catches a broken menu
 ## (missing node, bad theme reference) without a browser.

@@ -91,7 +91,7 @@ const StopTool = Tool.make("game_stop", {
 }).annotate(Tool.Readonly, false);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description:
-    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys, return screenshots and console errors. Use this as the final web check instead of building your own browser tooling.",
+    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Use this as the final web check instead of building your own browser tooling.",
   parameters: GameWebPlaytestInput,
   success: GameWebPlaytestResult,
   failure,

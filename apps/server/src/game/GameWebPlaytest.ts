@@ -65,36 +65,80 @@ interface KeyEvent {
   readonly text?: string;
 }
 
-/** KeyboardEvent names DevTools expects; unknown keys fall back to the DOM name alone. */
-const keyEvent = (key: string, type: "keyDown" | "keyUp"): KeyEvent => {
-  const named: Record<string, KeyEvent> = {
-    ArrowUp: { type, key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
-    ArrowDown: { type, key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
-    ArrowLeft: { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
-    ArrowRight: { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
-    Space: { type, key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
-    Enter: { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
-    Tab: { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
-    Backspace: { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
-  };
-  const held = named[key] ?? (key === " " ? named.Space : undefined);
-  if (held) return held;
-  if (key.length === 1 && /[a-z]/.test(key)) {
-    return {
-      type,
-      key,
-      code: `Key${key.toUpperCase()}`,
-      windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0),
-      text: key,
+/** KeyboardEvent names DevTools expects; unknown keys fall back to the DOM name alone. */ const keyEvent =
+  (key: string, type: "keyDown" | "keyUp"): KeyEvent => {
+    const named: Record<string, KeyEvent> = {
+      ArrowUp: { type, key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+      ArrowDown: { type, key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+      ArrowLeft: { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+      ArrowRight: { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+      Space: { type, key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+      Enter: { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+      Tab: { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+      Backspace: { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
     };
-  }
-  if (key.length === 1 && /[A-Z]/.test(key)) {
-    return { type, key, code: `Key${key}`, windowsVirtualKeyCode: key.charCodeAt(0), text: key };
-  }
-  if (key.length === 1 && /[0-9]/.test(key)) {
-    return { type, key, code: `Digit${key}`, windowsVirtualKeyCode: 48 + Number(key), text: key };
-  }
-  return { type, key, code: key, windowsVirtualKeyCode: 0 };
+    const held = named[key] ?? (key === " " ? named.Space : undefined);
+    if (held) return held;
+    if (key.length === 1 && /[a-z]/.test(key)) {
+      return {
+        type,
+        key,
+        code: `Key${key.toUpperCase()}`,
+        windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0),
+        text: key,
+      };
+    }
+    if (key.length === 1 && /[A-Z]/.test(key)) {
+      return { type, key, code: `Key${key}`, windowsVirtualKeyCode: key.charCodeAt(0), text: key };
+    }
+    if (key.length === 1 && /[0-9]/.test(key)) {
+      return { type, key, code: `Digit${key}`, windowsVirtualKeyCode: 48 + Number(key), text: key };
+    }
+    return { type, key, code: key, windowsVirtualKeyCode: 0 };
+  };
+
+/** Centre of the game canvas in viewport coordinates, or null before it exists. */
+const CANVAS_CENTRE = `(() => {
+  const canvas = document.querySelector("canvas");
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+})()`;
+
+/**
+ * Presses and releases one mouse button at the centre of the canvas. Web games need
+ * a real click before the shell lets them capture the pointer, and menu buttons need
+ * one to be pressed at all.
+ */
+const clickCanvas = async (
+  cdp: CdpSocket,
+  sessionId: string,
+  button: "left" | "middle" | "right",
+): Promise<void> => {
+  const evaluated = await cdp.send<{ result?: { value?: { x: number; y: number } | null } }>(
+    "Runtime.evaluate",
+    { expression: CANVAS_CENTRE, returnByValue: true },
+    sessionId,
+  );
+  const centre = evaluated.result?.value;
+  if (!centre) return;
+  const at = { x: Math.round(centre.x), y: Math.round(centre.y) };
+  const options = { ...at, clickCount: 1 };
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", ...at, button: "none" },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mousePressed", ...options, button },
+    sessionId,
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseReleased", ...options, button },
+    sessionId,
+  );
 };
 
 const launchBrowser = (input: GameWebPlaytestInput): BrowserHandle => {
@@ -379,6 +423,10 @@ const runPlaytest = async (
       signal?.throwIfAborted();
       if ("waitMs" in step) {
         await sleep(signal, step.waitMs);
+        continue;
+      }
+      if ("click" in step) {
+        await clickCanvas(cdp, session.sessionId, step.click);
         continue;
       }
       try {

@@ -209,6 +209,12 @@ export const GamePlaytestStep = Schema.Union([
     holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
   }),
   Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
+  Schema.Struct({
+    click: Schema.Literals(["left", "middle", "right"]).annotate({
+      description:
+        "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
+    }),
+  }),
 ]);
 export type GamePlaytestStep = typeof GamePlaytestStep.Type;
 export const GamePlaytestScreenshot = Schema.Struct({

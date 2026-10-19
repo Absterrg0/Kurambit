@@ -6,9 +6,9 @@ extends Node3D
 
 @export var target: NodePath
 ## Height above the target's origin that the camera orbits and looks at.
-@export var pivot_height := 1.5
+@export var pivot_height := 1.7
 @export var follow_speed := 16.0
-@export var rest_distance := 4.6
+@export var rest_distance := 5.6
 @export var min_pitch := -1.05
 @export var max_pitch := 0.55
 ## Right-stick look speed in radians per second.
@@ -18,7 +18,7 @@ extends Node3D
 @onready var _arm: SpringArm3D = $Pitch/SpringArm3D
 
 var _yaw := 0.0
-var _pitch := -0.24
+var _pitch := -0.3
 var _target: Node3D
 
 func _ready() -> void:

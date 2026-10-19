@@ -1,0 +1,10 @@
+[gd_resource type="StandardMaterial3D" load_steps=2 format=3]
+
+[ext_resource type="Texture2D" path="res://materials/speckle.svg" id="1_speckle"]
+
+[resource]
+resource_name = "Dirt"
+albedo_color = Color(0.5, 0.42, 0.31, 1)
+albedo_texture = ExtResource("1_speckle")
+uv1_scale = Vector3(24, 24, 1)
+roughness = 0.95
