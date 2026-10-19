@@ -5,7 +5,6 @@ import {
   CreateThreadsTool,
   DelegateTaskTool,
   OrchestratorToolkit,
-  ScheduleTaskTool,
   ThreadUpdateTool,
 } from "./tools.ts";
 
@@ -57,21 +56,6 @@ describe("orchestrator MCP tool guidance", () => {
     assert.include(timeoutText, "does not cancel the child");
   });
 
-  it("publishes an actionable schedule schema and compatibility string branch", () => {
-    const schema = Tool.getJsonSchema(ScheduleTaskTool) as {
-      readonly type?: unknown;
-      readonly properties?: Readonly<
-        Record<string, { readonly description?: unknown; readonly anyOf?: ReadonlyArray<unknown> }>
-      >;
-    };
-
-    assert.equal(schema.type, "object");
-    assert.isString(schema.properties?.schedule?.description);
-    assert.isAtLeast(schema.properties?.schedule?.anyOf?.length ?? 0, 2);
-    assert.include(ScheduleTaskTool.description ?? "", "STRUCTURED OBJECT");
-    assert.include(ScheduleTaskTool.description ?? "", "nextRunAt");
-  });
-
   it("publishes thread metadata actions from an object-root schema", () => {
     const schema = Tool.getJsonSchema(ThreadUpdateTool) as {
       readonly type?: unknown;
@@ -79,13 +63,7 @@ describe("orchestrator MCP tool guidance", () => {
     };
 
     assert.equal(schema.type, "object");
-    assert.hasAllKeys(schema.properties ?? {}, [
-      "threadId",
-      "action",
-      "title",
-      "pullRequest",
-      "clientRequestId",
-    ]);
+    assert.hasAllKeys(schema.properties ?? {}, ["threadId", "action", "title", "clientRequestId"]);
     assert.include(ThreadUpdateTool.description ?? "", "Workspace and branch changes");
   });
 });

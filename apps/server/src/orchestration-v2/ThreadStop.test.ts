@@ -11,7 +11,6 @@ import {
   ProviderTurnId,
   RuntimeRequestId,
   ThreadId,
-  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -68,12 +67,6 @@ const layerTest = ThreadManagementService.layer.pipe(
 
 const encodeEffectRequest = Schema.encodeSync(Schema.fromJsonString(OrchestrationEffectRequestV2));
 
-const pullRequest = (number: number) => ({
-  host: "github.com",
-  repository: "pingdotgg/t3code",
-  number,
-});
-
 const createWatchingThread = (threadId: ThreadId, number: number) =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -90,20 +83,6 @@ const createWatchingThread = (threadId: ThreadId, number: number) =>
       worktreePath: null,
       createdBy: "user",
       creationSource: "web",
-    });
-    yield* watch(threadId, number);
-  });
-
-const watch = (threadId: ThreadId, number: number) =>
-  Effect.gen(function* () {
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    yield* orchestrator.dispatch({
-      type: "thread.pull-request.watch",
-      commandId: CommandId.make(`watch:${threadId}:${number}`),
-      threadId,
-      ...pullRequest(number),
-      watching: true,
-      link: { url: `https://github.com/pingdotgg/t3code/pull/${number}`, source: "agent" },
     });
   });
 
@@ -157,7 +136,7 @@ const threadState = (threadId: ThreadId) =>
     };
   });
 
-it.effect("Stop ends watches, holds queues, and stops the delegated tasks under the thread", () =>
+it.effect("Stop holds queues and stops the delegated tasks under the thread", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -167,7 +146,6 @@ it.effect("Stop ends watches, holds queues, and stops the delegated tasks under 
     yield* createWatchingThread(parentThreadId, 1);
     yield* send(parentThreadId, "first", "start_immediately");
     const childThreadId = yield* delegate(parentThreadId, "child task");
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(childThreadId, 2))));
     const grandchildThreadId = yield* delegate(childThreadId, "grandchild task");
     yield* send(childThreadId, "child follow-up", "queue_after_active");
 
@@ -275,108 +253,25 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
     }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect(
-  "thread.stop ends an idle thread's watches and accepts a thread with nothing to stop",
-  () =>
-    Effect.gen(function* () {
-      const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const threadId = ThreadId.make("thread:stop-idle");
-      yield* createWatchingThread(threadId, 3);
-
-      yield* orchestrator.dispatch({
-        type: "thread.stop",
-        commandId: CommandId.make("stop-idle"),
-        threadId,
-      });
-      assert.deepEqual(yield* threadState(threadId), { runs: [], watched: [] });
-
-      const again = yield* orchestrator.dispatch({
-        type: "thread.stop",
-        commandId: CommandId.make("stop-idle-again"),
-        threadId,
-      });
-      assert.lengthOf(again.storedEvents, 0);
-    }).pipe(Effect.provide(layerTest)),
-);
-
-it.effect("a run Stop reached cannot delegate or start a watch, even after it ends", () =>
+it.effect("thread.stop accepts an idle thread with nothing to stop", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = ThreadId.make("thread:stop-barrier");
-    yield* createWatchingThread(threadId, 4);
-    yield* send(threadId, "work", "start_immediately");
-    const now = yield* DateTime.now;
-    const run = { ...(yield* orchestrator.getThreadProjection(threadId)).runs[0]!, startedAt: now };
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:running"),
-      type: "run.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: { ...run, status: "running" },
-    });
-    yield* send(threadId, "queued", "queue_after_active");
-    const queued = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
+    const threadId = ThreadId.make("thread:stop-idle");
+    yield* createWatchingThread(threadId, 3);
+
     yield* orchestrator.dispatch({
-      type: "queued-run.cancel",
-      commandId: CommandId.make("cancel-queued"),
+      type: "thread.stop",
+      commandId: CommandId.make("stop-idle"),
       threadId,
-      runId: queued.id,
     });
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:interrupt-request"),
-      type: "turn-item.updated",
+    assert.deepEqual(yield* threadState(threadId), { runs: [], watched: [] });
+
+    const again = yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("stop-idle-again"),
       threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: {
-        id: TurnItemId.make("turn-item:stop-barrier:interrupt-request"),
-        threadId,
-        runId: run.id,
-        nodeId: run.rootNodeId!,
-        providerThreadId: run.providerThreadId!,
-        providerTurnId: null,
-        nativeItemRef: null,
-        parentItemId: null,
-        ordinal: 1_000,
-        status: "completed",
-        title: "Interrupt requested",
-        startedAt: now,
-        completedAt: now,
-        updatedAt: now,
-        type: "run_interrupt_request",
-        message: "Stop",
-      },
     });
-
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(delegate(threadId, "late task"))));
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 5))));
-
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:interrupted"),
-      type: "run.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: { ...run, status: "interrupted", completedAt: now },
-    });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 5))));
-    assert.deepEqual(yield* threadState(threadId), {
-      runs: ["interrupted", "cancelled"],
-      watched: [4],
-    });
-
-    for (const watching of [false, true]) {
-      yield* orchestrator.dispatch({
-        type: "thread.pull-request.watch",
-        commandId: CommandId.make(`manual-watch:${watching}`),
-        threadId,
-        ...pullRequest(4),
-        watching,
-      });
-    }
-    assert.deepEqual((yield* threadState(threadId)).watched, [4]);
+    assert.lengthOf(again.storedEvents, 0);
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -634,7 +529,7 @@ it.effect("a delegated task that cannot be stopped fails the walk after its sibl
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("thread.stop on a finished thread refuses a late agent watch", () =>
+it.effect("thread.stop preserves a finished run", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -657,12 +552,11 @@ it.effect("thread.stop on a finished thread refuses a late agent watch", () =>
       commandId: CommandId.make("stop-finished"),
       threadId,
     });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 10))));
     assert.deepEqual(yield* threadState(threadId), { runs: ["completed"], watched: [] });
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is refused", () =>
+it.effect("thread.stop marks a turn it cannot interrupt", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -702,7 +596,6 @@ it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is
       commandId: CommandId.make("stop-lost-session"),
       threadId,
     });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 12))));
     assert.deepEqual(yield* threadState(threadId), { runs: ["running"], watched: [] });
   }).pipe(Effect.provide(layerTest)),
 );

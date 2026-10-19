@@ -27,7 +27,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
-import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
+import * as GitRepositoryService from "../../../project/GitRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
@@ -94,10 +94,7 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
     "Clone a repository using the app's source-control service. This only clones; register the returned cwd with t3_project_create. An existing destination is not adopted or removed on failure.",
   parameters: SourceControlCloneRepositoryInput,
   success: SourceControlCloneRepositoryResult,
-  dependencies: [
-    ...shared.dependencies,
-    SourceControlRepositoryService.SourceControlRepositoryService,
-  ],
+  dependencies: [...shared.dependencies, GitRepositoryService.GitRepositoryService],
 })
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true);

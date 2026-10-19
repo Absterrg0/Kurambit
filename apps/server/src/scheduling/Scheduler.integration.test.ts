@@ -15,21 +15,17 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as UsageLimitRecoveryWorker from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
-import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Scheduler from "./Scheduler.ts";
 
 it.effect.each(["on time", "after restart"])(
-  "runs Scheduled Tasks and a persisted limit retry through the same scheduler %s",
+  "resumes a persisted usage-limit retry through the scheduler %s",
   (scenario) =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
@@ -85,15 +81,9 @@ it.effect.each(["on time", "after restart"])(
       }
       const current = yield* Ref.make(thread);
       const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
-      const receipts = yield* Queue.unbounded<"task" | "retry">();
+      const receipts = yield* Queue.unbounded<"retry">();
       const layerDependencies = Layer.mergeAll(
         NodeCrypto.layer,
-        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
-          launch: () =>
-            Queue.offer(receipts, "task").pipe(
-              Effect.andThen(Effect.die("fixture dispatch failure")),
-            ),
-        }),
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           dispatch: (command) =>
             Ref.update(commands, (all) => [...all, command]).pipe(
@@ -113,36 +103,18 @@ it.effect.each(["on time", "after restart"])(
         Layer.mock(ServerSettings.ServerSettingsService)({
           getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
         }),
-        Layer.mock(SecretRequests.SecretRequests)({}),
       );
-      const layerWorkers = Layer.mergeAll(
-        ScheduledTasks.layer,
-        UsageLimitRecoveryWorker.layer,
-      ).pipe(Layer.provide(layerDependencies), Layer.provide(Scheduler.layer));
+      const layerWorkers = UsageLimitRecoveryWorker.layer.pipe(
+        Layer.provide(layerDependencies),
+        Layer.provide(Scheduler.layer),
+      );
       yield* Effect.gen(function* () {
-        const tasks = yield* ScheduledTasks.ScheduledTaskService;
-        const { task } = yield* tasks.upsert({
-          title: "Scheduled work",
-          prompt: "Run scheduled work",
-          enabled: true,
-          schedule: { type: "interval", everyMs: 60_000 },
-          projectId: thread.projectId,
-          workspaceStrategy: { type: "root" },
-          modelSelection: thread.modelSelection,
-          runtimeMode: thread.runtimeMode,
-          interactionMode: thread.interactionMode,
-        });
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`UPDATE scheduled_tasks SET next_run_at = ${resetAt} WHERE task_id = ${task.id}`;
         if (scenario === "on time") {
           yield* TestClock.adjust("55 seconds");
           assert.deepEqual(yield* Ref.get(commands), []);
         }
         yield* TestClock.adjust("5 seconds");
-        assert.deepEqual([yield* Queue.take(receipts), yield* Queue.take(receipts)].sort(), [
-          "retry",
-          "task",
-        ]);
+        assert.equal(yield* Queue.take(receipts), "retry");
         const delivered = yield* Ref.get(commands);
         assert.equal(delivered.length, 1);
         expect(delivered[0]).toMatchObject({

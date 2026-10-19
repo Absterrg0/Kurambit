@@ -10,34 +10,20 @@ import {
   type RunVcsStackedActionInput,
 } from "@t3tools/client-runtime/state/vcs";
 import {
-  AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   EnvironmentAuthorizationError,
   type EnvironmentId,
-  type GitResolvePullRequestResult,
-  type SourceControlCloneProtocol,
-  type SourceControlProviderKind,
-  type SourceControlRepositoryVisibility,
-  type ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { gitEnvironment } from "./git";
 import { useEnvironmentQuery } from "./query";
 import { readEnvironmentScope, useEnvironmentScope } from "./session";
-import { sourceControlEnvironment } from "./sourceControl";
 import { useAtomCommand } from "./use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "./vcs";
 
-export type SourceControlActionKind =
-  | "init"
-  | "pull"
-  | "publishRepository"
-  | "runStackedAction"
-  | "preparePullRequestThread";
+export type SourceControlActionKind = "init" | "pull" | "runStackedAction";
 
 export interface SourceControlActionScope {
   readonly environmentId: EnvironmentId | null;
@@ -65,9 +51,7 @@ interface SourceControlActionState<
 const ACTION_OPERATION = {
   init: "init",
   pull: "pull",
-  publishRepository: "publish_repository",
   runStackedAction: "run_change_request",
-  preparePullRequestThread: "prepare_pull_request_thread",
 } as const satisfies Record<SourceControlActionKind, VcsActionOperation>;
 
 function useAction<
@@ -253,152 +237,4 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
     onSuccess: status.refresh,
     managedExternally: true,
   });
-}
-
-export function useSourceControlPublishRepositoryAction(scope: SourceControlActionScope) {
-  const publishRepository = useAtomCommand(sourceControlEnvironment.publishRepository, {
-    reportFailure: false,
-  });
-  const status = useEnvironmentQuery(
-    scope.environmentId !== null && scope.cwd !== null
-      ? vcsEnvironment.status({
-          environmentId: scope.environmentId,
-          input: { cwd: scope.cwd },
-        })
-      : null,
-  );
-  const action = async (input: {
-    provider: SourceControlProviderKind;
-    repository: string;
-    visibility: SourceControlRepositoryVisibility;
-    remoteName: string;
-    protocol: SourceControlCloneProtocol;
-  }) => {
-    const target = resolveScope(scope);
-    if (target === null) {
-      return AsyncResult.failure<never, VcsActionUnavailableError>(
-        Cause.fail(
-          new VcsActionUnavailableError({
-            operation: "publish_repository",
-            environmentId: scope.environmentId,
-            cwd: scope.cwd,
-          }),
-        ),
-      );
-    }
-    return publishRepository({
-      environmentId: target.environmentId,
-      input: {
-        cwd: target.cwd,
-        ...input,
-      },
-    });
-  };
-  return useAction({
-    kind: "publishRepository",
-    label: "Publishing repository",
-    scope,
-    action,
-    onSuccess: status.refresh,
-  });
-}
-
-export function usePreparePullRequestThreadAction(scope: SourceControlActionScope) {
-  const preparePullRequestThread = useAtomCommand(gitEnvironment.preparePullRequestThread, {
-    reportFailure: false,
-  });
-  const action = async (input: {
-    reference: string;
-    mode: "local" | "worktree";
-    threadId?: ThreadId;
-  }) => {
-    const target = resolveScope(scope);
-    if (target === null) {
-      return AsyncResult.failure<never, VcsActionUnavailableError>(
-        Cause.fail(
-          new VcsActionUnavailableError({
-            operation: "prepare_pull_request_thread",
-            environmentId: scope.environmentId,
-            cwd: scope.cwd,
-          }),
-        ),
-      );
-    }
-    if (
-      input.mode === "worktree" &&
-      input.threadId !== undefined &&
-      !readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
-    ) {
-      return AsyncResult.failure<never, EnvironmentAuthorizationError>(
-        Cause.fail(
-          new EnvironmentAuthorizationError({
-            requiredScope: AuthOrchestrationOperateScope,
-            message: "This connection cannot change threads.",
-          }),
-        ),
-      );
-    }
-    return preparePullRequestThread({
-      environmentId: target.environmentId,
-      input: {
-        cwd: target.cwd,
-        reference: input.reference,
-        mode: input.mode,
-        ...(input.threadId ? { threadId: input.threadId } : {}),
-      },
-    });
-  };
-  return useAction({
-    kind: "preparePullRequestThread",
-    label: "Preparing pull request thread",
-    scope,
-    action,
-  });
-}
-
-export interface PullRequestResolutionTarget {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
-  readonly reference: string | null;
-}
-
-export function readCachedPullRequestResolution(
-  target: PullRequestResolutionTarget,
-): GitResolvePullRequestResult | null {
-  if (target.environmentId === null || target.cwd === null || target.reference === null) {
-    return null;
-  }
-  return Option.getOrNull(
-    AsyncResult.value(
-      appAtomRegistry.get(
-        gitEnvironment.pullRequestResolution({
-          environmentId: target.environmentId,
-          input: { cwd: target.cwd, reference: target.reference },
-        }),
-      ),
-    ),
-  );
-}
-
-export function usePullRequestResolutionState(target: PullRequestResolutionTarget) {
-  const query = useEnvironmentQuery(
-    target.environmentId !== null && target.cwd !== null && target.reference !== null
-      ? gitEnvironment.pullRequestResolution({
-          environmentId: target.environmentId,
-          input: {
-            cwd: target.cwd,
-            reference: target.reference,
-          },
-        })
-      : null,
-  );
-  const cached = readCachedPullRequestResolution(target);
-
-  return {
-    data: query.data ?? cached,
-    error: query.error,
-    isPending: query.isPending && cached === null,
-    isFetching: query.isPending,
-    refresh: query.refresh,
-  };
 }

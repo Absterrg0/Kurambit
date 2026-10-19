@@ -62,8 +62,7 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
   switch (surface.kind) {
     case "diff":
     case "files":
-    case "pull-requests":
-      return surface.id === surface.kind;
+      return true;
     case "preview":
       return surface.resourceId === null || typeof surface.resourceId === "string";
     case "file":
@@ -72,26 +71,6 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
         (surface.revealLine === null || Number.isSafeInteger(surface.revealLine)) &&
         Number.isSafeInteger(surface.revealRequestId) &&
         (surface.attachment === undefined || isAttachment(surface.attachment))
-      );
-    case "device":
-      return (
-        (surface.title === undefined || typeof surface.title === "string") &&
-        (surface.target === undefined ||
-          (surface.target !== null &&
-            typeof surface.target.hostId === "string" &&
-            typeof surface.target.deviceId === "string" &&
-            typeof surface.target.name === "string" &&
-            (surface.target.platform === "ios" || surface.target.platform === "android")))
-      );
-    case "pull-request":
-      return (
-        typeof surface.projectId === "string" &&
-        typeof surface.repository === "string" &&
-        Number.isSafeInteger(surface.number) &&
-        surface.number > 0 &&
-        (surface.environmentId === undefined || typeof surface.environmentId === "string") &&
-        (surface.host === undefined || typeof surface.host === "string") &&
-        (surface.url === undefined || typeof surface.url === "string")
       );
     default:
       return false;

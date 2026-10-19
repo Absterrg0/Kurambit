@@ -64,8 +64,6 @@ import {
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldRefocusComposerOnWindowFocus,
-  shouldOpenProactivePullRequest,
-  shouldRetargetThreadPullRequestPanel,
   shouldOpenProactiveTurnDiff,
   shouldRenderPreviewMiniPlayer,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -919,13 +917,6 @@ describe("floating browser preview", () => {
 });
 
 describe("proactive panels", () => {
-  it("opens an existing pull request on entry and follows newly observed links", () => {
-    expect(shouldOpenProactivePullRequest(undefined, "project:repo:42")).toBe(true);
-    expect(shouldOpenProactivePullRequest(null, "project:repo:42")).toBe(true);
-    expect(shouldOpenProactivePullRequest("project:repo:42", "project:repo:42")).toBe(false);
-    expect(shouldOpenProactivePullRequest("project:repo:42", null)).toBe(false);
-  });
-
   it("opens a completed diff on entry or when the observed running turn settles", () => {
     const turnId = RunId.make("turn-1");
     expect(
@@ -1775,21 +1766,6 @@ describe("proactive completed diff guard", () => {
     ).toBe("defer");
   });
 
-  it("keeps an active pull request above a completed turn diff", () => {
-    const changedCheckpoint = {
-      status: "ready",
-      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
-
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: changedCheckpoint,
-        isGitRepo: true,
-        activeSurfaceKind: "pull-request",
-      }),
-    ).toBe("ignore");
-  });
-
   it("leaves an already open diff and its chosen scope alone", () => {
     const largeCheckpoint = {
       status: "ready",
@@ -1913,40 +1889,6 @@ describe("threadShellHasStarted", () => {
     ).toBe(false);
     expect(threadShellHasStarted(null)).toBe(false);
   });
-});
-
-it("follows a changed server PR link without replacing an unrelated open panel", () => {
-  const previous = {
-    projectId: ProjectId.make("project-1"),
-    repository: "pingdotgg/t3code",
-    number: 42,
-    url: "https://github.com/pingdotgg/t3code/pull/42",
-  };
-  const current = {
-    ...previous,
-    number: 43,
-    url: "https://github.com/pingdotgg/t3code/pull/43",
-  };
-  const surface = {
-    id: "pull-request:previous",
-    kind: "pull-request",
-    projectId: previous.projectId,
-    repository: "PingDotGG/T3Code",
-    number: previous.number,
-  } satisfies RightPanelSurface;
-
-  expect(shouldRetargetThreadPullRequestPanel(previous, current, surface)).toBe(true);
-  expect(shouldRetargetThreadPullRequestPanel(previous, previous, surface)).toBe(false);
-  expect(shouldRetargetThreadPullRequestPanel(previous, null, surface)).toBe(false);
-  expect(shouldRetargetThreadPullRequestPanel(previous, current, { ...surface, number: 99 })).toBe(
-    false,
-  );
-  expect(
-    shouldRetargetThreadPullRequestPanel(previous, current, {
-      ...surface,
-      projectId: "another-project",
-    }),
-  ).toBe(false);
 });
 
 describe("worktree setup visibility", () => {

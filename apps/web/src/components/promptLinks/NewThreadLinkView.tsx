@@ -31,15 +31,13 @@ import { environmentPresentations } from "~/state/presentation";
 import { allReachableShellsLiveAtom } from "~/state/shell";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { useAtomCommand } from "~/state/use-atom-command";
-
-import { usePullRequestHandoffs } from "../pullRequest/usePullRequestActions";
 import { sortScopedProjectsForSidebar } from "../Sidebar.logic";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { SidebarInset } from "../ui/sidebar";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { placeLinkedPrompt, warnAboutHiddenCharacters } from "./linkedPrompt";
+import { placeLinkedPrompt } from "./linkedPrompt";
 
 type LinkState =
   | { readonly status: "opening" }
@@ -325,43 +323,19 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
  */
 function PullRequestLinkCheckout({
   link,
-  project,
 }: {
   readonly link: Extract<NewThreadLink, { kind: "pull-request" }>;
   readonly project: EnvironmentProject;
 }) {
-  const { handoff, startHandoff } = usePullRequestHandoffs({
-    environmentId: project.environmentId,
-    detail: {
-      projectId: project.id,
-      workspaceRoot: project.workspaceRoot,
-      url: promptLinkPullRequestUrl(link.pullRequest),
-    },
-  });
-  const warnedRef = useRef(false);
-  useEffect(() => {
-    if (warnedRef.current || link.prompt === null) return;
-    warnedRef.current = true;
-    warnAboutHiddenCharacters(link.prompt);
-  }, [link.prompt]);
-  const { owner, name, number } = link.pullRequest;
   return (
-    <LinkPage
-      title={`Check out ${owner}/${name}#${number}?`}
-      description="This puts the pull request's code in a new worktree and runs your project's setup script on it."
-    >
-      <Button
-        size="sm"
-        disabled={handoff !== null}
-        onClick={() =>
-          void startHandoff(
-            "prompt-link",
-            link.prompt === null ? null : { prompt: link.prompt.text },
-          )
-        }
+    <LinkPage title="Open pull request" description="Open this reference in your browser.">
+      <a
+        href={promptLinkPullRequestUrl(link.pullRequest)}
+        target="_blank"
+        rel="noopener noreferrer"
       >
-        {handoff !== null ? "Checking out..." : "Check out"}
-      </Button>
+        Open in browser
+      </a>
     </LinkPage>
   );
 }

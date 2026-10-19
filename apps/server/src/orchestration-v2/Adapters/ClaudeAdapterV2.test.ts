@@ -60,7 +60,6 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
-import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -9042,52 +9041,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         ),
       ),
     ),
-  );
-
-  it.effect.each([1, 2, 3, 4, 5, 6, 7, 8])(
-    "accepts completion during Stop at scheduler step %s",
-    (pauseAt) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fixture = yield* makeStopFixture();
-          const resumptions = yield* Queue.unbounded<() => void>();
-          const scheduler = yield* Scheduler.Scheduler;
-          const dispatcher = scheduler.makeDispatcher();
-          let checks = 0;
-          const stopping = yield* fixture.stop().pipe(
-            Effect.provideService(Scheduler.Scheduler, {
-              executionMode: scheduler.executionMode,
-              shouldYield: () => ++checks === pauseAt,
-              makeDispatcher: () => ({
-                scheduleTask: (task, priority) => {
-                  if (checks === pauseAt) Queue.offerUnsafe(resumptions, task);
-                  else dispatcher.scheduleTask(task, priority);
-                },
-                flush: () => dispatcher.flush(),
-              }),
-            }),
-            Effect.exit,
-            Effect.forkScoped,
-          );
-          const resume = yield* Queue.take(resumptions);
-          yield* fixture.notify("completed");
-          const completed = yield* Queue.take(fixture.subagentReceipts);
-          yield* Effect.sync(resume);
-          yield* TestClock.adjust("2 seconds");
-          assert.deepEqual(
-            yield* Fiber.join(stopping),
-            Exit.succeed({
-              status: "completed" as const,
-              completedAt: completed.subagent.completedAt!,
-              result: "Native outcome.",
-            }),
-          );
-        }).pipe(
-          Effect.provide(
-            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
-          ),
-        ),
-      ),
   );
 
   it.effect("retains native confirmation after the synchronous Agent tool result", () =>

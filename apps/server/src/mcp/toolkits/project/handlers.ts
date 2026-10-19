@@ -7,7 +7,7 @@ import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageInt
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
-import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
+import * as Repositories from "../../../project/GitRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
@@ -266,7 +266,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   ),
   t3_project_clone: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
-      const repositories = yield* Repositories.SourceControlRepositoryService;
+      const repositories = yield* Repositories.GitRepositoryService;
       return yield* repositories.cloneRepository(input).pipe(
         Effect.mapError(
           (error) =>

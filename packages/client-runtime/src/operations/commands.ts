@@ -1,6 +1,5 @@
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import {
-  type ThreadLinkedPullRequest,
   CommandId,
   CheckpointId,
   CheckpointScopeId,
@@ -29,7 +28,6 @@ import {
 } from "@t3tools/contracts";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
@@ -125,7 +123,6 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly branch?: string | null;
   readonly worktreePath?: string | null;
   readonly regenerateTitle?: boolean;
-  readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
 }
 
@@ -559,7 +556,6 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.branch !== undefined ||
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
-      input.linkedPullRequest !== undefined ||
       input.limitRecovery !== undefined
     ) {
       result = yield* dispatch({
@@ -572,9 +568,6 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
         ...(input.expectedEmpty === true ? { expectedEmpty: true } : {}),
         ...(input.regenerateTitle === undefined ? {} : { regenerateTitle: input.regenerateTitle }),
-        ...(input.linkedPullRequest === undefined
-          ? {}
-          : { linkedPullRequest: input.linkedPullRequest }),
       });
     }
     if (input.modelSelection !== undefined) {
@@ -807,18 +800,6 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
     }
     if (runId === undefined) {
       let result = { sequence: 0 };
-      for (const link of visibleThreadPullRequests(projection.thread.pullRequests ?? [])) {
-        if (link.watch === undefined) continue;
-        result = yield* dispatch({
-          type: "thread.pull-request.watch",
-          commandId: yield* allocateCommandId(result.sequence === 0 ? input : {}),
-          threadId: input.threadId,
-          host: link.host,
-          repository: link.repository,
-          number: link.number,
-          watching: false,
-        });
-      }
       return result;
     }
   }
@@ -1045,46 +1026,3 @@ export const editQueuedRun = Effect.fn("EnvironmentCommands.editQueuedRun")(func
       : {}),
   });
 });
-
-export type LinkThreadPullRequestInput = Omit<
-  Extract<OrchestrationV2Command, { type: "thread.pull-request.link" }>,
-  "type" | "commandId"
-> &
-  CommandMetadata;
-export type UnlinkThreadPullRequestInput = Omit<
-  Extract<OrchestrationV2Command, { type: "thread.pull-request.unlink" }>,
-  "type" | "commandId"
-> &
-  CommandMetadata;
-export const linkThreadPullRequest = Effect.fn("EnvironmentCommands.linkThreadPullRequest")(
-  function* (input: LinkThreadPullRequestInput) {
-    return yield* dispatch({
-      ...input,
-      type: "thread.pull-request.link",
-      commandId: yield* allocateCommandId(input),
-    });
-  },
-);
-export type WatchThreadPullRequestInput = Omit<
-  Extract<OrchestrationV2Command, { type: "thread.pull-request.watch" }>,
-  "type" | "commandId"
-> &
-  CommandMetadata;
-export const watchThreadPullRequest = Effect.fn("EnvironmentCommands.watchThreadPullRequest")(
-  function* (input: WatchThreadPullRequestInput) {
-    return yield* dispatch({
-      ...input,
-      type: "thread.pull-request.watch",
-      commandId: yield* allocateCommandId(input),
-    });
-  },
-);
-export const unlinkThreadPullRequest = Effect.fn("EnvironmentCommands.unlinkThreadPullRequest")(
-  function* (input: UnlinkThreadPullRequestInput) {
-    return yield* dispatch({
-      ...input,
-      type: "thread.pull-request.unlink",
-      commandId: yield* allocateCommandId(input),
-    });
-  },
-);

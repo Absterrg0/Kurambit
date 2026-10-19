@@ -7,7 +7,6 @@ import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
-import { listLinkedPullRequestThreads } from "../../pullRequest/linkedThreads.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
 import * as LegacyV1ThreadImporter from "./LegacyV1ThreadImporter.ts";
@@ -267,14 +266,6 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
         [9002, 9003, 9000],
       );
       assert.equal(shellProjection.thread.pullRequests?.[0]?.snapshot?.title, "Second PR");
-      assert.deepStrictEqual(
-        (yield* listLinkedPullRequestThreads({
-          host: "github.com",
-          repository: "pingdotgg/t3code",
-          number: 9002,
-        })).threads.map((thread) => thread.id),
-        [threadId],
-      );
       const shellSnapshot = yield* projections.getShellSnapshot();
       assert.equal(
         shellSnapshot.threads.find((thread) => thread.id === threadId)?.historyOrigin,

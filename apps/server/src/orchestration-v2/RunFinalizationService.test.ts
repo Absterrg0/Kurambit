@@ -1,14 +1,7 @@
 import { assert, it, vi } from "@effect/vitest";
-import {
-  CheckpointScopeId,
-  RunId,
-  ThreadId,
-  type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-
-import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
@@ -50,82 +43,48 @@ it.effect("refreshes workspace after checkpoint capture without reading history"
   }).pipe(Effect.provide(layer));
 });
 
-it.effect.each(
-  (
-    [
-      {
-        label: "discovers a new PR for the completed run's branch",
-        branch: "feature",
-        checkedOut: "feature",
-        activeRun: null,
-        expected: ["/repo"],
-      },
-      {
-        label: "leaves the default branch's PR cache alone",
-        branch: "main",
-        checkedOut: "main",
-        activeRun: null,
-        expected: [],
-      },
-      {
-        label: "does not refresh another thread's checkout",
-        branch: "feature",
-        checkedOut: "other",
-        activeRun: null,
-        expected: [],
-      },
-      {
-        label: "does not refresh during a newer active run",
-        branch: "feature",
-        checkedOut: "feature",
-        activeRun: "newer-run",
-        expected: [],
-      },
-    ] as const
-  ).map((scenario) => [scenario.label, scenario] as const),
-)("%s", ([, scenario]) => {
+it.effect("refreshes workspace and local Git after a turn without hosted lookups", () => {
   const refreshed: string[] = [];
-  const threadId = ThreadId.make("thread-pr-refresh");
-  const runId = RunId.make("completed-run");
-  const layer = RunFinalization.layerObserver.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
-        Layer.mock(PullRequestService.PullRequestService)({
-          refreshAfterTurn: () => Effect.void,
-        }),
-        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
-          refreshLocalStatus: () =>
-            Effect.succeed({
-              isRepo: true,
-              hasPrimaryRemote: true,
-              isDefaultRef: scenario.checkedOut === "main",
-              refName: scenario.checkedOut,
-              hasWorkingTreeChanges: false,
-              workingTree: { files: [], insertions: 0, deletions: 0 },
+  return Effect.gen(function* () {
+    const observer = yield* RunFinalization.RunFinalizationObserver;
+    yield* observer.refresh({
+      cwd: "/repo",
+      threadId: ThreadId.make("thread"),
+      runId: RunId.make("run"),
+    });
+    assert.deepEqual(refreshed.toSorted(), ["git:/repo", "workspace:/repo"]);
+  }).pipe(
+    Effect.provide(
+      RunFinalization.layerObserver.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(WorkspaceEntries.WorkspaceEntries)({
+              refresh: (cwd) =>
+                Effect.sync(() => {
+                  refreshed.push(`workspace:${cwd}`);
+                }),
             }),
-          refreshStatus: () =>
-            Effect.die("turn completion must preserve known PRs and lookup backoff"),
-          refreshPullRequestStatus: (cwd) =>
-            Effect.sync(() => {
-              refreshed.push(cwd);
-              return null;
+            Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+              refreshLocalStatus: (cwd) =>
+                Effect.sync(() => {
+                  refreshed.push(`git:${cwd}`);
+                  return {
+                    isRepo: false,
+                    hasPrimaryRemote: false,
+                    isDefaultRef: false,
+                    refName: null,
+                    hasWorkingTreeChanges: false,
+                    workingTree: { files: [], insertions: 0, deletions: 0 },
+                    hasUpstream: false,
+                    aheadCount: 0,
+                    behindCount: 0,
+                  };
+                }),
             }),
-        }),
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadShell: () =>
-            Effect.succeed({
-              id: threadId,
-              branch: scenario.branch,
-              activeRunId: scenario.activeRun === null ? null : RunId.make(scenario.activeRun),
-            } as OrchestrationV2ThreadShell),
-        }),
+            Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+          ),
+        ),
       ),
     ),
   );
-  return Effect.gen(function* () {
-    const observer = yield* RunFinalization.RunFinalizationObserver;
-    yield* observer.refresh({ cwd: "/repo", threadId, runId });
-    assert.deepEqual(refreshed, [...scenario.expected]);
-  }).pipe(Effect.provide(layer));
 });

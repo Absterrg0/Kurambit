@@ -33,7 +33,7 @@ import {
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import { type RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import * as RpcHttp from "../rpc/http.ts";
-import * as PullRequestDiffLoader from "./pullRequestDiffHttp.ts";
+
 import { withOrchestrationProtocolHeader } from "./environmentHttpAuth.ts";
 import { fetchEnvironmentSessionState } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
@@ -62,12 +62,6 @@ const PREPARED: PreparedConnection = {
 };
 const CURRENT_ORIGIN = "https://current.example.test";
 const RENEWED_ORIGIN = "https://renewed.example.test";
-const DIFF = {
-  projectId: ProjectId.make("project-1"),
-  repository: "owner/repository",
-  number: 42,
-};
-const DIFF_RESULT = { patch: "diff --git a/file.ts b/file.ts", truncated: false, nextCursor: null };
 const AUTH = {
   policy: "remote-reachable",
   bootstrapMethods: ["one-time-token"],
@@ -185,21 +179,8 @@ const LOADERS: ReadonlyArray<{
   readonly expected: unknown;
   readonly load: (
     input: HttpInput,
-  ) => Effect.Effect<
-    unknown,
-    RemoteEnvironmentRequestError | PullRequestDiffLoader.PullRequestDiffCredentialRejectedError,
-    HttpClient.HttpClient
-  >;
+  ) => Effect.Effect<unknown, RemoteEnvironmentRequestError, HttpClient.HttpClient>;
 }> = [
-  {
-    name: "PR diff",
-    method: "POST",
-    path: "/api/pull-requests/diff",
-    response: DIFF_RESULT,
-    expected: DIFF_RESULT,
-    load: (input: HttpInput) =>
-      PullRequestDiffLoader.fetchEnvironmentPullRequestDiff({ ...input, diff: DIFF }),
-  },
   {
     name: "session permissions",
     method: "GET",
@@ -371,41 +352,6 @@ describe("authenticated environment HTTP requests", () => {
       }),
   );
 
-  it.effect("retries a rejected diff once with a new token, endpoint, and proof", () =>
-    Effect.gen(function* () {
-      const harness = makeHarness((requestNumber) =>
-        requestNumber === 1 ? credentialRejectedResponse() : Response.json(DIFF_RESULT),
-      );
-      const result = yield* PullRequestDiffLoader.fetchEnvironmentPullRequestDiff({
-        ...harness.input,
-        diff: DIFF,
-      }).pipe(Effect.provide(harness.httpLayer));
-
-      expect(result).toEqual(DIFF_RESULT);
-      expect(harness.authorizations).toEqual([
-        { expectedEnvironmentId: TARGET.environmentId },
-        { expectedEnvironmentId: TARGET.environmentId, rejectedAccessToken: "current-token" },
-      ]);
-      expect(harness.calls.map((call) => call.url)).toEqual([
-        `${CURRENT_ORIGIN}/api/pull-requests/diff`,
-        `${RENEWED_ORIGIN}/api/pull-requests/diff`,
-      ]);
-      expect(
-        harness.calls.map((call) => new Headers(call.init.headers).get("authorization")),
-      ).toEqual(["DPoP current-token", "DPoP renewed-token"]);
-      expect(harness.calls.map((call) => new Headers(call.init.headers).get("dpop"))).toEqual([
-        "proof-1",
-        "proof-2",
-      ]);
-      expect(harness.proofs[1]).toEqual({
-        method: "POST",
-        url: `${RENEWED_ORIGIN}/api/pull-requests/diff`,
-        accessToken: "renewed-token",
-      });
-      expect(harness.calls[1]!.init.body).toEqual(harness.calls[0]!.init.body);
-    }),
-  );
-
   it.effect.each(LOADERS.filter((loader) => loader.path.startsWith("/api/orchestration/")))(
     "renews a rejected credential without losing the v2 protocol or query for $name",
     (loader) =>
@@ -478,53 +424,6 @@ describe("authenticated environment HTTP requests", () => {
     }),
   );
 
-  it.effect("uses the authorization service captured by the diff loader layer", () =>
-    Effect.gen(function* () {
-      const harness = makeHarness(() => Response.json(DIFF_RESULT));
-      const layerLoader = PullRequestDiffLoader.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            harness.httpLayer,
-            Layer.succeed(
-              ManagedRelay.ManagedRelayDpopSigner,
-              Option.getOrThrow(harness.input.signer),
-            ),
-            Layer.succeed(
-              RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
-              harness.remoteAuthorization,
-            ),
-          ),
-        ),
-      );
-      const loader = yield* PullRequestDiffLoader.PullRequestDiffLoader.pipe(
-        Effect.provide(layerLoader),
-      );
-      const result = yield* loader.load(PREPARED, DIFF);
-
-      expect(result).toEqual(DIFF_RESULT);
-      expect(new Headers(harness.calls[0]!.init.headers).get("authorization")).toBe(
-        "DPoP current-token",
-      );
-    }),
-  );
-
-  it.effect("preserves the credential rejection after the one recovery attempt fails", () =>
-    Effect.gen(function* () {
-      const harness = makeHarness(() => credentialRejectedResponse());
-      const error = yield* PullRequestDiffLoader.fetchEnvironmentPullRequestDiff({
-        ...harness.input,
-        diff: DIFF,
-      }).pipe(Effect.provide(harness.httpLayer), Effect.flip);
-
-      expect(error).toMatchObject({
-        _tag: "PullRequestDiffCredentialRejectedError",
-        traceId: "trace-rejected",
-      });
-      expect(harness.calls).toHaveLength(2);
-      expect(harness.authorizations).toHaveLength(2);
-    }),
-  );
-
   it.effect.each([
     {
       name: "insufficient scope",
@@ -558,10 +457,10 @@ describe("authenticated environment HTTP requests", () => {
   ])("does not renew or retry on $name", ({ reply, errorTag }) =>
     Effect.gen(function* () {
       const harness = makeHarness(reply);
-      const error = yield* PullRequestDiffLoader.fetchEnvironmentPullRequestDiff({
-        ...harness.input,
-        diff: DIFF,
-      }).pipe(Effect.provide(harness.httpLayer), Effect.flip);
+      const error = yield* fetchEnvironmentShellSnapshot(harness.input).pipe(
+        Effect.provide(harness.httpLayer),
+        Effect.flip,
+      );
 
       expect(error._tag).toBe(errorTag);
       expect(harness.calls).toHaveLength(1);
@@ -747,12 +646,9 @@ describe("relay request tracing", () => {
           return new Tracer.NativeSpan(options);
         },
       });
-      const harness = makeHarness(() => Response.json(DIFF_RESULT));
+      const harness = makeHarness(() => Response.json(SESSION));
 
-      yield* PullRequestDiffLoader.fetchEnvironmentPullRequestDiff({
-        ...harness.input,
-        diff: DIFF,
-      }).pipe(
+      yield* fetchEnvironmentSessionState(harness.input).pipe(
         Effect.withSpan("mobile.screen.local"),
         Effect.provide(harness.httpLayer),
         Effect.provideService(RelayClientTracer, Option.some(productTracer)),

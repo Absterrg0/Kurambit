@@ -12,8 +12,6 @@ import {
   type HttpClientResponse,
 } from "effect/http";
 
-import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
-
 /**
  * Everything a redirect leads to — the presigned object stores GitHub hands assets off to —
  * authorizes with its own signature, and some of them reject a request that also carries a
@@ -50,12 +48,6 @@ const SVG_CONTENT_TYPE = "image/svg+xml";
 // body cannot run script against this origin.
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
-const githubToken = GitHubCredentials.GitHubCredentials.pipe(
-  Effect.flatMap((credentials) => credentials.get("github.com")),
-  Effect.map((credential) => credential.token),
-  Effect.orElseSucceed(() => null),
-);
-
 const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedirects")(function* (
   url: string,
   headers: Record<string, string>,
@@ -91,8 +83,7 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
   asset: { readonly url: string; readonly cwd: string; readonly expiresAt: number },
   requestHeaders: Record<string, string | undefined>,
 ) {
-  // Both media hosts are served by github.com's account, which is the host `gh` stores it under.
-  const token = yield* githubToken;
+  const token = null;
   const forwarded: Record<string, string> = {};
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = requestHeaders[name];

@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
+import * as GitRepositoryService from "./GitRepositoryService.ts";
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
 import { parseGitCloneProgressLine } from "./gitCloneProgress.ts";
 
@@ -26,7 +26,7 @@ const startInput = {
 };
 
 function makeHarness(options?: {
-  readonly clone?: SourceControlRepositoryService.SourceControlRepositoryService["Service"]["cloneRepository"];
+  readonly clone?: GitRepositoryService.GitRepositoryService["Service"]["cloneRepository"];
 }) {
   const created: Array<{ projectId: ProjectId; workspaceRoot: string }> = [];
   const cloned: Array<ProjectId> = [];
@@ -40,7 +40,7 @@ function makeHarness(options?: {
   };
   const layer = ProjectCloneTracker.layer.pipe(
     Layer.provide(
-      Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+      Layer.mock(GitRepositoryService.GitRepositoryService)({
         prepareClone: (input) =>
           Effect.succeed({
             destinationPath: input.destinationPath,
@@ -185,7 +185,7 @@ describe("ProjectCloneTracker", () => {
     });
     const layer = ProjectCloneTracker.layer.pipe(
       Layer.provide(
-        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+        Layer.mock(GitRepositoryService.GitRepositoryService)({
           prepareClone: (input) =>
             Effect.succeed({
               destinationPath: input.destinationPath,
@@ -245,7 +245,7 @@ describe("ProjectCloneTracker", () => {
     const harness = makeHarness();
     const layer = ProjectCloneTracker.layer.pipe(
       Layer.provide(
-        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+        Layer.mock(GitRepositoryService.GitRepositoryService)({
           prepareClone: () =>
             Effect.fail(
               new SourceControlRepositoryError({

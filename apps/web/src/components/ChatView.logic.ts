@@ -22,7 +22,6 @@ import {
   type ScopedThreadRef,
   type ThreadContextRecord,
   type ThreadId,
-  type ThreadLinkedPullRequest,
   type RunId,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
@@ -98,27 +97,9 @@ export function agentControlledBrowserCloseConfirmation(
 
 export function shouldRenderPreviewMiniPlayer(
   source: PreviewMiniPlayerSource | null,
-  renderedRightPanelSurface: RightPanelSurface | null,
+  surface: RightPanelSurface | null,
 ): boolean {
-  if (source === null) return false;
-  if (source.kind === "browser") {
-    return !(
-      renderedRightPanelSurface?.kind === "preview" &&
-      renderedRightPanelSurface.resourceId === source.tabId
-    );
-  }
-  return !(
-    renderedRightPanelSurface?.kind === "device" &&
-    renderedRightPanelSurface.target?.hostId === source.hostId &&
-    renderedRightPanelSurface.target.deviceId === source.deviceId
-  );
-}
-
-export function shouldOpenProactivePullRequest(
-  previousTargetKey: string | null | undefined,
-  targetKey: string | null,
-): boolean {
-  return targetKey !== null && targetKey !== previousTargetKey;
+  return source !== null && !(surface?.kind === "preview" && surface.resourceId === source.tabId);
 }
 
 interface ProactivePanelObservation {
@@ -146,23 +127,6 @@ export function observeProactivePanelUserChoice(
   };
 }
 
-export function shouldRetargetThreadPullRequestPanel(
-  previous: ThreadLinkedPullRequest | null,
-  current: ThreadLinkedPullRequest | null,
-  surface: RightPanelSurface | null,
-): boolean {
-  if (previous === null || current === null || surface?.kind !== "pull-request") return false;
-  const previousRepository = previous.repository.toLowerCase();
-  return (
-    (previous.projectId !== current.projectId ||
-      previousRepository !== current.repository.toLowerCase() ||
-      previous.number !== current.number) &&
-    surface.projectId === previous.projectId &&
-    surface.repository.toLowerCase() === previousRepository &&
-    surface.number === previous.number
-  );
-}
-
 export function shouldOpenProactiveTurnDiff(input: {
   previousRunningTurnId: RunId | null | undefined;
   runningTurnId: RunId | null;
@@ -184,7 +148,7 @@ export function resolveProactiveTurnDiffAction(input: {
   activeSurfaceKind: RightPanelSurface["kind"] | null;
 }): "defer" | "ignore" | "open" {
   // An open diff already shows the work; reopening it would reset the chosen scope.
-  if (input.activeSurfaceKind === "pull-request" || input.activeSurfaceKind === "diff") {
+  if (input.activeSurfaceKind === "diff") {
     return "ignore";
   }
   if (input.checkpoint === undefined || input.checkpoint.status === "missing") return "defer";

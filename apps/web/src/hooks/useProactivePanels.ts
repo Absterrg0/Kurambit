@@ -1,19 +1,13 @@
-import type { RunId, ScopedThreadRef, ThreadLinkedPullRequest } from "@t3tools/contracts";
+import type { RunId, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useEffect, useRef } from "react";
 import { useDiffPanelStore } from "../diffPanelStore";
-import {
-  selectActiveRightPanelSurface,
-  pullRequestSurface,
-  useRightPanelStore,
-} from "../rightPanelStore";
+import { selectActiveRightPanelSurface, useRightPanelStore } from "../rightPanelStore";
 import type { TurnDiffSummary } from "../types";
 import {
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
-  shouldOpenProactivePullRequest,
   shouldOpenProactiveTurnDiff,
-  shouldRetargetThreadPullRequestPanel,
 } from "../components/ChatView.logic";
 
 /**
@@ -33,14 +27,6 @@ export function useProactivePanels(input: {
   readonly latestRunSettled: boolean;
   readonly turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   readonly isGitRepo: boolean | undefined;
-  readonly linkedPullRequest: ThreadLinkedPullRequest | null;
-  readonly hasLinkedPullRequestDetail: boolean;
-  // Identifies the change requests the thread shows, so a new one can open the panel.
-  readonly pullRequestsKey: string | null;
-  readonly pullRequestsCapabilityKnown: boolean;
-  readonly supportsPullRequests: boolean;
-  readonly pullRequestsSurfaceAvailable: boolean;
-  readonly visiblePullRequestCount: number;
   readonly onDiffPanelOpen: (() => void) | undefined;
 }) {
   const {
@@ -53,28 +39,16 @@ export function useProactivePanels(input: {
     latestRunSettled,
     turnDiffSummaries,
     isGitRepo,
-    linkedPullRequest: linkedThreadPullRequest,
-    hasLinkedPullRequestDetail,
-    pullRequestsKey: proactivePullRequestsKey,
-    pullRequestsCapabilityKnown,
-    supportsPullRequests,
-    pullRequestsSurfaceAvailable,
-    visiblePullRequestCount,
     onDiffPanelOpen,
   } = input;
   const proactivePanelObservationRef = useRef<ReturnType<
     typeof observeProactivePanelUserChoice
   > | null>(null);
-  const observedThreadPullRequestRef = useRef<{
-    readonly threadKey: string;
-    readonly reference: ThreadLinkedPullRequest | null;
-  } | null>(null);
   const threadKey = threadRef ? scopedThreadKey(threadRef) : null;
 
   useEffect(() => {
     if (threadKey === null || threadRef === null) {
       proactivePanelObservationRef.current = null;
-      observedThreadPullRequestRef.current = null;
       return;
     }
     const panels = useRightPanelStore.getState();
@@ -90,60 +64,8 @@ export function useProactivePanels(input: {
       userActionRevision,
     } = observation;
     const openSurface = selectActiveRightPanelSurface(panels.byThreadKey, threadRef);
-    const previousPullRequest = observedThreadPullRequestRef.current;
-    observedThreadPullRequestRef.current = {
-      threadKey: threadKey,
-      reference: linkedThreadPullRequest,
-    };
-    const followSelectedPullRequest =
-      previousPullRequest?.threadKey === threadKey &&
-      shouldRetargetThreadPullRequestPanel(
-        previousPullRequest.reference,
-        linkedThreadPullRequest,
-        openSurface,
-      );
-    // Following the selected linked PR does not open an unrelated panel, so it
-    // remains available with proactive panels off. It still respects a later choice.
-    if (followSelectedPullRequest && linkedThreadPullRequest !== null) {
-      panels.openProactive(
-        threadRef,
-        pullRequestSurface(linkedThreadPullRequest),
-        userActionRevision,
-      );
-    }
     if (!clientSettingsHydrated) return;
-
     const proactivePanelsEnabled = proactivePanelsEnabledSetting;
-    const eligibleLink =
-      proactivePanelsEnabled &&
-      shouldOpenProactivePullRequest(previousTargetKey, proactivePullRequestsKey);
-    const shouldDeferLink = eligibleLink && !pullRequestsCapabilityKnown;
-    proactivePanelObservationRef.current = {
-      ...observation,
-      targetKey: shouldDeferLink ? (previousTargetKey ?? null) : proactivePullRequestsKey,
-    };
-    if (eligibleLink && pullRequestsCapabilityKnown) {
-      if (
-        pullRequestsSurfaceAvailable &&
-        (visiblePullRequestCount > 1 || !hasLinkedPullRequestDetail || !supportsPullRequests)
-      ) {
-        panels.openProactive(
-          threadRef,
-          { id: "pull-requests", kind: "pull-requests" },
-          userActionRevision,
-        );
-      } else if (
-        !followSelectedPullRequest &&
-        supportsPullRequests &&
-        linkedThreadPullRequest !== null
-      ) {
-        panels.openProactive(
-          threadRef,
-          pullRequestSurface(linkedThreadPullRequest),
-          userActionRevision,
-        );
-      }
-    }
     if (threadDetailLoading) return;
 
     const settledTurnId = latestRunSettled ? (activeLatestRun?.runId ?? null) : null;
@@ -155,13 +77,7 @@ export function useProactivePanels(input: {
     })
       ? settledTurnId
       : null;
-    const eligibleCompletion =
-      proactivePanelsEnabled &&
-      newlyCompletedTurnId !== null &&
-      !(
-        proactivePullRequestsKey !== null &&
-        (!pullRequestsCapabilityKnown || supportsPullRequests || pullRequestsSurfaceAvailable)
-      );
+    const eligibleCompletion = proactivePanelsEnabled && newlyCompletedTurnId !== null;
     const completedCheckpoint = eligibleCompletion
       ? turnDiffSummaries.find((checkpoint) => checkpoint.runId === newlyCompletedTurnId)
       : undefined;
@@ -175,8 +91,7 @@ export function useProactivePanels(input: {
     proactivePanelObservationRef.current = {
       ...proactivePanelObservationRef.current,
       // Preserve first-entry eligibility while capabilities, checkpoint or repository load.
-      runningTurnId:
-        diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : activeRunningTurnId,
+      runningTurnId: diffAction === "defer" ? previousRunningTurnId : activeRunningTurnId,
     };
     if (diffAction !== "open" || newlyCompletedTurnId === null) return;
     if (!panels.openProactive(threadRef, { id: "diff", kind: "diff" }, userActionRevision)) {
@@ -189,20 +104,13 @@ export function useProactivePanels(input: {
     activeLatestRun?.status,
     activeRunningTurnId,
     clientSettingsHydrated,
-    hasLinkedPullRequestDetail,
     isGitRepo,
     latestRunSettled,
-    linkedThreadPullRequest,
     onDiffPanelOpen,
     proactivePanelsEnabledSetting,
-    proactivePullRequestsKey,
-    pullRequestsCapabilityKnown,
-    pullRequestsSurfaceAvailable,
-    supportsPullRequests,
     threadDetailLoading,
     threadKey,
     threadRef,
     turnDiffSummaries,
-    visiblePullRequestCount,
   ]);
 }
