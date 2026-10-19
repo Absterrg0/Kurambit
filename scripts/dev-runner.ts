@@ -19,7 +19,6 @@ import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/cli";
 import { ChildProcess } from "effect/process";
 
-import { type DevShareError, shareDevServer, unshareDevServer } from "./lib/dev-share.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
 
 Object.assign(process.env, loadRepoEnv());
@@ -180,7 +179,7 @@ export class DevRunnerHostNotProxiableError extends Schema.TaggedError<DevRunner
   },
 ) {
   override get message(): string {
-    return `--host ${this.host} cannot be combined with ${this.mode}: single-origin browser dev proxies the backend at localhost, and a backend bound only to ${this.host} leaves localhost unanswered, so every proxied request fails. Use a wildcard (0.0.0.0 or ::) to serve that interface and loopback together, or --share for remote access.`;
+    return `--host ${this.host} cannot be combined with ${this.mode}: single-origin browser dev proxies the backend at localhost, and a backend bound only to ${this.host} leaves localhost unanswered, so every proxied request fails. Use a wildcard (0.0.0.0 or ::) to serve that interface and loopback together.`;
   }
 }
 
@@ -583,7 +582,6 @@ interface DevRunnerCliInput {
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
   readonly dryRun: boolean;
-  readonly share: boolean;
   readonly runArgs: ReadonlyArray<string>;
 }
 
@@ -664,70 +662,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // surprising side effect from a command documented as inert.
     if (input.dryRun) {
       return;
-    }
-
-    const sharedWebPort = BASE_WEB_PORT + webOffset;
-    if (input.share) {
-      if (input.mode === "dev:server") {
-        yield* Effect.logInfo("[dev-runner] --share has no effect for dev:server (no web server).");
-      } else if (input.mode === "dev:desktop") {
-        yield* Effect.logWarning(
-          "[dev-runner] --share is not supported for dev:desktop (the renderer is pinned to loopback). Use `dev`, which runs the whole browser stack.",
-        );
-      } else {
-        // acquireRelease, not share-then-addFinalizer: the mapping outlives this
-        // process (and reboots), so the cleanup has to be registered atomically
-        // with creating it. An interrupt landing in between would otherwise
-        // leave a mapping pointing at a port nothing is listening on.
-        const shared = yield* Effect.acquireRelease(
-          shareDevServer({ webPort: sharedWebPort }),
-          () =>
-            unshareDevServer(sharedWebPort).pipe(
-              Effect.flatMap((result) =>
-                result.cleared
-                  ? Effect.void
-                  : Effect.logWarning(
-                      `[dev-runner] could not remove the tailnet mapping for port ${String(sharedWebPort)}${
-                        result.explanation ? `: ${result.explanation}` : ""
-                      }. Remove it with \`tailscale serve --https=${String(sharedWebPort)} off\`.`,
-                    ),
-              ),
-            ),
-        ).pipe(
-          Effect.tapError((error: DevShareError) =>
-            Effect.logWarning(
-              `[dev-runner] could not share on the tailnet: ${error.message}${
-                error.hint ? ` — ${error.hint}` : ""
-              }`,
-            ),
-          ),
-          Effect.option,
-          Effect.map(Option.getOrUndefined),
-        );
-
-        if (shared) {
-          // The app is reached from the tailnet origin. Vite already allows
-          // *.ts.net hosts; the backend needs the origin for credentialed
-          // requests that bypass the proxy (desktop renderer, direct calls).
-          env.T3CODE_DEV_ALLOWED_ORIGINS = [
-            env.T3CODE_DEV_ALLOWED_ORIGINS,
-            new URL(shared.url).origin,
-          ]
-            .filter((entry) => entry && entry.length > 0)
-            .join(",");
-          if (input.devUrl === undefined) {
-            env.VITE_DEV_SERVER_URL = shared.url;
-          }
-          // A shared origin serves a remote browser, where unbundled dev's
-          // per-module requests each pay a tailnet round trip — a cold module
-          // graph takes minutes to first paint. Bundled dev collapses that to a
-          // few chunk requests.
-          if (env.T3CODE_BUNDLED_DEV === undefined) {
-            env.T3CODE_BUNDLED_DEV = "1";
-          }
-          yield* Effect.logInfo(`[dev-runner] shared on tailnet: ${shared.url}`);
-        }
-      }
     }
 
     const args = [...MODE_ARGS[input.mode], ...input.runArgs];
@@ -825,12 +759,6 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   dryRun: Flag.Boolean("dry-run").pipe(
     Flag.withDescription("Resolve mode/ports/env and print, but do not spawn Vite+."),
-    Flag.withDefault(false),
-  ),
-  share: Flag.Boolean("share").pipe(
-    Flag.withDescription(
-      "Publish the web dev server on this machine's tailnet over HTTPS (via `tailscale serve`) and print the pairing URL for it. Removed again on exit.",
-    ),
     Flag.withDefault(false),
   ),
   runArgs: Argument.String("run-arg").pipe(

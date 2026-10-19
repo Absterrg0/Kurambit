@@ -12,7 +12,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   type ConnectionCatalogEntry,
   type ConnectionCredential,
@@ -211,7 +210,6 @@ export const make = Effect.gen(function* () {
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
-  const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
   const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
@@ -849,7 +847,6 @@ export const make = Effect.gen(function* () {
     for (const route of connectionRoutes(entry)) {
       const profile = Option.getOrNull(route.profile);
       if (profile !== null && isSshConnectionProfile(profile)) {
-        yield* disconnectSsh(environmentId, profile);
       }
     }
   });
@@ -857,17 +854,6 @@ export const make = Effect.gen(function* () {
   const remove = Effect.fn("EnvironmentRegistry.remove")(function* (environmentId: EnvironmentId) {
     return yield* withLeaseLock(environmentId, removeLocked(environmentId));
   });
-
-  const disconnectSsh = (environmentId: EnvironmentId, profile: SshConnectionProfile) =>
-    ssh.disconnect(profile.target).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("Could not disconnect the managed SSH environment.", {
-          environmentId,
-          error,
-        }),
-      ),
-      Effect.ignore,
-    );
 
   // Plain HTTP routes are unusable from an HTTPS page, which blocks mixed content.
   const allowInsecureRoutes =
@@ -954,7 +940,6 @@ export const make = Effect.gen(function* () {
         yield* replaceRoutesLocked(entry, remaining);
         const profile = Option.getOrNull(route.profile);
         if (profile !== null && isSshConnectionProfile(profile)) {
-          yield* disconnectSsh(environmentId, profile);
         }
       }),
     );
@@ -1058,7 +1043,6 @@ export const make = Effect.gen(function* () {
           for (const route of connectionRoutes(entry)) {
             const profile = Option.getOrNull(route.profile);
             if (profile !== null && isSshConnectionProfile(profile)) {
-              yield* disconnectSsh(environmentId, profile);
             }
           }
         }

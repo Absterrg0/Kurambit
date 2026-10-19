@@ -1,13 +1,11 @@
 import { DATABASE_COMPACTION_RECOMMENDED_BYTES } from "@t3tools/contracts";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
+
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
-import * as BootService from "../cloud/bootService.ts";
 import * as DatabaseMaintenance from "../persistence/DatabaseMaintenance.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
-import * as CliService from "./service.ts";
 
 const formatBytes = (bytes: number) =>
   bytes >= 1024 ** 3
@@ -41,7 +39,7 @@ export const runDoctor = Effect.fn("runDoctor")(function* (
               status.incrementalVacuumEnabled
                 ? "Returns unused space to disk."
                 : "Returns unused space to disk and turns on automatic shrinking."
-            }\n  Pauses the background service, if installed, while it runs and may need temporary disk space.`,
+            }\n  May need temporary disk space.`,
             recommended:
               !status.incrementalVacuumEnabled ||
               status.reclaimableBytes >= DATABASE_COMPACTION_RECOMMENDED_BYTES,
@@ -100,21 +98,16 @@ export const runDoctor = Effect.fn("runDoctor")(function* (
     return;
   }
   if (selected.includes("database")) {
-    const service = yield* BootService.BootService;
     yield* Console.log("\nReclaiming database space. This can take several minutes...");
-    // Report inside the pause: a repair that succeeded is worth knowing about
-    // even when starting the service again fails afterwards.
-    yield* service.withStopped(
-      maintenance
-        .compact(databasePath)
-        .pipe(
-          Effect.tap((result) =>
-            Console.log(
-              `Done: ${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)}, ${result.deletedEventCount} superseded events removed.`,
-            ),
+    yield* maintenance
+      .compact(databasePath)
+      .pipe(
+        Effect.tap((result) =>
+          Console.log(
+            `Done: ${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)}, ${result.deletedEventCount} superseded events removed.`,
           ),
         ),
-    );
+      );
   }
   if (selected.includes("legacy")) {
     // Only versions before 0.1.0 open this file, so the service keeps running;
@@ -135,15 +128,13 @@ export const doctorCommand = Command.make("doctor", {
     Flag.withDefault(false),
   ),
 }).pipe(
-  Command.withDescription(
-    "Inspect this T3 Code data directory and repair it. Pauses and restarts the background service as needed.",
-  ),
+  Command.withDescription("Inspect this T3 Code data directory and repair it."),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const logLevel = yield* GlobalFlag.LogLevel;
       const config = yield* resolveCliAuthConfig(flags, logLevel);
       yield* runDoctor(config.dbPath, { fix: flags.fix, dryRun: flags.dryRun }).pipe(
-        Effect.provide(Layer.merge(DatabaseMaintenance.layer, CliService.layer(config))),
+        Effect.provide(DatabaseMaintenance.layer),
       );
     }),
   ),

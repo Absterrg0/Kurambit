@@ -29,7 +29,6 @@ import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
-import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
   Schema.fromJsonString(DesktopBackendBootstrap),
@@ -172,9 +171,6 @@ function makeTestInstance(input: MakeInstanceInput) {
       ...input.desktopTelemetryPublisher,
     }),
     DesktopBrowserHost.layer,
-    DesktopWslEnvironment.layerTest(
-      input.pruneRuntimes === undefined ? {} : { pruneRuntimes: input.pruneRuntimes },
-    ),
   );
 
   const instance = DesktopBackendManager.makeBackendInstance({
@@ -648,83 +644,6 @@ describe("DesktopBackendManager", () => {
         yield* TestClock.adjust(Duration.seconds(1));
 
         assert.deepEqual(yield* Deferred.await(persistedOutput), ["trailing output\n"]);
-      }).pipe(Effect.provide(TestClock.layer())),
-    ),
-  );
-
-  it.effect("retries HTTP readiness before reporting the backend ready", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const requestUrls: Array<string> = [];
-        const prunedRuntimes: Array<[string | null, string]> = [];
-        const statuses = [503, 200];
-        let readyCount = 0;
-        const firstRequest = yield* Deferred.make<void>();
-        const backendReady = yield* Deferred.make<void>();
-        const processExit = yield* Deferred.make<void>();
-        const pruneComplete = yield* Deferred.make<void>();
-        const exited = yield* Queue.unbounded<void>();
-
-        const layerSpawner = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() =>
-            Effect.succeed(
-              makeProcess({
-                exitCode: Deferred.await(processExit).pipe(
-                  Effect.as(ChildProcessSpawner.ExitCode(0)),
-                ),
-              }),
-            ),
-          ),
-        );
-
-        const instance = yield* makeTestInstance({
-          spawnerLayer: layerSpawner,
-          config: {
-            ...baseConfig,
-            runningDistro: "Ubuntu",
-            wslRuntimeId: "1.2.3-x64",
-          },
-          pruneRuntimes: (distro, runtimeId) =>
-            Effect.sync(() => {
-              prunedRuntimes.push([distro, runtimeId]);
-            }).pipe(Effect.andThen(Deferred.succeed(pruneComplete, void 0)), Effect.asVoid),
-          httpClientLayer: layerHttpClient((request) =>
-            Effect.gen(function* () {
-              const status = statuses.shift();
-              assert.isDefined(status);
-              requestUrls.push(request.url);
-              yield* Deferred.succeed(firstRequest, void 0);
-              return responseForRequest(request, status);
-            }),
-          ),
-          onReady: Effect.sync(() => {
-            readyCount += 1;
-          }).pipe(Effect.andThen(Deferred.succeed(backendReady, void 0)), Effect.asVoid),
-          backendOutputLog: {
-            persistFailure: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
-          },
-        });
-
-        yield* instance.start;
-        yield* Deferred.await(firstRequest);
-
-        assert.equal(readyCount, 0);
-        assert.deepEqual(prunedRuntimes, []);
-        assert.deepEqual(requestUrls, ["http://127.0.0.1:3773/.well-known/t3/environment"]);
-
-        yield* TestClock.adjust(Duration.millis(100));
-        yield* Deferred.await(backendReady);
-        yield* Deferred.await(pruneComplete);
-        yield* Deferred.succeed(processExit, void 0);
-        yield* Queue.take(exited);
-
-        assert.equal(readyCount, 1);
-        assert.deepEqual(prunedRuntimes, [["Ubuntu", "1.2.3-x64"]]);
-        assert.deepEqual(requestUrls, [
-          "http://127.0.0.1:3773/.well-known/t3/environment",
-          "http://127.0.0.1:3773/.well-known/t3/environment",
-        ]);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

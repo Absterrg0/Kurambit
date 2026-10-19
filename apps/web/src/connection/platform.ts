@@ -8,7 +8,6 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   BearerConnectionTarget,
-  ConnectionBlockedError,
   type ConnectionAttemptError,
   ConnectionTransientError,
   Connectivity,
@@ -20,14 +19,10 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
 import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
 import {
   AuthStandardClientScopes,
-  type DesktopBridge,
   type DesktopEnvironmentBootstrap,
-  type DesktopSshEnvironmentTarget,
-  type EnvironmentId,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -48,15 +43,10 @@ import {
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
-import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
-import { appAtomRegistry } from "../rpc/atomRegistry";
+
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import {
-  desktopLocalConnectionId,
-  readDesktopSecondaryBootstrapsResult,
-  type DesktopSecondaryBootstrapsRead,
-} from "./desktopLocal";
+import { desktopLocalConnectionId, type DesktopSecondaryBootstrapsRead } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
 import { clientPresentationMetadata } from "./clientMetadata";
 
@@ -142,9 +132,6 @@ const layerWakeups = Wakeups.layer({
             }),
         ).pipe(Effect.asVoid),
       ),
-      managedRelayAccountChanges(appAtomRegistry).pipe(
-        Stream.map(() => "credentials-changed" as const),
-      ),
       networkPathChanges,
     ],
     { concurrency: "unbounded" },
@@ -154,7 +141,7 @@ const layerWakeups = Wakeups.layer({
 function clientMetadata() {
   return clientPresentationMetadata({
     appVersion: APP_VERSION,
-    hosted: isHostedStaticApp(),
+    hosted: false,
     identity: {
       userAgent: navigator.userAgent,
       platform: navigator.platform,
@@ -164,155 +151,10 @@ function clientMetadata() {
   });
 }
 
-function sshPreparationError(cause: unknown) {
-  const message = cause instanceof Error ? cause.message : String(cause);
-  if (message.toLowerCase().includes("cancel")) {
-    return new ConnectionBlockedError({
-      reason: "authentication",
-      detail: message,
-    });
-  }
-  return new ConnectionTransientError({
-    reason: "remote-unavailable",
-    detail: `Could not prepare the SSH environment: ${message}`,
-  });
-}
-
-export const provisionDesktopSshEnvironment = Effect.fn(
-  "web.connectionPlatform.ssh.provisionDesktop",
-)(function* (
-  bridge: DesktopBridge,
-  target: DesktopSshEnvironmentTarget,
-  expectedEnvironmentId?: EnvironmentId,
-) {
-  const bootstrap = yield* Effect.tryPromise({
-    try: () =>
-      bridge.ensureSshEnvironment(target, {
-        issuePairingToken: true,
-      }),
-    catch: sshPreparationError,
-  });
-  const pairingToken = bootstrap.pairingToken;
-  if (pairingToken === null) {
-    return yield* new ConnectionBlockedError({
-      reason: "authentication",
-      detail: "The SSH environment did not issue a pairing credential.",
-    });
-  }
-  const descriptor = yield* Effect.tryPromise({
-    try: () => bridge.fetchSshEnvironmentDescriptor(bootstrap.httpBaseUrl),
-    catch: sshPreparationError,
-  });
-  if (expectedEnvironmentId !== undefined && descriptor.environmentId !== expectedEnvironmentId) {
-    return yield* new ConnectionBlockedError({
-      reason: "configuration",
-      detail: `That host reaches ${descriptor.label}, a different machine. Add it as its own environment instead.`,
-    });
-  }
-  const access = yield* Effect.tryPromise({
-    try: () => bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, pairingToken),
-    catch: sshPreparationError,
-  });
-  return {
-    environmentId: descriptor.environmentId,
-    label: descriptor.label,
-    bootstrap,
-    bearerToken: access.access_token,
-  };
-});
-
-/**
- * Connects a saved SSH environment. A token from an earlier pairing is kept
- * while the host still accepts it with every standard scope, because every
- * pairing adds a session there.
- */
-export const prepareDesktopSshEnvironment = Effect.fn("web.connectionPlatform.ssh.prepareDesktop")(
-  function* (
-    bridge: DesktopBridge,
-    input: {
-      readonly target: DesktopSshEnvironmentTarget;
-      readonly expectedEnvironmentId: EnvironmentId;
-      readonly bearerToken?: string;
-    },
-  ) {
-    const bearerToken = input.bearerToken;
-    if (bearerToken !== undefined) {
-      const bootstrap = yield* Effect.tryPromise({
-        try: () => bridge.ensureSshEnvironment(input.target, { issuePairingToken: false }),
-        catch: sshPreparationError,
-      });
-      // Stop without sending the saved token, or pairing, when the forward
-      // reaches a different environment.
-      const descriptor = yield* Effect.tryPromise({
-        try: () => bridge.fetchSshEnvironmentDescriptor(bootstrap.httpBaseUrl),
-        catch: sshPreparationError,
-      });
-      if (descriptor.environmentId !== input.expectedEnvironmentId) {
-        return yield* new ConnectionBlockedError({
-          reason: "configuration",
-          detail: `That host reaches ${descriptor.label}, a different machine. Add it as its own environment instead.`,
-        });
-      }
-      const session = yield* Effect.tryPromise({
-        try: () => bridge.fetchSshSessionState(bootstrap.httpBaseUrl, bearerToken),
-        catch: sshPreparationError,
-      });
-      // Servers never widen a stored grant, so a token from before the standard
-      // scopes grew is replaced by pairing again.
-      const granted = session.permissions ?? session.scopes ?? [];
-      if (
-        session.authenticated &&
-        AuthStandardClientScopes.every((scope) => granted.includes(scope))
-      ) {
-        return { bootstrap, bearerToken };
-      }
-    }
-    const provisioned = yield* provisionDesktopSshEnvironment(
-      bridge,
-      input.target,
-      input.expectedEnvironmentId,
-    );
-    return { bootstrap: provisioned.bootstrap, bearerToken: provisioned.bearerToken };
-  },
-);
-
 const layerCapabilities = Layer.effectContext(
   Effect.sync(() => {
     const presentation = ClientCapabilities.ClientPresentation.of({
       metadata: clientMetadata(),
-    });
-    const cloudSession = ClientCapabilities.CloudSession.of({
-      identity: Effect.sync(() =>
-        Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionAtom)),
-      ),
-      clerkToken: Effect.gen(function* () {
-        const session = appAtomRegistry.get(managedRelaySessionAtom);
-        if (session === null) {
-          return yield* new ConnectionBlockedError({
-            reason: "authentication",
-            detail: "Sign in to T3 Connect to connect this environment.",
-          });
-        }
-        const token = yield* session.readClerkToken().pipe(
-          Effect.mapError(
-            (error) =>
-              new ConnectionTransientError({
-                reason: "network",
-                detail: error.message,
-              }),
-          ),
-        );
-        if (token === null) {
-          return yield* new ConnectionBlockedError({
-            reason: "authentication",
-            detail: "The T3 Connect session is unavailable.",
-          });
-        }
-        return token;
-      }),
-    });
-    const identity = ClientCapabilities.RelayDeviceIdentity.of({
-      deviceId: Effect.succeedNone,
     });
     const primaryAuth = ClientCapabilities.PrimaryEnvironmentAuth.of({
       bearerToken: Effect.tryPromise({
@@ -324,50 +166,8 @@ const layerCapabilities = Layer.effectContext(
           }),
       }).pipe(Effect.map(Option.fromNullishOr)),
     });
-    const ssh = ClientCapabilities.SshEnvironmentGateway.of({
-      provision: Effect.fn("web.connectionPlatform.ssh.provision")(
-        function* (target, expectedEnvironmentId) {
-          const bridge = window.desktopBridge;
-          if (bridge === undefined) {
-            return yield* new ConnectionBlockedError({
-              reason: "unsupported",
-              detail: "SSH environments are only available in the desktop app.",
-            });
-          }
-          return yield* provisionDesktopSshEnvironment(bridge, target, expectedEnvironmentId);
-        },
-      ),
-      prepare: Effect.fn("web.connectionPlatform.ssh.prepare")(function* (input) {
-        const bridge = window.desktopBridge;
-        if (bridge === undefined) {
-          return yield* new ConnectionBlockedError({
-            reason: "unsupported",
-            detail: "SSH environments are only available in the desktop app.",
-          });
-        }
-        return yield* prepareDesktopSshEnvironment(bridge, input);
-      }),
-      disconnect: Effect.fn("web.connectionPlatform.ssh.disconnect")(function* (target) {
-        const bridge = window.desktopBridge;
-        if (bridge === undefined) {
-          return;
-        }
-        yield* Effect.tryPromise({
-          try: () => bridge.disconnectSshEnvironment(target),
-          catch: (cause) =>
-            new ConnectionTransientError({
-              reason: "remote-unavailable",
-              detail: `Could not disconnect the SSH environment: ${String(cause)}`,
-            }),
-        });
-      }),
-    });
-
-    return Context.make(ClientCapabilities.CloudSession, cloudSession).pipe(
-      Context.add(ClientCapabilities.PrimaryEnvironmentAuth, primaryAuth),
-      Context.add(ClientCapabilities.RelayDeviceIdentity, identity),
+    return Context.make(ClientCapabilities.PrimaryEnvironmentAuth, primaryAuth).pipe(
       Context.add(ClientCapabilities.ClientPresentation, presentation),
-      Context.add(ClientCapabilities.SshEnvironmentGateway, ssh),
     );
   }),
 );
@@ -587,7 +387,7 @@ export function secondaryRegistrationsToRetainAfterTopologyRead(
 const layerPlatformConnectionSource = Layer.effect(
   PlatformConnectionSource.PlatformConnectionSource,
   Effect.gen(function* () {
-    if (isHostedStaticApp() || isLocalEnvironmentDisabled()) {
+    if (isLocalEnvironmentDisabled()) {
       return PlatformConnectionSource.PlatformConnectionSource.of({
         registrations: Stream.empty,
       });
@@ -638,111 +438,6 @@ const layerPlatformConnectionSource = Layer.effect(
             registrations.push(built.value);
           }
         }
-      }
-
-      const topologyRead = readDesktopSecondaryBootstrapsResult();
-      for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
-        previous,
-        topologyRead,
-        nowEpochMs,
-      )) {
-        next.set(id, cached);
-        registrations.push(cached.registration);
-      }
-
-      if (topologyRead._tag === "Failure") {
-        yield* Effect.logWarning("Could not read the desktop-local backend topology.", {
-          cause: topologyRead.cause,
-        });
-      } else {
-        const rejected = yield* Ref.get(rejectedRef);
-        const nextRejected = new Map<string, RejectedSecondaryBootstrap>();
-        for (const bootstrap of topologyRead.bootstraps) {
-          // The cached bearer belongs to the endpoint, not to the bootstrap
-          // token it was exchanged for: a new token must not drop a live
-          // session (its removal also clears the environment's drafts). The
-          // token only decides whether a rejected exchange is retried.
-          const endpointSignature = `${bootstrap.httpBaseUrl}|${bootstrap.wsBaseUrl}`;
-          const signature = `${endpointSignature}|${bootstrap.bootstrapToken ?? ""}`;
-          const cached = previous.get(bootstrap.id);
-          // A new token from the desktop means something changed (rotation, a
-          // restarted backend): exchange it rather than reusing a bearer that
-          // may be dead. The old bearer stays registered if that exchange fails.
-          if (
-            cached !== undefined &&
-            cached.bootstrapToken === bootstrap.bootstrapToken &&
-            canReuseCachedPlatformRegistration(cached, endpointSignature, nowEpochMs)
-          ) {
-            next.set(bootstrap.id, cached);
-            registrations.push(cached.registration);
-            continue;
-          }
-          const previouslyRejected = rejected.get(bootstrap.id);
-          if (isRejectedSecondaryBootstrap(previouslyRejected, signature, nowEpochMs)) {
-            nextRejected.set(bootstrap.id, previouslyRejected);
-            if (
-              cached !== undefined &&
-              canRetainCachedPlatformRegistrationAfterRefreshFailure(
-                cached,
-                endpointSignature,
-                nowEpochMs,
-              )
-            ) {
-              next.set(bootstrap.id, cached);
-              registrations.push(cached.registration);
-            }
-            continue;
-          }
-          const built = yield* loadSecondaryConnectionRegistration(bootstrap).pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning("Could not connect a desktop-local backend.", {
-                id: bootstrap.id,
-                error,
-              }),
-            ),
-            Effect.tapError((error) =>
-              isRejectedBootstrapCredentialError(error)
-                ? // Back off from when the rejection arrived; the exchanges in
-                  // this poll can take longer than the first backoff step.
-                  Clock.currentTimeMillis.pipe(
-                    Effect.map((rejectedAtEpochMs) =>
-                      nextRejected.set(
-                        bootstrap.id,
-                        nextRejectedSecondaryBootstrap(
-                          previouslyRejected,
-                          signature,
-                          rejectedAtEpochMs,
-                        ),
-                      ),
-                    ),
-                  )
-                : Effect.void,
-            ),
-            Effect.option,
-          );
-          if (Option.isSome(built)) {
-            const cacheEntry = {
-              signature: endpointSignature,
-              ...(bootstrap.bootstrapToken === undefined
-                ? {}
-                : { bootstrapToken: bootstrap.bootstrapToken }),
-              ...built.value,
-            };
-            next.set(bootstrap.id, cacheEntry);
-            registrations.push(built.value.registration);
-          } else if (
-            cached !== undefined &&
-            canRetainCachedPlatformRegistrationAfterRefreshFailure(
-              cached,
-              endpointSignature,
-              nowEpochMs,
-            )
-          ) {
-            next.set(bootstrap.id, cached);
-            registrations.push(cached.registration);
-          }
-        }
-        yield* Ref.set(rejectedRef, nextRejected);
       }
 
       yield* Ref.set(cacheRef, next);

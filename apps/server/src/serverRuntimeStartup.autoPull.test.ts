@@ -11,7 +11,6 @@ import { HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -25,7 +24,6 @@ import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ProjectService from "./project/ProjectService.ts";
-import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { ServerActivation } from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -116,7 +114,6 @@ it.effect("parks automatic pull until activation without delaying command readin
         }),
         Layer.mock(Orchestrator.OrchestratorV2)({ recoverDelegatedTasks: Effect.void }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ shutdown: Effect.void }),
-        Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({ start: () => Effect.void }),
         Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: Effect.never }),
         Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({
           publish: (event) => Effect.succeed({ ...event, sequence: 1 }),
@@ -148,13 +145,6 @@ it.effect("parks automatic pull until activation without delaying command readin
             }),
         }),
         Layer.mock(ThreadLaunch.ThreadLaunchService)({}),
-        Layer.mock(ServiceLauncherClient.ServiceLauncherClient)({
-          managed: true,
-          prepareTrial: Deferred.succeed(prepared, undefined).pipe(
-            Effect.andThen(Deferred.await(commitTrial)),
-            Effect.as(undefined),
-          ),
-        }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({
           statusDetails: (root) =>
             Deferred.succeed(statusCalled, root).pipe(
@@ -189,7 +179,10 @@ it.effect("parks automatic pull until activation without delaying command readin
         Effect.provide(
           ServerRuntimeStartup.layerWithOptions({
             activate: Deferred.succeed(activation, undefined).pipe(Effect.asVoid),
-            awaitAuxiliaryParked: Effect.void,
+            awaitAuxiliaryParked: Deferred.succeed(prepared, undefined).pipe(
+              Effect.andThen(Deferred.await(commitTrial)),
+              Effect.asVoid,
+            ),
           }).pipe(Layer.provide(dependencies)),
         ),
         Effect.provideService(ServerActivation, Deferred.await(activation)),

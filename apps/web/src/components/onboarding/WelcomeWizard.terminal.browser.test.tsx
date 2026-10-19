@@ -91,10 +91,6 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
     command: "open" | "write" | "close" | "refresh" | "pair" | "createProject" | "importThreads",
   ) => state[command]) as never,
 }));
-vi.mock(import("../../connection/onboarding"), async (original) => ({
-  ...(await original()),
-  connectPairing: "pair" as never,
-}));
 vi.mock(import("../../state/agentSessions"), async (original) => ({
   ...(await original()),
   agentSessionImport: "importThreads" as never,
@@ -115,10 +111,6 @@ vi.mock(import("../../onboarding/useProjectScans"), async (original) => ({
 vi.mock(import("../../onboarding/firstRun"), async (original) => ({
   ...(await original()),
   useCompleteOnboarding: () => state.complete,
-}));
-vi.mock(import("../../cloud/publicConfig"), async (original) => ({
-  ...(await original()),
-  hasCloudPublicConfig: () => false,
 }));
 vi.mock(import("../settings/ChatGptWelcomeCoordinator"), async (original) => ({
   ...(await original()),

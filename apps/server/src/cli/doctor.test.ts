@@ -3,12 +3,11 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import * as BootService from "../cloud/bootService.ts";
 import { runDoctor } from "./doctor.ts";
 import { DatabaseMaintenance } from "../persistence/DatabaseMaintenance.ts";
 
 it.effect(
-  "--fix reclaims space with the service paused and keeps the V1 database, and --dry-run changes nothing",
+  "--fix reclaims space with local maintenance and keeps the V1 database, and --dry-run changes nothing",
   () =>
     Effect.gen(function* () {
       const calls: string[] = [];
@@ -17,13 +16,6 @@ it.effect(
           Effect.provide(
             Layer.mergeAll(
               NodeServices.layer,
-              Layer.mock(BootService.BootService)({
-                withStopped: (operation) =>
-                  Effect.sync(() => calls.push("pause")).pipe(
-                    Effect.andThen(operation),
-                    Effect.ensuring(Effect.sync(() => calls.push("resume"))),
-                  ),
-              }),
               Layer.succeed(DatabaseMaintenance, {
                 // An unconverted database: reclaiming space is recommended.
                 // A database from before 0.1.0 sits beside it; --fix must keep it.
@@ -52,6 +44,6 @@ it.effect(
       yield* doctor(true);
       assert.deepEqual(calls, []);
       yield* doctor(false);
-      assert.deepEqual(calls, ["pause", "compact", "resume"]);
+      assert.deepEqual(calls, ["compact"]);
     }),
 );

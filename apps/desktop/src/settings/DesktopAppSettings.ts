@@ -23,7 +23,7 @@ import {
   type LinuxPasswordStorePreference,
 } from "../linuxSecretStorage.ts";
 import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts";
-import { isValidDistroName } from "../wsl/wslPathParsing.ts";
+const isValidDistroName = (value: string) => /^[a-zA-Z0-9_.-]+$/.test(value);
 
 export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
@@ -216,7 +216,7 @@ function normalizeDesktopSettingsDocument(
     (parsed.wslBackendEnabled === undefined && parsed.wslMode === "wsl");
 
   return {
-    localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
+    localEnvironmentEnabled: true,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,

@@ -1,3 +1,4 @@
+import { withLocalTracing as traceLocalHandlerWork } from "@t3tools/shared/relayTracing";
 import {
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
@@ -12,7 +13,6 @@ import {
   failEnvironmentInvalidRequest,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as ProjectService from "./ProjectService.ts";
 import { projectMutationOperation } from "./ProjectMutation.ts";

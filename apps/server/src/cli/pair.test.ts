@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,22 +16,11 @@ import { Command, CliError } from "effect/cli";
 
 import { cli } from "../binCli.ts";
 import {
-  SERVICE_LAUNCHER_CONTEXT_ENV,
-  SERVICE_LAUNCHER_PROTOCOL,
-} from "../cloud/serviceProtocol.ts";
-import * as ServiceLauncherClient from "../cloud/serviceLauncherClient.ts";
-import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
   type PersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
-import {
-  DevServerNotProxiableError,
-  resolveDirectPairingBaseUrl,
-  resolveTailscaleLocalTarget,
-} from "./pair.ts";
-
-import packageJson from "../../package.json" with { type: "json" };
+import { resolveDirectPairingBaseUrl } from "./pair.ts";
 
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -55,40 +44,6 @@ describe("pair base URL selection", () => {
       "http://100.64.0.7:3773",
     );
     expect(resolveDirectPairingBaseUrl(baseState)).toBe("http://localhost:3773");
-  });
-});
-
-describe("pair tailscale local target", () => {
-  it("proxies the dev web port for dev servers", () => {
-    expect(resolveTailscaleLocalTarget({ ...baseState, devUrl: "http://localhost:5733/" })).toEqual(
-      { localPort: 5_733 },
-    );
-    // A dev server on a non-loopback interface must be proxied at that
-    // interface; tailscale serve defaults to 127.0.0.1 otherwise.
-    expect(
-      resolveTailscaleLocalTarget({ ...baseState, devUrl: "http://192.168.1.10:5733/" }),
-    ).toEqual({ localPort: 5_733, localHost: "192.168.1.10" });
-    // URL.hostname keeps IPv6 brackets, so the serve target stays valid.
-    expect(
-      resolveTailscaleLocalTarget({ ...baseState, devUrl: "http://[fd7a:115c::1]:5733/" }),
-    ).toEqual({ localPort: 5_733, localHost: "[fd7a:115c::1]" });
-  });
-
-  it("rejects HTTPS dev URLs, which tailscale serve cannot proxy", () => {
-    expect(
-      resolveTailscaleLocalTarget({ ...baseState, devUrl: "https://localhost:5733/" }),
-    ).toBeInstanceOf(DevServerNotProxiableError);
-  });
-
-  it("proxies the backend port directly otherwise", () => {
-    expect(resolveTailscaleLocalTarget(baseState)).toEqual({ localPort: 3_773 });
-    expect(resolveTailscaleLocalTarget({ ...baseState, host: "0.0.0.0" })).toEqual({
-      localPort: 3_773,
-    });
-    expect(resolveTailscaleLocalTarget({ ...baseState, host: "192.168.1.42" })).toEqual({
-      localPort: 3_773,
-      localHost: "192.168.1.42",
-    });
   });
 });
 
@@ -161,7 +116,6 @@ describe("t3 pair", () => {
         assert.include(output, `Pairing with pair-test (${origin})`);
         assert.include(output, `Pairing URL: ${origin}/pair#token=`);
         assert.isTrue(output.includes("█") || output.includes("▀") || output.includes("▄"));
-        assert.include(output, "only reachable from this machine");
 
         const token = /#token=([A-Z2-9]+)/.exec(output)?.[1];
         assert.isString(token);
@@ -177,22 +131,7 @@ describe("t3 pair", () => {
         assert.equal(credentials[0]?.label, "t3 pair");
         assert.deepEqual(credentials[0]?.scopes, AuthStandardClientScopes);
       }),
-    ).pipe(
-      Effect.provide(NodeServices.layer),
-      Effect.provideService(HostProcess.Environment, {
-        ...process.env,
-        [SERVICE_LAUNCHER_CONTEXT_ENV]: JSON.stringify({
-          protocol: SERVICE_LAUNCHER_PROTOCOL,
-          childVersion: packageJson.version,
-        }),
-      }),
-      Effect.provideService(ServiceLauncherClient.ServiceLauncherHostProcess, {
-        connected: false,
-        send: () => false,
-        on: () => undefined,
-        off: () => undefined,
-      }),
-    ),
+    ).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("mints a pairing grant with only the selected scopes", () =>
@@ -253,7 +192,7 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to t3 serve or t3 connect when no server is running", () =>
+  it.effect("directs to t3 serve when no server is running", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));
 
@@ -266,7 +205,6 @@ describe("t3 pair", () => {
       );
       assert.include(rendered, "No running T3 Code server found.");
       assert.include(rendered, "npx t3 serve");
-      assert.include(rendered, "npx t3 connect");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

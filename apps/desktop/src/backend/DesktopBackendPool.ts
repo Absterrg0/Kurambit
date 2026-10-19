@@ -15,11 +15,10 @@ import { ChildProcessSpawner } from "effect/process";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
-import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
-import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 
@@ -73,8 +72,7 @@ export type BackendInstanceFactoryRequirements =
   | HttpClient.HttpClient
   | DesktopObservability.DesktopBackendOutputLogFactory
   | DesktopTelemetryPublisher.DesktopTelemetryPublisher
-  | DesktopBrowserHost.DesktopBrowserHost
-  | DesktopWslEnvironment.DesktopWslEnvironment;
+  | DesktopBrowserHost.DesktopBrowserHost;
 
 interface ActiveRegisteredInstance {
   readonly _tag: "Active";
@@ -105,63 +103,11 @@ export const layer = Layer.effect(
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
     const electronApp = yield* ElectronApp.ElectronApp;
-    const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
-    // Without this, instance scopes are orphaned: they only close via explicit unregister() calls,
-    // so on app shutdown the WSL backend child process gets hard-killed by the OS instead of
-    // receiving the graceful SIGTERM + grace period the instance's stop finalizer would otherwise
-    // run.
     const layerScope = yield* Scope.Scope;
     const factoryContext = yield* Effect.context<BackendInstanceFactoryRequirements>();
 
-    // Fatal configuration failures persist the Windows fallback. Bounded
-    // transport failures use an in-memory fallback for this launch so the app
-    // opens without overwriting the user's WSL preference.
-    const handlePrimaryPreflightFailure = Effect.fn("desktop.backendPool.primaryPreflightFailed")(
-      function* (failure: DesktopBackendManager.PreflightFailure) {
-        const { reason, fatal } = failure;
-        if (!fatal) {
-          yield* logBackendPoolWarning(
-            "primary WSL preflight retry window exhausted; using Windows for this launch",
-            { reason },
-          );
-          yield* electronDialog.showErrorBox(
-            "WSL backend is still unavailable",
-            `${reason}\n\nT3 Code will use the Windows backend for this launch and retry WSL the next time the app starts.`,
-          );
-          yield* appSettings.applyWslWindowsFallbackInMemory;
-          return true;
-        }
-
-        yield* logBackendPoolWarning("primary WSL preflight failed; falling back to Windows", {
-          reason,
-        });
-        yield* electronDialog.showErrorBox(
-          "WSL backend couldn't start",
-          `${reason}\n\nFalling back to the Windows backend so T3 Code can open. Re-enable the WSL backend from Settings > Connections once the WSL distro is fixed.`,
-        );
-        // Clearing wslBackendEnabled alone would leave a stale wslOnly:true that silently re-traps
-        // the user in wsl-only mode the next time they enable WSL. If the persisted write fails,
-        // keep this process recoverable by applying the fallback to in-memory settings.
-        yield* appSettings.applyWslWindowsFallback.pipe(
-          Effect.catch((error) =>
-            logBackendPoolWarning(
-              "failed to persist Windows fallback after WSL preflight failure",
-              {
-                error: error.message,
-              },
-            ).pipe(Effect.andThen(appSettings.applyWslWindowsFallbackInMemory)),
-          ),
-        );
-        return true;
-      },
-    );
-
     const primary = yield* DesktopBackendManager.makeBackendInstance({
       id: DesktopBackendManager.PRIMARY_INSTANCE_ID,
-      // Keep this lazy. The pool layer is initialized before startup loads
-      // persisted desktop settings, so resolving the primary label here would
-      // permanently capture DEFAULT_DESKTOP_SETTINGS and mislabel WSL-only
-      // primaries as Windows.
       label: configuration.resolvePrimaryLabel,
       configResolve: configuration.resolvePrimary,
       // Window creation errors propagating out of handleBackendReady must not block the readiness
@@ -175,12 +121,11 @@ export const layer = Layer.effect(
           ),
         ),
       onShutdown: () => desktopWindow.handleBackendNotReady,
-      onPreflightFailed: handlePrimaryPreflightFailure,
       onStateDirOwned: () =>
         electronDialog
           .showErrorBox(
-            "This T3 home is unavailable",
-            "Another T3 Code server, such as the background service, is using this data directory. Stop that server and reopen T3 Code, or set a separate GAME_STUDIO_HOME and pair with the running server.",
+            "This Game Studio home is unavailable",
+            "Another Game Studio server is using this data directory. Stop that server and reopen Game Studio, or set a separate GAME_STUDIO_HOME.",
           )
           .pipe(Effect.andThen(electronApp.quit)),
     });

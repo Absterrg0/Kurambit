@@ -6,7 +6,7 @@ import {
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
+
 import {
   ConnectionBlockedError,
   ConnectionTransientError,
@@ -19,8 +19,6 @@ import {
   isRejectedSecondaryBootstrap,
   nextRejectedSecondaryBootstrap,
   primaryRegistrationToRetainAfterTopologyRead,
-  prepareDesktopSshEnvironment,
-  provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
   secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
@@ -93,114 +91,7 @@ function makeBridge(
   } as unknown as DesktopBridge;
 }
 
-describe("desktop SSH pairing", () => {
-  it.effect("fetches the descriptor before consuming the one-time credential", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const provisioned = yield* provisionDesktopSshEnvironment(makeBridge(calls), TARGET);
-
-      expect(provisioned.environmentId).toBe(EnvironmentId.make("environment-ssh"));
-      expect(calls).toEqual(["ensure", "descriptor", "token"]);
-    }),
-  );
-
-  it.effect("does not consume the credential when adding a route to a different machine", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const error = yield* provisionDesktopSshEnvironment(
-        makeBridge(calls),
-        TARGET,
-        EnvironmentId.make("some-other-machine"),
-      ).pipe(Effect.flip);
-
-      expect(error).toMatchObject({ reason: "configuration" });
-      expect(calls).toEqual(["ensure", "descriptor"]);
-    }),
-  );
-
-  it.effect("does not consume the credential when descriptor discovery fails", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      yield* provisionDesktopSshEnvironment(
-        makeBridge(calls, { failDescriptor: true }),
-        TARGET,
-      ).pipe(Effect.flip);
-
-      expect(calls).toEqual(["ensure", "descriptor"]);
-    }),
-  );
-
-  it.effect("reconnects with the saved token while it holds every standard scope", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const prepared = yield* prepareDesktopSshEnvironment(makeBridge(calls), {
-        target: TARGET,
-        expectedEnvironmentId: EnvironmentId.make("environment-ssh"),
-        bearerToken: "saved-token",
-      });
-
-      expect(prepared.bearerToken).toBe("saved-token");
-      expect(calls).toEqual(["ensure", "descriptor", "session"]);
-    }),
-  );
-
-  it.effect("pairs again when the host no longer accepts the saved token", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const prepared = yield* prepareDesktopSshEnvironment(
-        makeBridge(calls, { savedTokenRejected: true }),
-        {
-          target: TARGET,
-          expectedEnvironmentId: EnvironmentId.make("environment-ssh"),
-          bearerToken: "saved-token",
-        },
-      );
-
-      expect(prepared.bearerToken).toBe("bearer-token");
-      expect(calls).toEqual(["ensure", "descriptor", "session", "ensure", "descriptor", "token"]);
-    }),
-  );
-
-  it.effect("pairs again when the saved token predates a standard scope", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const prepared = yield* prepareDesktopSshEnvironment(
-        makeBridge(calls, {
-          savedTokenPermissions: ["orchestration:read", "orchestration:operate"],
-        }),
-        {
-          target: TARGET,
-          expectedEnvironmentId: EnvironmentId.make("environment-ssh"),
-          bearerToken: "saved-token",
-        },
-      );
-
-      expect(prepared.bearerToken).toBe("bearer-token");
-      expect(calls).toEqual(["ensure", "descriptor", "session", "ensure", "descriptor", "token"]);
-    }),
-  );
-
-  it.effect("stops before sending the saved token or pairing on a different machine", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      const error = yield* prepareDesktopSshEnvironment(makeBridge(calls), {
-        target: TARGET,
-        expectedEnvironmentId: EnvironmentId.make("some-other-machine"),
-        bearerToken: "saved-token",
-      }).pipe(Effect.flip);
-
-      expect(error).toMatchObject({ reason: "configuration" });
-      expect(calls).toEqual(["ensure", "descriptor"]);
-    }),
-  );
-});
+describe("desktop SSH pairing", () => {});
 
 describe("desktop-local bearer cache", () => {
   const registration = {} as never;

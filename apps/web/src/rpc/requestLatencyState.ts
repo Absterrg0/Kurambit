@@ -32,7 +32,6 @@ const untrackedRpcAckMethods = new Set<string>([WS_METHODS.serverGetUsageSummary
 const longRunningRpcAckMethods = new Set<string>([
   WS_METHODS.serverUpdateProvider,
   WS_METHODS.serverRefreshProviders,
-  WS_METHODS.serverUpdateServer,
 ]);
 
 const slowRpcAckRequestsAtom = Atom.make<ReadonlyArray<SlowRpcAckRequest>>([]).pipe(

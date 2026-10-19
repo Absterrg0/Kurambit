@@ -1,4 +1,3 @@
-import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   AgentSessionProjectCandidate,
@@ -10,10 +9,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthTerminalOperateScope,
   CommandId,
@@ -23,22 +19,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import {
-  ArrowRightIcon,
-  CheckIcon,
-  ChevronRightIcon,
-  CloudIcon,
-  LinkIcon,
-  MonitorIcon,
-  TerminalIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ChevronRightIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 
-import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { useCompleteOnboarding } from "../../onboarding/firstRun";
 import {
   groupOnboardingProjects,
@@ -59,10 +45,7 @@ import { newProjectId, randomUUID } from "../../lib/utils";
 import { agentSessionImport } from "../../state/agentSessions";
 import { readProjects, useProjects } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
-import {
-  isOnboardingRelayEnvironment,
-  resolveOnboardingSetup,
-} from "../../onboarding/targetEnvironment.logic";
+import { resolveOnboardingSetup } from "../../onboarding/targetEnvironment.logic";
 import { useProjectScans } from "../../onboarding/useProjectScans";
 import { projectEnvironment } from "../../state/projects";
 import { serverEnvironment } from "../../state/server";
@@ -73,7 +56,6 @@ import {
 } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { connectPairing } from "../../connection/onboarding";
 import { getProviderSummary } from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
@@ -81,16 +63,14 @@ import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/Cod
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.logic";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
-import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
-import { presentSavedCloudEnvironmentConnection } from "../cloud/cloudEnvironmentConnectionPresentation";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { T3Wordmark } from "../T3Wordmark";
-import { Alert, AlertDescription } from "../ui/alert";
+
 import { Button } from "../ui/button";
-import { CommandBlock } from "../CommandBlock";
+
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { Input } from "../ui/input";
+
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { ScrollArea } from "../ui/scroll-area";
 import { Spinner } from "../ui/spinner";
@@ -250,7 +230,7 @@ export function WelcomeWizard({
         <WizardPanel holdHeight={isLoadingProjects}>
           {step === "connection" ? (
             <ConnectionStep
-              expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
+              expandPairingInitially={false}
               selectedIds={selectedIds}
               autoSelectedComputers={autoSelectedComputers}
               onSelectionChange={setSelection}
@@ -287,346 +267,26 @@ export function WelcomeWizard({
 }
 
 function ConnectionStep({
-  autoSelectedComputers,
-  expandPairingInitially,
-  selectedIds,
-  onSelectionChange,
-  onToggleEnvironment,
   onContinue,
-  onPaired,
 }: {
-  readonly autoSelectedComputers: Set<EnvironmentId>;
-  readonly expandPairingInitially: boolean;
-  readonly selectedIds: ReadonlySet<EnvironmentId>;
-  readonly onSelectionChange: (ids: ReadonlySet<EnvironmentId>) => void;
-  readonly onToggleEnvironment: (environmentId: EnvironmentId, checked: boolean) => void;
-  readonly onContinue: () => void;
-  readonly onPaired: (environmentId: EnvironmentId) => void;
+  onContinue: () => void;
+  autoSelectedComputers: Set<EnvironmentId>;
+  expandPairingInitially: boolean;
+  selectedIds: ReadonlySet<EnvironmentId>;
+  onSelectionChange: (ids: ReadonlySet<EnvironmentId>) => void;
+  onToggleEnvironment: (environmentId: EnvironmentId, checked: boolean) => void;
+  onPaired: (environmentId: EnvironmentId) => void;
 }) {
-  const { environments } = useEnvironments();
-  const cloudEnabled = hasCloudPublicConfig();
-  const directEnvironments = environments.filter(
-    (environment) => !cloudEnabled || !isOnboardingRelayEnvironment(environment),
-  );
-  const [pairingOpen, setPairingOpen] = useState(expandPairingInitially);
-  const [isPairing, setIsPairing] = useState(false);
-  const { ready, skippedIds } = resolveOnboardingSetup(environments, selectedIds);
-  const skippedLabels = environments
-    .filter((environment) => skippedIds.includes(environment.environmentId))
-    .map((environment) => environment.label);
-  const continueRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (
-      ready &&
-      (document.activeElement === document.body ||
-        document.activeElement?.getAttribute("role") === "dialog")
-    ) {
-      continueRef.current?.focus();
-    }
-  }, [ready]);
+  const primary = usePrimaryEnvironment();
   return (
-    <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        Connect your computers
-      </h1>
-      <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Choose one or more computers. We’ll set up agents and projects on each.
-      </p>
-      {directEnvironments.length > 0 ? (
-        <fieldset className="mt-5 space-y-2">
-          <legend className="sr-only">Computers to set up</legend>
-          {directEnvironments.map((environment) => (
-            <label
-              key={environment.environmentId}
-              className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-3"
-            >
-              <Checkbox
-                checked={selectedIds.has(environment.environmentId)}
-                onCheckedChange={(checked) => {
-                  const next = new Set(selectedIds);
-                  if (checked) next.add(environment.environmentId);
-                  else next.delete(environment.environmentId);
-                  onSelectionChange(next);
-                }}
-              />
-              <MonitorIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 text-sm font-medium break-words">
-                    {environment.label}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {!environment.entry.enabled && environment.connection.phase !== "unsupported"
-                      ? "Off"
-                      : presentSavedCloudEnvironmentConnection(environment.connection).buttonLabel}
-                  </span>
-                </span>
-                {environment.displayUrl ? (
-                  <span className="mt-0.5 block text-xs break-all text-muted-foreground">
-                    {environment.displayUrl}
-                  </span>
-                ) : null}
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      ) : null}
-      <div className="mt-4 space-y-2">
-        {cloudEnabled ? (
-          <ConnectAccountOption
-            autoSelectedComputers={autoSelectedComputers}
-            disabled={isPairing}
-            selectedIds={selectedIds}
-            onToggleEnvironment={onToggleEnvironment}
-          />
-        ) : null}
-        <div className="rounded-lg border border-border bg-background">
-          <Collapsible open={pairingOpen} onOpenChange={setPairingOpen}>
-            <CollapsibleTrigger
-              disabled={isPairing}
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm-multiline"
-                  className="min-h-14 w-full justify-start"
-                />
-              }
-            >
-              <LinkIcon className="size-4 text-muted-foreground" />
-              <span className="flex-1 text-left">Add a computer</span>
-              <ChevronRightIcon
-                className={cn("size-4 text-muted-foreground", pairingOpen && "rotate-90")}
-              />
-            </CollapsibleTrigger>
-            <CollapsiblePanel>
-              <div className="px-3 pb-3">
-                <PairingForm
-                  isPairing={isPairing}
-                  setIsPairing={setIsPairing}
-                  onPaired={(environmentId) => {
-                    setPairingOpen(false);
-                    onPaired(environmentId);
-                    requestAnimationFrame(() => continueRef.current?.focus());
-                  }}
-                />
-              </div>
-            </CollapsiblePanel>
-          </Collapsible>
-        </div>
-      </div>
-      {skippedLabels.length > 0 ? (
-        <p className="mt-4 text-xs text-muted-foreground">
-          Not connected, so setup skips {skippedLabels.join(", ")}. You can set{" "}
-          {skippedLabels.length === 1 ? "it" : "them"} up later from Settings.
-        </p>
-      ) : null}
-      <div className="mt-6 flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-        <p className="min-w-0 text-xs leading-relaxed text-muted-foreground">
-          Game Studio does not collect product usage analytics. Your projects and conversations are
-          stored locally.
-        </p>
-        <Button
-          className="shrink-0 self-end"
-          ref={continueRef}
-          autoFocus={!expandPairingInitially}
-          disabled={!ready || isPairing}
-          onClick={onContinue}
-        >
-          Continue
-          <ArrowRightIcon className="size-3.5" />
-        </Button>
-      </div>
-    </>
-  );
-}
-
-function ConnectAccountOption({
-  autoSelectedComputers,
-  disabled,
-  selectedIds,
-  onToggleEnvironment,
-}: {
-  readonly autoSelectedComputers: Set<EnvironmentId>;
-  readonly disabled: boolean;
-  readonly selectedIds: ReadonlySet<EnvironmentId>;
-  readonly onToggleEnvironment: (environmentId: EnvironmentId, checked: boolean) => void;
-}) {
-  const { environments } = useEnvironments();
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { openAuthPrompt } = useT3ConnectAuthPrompt();
-  const [expanded, setExpanded] = useState(true);
-  const [discoveryReady, setDiscoveryReady] = useState(false);
-  const onDiscoveryReady = () => setDiscoveryReady(true);
-
-  return (
-    <div className="rounded-lg border border-border bg-background">
-      <Collapsible open={expanded && !!isSignedIn && discoveryReady} onOpenChange={setExpanded}>
-        <CollapsibleTrigger
-          disabled={disabled || !isLoaded}
-          onClick={(event) => {
-            if (!isSignedIn) {
-              event.preventDefault();
-              setExpanded(true);
-              openAuthPrompt();
-            }
-          }}
-          render={
-            <Button variant="ghost" size="sm-multiline" className="min-h-14 w-full justify-start" />
-          }
-        >
-          <CloudIcon className="size-4 text-muted-foreground" />
-          <span className="flex-1 text-left">T3 Connect</span>
-          <span className="text-xs text-muted-foreground">
-            {!isLoaded
-              ? "Loading sign-in…"
-              : !isSignedIn
-                ? "Sign in"
-                : !discoveryReady
-                  ? "Loading computers…"
-                  : null}
-          </span>
-          <ChevronRightIcon
-            className={cn("size-4 text-muted-foreground", expanded && isSignedIn && "rotate-90")}
-          />
-        </CollapsibleTrigger>
-        <CollapsiblePanel keepMounted>
-          <div className="px-3 pb-3">
-            <div className="mb-3 space-y-1.5">
-              {isSignedIn ? (
-                <CloudEnvironmentConnectRows
-                  primaryEnvironmentId={null}
-                  savedEnvironments={environments}
-                  showSavedEnvironments
-                  onDiscoveryReady={onDiscoveryReady}
-                  selection={{ selectedIds, onChange: onToggleEnvironment, autoSelectedComputers }}
-                  refreshWhileEmpty
-                  empty={
-                    <p className="py-3 text-sm text-muted-foreground">No computers linked yet.</p>
-                  }
-                />
-              ) : null}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Run this on each computer you want to connect.
-            </p>
-            <CommandBlock command="npx t3 connect" className="mt-3" />
-            <p className="mt-3 text-xs text-muted-foreground">
-              Keep T3 Code running. Select the computers you want to set up above.
-            </p>
-          </div>
-        </CollapsiblePanel>
-      </Collapsible>
-    </div>
-  );
-}
-
-function PairingForm({
-  isPairing,
-  setIsPairing,
-  onPaired,
-}: {
-  readonly isPairing: boolean;
-  readonly setIsPairing: (value: boolean) => void;
-  readonly onPaired: (environmentId: EnvironmentId) => void;
-}) {
-  const connectPairingEnvironment = useAtomCommand(connectPairing, { reportFailure: false });
-  const [pairingUrl, setPairingUrl] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const submit = async () => {
-    if (isPairing || pairingUrl.trim().length === 0) return;
-    setIsPairing(true);
-    setErrorMessage("");
-    const result = await connectPairingEnvironment({ pairingUrl: pairingUrl.trim() });
-    if (!mountedRef.current) return;
-    setIsPairing(false);
-    if (result._tag === "Success") {
-      onPaired(result.value);
-      return;
-    }
-    if (isAtomCommandInterrupted(result)) return;
-    const cause = squashAtomCommandFailure(result);
-    setErrorMessage(cause instanceof Error ? cause.message : "Pairing failed.");
-  };
-
-  return (
-    <>
-      <form
-        className="space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <div>
-          <label className="block text-sm text-muted-foreground" htmlFor="onboarding-pairing-url">
-            Pairing link
-          </label>
-          <Input
-            id="onboarding-pairing-url"
-            autoFocus
-            aria-invalid={errorMessage.length > 0}
-            aria-describedby={errorMessage ? "onboarding-pairing-error" : undefined}
-            className="mt-2"
-            size="lg"
-            autoCapitalize="none"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            nativeInput
-            readOnly={isPairing}
-            placeholder="https://your-server:5230/pair#token=…"
-            value={pairingUrl}
-            onChange={(event) => setPairingUrl(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                (event.nativeEvent.isComposing || event.keyCode === 229)
-              ) {
-                event.preventDefault();
-              }
-            }}
-          />
-        </div>
-        {errorMessage ? (
-          <Alert id="onboarding-pairing-error" variant="error">
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-        <Collapsible>
-          <div className="flex items-center justify-between gap-3">
-            <CollapsibleTrigger
-              type="button"
-              className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <ChevronRightIcon className="size-3.5 group-data-panel-open:rotate-90" />
-              Need a pairing link?
-            </CollapsibleTrigger>
-            <Button type="submit" disabled={isPairing || pairingUrl.trim().length === 0}>
-              {isPairing ? "Pairing..." : "Pair"}
-            </Button>
-          </div>
-          <CollapsiblePanel>
-            <p className="pt-3 text-sm text-muted-foreground">
-              Run this on the computer with your code.
-            </p>
-            <CommandBlock command="npx t3 pair" className="mt-2" />
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start T3 Code first, or run <code className="font-mono">npx t3 serve</code>. Add{" "}
-              <code className="font-mono">--tailscale</code> to use your tailnet.
-            </p>
-          </CollapsiblePanel>
-        </Collapsible>
-      </form>
-    </>
+    <StepShell
+      title="Create games on this computer"
+      description="Game Studio runs your agents and game tools locally."
+    >
+      <Button disabled={!primary || primary.connection.phase !== "connected"} onClick={onContinue}>
+        Continue
+      </Button>
+    </StepShell>
   );
 }
 

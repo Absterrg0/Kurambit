@@ -13,11 +13,10 @@ import {
 
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { configuredHostedAppUrl } from "~/hostedPairing";
 
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
-/** A shareable link to a prompt on the hosted app, or null when the prompt cannot fit in one. */
+/** A shareable link to a prompt in this local app, or null when the prompt cannot fit in one. */
 export function promptLinkFor(
   prompt: string,
   context?: {
@@ -28,7 +27,7 @@ export function promptLinkFor(
 ): string | null {
   const trimmed = prompt.trim();
   if (trimmed.length === 0 || trimmed.length > PROMPT_LINK_MAX_PROMPT_LENGTH) return null;
-  return buildNewThreadLink({ prompt: trimmed, ...context, origin: configuredHostedAppUrl() });
+  return buildNewThreadLink({ prompt: trimmed, ...context, origin: window.location.origin });
 }
 
 export function promptLinkRepositoryOf(

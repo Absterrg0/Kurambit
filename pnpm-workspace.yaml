@@ -1,6 +1,5 @@
 packages:
   - apps/*
-  - infra/*
   - oxlint-plugin-t3code
   - packages/*
   - scripts
@@ -26,12 +25,6 @@ allowBuilds:
   workerd: false
 
 catalog:
-  "@clerk/backend": 3.25.0
-  "@clerk/clerk-js": 6.39.1
-  "@clerk/electron": 0.1.1
-  "@clerk/electron-passkeys": 0.0.3
-  "@clerk/react": 6.17.8
-  "@clerk/shared": 4.40.0
   "@effect/atom-react": 4.0.5
   "@effect/openapi-generator": 4.0.5
   "@effect/platform-node": 4.0.5
@@ -82,17 +75,6 @@ catalog:
 minimumReleaseAgeExclude:
   - tsc-rs
   - "@tsc-rs/*"
-  - "@clerk/backend@3.25.0"
-  - "@clerk/clerk-js@6.39.1"
-  - "@clerk/electron@0.1.1"
-  - "@clerk/react@6.17.8"
-  - "@clerk/shared@4.40.0"
-  - "@distilled.cloud/aws@1.0.0-rc.13"
-  - "@distilled.cloud/axiom@1.0.0-rc.13"
-  - "@distilled.cloud/cloudflare@1.0.0-rc.13"
-  - "@distilled.cloud/core@1.0.0-rc.13"
-  - "@distilled.cloud/neon@1.0.0-rc.13"
-  - "@distilled.cloud/planetscale@1.0.0-rc.13"
   - "@effect/atom-react@4.0.5"
   - "@effect/openapi-generator@4.0.5"
   - "@effect/platform-node-shared@4.0.5"
@@ -100,27 +82,13 @@ minimumReleaseAgeExclude:
   - "@effect/sql-pg@4.0.5"
   - "@effect/sql-sqlite-do@4.0.5"
   - "@effect/vitest@4.0.5"
-  - alchemy@2.0.0-beta.80
   - effect@4.0.5
   - electron@44.4.5
   - "@anthropic-ai/claude-agent-sdk@0.3.276"
-  - "@alchemy.run/cloudflare-runtime@2.0.0-beta.80"
-  - "@alchemy.run/floci@2.0.0-beta.80"
-  - "@alchemy.run/node-utils@2.0.0-beta.80"
-  - "@distilled.cloud/fly-io@1.0.0-rc.13"
-  - "@distilled.cloud/hetzner@1.0.0-rc.13"
-  - "@distilled.cloud/prisma@1.0.0-rc.13"
-  - "@distilled.cloud/railway@1.0.0-rc.13"
-  - "@distilled.cloud/stripe@1.0.0-rc.13"
   - "@shadcn/lint@0.1.5"
   - cn@0.3.2
   - "react@19.3.0"
   - "react-dom@19.3.0"
-  - "@distilled.cloud/acme@1.0.0-rc.13"
-  - "@distilled.cloud/doppler@1.0.0-rc.13"
-  - "@distilled.cloud/gcp@1.0.0-rc.13"
-  - "@distilled.cloud/infisical@1.0.0-rc.13"
-  - "@distilled.cloud/zerossl@1.0.0-rc.13"
   - "@opencode/client@2.0.28"
   - "@opencode/protocol@2.0.28"
   - "@opencode/schema@2.0.28"
@@ -141,28 +109,6 @@ overrides:
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64-musl": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-arm64": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-x64": "-"
-  # Alchemy's Ink fork declares React as a hard dependency, but the relay only
-  # reaches its terminal-capability helpers; the TUI is never imported, so the
-  # extra React copy is pure install weight.
-  "@alchemy.run/sigil>react": "-"
-  "@alchemy.run/sigil>react-reconciler": "-"
-  "@alchemy.run/sigil>scheduler": "-"
-  # Alchemy only reaches @prisma/dev through a lazy import inside the Prisma
-  # database provider, which the relay never deploys. Its exact hono/valibot
-  # pins are also the bulk of our open dependency advisories.
-  "alchemy>@prisma/dev": "-"
-  "@clerk/backend": "catalog:"
-  "@clerk/clerk-js": "catalog:"
-  "@clerk/clerk-js>@base-org/account": "-"
-  "@clerk/clerk-js>@coinbase/wallet-sdk": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-base": "-"
-  "@clerk/clerk-js>@solana/wallet-adapter-react": "-"
-  "@clerk/clerk-js>@solana/wallet-standard": "-"
-  "@clerk/clerk-js>@wallet-standard/core": "-"
-  "@clerk/electron": "catalog:"
-  "@clerk/electron-passkeys": "catalog:"
-  "@clerk/react": "catalog:"
-  "@clerk/shared": "catalog:"
   "@effect/atom-react": "catalog:"
   "@effect/platform-node": "catalog:"
   "@effect/platform-node-shared": "catalog:"
@@ -207,7 +153,6 @@ packageExtensions:
       vite-plus: "catalog:"
 
 patchedDependencies:
-  alchemy@2.0.0-beta.80: patches/alchemy@2.0.0-beta.80.patch
   "@effect/vitest@4.0.5": patches/@effect__vitest@4.0.5.patch
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch
   "@ff-labs/fff-node@0.11.0": patches/@ff-labs__fff-node@0.11.0.patch

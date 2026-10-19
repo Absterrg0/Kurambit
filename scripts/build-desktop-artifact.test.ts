@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Tests use Node's glob matcher to verify electron-builder exclusions.
-import * as NodeCrypto from "node:crypto";
+
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -9,7 +9,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+
 import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -18,41 +18,29 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   BundleNotSelfContainedError,
   BuildCommandFailedError,
-  parseWslRuntimeArchiveMembers,
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   readWorkspaceConfig,
   createBuildConfig,
-  DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
-  LINUX_CAPTURE_EXTRA_RESOURCES,
-  LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
   MAC_FILE_EXCLUSIONS,
-  InvalidMacPasskeyRpDomainError,
-  InvalidMacPasskeyPublishableKeyError,
   InvalidMockUpdateServerPortError,
-  UnsupportedDesktopBuildArchitectureError,
-  isMacPasskeySigningConfigurationError,
   LinuxIconResizeError,
   LinuxDesktopBuildPrerequisitesMissingError,
   MacDesktopBuildPrerequisitesMissingError,
   MacPasskeySigningConfigurationResolutionError,
-  MissingMacPasskeyProvisioningProfileError,
   packWindowsServerAsar,
   preflightLinuxDesktopBuild,
   preflightMacDesktopBuild,
-  preflightWindowsDesktopBuild,
   renderMacPasskeyEntitlements,
   resolveMacWebAuthnEntitlements,
-  resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
   resolveMergedStageDependencies,
   resolveFffNativeDependencies,
-  resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
@@ -69,7 +57,6 @@ import {
   stageResourceMonitor,
   stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
-  bundlesWslRuntime,
   STAGE_INSTALL_ARGS,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -77,21 +64,14 @@ import {
   stageBrowserSecret,
   validateWindowsPackagedPayload,
   WindowsPrimaryNativeProbeError,
-  WindowsDesktopBuildPrerequisitesMissingError,
   WindowsPackagedPayloadValidationError,
   WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
   stageCursorSdkPlatformPackages,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
-  WINDOWS_SERVER_EXTRA_RESOURCES,
   WINDOWS_SERVER_ASAR_RESOURCE,
-  WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
-  WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
-  WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
   WSL_RUNTIME_ARCHIVE_HASH_NAME,
   WSL_RUNTIME_ARCHIVE_NAME,
-  WSL_RUNTIME_EXTRA_RESOURCES,
-  WslRuntimeArchiveMissingError,
   wslRuntimeArchiveStem,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
@@ -550,170 +530,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
-  it("limits Electron locales and excludes separately packaged resources", () => {
-    assert.deepStrictEqual(DESKTOP_ELECTRON_LANGUAGES, ["en-US"]);
-    for (const resource of [
-      ...WSL_RUNTIME_EXTRA_RESOURCES,
-      ...LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
-    ]) {
-      assert.include(
-        DESKTOP_FILE_EXCLUSIONS,
-        `!${resource.from}`,
-        `${resource.from} ships via extraResources and must be excluded from app.asar`,
-      );
-    }
-
-    assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, [
-      "!**/node_modules/@cursor/sdk-*/**/*",
-      "!apps/desktop/prod-resources/cursor-sdk",
-      "!apps/desktop/prod-resources/cursor-sdk/**/*",
-      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
-      "!**/*.map",
-      "!**/*.d.cts",
-      "!apps/desktop/resources/browser-secret",
-      "!apps/desktop/resources/browser-secret/**/*",
-      "!apps/desktop/prod-resources/browser-secret",
-      "!apps/desktop/prod-resources/browser-secret/**/*",
-      "!apps/desktop/prod-resources/windows-server",
-      "!apps/desktop/prod-resources/windows-server/**/*",
-      "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
-      "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
-      "!apps/desktop/gnome-extension",
-      "!apps/desktop/gnome-extension/**/*",
-    ]);
-    assert.equal(WINDOWS_SERVER_RESOURCE_SOURCE_DIR, "apps/desktop/prod-resources/windows-server");
-    assert.deepStrictEqual(WINDOWS_SERVER_EXTRA_RESOURCES, [
-      {
-        from: "apps/desktop/prod-resources/windows-server",
-        to: ".",
-        filter: ["server.asar", "server.asar.unpacked/**/*"],
-      },
-    ]);
-  });
-
-  it.effect("applies platform-specific packaging to the build config", () =>
-    Effect.gen(function* () {
-      const mac = yield* createBuildConfig(
-        "mac",
-        "dmg",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
-      const linux = yield* createBuildConfig(
-        "linux",
-        "AppImage",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-      );
-      const win = yield* createBuildConfig(
-        "win",
-        "nsis",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-        true,
-      );
-      const winWithoutWslRuntime = yield* createBuildConfig(
-        "win",
-        "nsis",
-        "1.2.3",
-        false,
-        false,
-        undefined,
-        undefined,
-        false,
-      );
-
-      assert.notProperty(mac, "asar");
-      assert.notProperty(linux, "asar");
-      assert.notProperty(mac, "asarUnpack");
-      assert.notProperty(linux, "asarUnpack");
-      assert.deepStrictEqual(win.asar, { smartUnpack: false });
-      assert.deepStrictEqual(win.asarUnpack, [WINDOWS_NATIVE_ASAR_UNPACK_GLOB]);
-      assert.deepStrictEqual(winWithoutWslRuntime.asar, win.asar);
-      assert.deepStrictEqual(winWithoutWslRuntime.asarUnpack, win.asarUnpack);
-      assert.deepStrictEqual(mac.extraResources, DESKTOP_EXTRA_RESOURCES);
-      assert.deepStrictEqual(linux.extraResources, [
-        ...DESKTOP_EXTRA_RESOURCES,
-        ...LINUX_CAPTURE_EXTRA_RESOURCES,
-        { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
-      ]);
-      assert.deepStrictEqual(win.extraResources, [
-        ...DESKTOP_EXTRA_RESOURCES,
-        ...WINDOWS_SERVER_EXTRA_RESOURCES,
-        ...WSL_RUNTIME_EXTRA_RESOURCES,
-      ]);
-      assert.deepStrictEqual(winWithoutWslRuntime.extraResources, [
-        ...DESKTOP_EXTRA_RESOURCES,
-        ...WINDOWS_SERVER_EXTRA_RESOURCES,
-      ]);
-      assert.deepStrictEqual(win.nsis, { differentialPackage: true });
-      assert.deepStrictEqual(WINDOWS_SERVER_ASAR_IGNORE_GLOBS, [
-        "**/node_modules/@cursor/sdk-*",
-        "**/node_modules/@cursor/sdk-*/**",
-        "**/node_modules/@anthropic-ai/claude-agent-sdk-*",
-        "**/node_modules/@anthropic-ai/claude-agent-sdk-*/**",
-        "**/node_modules/.bin",
-        "**/node_modules/.bin/**",
-        "**/*.map",
-      ]);
-      assert.deepStrictEqual(mac.dmg, {
-        title: "Game Studio 1.2.3 Installer",
-        background: "dmg/dmg-background-latest.png",
-        window: { width: 640, height: 432 },
-        contents: [
-          { x: 166, y: 214, type: "file" },
-          { x: 474, y: 214, type: "link", path: "/Applications" },
-        ],
-        iconSize: 120,
-        iconTextSize: 12,
-      });
-      assert.deepStrictEqual((linux.linux as Record<string, unknown>).target, ["AppImage", "deb"]);
-      assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "Game Studio", schemes: ["game-studio", "game-studio-dev"] },
-      ]);
-      assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
-        { name: "Game Studio", schemes: ["game-studio", "game-studio-dev"] },
-        { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
-      ]);
-      const macInfo = (mac.mac as { extendInfo: Record<string, unknown> }).extendInfo;
-      assert.strictEqual(macInfo.NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac, true);
-      assert.deepStrictEqual(macInfo.CFBundleDocumentTypes, [
-        {
-          CFBundleTypeName: "Web page",
-          CFBundleTypeRole: "Viewer",
-          LSHandlerRank: "Alternate",
-          LSItemContentTypes: ["public.html", "public.xhtml"],
-        },
-      ]);
-      assert.deepStrictEqual(linux.toolsets, { appimage: "1.0.3" });
-      assert.notProperty(mac, "toolsets");
-      assert.notProperty(win, "toolsets");
-      assert.deepStrictEqual(mac.files, [...DESKTOP_FILE_EXCLUSIONS, ...MAC_FILE_EXCLUSIONS]);
-      assert.deepStrictEqual(linux.files, [...DESKTOP_FILE_EXCLUSIONS, ...LINUX_FILE_EXCLUSIONS]);
-      assert.deepStrictEqual(win.files, DESKTOP_FILE_EXCLUSIONS);
-      assert.deepStrictEqual(winWithoutWslRuntime.files, win.files);
-      assert.notProperty(mac.mac as Record<string, unknown>, "sign");
-      assert.propertyVal(
-        (mac.mac as Record<string, unknown>).extendInfo as Record<string, unknown>,
-        "NSLocalNetworkUsageDescription",
-        "Game Studio connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
-      );
-      for (const config of [linux, win]) {
-        assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
-      }
-      assert.deepStrictEqual(mac.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
-    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
-  );
-
   it("excludes foreign node-pty prebuilds from macOS and Linux packages", () => {
     assert.deepStrictEqual(MAC_FILE_EXCLUSIONS, [
       "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
@@ -1049,137 +865,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it.effect("reports missing Windows toolchain capabilities before building", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
-        const pythonPath = path.join(tempDir, "python.exe");
-        yield* fs.writeFileString(pythonPath, "python");
-        const spawner = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) => {
-            const childProcess = command as unknown as { readonly command: string };
-            const fails =
-              childProcess.command === "rustc" ||
-              childProcess.command === "powershell.exe" ||
-              childProcess.command === pythonPath;
-            return Effect.succeed(mockProcess(fails ? 1 : 0));
-          }),
-        );
-        const error = yield* preflightWindowsDesktopBuild({
-          arch: "x64",
-          bundlesWslRuntime: true,
-        }).pipe(
-          Effect.provide(
-            Layer.merge(
-              spawner,
-              ConfigProvider.layer(
-                ConfigProvider.fromEnv({ env: { npm_config_python: pythonPath } }),
-              ),
-            ),
-          ),
-          Effect.flip,
-        );
-
-        assert.instanceOf(error, WindowsDesktopBuildPrerequisitesMissingError);
-        assert.deepStrictEqual(error.missing, ["rust", "python", "msvc"]);
-        assert.equal(error.rustTarget, "x86_64-pc-windows-msvc");
-        assert.include(error.message, "Visual Studio Build Tools components");
-      }),
-    ),
-  );
-
-  it.effect("does not require MSVC when reusing a prebuilt Windows resource monitor", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
-        const pythonPath = path.join(tempDir, "python.exe");
-        yield* fs.writeFileString(pythonPath, "python");
-        const commands: string[] = [];
-        const spawner = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) => {
-            const childProcess = command as unknown as { readonly command: string };
-            commands.push(childProcess.command);
-            return Effect.succeed(mockProcess(childProcess.command === "powershell.exe" ? 1 : 0));
-          }),
-        );
-
-        yield* preflightWindowsDesktopBuild({
-          arch: "x64",
-          bundlesWslRuntime: true,
-        }).pipe(
-          Effect.provide(
-            Layer.merge(
-              spawner,
-              ConfigProvider.layer(
-                ConfigProvider.fromEnv({
-                  env: {
-                    npm_config_python: pythonPath,
-                    T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true",
-                  },
-                }),
-              ),
-            ),
-          ),
-        );
-
-        assert.notInclude(commands, "powershell.exe");
-      }),
-    ),
-  );
-
-  it.effect("rejects a PATH-discovered Python executable that is not Python 3", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-python2-preflight-" });
-        const pythonPath = path.join(tempDir, "python");
-        yield* fs.writeFileString(pythonPath, "python2");
-        const spawner = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) => {
-            const childProcess = command as unknown as {
-              readonly command: string;
-              readonly args: ReadonlyArray<string>;
-            };
-            if (childProcess.command === "python") {
-              return Effect.succeed(mockProcess(0, `${pythonPath}\n`));
-            }
-            if (childProcess.command === pythonPath) {
-              return Effect.succeed(mockProcess(1));
-            }
-            return Effect.succeed(mockProcess(0));
-          }),
-        );
-        const error = yield* preflightWindowsDesktopBuild({
-          arch: "x64",
-          bundlesWslRuntime: false,
-        }).pipe(
-          Effect.provide(
-            Layer.merge(
-              spawner,
-              ConfigProvider.layer(
-                ConfigProvider.fromEnv({
-                  env: { T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
-                }),
-              ),
-            ),
-          ),
-          Effect.flip,
-        );
-
-        assert.instanceOf(error, WindowsDesktopBuildPrerequisitesMissingError);
-        assert.deepStrictEqual(error.missing, ["python"]);
-      }),
-    ),
-  );
-
   it.effect("builds and stages native capture helpers for each Linux architecture", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1282,181 +967,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(secondAsar, firstAsar);
       }),
     ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
-  );
-
-  it.effect("accepts an embedded Linux CLI release archive with a matching digest", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "valid",
-        });
-        const result = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-          expectWslRuntime: true,
-        });
-
-        assert.equal(result.packagedAppDir, fixture.packagedAppDir);
-      }),
-    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
-  );
-
-  it.effect.each(["x64", "arm64"] as const)(
-    "accepts an embedded archive with the Linux %s node-pty prebuild",
-    (targetArch) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fixture = yield* makeWindowsPayloadFixture({
-            copyUnpackedNatives: true,
-            wslRuntime: "valid",
-            targetArch,
-            ptyPrebuildArch: targetArch,
-          });
-          const result = yield* validateWindowsPackagedPayload({
-            stageDistDir: fixture.stageDistDir,
-            appExecutableName: fixture.appExecutableName,
-            targetArch,
-            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-            expectWslRuntime: true,
-          });
-
-          assert.equal(result.packagedAppDir, fixture.packagedAppDir);
-        }),
-      ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
-  );
-
-  it.effect.each(["x64", "arm64"] as const)(
-    "rejects a node-pty prebuild for the wrong architecture in a Linux %s archive",
-    (targetArch) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fixture = yield* makeWindowsPayloadFixture({
-            copyUnpackedNatives: true,
-            wslRuntime: "valid",
-            targetArch,
-            ptyPrebuildArch: targetArch === "x64" ? "arm64" : "x64",
-          });
-          const error = yield* validateWindowsPackagedPayload({
-            stageDistDir: fixture.stageDistDir,
-            appExecutableName: fixture.appExecutableName,
-            targetArch,
-            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-            expectWslRuntime: true,
-          }).pipe(Effect.flip);
-
-          assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-          assert.equal(error.reason, "wsl-runtime-invalid");
-        }),
-      ),
-  );
-
-  it.effect("rejects an embedded archive built for a different release version", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "valid",
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: "9.9.9",
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
-      }),
-    ),
-  );
-
-  it.effect("rejects a Windows package missing its expected WSL runtime", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-missing");
-      }),
-    ),
-  );
-
-  it.effect("rejects a loose server tree that is not a Linux CLI release archive", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "loose-server-tree",
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
-      }),
-    ),
-  );
-
-  it.effect("rejects an embedded archive without the Linux node-pty binary", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "missing-pty",
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
-        assert.deepStrictEqual(error.missingFiles, [
-          `${wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, "x64")}/node_modules/node-pty/build/Release/pty.node`,
-          `${wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, "x64")}/node_modules/node-pty/prebuilds/linux-x64/pty.node`,
-        ]);
-      }),
-    ),
-  );
-
-  it.effect("rejects an emitted WSL archive whose sidecar digest does not match", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          wslRuntime: "bad-digest",
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-          expectWslRuntime: true,
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "wsl-runtime-invalid");
-      }),
-    ),
   );
 
   it.effect("probes fff through the packaged Windows primary instead of helper executables", () => {
@@ -1999,76 +1509,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
-  it("rejects incomplete macOS passkey signing configuration", () => {
-    const captureError = (env: Readonly<Record<string, string | undefined>>) => {
-      try {
-        resolveMacPasskeySigningConfiguration(env);
-      } catch (error) {
-        return error;
-      }
-      return assert.fail("Expected passkey signing configuration to fail.");
-    };
-
-    const missingProfileError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
-    });
-    assert.instanceOf(missingProfileError, MissingMacPasskeyProvisioningProfileError);
-    assert.equal(
-      missingProfileError.message,
-      "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.",
-    );
-
-    const unsafeDomain =
-      "https://domain-user:domain-secret@example.clerk.accounts.dev/path?token=query-secret";
-    const invalidDomainError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PASSKEY_RP_DOMAINS: unsafeDomain,
-    });
-    assert.instanceOf(invalidDomainError, InvalidMacPasskeyRpDomainError);
-    assert.equal(invalidDomainError.reason, "scheme-not-allowed");
-    assert.equal(invalidDomainError.inputLength, unsafeDomain.length);
-    assert.equal(invalidDomainError.message, "Invalid passkey RP domain (scheme-not-allowed).");
-    assert.notProperty(invalidDomainError, "domain");
-    assert.notProperty(invalidDomainError, "cause");
-    const serializedInvalidDomainError = JSON.stringify(invalidDomainError);
-    assert.notInclude(serializedInvalidDomainError, unsafeDomain);
-    assert.notInclude(serializedInvalidDomainError, "domain-user");
-    assert.notInclude(serializedInvalidDomainError, "domain-secret");
-    assert.notInclude(serializedInvalidDomainError, "query-secret");
-    assert.throws(
-      () =>
-        resolveMacPasskeySigningConfiguration({
-          T3CODE_APPLE_TEAM_ID: "ABC1234567",
-          T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-          T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev:8443",
-        }),
-      /Invalid passkey RP domain/u,
-    );
-    const invalidPublishableKeyError = captureError({
-      T3CODE_APPLE_TEAM_ID: "ABC1234567",
-      T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
-      T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test_%",
-    });
-    assert.instanceOf(invalidPublishableKeyError, InvalidMacPasskeyPublishableKeyError);
-    assert.ok(invalidPublishableKeyError.cause);
-    assert.equal(invalidPublishableKeyError.message, "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.");
-    assert.notProperty(invalidPublishableKeyError, "publishableKey");
-    assert.notInclude(invalidPublishableKeyError.message, "pk_test_%");
-  });
-
-  it("preserves known passkey signing configuration errors at the build boundary", () => {
-    const decodingCause = new Error("publishable-key-decode-failed");
-    const knownError = new InvalidMacPasskeyPublishableKeyError({ cause: decodingCause });
-    const error = MacPasskeySigningConfigurationResolutionError.fromCause(knownError);
-
-    assert.strictEqual(error, knownError);
-    assert.instanceOf(error, InvalidMacPasskeyPublishableKeyError);
-    assert.strictEqual(error.cause, decodingCause);
-    assert.isTrue(isMacPasskeySigningConfigurationError(error));
-  });
-
   it("wraps unknown passkey signing configuration defects without copying cause text", () => {
     const secret = "pk_test_do-not-retain";
     const cause = new Error(secret);
@@ -2163,76 +1603,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resourceMonitorExecutableName("win"), "t3-resource-monitor.exe");
   });
 
-  it("ships the Linux CLI release archive as the WSL runtime", () => {
-    assert.equal(WSL_RUNTIME_ARCHIVE_NAME, "wsl-runtime.tar.gz");
-    assert.equal(WSL_RUNTIME_ARCHIVE_HASH_NAME, "wsl-runtime.tar.gz.sha256");
-    assert.deepStrictEqual(WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE, {
-      from: "apps/desktop/prod-resources/wsl-runtime.tar.gz",
-      to: "wsl-runtime.tar.gz",
-    });
-    assert.deepStrictEqual(WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE, {
-      from: "apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
-      to: "wsl-runtime.tar.gz.sha256",
-    });
-    const runtimeArchivePath = "/tmp/t3-1.2.3-linux-x64.tar.gz";
-    assert.isTrue(bundlesWslRuntime({ platform: "win", runtimeArchivePath }));
-    assert.isFalse(bundlesWslRuntime({ platform: "win", runtimeArchivePath: undefined }));
-    assert.isFalse(bundlesWslRuntime({ platform: "linux", runtimeArchivePath }));
-    assert.isFalse(bundlesWslRuntime({ platform: "mac", runtimeArchivePath }));
-    assert.equal(wslRuntimeArchiveStem("1.2.3", "x64"), "t3-1.2.3-linux-x64");
-  });
-
-  it("parses Windows bsdtar member listings with CRLF line endings", () => {
-    assert.deepStrictEqual(
-      parseWslRuntimeArchiveMembers("./t3-1.2.3-linux-x64/t3\r\nt3-1.2.3-linux-x64/client/\r\n"),
-      ["t3-1.2.3-linux-x64/t3", "t3-1.2.3-linux-x64/client"],
-    );
-  });
-
-  it.effect("stages the Linux CLI archive verbatim with its SHA-256 sidecar", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-wsl-runtime-stage-" });
-        const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
-          root,
-          stem: "t3-1.2.3-linux-x64",
-        });
-        const stageAppDir = path.join(root, "app");
-        const archivePath = path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE.from);
-        const hashPath = path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE.from);
-
-        yield* stageWslRuntimeArchive({ sourceArchivePath, archivePath, hashPath });
-
-        const [source, staged] = yield* Effect.all([
-          fs.readFile(sourceArchivePath),
-          fs.readFile(archivePath),
-        ]);
-        assert.deepStrictEqual(staged, source);
-        const hash = yield* fs.readFileString(hashPath);
-        assert.equal(hash, `${NodeCrypto.createHash("sha256").update(source).digest("hex")}\n`);
-      }),
-    ),
-  );
-
-  it.effect("fails when the Linux CLI archive handed to the build does not exist", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-wsl-runtime-missing-" });
-        const error = yield* stageWslRuntimeArchive({
-          sourceArchivePath: path.join(root, "t3-1.2.3-linux-x64.tar.gz"),
-          archivePath: path.join(root, WSL_RUNTIME_ARCHIVE_NAME),
-          hashPath: path.join(root, WSL_RUNTIME_ARCHIVE_HASH_NAME),
-        }).pipe(Effect.flip);
-
-        assert.instanceOf(error, WslRuntimeArchiveMissingError);
-      }),
-    ),
-  );
-
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
@@ -2252,26 +1622,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
       "@ff-labs/fff-bin-linux-arm64-musl": "0.9.4",
     });
-  });
-
-  it("resolves target Clerk passkey native artifacts", () => {
-    assert.deepStrictEqual(resolveClerkPasskeyNativeArtifacts("mac", "universal"), [
-      {
-        packageName: "@clerk/electron-passkeys-darwin-arm64",
-        binaryFileName: "electron-passkeys.darwin-arm64.node",
-      },
-      {
-        packageName: "@clerk/electron-passkeys-darwin-x64",
-        binaryFileName: "electron-passkeys.darwin-x64.node",
-      },
-    ]);
-    assert.deepStrictEqual(resolveClerkPasskeyNativeArtifacts("win", "x64"), [
-      {
-        packageName: "@clerk/electron-passkeys-win32-x64-msvc",
-        binaryFileName: "electron-passkeys.win32-x64-msvc.node",
-      },
-    ]);
-    assert.deepStrictEqual(resolveClerkPasskeyNativeArtifacts("linux", "x64"), []);
   });
 
   it("falls back to the default mock update port when the configured port is blank", () => {
@@ -2324,109 +1674,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       cause,
     );
   });
-
-  it.effect("resolves default platform and architecture from host references", () =>
-    Effect.gen(function* () {
-      const resolved = yield* resolveBuildOptions({
-        platform: Option.none(),
-        target: Option.none(),
-        arch: Option.none(),
-        buildVersion: Option.none(),
-        outputDir: Option.none(),
-        skipBuild: Option.none(),
-        keepStage: Option.none(),
-        signed: Option.none(),
-        verbose: Option.none(),
-        mockUpdates: Option.none(),
-        mockUpdateServerPort: Option.none(),
-        wslRuntime: Option.none(),
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Layer.succeed(HostProcess.Platform, "win32"),
-            Layer.succeed(HostProcess.Architecture, "x64"),
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: {
-                  PROCESSOR_ARCHITECTURE: "AMD64",
-                  PROCESSOR_ARCHITEW6432: "ARM64",
-                },
-              }),
-            ),
-          ),
-        ),
-      );
-
-      assert.equal(resolved.platform, "win");
-      assert.equal(resolved.target, "nsis");
-      assert.equal(resolved.arch, "arm64");
-    }),
-  );
-
-  it.effect("rejects universal builds on Linux and Windows before staging binaries", () =>
-    Effect.gen(function* () {
-      for (const platform of ["linux", "win"] as const) {
-        const error = yield* Effect.flip(
-          resolveBuildOptions({
-            platform: Option.some(platform),
-            target: Option.none(),
-            arch: Option.some("universal"),
-            buildVersion: Option.none(),
-            outputDir: Option.none(),
-            skipBuild: Option.none(),
-            keepStage: Option.none(),
-            signed: Option.none(),
-            verbose: Option.none(),
-            mockUpdates: Option.none(),
-            mockUpdateServerPort: Option.none(),
-            wslRuntime: Option.none(),
-          }),
-        );
-
-        assert.instanceOf(error, UnsupportedDesktopBuildArchitectureError);
-        assert.deepStrictEqual(error.supportedArchitectures, ["x64", "arm64"]);
-      }
-    }),
-  );
-
-  it.effect("preserves explicit false boolean flags over true env defaults", () =>
-    Effect.gen(function* () {
-      const resolved = yield* resolveBuildOptions({
-        platform: Option.some("mac"),
-        target: Option.none(),
-        arch: Option.some("arm64"),
-        buildVersion: Option.none(),
-        outputDir: Option.some("release-test"),
-        skipBuild: Option.some(false),
-        keepStage: Option.some(false),
-        signed: Option.some(false),
-        verbose: Option.some(false),
-        mockUpdates: Option.some(false),
-        mockUpdateServerPort: Option.none(),
-        wslRuntime: Option.none(),
-      }).pipe(
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromEnv({
-              env: {
-                T3CODE_DESKTOP_SKIP_BUILD: "true",
-                T3CODE_DESKTOP_KEEP_STAGE: "true",
-                T3CODE_DESKTOP_SIGNED: "true",
-                T3CODE_DESKTOP_VERBOSE: "true",
-                T3CODE_DESKTOP_MOCK_UPDATES: "true",
-              },
-            }),
-          ),
-        ),
-      );
-
-      assert.equal(resolved.skipBuild, false);
-      assert.equal(resolved.keepStage, false);
-      assert.equal(resolved.signed, false);
-      assert.equal(resolved.verbose, false);
-      assert.equal(resolved.mockUpdates, false);
-    }),
-  );
 });
 
 it("lists ancestor node_modules, nearest first, excluding the start directory", () => {

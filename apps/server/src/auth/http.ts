@@ -25,7 +25,7 @@ import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { identity } from "effect/Function";
+
 import * as Layer from "effect/Layer";
 import * as Cookies from "effect/http/Cookies";
 import * as HttpEffect from "effect/http/HttpEffect";
@@ -34,7 +34,6 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as SessionStore from "./SessionStore.ts";
-import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
 
@@ -250,9 +249,7 @@ export const layerAuthenticatedAuth = Layer.effect(
             scopes: new Set(session.scopes),
           }),
         );
-        return yield* session.subject === "cloud-connect"
-          ? traceAuthenticatedRelayRequest(handler, { startTime, endTime })
-          : handler;
+        return yield* handler;
       }).pipe(Effect.catchTags({ EnvironmentAuthInvalidError: appendDpopChallengeOnUnauthorized }));
   }),
 );
@@ -395,7 +392,6 @@ export const layer = HttpApiBuilder.group(
               proofKeyThumbprint ? { proofKeyThumbprint } : undefined,
             );
           },
-          traceRelayRequest,
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(
               EnvironmentAuth.serverAuthCredentialReason(error),

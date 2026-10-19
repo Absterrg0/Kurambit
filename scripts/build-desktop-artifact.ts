@@ -2,7 +2,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
 import * as NodeFSP from "node:fs/promises";
-import * as NodeCrypto from "node:crypto";
+
 import * as NodeModule from "node:module";
 // plist is CommonJS; Node cannot load its named exports from an ES module.
 import Plist from "plist";
@@ -17,7 +17,6 @@ import {
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -181,7 +180,6 @@ interface BuildCliInput {
   readonly verbose: Option.Option<boolean>;
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
-  readonly wslRuntime: Option.Option<string>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -232,22 +230,6 @@ export class KeyringNativePackageMissingError extends Schema.TaggedError<Keyring
 ) {
   override get message(): string {
     return `Keyring native package is missing: ${this.packageName}`;
-  }
-}
-
-export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedError<ClerkPasskeyNativePackageMissingError>()(
-  "ClerkPasskeyNativePackageMissingError",
-  {
-    packageName: Schema.String,
-    binaryFileName: Schema.String,
-    packageEntryPath: Schema.String,
-    platform: BuildPlatform,
-    arch: BuildArch,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Clerk passkey native package is missing: ${this.packageName}`;
   }
 }
 
@@ -416,7 +398,6 @@ const WINDOWS_DESKTOP_BUILD_PREREQUISITES = [
     id: "msvc",
     description: "Visual Studio Build Tools with C++, Windows SDK, and Spectre libraries",
   },
-  { id: "tar", description: "tar to inspect the bundled WSL runtime archive" },
 ] as const;
 
 export class WindowsDesktopBuildPrerequisitesMissingError extends Schema.TaggedError<WindowsDesktopBuildPrerequisitesMissingError>()(
@@ -687,17 +668,6 @@ export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedError<Des
   }
 }
 
-export class WslRuntimeArchiveMissingError extends Schema.TaggedError<WslRuntimeArchiveMissingError>()(
-  "WslRuntimeArchiveMissingError",
-  {
-    archivePath: Schema.String,
-  },
-) {
-  override get message(): string {
-    return `WSL runtime archive not found at ${this.archivePath}.`;
-  }
-}
-
 export class WindowsServerSidecarPackError extends Schema.TaggedError<WindowsServerSidecarPackError>()(
   "WindowsServerSidecarPackError",
   {
@@ -729,8 +699,6 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-invalid",
   "unpacked-native-missing",
   "resource-monitor-missing",
-  "wsl-runtime-missing",
-  "wsl-runtime-invalid",
   "file-limit-exceeded",
 ]);
 
@@ -754,12 +722,6 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedError<Wi
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
-    }
-    if (this.reason === "wsl-runtime-missing") {
-      return "Windows packaged payload is missing the WSL runtime archive or SHA-256 sidecar.";
-    }
-    if (this.reason === "wsl-runtime-invalid") {
-      return "Windows packaged payload contains an invalid WSL runtime archive.";
     }
     if (this.reason === "sidecar-invalid") {
       return "Windows packaged payload contains an invalid server.asar sidecar.";
@@ -938,7 +900,6 @@ interface ResolvedBuildOptions {
   readonly verbose: boolean;
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
-  readonly wslRuntime: string | undefined;
 }
 
 interface StagePackageJson {
@@ -983,8 +944,6 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   // staging inputs out of app.asar; they are emitted once at resources/.
   "!apps/desktop/prod-resources/windows-server",
   "!apps/desktop/prod-resources/windows-server/**/*",
-  "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
-  "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
@@ -1064,26 +1023,7 @@ export const WINDOWS_SERVER_EXTRA_RESOURCES = [
     filter: [WINDOWS_SERVER_ASAR_RESOURCE, `${WINDOWS_SERVER_ASAR_RESOURCE}.unpacked/**/*`],
   },
 ] as const;
-export const WSL_RUNTIME_ARCHIVE_NAME = "wsl-runtime.tar.gz";
-export const WSL_RUNTIME_ARCHIVE_HASH_NAME = `${WSL_RUNTIME_ARCHIVE_NAME}.sha256`;
-export const WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE = {
-  from: `apps/desktop/prod-resources/${WSL_RUNTIME_ARCHIVE_NAME}`,
-  to: WSL_RUNTIME_ARCHIVE_NAME,
-} as const;
-export const WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE = {
-  from: `apps/desktop/prod-resources/${WSL_RUNTIME_ARCHIVE_HASH_NAME}`,
-  to: WSL_RUNTIME_ARCHIVE_HASH_NAME,
-} as const;
 
-export const bundlesWslRuntime = (input: {
-  readonly platform: typeof BuildPlatform.Type;
-  readonly runtimeArchivePath: string | undefined;
-}): boolean => input.platform === "win" && input.runtimeArchivePath !== undefined;
-
-export const WSL_RUNTIME_EXTRA_RESOURCES = [
-  WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
-  WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
-] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/cursor-sdk",
@@ -1166,32 +1106,12 @@ export class MissingMacPasskeyProvisioningProfileError extends Schema.TaggedErro
   }
 }
 
-export class MissingMacPasskeyDomainConfigurationError extends Schema.TaggedError<MissingMacPasskeyDomainConfigurationError>()(
-  "MissingMacPasskeyDomainConfigurationError",
-  {},
-) {
-  override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
-  }
-}
-
-export class InvalidMacPasskeyPublishableKeyError extends Schema.TaggedError<InvalidMacPasskeyPublishableKeyError>()(
-  "InvalidMacPasskeyPublishableKeyError",
-  {
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.";
-  }
-}
-
 export class MissingMacPasskeyRpDomainError extends Schema.TaggedError<MissingMacPasskeyRpDomainError>()(
   "MissingMacPasskeyRpDomainError",
   {},
 ) {
   override get message(): string {
-    return "At least one Clerk passkey RP domain is required.";
+    return "At least one passkey RP domain is required.";
   }
 }
 
@@ -1260,24 +1180,10 @@ export function resolveMacPasskeySigningConfiguration(
     throw new MissingMacPasskeyProvisioningProfileError();
   }
 
-  const configuredRpDomains = env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim();
-  let rpDomains: readonly string[];
-  if (configuredRpDomains) {
-    rpDomains = configuredRpDomains.split(",").map(normalizePasskeyRpDomain);
-  } else {
-    const publishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim();
-    if (!publishableKey) {
-      throw new MissingMacPasskeyDomainConfigurationError();
-    }
-    let hostname: string;
-    try {
-      hostname = clerkFrontendApiHostnameFromPublishableKey(publishableKey);
-    } catch (cause) {
-      throw new InvalidMacPasskeyPublishableKeyError({ cause });
-    }
-    rpDomains = [normalizePasskeyRpDomain(hostname)];
-  }
-
+  const rpDomains = (env.GAME_STUDIO_PASSKEY_RP_DOMAINS ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map(normalizePasskeyRpDomain);
   const uniqueRpDomains = [...new Set(rpDomains)];
   if (uniqueRpDomains.length === 0) {
     throw new MissingMacPasskeyRpDomainError();
@@ -1451,38 +1357,15 @@ export const stageCursorSdkPlatformPackages = Effect.fn("stageCursorSdkPlatformP
   },
 );
 
-export interface ClerkPasskeyNativeArtifact {
+export interface NativeArtifact {
   readonly packageName: string;
   readonly binaryFileName: string;
-}
-
-export function resolveClerkPasskeyNativeArtifacts(
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-): readonly ClerkPasskeyNativeArtifact[] {
-  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
-
-  if (platform === "mac") {
-    return architectures.map((architecture) => ({
-      packageName: `@clerk/electron-passkeys-darwin-${architecture}`,
-      binaryFileName: `electron-passkeys.darwin-${architecture}.node`,
-    }));
-  }
-
-  if (platform === "win") {
-    return architectures.map((architecture) => ({
-      packageName: `@clerk/electron-passkeys-win32-${architecture}-msvc`,
-      binaryFileName: `electron-passkeys.win32-${architecture}-msvc.node`,
-    }));
-  }
-
-  return [];
 }
 
 export function resolveKeyringNativeArtifacts(
   platform: typeof BuildPlatform.Type,
   arch: typeof BuildArch.Type,
-): readonly ClerkPasskeyNativeArtifact[] {
+): readonly NativeArtifact[] {
   const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
 
   if (platform === "mac") {
@@ -1506,7 +1389,7 @@ export function resolveKeyringNativeArtifacts(
 }
 
 /**
- * Same nesting problem as the Clerk passkey binaries: pnpm keeps the platform
+ * pnpm keeps the platform
  * package under `@napi-rs/keyring`, electron-builder only retains collected
  * top-level dependencies, and the generated loader checks for a sibling
  * `keyring.<platform>.node` before falling back to the package. Staging the
@@ -1542,91 +1425,6 @@ const stageKeyringNativeBinaries = Effect.fn("stageKeyringNativeBinaries")(funct
   }
 });
 
-// pnpm nests the architecture package under @clerk/electron-passkeys, while electron-builder only
-// retains collected top-level dependencies. The SDK loader checks beside index.js first, so stage
-// the binary there and let electron-builder's native-addon handling unpack it from the ASAR.
-const stageClerkPasskeyNativeBinaries = Effect.fn("stageClerkPasskeyNativeBinaries")(function* (
-  stageAppDir: string,
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const packageEntryPath = yield* fs.realPath(
-    path.join(stageAppDir, "node_modules", "@clerk", "electron-passkeys", "index.js"),
-  );
-  const packageDir = path.dirname(packageEntryPath);
-  const packageRequire = NodeModule.createRequire(packageEntryPath);
-
-  for (const artifact of resolveClerkPasskeyNativeArtifacts(platform, arch)) {
-    const sourcePath = yield* Effect.try({
-      try: () => packageRequire.resolve(artifact.packageName),
-      catch: (cause) =>
-        new ClerkPasskeyNativePackageMissingError({
-          packageName: artifact.packageName,
-          binaryFileName: artifact.binaryFileName,
-          packageEntryPath,
-          platform,
-          arch,
-          cause,
-        }),
-    });
-    yield* fs.copyFile(sourcePath, path.join(packageDir, artifact.binaryFileName));
-  }
-});
-
-export function createStageWorkspaceConfig(input: {
-  readonly platform: typeof BuildPlatform.Type;
-  readonly arch: typeof BuildArch.Type;
-  readonly allowBuilds?: Record<string, boolean>;
-  readonly patchedDependencies?: Record<string, string>;
-  readonly overrides?: Record<string, string>;
-}): StageWorkspaceConfig {
-  const { platform, arch, allowBuilds, patchedDependencies, overrides } = input;
-  const hostOs = platform === "mac" ? "darwin" : platform === "win" ? "win32" : "linux";
-  const hostCpu = arch === "universal" ? ["arm64", "x64"] : [arch];
-  // Linux AppImages execute a Linux/glibc Node process that loads
-  // Linux-native optional deps at runtime. Keep libc explicit so pnpm
-  // includes those optional packages in the staged production install.
-  const supportedArchitectures =
-    platform === "linux"
-      ? {
-          os: [hostOs],
-          cpu: hostCpu,
-          libc: ["glibc"],
-        }
-      : {
-          os: [hostOs],
-          cpu: hostCpu,
-        };
-
-  return {
-    supportedArchitectures,
-    ...(allowBuilds && Object.keys(allowBuilds).length > 0 ? { allowBuilds } : {}),
-    ...(patchedDependencies && Object.keys(patchedDependencies).length > 0
-      ? { patchedDependencies }
-      : {}),
-    ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
-    packageExtensions: STAGE_PACKAGE_EXTENSIONS,
-  };
-}
-
-export function createStagePatchedDependencies(
-  patchedDependencies: Record<string, string>,
-  dependencies: Record<string, unknown>,
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(patchedDependencies).filter(([patchKey]) =>
-      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
-    ),
-  );
-}
-
-function getPatchedDependencyPackageName(patchKey: string): string {
-  const versionSeparator = patchKey.lastIndexOf("@");
-  return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey;
-}
-
 const AzureTrustedSigningOptionsConfig = Config.all({
   publisherName: Config.String("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"),
   endpoint: Config.String("AZURE_TRUSTED_SIGNING_ENDPOINT"),
@@ -1653,7 +1451,6 @@ const BuildEnvConfig = Config.all({
   verbose: Config.Boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.String("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
-  wslRuntime: Config.String("T3CODE_DESKTOP_WSL_RUNTIME").pipe(Config.option),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -1745,9 +1542,6 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
           ),
         ));
 
-  const wslRuntime =
-    Option.getOrUndefined(input.wslRuntime) ?? Option.getOrUndefined(env.wslRuntime);
-
   return {
     platform,
     target,
@@ -1760,7 +1554,6 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     verbose,
     mockUpdates,
     mockUpdateServerPort,
-    wslRuntime,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -1914,7 +1707,7 @@ function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
 }
 
 export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBuild")(
-  function* (input: { readonly arch: typeof BuildArch.Type; readonly bundlesWslRuntime: boolean }) {
+  function* (input: { readonly arch: typeof BuildArch.Type }) {
     const rustTarget = resolveResourceMonitorRustTargets("win", input.arch)[0]!;
     const reuseResourceMonitor = yield* Config.Boolean(
       "T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR",
@@ -1941,9 +1734,6 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
               ]),
               "Visual Studio Build Tools",
             ),
-        tar: input.bundlesWslRuntime
-          ? desktopBuildProbeSucceeds(ChildProcess.make("tar.exe", ["--version"]), "tar")
-          : Effect.succeed(true),
       },
       { concurrency: "unbounded" },
     );
@@ -2664,7 +2454,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         readonly provisioningProfilePath: string;
       }
     | undefined,
-  wslRuntimeBundled = false,
+  _legacyRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
 ) {
   const buildConfig: Record<string, unknown> = {
@@ -2694,7 +2484,6 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
-      ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
@@ -2867,43 +2656,6 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
 // The desktop app verifies the digest inside the distro before extracting, and
 // the digest also names the extracted runtime's cache directory, so it must be
 // computed from the exact bytes that ship.
-export const stageWslRuntimeArchive = Effect.fn("stageWslRuntimeArchive")(function* (input: {
-  readonly sourceArchivePath: string;
-  readonly archivePath: string;
-  readonly hashPath: string;
-}) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const sourceExists = yield* fs
-    .exists(input.sourceArchivePath)
-    .pipe(Effect.orElseSucceed(() => false));
-  if (!sourceExists) {
-    return yield* new WslRuntimeArchiveMissingError({ archivePath: input.sourceArchivePath });
-  }
-  yield* fs.makeDirectory(path.dirname(input.archivePath), { recursive: true });
-  yield* fs.copyFile(input.sourceArchivePath, input.archivePath);
-  const hash = NodeCrypto.createHash("sha256");
-  yield* fs
-    .stream(input.archivePath)
-    .pipe(Stream.runForEach((chunk) => Effect.sync(() => hash.update(chunk))));
-  const digest = hash.digest("hex");
-  yield* fs.writeFileString(input.hashPath, `${digest}\n`);
-  yield* Effect.log(
-    `[desktop-artifact] Staged WSL runtime archive at ${input.archivePath} (${digest}).`,
-  );
-});
-
-// Mirrors cliArchiveStem in scripts/build-cli-archive.ts (which imports from
-// this module, so it cannot be imported here). WSL runs the same CPU arch as
-// the Windows host.
-export const wslRuntimeArchiveStem = (version: string, arch: typeof BuildArch.Type): string =>
-  `t3-${version}-linux-${arch}`;
-
-export const parseWslRuntimeArchiveMembers = (listing: string): ReadonlyArray<string> =>
-  listing
-    .split(/\r?\n/)
-    .map((member) => member.replace(/^\.\//, "").replace(/\/$/, ""))
-    .filter((member) => member.length > 0);
 
 export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
   readonly sourceDir: string;
@@ -3169,7 +2921,6 @@ export const validateWindowsPackagedPayload = Effect.fn(
   readonly appExecutableName: string;
   readonly targetArch: typeof BuildArch.Type;
   readonly appVersion: string;
-  readonly expectWslRuntime?: boolean;
   readonly fileLimit?: number;
   readonly verbose?: boolean;
 }) {
@@ -3265,133 +3016,6 @@ export const validateWindowsPackagedPayload = Effect.fn(
       missingFiles: ["resource-monitor/t3-resource-monitor.exe"],
     });
   }
-
-  const wslArchivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
-  const wslArchiveHashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
-  const [hasWslArchive, hasWslArchiveHash] = yield* Effect.all([
-    isFile(wslArchivePath),
-    isFile(wslArchiveHashPath),
-  ]);
-  if (input.expectWslRuntime === true && (!hasWslArchive || !hasWslArchiveHash)) {
-    return yield* new WindowsPackagedPayloadValidationError({
-      reason: "wsl-runtime-missing",
-      packagedAppDir,
-      missingFiles: [
-        ...(hasWslArchive ? [] : [WSL_RUNTIME_ARCHIVE_NAME]),
-        ...(hasWslArchiveHash ? [] : [WSL_RUNTIME_ARCHIVE_HASH_NAME]),
-      ],
-    });
-  }
-  if (hasWslArchive !== hasWslArchiveHash) {
-    return yield* new WindowsPackagedPayloadValidationError({
-      reason: "wsl-runtime-missing",
-      packagedAppDir,
-      missingFiles: [hasWslArchive ? WSL_RUNTIME_ARCHIVE_HASH_NAME : WSL_RUNTIME_ARCHIVE_NAME],
-    });
-  }
-  if (hasWslArchive && hasWslArchiveHash) {
-    const invalidWslRuntime = (cause: unknown) =>
-      new WindowsPackagedPayloadValidationError({
-        reason: "wsl-runtime-invalid",
-        packagedAppDir,
-        cause,
-      });
-    const recordedHash = yield* fs
-      .readFileString(wslArchiveHashPath)
-      .pipe(Effect.mapError(invalidWslRuntime));
-    const expectedHash = recordedHash.trim().toLowerCase();
-    if (!/^[0-9a-f]{64}$/.test(expectedHash)) {
-      return yield* invalidWslRuntime(new Error("invalid WSL runtime SHA-256 sidecar"));
-    }
-    const archiveHash = NodeCrypto.createHash("sha256");
-    yield* fs.stream(wslArchivePath).pipe(
-      Stream.runForEach((chunk) => Effect.sync(() => archiveHash.update(chunk))),
-      Effect.mapError(invalidWslRuntime),
-    );
-    const actualHash = archiveHash.digest("hex");
-    if (actualHash !== expectedHash) {
-      return yield* invalidWslRuntime(
-        new Error(`WSL runtime SHA-256 mismatch: expected ${expectedHash}, got ${actualHash}`),
-      );
-    }
-
-    const listing = yield* spawnAndCollectOutput(
-      ChildProcess.make("tar", ["-tzf", WSL_RUNTIME_ARCHIVE_NAME], {
-        cwd: resourcesDir,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    ).pipe(Effect.mapError(invalidWslRuntime));
-    if (listing.exitCode !== 0) {
-      return yield* invalidWslRuntime(
-        new Error(`tar could not list WSL runtime archive: ${listing.stderr.trim()}`),
-      );
-    }
-    const members = parseWslRuntimeArchiveMembers(listing.stdout);
-    // A release archive unpacks to one directory named after its stem; the
-    // desktop app's WSL install script relies on that layout to find `t3`.
-    const stem = wslRuntimeArchiveStem(input.appVersion, input.targetArch);
-    const topLevel = new Set(members.map((member) => member.split("/")[0]));
-    if (topLevel.size !== 1 || !topLevel.has(stem)) {
-      return yield* invalidWslRuntime(
-        new Error(
-          `WSL runtime archive must contain a single top-level directory ${stem}, found ${[...topLevel].join(", ") || "nothing"}`,
-        ),
-      );
-    }
-    const requiredMembers = [`${stem}/t3`, `${stem}/client`, `${stem}/node_modules`];
-    const missingMembers = requiredMembers.filter((member) => !members.includes(member));
-    const ptyCandidates = [
-      `${stem}/node_modules/node-pty/build/Release/pty.node`,
-      `${stem}/node_modules/node-pty/prebuilds/linux-${input.targetArch}/pty.node`,
-    ];
-    if (!ptyCandidates.some((member) => members.includes(member))) {
-      missingMembers.push(...ptyCandidates);
-    }
-    if (missingMembers.length > 0) {
-      return yield* new WindowsPackagedPayloadValidationError({
-        reason: "wsl-runtime-invalid",
-        packagedAppDir,
-        missingFiles: missingMembers,
-        cause: new Error("WSL runtime archive is not a Linux CLI release archive"),
-      });
-    }
-    const bundleEntry = members.find((member) => member.endsWith("/bin.mjs"));
-    if (bundleEntry !== undefined) {
-      return yield* invalidWslRuntime(
-        new Error(`WSL runtime archive contains a server bundle entry ${bundleEntry}`),
-      );
-    }
-  }
-
-  const fileCount = yield* countPayloadFiles(packagedAppDir);
-  if (fileCount > fileLimit) {
-    return yield* new WindowsPackagedPayloadValidationError({
-      reason: "file-limit-exceeded",
-      packagedAppDir,
-      fileCount,
-      fileLimit,
-    });
-  }
-
-  yield* verifyWindowsPrimaryFffNativeLoad({
-    packagedAppDir,
-    asarPath,
-    appExecutableName: input.appExecutableName,
-    targetArch: input.targetArch,
-    verbose: input.verbose ?? false,
-  });
-
-  yield* verifyPackagedBundleIsSelfContained({
-    asarPath,
-    verbose: input.verbose ?? false,
-  });
-
-  yield* Effect.log(
-    `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,
-  );
-  return { packagedAppDir, fileCount, unpackedFiles } as const;
 });
 
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
@@ -3410,10 +3034,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   if (hostPlatform === "win32" && options.platform === "win") {
     yield* preflightWindowsDesktopBuild({
       arch: options.arch,
-      bundlesWslRuntime: bundlesWslRuntime({
-        platform: options.platform,
-        runtimeArchivePath: options.wslRuntime,
-      }),
     });
   }
   const workspaceConfig = yield* readWorkspaceConfig();
@@ -3725,7 +3345,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
         : undefined,
-      bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
+      false,
       options.arch,
     ),
     dependencies: stageDependencies,
@@ -3762,7 +3382,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     }),
     { label: "vp install --prod", verbose: options.verbose },
   );
-  yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
   yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
 
   if (options.platform === "win" && windowsServerAsarPath) {
@@ -3788,17 +3407,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ),
     path.join(stageProdResourcesDir, "cursor-sdk"),
   );
-  if (
-    options.wslRuntime !== undefined &&
-    bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime })
-  ) {
-    yield* stageWslRuntimeArchive({
-      sourceArchivePath: options.wslRuntime,
-      archivePath: path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE.from),
-      hashPath: path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE.from),
-    });
-  }
-
   // electron-builder treats several set-but-empty variables (e.g. CSC_LINK="")
   // as enabled, so copy the host env and scrub empty values instead of relying
   // on `extendEnv` merging.
@@ -3887,10 +3495,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       appExecutableName: `${resolveDesktopProductName(appVersion)}.exe`,
       targetArch: options.arch,
       appVersion,
-      expectWslRuntime: bundlesWslRuntime({
-        platform: options.platform,
-        runtimeArchivePath: options.wslRuntime,
-      }),
       verbose: options.verbose,
     });
   }
@@ -3974,14 +3578,8 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
     Flag.optional,
   ),
-  wslRuntime: Flag.String("wsl-runtime").pipe(
-    Flag.withDescription(
-      "Path to the Linux CLI release archive (t3-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
-    ),
-    Flag.optional,
-  ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for Game Studio."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

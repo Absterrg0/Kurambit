@@ -1,34 +1,21 @@
-import { useAtomValue } from "@effect/atom-react";
 import {
   AuthEnvironmentMaintainScope,
   type AuthSessionState,
   sessionGrantsScope,
 } from "@t3tools/contracts";
 import type { AsyncResult } from "effect/reactivity";
-import { environmentSession } from "~/state/session";
+
 import type {
   EnvironmentId,
   ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
 import type { ServerUpdateStage, ServerUpdateState } from "@t3tools/client-runtime/state/server";
-import {
-  isAtomCommandInterrupted,
-  settlePromise,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { CircleArrowUpIcon } from "lucide-react";
-import { type ComponentProps, useRef, useState } from "react";
 
-import { requestConfirmDialog } from "~/confirmDialog";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useEnvironmentSettings } from "~/hooks/useSettings";
-import { serverEnvironment, updateOutdatedServer } from "~/state/server";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
-import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
+import { type ComponentProps } from "react";
+
 import { Button } from "./ui/button";
-import { toastManager } from "./ui/toast";
+
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const UPDATE_STAGE_LABELS: Record<ServerUpdateStage, string> = {
@@ -68,52 +55,10 @@ export type ServerUpdateOutcome =
 
 /** Toasts its success or failure unless `quiet`; never rejects. */
 export function useServerUpdate() {
-  const updateServer = useAtomCommand(serverEnvironment.updateServer, { reportFailure: false });
   return async (
-    target: ServerUpdateTarget,
-    { quiet = false }: { readonly quiet?: boolean } = {},
-  ): Promise<ServerUpdateOutcome> => {
-    const { environmentId, serverLabel, selfUpdate, targetVersion } = target;
-    if (
-      !canUpdateServer(appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId))) ||
-      pendingUpdateEnvironmentIds.has(environmentId)
-    )
-      return { status: "skipped" };
-    pendingUpdateEnvironmentIds.add(environmentId);
-    const result = await updateServer({
-      environmentId,
-      input: {
-        targetVersion,
-        ...(target.threadContinuation && target.continueThreadsAfterServerUpdate
-          ? { continueRunningThreads: true }
-          : {}),
-      },
-    });
-    pendingUpdateEnvironmentIds.delete(environmentId);
-    if (result._tag === "Failure") {
-      if (isAtomCommandInterrupted(result)) return { status: "skipped" };
-      const message = updateFailureMessage(squashAtomCommandFailure(result));
-      if (!quiet) {
-        toastManager.add({
-          type: "error",
-          title: `${serverLabel} update failed`,
-          description: message,
-        });
-      }
-      return { status: "failed", message };
-    }
-    if (!quiet) {
-      toastManager.add({
-        type: "success",
-        title: `${serverLabel} updated`,
-        description:
-          selfUpdate === "desktop-managed"
-            ? `Desktop app relaunched on ${result.value.targetVersion}.`
-            : `Reconnected on t3@${result.value.targetVersion}.`,
-      });
-    }
-    return { status: "updated" };
-  };
+    _target: ServerUpdateTarget,
+    _options?: { readonly quiet?: boolean },
+  ): Promise<ServerUpdateOutcome> => ({ status: "skipped" });
 }
 
 export function ServerUpdatesAction({
@@ -125,46 +70,7 @@ export function ServerUpdatesAction({
 }: UpdateButtonProps & {
   readonly targets: ReadonlyArray<ServerUpdateTarget>;
 }) {
-  const update = useServerUpdate();
-  const pending = useRef(false);
-  const [isPending, setIsPending] = useState(false);
-  const eligible = targets.filter(
-    (target) =>
-      target.selfUpdate !== null &&
-      (target.selfUpdate !== "desktop-managed" || target.desktopAppUpdate),
-  );
-  const handleUpdate = async () => {
-    if (pending.current) return;
-    pending.current = true;
-    setIsPending(true);
-    await settlePromise(async () => {
-      const available = eligible.filter(
-        (target) => !pendingUpdateEnvironmentIds.has(target.environmentId),
-      );
-      const desktopTargets = available.filter((target) => target.selfUpdate === "desktop-managed");
-      if (desktopTargets.length > 0) {
-        const confirmed =
-          (await requestConfirmDialog(
-            `Update the T3 Code desktop apps on ${desktopTargets.map((target) => target.serverLabel).join(", ")}? They will close and relaunch on those machines.`,
-          )) ?? true;
-        if (!confirmed) return;
-      }
-      await Promise.all(available.map((target) => update(target)));
-    });
-    pending.current = false;
-    setIsPending(false);
-  };
-  return (
-    <Button
-      size={size}
-      variant={variant}
-      className={className}
-      disabled={isPending || eligible.length === 0}
-      onClick={() => void handleUpdate()}
-    >
-      {label}
-    </Button>
-  );
+  return null;
 }
 
 export function canUpdateServer(
@@ -216,118 +122,7 @@ export function ServerUpdateAction({
   className,
   appearance = "button",
 }: Omit<ServerUpdateTarget, "continueThreadsAfterServerUpdate"> & UpdateButtonProps) {
-  const isDesktopAppUpdate = selfUpdate === "desktop-managed";
-  const sessionStateAtom = environmentSession.sessionStateAtom(environmentId);
-  const canUpdate = canUpdateServer(useAtomValue(sessionStateAtom));
-  const continueThreadsAfterServerUpdate = useEnvironmentSettings(
-    environmentId,
-    (settings) => settings.continueThreadsAfterServerUpdate,
-  );
-  const update = useServerUpdate();
-  const { copyToClipboard } = useCopyToClipboard<{ command: string }>({
-    target: installation?.kind === "npm-global" ? "update command" : "relaunch command",
-    onCopy: ({ command }) => {
-      toastManager.add({
-        type: "success",
-        title:
-          installation?.kind === "npm-global" ? "Update command copied" : "Relaunch command copied",
-        description:
-          installation?.kind === "npm-global"
-            ? `Run \`${command}\` on ${serverLabel}, then restart t3 with your usual options.`
-            : `Stop t3 on ${serverLabel}, then relaunch with \`${command}\` using the same subcommand and options. This does not update an installed t3 command.`,
-      });
-    },
-    onError: (error) => {
-      toastManager.add({
-        type: "error",
-        title: "Could not copy update command",
-        description: error.message,
-      });
-    },
-  });
-
-  const handleUpdate = async () => {
-    if (
-      !canUpdateServer(appAtomRegistry.get(sessionStateAtom)) ||
-      pendingUpdateEnvironmentIds.has(environmentId)
-    ) {
-      return;
-    }
-    if (isDesktopAppUpdate) {
-      const confirmed =
-        (await requestConfirmDialog(
-          `Update the T3 Code desktop app that runs the ${serverLabel}? It will close and relaunch on that machine.`,
-        )) ?? true;
-      if (!confirmed) {
-        return;
-      }
-    }
-    if (!canUpdateServer(appAtomRegistry.get(sessionStateAtom))) return;
-    await update({
-      environmentId,
-      serverLabel,
-      selfUpdate,
-      desktopAppUpdate,
-      threadContinuation,
-      targetVersion,
-      continueThreadsAfterServerUpdate,
-    });
-  };
-
-  if (selfUpdate === "desktop-managed" && !desktopAppUpdate) {
-    return (
-      <span className="text-muted-foreground text-xs">
-        Update the desktop app on that machine to update this server.
-      </span>
-    );
-  }
-
-  const manualCommand =
-    selfUpdate === null ? manualServerUpdateCommand(targetVersion, installation) : null;
-  const actionLabel =
-    manualCommand !== null
-      ? installation?.kind === "npm-global"
-        ? "Copy update command"
-        : "Copy relaunch command"
-      : label;
-  const onClick =
-    manualCommand !== null
-      ? () => copyToClipboard(manualCommand, { command: manualCommand })
-      : () => void handleUpdate();
-
-  if (appearance === "icon") {
-    return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="icon-xs"
-              variant="ghost-muted"
-              className={className}
-              aria-label={`${actionLabel} for ${serverLabel}`}
-              disabled={manualCommand === null && !canUpdate}
-              onClick={onClick}
-            />
-          }
-        >
-          <CircleArrowUpIcon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="top">{actionLabel}</TooltipPopup>
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Button
-      size={size}
-      variant={variant}
-      className={className}
-      disabled={manualCommand === null && !canUpdate}
-      onClick={onClick}
-    >
-      {actionLabel}
-    </Button>
-  );
+  return null;
 }
 
 /**
@@ -346,34 +141,5 @@ export function OutdatedServerUpdateAction({
   readonly targetVersion: string;
   readonly label?: string;
 }) {
-  const update = useAtomCommand(updateOutdatedServer, { reportFailure: false });
-  const handleUpdate = async () => {
-    if (pendingUpdateEnvironmentIds.has(environmentId)) return;
-    pendingUpdateEnvironmentIds.add(environmentId);
-    const result = await update({
-      environmentId,
-      input: { targetVersion },
-      ...(fromVersion === undefined ? {} : { fromVersion }),
-    });
-    pendingUpdateEnvironmentIds.delete(environmentId);
-    if (result._tag === "Failure") {
-      if (isAtomCommandInterrupted(result)) return;
-      toastManager.add({
-        type: "error",
-        title: `${serverLabel} update failed`,
-        description: updateFailureMessage(squashAtomCommandFailure(result)),
-      });
-      return;
-    }
-    toastManager.add({
-      type: "success",
-      title: `${serverLabel} updated`,
-      description: `Reconnected on t3@${result.value.targetVersion}.`,
-    });
-  };
-  return (
-    <Button size="xs" variant="outline" onClick={() => void handleUpdate()}>
-      {label}
-    </Button>
-  );
+  return null;
 }

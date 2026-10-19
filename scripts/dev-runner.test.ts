@@ -65,7 +65,6 @@ const devServerInput = {
   port: 13_773,
   devUrl: undefined,
   dryRun: false,
-  share: false,
   runArgs: ["--inspect", "secret-token-value"],
 } as const;
 
@@ -908,59 +907,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect("declines to share for dev:desktop and still starts the stack", () => {
-      let spawnCount = 0;
-      const spawnerLayer = Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => {
-          spawnCount += 1;
-          return Effect.succeed(mockProcess(0));
-        }),
-      );
-
-      return Effect.gen(function* () {
-        yield* runDevRunnerWithInput({
-          ...devServerInput,
-          mode: "dev:desktop",
-          port: undefined,
-          share: true,
-        }).pipe(
-          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
-          Effect.provideService(HostProcess.Platform, "linux"),
-        );
-
-        assert.equal(spawnCount, 1);
-      });
-    });
-
-    it.effect("rejects a specific non-loopback --host for browser dev modes", () => {
-      const spawnerLayer = Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => Effect.succeed(mockProcess(0))),
-      );
-
-      return Effect.gen(function* () {
-        const error = yield* runDevRunnerWithInput({
-          ...devServerInput,
-          mode: "dev",
-          port: undefined,
-          host: "192.168.1.10",
-        }).pipe(
-          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
-          Effect.provideService(HostProcess.Platform, "linux"),
-          Effect.flip,
-        );
-
-        if (error._tag !== "DevRunnerHostNotProxiableError") {
-          assert.fail(`Unexpected error: ${error._tag}`);
-        }
-        assert.equal(error.mode, "dev");
-        assert.equal(error.host, "192.168.1.10");
-        assert.include(error.message, "0.0.0.0");
-        assert.include(error.message, "--share");
-      });
-    });
-
     it.effect("still spawns the stack for a wildcard --host in dev mode", () => {
       let spawnCount = 0;
       const spawnerLayer = Layer.succeed(
@@ -1085,61 +1031,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           assert.equal(env?.T3CODE_BUNDLED_DEV, "0");
         }),
       );
-
-      it.effect("leaves T3CODE_BUNDLED_DEV unset without --share", () =>
-        Effect.gen(function* () {
-          let captured: Record<string, string | undefined> | undefined;
-          const spawnerLayer = Layer.succeed(
-            ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make((command) => {
-              captured = (
-                command as {
-                  readonly options?: { readonly env?: Record<string, string | undefined> };
-                }
-              ).options?.env;
-              return Effect.succeed(mockProcess(0));
-            }),
-          );
-
-          yield* runDevRunnerWithInput({
-            ...devServerInput,
-            mode: "dev",
-            port: undefined,
-          }).pipe(
-            Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
-            Effect.provideService(HostProcess.Platform, "linux"),
-            Effect.provideService(HostProcess.Environment, {}),
-          );
-
-          assert.equal(captured?.T3CODE_BUNDLED_DEV, undefined);
-        }),
-      );
-    });
-
-    it.effect("spawns nothing when --dry-run is combined with --share", () => {
-      let spawnCount = 0;
-      const spawnerLayer = Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => {
-          spawnCount += 1;
-          return Effect.succeed(mockProcess(0));
-        }),
-      );
-
-      return Effect.gen(function* () {
-        yield* runDevRunnerWithInput({
-          ...devServerInput,
-          mode: "dev",
-          port: undefined,
-          dryRun: true,
-          share: true,
-        }).pipe(
-          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
-          Effect.provideService(HostProcess.Platform, "linux"),
-        );
-
-        assert.equal(spawnCount, 0);
-      });
     });
 
     it.effect("reports non-zero exits without manufacturing a cause", () => {

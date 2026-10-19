@@ -13,23 +13,7 @@ import {
   getLocalEnvironmentEnabled,
   setLocalEnvironmentEnabled,
 } from "./methods/localEnvironment.ts";
-import {
-  getAdvertisedEndpoints,
-  getServerExposureState,
-  setServerExposureMode,
-  setTailscaleServeEnabled,
-} from "./methods/serverExposure.ts";
-import {
-  bootstrapSshBearerSession,
-  disconnectSshEnvironment,
-  discoverSshHosts,
-  ensureSshEnvironment,
-  fetchSshEnvironmentDescriptor,
-  fetchSshSessionState,
-  issueSshWebSocketTicket,
-  resolveSshHost,
-  resolveSshPasswordPrompt,
-} from "./methods/sshEnvironment.ts";
+import { getAdvertisedEndpoints, getServerExposureState } from "./methods/serverExposure.ts";
 import {
   checkForUpdate,
   downloadUpdate,
@@ -75,7 +59,6 @@ import {
   completeLegacyLocalStorage,
   takeLegacyLocalStorage,
 } from "./methods/legacyLocalStorage.ts";
-import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 import {
   getCliCommandState,
   installCliCommand,
@@ -119,25 +102,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setConnectionCatalog);
   yield* ipc.handle(clearConnectionCatalog);
 
-  yield* ipc.handle(discoverSshHosts);
-  yield* ipc.handle(resolveSshHost);
-  yield* ipc.handle(ensureSshEnvironment);
-  yield* ipc.handle(disconnectSshEnvironment);
-  yield* ipc.handle(fetchSshEnvironmentDescriptor);
-  yield* ipc.handle(bootstrapSshBearerSession);
-  yield* ipc.handle(fetchSshSessionState);
-  yield* ipc.handle(issueSshWebSocketTicket);
-  yield* ipc.handle(resolveSshPasswordPrompt);
-
   yield* ipc.handle(getServerExposureState);
-  yield* ipc.handle(setServerExposureMode);
-  yield* ipc.handle(setTailscaleServeEnabled);
   yield* ipc.handle(getAdvertisedEndpoints);
-
-  yield* ipc.handle(getWslState);
-  yield* ipc.handle(setWslBackendEnabled);
-  yield* ipc.handle(setWslDistro);
-  yield* ipc.handle(setWslOnly);
 
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(pickProjectFavicon);

@@ -10,15 +10,11 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import {
-  PUBLISH_AGENT_ACTIVITY_SECRET,
-  RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
-  RELAY_URL_SECRET,
-} from "../cloud/config.ts";
+
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
@@ -80,54 +76,6 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
 });
 
 it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
-  it.effect("publishes proven install ownership only for manually updated servers", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped();
-      const prefix = `${baseDir}/node`;
-      const entry = `${prefix}/lib/node_modules/t3/dist/bin.mjs`;
-      yield* fs.makeDirectory(`${prefix}/lib/node_modules/t3/dist`, { recursive: true });
-      yield* fs.makeDirectory(`${prefix}/bin`, { recursive: true });
-      yield* fs.writeFileString(entry, "");
-      yield* fs.writeFileString(
-        `${prefix}/lib/node_modules/t3/package.json`,
-        '{"name":"t3","version":"0.0.45","bin":{"t3":"./dist/bin.mjs"}}',
-      );
-      yield* fs.symlink(entry, `${prefix}/bin/t3`);
-      const config = yield* makeServerConfig(baseDir);
-      yield* fs.makeDirectory(config.stateDir, { recursive: true });
-      for (const mode of ["web", "desktop"] as const) {
-        const descriptor = yield* Effect.gen(function* () {
-          const environment = yield* ServerEnvironment.ServerEnvironment;
-          return yield* environment.getDescriptor;
-        }).pipe(
-          Effect.provide(
-            ServerEnvironment.layer.pipe(
-              Layer.provide(layerEmptySecretStore),
-              Layer.provide(ServerConfig.layer({ ...config, mode })),
-            ),
-          ),
-          Effect.provideService(HostProcess.Arguments, ["node", entry]),
-          Effect.provideService(HostProcess.IsExecutable, false),
-          Effect.provideService(HostProcess.Platform, "linux"),
-          Effect.provideService(HostProcess.Environment, {}),
-        );
-        expect(descriptor.capabilities.serverInstallation).toEqual(
-          mode === "web" ? { kind: "npm-global", prefix } : undefined,
-        );
-        expect(descriptor.capabilities.serverSelfUpdate).toBe(
-          mode === "web" ? undefined : "desktop-managed",
-        );
-        expect(descriptor.capabilities).toMatchObject({
-          settledWorktreeCleanup: true,
-          storageCleanupRun: true,
-          projectWorktreeCleanup: true,
-          worktreesDirectory: true,
-          threadAutoSettlementScope: true,
-        });
-      }
-    }),
-  );
   it.effect.each([
     { name: "missing", content: undefined },
     { name: "empty", content: "" },
@@ -221,59 +169,20 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.connectionProbe).toBe(true);
       expect(second.capabilities.attachmentUploads).toBe(true);
       expect(second.capabilities.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });
-      expect(second.capabilities.pullRequests).toBe(true);
+      expect(second.capabilities.pullRequests).toBe(false);
       expect(second.capabilities.requiredWorktreeBootstrap).toBe(true);
       expect(second.capabilities.usagePriceOverrides).toBe(true);
       expect(second.capabilities.threadActiveReorder).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
-      expect(second.capabilities.threadPullRequests).toBe(true);
+      expect(second.capabilities.threadPullRequests).toBe(false);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
       expect(second.capabilities.serverResolvedCommandContext).toBe(true);
       expect(second.capabilities.projectProviderInstanceOverrides).toBe(true);
-      expect(second.capabilities.agentActivityPublishing).toBe(false);
+      expect(second.capabilities.agentActivityPublishing).toBeUndefined();
     }),
   );
 
-  it.effect("reports agent activity publishing from the current secret state", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-environment-publish-test-",
-      });
-      const layerTest = Layer.mergeAll(
-        ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer)),
-        ServerSecretStore.layer,
-      ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
-
-      yield* Effect.gen(function* () {
-        const secrets = yield* ServerSecretStore.ServerSecretStore;
-        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-        const encode = (value: string) => new TextEncoder().encode(value);
-
-        const unlinked = yield* serverEnvironment.getDescriptor;
-        expect(unlinked.capabilities.agentActivityPublishing).toBe(false);
-
-        yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, encode("true"));
-        const withoutLink = yield* serverEnvironment.getDescriptor;
-        expect(withoutLink.capabilities.agentActivityPublishing).toBe(false);
-
-        yield* secrets.set(RELAY_URL_SECRET, encode(""));
-        yield* secrets.set(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, encode("credential"));
-        const emptyUrl = yield* serverEnvironment.getDescriptor;
-        expect(emptyUrl.capabilities.agentActivityPublishing).toBe(false);
-
-        yield* secrets.set(RELAY_URL_SECRET, encode("https://relay.example"));
-        const linked = yield* serverEnvironment.getDescriptor;
-        expect(linked.capabilities.agentActivityPublishing).toBe(true);
-
-        yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, encode("false"));
-        const disabled = yield* serverEnvironment.getDescriptor;
-        expect(disabled.capabilities.agentActivityPublishing).toBe(false);
-      }).pipe(Effect.provide(layerTest));
-    }),
-  );
-
-  it.effect("advertises desktopAppUpdate only with desktop mode and the control fd", () =>
+  it.effect("keeps remote and self-update capabilities disabled", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -296,13 +205,13 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         );
 
       const withFd = yield* describeWith({ mode: "desktop", desktopTelemetryControlFd: 5 });
-      expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
-      expect(withFd.capabilities.desktopAppUpdate).toBe(true);
-      expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
+      expect(withFd.capabilities.serverSelfUpdate).toBeUndefined();
+      expect(withFd.capabilities.desktopAppUpdate).toBeUndefined();
+      expect(withFd.capabilities.serverSelfUpdateProgress).toBeUndefined();
       expect(withFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
       const withoutFd = yield* describeWith({ mode: "desktop" });
-      expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
+      expect(withoutFd.capabilities.serverSelfUpdate).toBeUndefined();
       expect(withoutFd.capabilities.desktopAppUpdate).toBeUndefined();
       expect(withoutFd.capabilities.serverSelfUpdateProgress).toBeUndefined();
       expect(withoutFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();

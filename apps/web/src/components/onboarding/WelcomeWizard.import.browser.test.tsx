@@ -51,10 +51,6 @@ vi.mock(import("@t3tools/client-runtime/state/session"), async (original) => {
     })) as never,
   };
 });
-vi.mock(import("../../cloud/publicConfig"), async (original) => ({
-  ...(await original()),
-  hasCloudPublicConfig: () => false,
-}));
 vi.mock(import("../../onboarding/firstRun"), async (original) => ({
   ...(await original()),
   useCompleteOnboarding: () => state.completeOnboarding,
@@ -114,10 +110,6 @@ vi.mock(import("../../onboarding/useProjectScans"), async (original) => ({
         refresh: state.refreshScan,
       };
     }),
-}));
-vi.mock(import("../../connection/onboarding"), async (original) => ({
-  ...(await original()),
-  connectPairing: "connectPairing" as never,
 }));
 vi.mock(import("../../state/use-atom-command"), async (original) => ({
   ...(await original()),

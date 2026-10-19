@@ -26,7 +26,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "./config.ts";
-import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import { flushCompileCache } from "./compileCache.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -40,7 +39,6 @@ import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts
 import * as ProjectService from "./project/ProjectService.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
-import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import { forkParked, forkParkedFiber } from "./serverActivation.ts";
@@ -372,31 +370,6 @@ interface StartupOptions {
   readonly abort?: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
 }
 
-export const startEffectWorkerWithRelay = Effect.fn(
-  "ServerRuntimeStartup.startEffectWorkerWithRelay",
-)(function* <WorkerContext, RelayContext>(input: {
-  readonly runWorker: Effect.Effect<void, never, WorkerContext>;
-  readonly startRelay: Effect.Effect<void, never, RelayContext>;
-  readonly workerFiberRef: Ref.Ref<Fiber.Fiber<void, never> | null>;
-}) {
-  const workerFiber = yield* forkParkedFiber(input.runWorker);
-  yield* Ref.set(input.workerFiberRef, workerFiber);
-  yield* input.startRelay.pipe(
-    Effect.onExit((exit) => {
-      if (Exit.isSuccess(exit)) {
-        return Effect.void;
-      }
-      return Ref.getAndSet(input.workerFiberRef, null).pipe(
-        Effect.flatMap((ownedWorkerFiber) =>
-          ownedWorkerFiber === null
-            ? Effect.void
-            : Fiber.interrupt(ownedWorkerFiber).pipe(Effect.asVoid),
-        ),
-      );
-    }),
-  );
-});
-
 export function runOrderedV2StartupPhases<
   Import,
   Recovery,
@@ -436,12 +409,10 @@ const make = (options?: StartupOptions) =>
     const providerRuntimeRecovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
-    const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     const crypto = yield* Crypto.Crypto;
-    const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
 
     const commandGate = yield* makeCommandGate;
     const httpListening = yield* Deferred.make<void>();
@@ -537,11 +508,9 @@ const make = (options?: StartupOptions) =>
         ),
         startEffectWorker: runStartupPhase(
           "orchestration-v2.effect-worker.start",
-          startEffectWorkerWithRelay({
-            runWorker: EffectWorker.runDaemon,
-            startRelay: agentAwarenessRelay.start(),
-            workerFiberRef: effectWorkerFiber,
-          }),
+          forkParkedFiber(EffectWorker.runDaemon).pipe(
+            Effect.flatMap((fiber) => Ref.set(effectWorkerFiber, fiber)),
+          ),
         ),
         autoBootstrap: (serverConfig.autoBootstrapProjectFromCwd
           ? runStartupPhase(
@@ -626,8 +595,6 @@ const make = (options?: StartupOptions) =>
         options?.awaitAuxiliaryParked ?? Effect.void,
       );
 
-      const updateOutcome = yield* launcher.prepareTrial;
-
       yield* Effect.logDebug("startup phase: publishing welcome event", {
         environmentId: environment.environmentId,
         cwd: welcomeBase.cwd,
@@ -660,7 +627,6 @@ const make = (options?: StartupOptions) =>
           payload: {
             at: DateTime.formatIso(yield* DateTime.now),
             environment,
-            ...(updateOutcome === undefined ? {} : { updateOutcome }),
           },
         }),
       );
