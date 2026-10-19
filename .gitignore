@@ -47,3 +47,4 @@ node_modules/
 .pnpm-store/
 apps/server/templates/*/godot/.godot/
 apps/server/templates/*/godot/**/*.import
+apps/server/templates/*/godot/**/*.uid
