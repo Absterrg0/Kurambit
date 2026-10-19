@@ -1,3 +1,4 @@
+import { GamePanelButton } from "./game/GamePanel";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -7799,7 +7800,10 @@ export default function ChatView(props: ChatViewProps) {
           />
         </span>
       ) : null}
-      <div className="pointer-events-auto flex h-full items-center">{panelToggleControls}</div>
+      <div className="pointer-events-auto flex h-full items-center">
+        {activeThreadRef ? <GamePanelButton threadRef={activeThreadRef} /> : null}
+        {panelToggleControls}
+      </div>
     </div>
   );
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({

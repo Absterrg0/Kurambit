@@ -1,3 +1,5 @@
+import { GameToolkit } from "./toolkits/game/tools.ts";
+import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -832,7 +834,10 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
+const layerGameToolkit = toolkitRegistration(GameToolkit, GameHandlers.layer);
+
 export const layer = Layer.mergeAll(
+  layerGameToolkit,
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,

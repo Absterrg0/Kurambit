@@ -1,4 +1,15 @@
 import {
+  GameActionInput,
+  GameActionResult,
+  GameCreateInput,
+  GameOpenInput,
+  GameOperationError,
+  GameProjectResult,
+  GameStatus,
+  GameThreadInput,
+  GameToolchainStatus,
+} from "./game.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -383,6 +394,12 @@ export const WS_METHODS = {
   projectsMutate: "projects.mutate",
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
+  gameStatus: "game.status",
+  gameCreate: "game.create",
+  gameOpen: "game.open",
+  gameAction: "game.action",
+  gameToolchainStatus: "game.toolchainStatus",
+  gameInstall: "game.install",
 
   shellOpenInEditor: "shell.openInEditor",
 
@@ -1852,7 +1869,45 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const gameError = Schema.Union([GameOperationError, EnvironmentAuthorizationError]);
+const WsGameStatusRpc = Rpc.make(WS_METHODS.gameStatus, {
+  payload: GameThreadInput,
+  success: GameStatus,
+  error: gameError,
+});
+const WsGameCreateRpc = Rpc.make(WS_METHODS.gameCreate, {
+  payload: GameCreateInput,
+  success: GameProjectResult,
+  error: gameError,
+});
+const WsGameOpenRpc = Rpc.make(WS_METHODS.gameOpen, {
+  payload: GameOpenInput,
+  success: GameProjectResult,
+  error: gameError,
+});
+const WsGameActionRpc = Rpc.make(WS_METHODS.gameAction, {
+  payload: GameActionInput,
+  success: GameActionResult,
+  error: gameError,
+});
+const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
+  payload: Schema.Struct({}),
+  success: GameToolchainStatus,
+  error: gameError,
+});
+const WsGameInstallRpc = Rpc.make(WS_METHODS.gameInstall, {
+  payload: Schema.Struct({}),
+  success: GameToolchainStatus,
+  error: gameError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsGameStatusRpc,
+  WsGameCreateRpc,
+  WsGameOpenRpc,
+  WsGameActionRpc,
+  WsGameToolchainStatusRpc,
+  WsGameInstallRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

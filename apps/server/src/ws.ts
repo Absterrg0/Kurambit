@@ -1,3 +1,6 @@
+import * as GameService from "./game/GameService.ts";
+import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameToolchain from "./game/GameToolchain.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -1168,6 +1171,9 @@ const layerWsRpc = (
 ) =>
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const game = yield* GameService.GameService;
+      const gameProjects = yield* GameProjectService.GameProjectService;
+      const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1790,6 +1796,12 @@ const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
+        [WS_METHODS.gameStatus]: ({ threadId }) => game.status(threadId),
+        [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
+        [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
+        [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
+        [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
+        [WS_METHODS.gameInstall]: () => gameToolchain.install,
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -3110,6 +3122,9 @@ export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
+    const game = yield* GameService.GameService;
+    const gameProjects = yield* GameProjectService.GameProjectService;
+    const gameToolchain = yield* GameToolchain.GameToolchain;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -3168,6 +3183,9 @@ export const layer = Layer.unwrap(
               previewAutomationBroker,
               serverBrowser,
             ).pipe(
+              Layer.provide(Layer.succeed(GameService.GameService, game)),
+              Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
+              Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

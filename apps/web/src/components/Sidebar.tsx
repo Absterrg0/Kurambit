@@ -1,3 +1,4 @@
+import { GameEntry } from "./game/GameEntry";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
@@ -4530,6 +4531,7 @@ export default function Sidebar() {
     <>
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
+      <GameEntry />
       <SidebarContent
         className="min-h-full"
         fixedHeader={

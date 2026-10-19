@@ -1,3 +1,8 @@
+import * as GameService from "./game/GameService.ts";
+import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameToolchain from "./game/GameToolchain.ts";
+import * as GameProcesses from "./game/GameProcesses.ts";
+import * as GamePreview from "./game/GamePreview.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
@@ -670,6 +675,13 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
+const layerGame = GameService.layer.pipe(
+  Layer.provideMerge(GameProjectService.layer),
+  Layer.provideMerge(GameToolchain.layer),
+  Layer.provide(GamePreview.layer),
+  Layer.provide(GameProcesses.layer),
+);
+
 const layerMakeRoutes = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
@@ -699,6 +711,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),
+  Layer.provide(layerGame),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(layerPullRequestService),
