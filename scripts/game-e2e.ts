@@ -18,6 +18,8 @@ import { RpcClient, RpcSerialization } from "effect/rpc";
 import {
   CommandId,
   MessageId,
+  ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+  ORCHESTRATION_PROTOCOL_VERSION,
   ProviderInstanceId,
   WsRpcGroup,
   WS_METHODS,
@@ -113,6 +115,10 @@ const authenticate = async () => {
   const socket = new URL("/ws", origin);
   socket.protocol = socket.protocol === "https:" ? "wss:" : "ws:";
   socket.searchParams.set("wsTicket", ticket.ticket);
+  socket.searchParams.set(
+    ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+    String(ORCHESTRATION_PROTOCOL_VERSION),
+  );
   timeline(`Authenticated at ${origin}`);
   return socket.toString();
 };
