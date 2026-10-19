@@ -650,21 +650,6 @@ class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
-class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
-  HttpApiEndpoint.post("diff", "/api/pull-requests/diff", {
-    headers: OptionalBearerHeaders,
-    payload: PullRequestDiffInput,
-    success: PullRequestDiffResult,
-    error: [
-      PullRequestUnavailableError,
-      PullRequestOperationError,
-      EnvironmentAuthInvalidError,
-      EnvironmentScopeRequiredError,
-      EnvironmentInternalError,
-    ],
-  }).middleware(EnvironmentAuthenticatedAuth),
-) {}
-
 class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -726,30 +711,6 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
-/**
- * Public entry point for webhook tasks. Unauthenticated by design: the token
- * in the path, and an optional body signature, are the credential. The handler
- * reads the raw body itself so a signature is checked over the exact bytes.
- */
-const WebhookParams = Schema.Struct({
-  hookId: TrimmedNonEmptyString,
-  token: TrimmedNonEmptyString,
-});
-const WebhookAccepted = Schema.Struct({ deliveryId: TrimmedNonEmptyString }).pipe(
-  HttpApiSchema.status(202),
-);
-const webhookEndpoint = {
-  params: WebhookParams,
-  success: WebhookAccepted,
-} as const;
-const WEBHOOK_PATH = "/api/hooks/:hookId/:token";
-
-class EnvironmentWebhooksHttpApi extends HttpApiGroup.make("webhooks")
-  .add(HttpApiEndpoint.post("webhookPost", WEBHOOK_PATH, webhookEndpoint))
-  .add(HttpApiEndpoint.put("webhookPut", WEBHOOK_PATH, webhookEndpoint))
-  .add(HttpApiEndpoint.patch("webhookPatch", WEBHOOK_PATH, webhookEndpoint))
-  .add(HttpApiEndpoint.get("webhookGet", WEBHOOK_PATH, webhookEndpoint)) {}
-
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
@@ -757,5 +718,4 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
-  .add(EnvironmentConnectHttpApi)
-  .add(EnvironmentWebhooksHttpApi) {}
+  .add(EnvironmentConnectHttpApi) {}
