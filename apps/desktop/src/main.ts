@@ -37,7 +37,7 @@ import * as DesktopAppActivation from "./app/DesktopAppActivation.ts";
 import * as DesktopWebLinks from "./app/DesktopWebLinks.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
-import * as DesktopClerk from "./app/DesktopClerk.ts";
+import * as DesktopInstance from "./app/DesktopInstance.ts";
 import * as DesktopCliCommand from "./app/DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
@@ -215,8 +215,8 @@ const layerDesktopApplication = Layer.mergeAll(
   Layer.provideMerge(layerDesktopLocalEnvironmentAuth),
 );
 
-// Clerk resolves userData before Electron is ready, so it gets the synchronous FileSystem.
-const layerDesktopClerk = DesktopClerk.layer.pipe(
+// Select the profile and acquire the lock before Electron becomes ready.
+const layerDesktopInstance = DesktopInstance.layer.pipe(
   Layer.provide(DesktopPreReadyFileSystem.layer),
   Layer.provideMerge(ElectronShell.layer),
   Layer.provideMerge(layerDesktopEnvironment),
@@ -231,11 +231,10 @@ const layerDesktopApplicationRuntime = layerDesktopApplication.pipe(
   Layer.provideMerge(layerElectron),
 );
 
-// Acquire strict pre-ready setup before Clerk. Nothing before the Clerk bridge
-// may yield, or Electron can emit ready before Clerk registers its scheme.
-const layerDesktopRuntime = layerDesktopClerk.pipe(
-  Layer.flatMap((clerkContext) =>
-    layerDesktopApplicationRuntime.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
+// Acquire the profile lock before building services that may yield.
+const layerDesktopRuntime = layerDesktopInstance.pipe(
+  Layer.flatMap((instanceContext) =>
+    layerDesktopApplicationRuntime.pipe(Layer.provideMerge(Layer.succeedContext(instanceContext))),
   ),
   Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );

@@ -54,7 +54,7 @@ export class ElectronProtocolUnregistrationError extends Schema.TaggedError<Elec
 
 export type DesktopProtocolRegistrationInput = {
   readonly scheme: string;
-  readonly clerkFrontendApiHostname: string | undefined;
+  readonly clerkFrontendApiHostname?: string | undefined;
 } & ({ readonly targetOrigin: URL } | { readonly assetDirectory: string });
 
 export class ElectronProtocol extends Context.Service<
