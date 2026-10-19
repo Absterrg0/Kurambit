@@ -260,7 +260,18 @@ const main = Effect.gen(function* () {
     modelSelection: {
       instanceId: ProviderInstanceId.make(values.provider),
       model: values.model,
-      options: [{ id: "reasoningEffort", value: values["reasoning-effort"] }],
+      // Each provider names its reasoning option differently.
+      options: [
+        {
+          id:
+            values.provider === "claudeAgent"
+              ? "effort"
+              : values.provider === "opencode"
+                ? "variant"
+                : "reasoningEffort",
+          value: values["reasoning-effort"],
+        },
+      ],
     },
     runtimeMode: "full-access",
   });
@@ -357,14 +368,21 @@ const main = Effect.gen(function* () {
     });
   if (values.revise) {
     const before = yield* promise(() => revisionSnapshot(created.root));
-    const baseline = (yield* promise(() =>
-      exec("git", ["write-tree"], { cwd: created.root }),
-    )).stdout.trim();
+    // A throwaway index captures uncommitted agent work without touching the game's own index.
+    const index = NodePath.join(created.root, "builds/logs/e2e-snapshot.index");
+    const snapshotTree = () =>
+      promise(async () => {
+        const env = { ...process.env, GIT_INDEX_FILE: index };
+        await exec("git", ["add", "-A"], { cwd: created.root, env });
+        return (await exec("git", ["write-tree"], { cwd: created.root, env })).stdout.trim();
+      });
+    const baseline = yield* snapshotTree();
     yield* followup(values.revise);
     const after = yield* promise(() => revisionSnapshot(created.root));
     console.log("Revision assets before/after:", JSON.stringify({ before, after }, null, 2));
+    const revised = yield* snapshotTree();
     const diff = yield* promise(() =>
-      exec("git", ["diff", baseline, "--stat"], { cwd: created.root }),
+      exec("git", ["diff", "--stat", baseline, revised], { cwd: created.root }),
     );
     console.log("Changed files:\n" + diff.stdout);
   }
