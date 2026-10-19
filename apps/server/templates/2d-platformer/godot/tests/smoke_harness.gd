@@ -291,6 +291,17 @@ func _check_menu() -> void:
 	_check(menu.get_node_or_null("Menu/Panel/Box/Play") != null, "menu has a Play button")
 	_check(menu.get_node_or_null("SettingsPanel") != null, "menu has a settings panel")
 	_check(GameState.state == GameState.State.MENU, "menu puts the game state in MENU")
+	# Opening the shared panel proves its sliders exist and its signals connect; a
+	# broken node path only shows up when the player presses Settings otherwise.
+	var settings := menu.get_node_or_null("SettingsPanel")
+	if settings != null:
+		settings.call("open")
+		await _frames(2)
+		_check(settings.visible, "the settings panel opens")
+		settings.call("hide")
+	# The focus sounds the panel plays are short; let them finish before the scene is
+	# freed, or the audio server reports their streams as leaked at exit.
+	await _frames(8)
 	menu.free()
 
 ## ---------------------------------------------------------------- helpers
@@ -353,11 +364,12 @@ func _teardown() -> void:
 	# engine shuts down, otherwise they show up as leaked instances at exit.
 	await get_tree().process_frame
 	await get_tree().process_frame
-	# The menu phase started the music again; stop once more now that the scenes are
-	# gone, so no stream is still playing when the audio server shuts down.
+	# The menu phase started the music and played UI sounds; stop once more now that
+	# the scenes are gone, and give the mixer a few frames to release those playbacks,
+	# or the engine reports their streams as leaked instances at exit.
 	Audio.stop_all()
-	await get_tree().process_frame
-	await get_tree().process_frame
+	for _frame in 6:
+		await get_tree().process_frame
 
 func _check(condition: bool, label: String) -> void:
 	_checks += 1
