@@ -110,6 +110,16 @@ if _player_inside and not player.is_invulnerable():
     player.apply_hit(global_position, 20.0, "enemy")
 ```
 
+**An interactable** (chest, lever, lore stele). Nothing in the template uses the `interact`
+action yet — it is bound to E and the pad's X. The pattern is an `Area3D` that tracks the
+player:
+
+```gdscript
+if player_inside and Input.is_action_just_pressed("interact"):
+    GameState.notify("The lever gives away")
+    Audio.play("unlock")
+```
+
 **Movement feel.** Every number is an `@export` on `Player` (groups _Movement_, _Jump_,
 _Survival_, _Feedback_) and `CameraRig` (pivot height, follow speed, distance, pitch
 limits, stick speed). Defaults are tuned for 1.25 m jumps: steps of ≤ 1 m and gaps of
