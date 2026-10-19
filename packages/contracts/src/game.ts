@@ -12,7 +12,7 @@ export const GameAsset = Schema.Struct({
   thumbnail: Schema.optionalKey(Schema.String),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals(["blank"]);
+export const GameTemplateId = Schema.Literals(["3d-explorer", "blank"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
@@ -27,13 +27,20 @@ export type GameTemplate = typeof GameTemplate.Type;
  */
 export const GAME_TEMPLATES: readonly GameTemplate[] = [
   {
+    id: "3d-explorer",
+    name: "3D Explorer",
+    description:
+      "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
+    dimension: "3d",
+  },
+  {
     id: "blank",
     name: "Blank",
     description: "An empty Godot project: a camera, a light, and Web and Linux export presets.",
     dimension: "3d",
   },
 ];
-export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
+export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,

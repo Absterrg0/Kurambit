@@ -33,7 +33,7 @@ describe("game manifest starter template", () => {
 
   it("rejects an unknown starter template", () => {
     expect(() =>
-      decodeManifest(JSON.stringify({ ...legacyManifest, template: "3d-explorer" })),
+      decodeManifest(JSON.stringify({ ...legacyManifest, template: "topdown-2d" })),
     ).toThrow();
   });
 });

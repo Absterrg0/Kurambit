@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { ProviderInstanceId, type GameTemplateId } from "@t3tools/contracts";
+import { DEFAULT_GAME_TEMPLATE, ProviderInstanceId, type GameTemplateId } from "@t3tools/contracts";
 import { projectTestLayer } from "./gameTestLayers.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -80,7 +80,7 @@ it.effect(
               "godot/scripts/cube.gd",
             ]);
             // The template survives a manifest re-encode (upsertAsset above).
-            expect((yield* projects.read(game.root)).template).toBe("blank");
+            expect((yield* projects.read(game.root)).template).toBe(DEFAULT_GAME_TEMPLATE);
             const processes = yield* GameProcesses.GameProcesses;
             const commit = yield* processes.run({
               root: game.root,
@@ -113,13 +113,16 @@ it.effect(
         expect(presets).toContain('name="Web"');
         expect(presets).toContain('name="Linux"');
         expect(presets).toContain("variant/thread_support=false");
-        // The blank starter template becomes the game's godot/ tree with the name substituted.
+        // The default starter template becomes the game's godot/ tree with the name substituted.
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
           'config/name="Tiny Quest"',
         );
-        expect(yield* exists(NodePath.join(created.root, "godot/scenes/main.tscn"))).toBe(true);
+        expect(yield* exists(NodePath.join(created.root, "godot/scenes/main_menu.tscn"))).toBe(
+          true,
+        );
+        expect(yield* exists(NodePath.join(created.root, "godot/tests/smoke_test.gd"))).toBe(true);
         expect(yield* readFile(NodePath.join(created.root, "TEMPLATE.md"))).toContain(
-          "# Tiny Quest — Blank starter template",
+          "# Tiny Quest — 3D Explorer starter template",
         );
         expect(
           Object.keys(
@@ -236,7 +239,7 @@ it.effect("rejects an unknown starter template and removes the folder it created
             parentDirectory: parent,
             brief: "Go",
             // A template id this build does not ship.
-            template: "3d-explorer" as GameTemplateId,
+            template: "not-a-template" as GameTemplateId,
             modelSelection: selection,
           }),
         );
