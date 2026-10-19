@@ -40,7 +40,7 @@ try:
         camera_data.ortho_scale = size * 1.9
         bpy.context.scene.camera = camera
         light_data = bpy.data.lights.new('Studio thumbnail light', 'AREA')
-        light_data.energy = 500 * size * size
+        light_data.energy = 125 * size * size
         light_data.shape = 'DISK'
         light_data.size = size * 3
         light = bpy.data.objects.new('Studio thumbnail light', light_data)
@@ -48,6 +48,12 @@ try:
         light.location = center + Vector((0.8, -1, 2)) * size
         light.rotation_euler = (center - light.location).to_track_quat('-Z', 'Y').to_euler()
         scene = bpy.context.scene
+        scene.view_settings.view_transform = 'Standard'
+        world = bpy.data.worlds.new('Studio thumbnail world')
+        world.use_nodes = True
+        world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.15, 0.15, 0.15, 1)
+        world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0.5
+        scene.world = world
         scene.render.engine = 'CYCLES'
         scene.cycles.device = 'CPU'
         scene.cycles.samples = 8
