@@ -41,7 +41,7 @@ const runStep = Effect.fn("browserSetup.runStep")(function* (
 
 /**
  * Under `sudo` the process home is root's, so an unspecified home falls back to
- * the invoking user's `~/.t3`.
+ * the invoking user's `~/.game-studio`.
  */
 const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Option.Option<string>) {
   const env = yield* HostProcess.Environment;

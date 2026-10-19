@@ -596,10 +596,10 @@ const layerTelemetry = Layer.unwrap(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const endpoints = yield* resolveOtlpEndpoints;
     const resource = {
-      serviceName: "t3code-desktop",
+      serviceName: "game-studio-desktop",
       serviceVersion: environment.appVersion,
       attributes: {
-        "service.namespace": "t3code",
+        "service.namespace": "game-studio",
         "service.runtime": "desktop",
         "service.mode": environment.isDevelopment ? "development" : "packaged",
         "host.name": endpoints.resourceAttributes["host.name"] || (yield* HostProcess.Hostname),

@@ -12,7 +12,7 @@ describe("resolveT3McpToolPresentation", () => {
         "mcp__t3code__",
         "T3-code.",
         "t3_code/",
-        "game-studio:",
+        "t3code:",
         "mcp_t3-code_",
         "T3 Code ",
         "t3-code · ",

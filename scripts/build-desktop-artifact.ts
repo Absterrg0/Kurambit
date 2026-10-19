@@ -2713,9 +2713,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         // macOS 26 offers Messages/Mail codes in every text field unless opted out.
         NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
         NSLocalNetworkUsageDescription:
-          "T3 Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
+          "Game Studio connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
         NSScreenCaptureUsageDescription:
-          "T3 Code captures the active window when you use the window capture shortcut.",
+          "Game Studio captures the active window when you use the window capture shortcut.",
         // macOS lists an app under Default web browser only when it opens web
         // pages as documents as well as http and https links (see protocols).
         CFBundleDocumentTypes: [
@@ -2782,8 +2782,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       executableName: "game-studio",
       icon: "icons",
       category: "Development",
-      synopsis: "Desktop GUI for coding agents",
-      maintainer: "T3 Tools <hello@t3.codes>",
+      synopsis: "Local desktop studio for creating games",
+      maintainer: "Game Studio contributors",
       protocols: [
         {
           name: "Game Studio",
@@ -2800,7 +2800,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // FPM runs outside the staged app directory, so source paths must be absolute.
       fpm: [
         `${path.join(repoRoot, "apps/desktop/resources/linux/dev.gamestudio.app.metainfo.xml")}=/usr/share/metainfo/dev.gamestudio.app.metainfo.xml`,
-        `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/t3code/copyright`,
+        `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/game-studio/copyright`,
       ],
       // Debian 13 and Ubuntu 24.04 renamed some for 64-bit time; the old name
       // is the fallback for older releases.
@@ -3709,9 +3709,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
-      "T3 Code is an open-source desktop app for coding agents. Work with your existing agent subscriptions, review code changes, and run commands in your projects. Connect from desktop, web, or mobile to continue working remotely.",
+      "Game Studio is a local desktop application for creating games with coding agents, Blender, and Godot.",
     license: "MIT",
-    homepage: "https://t3.codes",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(

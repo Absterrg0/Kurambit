@@ -85,14 +85,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(code).not.toBe(0);
           expect(output).toContain("500");
           expect(output).not.toContain("100%");
-          expect(output).not.toContain("Installed T3 Code");
+          expect(output).not.toContain("Installed Game Studio");
           expect(await NodeFSP.readdir(versions)).toEqual([]);
         } else {
           expect(code).toBe(0);
           expect(sawPartialProgress).toBe(true);
           expect(output).toContain("100%");
           expect(output).toContain("0.1 / 0.1 MB");
-          expect(output).toContain("Installed T3 Code 1.2.3");
+          expect(output).toContain("Installed Game Studio 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
           ).toBe("1.2.3\n");
@@ -111,4 +111,22 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
       }
     },
   );
+});
+
+it("requires an explicit fork release source before downloading or installing", () => {
+  const result = NodeChildProcess.spawnSync(
+    "sh",
+    [NodePath.join(import.meta.dirname, "install.sh")],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        T3CODE_RELEASE_BASE_URL: "",
+        T3CODE_INSTALL_BIN_DIR: "",
+        T3CODE_VERSION: "",
+      },
+    },
+  );
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("Set T3CODE_RELEASE_BASE_URL");
 });

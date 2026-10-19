@@ -7,7 +7,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../src/persistence/Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { runMigrateDevDb } from "./migrate-dev-db.ts";
+import { MigrateDevDbSourceMissingError, runMigrateDevDb } from "./migrate-dev-db.ts";
 
 const withDatabase = <A, E>(
   databasePath: string,
@@ -88,6 +88,17 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
 });
 
 it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
+  it.effect("requires an explicit source before reading or creating any database", () =>
+    Effect.gen(function* () {
+      const error = yield* runMigrateDevDb({
+        projects: 5,
+        threadsPerProject: 10,
+      }).pipe(Effect.flip);
+      assert.instanceOf(error, MigrateDevDbSourceMissingError);
+      assert.include(error.sourcePath, "Pass --source explicitly");
+    }),
+  );
+
   it.effect("keeps stopped thread families from live projects and clears pending work", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

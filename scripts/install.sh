@@ -1,31 +1,21 @@
 #!/bin/sh
-# Installs the T3 Code CLI from a GitHub Release archive. Needs only sh, tar,
-# sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
-#
-#   curl -fsSL https://t3.codes/install.sh | sh
-#
-# Environment:
-#   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
-#                            (default: stable; preview is a maintainers' test train)
-#   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
-#   GAME_STUDIO_HOME              T3 home directory (default: ~/.t3)
-#   T3CODE_INSTALL_BIN_DIR   where the `t3` symlink goes (default: ~/.local/bin)
-#   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
-#
-# The archive is unpacked into $GAME_STUDIO_HOME/runtime/versions/<version>, the
-# same layout `t3 service install` uses, so the service reuses this download
-# instead of fetching the release again.
+# Installs an explicitly selected Game Studio CLI archive.
+# Set T3CODE_RELEASE_BASE_URL, T3CODE_VERSION, and T3CODE_INSTALL_BIN_DIR.
+# GAME_STUDIO_HOME defaults to ~/.game-studio. The internal executable is t3.
 set -eu
 
-repo="pingdotgg/t3code"
-base_url="${T3CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+base_url="${T3CODE_RELEASE_BASE_URL:-}"
 t3_home="${GAME_STUDIO_HOME:-$HOME/.game-studio}"
-bin_dir="${T3CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+bin_dir="${T3CODE_INSTALL_BIN_DIR:-}"
 
 fail() {
   printf '\nt3 install: %s\n' "$1" >&2
   exit 1
 }
+
+[ -n "$base_url" ] || fail "Set T3CODE_RELEASE_BASE_URL to a Game Studio release source."
+[ -n "$bin_dir" ] || fail "Set T3CODE_INSTALL_BIN_DIR to a dedicated Game Studio bin directory."
+[ -n "${T3CODE_VERSION:-}" ] || fail "Set T3CODE_VERSION to the exact Game Studio release."
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -42,7 +32,7 @@ step() {
 if "$interactive"; then
   printf '\n%s' "$bold" >&2
   printf '  %s\n' '██████████ ████████ ' >&2
-  printf '  %s\n' '    ███       ▄██▀       T3 Code' >&2
+  printf '  %s\n' '    ███       ▄██▀       Game Studio' >&2
   printf '  %s%s     %sCLI installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$reset$bold" >&2
   printf '  %s\n' '    ███    ▄     ███' >&2
   printf '  %s\n' '    ███    ███████▀ ' >&2
@@ -144,21 +134,6 @@ fi
 
 channel="${T3CODE_CHANNEL:-stable}"
 version="${T3CODE_VERSION:-}"
-if [ -z "$version" ]; then
-  # Tags are v<semver>; the channel is the prerelease identifier, or none for
-  # stable. Only tags of the requested train are considered, so a stable
-  # install can never pick up a nightly or preview build by accident.
-  case "$channel" in
-    stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
-    nightly | preview) tag_pattern="v\([0-9][^\"]*-${channel}\.[0-9]*\.[0-9]*\)" ;;
-    *) fail "T3CODE_CHANNEL must be stable, nightly, or preview" ;;
-  esac
-  tmp_index="$(mktemp)"
-  fetch "https://api.github.com/repos/${repo}/releases?per_page=100" "$tmp_index"
-  version="$(sed -n "s/.*\"tag_name\": *\"${tag_pattern}\".*/\1/p" "$tmp_index" | head -n 1)"
-  rm -f "$tmp_index"
-  [ -n "$version" ] || fail "could not find a ${channel} release; set T3CODE_VERSION"
-fi
 case "$version" in
   *-preview.*)
     printf '%s\n' \
@@ -188,7 +163,7 @@ else
   trap 'printf "\n" >&2; exit 143' TERM
 
   if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalling%s T3 Code %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
+  printf '  %sInstalling%s Game Studio %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
   step "Downloading..."
   fetch_status=0
   fetch "${base_url}/v${version}/SHA256SUMS" "${staging}/SHA256SUMS" || fetch_status=$?
@@ -205,7 +180,7 @@ else
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
-  step "Extracting T3 Code..."
+  step "Extracting Game Studio..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
   "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
@@ -220,7 +195,7 @@ step "Setting up the t3 command..."
 mkdir -p "$bin_dir"
 ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
-printf '  %sInstalled T3 Code %s%s\n\n' "$green" "$version" "$reset" >&2
+printf '  %sInstalled Game Studio %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
   *":${bin_dir}:"*) printf '  Run %st3%s to get started.\n\n' "$bold" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset" ;;

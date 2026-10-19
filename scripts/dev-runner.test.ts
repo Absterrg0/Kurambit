@@ -1220,6 +1220,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         readonly t3Home: string | undefined;
         readonly cwd: string;
         readonly ambientHome: string | undefined;
+        readonly upstreamHome?: string;
       }) =>
         Effect.gen(function* () {
           let captured: Record<string, string | undefined> | undefined;
@@ -1239,10 +1240,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
             Effect.provideService(HostProcess.Platform, "linux"),
             Effect.provideService(HostProcess.WorkingDirectory, input.cwd),
-            Effect.provideService(
-              HostProcess.Environment,
-              input.ambientHome === undefined ? {} : { GAME_STUDIO_HOME: input.ambientHome },
-            ),
+            Effect.provideService(HostProcess.Environment, {
+              GAME_STUDIO_HOME: input.ambientHome,
+              T3CODE_HOME: input.upstreamHome,
+            }),
           );
 
           return captured?.GAME_STUDIO_HOME;
@@ -1296,6 +1297,18 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             ambientHome: "/home/user/.t3",
           });
           assert.equal(home, path.resolve("/home/user/.t3"));
+        }),
+      );
+
+      it.effect("ignores the upstream home outside a worktree", () =>
+        Effect.gen(function* () {
+          const home = yield* spawnedHome({
+            t3Home: undefined,
+            cwd: NodeOS.tmpdir(),
+            ambientHome: undefined,
+            upstreamHome: "/live-t3",
+          });
+          assert.equal(home, undefined);
         }),
       );
 

@@ -39,6 +39,22 @@ const makeEnvironment = (
 ) => DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(layerEnvironment(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("ignores inherited T3 home and application identity", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {},
+        {
+          T3CODE_HOME: "/live-t3",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: "com.t3tools.T3Code",
+          VITE_DEV_SERVER_URL: "http://localhost:5173",
+        },
+      );
+      assert.equal(environment.baseDir, "/Users/alice/.game-studio");
+      assert.equal(environment.stateDir, "/Users/alice/.game-studio/dev");
+      assert.equal(environment.appUserModelId, "dev.gamestudio.app.dev");
+    }),
+  );
+
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
@@ -172,7 +188,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " dev.gamestudio.app.dev.local ",
+          GAME_STUDIO_APP_USER_MODEL_ID: " dev.gamestudio.app.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );
