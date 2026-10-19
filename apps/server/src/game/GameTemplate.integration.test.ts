@@ -173,6 +173,18 @@ it.live.skipIf(!available)(
             }
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
+                NodePath.join(evidenceDirectory, "3d-explorer-import.log"),
+                importLog,
+              ),
+            );
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                NodePath.join(evidenceDirectory, "3d-explorer-smoke.log"),
+                smokeLog,
+              ),
+            );
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
                 NodePath.join(evidenceDirectory, "3d-explorer-playtest.json"),
                 JSON.stringify(
                   {

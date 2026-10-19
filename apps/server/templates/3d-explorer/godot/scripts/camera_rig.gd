@@ -13,6 +13,10 @@ extends Node3D
 @export var max_pitch := 0.55
 ## Right-stick look speed in radians per second.
 @export var stick_speed := 2.6
+## Largest pointer jump one event may apply, in pixels. Browsers can deliver one
+## enormous movement event the moment the pointer is locked; without a clamp the view
+## snaps to a random angle on the first click.
+@export var max_look_step := 90.0
 
 @onready var _pitch_pivot: Node3D = $Pitch
 @onready var _arm: SpringArm3D = $Pitch/SpringArm3D
@@ -50,8 +54,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	var motion := event as InputEventMouseMotion
 	if motion != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var invert := -1.0 if Settings.invert_y else 1.0
-		_yaw -= motion.relative.x * Settings.mouse_sensitivity
-		_pitch -= motion.relative.y * Settings.mouse_sensitivity * invert
+		var step := Vector2(
+			clampf(motion.relative.x, -max_look_step, max_look_step),
+			clampf(motion.relative.y, -max_look_step, max_look_step),
+		)
+		_yaw -= step.x * Settings.mouse_sensitivity
+		_pitch -= step.y * Settings.mouse_sensitivity * invert
 		_apply()
 		return
 	var button := event as InputEventMouseButton

@@ -123,12 +123,9 @@ const clickCanvas = async (
   const centre = evaluated.result?.value;
   if (!centre) return;
   const at = { x: Math.round(centre.x), y: Math.round(centre.y) };
+  // No mouseMoved first: moving the pointer from wherever it happens to be would hand
+  // the game one huge relative motion, which is not what a player clicking sees.
   const options = { ...at, clickCount: 1 };
-  await cdp.send(
-    "Input.dispatchMouseEvent",
-    { type: "mouseMoved", ...at, button: "none" },
-    sessionId,
-  );
   await cdp.send(
     "Input.dispatchMouseEvent",
     { type: "mousePressed", ...options, button },
