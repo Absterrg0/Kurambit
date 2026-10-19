@@ -5,6 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as GameService from "./GameService.ts";
@@ -65,6 +66,16 @@ it.live.skipIf(!available)(
             expect(revision.meshes).toBe(1);
             expect(revision.asset.export).toBe(asset.asset.export);
             expect(revision.dimensions).toEqual([2, 1, 1]);
+            const rebuilt = yield* game.blender(threadId, {
+              id: "cube",
+              reset: true,
+              thumbnail: false,
+              script: "import bpy\nbpy.ops.mesh.primitive_cube_add(size=3)\n",
+            });
+            expect(rebuilt.meshes).toBe(1);
+            expect(rebuilt.dimensions).toEqual([3, 3, 3]);
+            expect(rebuilt.asset.source).toBe(asset.asset.source);
+            expect(rebuilt.asset.export).toBe(asset.asset.export);
             const bad = yield* Effect.result(
               game.blender(threadId, {
                 id: "broken",
@@ -73,6 +84,14 @@ it.live.skipIf(!available)(
               }),
             );
             expect(bad._tag).toBe("Failure");
+            if (Result.isFailure(bad)) {
+              expect(bad.failure.detail).toContain("Traceback");
+              expect(bad.failure.message).toContain("RuntimeError: intentional script failure");
+            }
+            const logs = yield* Effect.promise(() =>
+              NodeFSP.readdir(NodePath.join(created.root, "builds/logs")),
+            );
+            expect(logs.filter((name) => name.startsWith("blender-"))).toEqual([]);
             yield* Effect.promise(async () => {
               await NodeFSP.writeFile(
                 NodePath.join(created.root, "godot/scripts/main.gd"),

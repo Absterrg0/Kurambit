@@ -23,6 +23,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
+import { commandDetail } from "./commandDetail.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 
 export class GameService extends Context.Service<
@@ -80,7 +81,12 @@ const make = Effect.gen(function* () {
           Deferred.await(cancelled).pipe(
             Effect.andThen(
               Effect.fail(
-                new GameOperationError({ operation: name, path: root, reason: "command-failed" }),
+                new GameOperationError({
+                  operation: name,
+                  path: root,
+                  reason: "command-failed",
+                  detail: "Operation cancelled by Stop.",
+                }),
               ),
             ),
           ),
@@ -136,7 +142,7 @@ const make = Effect.gen(function* () {
       success,
       message: success
         ? "Completed successfully."
-        : `Command failed${process.timedOut ? " after its timeout" : ` with exit code ${process.exitCode}`}. ${errors.slice(0, 8).join("\n")} See ${process.logPath}`,
+        : `Command failed${process.timedOut ? " after its timeout" : ` with exit code ${process.exitCode}`}. ${errors.slice(0, 8).join("\n")} See ${process.logPath}\n${commandDetail(process)}`,
       path: outputPath,
       url: null,
       process,
@@ -205,6 +211,10 @@ const make = Effect.gen(function* () {
           operation: "export-output",
           path: output,
           reason: "command-failed",
+          detail:
+            `Expected nonempty export files were missing.\n${commandDetail(result.process!)}`.slice(
+              -4096,
+            ),
           cause,
         }),
     });
@@ -293,87 +303,99 @@ const make = Effect.gen(function* () {
             "builds/logs",
             `blender-${NodeCrypto.randomUUID()}`,
           );
-          yield* Effect.tryPromise({
-            try: async () => {
-              await NodeFSP.mkdir(temporary, { recursive: true });
-              for (const relative of [
-                asset.source,
-                asset.script,
-                asset.export,
-                ...(asset.thumbnail ? [asset.thumbnail] : []),
-              ])
-                await NodeFSP.mkdir(NodePath.dirname(insideGame(root, relative)), {
-                  recursive: true,
-                });
-              await NodeFSP.writeFile(insideGame(root, asset.script), input.script);
-              await NodeFSP.writeFile(
-                NodePath.join(temporary, "run.py"),
-                blenderWrapper({
-                  source: insideGame(root, asset.source),
-                  script: insideGame(root, asset.script),
-                  exported: insideGame(root, asset.export),
-                  thumbnail: asset.thumbnail ? insideGame(root, asset.thumbnail) : null,
-                  metadata: NodePath.join(temporary, "result.json"),
+          return yield* Effect.gen(function* () {
+            yield* Effect.tryPromise({
+              try: async () => {
+                await NodeFSP.mkdir(temporary, { recursive: true });
+                for (const relative of [
+                  asset.source,
+                  asset.script,
+                  asset.export,
+                  ...(asset.thumbnail ? [asset.thumbnail] : []),
+                ])
+                  await NodeFSP.mkdir(NodePath.dirname(insideGame(root, relative)), {
+                    recursive: true,
+                  });
+                await NodeFSP.writeFile(insideGame(root, asset.script), input.script);
+                await NodeFSP.writeFile(
+                  NodePath.join(temporary, "run.py"),
+                  blenderWrapper({
+                    reset: input.reset,
+                    source: insideGame(root, asset.source),
+                    script: insideGame(root, asset.script),
+                    exported: insideGame(root, asset.export),
+                    thumbnail: asset.thumbnail ? insideGame(root, asset.thumbnail) : null,
+                    metadata: NodePath.join(temporary, "result.json"),
+                  }),
+                );
+              },
+              catch: (cause) =>
+                new GameOperationError({
+                  operation: "blender-prepare",
+                  path: temporary,
+                  reason: "io",
+                  cause,
                 }),
-              );
-            },
-            catch: (cause) =>
-              new GameOperationError({
-                operation: "blender-prepare",
-                path: temporary,
-                reason: "io",
-                cause,
-              }),
-          });
-          const result = yield* processes.run({
-            root,
-            executable: blender.path,
-            args: [
-              "--background",
-              "--factory-startup",
-              "--threads",
-              "2",
-              "--python-exit-code",
-              "1",
-              "--python",
-              NodePath.join(temporary, "run.py"),
-            ],
-            operation: "blender-asset",
-            timeoutMs: 300_000,
-          });
-          if (result.exitCode !== 0)
-            return yield* new GameOperationError({
-              operation: "blender-asset",
-              path: result.logPath,
-              reason: "command-failed",
             });
-          const output = yield* Effect.tryPromise({
-            try: async () => {
-              for (const relative of [
-                asset.source,
-                asset.export,
-                ...(asset.thumbnail ? [asset.thumbnail] : []),
-              ])
-                if ((await NodeFSP.stat(insideGame(root, relative))).size === 0)
-                  throw new Error("Empty asset");
-              return {
-                ...decodeBlenderMetadata(
-                  await NodeFSP.readFile(NodePath.join(temporary, "result.json"), "utf8"),
-                ),
-                asset,
-                process: result,
-              };
-            },
-            catch: (cause) =>
-              new GameOperationError({
-                operation: "blender-output",
-                path: temporary,
+            const result = yield* processes.run({
+              root,
+              executable: blender.path,
+              args: [
+                "--background",
+                "--factory-startup",
+                "--threads",
+                "2",
+                "--python-exit-code",
+                "1",
+                "--python",
+                NodePath.join(temporary, "run.py"),
+              ],
+              operation: "blender-asset",
+              timeoutMs: 300_000,
+            });
+            if (result.exitCode !== 0)
+              return yield* new GameOperationError({
+                operation: "blender-asset",
+                path: result.logPath,
                 reason: "command-failed",
-                cause,
-              }),
-          });
-          yield* projects.upsertAsset(root, asset);
-          return output;
+                detail: commandDetail(result),
+              });
+            const output = yield* Effect.tryPromise({
+              try: async () => {
+                for (const relative of [
+                  asset.source,
+                  asset.export,
+                  ...(asset.thumbnail ? [asset.thumbnail] : []),
+                ])
+                  if ((await NodeFSP.stat(insideGame(root, relative))).size === 0)
+                    throw new Error("Empty asset");
+                return {
+                  ...decodeBlenderMetadata(
+                    await NodeFSP.readFile(NodePath.join(temporary, "result.json"), "utf8"),
+                  ),
+                  asset,
+                  process: result,
+                };
+              },
+              catch: (cause) =>
+                new GameOperationError({
+                  operation: "blender-output",
+                  path: temporary,
+                  reason: "command-failed",
+                  detail:
+                    `Expected asset files or metadata were missing or invalid.\n${commandDetail(result)}`.slice(
+                      -4096,
+                    ),
+                  cause,
+                }),
+            });
+            yield* projects.upsertAsset(root, asset);
+            return output;
+          }).pipe(
+            Effect.ensuring(
+              Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
+            ),
+          );
         }),
       ),
     action: Effect.fn("GameService.action")(function* (threadId, action) {

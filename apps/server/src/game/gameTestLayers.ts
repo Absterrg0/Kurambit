@@ -28,6 +28,7 @@ export function projectTestLayer(
         };
         return Effect.succeed({ project, created: true });
       },
+      getByWorkspaceRoot: () => Effect.succeed(Option.fromUndefinedOr(project)),
       getById: () => Effect.succeed(Option.fromUndefinedOr(project)),
     }),
     Layer.mock(ThreadManagementService.ThreadManagementService)({

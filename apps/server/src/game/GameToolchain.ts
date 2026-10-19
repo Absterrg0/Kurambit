@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { GameOperationError, type GameToolchainStatus } from "@t3tools/contracts";
 import * as ServerSettings from "../serverSettings.ts";
+import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 
 export const GODOT_VERSION = "4.7.2";
@@ -139,7 +140,8 @@ const make = Effect.gen(function* () {
           return yield* new GameOperationError({
             operation: tool,
             path: selected,
-            reason: "wrong-version",
+            reason: result.exitCode !== 0 ? "command-failed" : "wrong-version",
+            detail: commandDetail(result),
           });
         probes.set(selected, { mtime: stat.mtimeMs, size: stat.size, version });
       }
@@ -242,6 +244,7 @@ const make = Effect.gen(function* () {
           operation: "verify-blender",
           path: blend.logPath,
           reason: "command-failed",
+          detail: commandDetail(blend),
         });
       verified.set(blender.path, blender.version);
       const godot = yield* executable("godot");
@@ -269,6 +272,7 @@ const make = Effect.gen(function* () {
           operation: "verify-godot",
           path: imported.logPath,
           reason: "command-failed",
+          detail: commandDetail(imported),
         });
       verified.set(godot.path, godot.version);
       return yield* status;
@@ -314,6 +318,7 @@ const make = Effect.gen(function* () {
             operation: "install-extract",
             path: result.logPath,
             reason: "command-failed",
+            detail: commandDetail(result),
           });
       });
       return yield* Effect.gen(function* () {

@@ -41,6 +41,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "download",
       "project-not-found",
     ]),
+    detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
@@ -64,7 +65,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
     };
-    return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}`;
+    return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
 }
 export const GameToolStatus = Schema.Struct({
@@ -151,6 +152,7 @@ export const GameBlenderInput = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,80}$/)),
   script: Schema.String,
   thumbnail: Schema.optionalKey(Schema.Boolean),
+  reset: Schema.optionalKey(Schema.Boolean),
 });
 export const GameBlenderResult = Schema.Struct({
   asset: GameAsset,

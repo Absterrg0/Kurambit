@@ -31,6 +31,8 @@ it.effect(
               artDirection: "Clay",
               modelSelection: selection,
             });
+            const reopened = yield* projects.open({ path: game.root, modelSelection: selection });
+            expect(reopened.projectId).toBe(game.projectId);
             const asset = {
               id: "coin",
               kind: "model" as const,

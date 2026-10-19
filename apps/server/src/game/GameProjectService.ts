@@ -23,6 +23,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import { commandDetail } from "./commandDetail.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -99,19 +100,24 @@ const make = Effect.gen(function* () {
     message?: string,
   ) {
     const manifest = yield* read(root);
-    const { project } = yield* projects
-      .bootstrap({
-        commandId: CommandId.make(NodeCrypto.randomUUID()),
-        projectId: ProjectId.make(NodeCrypto.randomUUID()),
-        title: manifest.name,
-        workspaceRoot: root,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new GameOperationError({ operation: "register-game", path: root, reason: "io", cause }),
-        ),
-      );
+    const project = yield* projects.getByWorkspaceRoot(root).pipe(
+      Effect.flatMap((existing) =>
+        Option.isSome(existing)
+          ? Effect.succeed(existing.value)
+          : projects
+              .bootstrap({
+                commandId: CommandId.make(NodeCrypto.randomUUID()),
+                projectId: ProjectId.make(NodeCrypto.randomUUID()),
+                title: manifest.name,
+                workspaceRoot: root,
+              })
+              .pipe(Effect.map((result) => result.project)),
+      ),
+      Effect.mapError(
+        (cause) =>
+          new GameOperationError({ operation: "register-game", path: root, reason: "io", cause }),
+      ),
+    );
     const result = yield* launches
       .launch({
         commandId: CommandId.make(NodeCrypto.randomUUID()),
@@ -202,6 +208,7 @@ const make = Effect.gen(function* () {
             operation: "git-init",
             path: result.logPath,
             reason: "command-failed",
+            detail: commandDetail(result),
           });
       }
       return yield* register(

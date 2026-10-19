@@ -1,5 +1,6 @@
 export function blenderWrapper(input: {
   source: string;
+  reset?: boolean;
   script: string;
   exported: string;
   thumbnail: string | null;
@@ -8,7 +9,7 @@ export function blenderWrapper(input: {
   return `import bpy, os, json, traceback, sys, math
 from mathutils import Vector
 try:
-    if os.path.exists(${JSON.stringify(input.source)}):
+    if ${input.reset ? "False" : "True"} and os.path.exists(${JSON.stringify(input.source)}):
         bpy.ops.wm.open_mainfile(filepath=${JSON.stringify(input.source)})
     else:
         bpy.ops.wm.read_factory_settings(use_empty=True)

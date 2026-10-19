@@ -144,16 +144,25 @@ const make = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => stop());
   return GameProcesses.of({
     run: (input) =>
-      Effect.tryPromise({
-        try: async (signal) => (await startProcess(input, signal)).done,
-        catch: (cause) =>
-          new GameOperationError({
-            operation: input.operation,
-            path: input.executable,
-            reason: "io",
-            cause,
+      Effect.scoped(
+        Effect.acquireRelease(
+          Effect.tryPromise({
+            try: () => startProcess(input),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: input.operation,
+                path: input.executable,
+                reason: "io",
+                cause,
+              }),
           }),
-      }),
+          (handle) =>
+            Effect.promise(async () => {
+              running.get(handle.pid)?.stop();
+              await handle.done.catch(() => {});
+            }),
+        ).pipe(Effect.flatMap((handle) => Effect.promise(() => handle.done))),
+      ),
     start: (input) =>
       Effect.tryPromise({
         try: (signal) => startProcess(input, signal).then(({ pid, logPath }) => ({ pid, logPath })),
