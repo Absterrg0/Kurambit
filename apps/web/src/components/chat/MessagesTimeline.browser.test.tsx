@@ -16,7 +16,6 @@ import { userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { serverEnvironment } from "../../state/server";
-import { PullRequestLinkPreview } from "../pullRequest/PullRequestLinkPreview";
 import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from "../ui/tooltip";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { readTimelinePosition } from "./timelineScrollAnchoring";
@@ -1109,25 +1108,6 @@ describe("timeline tooltip scroll dismissal", () => {
       scrollable.dispatchEvent(new Event("scroll"));
     });
   }
-
-  it.each([false, true])(
-    "closes a hovered tooltip on scroll but keeps a focused one (pull request=%s)",
-    async (pullRequest) => {
-      const { trigger, scrollable } = await renderTooltip(pullRequest, false);
-      await userEvent.hover(trigger);
-      await vi.waitFor(() => expect(openPopup()).toBe("https://example.com"));
-      await scroll(scrollable);
-      await vi.waitFor(() => expect(openPopup()).toBeNull());
-
-      await userEvent.unhover(trigger);
-      await userEvent.keyboard("{Tab}");
-      expect(document.activeElement).toBe(trigger);
-      await vi.waitFor(() => expect(openPopup()).toBe("https://example.com"));
-      await scroll(scrollable);
-      expect(openPopup()).toBe("https://example.com");
-      expect(document.activeElement).toBe(trigger);
-    },
-  );
 
   it("leaves tooltips outside the timeline open when it scrolls", async () => {
     const { trigger, scrollable } = await renderTooltip(false, true);

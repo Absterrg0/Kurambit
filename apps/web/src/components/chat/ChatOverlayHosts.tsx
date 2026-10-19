@@ -1,18 +1,9 @@
-import type {
-  DeviceServiceState,
-  EnvironmentId,
-  MessageId,
-  ScopedThreadRef,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { MessageId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import { useEffect } from "react";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
-import { useRightPanelStore } from "~/rightPanelStore";
-import { DeviceSetup } from "../device/DeviceSetup";
-import { PullRequestThreadDialog } from "../PullRequestThreadDialog";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -23,8 +14,6 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Dialog } from "../ui/dialog";
-import { WizardPopup } from "../ui/wizard";
 
 /**
  * Open state for overlays the chat view hosts. It lives in atoms rather than
@@ -54,82 +43,6 @@ function useThreadOverlay<T>(atom: ThreadOverlayAtom<T>, threadKey: string | nul
     [atom, threadKey],
   );
   return threadKey !== null && entry?.threadKey === threadKey ? entry.value : null;
-}
-
-const pullRequestThreadDialogAtom = makeThreadOverlayAtom<{
-  readonly initialReference: string | null;
-  readonly key: number;
-}>("pull-request-thread-dialog");
-
-export function openPullRequestThreadDialog(threadKey: string, reference?: string): void {
-  appAtomRegistry.set(pullRequestThreadDialogAtom, {
-    threadKey,
-    value: { initialReference: reference ?? null, key: Date.now() },
-  });
-}
-
-export function PullRequestThreadDialogHost(props: {
-  readonly threadKey: string | null;
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly cwd: string | null;
-  readonly onPrepared: (input: {
-    branch: string;
-    worktreePath: string | null;
-  }) => Promise<void> | void;
-}) {
-  const state = useThreadOverlay(pullRequestThreadDialogAtom, props.threadKey);
-  if (state === null) return null;
-  return (
-    <PullRequestThreadDialog
-      key={state.key}
-      open
-      environmentId={props.environmentId}
-      threadId={props.threadId}
-      cwd={props.cwd}
-      initialReference={state.initialReference}
-      onOpenChange={(open) => {
-        if (!open) closeThreadOverlay(pullRequestThreadDialogAtom);
-      }}
-      onPrepared={props.onPrepared}
-    />
-  );
-}
-
-const deviceSetupDialogAtom = makeThreadOverlayAtom<true>("device-setup-dialog");
-
-export function openDeviceSetupDialog(threadKey: string): void {
-  appAtomRegistry.set(deviceSetupDialogAtom, { threadKey, value: true });
-}
-
-export function DeviceSetupDialogHost(props: {
-  readonly threadKey: string | null;
-  readonly threadRef: ScopedThreadRef | null;
-  readonly state: DeviceServiceState;
-}) {
-  const open = useThreadOverlay(deviceSetupDialogAtom, props.threadKey) !== null;
-  const { threadRef } = props;
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) closeThreadOverlay(deviceSetupDialogAtom);
-      }}
-    >
-      <WizardPopup>
-        {threadRef ? (
-          <DeviceSetup
-            environmentId={threadRef.environmentId}
-            state={props.state}
-            onComplete={() => {
-              useRightPanelStore.getState().open(threadRef, "device");
-              closeThreadOverlay(deviceSetupDialogAtom);
-            }}
-          />
-        ) : null}
-      </WizardPopup>
-    </Dialog>
-  );
 }
 
 const branchRestoreConfirmAtom = makeThreadOverlayAtom<true>("branch-restore-confirm");

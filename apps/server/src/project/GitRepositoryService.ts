@@ -28,6 +28,18 @@ import {
 } from "../project/gitCloneProgress.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+function mapRepositoryError(operation: string, provider: SourceControlProviderKind) {
+  return Effect.mapError((cause: unknown) =>
+    isSourceControlRepositoryError(cause)
+      ? cause
+      : new SourceControlRepositoryError({
+          operation,
+          provider,
+          detail: "The Git operation could not be completed.",
+          cause,
+        }),
+  );
+}
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
 
 export class GitRepositoryService extends Context.Service<
@@ -44,7 +56,7 @@ export class GitRepositoryService extends Context.Service<
       destinationPath: string,
     ) => Effect.Effect<void, SourceControlRepositoryError>;
   }
->()("t3/sourceControl/GitRepositoryService") {}
+>()("t3/project/GitRepositoryService") {}
 
 export interface SourceControlPreparedClone {
   readonly destinationPath: string;

@@ -263,34 +263,3 @@ describe("settings scope navigation", () => {
     expect(router.state.location.search).toEqual({ machine: "remote-server" });
   });
 });
-
-describe("scheduled task scope navigation", () => {
-  it("opens a task link on its owning environment, then clears the task when changing filters", async () => {
-    const router = createSettingsRouter();
-    await router.navigate({
-      to: "/settings/scheduled-tasks",
-      search: {
-        environmentId: EnvironmentId.make("remote-server"),
-        taskId: ScheduledTaskId.make("task-1"),
-      },
-    });
-    expect(router.state.matches.at(-1)?.search).toEqual({
-      machine: "remote-server",
-      environmentId: "remote-server",
-      taskId: "task-1",
-    });
-    await router.navigate({
-      from: "/settings",
-      to: router.state.location.pathname,
-      search: () => ({ machine: undefined, project: undefined, checkout: undefined }),
-    });
-    expect(router.state.matches.at(-1)?.search).toEqual({});
-  });
-
-  it("keeps the project and checkout filters when entering scheduled tasks", async () => {
-    const router = createSettingsRouter();
-    await router.navigate({ to: "/settings/projects", search: checkoutSearch });
-    await router.navigate({ to: "/settings/scheduled-tasks" });
-    expect(router.state.matches.at(-1)?.search).toEqual(checkoutSearch);
-  });
-});

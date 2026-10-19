@@ -67,7 +67,6 @@ import {
   reorderQueuedRun,
   resumeThreadQueue,
   retryWorkspacePreparation,
-  linkThreadPullRequest,
   respondToThreadApproval,
   respondToThreadUserInput,
   dismissThreadUserInput,
@@ -83,13 +82,11 @@ import {
   startThreadTurn,
   stopThreadSession,
   unarchiveThread,
-  unlinkThreadPullRequest,
   unpinThread,
   unsettleThread,
   unsnoozeThread,
   updateThreadMetadata,
   visitThread,
-  watchThreadPullRequest,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
@@ -243,24 +240,6 @@ export function createThreadEnvironmentAtoms<R, E>(
     updateMetadata: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:update-metadata",
       execute: (input: UpdateThreadMetadataInput) => updateThreadMetadata(input),
-      scheduler,
-      concurrency,
-    }),
-    linkPullRequest: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:link-pull-request",
-      execute: (input: LinkThreadPullRequestInput) => linkThreadPullRequest(input),
-      scheduler,
-      concurrency,
-    }),
-    unlinkPullRequest: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:unlink-pull-request",
-      execute: (input: UnlinkThreadPullRequestInput) => unlinkThreadPullRequest(input),
-      scheduler,
-      concurrency,
-    }),
-    watchPullRequest: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:watch-pull-request",
-      execute: (input: WatchThreadPullRequestInput) => watchThreadPullRequest(input),
       scheduler,
       concurrency,
     }),

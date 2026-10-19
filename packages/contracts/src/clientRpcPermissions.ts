@@ -33,11 +33,6 @@ export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
-  if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
-    const payload = decodePrepareThread(input);
-    if (payload.mode === "worktree" && payload.threadId !== undefined)
-      return [AuthSourceControlWriteScope, AuthOrchestrationOperateScope];
-  }
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method)
     ? [CLIENT_GUARDED_RPC_SCOPES[method as ClientGuardedRpcTag]]
     : [];

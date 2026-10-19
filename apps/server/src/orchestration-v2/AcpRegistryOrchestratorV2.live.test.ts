@@ -1,5 +1,4 @@
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -42,12 +41,7 @@ import * as ProviderTurnStartServiceTestkit from "./ProviderTurnStartService.tes
 import * as RuntimeLayer from "./runtimeLayer.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 
-const layerPlatformTest = Layer.merge(
-  NodeServices.layer,
-  Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
-    resolveLink: () => Effect.die("unused title link"),
-  }),
-);
+const layerPlatformTest = Layer.merge(NodeServices.layer, Layer.empty);
 
 const runAntigravityFixture = process.env.T3_ACP_ANTIGRAVITY_LIVE === "1";
 const liveAgentId = runAntigravityFixture

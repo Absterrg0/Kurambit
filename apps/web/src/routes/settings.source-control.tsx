@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-
-import { SourceControlSettingsPanel } from "../components/settings/SourceControlSettings";
+import { SourceControlWritingSettingsSection } from "../components/settings/SourceControlWritingSettings";
+import { SettingsPageContainer } from "../components/settings/settingsLayout";
+import { ProjectDefaultsSettings } from "../components/settings/ProjectDefaultsSettings";
 
 export const Route = createFileRoute("/settings/source-control")({
-  component: SourceControlSettingsPanel,
+  component: () => (
+    <SettingsPageContainer>
+      <ProjectDefaultsSettings category="source-control" />
+      <SourceControlWritingSettingsSection />
+    </SettingsPageContainer>
+  ),
 });

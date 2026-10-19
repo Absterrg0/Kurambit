@@ -1,6 +1,4 @@
 import {
-  ScheduledTaskId,
-  ScheduledTask,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
   OrchestrationV2ThreadForkSourcePoint,

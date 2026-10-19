@@ -246,24 +246,6 @@ describe("searchSettings", () => {
     expect(browser).toContain("publish-agent-activity");
   });
 
-  it("offers webhook holding only while the managed tunnel is on, like its row", () => {
-    const availability = {
-      hasCloudPublicConfig: true,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: true,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-    };
-    const itemIds = (managedTunnelActive: boolean) =>
-      filterAvailableSettingsSearchItems({ ...availability, managedTunnelActive }).map(
-        (item) => item.id,
-      );
-    expect(itemIds(false)).not.toContain("hold-webhooks-while-offline");
-    expect(itemIds(true)).toContain("hold-webhooks-while-offline");
-  });
-
   it("shows automatic settlement settings when the server supports them", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,

@@ -71,33 +71,6 @@ describe("add project shared logic", () => {
     expect(normalizePastedCloneUrl("/srv/git/repo.git")).toBe("/srv/git/repo.git");
   });
 
-  it("uses HTTPS for repositories selected through a provider", () => {
-    expect(
-      getDefaultCloneUrl({
-        provider: SourceControlProviderKind.make("github"),
-        url: "https://github.com/imputnet/helium",
-        sshUrl: "git@github.com:imputnet/helium.git",
-      }),
-    ).toBe("https://github.com/imputnet/helium");
-    expect(
-      getDefaultCloneUrl({
-        provider: SourceControlProviderKind.make("forgejo"),
-        url: "https://forgejo.example.test:8443/owner/repo.git",
-        sshUrl: "ssh://git@forgejo.example.test:2222/owner/repo.git",
-      }),
-    ).toBe("https://forgejo.example.test:8443/owner/repo.git");
-  });
-
-  it("preserves existing clone transport behavior for other providers", () => {
-    expect(
-      getDefaultCloneUrl({
-        provider: SourceControlProviderKind.make("gitlab"),
-        url: "https://gitlab.com/group/project.git",
-        sshUrl: "git@gitlab.com:group/project.git",
-      }),
-    ).toBe("git@gitlab.com:group/project.git");
-  });
-
   it("derives the clone folder name from any pasted clone URL", () => {
     expect(getCloneDirectoryName("https://github.com/owner/repo.git")).toBe("repo");
     expect(getCloneDirectoryName("https://github.com/owner/repo")).toBe("repo");
@@ -296,21 +269,5 @@ describe("new project publish targets", () => {
       host: Option.none(),
       detail: Option.none(),
     },
-  });
-
-  it("offers ready hosts that can place the repository, GitHub first, and keeps the pick", () => {
-    const targets = getNewProjectPublishTargets({
-      versionControlSystems: [],
-      sourceControlProviders: [
-        readyHost("gitlab", "group"),
-        readyHost("github", null),
-        readyHost("azure-devops", "me"),
-      ],
-    });
-    expect(targets.map((target) => target.definition.kind)).toEqual(["github", "gitlab"]);
-    expect(getNewProjectPublishTarget(targets, null)?.definition.kind).toBe("github");
-    expect(
-      getNewProjectPublishTarget(targets, SourceControlProviderKind.make("gitlab"))?.owner,
-    ).toBe("group");
   });
 });

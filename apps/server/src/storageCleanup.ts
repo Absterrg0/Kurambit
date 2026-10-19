@@ -166,27 +166,6 @@ function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
  * squash or rebase merge leaves the head outside the default branch, so the
  * merged pull request then has to name this exact commit.
  */
-export function storageCleanupPullRequestMerged(
-  pullRequest: Pick<
-    GitManager.GitBranchPullRequest,
-    "state" | "headRef" | "baseRef" | "headSha"
-  > | null,
-  worktree: {
-    readonly branch: string;
-    readonly defaultBranch: string;
-    readonly headSha: string;
-    readonly integrated: boolean;
-  },
-): boolean {
-  return (
-    pullRequest?.state === "merged" &&
-    (worktree.integrated ||
-      (pullRequest.headRef === worktree.branch &&
-        pullRequest.baseRef === worktree.defaultBranch &&
-        pullRequest.headSha === worktree.headSha))
-  );
-}
-
 export class StorageCleanup extends Context.Service<
   StorageCleanup,
   {
@@ -677,7 +656,7 @@ const make = Effect.gen(function* () {
           : old
             ? `inactive for ${Math.floor((now - activityAt) / DAY_MS)} days`
             : `settled for ${settledDays} days`;
-        if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
+        if (!eligible && settings.worktreeUnchanged) {
           const repositoryCwd = path.resolve(project.workspaceRoot);
           const remote = yield* git.resolvePrimaryRemoteName(repositoryCwd);
           const branch = yield* git.resolveDefaultBranchName(repositoryCwd, remote);
@@ -706,19 +685,6 @@ const make = Effect.gen(function* () {
           const integrated = ancestor.exitCode === 0;
           eligible = integrated && settings.worktreeUnchanged;
           if (eligible) removalReason = "no commits beyond the default branch";
-          if (!eligible && settings.worktreeOnMerge && thread.branch !== null) {
-            const pullRequest = yield* gitManager.branchPullRequest(
-              { cwd: worktreePath, branch: thread.branch },
-              { refresh: true },
-            );
-            eligible = storageCleanupPullRequestMerged(pullRequest, {
-              branch: thread.branch,
-              defaultBranch: branch,
-              headSha: head.commitSha,
-              integrated,
-            });
-            if (eligible) removalReason = "pull request was merged";
-          }
         }
         if (!eligible)
           return keep(

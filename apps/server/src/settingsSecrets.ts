@@ -17,7 +17,7 @@ import {
   SOURCE_CONTROL_HOST_SECRET_FIELDS,
   sourceControlHostSecretName,
   writeSecretFieldValues,
-} from "./sourceControl/sourceControlHostSecrets.ts";
+} from "./sourceControlHostSecrets.ts";
 
 export const SECRET_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 

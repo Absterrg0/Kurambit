@@ -14,7 +14,7 @@ import {
   formatAttachmentUploadProgress,
   type AttachmentUploadState,
 } from "~/lib/attachmentUploadState";
-import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { PullRequestGlyph } from "~/components/historyChangeIcons";
 import {
   fileContextReference,
   imageContextReference,

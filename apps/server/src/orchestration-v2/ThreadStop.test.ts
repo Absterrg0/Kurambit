@@ -11,7 +11,6 @@ import {
   ProviderTurnId,
   RuntimeRequestId,
   ThreadId,
-  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -92,19 +91,6 @@ const createWatchingThread = (threadId: ThreadId, number: number) =>
       creationSource: "web",
     });
     yield* watch(threadId, number);
-  });
-
-const watch = (threadId: ThreadId, number: number) =>
-  Effect.gen(function* () {
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    yield* orchestrator.dispatch({
-      type: "thread.pull-request.watch",
-      commandId: CommandId.make(`watch:${threadId}:${number}`),
-      threadId,
-      ...pullRequest(number),
-      watching: true,
-      link: { url: `https://github.com/pingdotgg/t3code/pull/${number}`, source: "agent" },
-    });
   });
 
 const send = (threadId: ThreadId, text: string, type: "start_immediately" | "queue_after_active") =>
@@ -297,87 +283,6 @@ it.effect(
       });
       assert.lengthOf(again.storedEvents, 0);
     }).pipe(Effect.provide(layerTest)),
-);
-
-it.effect("a run Stop reached cannot delegate or start a watch, even after it ends", () =>
-  Effect.gen(function* () {
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = ThreadId.make("thread:stop-barrier");
-    yield* createWatchingThread(threadId, 4);
-    yield* send(threadId, "work", "start_immediately");
-    const now = yield* DateTime.now;
-    const run = { ...(yield* orchestrator.getThreadProjection(threadId)).runs[0]!, startedAt: now };
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:running"),
-      type: "run.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: { ...run, status: "running" },
-    });
-    yield* send(threadId, "queued", "queue_after_active");
-    const queued = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
-    yield* orchestrator.dispatch({
-      type: "queued-run.cancel",
-      commandId: CommandId.make("cancel-queued"),
-      threadId,
-      runId: queued.id,
-    });
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:interrupt-request"),
-      type: "turn-item.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: {
-        id: TurnItemId.make("turn-item:stop-barrier:interrupt-request"),
-        threadId,
-        runId: run.id,
-        nodeId: run.rootNodeId!,
-        providerThreadId: run.providerThreadId!,
-        providerTurnId: null,
-        nativeItemRef: null,
-        parentItemId: null,
-        ordinal: 1_000,
-        status: "completed",
-        title: "Interrupt requested",
-        startedAt: now,
-        completedAt: now,
-        updatedAt: now,
-        type: "run_interrupt_request",
-        message: "Stop",
-      },
-    });
-
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(delegate(threadId, "late task"))));
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 5))));
-
-    yield* projections.apply({
-      id: EventId.make("event:stop-barrier:interrupted"),
-      type: "run.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: { ...run, status: "interrupted", completedAt: now },
-    });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 5))));
-    assert.deepEqual(yield* threadState(threadId), {
-      runs: ["interrupted", "cancelled"],
-      watched: [4],
-    });
-
-    for (const watching of [false, true]) {
-      yield* orchestrator.dispatch({
-        type: "thread.pull-request.watch",
-        commandId: CommandId.make(`manual-watch:${watching}`),
-        threadId,
-        ...pullRequest(4),
-        watching,
-      });
-    }
-    assert.deepEqual((yield* threadState(threadId)).watched, [4]);
-  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("thread.stop keeps a restart continuation of the stopped run from starting", () =>

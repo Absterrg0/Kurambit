@@ -57,16 +57,6 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
-    for (const method of [
-      WS_METHODS.scheduledTasksListWebhookDeliveries,
-      WS_METHODS.scheduledTasksGetWebhookDelivery,
-      WS_METHODS.scheduledTasksRotateWebhookToken,
-    ]) {
-      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
-    }
-  });
-
   it("allows relay status reads without granting relay installation access", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudGetRelayClientStatus)).toBe(
       AuthRelayReadScope,
@@ -113,18 +103,6 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("reads the reviewer menu under the same scope as the pull request it belongs to", () => {
-    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsChecks)).toBe(
-      AuthOrchestrationReadScope,
-    );
-    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsReviewerCandidates)).toBe(
-      requiredScopeForRpcMethod(WS_METHODS.pullRequestsDetail),
-    );
-    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsRequestReviewers)).toBe(
-      requiredScopeForRpcMethod(WS_METHODS.pullRequestsComment),
-    );
-  });
-
   it("requires source control writes to start, retry, or cancel project clones", () => {
     for (const method of [
       WS_METHODS.projectCloneStart,
@@ -135,15 +113,6 @@ describe("RPC authorization scopes", () => {
     }
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeProjectClones)).toBe(
       AuthOrchestrationReadScope,
-    );
-  });
-
-  it("separates viewing pull request file progress from writing it", () => {
-    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsFilesViewed)).toBe(
-      AuthOrchestrationReadScope,
-    );
-    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsSetFilesViewed)).toBe(
-      AuthSourceControlWriteScope,
     );
   });
 
@@ -328,43 +297,6 @@ describe("settings mutation authorization", () => {
     }).pipe(Effect.scoped),
   );
 });
-
-it.effect("requires task permission before attaching a prepared worktree to a thread", () =>
-  Effect.gen(function* () {
-    const group = WsRpcGroup.omit(
-      ...[...WsRpcGroup.requests.keys()].filter(
-        (
-          tag,
-        ): tag is Exclude<
-          keyof typeof RPC_REQUIRED_SCOPES,
-          typeof WS_METHODS.gitPreparePullRequestThread
-        > => tag !== WS_METHODS.gitPreparePullRequestThread,
-      ),
-    );
-    let handled = false;
-    const client = yield* RpcTest.makeClient(group).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          group.toLayerHandler(WS_METHODS.gitPreparePullRequestThread, () =>
-            Effect.sync(() => {
-              handled = true;
-            }).pipe(Effect.andThen(Effect.never)),
-          ),
-          RpcAuthorization.layer([AuthSourceControlWriteScope]),
-        ),
-      ),
-    );
-    expect(
-      yield* client[WS_METHODS.gitPreparePullRequestThread]({
-        cwd: "/repo",
-        reference: "42",
-        mode: "worktree",
-        threadId: ThreadId.make("thread"),
-      }).pipe(Effect.flip),
-    ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
-    expect(handled).toBe(false);
-  }).pipe(Effect.scoped),
-);
 
 it.effect("separates host file URLs from readable attachment URLs", () =>
   Effect.gen(function* () {
