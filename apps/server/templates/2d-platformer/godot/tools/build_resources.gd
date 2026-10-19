@@ -27,6 +27,9 @@ const LEVELS := [
 			Color(0.98, 0.62, 0.36),
 		],
 		"tint": Color(1, 1, 1),
+		# The row the camera frames as this level's ground line. The parallax bands hang
+		# off it, and the map has to keep room below it for the view.
+		"floor_row": 21,
 	},
 	{
 		"id": "level_02",
@@ -39,6 +42,8 @@ const LEVELS := [
 			Color(0.66, 0.38, 0.4),
 		],
 		"tint": Color(0.68, 0.7, 0.92),
+		# The stone the goal door stands on: this staircase's own ground line.
+		"floor_row": 21,
 	},
 ]
 
@@ -245,8 +250,8 @@ func _write_level(definition: Dictionary) -> int:
 	_root.set("camera_bounds", Rect2(0, 0, width * TILE, height * TILE))
 	_root.set("kill_plane", height * TILE + 64)
 
-	# Background bands sit against the bottom of the level, so they take pixels, not rows.
-	_add_background(definition, height * TILE)
+	# Background bands sit at a pixel offset from the ground line, so they take pixels, not rows.
+	_add_background(definition)
 	if definition["tint"] != Color(1, 1, 1):
 		var tint := CanvasModulate.new()
 		tint.name = "Tint"
@@ -314,7 +319,7 @@ func _layer(name: String, tile_set: TileSet) -> TileMapLayer:
 	_add(layer)
 	return layer
 
-func _add_background(definition: Dictionary, height: int) -> void:
+func _add_background(definition: Dictionary) -> void:
 	var backdrop := CanvasLayer.new()
 	backdrop.name = "Background"
 	backdrop.layer = -10
@@ -338,10 +343,13 @@ func _add_background(definition: Dictionary, height: int) -> void:
 	_add(sky)
 	# Three parallax bands. `scroll_scale` 0 is pinned to the screen and 1 moves with
 	# the camera, so the far ridge barely moves and the near vegetation runs almost level.
+	# They hang off the level's ground line, not the bottom of the map: the map keeps room
+	# below the floor for the camera to frame it (see scripts/game_camera.gd).
+	var floor_y := float(int(definition["floor_row"]) * TILE)
 	for band in [
-		{"name": "Far", "texture": "ridge_far", "scroll": 0.18, "top": height - 224},
-		{"name": "Mid", "texture": "ridge_mid", "scroll": 0.34, "top": height - 216},
-		{"name": "Near", "texture": "veg_near", "scroll": 0.62, "top": height - 132},
+		{"name": "Far", "texture": "ridge_far", "scroll": 0.18, "top": floor_y - 144.0},
+		{"name": "Mid", "texture": "ridge_mid", "scroll": 0.34, "top": floor_y - 136.0},
+		{"name": "Near", "texture": "veg_near", "scroll": 0.62, "top": floor_y - 52.0},
 	]:
 		var parallax := Parallax2D.new()
 		parallax.name = band["name"]

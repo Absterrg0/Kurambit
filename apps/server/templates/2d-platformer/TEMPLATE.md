@@ -84,8 +84,12 @@ are what `Level` and `Game` read:
   `Near` (`Parallax2D` bands). `Tint` is an optional `CanvasModulate` — level 2 uses it
   for its night mood without a second set of art.
 
-Two exports drive the run: `camera_bounds` (a `Rect2` in pixels; the camera never shows
-past it) and `kill_plane` (falling below this line costs a life).
+Two exports drive the run: `camera_bounds` (a `Rect2` in pixels; the view never shows past
+the level's bottom or sides, and may look into the sky above its top) and `kill_plane`
+(falling below this line costs a life). The camera frames a level's floor at 70% of the
+screen, so a map keeps at least seven rows of ground below that floor; each level names
+its floor row in `LEVELS` in `tools/build_resources.gd`, which also hangs the parallax
+bands off it.
 
 Sprite origins, and the smoke test relies on them: a coin's origin is its centre, a
 slime's, checkpoint's and door's origin is the **ground line under it**, and the player's
@@ -100,7 +104,8 @@ either paint them and run `tools/build_resources.gd`, or add a `CollisionShape2D
 `SpikeField` yourself. The other way is to edit `tools/level_01.map` (`.` empty,
 `#` ground, `S` stone, `-` plank, `^` spikes; plus `[decor]` and `[objects]` sections)
 and run `game_godot_test { script: "tools/build_resources.gd" }`. Then add the scene to
-`Game.levels` in `scenes/game.tscn`.
+`Game.levels` in `scenes/game.tscn`, and its floor row to `LEVELS` in
+`tools/build_resources.gd`.
 
 **Another coin.** Instance `pickups/coin.tscn` under `Pickups` and put its centre about
 two tiles above the floor (that is the height a jump reaches). Score, HUD counter and the
@@ -122,7 +127,8 @@ spike tiles when you rebuild) or make an `Area2D` that calls
 `player.hurt(position, reason)`; `reason` is what the HUD prints.
 
 **Movement feel.** Every number is an `@export` on `Player` (groups _Movement_, _Jump_,
-_Wall_, _Survival_, _Feedback_) and `GameCamera` (height offset, look-ahead, shake).
+_Wall_, _Survival_, _Feedback_) and `GameCamera` (framing height, look-ahead, the vertical
+deadzone that keeps a jump from moving the view, shake).
 Defaults are tuned so a running jump clears **three tiles up and five tiles across**;
 `jump_velocity`, `gravity`, `fall_gravity_multiplier` and `apex_gravity_multiplier` are
 what to change first, and `wall_slide_enabled` turns on the (off-by-default) wall slide

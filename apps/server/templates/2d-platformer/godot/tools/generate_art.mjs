@@ -889,46 +889,39 @@ const buildSlime = () => {
   return sheet;
 };
 
-/** Coin spin: five frames of a disc squashing edge-on, then back again. */
+/**
+ * Coin spin: a disc that narrows to two thirds of its width and back, with a glint that
+ * travels across the face.
+ *
+ * It deliberately never turns fully edge-on. A coin that squashes to a 2px sliver is a
+ * vertical line on screen for a tenth of a second at a time, and every coin in the level
+ * flips together, so a screenshot catches a whole row of lines instead of a row of coins.
+ * Keeping the silhouette wide (and letting `coin.gd` start each coin on its own frame)
+ * means a coin always reads as a coin.
+ */
 const buildCoin = () => {
-  const widths = [12, 9, 5, 2, 5, 9];
+  const widths = [12, 11, 9, 8, 9, 11];
   const sheet = new Canvas(FRAME * widths.length, FRAME);
   widths.forEach((width, index) => {
     const frame = new Canvas(FRAME, FRAME);
     const height = 12;
     const top = Math.round((FRAME - height) / 2);
     const left = Math.round((FRAME - width) / 2);
-    frame.ellipse(
-      left + width / 2 - 0.5,
-      top + height / 2 - 0.5,
-      width / 2,
-      height / 2,
-      palette.gold,
-    );
-    if (width > 4) {
+    const centreX = left + width / 2 - 0.5;
+    const centreY = top + height / 2 - 0.5;
+    const ring = (inset, lift, colour) =>
       frame.ellipse(
-        left + width / 2 - 0.5,
-        top + height / 2 - 0.5,
-        width / 2 - 1.4,
-        height / 2 - 1.4,
-        palette.goldMid,
+        centreX,
+        centreY - lift,
+        Math.max(width / 2 - inset, 0.4),
+        Math.max(height / 2 - inset, 0.4),
+        colour,
       );
-      frame.ellipse(
-        left + width / 2 - 0.5,
-        top + height / 2 - 1,
-        width / 2 - 2.4,
-        height / 2 - 2.4,
-        palette.gold,
-      );
-      frame.ellipse(
-        left + width / 2 - 0.5,
-        top + height / 2 - 1,
-        width / 2 - 3.2,
-        height / 2 - 3.2,
-        palette.goldHi,
-      );
-    }
-    // Rim light on the left, shade on the right, and a moving glint.
+    ring(0, 0, palette.gold);
+    ring(1.4, 0, palette.goldMid);
+    ring(2.6, 1, palette.gold);
+    ring(3.4, 1, palette.goldHi);
+    // Rim light on the left, shade on the right.
     for (let y = top + 2; y < top + height - 2; y++) {
       frame.pixel(left + 1, y, palette.goldHi);
       frame.pixel(left + width - 2, y, palette.goldDark);
@@ -937,7 +930,13 @@ const buildCoin = () => {
       frame.pixel(x, top, palette.goldHi);
       frame.pixel(x, top + height - 1, palette.goldDark);
     }
-    if (width > 4) frame.pixel(left + Math.max(1, width - 4), top + 3, palette.goldHi);
+    // The glint sweeps left to right and back as the disc narrows, so the coin still
+    // reads as turning even though its outline never collapses.
+    const travel = Math.round((Math.abs(index - (widths.length - 1) / 2) / widths.length) * width);
+    const glintX = Math.min(left + 2 + travel, left + width - 3);
+    frame.pixel(glintX, top + 3, palette.goldHi);
+    frame.pixel(glintX, top + 4, palette.goldHi);
+    frame.pixel(glintX + 1, top + 3, palette.goldHi);
     paste(sheet, frame, index * FRAME, 0);
   });
   return sheet;
@@ -1047,7 +1046,10 @@ const buildDust = () => {
   return canvas;
 };
 
-/** HUD icons: a heart for a life, a coin for the counter. */
+/**
+ * HUD icons: a heart for a life, a coin for the counter. Both are drawn at the size the
+ * HUD shows them, so the panel never has to scale pixel art by a fraction.
+ */
 const HEART = [
   "..kkk.kkk..",
   ".khhhkhhhk.",
@@ -1061,8 +1063,8 @@ const HEART = [
 ];
 
 const buildHeart = (body, hi, dark) => {
-  const canvas = new Canvas(16, 16);
-  canvas.matrix(2, 3, HEART, { k: dark, h: body, H: hi });
+  const canvas = new Canvas(12, 12);
+  canvas.matrix(1, 2, HEART, { k: dark, h: body, H: hi });
   return canvas;
 };
 

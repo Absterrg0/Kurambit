@@ -368,8 +368,19 @@ func _teardown() -> void:
 	# the scenes are gone, and give the mixer a few frames to release those playbacks,
 	# or the engine reports their streams as leaked instances at exit.
 	Audio.stop_all()
+	await _wait_for_mix()
 	for _frame in 6:
 		await get_tree().process_frame
+
+## Waits for the audio server to mix again after the last `stop_all()`: a stopped voice
+## releases its playback on the audio thread, and quitting before that thread runs again
+## reports the voice as a leaked instance at exit. Bounded, so a silent server still ends.
+func _wait_for_mix() -> void:
+	var since := AudioServer.get_time_since_last_mix()
+	for _frame in 600:
+		await get_tree().process_frame
+		if AudioServer.get_time_since_last_mix() < since:
+			return
 
 func _check(condition: bool, label: String) -> void:
 	_checks += 1

@@ -12,7 +12,18 @@ var _bob := 0.0
 func _ready() -> void:
 	_home = sprite.position
 	_bob = randf() * TAU
+	_start_spin()
 	body_entered.connect(_on_body_entered)
+
+## Every coin sharing one animation frame reads as a row of blinking sprites rather
+## than as a row of coins, so each one starts on its own frame and turns at its own
+## pace. The art keeps a wide silhouette (see tools/generate_art.mjs) either way.
+func _start_spin() -> void:
+	sprite.play("spin")
+	var count := sprite.sprite_frames.get_frame_count("spin")
+	if count > 0:
+		sprite.frame = randi() % count
+	sprite.speed_scale = randf_range(0.85, 1.15)
 
 func _process(delta: float) -> void:
 	if _taken:
@@ -42,7 +53,7 @@ func reset() -> void:
 	sprite.position = _home
 	sprite.scale = Vector2.ONE
 	sprite.modulate = Color.WHITE
-	sprite.play("spin")
+	_start_spin()
 
 func _on_body_entered(body: Node2D) -> void:
 	if body is Player:
