@@ -53,6 +53,17 @@ it.effect(
             expect(inventory.assets).toHaveLength(1);
             expect(inventory.assets[0]?.updatedAt).toBe("2026-10-19T01:00:00Z");
             expect(inventory.assets[0]?.usedBy).toEqual(["godot/scenes/coin.tscn"]);
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                NodePath.join(game.root, "godot/scripts/cube.gd"),
+                'extends Node3D\nvar model = preload("res://assets/models/coin.glb").instantiate()\n',
+              ),
+            );
+            const scriptedInventory = yield* projects.inventory(game.root);
+            expect(scriptedInventory.assets[0]?.usedBy).toEqual([
+              "godot/scenes/coin.tscn",
+              "godot/scripts/cube.gd",
+            ]);
             const processes = yield* GameProcesses.GameProcesses;
             const commit = yield* processes.run({
               root: game.root,

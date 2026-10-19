@@ -299,30 +299,37 @@ const make = Effect.gen(function* () {
         try: async () => {
           const engineRoot = insideGame(root, manifest.godotProject);
           const scenes: string[] = [];
+          const sourceFiles: string[] = [];
           const walk = async (directory: string) => {
             for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
               if (entry.isDirectory() && !entry.name.startsWith("."))
                 await walk(NodePath.join(directory, entry.name));
-              else if (entry.isFile() && entry.name.endsWith(".tscn"))
-                scenes.push(NodePath.relative(root, NodePath.join(directory, entry.name)));
+              else if (
+                entry.isFile() &&
+                (entry.name.endsWith(".tscn") || entry.name.endsWith(".gd"))
+              ) {
+                const relative = NodePath.relative(root, NodePath.join(directory, entry.name));
+                sourceFiles.push(relative);
+                if (entry.name.endsWith(".tscn")) scenes.push(relative);
+              }
             }
           };
           await walk(engineRoot);
-          const sceneSources = await Promise.all(
-            scenes.map(async (scene) => ({
-              scene,
-              source: await NodeFSP.readFile(insideGame(root, scene), "utf8"),
+          const sources = await Promise.all(
+            sourceFiles.map(async (file) => ({
+              file,
+              source: await NodeFSP.readFile(insideGame(root, file), "utf8"),
             })),
           );
           const assets = manifest.assets.map((asset) => ({
             ...asset,
-            usedBy: sceneSources
+            usedBy: sources
               .filter(({ source }) =>
                 source.includes(
                   `"res://${NodePath.relative(manifest.godotProject, asset.export).split(NodePath.sep).join("/")}"`,
                 ),
               )
-              .map(({ scene }) => scene),
+              .map(({ file }) => file),
           }));
           const builds: { target: string; path: string; updatedAt: string }[] = [];
           for (const [target, relative] of [
