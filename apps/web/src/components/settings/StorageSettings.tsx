@@ -286,7 +286,6 @@ function CleanupSection() {
     const enabled = (rules: WorktreeCleanupRules) =>
       rules.worktreeAfterDays !== null ||
       rules.worktreeSettledAfterDays !== null ||
-      rules.worktreeOnMerge ||
       rules.worktreeOnDelete ||
       rules.worktreeUnchanged;
     return (
@@ -587,19 +586,6 @@ export function StorageSettingsPanel() {
                   }
                 />
               )}
-            <SettingsRow
-              title="Delete merged worktrees"
-              status={ruleStatus("worktreeOnMerge")}
-              description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
-              serverScoped={!isProjectScope}
-              control={
-                <Switch
-                  aria-label="Delete merged worktrees"
-                  checked={settings.worktreeOnMerge}
-                  onCheckedChange={(worktreeOnMerge) => updateWorktree({ worktreeOnMerge })}
-                />
-              }
-            />
             <SettingsRow
               title="Delete unchanged worktrees"
               status={ruleStatus("worktreeUnchanged")}

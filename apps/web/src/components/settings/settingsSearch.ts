@@ -307,14 +307,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
-    id: "auto-settle-merged-threads",
-    title: "Auto-settle merged threads",
-    to: "/settings/general",
-    searchTerms: ["pull request merge closed automatically sidebar"],
-    requiresThreadAutoSettlement: true,
-    scope: "project-defaults",
-  },
-  {
     id: "days-before-auto-settle",
     title: "Days of inactivity before auto-settle",
     to: "/settings/general",
@@ -358,7 +350,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "default-diff-file-state",
     title: "Default diff file state",
     to: "/settings/general",
-    searchTerms: ["collapsed expanded collapse expand files pull request pr code tab"],
+    searchTerms: ["collapsed expanded collapse expand files diff"],
   },
   {
     id: "diff-layout",
@@ -370,7 +362,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "proactive-panels",
     title: "Proactive panels",
     to: "/settings/general",
-    searchTerms: ["automatically open diff pull request pr right panel agent completion"],
+    searchTerms: ["automatically open diff right panel agent completion"],
   },
   {
     id: "skills-in-slash-menu",
@@ -642,12 +634,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
-    id: "device-hosts",
-    title: "Device hosts",
-    to: "/settings/integrations",
-    searchTerms: ["ssh remote simulator emulator ios android mac mini identity key connection"],
-  },
-  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",
@@ -704,7 +690,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-auto-show-floating-preview",
     title: "Auto-show floating preview",
     to: "/settings/integrations",
-    searchTerms: ["agent opens browser device simulator pop into view hide"],
+    searchTerms: ["agent opens browser pop into view hide"],
   },
   {
     id: "automatic-pull",
@@ -864,7 +850,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "github-routing",
     title: "GitHub sharing",
     to: "/settings/connections",
-    searchTerms: ["pull request trusted environments shared credentials permissions read actions"],
+    searchTerms: ["trusted environments shared credentials permissions read actions"],
   },
   {
     id: "archive",

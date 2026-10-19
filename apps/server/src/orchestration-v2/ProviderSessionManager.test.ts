@@ -1861,10 +1861,7 @@ it.effect(
         assert.isDefined(token);
         const resolved = yield* registry.resolve(token!);
         assert.equal(resolved?.thread.threadId, threadId);
-        assert.deepEqual(
-          resolved?.capabilities,
-          new Set(["preview", "orchestration", "worktree", "pull-requests"]),
-        );
+        assert.deepEqual(resolved?.capabilities, new Set(["preview", "orchestration", "worktree"]));
 
         yield* manager.close(providerSessionId);
         assert.isUndefined(yield* mcpSessions.read(threadId));
@@ -1918,10 +1915,7 @@ it.effect(
         assert.equal(captured?.browserToolsAvailable, false);
         const token = captured?.authorizationHeader.replace(/^Bearer\s+/, "");
         const resolved = yield* registry.resolve(token!);
-        assert.deepEqual(
-          resolved?.capabilities,
-          new Set(["orchestration", "worktree", "pull-requests"]),
-        );
+        assert.deepEqual(resolved?.capabilities, new Set(["orchestration", "worktree"]));
 
         yield* manager.close(providerSessionId);
       });
@@ -4888,23 +4882,21 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
-  "ProviderSessionManagerV2 applies project device access independently of browser access",
-  () =>
-    Effect.gen(function* () {
-      const enabled = yield* runBrowserAccessScenario({
-        enableAgentBrowserAccess: false,
-        projectOverride: false,
-        deviceOverride: true,
-      });
-      assert.isTrue(enabled?.capabilities?.has("device"));
-      assert.isFalse(enabled?.browserToolsAvailable);
-      const denied = yield* runBrowserAccessScenario({
-        enableAgentBrowserAccess: false,
-        projectOverride: false,
-        deviceOverride: true,
-        projectExists: false,
-      });
-      assert.isFalse(denied?.capabilities?.has("device"));
-    }),
+it.effect("ProviderSessionManagerV2 ignores saved native-device access preferences", () =>
+  Effect.gen(function* () {
+    const enabled = yield* runBrowserAccessScenario({
+      enableAgentBrowserAccess: false,
+      projectOverride: false,
+      deviceOverride: true,
+    });
+    assert.isFalse(enabled?.capabilities?.has("device"));
+    assert.isFalse(enabled?.browserToolsAvailable);
+    const denied = yield* runBrowserAccessScenario({
+      enableAgentBrowserAccess: false,
+      projectOverride: false,
+      deviceOverride: true,
+      projectExists: false,
+    });
+    assert.isFalse(denied?.capabilities?.has("device"));
+  }),
 );

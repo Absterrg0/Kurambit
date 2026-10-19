@@ -8,9 +8,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  ORCHESTRATION_V2_WS_METHODS,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
+  NodeId,
   EnvironmentId,
   WS_METHODS,
   type AuthSessionState,
@@ -49,7 +51,7 @@ const runtime = Atom.runtime(
     run: (_id: EnvironmentId, effect: Effect.Effect<unknown>) => effect,
   } as unknown as EnvironmentRegistry["Service"]),
 );
-const permissions = createCommandPermissions(runtime, WS_METHODS.orchestrationDispatchCommand);
+const permissions = createCommandPermissions(runtime, ORCHESTRATION_V2_WS_METHODS.stopWorkflow);
 const setup = Effect.gen(function* () {
   const registry = AtomRegistry.make();
   registry.mount(sessions(env));
@@ -165,6 +167,49 @@ describe("command permissions", () => {
         }),
       ),
   );
+  it("rechecks permission after waiting in a serial command lane", async () => {
+    const registry = AtomRegistry.make();
+    const unmount = registry.mount(sessions(env));
+    registry.set(sessions(env), AsyncResult.success(grant(true)));
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const command = createEnvironmentRpcCommand(runtime, {
+      label: "test.delete",
+      tag: ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
+      concurrency: { mode: "serial", key: () => "target" },
+      execute: () =>
+        Effect.promise(async () => {
+          calls++;
+          started();
+          await gate;
+          return undefined;
+        }),
+    });
+    const target = {
+      environmentId: env,
+      input: { threadId: ThreadId.make("thread"), subagentId: NodeId.make("node") },
+    };
+    try {
+      const first = command.run(registry, target);
+      await entered;
+      const second = command.run(registry, target);
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      release();
+      expect((await first)._tag).toBe("Success");
+      expect((await second)._tag).toBe("Failure");
+      expect(calls).toBe(1);
+    } finally {
+      unmount();
+      registry.dispose();
+    }
+  });
 });
 
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>

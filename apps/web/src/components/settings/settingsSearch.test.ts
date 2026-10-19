@@ -104,7 +104,6 @@ describe("searchSettings", () => {
   });
 
   it("finds settings that used to be reachable only through their section", () => {
-    expect(searchSettings("pull request template")[0]?.id).toBe("follow-change-request-templates");
     expect(searchSettings("git security keys")[0]?.id).toBe("git-fetch-interval");
     expect(searchSettings("push notifications")[0]?.id).toBe("publish-agent-activity");
     expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
@@ -184,7 +183,6 @@ describe("searchSettings", () => {
     });
 
     const gatedIds = new Set<string>([
-      "follow-change-request-templates",
       "git-fetch-interval",
       "network-access",
       "publish-agent-activity",
@@ -199,7 +197,6 @@ describe("searchSettings", () => {
       "tailscale-https",
       "wsl-backend",
       "auto-settle-inactive-threads",
-      "auto-settle-merged-threads",
       "days-before-auto-settle",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
@@ -259,7 +256,6 @@ describe("searchSettings", () => {
 
     expect(searchSettings("auto-settle", available).map((item) => item.id)).toEqual([
       "auto-settle-inactive-threads",
-      "auto-settle-merged-threads",
       "days-before-auto-settle",
     ]);
   });
@@ -388,7 +384,7 @@ describe("searchSettings", () => {
       hasThreadAutoSettlement: true,
     });
     expect(searchSettings("writing style", available)[0]?.id).toBe("source-control-writing-style");
-    expect(searchSettings("auto-settle", available)).toHaveLength(3);
+    expect(searchSettings("auto-settle", available)).toHaveLength(2);
   });
 });
 
@@ -402,16 +398,15 @@ describe("settings search targets", () => {
     expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
     expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
   });
-  it.each([
-    "auto-settle-inactive-threads",
-    "auto-settle-merged-threads",
-    "days-before-auto-settle",
-  ])("retains the capability requirement for %s", (targetId) => {
-    expect(getSettingsSearchTargetScope(targetId)).toMatchObject({
-      scope: "project-defaults",
-      requiresThreadAutoSettlement: true,
-    });
-  });
+  it.each(["auto-settle-inactive-threads", "days-before-auto-settle"])(
+    "retains the capability requirement for %s",
+    (targetId) => {
+      expect(getSettingsSearchTargetScope(targetId)).toMatchObject({
+        scope: "project-defaults",
+        requiresThreadAutoSettlement: true,
+      });
+    },
+  );
 
   it("treats device-local rows as reachable from every selection", () => {
     const setting = getSettingsSearchTargetScope("time-format")!;
@@ -493,7 +488,6 @@ describe("auto-settlement search availability", () => {
     });
     expect(searchSettings("auto-settle", items).map((item) => item.id)).toEqual([
       "auto-settle-inactive-threads",
-      "auto-settle-merged-threads",
       "days-before-auto-settle",
     ]);
   });

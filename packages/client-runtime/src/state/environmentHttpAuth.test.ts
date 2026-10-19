@@ -457,7 +457,7 @@ describe("authenticated environment HTTP requests", () => {
   ])("does not renew or retry on $name", ({ reply, errorTag }) =>
     Effect.gen(function* () {
       const harness = makeHarness(reply);
-      const error = yield* fetchEnvironmentSessionState(harness.input).pipe(
+      const error = yield* fetchEnvironmentShellSnapshot(harness.input).pipe(
         Effect.provide(harness.httpLayer),
         Effect.flip,
       );

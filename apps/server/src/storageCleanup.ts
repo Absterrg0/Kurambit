@@ -76,7 +76,6 @@ function cleanupFailureReason(error: { readonly message: string }) {
 const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeAfterDays !== null ||
   rules.worktreeSettledAfterDays !== null ||
-  rules.worktreeOnMerge ||
   rules.worktreeOnDelete ||
   rules.worktreeUnchanged;
 
@@ -161,11 +160,6 @@ function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
   return owner;
 }
 
-/**
- * Whether the host's pull request proves this worktree's head was merged. A
- * squash or rebase merge leaves the head outside the default branch, so the
- * merged pull request then has to name this exact commit.
- */
 export class StorageCleanup extends Context.Service<
   StorageCleanup,
   {
@@ -694,9 +688,7 @@ const make = Effect.gen(function* () {
                 ? settledFor === null
                   ? "not settled"
                   : `settled for ${settledDays} of ${settings.worktreeSettledAfterDays} days`
-                : settings.worktreeOnMerge
-                  ? "not merged"
-                  : "has commits beyond the default branch",
+                : "has commits beyond the default branch",
           );
         // Threads, queued deletion work and provider sessions as they are now, so a
         // queued turn, resumed session or new thread sharing this path cancels

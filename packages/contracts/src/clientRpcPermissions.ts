@@ -1,5 +1,3 @@
-import * as Schema from "effect/Schema";
-import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -26,8 +24,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
-
-const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
 
 export function clientRpcRequiredScopes(
   method: string,

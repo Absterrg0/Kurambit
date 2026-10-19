@@ -285,48 +285,12 @@ describe("resolveAutoSettlementAt", () => {
     ).toEqual(at(-1_000));
   });
 
-  it("settles on merge only after the user's last action and preserves the activity time", () => {
-    const thread = shell({
-      latestUserMessageAt: at(-2 * 60 * 60 * 1_000),
-      latestRunCompletedAt: at(-90 * 60 * 1_000),
-    });
-    const input = {
-      thread,
-      nowMs: NOW_MS,
-      autoSettleAfterDays: null,
-    };
-    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toEqual(at(-90 * 60 * 1_000));
-    expect(ThreadSettlementService.resolveAutoSettlementAt({ ...input })).toBeNull();
+  it("leaves a completed thread unsettled when inactivity settlement is disabled", () => {
     expect(
       ThreadSettlementService.resolveAutoSettlementAt({
-        ...input,
-      }),
-    ).toBeNull();
-    expect(
-      ThreadSettlementService.resolveAutoSettlementAt({
-        ...input,
-        thread: shell(),
-      }),
-    ).toEqual(shell().createdAt);
-  });
-
-  it("settles on merge after agent-started runs, but not after the user writes again", () => {
-    const woken = shell({
-      latestUserMessageAt: at(-30 * 60 * 1_000),
-      latestUserAuthoredMessageAt: at(-2 * 60 * 60 * 1_000),
-      latestRunRequestedAt: at(-30 * 60 * 1_000),
-      latestRunCompletedAt: at(-29 * 60 * 1_000),
-    });
-    const input = {
-      thread: woken,
-      nowMs: NOW_MS,
-      autoSettleAfterDays: null,
-    };
-    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toEqual(at(-29 * 60 * 1_000));
-    expect(
-      ThreadSettlementService.resolveAutoSettlementAt({
-        ...input,
-        thread: { ...woken, latestUserAuthoredMessageAt: at(-30 * 60 * 1_000) },
+        thread: shell({ latestUserMessageAt: at(-2 * DAY_MS), latestRunCompletedAt: at(-DAY_MS) }),
+        nowMs: NOW_MS,
+        autoSettleAfterDays: null,
       }),
     ).toBeNull();
   });

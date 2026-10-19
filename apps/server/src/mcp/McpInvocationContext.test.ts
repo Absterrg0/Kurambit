@@ -58,14 +58,14 @@ it.effect("reports other missing capabilities with the neutral error", () => {
   };
 
   return Effect.gen(function* () {
-    const error = yield* McpInvocationContext.requireMcpCapability("pull-requests").pipe(
+    const error = yield* McpInvocationContext.requireMcpCapability("worktree").pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
       Effect.flip,
     );
 
     expect(error).toBeInstanceOf(McpCapabilityUnavailableError);
     expect(error).toMatchObject({
-      capability: "pull-requests",
+      capability: "worktree",
       threadId: invocation.thread?.threadId,
     });
 

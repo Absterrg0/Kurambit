@@ -986,7 +986,7 @@ export default function GitActionsControl({
 
       {gitStatusForActions?.refName === null && (
         <p className="px-2 py-1.5 text-xs text-warning">
-          Detached HEAD: create and check out a branch to enable push and pull request actions.
+          Detached HEAD: create and check out a branch to enable push actions.
         </p>
       )}
       {gitStatusForActions &&

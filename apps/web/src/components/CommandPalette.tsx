@@ -1592,7 +1592,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:copy-thread-reference",
-      searchTerms: ["copy", "pull request", "pr link", "thread id", "reference"],
+      searchTerms: ["copy", "thread id", "reference"],
       title: "Copy thread ID",
       description: activeThreadReferenceCopyTarget.value,
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,

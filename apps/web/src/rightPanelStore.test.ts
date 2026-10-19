@@ -220,8 +220,8 @@ describe("rightPanelStore", () => {
     });
     expect(migrated.byThreadKey["env-1:pull-requests-panel"]).toBeUndefined();
     expect(selectThreadRightPanelState(migrated.byThreadKey, refA)).toEqual({
-      isOpen: false,
-      activeSurfaceId: null,
+      isOpen: true,
+      activeSurfaceId: "browser:tab-a",
       surfaces: [{ id: "browser:tab-a", kind: "preview", resourceId: "tab-a" }],
     });
   });
@@ -430,7 +430,7 @@ describe("rightPanelStore", () => {
   });
 
   it("opening a different kind keeps both surfaces and activates the new one", () => {
-    useRightPanelStore.getState().open(refA, "preview");
+    useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().open(refA, "preview");
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("preview");
     expect(
@@ -448,7 +448,7 @@ describe("rightPanelStore", () => {
       activeSurfaceId: "diff",
       surfaces: [
         { id: "diff", kind: "diff" },
-        { id: "preview", kind: "preview" },
+        { id: "browser:new", kind: "preview", resourceId: null },
       ],
     });
   });
@@ -722,8 +722,8 @@ describe("rightPanelStore", () => {
 
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
-      activeSurfaceId: "preview",
-      surfaces: [{ id: "preview", kind: "preview" }],
+      activeSurfaceId: "browser:new",
+      surfaces: [{ id: "browser:new", kind: "preview", resourceId: null }],
     });
 
     useRightPanelStore.getState().openFile(refB, "conductor.json");
@@ -770,11 +770,11 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
     expect(
       selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
-    ).toEqual({ id: "preview", kind: "preview" });
+    ).toEqual({ id: "browser:new", kind: "preview", resourceId: null });
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: false,
-      activeSurfaceId: "preview",
-      surfaces: [{ id: "preview", kind: "preview" }],
+      activeSurfaceId: "browser:new",
+      surfaces: [{ id: "browser:new", kind: "preview", resourceId: null }],
     });
   });
 
@@ -803,7 +803,7 @@ describe("rightPanelStore", () => {
   });
 
   it("toggle to a different kind switches active", () => {
-    useRightPanelStore.getState().toggle(refA, "preview");
+    useRightPanelStore.getState().toggle(refA, "files");
     useRightPanelStore.getState().toggle(refA, "preview");
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("preview");
   });

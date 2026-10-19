@@ -11,13 +11,7 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-const ALL_MCP_CAPABILITIES = [
-  "preview",
-  "orchestration",
-  "worktree",
-  "device",
-  "pull-requests",
-] as const;
+const ALL_MCP_CAPABILITIES = ["preview", "orchestration", "worktree"] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
 export interface McpThreadCaller {
@@ -92,7 +86,7 @@ export const requireMcpCapability = <const C extends McpCapability>(
     Effect.withSpan("mcp.requireCapability"),
   );
 
-export const requireThreadMcpCapability = <const C extends "preview" | "device">(
+export const requireThreadMcpCapability = <const C extends "preview">(
   capability: C,
 ): Effect.Effect<McpThreadInvocationScope, McpCapabilityError<C>, McpInvocationContext> =>
   McpInvocationContext.pipe(
