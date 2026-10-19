@@ -96,8 +96,9 @@ const make = Effect.gen(function* () {
         return yield* new GameOperationError({ operation: name, path: root, reason: "busy" });
       const cancelled = yield* Deferred.make<void>();
       const done = yield* Deferred.make<void>();
+      const at = DateTime.formatIso(yield* DateTime.now);
       active.set(root, { cancelled, done });
-      operations.set(root, { name, state: "running", message: `${name} is running.` });
+      operations.set(root, { name, state: "running", message: `${name} is running.`, at });
       return yield* work.pipe(
         Effect.raceFirst(
           Deferred.await(cancelled).pipe(
@@ -127,17 +128,18 @@ const make = Effect.gen(function* () {
                 typeof result === "object" && result !== null && "message" in result
                   ? String(result.message)
                   : `${name} completed.`,
+              at,
             });
           }),
         ),
         Effect.tapError((error) =>
           Effect.sync(() => {
-            operations.set(root, { name, state: "failed", message: error.message });
+            operations.set(root, { name, state: "failed", message: error.message, at });
           }),
         ),
         Effect.onInterrupt(() =>
           Effect.sync(() => {
-            operations.set(root, { name, state: "failed", message: `${name} was cancelled.` });
+            operations.set(root, { name, state: "failed", message: `${name} was cancelled.`, at });
           }),
         ),
         Effect.ensuring(

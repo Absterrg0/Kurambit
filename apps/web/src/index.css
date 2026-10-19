@@ -213,6 +213,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       transparent calc(var(--chat-composer-attachment-overlap) + 10px)
     );
   --color-zinc-25: oklch(99.2% 0 0);
+  /* The game viewport, like an engine's stage: always dark, in both themes,
+     because a light letterbox around a rendered game looks broken. */
+  --color-stage: oklch(17% 0 0);
+  --color-stage-foreground: oklch(96% 0 0);
+  --color-stage-muted: oklch(72% 0 0);
+  --color-stage-subtle: oklch(48% 0 0);
   --animate-skeleton: skeleton 2.4s infinite;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */

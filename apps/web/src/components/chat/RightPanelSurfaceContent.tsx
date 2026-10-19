@@ -15,9 +15,6 @@ import {
   type PersistentThreadTerminalPanelProps,
 } from "../PersistentThreadTerminals";
 
-const GamePanel = lazy(() =>
-  import("../game/GamePanel").then((module) => ({ default: module.GamePanel })),
-);
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
@@ -61,12 +58,6 @@ export function RightPanelSurfaceContent(props: {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
   switch (surface.kind) {
-    case "game":
-      return (
-        <Suspense fallback={null}>
-          <GamePanel threadRef={threadRef} visible={visible} />
-        </Suspense>
-      );
     case "preview":
       return (
         <Suspense fallback={null}>

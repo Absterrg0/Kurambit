@@ -43,8 +43,6 @@ import {
 } from "../../modelSelection";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useRightPanelStore } from "../../rightPanelStore";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 export function GameEntry() {
   const environmentId = usePrimaryEnvironmentId();
@@ -158,8 +156,8 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
         return;
       }
       setDialog(null);
-      const threadRef = scopeThreadRef(environmentId, result.value.threadId);
-      useRightPanelStore.getState().open(threadRef, "game");
+      // The thread's own game stage takes over the workspace once its status
+      // resolves; there is no panel to open here any more.
       await navigate({
         to: "/$environmentId/$threadId",
         params: { environmentId, threadId: result.value.threadId },

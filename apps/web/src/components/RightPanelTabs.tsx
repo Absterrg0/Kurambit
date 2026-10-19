@@ -471,8 +471,6 @@ function surfaceTitle(
   terminalLabelsById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
-    case "game":
-      return "Game";
     case "diff":
       return "Diff";
     case "files":
@@ -544,8 +542,6 @@ function SurfaceIcon({
   environmentId: EnvironmentId | null;
 }) {
   switch (surface.kind) {
-    case "game":
-      return <span aria-hidden="true">G</span>;
     case "preview":
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
     case "diff":

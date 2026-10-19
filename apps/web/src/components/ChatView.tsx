@@ -1,4 +1,4 @@
-import { GamePanelButton } from "./game/GamePanelButton";
+import { GameStage } from "./game/GameStage";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -347,6 +347,8 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
+import { gameEnvironment } from "../state/game";
+import { useGameWorkspaceStore } from "../gameWorkspaceStore";
 import { useEnvironmentScope } from "~/state/session";
 import {
   environmentServerConfigsAtom,
@@ -1640,6 +1642,19 @@ export default function ChatView(props: ChatViewProps) {
   const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
+  // A thread is a game thread when its workspace answers game status. The
+  // stage reads the same query atom, so a thread still costs one request.
+  const gameStatusQuery = useEnvironmentQuery(
+    activeThreadRef
+      ? gameEnvironment.status({
+          environmentId: activeThreadRef.environmentId,
+          input: { threadId: activeThreadRef.threadId },
+        })
+      : null,
+  );
+  const isGameThread = gameStatusQuery.data !== null;
+  const gameChatWidth = useGameWorkspaceStore((state) => state.chatWidth);
+  const gameChatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
   const panelTerminalIds = new Set(
     rightPanelState.surfaces.flatMap((surface) =>
       surface.kind === "terminal" ? surface.terminalIds : [],
@@ -3229,6 +3244,21 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocus();
   };
   const useArtifactTemplateStable = useStableCallback(useArtifactTemplate);
+  // "Ask agent to fix" from the game stage: the error lands in the composer as
+  // a draft, and the user still decides to send it.
+  const askAgentToFix = (text: string) => {
+    const composer = composerRef.current;
+    if (!composer || !composer.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+      toastManager.add({
+        type: "error",
+        title: "Unable to add to chat",
+        description: "The composer is busy; try again once it is ready.",
+      });
+      return;
+    }
+    scheduleComposerFocus();
+  };
+  const askAgentToFixStable = useStableCallback(askAgentToFix);
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
       throw new Error("Messages from apps need a started thread.");
@@ -5274,6 +5304,7 @@ export default function ChatView(props: ChatViewProps) {
     composerFocus: document.activeElement?.getAttribute("data-testid") === "composer-editor",
     draftThreadRoute: routeKind === "draft",
     turnRunning: phase === "running",
+    gameThread: isGameThread,
     isWeb: !isElectron,
     isDesktop: isElectron,
   });
@@ -5349,6 +5380,11 @@ export default function ChatView(props: ChatViewProps) {
         openThreadFindStable();
       },
       "rightPanel.toggle": () => toggleRightPanelStable(),
+      "game.chat.toggle": () => {
+        // Only a game thread has the stage this shortcut collapses chat for.
+        if (!isGameThread) return false;
+        useGameWorkspaceStore.getState().toggleChat();
+      },
       "rightPanel.toggleMaximized": ({ event }) => {
         if (!event.repeat) toggleRightPanelMaximizedStable();
       },
@@ -7589,10 +7625,7 @@ export default function ChatView(props: ChatViewProps) {
           />
         </span>
       ) : null}
-      <div className="pointer-events-auto flex h-full items-center">
-        {activeThreadRef ? <GamePanelButton threadRef={activeThreadRef} /> : null}
-        {panelToggleControls}
-      </div>
+      <div className="pointer-events-auto flex h-full items-center">{panelToggleControls}</div>
     </div>
   );
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -7601,18 +7634,31 @@ export default function ChatView(props: ChatViewProps) {
     addFolders: addDroppedFoldersToComposer,
   });
 
+  // Game threads trade the wide chat column for the stage: the chat is docked
+  // at its remembered width and the stage takes everything else.
+  const gameChatDocked =
+    isGameThread && activeThreadRef !== null && !gameChatCollapsed && !rightPanelMaximized;
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
+      {isGameThread && activeThreadRef ? (
+        <GameStage
+          threadRef={activeThreadRef}
+          turnRunning={phase === "running"}
+          onAskAgent={askAgentToFixStable}
+        />
+      ) : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized ? "w-0 flex-none" : "flex-1",
+          rightPanelMaximized ? "w-0 flex-none" : gameChatDocked ? "shrink-0" : "flex-1",
         )}
+        style={gameChatDocked ? { width: gameChatWidth } : undefined}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
+        data-game-chat-docked={gameChatDocked ? "true" : "false"}
       >
         <header
           ref={threadPanelPopoverAnchorRef}

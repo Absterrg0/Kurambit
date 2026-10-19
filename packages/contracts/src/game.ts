@@ -173,6 +173,8 @@ export const GameStatus = Schema.Struct({
       name: Schema.String,
       state: Schema.Literals(["running", "succeeded", "failed"]),
       message: Schema.String,
+      /** When the operation started, so clients can show elapsed time honestly. */
+      at: Schema.String,
     }),
   ),
 });
