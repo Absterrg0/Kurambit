@@ -290,7 +290,7 @@ const make = Effect.gen(function* () {
             operation: "Web playtest",
             path: root,
             reason: "tool-missing",
-            detail: `T3's headless browser is not ready. ${cause.message} Once the install finishes, retry game_web_playtest.`,
+            detail: `Game Studio's preview browser is not ready. ${cause.message} Once the install finishes, retry game_web_playtest.`,
           }),
       ),
     );
