@@ -1,3 +1,4 @@
+import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -685,6 +686,12 @@ const layerGame = GameService.layer.pipe(
 );
 
 const layerMakeRoutes = Layer.mergeAll(
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const reactor = yield* GameTurnCancellationReactor.GameTurnCancellationReactor;
+      yield* reactor.start();
+    }),
+  ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),

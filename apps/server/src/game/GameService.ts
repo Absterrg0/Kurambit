@@ -33,6 +33,7 @@ import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 export class GameService extends Context.Service<
   GameService,
   {
+    readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
     readonly status: (threadId: ThreadId) => Effect.Effect<GameStatus, GameOperationError>;
     readonly action: (
       threadId: ThreadId,
@@ -77,13 +78,24 @@ const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const browser = yield* PreviewBrowser.PreviewBrowser;
   const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
-  const active = new Map<string, Deferred.Deferred<void>>();
+  const active = new Map<
+    string,
+    { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
+  >();
+  const cancel = Effect.fnUntraced(function* (root: string) {
+    const operation = active.get(root);
+    if (operation === undefined) return;
+    yield* Deferred.succeed(operation.cancelled, undefined);
+    // The race interrupts work and awaits its finalizers, including native child exit.
+    yield* Deferred.await(operation.done);
+  });
   const exclusive = <A>(root: string, name: string, work: Effect.Effect<A, GameOperationError>) =>
     Effect.gen(function* () {
       if (active.has(root))
         return yield* new GameOperationError({ operation: name, path: root, reason: "busy" });
       const cancelled = yield* Deferred.make<void>();
-      active.set(root, cancelled);
+      const done = yield* Deferred.make<void>();
+      active.set(root, { cancelled, done });
       operations.set(root, { name, state: "running", message: `${name} is running.` });
       return yield* work.pipe(
         Effect.raceFirst(
@@ -94,7 +106,7 @@ const make = Effect.gen(function* () {
                   operation: name,
                   path: root,
                   reason: "command-failed",
-                  detail: "Operation cancelled by Stop.",
+                  detail: "Operation cancelled.",
                 }),
               ),
             ),
@@ -130,7 +142,7 @@ const make = Effect.gen(function* () {
         Effect.ensuring(
           Effect.sync(() => {
             active.delete(root);
-          }),
+          }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
         ),
       );
     });
@@ -301,6 +313,17 @@ const make = Effect.gen(function* () {
     return yield* exclusive(root, name, work(root));
   });
   return GameService.of({
+    cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
+      const root = yield* projects.resolve(threadId).pipe(
+        Effect.catchTags({
+          GameOperationError: (error) =>
+            error.reason === "project-not-found" || error.reason === "invalid-project"
+              ? Effect.succeed(null)
+              : Effect.fail(error),
+        }),
+      );
+      if (root !== null) yield* cancel(root);
+    }),
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
       const inventory = yield* projects.inventory(root);
@@ -475,8 +498,7 @@ const make = Effect.gen(function* () {
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {
-        const cancellation = active.get(root);
-        if (cancellation) yield* Deferred.succeed(cancellation, undefined);
+        yield* cancel(root);
         yield* processes.stop(root);
         yield* preview.stop(root);
         return {
