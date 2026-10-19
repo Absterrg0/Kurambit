@@ -39,7 +39,7 @@ This root is the git repository. game.json is the studio manifest. The engine pr
 
 ## Tools
 
-Call game_status first for readiness, asset usage, scenes, builds and logs. If tools are missing, tell the user to install them with the Game panel.
+Call game_status first for readiness, asset usage, scenes, builds and logs. If tools are missing, tell the user to install them in Settings > General > Game tools.
 
 Use game_blender_run with a stable asset id and bpy script to create or revise an asset. The tool opens the existing .blend on revisions, runs your script, saves the source and script, exports GLB with modifiers, and renders a thumbnail unless disabled. For revisions, edit existing objects by name, or pass reset=true with a complete rebuild script to start from an empty scene at the same source/export paths. Re-running an object-creation script without reset duplicates objects. Keep the .blend sources. Re-export revisions to the same path so scene references remain valid. Do not put .blend files inside godot/.
 

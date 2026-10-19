@@ -7638,6 +7638,10 @@ export default function ChatView(props: ChatViewProps) {
   // at its remembered width and the stage takes everything else.
   const gameChatDocked =
     isGameThread && activeThreadRef !== null && !gameChatCollapsed && !rightPanelMaximized;
+  // A collapsed chat gives the stage the whole window; the column stays mounted
+  // at zero width so the composer keeps its draft, and inert so nothing in it
+  // can take focus while it cannot be seen.
+  const gameChatHidden = isGameThread && activeThreadRef !== null && gameChatCollapsed;
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
@@ -7654,9 +7658,14 @@ export default function ChatView(props: ChatViewProps) {
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized ? "w-0 flex-none" : gameChatDocked ? "shrink-0" : "flex-1",
+          rightPanelMaximized || gameChatHidden
+            ? "w-0 flex-none"
+            : gameChatDocked
+              ? "shrink-0"
+              : "flex-1",
         )}
         style={gameChatDocked ? { width: gameChatWidth } : undefined}
+        inert={gameChatHidden}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         data-game-chat-docked={gameChatDocked ? "true" : "false"}
       >

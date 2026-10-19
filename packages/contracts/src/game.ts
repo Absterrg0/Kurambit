@@ -91,11 +91,11 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "invalid-project": "Open a folder containing a valid game.json, or create a new game.",
       "invalid-path": "Use a relative path inside the game project.",
       "tool-missing":
-        "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or GAME_STUDIO_BLENDER / GAME_STUDIO_GODOT. To use the managed version, clear the override and click Install tools in Game panel > Toolchain.",
+        "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or GAME_STUDIO_BLENDER / GAME_STUDIO_GODOT. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
       "wrong-version":
-        "Use Godot 4.7.x and Blender 4.2 or later. Fix the executable path in Settings > General > Game tools. To use the managed version, clear the override and click Install tools in Game panel > Toolchain.",
+        "Use Godot 4.7.x and Blender 4.2 or later. Fix the executable path in Settings > General > Game tools. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
       "templates-missing":
-        "Install Godot export templates matching this executable's exact version at the path below. For managed tools, clear executable overrides in Settings > General > Game tools, then click Install tools in Game panel > Toolchain.",
+        "Install Godot export templates matching this executable's exact version at the path below. For managed tools, clear executable overrides in Settings > General > Game tools, then click Install tools in Settings > General > Game tools.",
       "unknown-template": "Pick a starter template from the New game dialog.",
       "starter-templates-missing":
         "Game Studio's starter template files are missing. Reinstall or update the app.",

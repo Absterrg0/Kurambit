@@ -57,12 +57,12 @@ function GameAssetCard({
     useRightPanelStore.getState().openFile(threadRef, relativePath);
   return (
     <li className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex aspect-square items-center justify-center bg-stage">
+      <div className="flex aspect-4/3 items-center justify-center bg-stage">
         {thumbnail._tag === "Success" ? (
           <img
             src={thumbnail.url}
             alt={`${asset.id} preview`}
-            className="size-full object-contain p-3"
+            className="size-full object-contain p-4"
           />
         ) : (
           <FileBoxIcon className="size-8 text-stage-subtle" aria-hidden="true" />

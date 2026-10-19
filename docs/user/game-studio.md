@@ -5,7 +5,7 @@ Blender and Godot; you direct it, play the result, and ask for changes.
 
 ## Set up the tools once
 
-Open **Settings → General → Game tools**, or the **Game** panel of any game, and choose
+Open **Settings → General → Game tools**, or the setup card in any game, and choose
 **Install tools**. Game Studio downloads Blender 4.5.14 LTS and Godot 4.7.2 with the matching export
 templates, checks their published checksums, and keeps them in `~/.local/share/game-studio/tools`.
 **Verify** runs a real Blender export and a real Godot import, so a green status means the tools
@@ -33,16 +33,22 @@ folder that contains `game.json`.
 
 ## Play and revise
 
-In the **Game** panel:
+A game thread opens as a game workspace: the game owns the middle of the window and the chat is
+docked to its right.
 
-- **Play in app** builds the web version and opens it in the in-app browser. This is the real game,
-  not a recording.
-- **Run native** starts the game in its own window. **Stop** ends only processes Game Studio started
-  for this game, and closes its preview server.
-- **Export Linux** writes a standalone build to `builds/linux/`.
-- **Assets** lists each Blender asset with its thumbnail, its `.blend` source, its exported `.glb`,
-  and the scenes or scripts that use it.
-- **Brief** shows what the game is meant to be. Edit `BRIEF.md` to change it.
+- **Play** builds the web version when it is missing or older than the game's files, then plays it
+  in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
+  it, and use **Fullscreen** to give it the whole screen.
+- **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
+  the stage says so and offers to rebuild.
+- **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio
+  started for this game, and closes its preview server.
+- **Export Linux** writes a standalone build to `builds/linux/`. The **Builds** tab lists both
+  targets with their times, folders and logs.
+- **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
+  scenes or scripts that use it.
+- The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
+  or `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) to give the game the whole window.
 
 To change the game, write a follow-up in the thread, for example "make the rocks taller and spread the
 artifacts out". The agent edits the same Blender sources and re-exports to the same paths, so scenes

@@ -159,7 +159,7 @@ const make = Effect.gen(function* () {
             path: selected,
             reason: result.exitCode !== 0 ? "command-failed" : "wrong-version",
             detail:
-              `${tool} reported ${version}. ${result.exitCode !== 0 ? "The version check failed. Fix its path in Settings > General > Game tools, or clear the override and click Install tools in Game panel > Toolchain.\n" : ""}${commandDetail(result)}`.slice(
+              `${tool} reported ${version}. ${result.exitCode !== 0 ? "The version check failed. Fix its path in Settings > General > Game tools, or clear the override and click Install tools in Settings > General > Game tools.\n" : ""}${commandDetail(result)}`.slice(
                 0,
                 4096,
               ),

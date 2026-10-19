@@ -12,8 +12,8 @@ configuration, and provider adapters contain no game logic. Each tool resolves t
 calling thread's project. A thread whose workspace has no `game.json` gets an actionable error
 instead of acting on an arbitrary directory.
 
-The Game panel's buttons call the same `GameService` methods over RPC. Anything a user can do from
-the panel, an agent can do through a tool, and the reverse.
+The game stage's buttons call the same `GameService` methods over RPC. Anything a user can do from
+the stage, an agent can do through a tool, and the reverse.
 
 ## Starter templates
 
@@ -73,6 +73,13 @@ The web preview is a single-threaded Godot web export using the Compatibility re
 avoids SharedArrayBuffer, so the loopback static server needs no COOP/COEP headers. The server binds
 `127.0.0.1` on an ephemeral port per game and lives in-process, so there is no extra process to
 track.
+
+The stage letterboxes the preview to the design resolution in `godot/project.godot`, which
+`game_status` reports, and loads the loopback URL in a sandboxed iframe instead of the browser
+panel: the game is a surface of the app, not a tab in it. Play reuses an existing build and only
+exports when one is missing or older than the newest file under `godot/`; Rebuild always exports.
+That staleness walk lives in one place (`webBuild.ts`) and is shared with the playtest's decision
+to rebuild, so both stay honest about what is on screen.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends key presses and canvas clicks, and returns screenshots

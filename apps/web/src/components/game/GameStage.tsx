@@ -70,6 +70,10 @@ export function GameStage({
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab>("play");
+  // The server keeps the last operation per game for the whole session, so the
+  // stage treats an operation as news only when it happened after this stage
+  // mounted. Older ones would greet the user with a build they already know about.
+  const [mountedAt] = useState(() => Date.now());
   const [busy, setBusy] = useState<{ action: GameAction; startedAt: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +116,10 @@ export function GameStage({
   });
   const building = phase.kind === "building";
   const operation = data.operation;
-  const operationVisible = operation !== null && operation.at !== dismissedOperationAt;
+  const operationVisible =
+    operation !== null &&
+    operation.at !== dismissedOperationAt &&
+    Date.parse(operation.at) >= mountedAt;
   const failureVisible =
     error ??
     (operation !== null && operationVisible && operation.state === "failed"
@@ -131,6 +138,7 @@ export function GameStage({
     data.previewUrl !== null;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
   const frameKey = `${data.previewUrl ?? ""}#${webBuild?.updatedAt ?? ""}`;
+  const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
     if (busy !== null && stageAction !== "stop") return;
     setBusy({ action: stageAction, startedAt: Date.now() });
@@ -286,7 +294,7 @@ export function GameStage({
           }}
         >
           {TABS.map((entry) => (
-            <Toggle key={entry.value} value={entry.value}>
+            <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
               {entry.label}
               {entry.value === "assets" && data.assets.length > 0 ? (
                 <span className="text-muted-foreground">{data.assets.length}</span>
@@ -323,6 +331,11 @@ export function GameStage({
                 <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
               ) : null}
               <TruncatedText text={strip} />
+              {failureVisible === null ? null : (
+                <Button size="xs" variant="ghost" onClick={() => askAgentToFix(failureVisible)}>
+                  Ask agent to fix
+                </Button>
+              )}
               <Button
                 size="icon-micro"
                 variant="ghost"
@@ -365,7 +378,7 @@ export function GameStage({
           onPlay={() => void perform("preview")}
           onRebuild={() => void perform("rebuild")}
           onStop={() => void perform("stop")}
-          onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
+          onAskAgent={askAgentToFix}
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
         />
       ) : null}
