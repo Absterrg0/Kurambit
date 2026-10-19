@@ -141,9 +141,18 @@ export function GameStage({
       : null);
   const noticeVisible =
     message ?? (operation !== null && operationVisible ? operation.message : null);
-  const strip = building ? null : (failureVisible ?? noticeVisible);
+  // The strip is one line: a failure's excerpt belongs in the card, and its
+  // headline (with the full text in the tooltip) is what the strip has room for.
+  const strip = building
+    ? null
+    : failureVisible !== null
+      ? (failureVisible.split("\n")[0] ?? failureVisible)
+      : noticeVisible;
   const showStrip = strip !== null && phase.kind !== "failed";
-  const staleChipVisible = phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false;
+  // One status line, and a failure outranks the staleness it just caused.
+  const staleChipVisible =
+    failureVisible === null &&
+    (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
   const nativeRunning = data.processes.some((process) => process.operation === "native");
   const runningSomething =
     busy !== null ||
@@ -348,7 +357,7 @@ export function GameStage({
               {failureVisible !== null ? (
                 <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
               ) : null}
-              <TruncatedText text={strip} />
+              <TruncatedText text={strip} className="min-w-16 max-w-md" />
               {failureVisible === null ? null : (
                 <Button size="xs" variant="ghost" onClick={() => askAgentToFix(failureVisible)}>
                   Ask agent to fix
