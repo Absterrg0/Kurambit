@@ -150,6 +150,45 @@ export const GameActionResult = Schema.Struct({
   process: Schema.NullOr(GameProcessResult),
 });
 export type GameActionResult = typeof GameActionResult.Type;
+export const GameConsoleMessage = Schema.Struct({
+  level: Schema.Literals(["log", "info", "warning", "error"]),
+  text: Schema.String,
+});
+export type GameConsoleMessage = typeof GameConsoleMessage.Type;
+export const GamePlaytestStep = Schema.Union([
+  Schema.Struct({
+    key: Schema.String.annotate({
+      description: 'Key to hold while playing, such as "ArrowUp", "w", "Space".',
+    }),
+    holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
+  }),
+  Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
+]);
+export type GamePlaytestStep = typeof GamePlaytestStep.Type;
+export const GamePlaytestScreenshot = Schema.Struct({
+  label: Schema.String,
+  mimeType: Schema.Literal("image/png"),
+  data: Schema.String,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+export type GamePlaytestScreenshot = typeof GamePlaytestScreenshot.Type;
+export const GameWebPlaytestInput = Schema.Struct({
+  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
+  width: Schema.optionalKey(Schema.Number),
+  height: Schema.optionalKey(Schema.Number),
+  bootTimeoutMs: Schema.optionalKey(Schema.Number),
+});
+export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
+export const GameWebPlaytestResult = Schema.Struct({
+  success: Schema.Boolean,
+  booted: Schema.Boolean,
+  bootMs: Schema.NullOr(Schema.Number),
+  message: Schema.String,
+  consoleMessages: Schema.Array(GameConsoleMessage),
+  screenshots: Schema.Array(GamePlaytestScreenshot),
+});
+export type GameWebPlaytestResult = typeof GameWebPlaytestResult.Type;
 export const GameBlenderInput = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,80}$/)),
   script: Schema.String,
