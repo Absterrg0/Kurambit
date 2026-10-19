@@ -11,24 +11,6 @@ import { useAssetUrlState } from "../../assets/assetUrls";
 import { Button } from "../ui/button";
 import { openPreviewSession } from "../preview/openPreviewSession";
 
-export function GamePanelButton({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const query = useEnvironmentQuery(
-    gameEnvironment.status({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  );
-  if (!query.data) return null;
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={() => useRightPanelStore.getState().open(threadRef, "game")}
-    >
-      Game
-    </Button>
-  );
-}
 function AssetCard({
   asset,
   threadRef,
@@ -148,7 +130,7 @@ export function GamePanel({
   };
   const data = query.data;
   if (!data) return <div className="p-4 text-sm">{query.error ?? "Loading game…"}</div>;
-  const running = busy !== null || data.operation?.state === "running";
+  const running = busy !== null || data.operation?.state === "running" || data.toolchain.installing;
   return (
     <div className="h-full space-y-5 overflow-auto p-4">
       <div className="flex items-center justify-between">

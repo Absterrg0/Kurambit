@@ -9,6 +9,24 @@ const temporary = Effect.acquireRelease(
   Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-process-"))),
   (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
 );
+it.effect("reports a spawn failure without leaving a tracked process", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = yield* temporary;
+      const processes = yield* GameProcesses.GameProcesses;
+      const result = yield* Effect.result(
+        processes.start({
+          root,
+          executable: NodePath.join(root, "missing-executable"),
+          args: [],
+          operation: "native",
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(processes.list(root)).toEqual([]);
+    }).pipe(Effect.provide(GameProcesses.layer)),
+  ),
+);
 it.effect("captures command failure and output in a real log", () =>
   Effect.scoped(
     Effect.gen(function* () {
