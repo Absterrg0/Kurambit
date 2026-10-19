@@ -88,16 +88,16 @@ const authenticate = async () => {
   const credential = new URLSearchParams(pairing.hash.slice(1)).get("token");
   assert(credential, "pair did not return a token");
   const origin = values.url ?? pairing.origin;
-  const request = async (endpoint: string, init: RequestInit) => {
+  const request = async <T>(endpoint: string, init: RequestInit): Promise<T> => {
     const response = await fetch(new URL(endpoint, origin), {
       ...init,
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok)
       throw new Error(`${endpoint}: HTTP ${response.status} ${await response.text()}`);
-    return response.json();
+    return response.json() as Promise<T>;
   };
-  const access = await request("/oauth/token", {
+  const access = await request<{ access_token: string }>("/oauth/token", {
     method: "POST",
     body: new URLSearchParams({
       grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -108,7 +108,7 @@ const authenticate = async () => {
       client_device_type: "desktop",
     }),
   });
-  const ticket = await request("/api/auth/websocket-ticket", {
+  const ticket = await request<{ ticket: string }>("/api/auth/websocket-ticket", {
     method: "POST",
     headers: { Authorization: `Bearer ${access.access_token}` },
   });
@@ -145,10 +145,45 @@ const waitForTurn = (
       Effect.gen(function* () {
         if (item.runId && previous.has(item.runId)) return;
         if (item.type !== "dynamic_tool" && item.type !== "command_execution") return;
-        const name =
-          item.type === "dynamic_tool"
-            ? (item.toolName ?? item.title ?? "tool")
-            : (item.title ?? "command");
+        let name: string;
+        if (item.type === "dynamic_tool") {
+          // Providers call MCP tools directly, or wrap them in a code-mode
+          // `execute`; a wrapped call only names its tools inside the code.
+          const code =
+            item.toolName === "execute" &&
+            typeof (item.input as { code?: unknown } | undefined)?.code === "string"
+              ? (item.input as { code: string }).code
+              : "";
+          // `const G = tools["t3-code-…"]` aliases the MCP namespace before calling.
+          const aliases = new Set<string>();
+          for (const match of code.matchAll(
+            /(?:const|let|var)\s+([\w$]+)\s*=\s*tools(?:\s*\.\s*\w+|\s*\[[^\]]+\])/g,
+          ))
+            aliases.add(match[1]!);
+          const namespace = `tools(?:\\s*\\.\\s*\\w+|\\s*\\[[^\\]]+\\])?${
+            aliases.size > 0 ? `|\\b(?:${[...aliases].join("|")})\\b` : ""
+          }`;
+          const calls = new Set<string>();
+          for (const match of code.matchAll(
+            new RegExp(`(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\.\\s*([A-Za-z]\\w*)\\s*\\(`, "g"),
+          ))
+            calls.add(match[1]!);
+          for (const match of code.matchAll(
+            new RegExp(
+              `(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\[\\s*["'\`]([\\w/:-]+)["'\`]\\s*\\]\\s*\\(`,
+              "g",
+            ),
+          ))
+            calls.add(match[1]!);
+          name =
+            item.toolName !== null && item.toolName !== "execute"
+              ? item.toolName
+              : code === ""
+                ? (item.title ?? "execute")
+                : calls.size > 0
+                  ? [...calls].join(", ")
+                  : "execute";
+        } else name = item.title ?? "command";
         if (seen.get(item.id) !== item.status) {
           seen.set(item.id, item.status);
           timeline(`${name}: ${item.status}`);
