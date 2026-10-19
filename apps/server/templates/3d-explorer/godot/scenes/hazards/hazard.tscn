@@ -1,0 +1,32 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/hazard.gd" id="1_hazard"]
+[ext_resource type="Material" path="res://materials/lava.tres" id="2_lava"]
+
+[sub_resource type="BoxMesh" id="mesh_pool"]
+size = Vector3(7.8, 0.3, 9.8)
+
+[sub_resource type="BoxShape3D" id="shape_volume"]
+size = Vector3(8, 3, 10)
+
+[node name="Hazard" type="Area3D"]
+collision_layer = 8
+collision_mask = 2
+script = ExtResource("1_hazard")
+damage = 34.0
+reason = "lava"
+
+[node name="Volume" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.9, 0)
+shape = SubResource("shape_volume")
+
+[node name="Pool" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_pool")
+material_override = ExtResource("2_lava")
+
+[node name="Glow" type="OmniLight3D" parent="."]
+position = Vector3(0, 2.6, 0)
+light_color = Color(1, 0.56, 0.24, 1)
+light_energy = 2.2
+omni_range = 14.0
+shadow_enabled = false

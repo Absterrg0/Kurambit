@@ -1,0 +1,6 @@
+[gd_resource type="StandardMaterial3D" format=3]
+
+[resource]
+resource_name = "StoneDark"
+albedo_color = Color(0.4, 0.4, 0.45, 1)
+roughness = 0.9

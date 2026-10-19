@@ -1,0 +1,83 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/camera_rig.gd" id="2_rig"]
+[ext_resource type="Material" path="res://materials/player_suit.tres" id="3_suit"]
+[ext_resource type="Material" path="res://materials/player_visor.tres" id="4_visor"]
+[ext_resource type="Material" path="res://materials/player_pack.tres" id="5_pack"]
+
+[sub_resource type="CapsuleShape3D" id="shape_body"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="mesh_body"]
+radius = 0.4
+height = 1.5
+radial_segments = 20
+rings = 5
+
+[sub_resource type="BoxMesh" id="mesh_visor"]
+size = Vector3(0.34, 0.15, 0.26)
+
+[sub_resource type="BoxMesh" id="mesh_pack"]
+size = Vector3(0.36, 0.42, 0.18)
+
+[sub_resource type="CylinderMesh" id="mesh_antenna"]
+top_radius = 0.012
+bottom_radius = 0.012
+height = 0.26
+radial_segments = 6
+
+[sub_resource type="SphereShape3D" id="shape_arm"]
+radius = 0.24
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+floor_snap_length = 0.35
+script = ExtResource("1_player")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.9, 0)
+shape = SubResource("shape_body")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 0.92, 0)
+mesh = SubResource("mesh_body")
+material_override = ExtResource("3_suit")
+
+[node name="Visor" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 1.32, -0.33)
+mesh = SubResource("mesh_visor")
+material_override = ExtResource("4_visor")
+
+[node name="Pack" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 1.06, 0.34)
+mesh = SubResource("mesh_pack")
+material_override = ExtResource("5_pack")
+
+[node name="Antenna" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 1.79, 0.06)
+mesh = SubResource("mesh_antenna")
+material_override = ExtResource("4_visor")
+
+[node name="CameraRig" type="Node3D" parent="."]
+top_level = true
+script = ExtResource("2_rig")
+target = NodePath("..")
+
+[node name="Pitch" type="Node3D" parent="CameraRig"]
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig/Pitch"]
+collision_mask = 1
+spring_length = 4.6
+margin = 0.3
+shape = SubResource("shape_arm")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig/Pitch/SpringArm3D"]
+near = 0.08
+far = 400.0
+fov = 68.0
+current = true

@@ -1,0 +1,41 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/collectible.gd" id="1_collectible"]
+[ext_resource type="Material" path="res://materials/relic.tres" id="2_relic"]
+[ext_resource type="Material" path="res://materials/beam.tres" id="3_beam"]
+
+[sub_resource type="SphereMesh" id="mesh_crystal"]
+radius = 0.3
+height = 0.68
+radial_segments = 4
+rings = 2
+
+[sub_resource type="TorusMesh" id="mesh_halo"]
+inner_radius = 0.4
+outer_radius = 0.47
+rings = 20
+ring_segments = 5
+
+[sub_resource type="SphereShape3D" id="shape_pickup"]
+radius = 0.9
+
+[node name="Collectible" type="Area3D"]
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("1_collectible")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.95, 0)
+shape = SubResource("shape_pickup")
+
+[node name="Visual" type="Node3D" parent="."]
+position = Vector3(0, 0.95, 0)
+
+[node name="Crystal" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("mesh_crystal")
+material_override = ExtResource("2_relic")
+
+[node name="Halo" type="MeshInstance3D" parent="Visual"]
+rotation_degrees = Vector3(84, 0, 18)
+mesh = SubResource("mesh_halo")
+material_override = ExtResource("3_beam")

@@ -1,0 +1,64 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/checkpoint.gd" id="1_checkpoint"]
+[ext_resource type="Material" path="res://materials/stone_dark.tres" id="2_stone"]
+[ext_resource type="Material" path="res://materials/checkpoint_idle.tres" id="3_idle"]
+[ext_resource type="Material" path="res://materials/checkpoint_lit.tres" id="4_lit"]
+[ext_resource type="Material" path="res://materials/beam.tres" id="5_beam"]
+
+[sub_resource type="BoxShape3D" id="shape_reach"]
+size = Vector3(2.4, 2, 2.4)
+
+[sub_resource type="CylinderMesh" id="mesh_disc"]
+top_radius = 1.1
+bottom_radius = 1.1
+height = 0.08
+radial_segments = 20
+
+[sub_resource type="SphereMesh" id="mesh_crystal"]
+radius = 0.24
+height = 0.58
+radial_segments = 4
+rings = 2
+
+[sub_resource type="CylinderMesh" id="mesh_beam"]
+top_radius = 0.09
+bottom_radius = 0.16
+height = 6
+radial_segments = 8
+
+[node name="Checkpoint" type="Area3D"]
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("1_checkpoint")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1, 0)
+shape = SubResource("shape_reach")
+
+[node name="Disc" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.04, 0)
+mesh = SubResource("mesh_disc")
+material_override = ExtResource("2_stone")
+
+[node name="Idle" type="Node3D" parent="."]
+
+[node name="Crystal" type="MeshInstance3D" parent="Idle"]
+position = Vector3(0, 1.05, 0)
+mesh = SubResource("mesh_crystal")
+material_override = ExtResource("3_idle")
+
+[node name="Lit" type="Node3D" parent="."]
+
+[node name="Crystal" type="MeshInstance3D" parent="Lit"]
+position = Vector3(0, 1.05, 0)
+mesh = SubResource("mesh_crystal")
+material_override = ExtResource("4_lit")
+
+[node name="Beam" type="MeshInstance3D" parent="Lit"]
+position = Vector3(0, 3.05, 0)
+mesh = SubResource("mesh_beam")
+material_override = ExtResource("5_beam")
+
+[node name="Respawn" type="Marker3D" parent="."]
+position = Vector3(0, 0.02, 1.3)

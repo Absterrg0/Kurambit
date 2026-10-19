@@ -1,0 +1,62 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/goal.gd" id="1_goal"]
+[ext_resource type="Material" path="res://materials/gate_locked.tres" id="2_locked"]
+[ext_resource type="Material" path="res://materials/gate_open.tres" id="3_open"]
+[ext_resource type="Material" path="res://materials/gate_barrier.tres" id="4_barrier"]
+[ext_resource type="Material" path="res://materials/beam.tres" id="5_beam"]
+
+[sub_resource type="BoxShape3D" id="shape_reach"]
+size = Vector3(3.4, 3.2, 2.4)
+
+[sub_resource type="BoxMesh" id="mesh_rune"]
+size = Vector3(0.85, 0.85, 0.2)
+
+[sub_resource type="BoxMesh" id="mesh_barrier"]
+size = Vector3(2.9, 3, 0.16)
+
+[sub_resource type="CylinderMesh" id="mesh_beam"]
+top_radius = 1.25
+bottom_radius = 1.25
+height = 3.2
+radial_segments = 14
+
+[node name="Goal" type="Area3D"]
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("1_goal")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1.6, 0)
+shape = SubResource("shape_reach")
+
+[node name="Locked" type="Node3D" parent="."]
+
+[node name="Barrier" type="MeshInstance3D" parent="Locked"]
+position = Vector3(0, 1.6, 0)
+mesh = SubResource("mesh_barrier")
+material_override = ExtResource("4_barrier")
+
+[node name="Rune" type="MeshInstance3D" parent="Locked"]
+position = Vector3(0, 2.7, -0.05)
+mesh = SubResource("mesh_rune")
+material_override = ExtResource("2_locked")
+
+[node name="Open" type="Node3D" parent="."]
+
+[node name="Beam" type="MeshInstance3D" parent="Open"]
+position = Vector3(0, 1.6, 0)
+mesh = SubResource("mesh_beam")
+material_override = ExtResource("5_beam")
+
+[node name="Rune" type="MeshInstance3D" parent="Open"]
+position = Vector3(0, 2.7, -0.05)
+mesh = SubResource("mesh_rune")
+material_override = ExtResource("3_open")
+
+[node name="Light" type="OmniLight3D" parent="."]
+position = Vector3(0, 2.2, 0.8)
+light_color = Color(0.95, 0.35, 0.3, 1)
+light_energy = 1.8
+omni_range = 10.0
+shadow_enabled = false
