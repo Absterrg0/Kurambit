@@ -18,8 +18,8 @@ const { version } = JSON.parse(
 const SUPPORTED = ["darwin-arm64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"];
 
 function t3Home() {
-  const raw = (process.env.T3CODE_HOME || "").trim();
-  if (raw === "") return path.join(os.homedir(), ".t3");
+  const raw = (process.env.GAME_STUDIO_HOME || "").trim();
+  if (raw === "") return path.join(os.homedir(), ".game-studio");
   if (raw === "~") return os.homedir();
   if (raw.startsWith("~/") || raw.startsWith("~\\")) return path.join(os.homedir(), raw.slice(2));
   return path.resolve(raw);

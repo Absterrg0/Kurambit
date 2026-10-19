@@ -135,7 +135,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         const home = path.join(root, "home");
         const env = {
           PATH: process.env.PATH,
-          T3CODE_HOME: home,
+          GAME_STUDIO_HOME: home,
           T3CODE_RELEASE_BASE_URL: release.baseUrl,
         };
         const launcher = path.join(packageDir, "bin/t3.mjs");
@@ -191,7 +191,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         const raceHome = path.join(root, "race-home");
         const launch = run(process.execPath, [launcher, "--version"], {
           cwd: root,
-          env: { ...env, T3CODE_HOME: raceHome },
+          env: { ...env, GAME_STUDIO_HOME: raceHome },
         });
         const [one, two] = yield* Effect.all([launch, launch], { concurrency: "unbounded" });
         assert.equal(one.exitCode, 7, one.stderr);
@@ -204,7 +204,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         release.corruptChecksum();
         const corrupt = yield* run(process.execPath, [launcher, "--version"], {
           cwd: root,
-          env: { ...env, T3CODE_HOME: path.join(root, "other-home") },
+          env: { ...env, GAME_STUDIO_HOME: path.join(root, "other-home") },
         });
         assert.equal(corrupt.exitCode, 1);
         assert.include(corrupt.stderr, "checksum mismatch");

@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";
@@ -229,6 +230,28 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  it.effect("ignores inherited T3CODE_HOME and resolves a fresh default home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "game-studio-home-" });
+      const resolved = yield* resolveServerConfig(
+        { ...minimalDesktopFlags(home), baseDir: Option.none() },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_HOME: "/live-t3" } })),
+            NetService.layer,
+          ),
+        ),
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+      assert.equal(resolved.baseDir, path.join(home, ".game-studio"));
+      assert.equal(resolved.stateDir, path.join(home, ".game-studio", "userdata"));
+    }),
+  );
+
   it.effect("falls back to effect/config values when flags are omitted", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
@@ -263,7 +286,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_MODE: "desktop",
                   T3CODE_PORT: "4001",
                   T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: baseDir,
+                  GAME_STUDIO_HOME: baseDir,
+                  T3CODE_HOME: "/live-t3",
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
                   T3CODE_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
@@ -336,7 +360,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_MODE: "desktop",
                   T3CODE_PORT: "4001",
                   T3CODE_HOST: "0.0.0.0",
-                  T3CODE_HOME: join(NodeOS.tmpdir(), "ignored-base"),
+                  GAME_STUDIO_HOME: join(NodeOS.tmpdir(), "ignored-base"),
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
                   T3CODE_NO_BROWSER: "false",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
@@ -652,7 +676,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                 env: {
                   T3CODE_MODE: "web",
                   T3CODE_BOOTSTRAP_FD: String(fd),
-                  T3CODE_HOME: baseDir,
+                  GAME_STUDIO_HOME: baseDir,
+                  T3CODE_HOME: "/live-t3",
                   T3CODE_NO_BROWSER: "true",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                   T3CODE_LOG_WS_EVENTS: "true",

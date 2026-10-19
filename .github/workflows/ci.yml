@@ -15,8 +15,7 @@ concurrency:
 
 jobs:
   # Skips jobs a pull request cannot affect: a web change does not run the
-  # server shards, a server change does not run the mobile tests, and the macOS
-  # lint (~6.7x a Linux minute) runs only for native mobile sources.
+  # server shards.
   # .github/scripts/ci-changes.cjs maps changed files to workspace packages and
   # their dependents. Pushes to main still run every Linux job. Detection fails
   # open: if the diff cannot be resolved, everything runs.
@@ -33,7 +32,6 @@ jobs:
       test_server: ${{ steps.detect.outputs.test_server }}
       rust: ${{ steps.detect.outputs.rust }}
       release_smoke: ${{ steps.detect.outputs.release_smoke }}
-      mobile_native: ${{ steps.detect.outputs.mobile_native }}
     steps:
       # Only the package manifests the script reads to build the dependency graph.
       # Depth 2 brings the base commit the change is diffed against.
@@ -69,7 +67,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       - name: Reject repository-owned PR assets
@@ -109,7 +106,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       - uses: ./.github/actions/setup-apt-mirrors
@@ -190,7 +186,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       # Blacksmith boots GitHub's Ubuntu runner image (gcc is usually present),
@@ -262,7 +257,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
@@ -321,7 +315,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       - name: Detect affected jobs
@@ -416,7 +409,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       - name: Setup Rust
@@ -436,36 +428,6 @@ jobs:
             cargo test --locked --manifest-path "native/$crate/Cargo.toml"
           done
 
-  mobile_native_static_analysis:
-    name: Mobile Native Static Analysis
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-26
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@t3tools/scripts...
-
-      - name: Install mobile native static analysis tools
-        run: brew bundle install --file apps/mobile/Brewfile
-
-      - name: Lint mobile native sources
-        run: vp run lint:mobile
-
   release_smoke:
     name: Release Smoke
     needs: changes
@@ -479,7 +441,6 @@ jobs:
           sparse-checkout: |
             /*
             !/.repos/
-            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
       # A full install: a filtered one that misses the cache first saves its
@@ -498,18 +459,7 @@ jobs:
   check:
     name: Check
     if: ${{ always() }}
-    needs:
-      [
-        changes,
-        lint,
-        build,
-        test,
-        test_web,
-        test_server,
-        rust,
-        mobile_native_static_analysis,
-        release_smoke,
-      ]
+    needs: [changes, lint, build, test, test_web, test_server, rust, release_smoke]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
@@ -522,7 +472,7 @@ jobs:
           # not needed. Gates are keyed by job name, except merged Build and the
           # macOS lint.
           echo "$RESULTS" | jq -e '.changes.outputs as $gates
-            | {build: ["build", "typecheck"], mobile_native_static_analysis: ["mobile_native"]} as $renamed
+            | {build: ["build", "typecheck"]} as $renamed
             | all(to_entries[];
                 .value.result == "success"
                 or (.value.result == "skipped"

@@ -145,38 +145,15 @@ it.effect("reports malformed Clerk publishable keys as typed configuration failu
   }),
 );
 
-it("resolves relay client tracing from runtime config with build-time fallback", () => {
-  const fallback = {
-    tracesUrl: "https://embedded.example.test/v1/traces",
-    tracesDataset: "embedded-dataset",
-    tracesToken: "embedded-token",
-  };
-
-  assert.deepEqual(resolveRelayClientTracingConfig({}, fallback), fallback);
-  assert.deepEqual(
+it("ignores managed relay tracing defaults and inherited tokens", () => {
+  assert.isNull(
     resolveRelayClientTracingConfig(
       {
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://runtime.example.test/v1/traces",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
+        T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://upstream.example",
+        T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "traces",
+        T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "token",
       },
-      fallback,
+      { tracesUrl: "https://upstream.example", tracesDataset: "traces", tracesToken: "token" },
     ),
-    {
-      tracesUrl: "https://runtime.example.test/v1/traces",
-      tracesDataset: "runtime-dataset",
-      tracesToken: "runtime-token",
-    },
-  );
-  assert.equal(
-    resolveRelayClientTracingConfig(
-      {
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "http://insecure.example.test/v1/traces",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
-      },
-      fallback,
-    ),
-    null,
   );
 });

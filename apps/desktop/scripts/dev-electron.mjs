@@ -70,7 +70,7 @@ const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
 const devProtocolClient = resolveDevProtocolClient();
 if (devProtocolClient) {
-  childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
+  childEnv.GAME_STUDIO_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
   childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
 }
 
@@ -89,16 +89,6 @@ function killChildTreeByPid(pid, signal) {
   NodeChildProcess.spawnSync("pkill", [`-${signal}`, "-P", String(pid)], { stdio: "ignore" });
 }
 
-function cleanupStaleDevApps() {
-  if (hostPlatform === "win32") {
-    return;
-  }
-
-  NodeChildProcess.spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], {
-    stdio: "ignore",
-  });
-}
-
 function startApp() {
   if (shuttingDown || currentApp !== null) {
     return;
@@ -109,7 +99,7 @@ function startApp() {
     : [];
   const launchArgs = devProtocolClient
     ? electronArgs
-    : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
+    : [...electronArgs, `--game-studio-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
   const electronCommand = resolveElectronLaunchCommand(launchArgs);
   const app = NodeChildProcess.spawn(electronCommand.electronPath, electronCommand.args, {
     cwd: desktopDir,
@@ -165,7 +155,6 @@ async function stopApp() {
     app.once("exit", finish);
     app.kill("SIGTERM");
     killChildTreeByPid(app.pid, "TERM");
-    cleanupStaleDevApps();
 
     setTimeout(() => {
       if (settled) {
@@ -174,7 +163,7 @@ async function stopApp() {
 
       app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
-      cleanupStaleDevApps();
+
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -254,7 +243,7 @@ async function shutdown(exitCode) {
 }
 
 startWatchers();
-cleanupStaleDevApps();
+
 startApp();
 
 process.once("SIGINT", () => {

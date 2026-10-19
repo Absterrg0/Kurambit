@@ -22,17 +22,14 @@ const INERT = [
 ];
 
 // Run everything: the root vite.config.ts loads the first as setup for every
-// package's tests, and the vendored mobile tarballs are installed dependencies.
-const RUNS_EVERYTHING = [
-  /^packages\/shared\/src\/(HostProcess|testing\/longTempDir)\.ts$/,
-  /^apps\/mobile\/deps\//,
-];
+// package's tests.
+const RUNS_EVERYTHING = [/^packages\/shared\/src\/(HostProcess|testing\/longTempDir)\.ts$/];
 
 // Paths outside a package, or files inside one that other packages read
 // through relative imports rather than a package.json dependency.
 const EXTRA_OWNERS = [
   // Vite configs and tsconfigs of these apps import scripts/lib directly.
-  [/^scripts\/lib\//, ["@t3tools/desktop", "@t3tools/mobile", "@t3tools/web", "t3"]],
+  [/^scripts\/lib\//, ["@t3tools/desktop", "@t3tools/web", "t3"]],
   // scripts/build-desktop-artifact.ts reads the GNOME extension manifest.
   [/^apps\/desktop\/gnome-extension\//, ["@t3tools/scripts"]],
   [/^native\/browser-secret\//, ["@t3tools/desktop"]],
@@ -45,23 +42,11 @@ const RUST = /^native\/(resource-monitor|kde-snap-shot|hyprland-snap-shot)\//;
 // third-party-licenses, brand-assets, build-desktop-artifact).
 const TEST_ONLY_DEPS = {
   "@t3tools/provider-pi": ["@t3tools/client-runtime"],
-  "@t3tools/scripts": [
-    "@t3tools/desktop",
-    "@t3tools/mobile",
-    "@t3tools/web",
-    "t3",
-    "@t3tools/provider-cursor",
-  ],
+  "@t3tools/scripts": ["@t3tools/desktop", "@t3tools/web", "t3", "@t3tools/provider-cursor"],
 };
 // Declared dependencies that only feed a build step: the server bundles the
 // built web app (apps/server/vite.config.ts) but never imports it.
 const BUILD_ONLY_DEPS = { t3: ["@t3tools/web"] };
-
-// Sources scripts/mobile-native-static-check.ts lints, plus the tool and rule
-// configuration that decides how it lints them, plus the root package.json
-// that defines the lint:mobile command.
-const MOBILE_NATIVE =
-  /^apps\/mobile\/.*\.(swift|kt|kts)$|^apps\/mobile\/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts\/mobile-native-static-check\.ts$|^package\.json$|^\.github\/workflows\/ci\.yml$|^\.github\/scripts\/ci-changes\.cjs$|^\.github\/actions\/ci-changes\//;
 
 // Jobs that test every package except these, which have jobs of their own.
 const OWN_TEST_JOB = new Set(["t3", "@t3tools/web", "@t3tools/monorepo"]);
@@ -179,7 +164,6 @@ function decide(files, packages, full) {
       test_server: has("t3"),
       rust: everything || rust,
       release_smoke: scriptsChanged,
-      mobile_native: files === null || files.some((file) => MOBILE_NATIVE.test(file)),
     },
   };
 }

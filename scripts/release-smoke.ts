@@ -16,11 +16,6 @@ const workspaceFiles = [
   "apps/server/package.json",
   "apps/desktop/package.json",
   "apps/web/package.json",
-  "apps/mobile/package.json",
-  "apps/mobile/modules/t3-source-text/package.json",
-  "apps/mobile/modules/t3-review-diff/package.json",
-  "apps/mobile/modules/t3-terminal/package.json",
-  "apps/marketing/package.json",
   "infra/relay/package.json",
   "oxlint-plugin-t3code/package.json",
   "packages/client-runtime/package.json",
@@ -56,13 +51,6 @@ function copyWorkspaceManifestFixture(targetRoot: string): void {
     const destinationPath = NodePath.resolve(targetRoot, relativePath);
     NodeFS.mkdirSync(NodePath.dirname(destinationPath), { recursive: true });
     NodeFS.cpSync(sourcePath, destinationPath);
-  }
-
-  const mobileDependencies = NodePath.resolve(repoRoot, "apps/mobile/deps");
-  if (NodeFS.existsSync(mobileDependencies)) {
-    NodeFS.cpSync(mobileDependencies, NodePath.resolve(targetRoot, "apps/mobile/deps"), {
-      recursive: true,
-    });
   }
 
   const patchesDirectory = NodePath.resolve(repoRoot, "patches");

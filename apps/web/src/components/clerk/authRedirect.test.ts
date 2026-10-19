@@ -14,19 +14,19 @@ describe("resolveClerkSignInProps", () => {
   it("removes a Clerk virtual pathname and callback params while preserving the desktop route", () => {
     expect(
       resolveClerkSignInProps(
-        "t3code://app/CLERK-ROUTER/VIRTUAL/sign-up?__clerk_status=complete#/settings/connections",
+        "game-studio://app/CLERK-ROUTER/VIRTUAL/sign-up?__clerk_status=complete#/settings/connections",
         true,
       ),
     ).toEqual({
-      forceRedirectUrl: "t3code://app/#/settings/connections",
-      signUpForceRedirectUrl: "t3code://app/#/settings/connections",
+      forceRedirectUrl: "game-studio://app/#/settings/connections",
+      signUpForceRedirectUrl: "game-studio://app/#/settings/connections",
     });
   });
 
   it("preserves a clean development desktop route", () => {
-    expect(resolveClerkSignInProps("t3code-dev://app/#/settings/general", true)).toEqual({
-      forceRedirectUrl: "t3code-dev://app/#/settings/general",
-      signUpForceRedirectUrl: "t3code-dev://app/#/settings/general",
+    expect(resolveClerkSignInProps("game-studio-dev://app/#/settings/general", true)).toEqual({
+      forceRedirectUrl: "game-studio-dev://app/#/settings/general",
+      signUpForceRedirectUrl: "game-studio-dev://app/#/settings/general",
     });
   });
 });

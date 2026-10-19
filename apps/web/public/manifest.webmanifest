@@ -16,5 +16,7 @@
       "sizes": "180x180",
       "type": "image/png"
     }
-  ]
+  ],
+  "name": "Game Studio",
+  "short_name": "Game Studio"
 }

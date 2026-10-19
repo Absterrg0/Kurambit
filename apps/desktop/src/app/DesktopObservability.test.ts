@@ -62,7 +62,7 @@ const layerEnvironmentFor = (
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: baseDir,
+          GAME_STUDIO_HOME: baseDir,
           VITE_DEV_SERVER_URL: isDevelopment ? "http://127.0.0.1:5733" : undefined,
           ...env,
         }),
@@ -493,9 +493,9 @@ describe("DesktopObservability", () => {
 
       assert.lengthOf(requests, 1);
       const body = requests[0]?.body ?? "";
-      assert.include(body, '"stringValue":"t3code-desktop"');
+      assert.include(body, '"stringValue":"game-studio-desktop"');
       assert.include(body, "deployment.environment.name");
-      assert.include(body, '"key":"service.namespace","value":{"stringValue":"t3code"}');
+      assert.include(body, '"key":"service.namespace","value":{"stringValue":"game-studio"}');
       assert.notInclude(body, "renamed");
     }).pipe(
       Effect.scoped,
