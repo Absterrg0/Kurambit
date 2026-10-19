@@ -56,10 +56,18 @@ export type McpCapabilityError<C extends McpCapability> = C extends "preview"
   ? PreviewAutomationUnavailableError
   : McpCapabilityUnavailableError;
 
-const missingCapability = (
+function missingCapability(
+  invocation: McpInvocationScope,
+  capability: "preview",
+): PreviewAutomationUnavailableError;
+function missingCapability(
   invocation: McpInvocationScope,
   capability: McpCapability,
-): PreviewAutomationUnavailableError | McpCapabilityUnavailableError => {
+): PreviewAutomationUnavailableError | McpCapabilityUnavailableError;
+function missingCapability(
+  invocation: McpInvocationScope,
+  capability: McpCapability,
+): PreviewAutomationUnavailableError | McpCapabilityUnavailableError {
   const fields = {
     environmentId: invocation.environmentId,
     ...(invocation.thread === undefined
@@ -73,7 +81,7 @@ const missingCapability = (
   return capability === "preview"
     ? new PreviewAutomationUnavailableError({ capability, ...fields })
     : new McpCapabilityUnavailableError({ capability, ...fields });
-};
+}
 
 export const requireMcpCapability = <const C extends McpCapability>(
   capability: C,
@@ -86,14 +94,18 @@ export const requireMcpCapability = <const C extends McpCapability>(
     Effect.withSpan("mcp.requireCapability"),
   );
 
-export const requireThreadMcpCapability = <const C extends "preview">(
-  capability: C,
-): Effect.Effect<McpThreadInvocationScope, McpCapabilityError<C>, McpInvocationContext> =>
+export const requireThreadMcpCapability = (
+  capability: "preview",
+): Effect.Effect<
+  McpThreadInvocationScope,
+  PreviewAutomationUnavailableError,
+  McpInvocationContext
+> =>
   McpInvocationContext.pipe(
     Effect.filterOrFail(
       (invocation): invocation is McpThreadInvocationScope =>
         invocation.capabilities.has(capability) && invocation.thread !== undefined,
-      (invocation) => missingCapability(invocation, capability) as McpCapabilityError<C>,
+      (invocation) => missingCapability(invocation, capability),
     ),
     Effect.withSpan("mcp.requireCapability"),
   );
