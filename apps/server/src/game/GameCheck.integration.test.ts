@@ -71,6 +71,21 @@ it.live.skipIf(!available)(
             expect(inspected.nodes[0]).toMatchObject({ path: ".", type: "Control" });
             expect(inspected.nodes.some((node) => node.name === "SettingsPanel")).toBe(true);
 
+            // The dump is capped, and the total still tells the agent how much it did not see.
+            const crowded = ["[gd_scene format=3]", '[node name="Crowded" type="Node"]'];
+            for (let index = 0; index < 405; index++)
+              crowded.push(`[node name="Node${index}" type="Node" parent="."]`);
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                NodePath.join(created.root, "godot/scenes/crowded.tscn"),
+                crowded.join("\n"),
+              ),
+            );
+            const limited = yield* game.inspectScene(created.threadId, "res://scenes/crowded.tscn");
+            expect(limited.truncated).toBe(true);
+            expect(limited.nodeCount).toBe(406);
+            expect(limited.nodes).toHaveLength(400);
+
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
                 NodePath.join(created.root, "godot/scripts/broken.gd"),
