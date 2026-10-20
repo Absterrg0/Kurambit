@@ -11,9 +11,11 @@ import { ProviderInstanceId } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameQualification from "./GameQualification.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
+import { snapshotSource } from "./sourceSnapshot.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   previewBrowserTestLayer,
@@ -143,8 +145,10 @@ it.live.skipIf(!available || !templatesInstalled)(
       const parent = yield* Effect.promise(() =>
         NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-webplaytest-")),
       );
-      // preserveTimestamps keeps the fixture's godot/ sources older than its
-      // builds/web, so the service reuses the export instead of re-exporting.
+      // The fixture ships a prebuilt web export. Record the export identity the
+      // way GameService does after a real export, so the playtest reuses it
+      // instead of paying for an export the test does not need.
+      const stateDir = NodePath.join(parent, "state");
       const root = NodePath.join(parent, "fixture");
       yield* Effect.promise(() =>
         NodeFSP.cp(sourceProject, root, {
@@ -159,7 +163,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(GameProcesses.layer),
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
-        Layer.provide(qualificationTestLayer()),
+        Layer.provideMerge(qualificationTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );
@@ -177,6 +181,16 @@ it.live.skipIf(!available || !templatesInstalled)(
             });
             const index = NodePath.join(root, "builds/web/index.html");
             const builtBefore = (yield* Effect.promise(() => NodeFSP.stat(index))).mtimeMs;
+            const qualification = yield* GameQualification.GameQualification;
+            const snapshot = yield* Effect.promise(() => snapshotSource(root, "godot"));
+            if (snapshot.kind !== "known") throw new Error("Fixture sources should be known");
+            yield* qualification.record(root, {
+              stage: "export",
+              outcome: "passed",
+              sourceId: snapshot.sourceId,
+              buildId: `${snapshot.sourceId}:fixture`,
+              evidenceDirectory: null,
+            });
             const result = yield* game.webPlaytest(registered.threadId, {
               steps: [{ key: "ArrowUp", holdMs: 1000 }],
             });

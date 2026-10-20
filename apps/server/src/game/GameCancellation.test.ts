@@ -97,7 +97,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
             }),
           ),
           Layer.provide(previewBrowserTestLayer()),
-          Layer.provide(qualificationTestLayer()),
+          Layer.provideMerge(qualificationTestLayer()),
         );
         yield* Effect.gen(function* () {
           const game = yield* GameService.GameService;

@@ -38,7 +38,7 @@ it.live.skipIf(!available)(
         Layer.provideMerge(GameProcesses.layer),
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer()),
-        Layer.provide(qualificationTestLayer()),
+        Layer.provideMerge(qualificationTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

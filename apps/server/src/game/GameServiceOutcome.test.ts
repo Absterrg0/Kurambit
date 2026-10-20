@@ -91,7 +91,7 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
         Layer.provide(previewBrowserTestLayer()),
-        Layer.provide(GameQualification.layer({ stateDir })),
+        Layer.provideMerge(GameQualification.layer({ stateDir })),
         Layer.provide(NodeServices.layer),
       );
       return yield* run({ root, stateDir }).pipe(Effect.provide(services));

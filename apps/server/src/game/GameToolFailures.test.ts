@@ -110,7 +110,7 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
         Layer.provide(previewBrowserTestLayer()),
-        Layer.provide(qualificationTestLayer()),
+        Layer.provideMerge(qualificationTestLayer()),
       );
       return yield* run(root, executable).pipe(
         Effect.provide(

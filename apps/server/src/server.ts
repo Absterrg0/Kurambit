@@ -500,7 +500,7 @@ const layerGame = GameService.layer.pipe(
   Layer.provide(GameProcesses.layer),
   // Web playtest drives the same headless browser the html toolkit drives.
   Layer.provide(PreviewBrowser.layer),
-  Layer.provide(
+  Layer.provideMerge(
     Layer.unwrap(
       Effect.gen(function* () {
         const config = yield* ServerConfig.ServerConfig;

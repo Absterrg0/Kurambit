@@ -118,7 +118,7 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provideMerge(GameProcesses.layer),
       Layer.provide(projectTestLayer()),
       Layer.provide(previewBrowserTestLayer(browserExecutable!)),
-      Layer.provide(qualificationTestLayer()),
+      Layer.provideMerge(qualificationTestLayer()),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );
