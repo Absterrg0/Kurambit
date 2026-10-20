@@ -5,7 +5,7 @@ import {
   type GameManifest,
 } from "@t3tools/contracts";
 
-const designSkeleton = (name: string) => `# ${name} — design
+export const designSkeleton = (name: string) => `# ${name} — design
 
 One page. Keep these headings and replace every hint with a concrete decision.
 
@@ -29,6 +29,22 @@ How a run ends in success and in failure, and what retrying costs.
 
 Levels, enemies and pickups, with counts and names. Say what the starter template
 provides and what this game adds.
+
+## Acceptance
+
+The build is judged against these, not against a summary. Write a fenced block tagged
+\`acceptance\` with 5 to 12 concrete criteria. Each needs a slug id, a kind (\`mechanic\`,
+\`content\`, \`end\` or \`control\`), the promise in plain language, and optionally an
+\`observe\` of a GameState autoload property (\`state\`, \`collected\`, \`total\`, \`score\`,
+\`lives\`, \`health\`, \`level_index\`) using \`==V\`, \`>=N\`, \`<=N\` or \`changes\`. Cover every
+control, the core mechanic, the content counts, how the game is won and how it is lost.
+
+\`\`\`acceptance
+[
+  { "id": "light-all-lanterns", "kind": "mechanic", "text": "Lighting every lantern opens the chimney", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "reach-the-summit", "kind": "end", "text": "The run ends at the summit spire" }
+]
+\`\`\`
 
 ## Art direction
 
@@ -61,7 +77,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
   const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
   if (input.planFirst === false)
     return `${brief}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block, covering every control, the core mechanic, the content counts, and how the game is won and lost. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
 }
 
 /**
@@ -97,9 +113,9 @@ This game started from the **${templateName}** starter template. Read TEMPLATE.m
 
 ## Design first
 
-game.json's design section decides what this turn may do. When design.status is "draft", this is a design turn: write or update DESIGN.md only. Keep the scaffold's section headings (Pitch, Core loop, Controls, Win & lose, Content, Art direction, Audio, Scope, Milestones) and replace every hint with a concrete decision; do not delete, rename or merge them. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
+game.json's design section decides what this turn may do, but only the server's approval record can release the build. When the design is still a draft, this is a design turn: write or update DESIGN.md only. Keep the scaffold's section headings (Pitch, Core loop, Controls, Win & lose, Content, Acceptance, Art direction, Audio, Scope, Milestones) and replace every hint with a concrete decision; do not delete, rename or merge them. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Fill Acceptance with 5 to 12 concrete criteria in the fenced acceptance block: each control, the core mechanic, content counts, and how the game is won and lost. Criteria carry a slug id, a kind (mechanic, content, end or control), plain text and optionally an observe of a GameState property. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
 
-When design.status is "approved" and DESIGN.md exists, build to its milestones one at a time. Keep DESIGN.md truthful when scope changes.
+When the creator has approved the design, build to its milestones one at a time. The approved revision and its acceptance bind every build: implement every criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell the creator it needs re-approval on the Design tab; staging stays locked until they approve the new revision.
 
 ## Layout
 

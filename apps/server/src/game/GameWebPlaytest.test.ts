@@ -20,6 +20,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import {
   previewBrowserTestLayer,
   projectTestLayer,
+  designApprovalTestLayer,
   qualificationTestLayer,
 } from "./gameTestLayers.ts";
 
@@ -164,6 +165,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provideMerge(qualificationTestLayer(stateDir)),
+        Layer.provideMerge(designApprovalTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

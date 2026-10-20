@@ -131,7 +131,7 @@ export function GameStage({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
   if (!data) return null;
-  const designDraft = data.design?.status === "draft";
+  const designDraft = data.design.state === "draft";
   const tabs = designDraft ? DESIGN_FIRST_TABS : PLAY_TABS;
   const activeTab = tab ?? (designDraft ? "design" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");

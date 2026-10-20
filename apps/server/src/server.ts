@@ -1,6 +1,7 @@
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
@@ -505,6 +506,14 @@ const layerGame = GameService.layer.pipe(
       Effect.gen(function* () {
         const config = yield* ServerConfig.ServerConfig;
         return GameQualification.layer({ stateDir: config.stateDir });
+      }),
+    ),
+  ),
+  Layer.provideMerge(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        return GameDesignApproval.layer({ stateDir: config.stateDir });
       }),
     ),
   ),

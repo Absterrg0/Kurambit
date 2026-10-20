@@ -25,6 +25,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -132,6 +133,7 @@ const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const browser = yield* PreviewBrowser.PreviewBrowser;
   const qualification = yield* GameQualification.GameQualification;
+  const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
   const active = new Map<
     string,
@@ -596,19 +598,21 @@ const make = Effect.gen(function* () {
     return yield* exclusive(root, name, work(root));
   });
   /**
-   * The design phase is the gate between planning and building: while DESIGN.md
-   * is only a draft the game must not export, preview, run or playtest, and must
-   * not mint Blender assets. Prompts ask the agent to wait, but a weak model can
-   * ignore them and build an unreviewed game, so the stage state enforces it.
+   * The design phase is the gate between planning and building: while the
+   * current DESIGN.md has no matching approval record the game must not export,
+   * preview, run or playtest, and must not mint Blender assets. The record is
+   * authoritative, so editing game.json cannot lift the gate.
    */
-  const refuseWhileDraft = (root: string, operation: string) =>
+  const refuseWhileUnapproved = (root: string, operation: string) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
-      if (manifest?.design?.status !== "draft") return;
+      if (manifest === null) return;
+      const design = yield* designApprovals.status(root, manifest);
+      if (design.state !== "draft" && design.state !== "changed") return;
       return yield* new GameOperationError({
         operation,
-        path: NodePath.join(root, "game.json"),
-        reason: "design-draft",
+        path: NodePath.join(root, "DESIGN.md"),
+        reason: design.state === "changed" ? "design-changed" : "design-draft",
       });
     });
   return GameService.of({
@@ -626,7 +630,12 @@ const make = Effect.gen(function* () {
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
       const inventory = yield* projects.inventory(root);
-      const qualificationRead = yield* qualification.read(root, inventory.manifest.godotProject);
+      const design = yield* designApprovals.status(root, inventory.manifest);
+      const qualificationRead = yield* qualification.read(
+        root,
+        inventory.manifest.godotProject,
+        design.state,
+      );
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () => readLastPlaytest(root, inventory.builds),
@@ -647,6 +656,7 @@ const make = Effect.gen(function* () {
       return {
         root,
         ...inventory,
+        design,
         webBuildStale: !(yield* webBuildIsCurrent(root, qualificationRead)),
         qualification: qualificationRead,
         toolchain: yield* tools.status,
@@ -660,11 +670,11 @@ const make = Effect.gen(function* () {
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) =>
-        Effect.andThen(refuseWhileDraft(root, "export"), exportGame(root, target)),
+        Effect.andThen(refuseWhileUnapproved(root, "export"), exportGame(root, target)),
       ),
     webPlaytest: (threadId, input) =>
       withRoot(threadId, "Web playtest", (root) =>
-        Effect.andThen(refuseWhileDraft(root, "web-playtest"), webPlaytest(root, input)),
+        Effect.andThen(refuseWhileUnapproved(root, "web-playtest"), webPlaytest(root, input)),
       ),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     inspectScene: (threadId, scenePath) =>
@@ -714,7 +724,7 @@ const make = Effect.gen(function* () {
     blender: (threadId, input) =>
       withRoot(threadId, "Blender asset", (root) =>
         Effect.gen(function* () {
-          yield* refuseWhileDraft(root, "blender");
+          yield* refuseWhileUnapproved(root, "blender");
           const blender = yield* tools.executable("blender");
           const manifest = yield* projects.read(root);
           if (!/^[a-zA-Z0-9_-]{1,80}$/.test(input.id))
@@ -862,7 +872,7 @@ const make = Effect.gen(function* () {
           }
           // Only the toolchain check stays open during a draft; every staging
           // action here moves the game toward a playable build.
-          yield* refuseWhileDraft(root, action);
+          yield* refuseWhileUnapproved(root, action);
           if (action === "export-linux") return yield* exportGame(root, "Linux");
           if (action === "native") {
             if (processes.list(root).some((entry) => entry.operation === "native"))

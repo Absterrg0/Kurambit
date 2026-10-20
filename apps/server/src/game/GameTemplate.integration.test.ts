@@ -17,6 +17,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import {
   previewBrowserTestLayer,
   projectTestLayer,
+  designApprovalTestLayer,
   qualificationTestLayer,
 } from "./gameTestLayers.ts";
 
@@ -119,6 +120,7 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provide(projectTestLayer()),
       Layer.provide(previewBrowserTestLayer(browserExecutable!)),
       Layer.provideMerge(qualificationTestLayer()),
+      Layer.provideMerge(designApprovalTestLayer()),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );

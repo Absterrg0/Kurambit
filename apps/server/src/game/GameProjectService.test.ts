@@ -14,6 +14,7 @@ import {
   type GameTemplateId,
 } from "@t3tools/contracts";
 import {
+  designApprovalTestLayer,
   previewBrowserTestLayer,
   projectTestLayer,
   qualificationTestLayer,
@@ -25,27 +26,101 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" };
 /** Enough of the real services to resolve a game and hit the draft gate without Godot. */
-const gameServiceLayer = GameService.layer.pipe(
-  Layer.provideMerge(GameProjectService.layer),
-  Layer.provideMerge(GameToolchain.layer),
-  Layer.provideMerge(GamePreview.layer),
-  Layer.provideMerge(GameProcesses.layer),
-  Layer.provide(projectTestLayer()),
-  Layer.provide(previewBrowserTestLayer()),
-  Layer.provideMerge(qualificationTestLayer()),
-  Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(NodeServices.layer),
-);
-const gameProjectLayer = (registration = projectTestLayer()) =>
+const gameServiceLayers = (options?: {
+  readonly stateDir?: string;
+  readonly onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void;
+}) =>
+  GameService.layer.pipe(
+    Layer.provideMerge(GameProjectService.layer),
+    Layer.provideMerge(GameToolchain.layer),
+    Layer.provideMerge(GamePreview.layer),
+    Layer.provideMerge(GameProcesses.layer),
+    Layer.provide(projectTestLayer(undefined, options?.onSend)),
+    Layer.provide(previewBrowserTestLayer()),
+    Layer.provideMerge(qualificationTestLayer(options?.stateDir)),
+    Layer.provideMerge(designApprovalTestLayer(options?.stateDir)),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(NodeServices.layer),
+  );
+const gameServiceLayer = gameServiceLayers();
+const gameProjectLayer = (registration = projectTestLayer(), stateDir?: string) =>
   GameProjectService.layer.pipe(
     Layer.provide(registration),
     Layer.provideMerge(GameProcesses.layer),
+    Layer.provideMerge(designApprovalTestLayer(stateDir)),
     Layer.provide(NodeServices.layer),
   );
+/** A design that clears every scaffold heading and binds acceptance. */
+const filledDesign = (name = "Planned Quest") => `# ${name} — design
+
+## Pitch
+
+You are a rooftop courier who lights lanterns to open the chimney gate. The pleasure is a clean
+route across moving platforms, a growing string of lights below, and one more run after a fall.
+
+## Core loop
+
+Run and jump across three rooftops, light every lantern on a roof, then climb the chimney to the
+next roof. Each roof raises the wind and adds a moving platform, so the same route keeps changing.
+
+## Controls
+
+Move with A and D or the left stick. Jump with Space, W or the south face button. Pause with
+Escape or Start, and restart the current roof from the pause menu with R.
+
+## Win & lose
+
+The run is won when the chimney lantern on the third roof lights. Falling below the rooftops or
+losing all three lives ends the run at the last checkpoint, and restart returns to roof one.
+
+## Content
+
+Three rooftops, nine lanterns total, two moving platforms, one wind gust per roof and a chimney
+gate. The starter template supplies the courier controller, camera, pause menu and checkpoint
+respawn; this game adds lanterns, the wind system and the chimney route.
+
+## Acceptance
+
+The build is judged against these criteria.
+
+\`\`\`acceptance
+[
+  { "id": "move-and-jump", "kind": "control", "text": "A and D move the courier and Space jumps", "observe": { "key": "state", "expect": "changes" } },
+  { "id": "light-lanterns", "kind": "mechanic", "text": "Touching a lantern lights it and increments the count", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "nine-lanterns", "kind": "content", "text": "All nine lanterns exist across the three rooftops", "observe": { "key": "total", "expect": "==9" } },
+  { "id": "chimney-opens", "kind": "mechanic", "text": "Lighting every lantern on a roof opens its chimney", "observe": { "key": "level_index", "expect": "changes" } },
+  { "id": "reach-third-roof", "kind": "end", "text": "The run ends at the third roof's chimney lantern" }
+]
+\`\`\`
+
+## Art direction
+
+Moonlit slate rooftops with warm amber lanterns, deep blue shadows and a pale gold chimney. Keep
+silhouettes simple and readable at the game's small camera distance.
+
+## Audio
+
+A quiet wind bed, a rising chime per lantern, a low door rumble for each chimney and a short
+victory phrase when the third roof lights.
+
+## Scope
+
+- **Must have** — three rooftops, nine lanterns, the jump controller and a finish.
+- **Nice to have** — wind gusts and a second moving platform on roof three.
+- **Cut** — enemies, inventories and generated audio beds.
+
+## Milestones
+
+1. **Playable core** — one roof, three lanterns and the chimney gate working end to end.
+2. **Content** — all three rooftops, nine lanterns and the wind system.
+3. **Polish** — audio, pause states and the checkpoint presentation.
+`;
+
 const readFile = (file: string) => Effect.promise(() => NodeFSP.readFile(file, "utf8"));
 const exists = (path: string) =>
   Effect.promise(() =>
@@ -508,10 +583,23 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
   }),
 );
 
-it.effect("approves a draft design once and starts exactly one build turn", () =>
+const writeDesign = (root: string, design: string) =>
+  Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), design));
+const designHashOf = (root: string) =>
+  readFile(NodePath.join(root, "DESIGN.md")).pipe(
+    Effect.map(GameDesignApproval.designDocumentHash),
+  );
+
+it.effect("approves one reviewed DESIGN.md revision and dispatches one build turn", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(
       Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-approve-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-approve-state-")),
+      ),
       (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
     );
     const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
@@ -526,29 +614,44 @@ it.effect("approves a draft design once and starts exactly one build turn", () =
           modelSelection: selection,
         });
         gameRoot = created.root;
-        yield* projects.upsertAsset(created.root, {
-          id: "coin",
-          kind: "model",
-          source: "art/blender/coin.blend",
-          script: "art/scripts/coin.py",
-          export: "godot/assets/models/coin.glb",
-          updatedAt: "2026-10-20T09:00:00Z",
-        });
-        const approval = yield* projects.approveDesign(created.threadId);
+        yield* writeDesign(created.root, filledDesign());
+        const designHash = yield* designHashOf(created.root);
+        const approval = yield* projects.approveDesign(created.threadId, designHash);
         const manifest = yield* projects.read(created.root);
         expect(manifest.design).toEqual({ status: "approved", approvedAt: approval.approvedAt });
-        expect(manifest.assets).toHaveLength(1);
-        const again = yield* Effect.result(projects.approveDesign(created.threadId));
-        expect(again._tag).toBe("Failure");
-        if (again._tag === "Failure") expect(again.failure.reason).toBe("design-already-approved");
+        expect(approval.designHash).toBe(designHash);
+        // The authority is the server record, not game.json.
+        const record = yield* Effect.promise(() =>
+          GameDesignApproval.readDesignApprovalRecord(
+            GameDesignApproval.approvalRecordFile(stateDir, created.root),
+          ),
+        );
+        expect(record?.approvalId).toBe(approval.approvalId);
+        expect(record?.designHash).toBe(designHash);
+        expect(record?.acceptance).toHaveLength(5);
+        // Retrying the same revision is a read, not another build turn.
+        const again = yield* projects.approveDesign(created.threadId, designHash);
+        expect(again.approvalId).toBe(approval.approvalId);
+        // The creator approves what they saw; a changed document is rejected.
+        yield* writeDesign(created.root, filledDesign().replace("nine lanterns", "ten lanterns"));
+        const stale = yield* Effect.result(projects.approveDesign(created.threadId, designHash));
+        expect(stale._tag).toBe("Failure");
+        if (stale._tag === "Failure") expect(stale.failure.reason).toBe("design-hash-mismatch");
       }).pipe(
-        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer(undefined, (input) => sends.push(input)),
+            stateDir,
+          ),
+        ),
       ),
     );
     expect(sends).toHaveLength(1);
     expect(sends[0]?.threadId).toBe(ThreadId.make("game-test-thread"));
     expect(sends[0]?.text).toContain("The design is approved");
     expect(sends[0]?.text).toContain("milestone 1");
+    expect(sends[0]?.text).toContain("acceptance criterion");
+    expect(sends[0]?.text).toContain("re-approval");
     // The build turn runs the product's qualification loop with the recorded
     // tools; the prompt has to name them, because a do-it-yourself agent that
     // drives the godot CLI by hand leaves no verdicts the panel can show.
@@ -562,6 +665,278 @@ it.effect("approves a draft design once and starts exactly one build turn", () =
     expect(sends[0]?.createdBy).toBe("user");
     expect(sends[0]?.attachments).toEqual([]);
     expect(gameRoot).not.toBe("");
+  }),
+);
+
+it.effect("refuses a missing, skeleton, unreadable or acceptance-less design", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-invalid-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        const designFile = NodePath.join(created.root, "DESIGN.md");
+        const refuse = (reason: string) =>
+          Effect.gen(function* () {
+            const hash = yield* Effect.promise(async () => {
+              try {
+                return GameDesignApproval.designDocumentHash(
+                  await NodeFSP.readFile(designFile, "utf8"),
+                );
+              } catch {
+                return "missing";
+              }
+            });
+            const outcome = yield* Effect.result(projects.approveDesign(created.threadId, hash));
+            expect(outcome._tag).toBe("Failure");
+            if (outcome._tag === "Failure") {
+              expect(outcome.failure.reason).toBe(reason);
+              return outcome.failure.detail ?? "";
+            }
+            return "";
+          });
+        // The untouched scaffold.
+        const skeletonDetail = yield* refuse("design-invalid");
+        expect(skeletonDetail).toContain("skeleton hint");
+        // A filled page with no acceptance block.
+        const withoutAcceptance = filledDesign().replace(
+          /\n## Acceptance[\s\S]*?(?=\n## Art direction)/,
+          "",
+        );
+        yield* writeDesign(created.root, withoutAcceptance);
+        expect(yield* refuse("design-invalid")).toContain("Acceptance");
+        // Missing, then unreadable (a directory is never a document).
+        yield* Effect.promise(() => NodeFSP.rm(designFile));
+        yield* refuse("design-missing");
+        yield* Effect.promise(() => NodeFSP.mkdir(designFile));
+        yield* refuse("design-missing");
+        yield* Effect.promise(() => NodeFSP.rmdir(designFile));
+        expect(sends).toHaveLength(0);
+      }).pipe(
+        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+      ),
+    );
+  }),
+);
+
+it.effect("two concurrent approvals write one record and dispatch one turn", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-concurrent-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        yield* writeDesign(created.root, filledDesign());
+        const hash = yield* designHashOf(created.root);
+        const results = yield* Effect.all(
+          [
+            projects.approveDesign(created.threadId, hash),
+            projects.approveDesign(created.threadId, hash),
+          ],
+          { concurrency: 2 },
+        );
+        expect(results[0].approvalId).toBe(results[1].approvalId);
+      }).pipe(
+        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+      ),
+    );
+    expect(sends).toHaveLength(1);
+  }),
+);
+
+it.effect("a failed dispatch rolls back only that attempt, and a retry dispatches once", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-retry-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const approvals = yield* GameDesignApproval.GameDesignApproval;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        yield* writeDesign(created.root, filledDesign());
+        const hash = yield* designHashOf(created.root);
+        const failed = yield* Effect.result(projects.approveDesign(created.threadId, hash));
+        expect(failed._tag).toBe("Failure");
+        if (failed._tag === "Failure") expect(failed.failure.reason).toBe("thread-dispatch");
+        expect((yield* projects.read(created.root)).design).toEqual({ status: "draft" });
+        expect(yield* approvals.read(created.root)).toBeNull();
+        const approval = yield* projects.approveDesign(created.threadId, hash);
+        expect(yield* approvals.read(created.root)).toMatchObject({
+          approvalId: approval.approvalId,
+          designHash: hash,
+        });
+        // A successful approval is never duplicated or undone by a retry.
+        const retry = yield* projects.approveDesign(created.threadId, hash);
+        expect(retry.approvalId).toBe(approval.approvalId);
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer(undefined, (input) => sends.push(input), { sendFailures: 1 }),
+          ),
+        ),
+      ),
+    );
+    expect(sends).toHaveLength(2);
+  }),
+);
+
+it.effect(
+  "changing the approved design marks it changed, unqualifies the game, and re-approval does not dispatch",
+  () =>
+    Effect.gen(function* () {
+      const parent = yield* Effect.acquireRelease(
+        Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-changed-"))),
+        (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+      );
+      const stateDir = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-changed-state-")),
+        ),
+        (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+      );
+      const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const projects = yield* GameProjectService.GameProjectService;
+          const game = yield* GameService.GameService;
+          const created = yield* projects.create({
+            name: "Planned Quest",
+            parentDirectory: parent,
+            brief: "Collect three coins.",
+            modelSelection: selection,
+          });
+          yield* writeDesign(created.root, filledDesign());
+          const firstHash = yield* designHashOf(created.root);
+          yield* projects.approveDesign(created.threadId, firstHash);
+          const approved = yield* game.status(created.threadId);
+          expect(approved.design.state).toBe("approved");
+          expect(approved.design.acceptance).toHaveLength(5);
+          expect(approved.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
+            "passed",
+          );
+          // Changing DESIGN.md is a scope change, not a silent approval.
+          yield* writeDesign(
+            created.root,
+            filledDesign().replaceAll("nine lanterns", "ten lanterns"),
+          );
+          const changed = yield* game.status(created.threadId);
+          expect(changed.design.state).toBe("changed");
+          expect(changed.design.currentHash).not.toBe(changed.design.approvedHash);
+          expect(changed.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
+            "failed",
+          );
+          expect(changed.qualification.state).toBe("unqualified");
+          const gated = yield* Effect.result(game.action(created.threadId, "preview"));
+          expect(gated._tag).toBe("Failure");
+          if (gated._tag === "Failure") expect(gated.failure.reason).toBe("design-changed");
+          // Re-approval binds the new revision but must not start another build.
+          const secondHash = yield* designHashOf(created.root);
+          const second = yield* projects.approveDesign(created.threadId, secondHash);
+          expect(second.designHash).toBe(secondHash);
+          const reapproved = yield* game.status(created.threadId);
+          expect(reapproved.design.state).toBe("approved");
+          expect(reapproved.design.acceptance.some((c) => c.text.includes("ten lanterns"))).toBe(
+            true,
+          );
+        }).pipe(
+          Effect.provide(gameServiceLayers({ stateDir, onSend: (input) => sends.push(input) })),
+        ),
+      );
+      expect(sends).toHaveLength(1);
+    }),
+);
+
+it.effect("a raw game.json edit to approved grants nothing", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-raw-edit-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        const manifestFile = NodePath.join(created.root, "game.json");
+        const manifest = JSON.parse(yield* readFile(manifestFile)) as Record<string, unknown>;
+        manifest.design = { status: "approved", approvedAt: "2026-10-20T00:00:00.000Z" };
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`),
+        );
+        const status = yield* game.status(created.threadId);
+        // The untouched skeleton is still a draft, whatever game.json claims.
+        expect(status.design.state).toBe("draft");
+        expect(status.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
+          "failed",
+        );
+        const hash = yield* designHashOf(created.root);
+        const outcome = yield* Effect.result(projects.approveDesign(created.threadId, hash));
+        expect(outcome._tag).toBe("Failure");
+        if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("design-invalid");
+      }).pipe(Effect.provide(gameServiceLayers())),
+    );
+  }),
+);
+
+it.effect("a skip-planning game is legacy with no acceptance", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-legacy-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* projects.create({
+          name: "Straight To Build",
+          parentDirectory: parent,
+          brief: "Jump over the crates.",
+          planFirst: false,
+          modelSelection: selection,
+        });
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("legacy");
+        expect(status.design.acceptance).toEqual([]);
+        expect(status.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
+          "passed",
+        );
+        const outcome = yield* Effect.result(projects.approveDesign(created.threadId, "any"));
+        expect(outcome._tag).toBe("Failure");
+        if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("design-legacy");
+      }).pipe(Effect.provide(gameServiceLayers())),
+    );
   }),
 );
 
@@ -599,10 +974,12 @@ it.effect("a draft design locks staging until it is approved", () =>
           }
           // Read-only tools stay open; the agent can still see game state while drafting.
           const status = yield* game.status(created.threadId);
-          expect(status.design?.status).toBe("draft");
+          expect(status.design.state).toBe("draft");
           // Approval is the only legal way out of the gate.
-          yield* projects.approveDesign(created.threadId);
+          yield* writeDesign(created.root, filledDesign("Planned First"));
+          yield* projects.approveDesign(created.threadId, yield* designHashOf(created.root));
           expect((yield* projects.read(created.root)).design?.status).toBe("approved");
+          expect((yield* game.status(created.threadId)).design.state).toBe("approved");
         }).pipe(Effect.provide(gameServiceLayer)),
       );
     } finally {

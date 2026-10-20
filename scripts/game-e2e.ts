@@ -31,6 +31,8 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
   type GameStatus,
+  parseAcceptance,
+  validateDesignDocument,
 } from "../packages/contracts/src/index.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
@@ -387,41 +389,27 @@ const designSections = (markdown: string) => {
 };
 const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
 
-/** The design turn's bar: the skeleton is gone and every heading has real decisions under it. */
+/** The design turn's bar, shared with the server so both agree on approvability. */
 const assertDesignFilled = (skeleton: string, design: string) => {
-  const headings = skeleton
-    .split("\n")
-    .map(designHeading)
-    .filter((heading): heading is string => heading !== undefined);
-  assert(headings.length >= 5, "The scaffolded DESIGN.md has no section headings");
-  const sections = designSections(design);
-  for (const heading of headings) {
-    assert(sections.has(heading), `DESIGN.md is missing the "${heading}" section`);
-    const body = normalizeText(sections.get(heading)!);
-    assert(body.length >= 40, `DESIGN.md's "${heading}" section is still empty`);
-  }
-  const normalizedDesign = normalizeText(design);
+  const validation = validateDesignDocument({ design, skeleton });
   assert(
-    normalizedDesign.length >= 1_200,
-    `DESIGN.md is too thin for a one-page design (${normalizedDesign.length} characters)`,
+    validation.issues.length === 0,
+    `DESIGN.md is not approvable:\n${validation.issues.join("\n")}`,
   );
-  // Paragraph hints are copied verbatim only when the agent forgot to replace one.
-  for (const paragraph of skeleton.split(/\n\s*\n/).map(normalizeText)) {
-    if (paragraph === "" || paragraph.startsWith("#")) continue;
-    if (/^(?:-|\d+\.)\s/.test(paragraph)) continue;
-    assert(
-      !normalizedDesign.includes(paragraph),
-      `DESIGN.md still contains the skeleton hint "${paragraph.slice(0, 70)}..."`,
-    );
-  }
-  for (const line of skeleton.split("\n")) {
-    const hint = line.match(/^(?:-|\d+\.)\s+\*\*[^*]+\*\*\s+—\s+(.+)$/)?.[1];
-    if (hint === undefined) continue;
-    assert(
-      !normalizedDesign.includes(normalizeText(hint)),
-      `DESIGN.md still contains the skeleton hint "${normalizeText(hint).slice(0, 70)}..."`,
-    );
-  }
+  const parsed = parseAcceptance(design);
+  assert(parsed.ok, "DESIGN.md's acceptance block did not parse");
+  assert(
+    parsed.ok && parsed.criteria.length >= 5,
+    `DESIGN.md bound only ${parsed.ok ? parsed.criteria.length : 0} acceptance criteria`,
+  );
+  assert(
+    parsed.ok && parsed.criteria.some((criterion) => criterion.kind === "end"),
+    "DESIGN.md's acceptance has no end criterion",
+  );
+  assert(
+    parsed.ok && parsed.criteria.some((criterion) => criterion.kind === "mechanic"),
+    "DESIGN.md's acceptance has no mechanic criterion",
+  );
 };
 
 const filesUnder = async (directory: string): Promise<string[]> => {
@@ -518,7 +506,7 @@ const main = Effect.gen(function* () {
     yield* promise(async () => assertDesignFilled(designSkeleton, design));
     const designStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     assert(
-      designStatus.design?.status === "draft",
+      designStatus.design.state === "draft",
       `Design turn did not leave the design in draft (${JSON.stringify(designStatus.design)})`,
     );
     assert(designStatus.assets.length === 0, "Design turn created Blender assets");
@@ -552,14 +540,30 @@ const main = Effect.gen(function* () {
       designChanges.split("\n").every((line) => line === "M DESIGN.md" || line === ""),
       `Design turn touched files beyond DESIGN.md:\n${designChanges}`,
     );
-    // Approve through the same RPC the Design tab calls, then wait for the build turn.
-    const approval = yield* client[WS_METHODS.gameApproveDesign]({ threadId: created.threadId });
+    // Approve through the same RPC the Design tab calls, with the hash the
+    // status read returned, then wait for the build turn.
+    const designHash = designStatus.design.currentHash;
+    assert(designHash !== null, "Status reported no DESIGN.md hash for the draft");
+    const approval = yield* client[WS_METHODS.gameApproveDesign]({
+      threadId: created.threadId,
+      expectedDesignHash: designHash,
+    });
     assert(approval.approvedAt.length > 0, "Approval returned no timestamp");
+    assert(approval.designHash === designHash, "Approval recorded a different design hash");
     timeline(`Design approved at ${approval.approvedAt}`);
     const approvedStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     assert(
-      approvedStatus.design?.status === "approved",
-      "game.json still reports a draft after approval",
+      approvedStatus.design.state === "approved",
+      `The server did not record the approved design (${JSON.stringify(approvedStatus.design)})`,
+    );
+    assert(
+      approvedStatus.design.acceptance.length >= 5,
+      `Approval bound only ${approvedStatus.design.acceptance.length} acceptance criteria`,
+    );
+    assert(
+      approvedStatus.design.acceptance.some((criterion) => criterion.kind === "end") &&
+        approvedStatus.design.acceptance.some((criterion) => criterion.kind === "mechanic"),
+      "Approved acceptance is missing an end or mechanic criterion",
     );
     buildRun = yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
       observed: observedTurnItems,
@@ -727,8 +731,8 @@ const main = Effect.gen(function* () {
     assert(diff.stdout.trim() !== "", "Revision turn changed no files");
     const reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     assert(
-      reviseStatus.design?.status === "approved",
-      "Revision turn knocked the design back to draft",
+      reviseStatus.design.state === "approved",
+      "Revision turn changed the approved design without re-approval",
     );
     assertQualified("after the revision turn", reviseStatus);
     timeline(

@@ -91,6 +91,7 @@ it.effect("starts unqualified, with every stage missing and later stages never p
       const read = yield* qualification.read(root, "godot");
       expect(read.state).toBe("unqualified");
       expect(read.stages.map((entry) => [entry.stage, entry.status])).toEqual([
+        ["design", "missing"],
         ["check", "missing"],
         ["test", "missing"],
         ["export", "missing"],
@@ -109,7 +110,7 @@ it.effect("records real stage results and only qualifies when all four are curre
       const buildId = `${sourceId}:first`;
       yield* recordAll(qualification, root, sourceId, buildId);
 
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.state).toBe("qualified");
       expect(read.buildId).toBe(buildId);
       expect(read.stages.find((entry) => entry.stage === "playtest")).toMatchObject({
@@ -133,9 +134,9 @@ it.effect("records real stage results and only qualifies when all four are curre
           JSON.stringify({ success: true, responded: true }),
         ),
       );
-      expect((yield* qualification.read(root, "godot")).state).toBe("qualified");
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
       // Unchanged sources keep the record current.
-      expect((yield* qualification.read(root, "godot")).state).toBe("qualified");
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
     }),
   ),
 );
@@ -151,7 +152,7 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
           "extends Node\n# revised\n",
         ),
       );
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.state).toBe("unqualified");
       expect(
         read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
@@ -167,7 +168,7 @@ it.effect("a deletion after the stages also invalidates them", () =>
       const sourceId = yield* Effect.promise(() => sourceIdOf(root));
       yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
       yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, "godot/scripts/main.gd")));
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.state).toBe("unqualified");
       expect(read.stages.find((entry) => entry.stage === "export")?.status).toBe("stale");
     }),
@@ -192,7 +193,7 @@ it.effect("a later failing check replaces the pass", () =>
         buildId: null,
         evidenceDirectory: null,
       });
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.stages.find((entry) => entry.stage === "check")?.status).toBe("failed");
       expect(read.state).toBe("unqualified");
     }),
@@ -204,7 +205,7 @@ it.effect("a re-export on the same sources invalidates the playtest build", () =
     Effect.gen(function* () {
       const sourceId = yield* Effect.promise(() => sourceIdOf(root));
       yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
-      expect((yield* qualification.read(root, "godot")).state).toBe("qualified");
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
 
       yield* qualification.record(root, {
         stage: "export",
@@ -213,10 +214,29 @@ it.effect("a re-export on the same sources invalidates the playtest build", () =
         buildId: `${sourceId}:second`,
         evidenceDirectory: null,
       });
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.buildId).toBe(`${sourceId}:second`);
       expect(read.stages.find((entry) => entry.stage === "playtest")?.status).toBe("stale");
       expect(read.state).toBe("unqualified");
+    }),
+  ),
+);
+
+it.effect("the design stage passes only for an approved or legacy design", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
+      for (const state of ["approved", "legacy"] as const) {
+        const read = yield* qualification.read(root, "godot", state);
+        expect(read.stages.find((entry) => entry.stage === "design")?.status).toBe("passed");
+        expect(read.state).toBe("qualified");
+      }
+      for (const state of ["draft", "changed"] as const) {
+        const read = yield* qualification.read(root, "godot", state);
+        expect(read.stages.find((entry) => entry.stage === "design")?.status).toBe("failed");
+        expect(read.state).toBe("unqualified");
+      }
     }),
   ),
 );
@@ -226,7 +246,7 @@ it.effect("a tree past the scan bound reads as unknown, never as current", () =>
     Effect.gen(function* () {
       const sourceId = yield* Effect.promise(() => sourceIdOf(root));
       yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read).toMatchObject({ state: "unknown", sourceId: null, buildId: null });
       expect(read.stages.every((entry) => entry.status === "unknown")).toBe(true);
     }),
@@ -256,7 +276,7 @@ it.effect("serializes concurrent stage writes instead of losing one", () =>
         ],
         { concurrency: 2 },
       );
-      const read = yield* qualification.read(root, "godot");
+      const read = yield* qualification.read(root, "godot", "approved");
       expect(read.stages.find((entry) => entry.stage === "check")?.status).toBe("passed");
       expect(read.stages.find((entry) => entry.stage === "test")?.status).toBe("passed");
     }),

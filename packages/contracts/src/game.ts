@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
+import { GameDesignRead } from "./gameDesign.ts";
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -93,7 +94,11 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "download",
       "project-not-found",
       "design-draft",
-      "design-already-approved",
+      "design-changed",
+      "design-missing",
+      "design-invalid",
+      "design-hash-mismatch",
+      "design-legacy",
       "thread-dispatch",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
@@ -122,11 +127,20 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "unsupported-platform": "Managed installation currently supports Linux x86_64 only.",
       "design-draft":
         "DESIGN.md is still a draft, so this game may not export, preview, run or playtest yet. Finish the design and ask for review; after the creator approves it on the Design tab, retry.",
+      "design-changed":
+        "DESIGN.md changed after the creator approved it, so this game may not export, preview, run or playtest until they review the new scope and re-approve it on the Design tab.",
+      "design-missing":
+        "DESIGN.md is missing or unreadable. Write the design and ask the creator to approve it on the Design tab.",
+      "design-invalid":
+        "DESIGN.md is not ready to approve. Fix the listed issues, then ask the creator to approve it.",
+      "design-hash-mismatch":
+        "The design changed after the creator reviewed it. Refresh the Design tab, read the current version, and approve that.",
+      "design-legacy":
+        "This game was created before the design step, so it has no design to approve.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
-      "design-already-approved": "The design is already approved.",
       "thread-dispatch":
-        "The design was approved, but starting the build turn failed. It is back to draft; try approving it again.",
+        "The design was approved, but starting the build turn failed. The approval was rolled back; try approving it again.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
@@ -188,6 +202,7 @@ export type GameLastPlaytest = typeof GameLastPlaytest.Type;
  * stable, but their checks arrive in later work and never report passed yet.
  */
 export const GameQualificationStage = Schema.Literals([
+  "design",
   "check",
   "test",
   "export",
@@ -232,8 +247,8 @@ export type GameQualificationRead = typeof GameQualificationRead.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
-  /** The design phase, or null for games created before it existed. */
-  design: Schema.NullOr(GameDesign),
+  /** The server-owned design lifecycle: the approval record, never game.json alone. */
+  design: GameDesignRead,
   /** Game-relative paths, when the file exists on disk. */
   designPath: Schema.NullOr(Schema.String),
   briefPath: Schema.NullOr(Schema.String),
@@ -281,8 +296,6 @@ export const GameCreateInput = Schema.Struct({
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
-export const GameDesignApprovalResult = Schema.Struct({ approvedAt: Schema.String });
-export type GameDesignApprovalResult = typeof GameDesignApprovalResult.Type;
 export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });
 export const GameProjectResult = Schema.Struct({
   projectId: ProjectId,

@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { ThreadId, type Project, type OrchestrationV2ThreadShell } from "@t3tools/contracts";
@@ -11,6 +12,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameQualification from "./GameQualification.ts";
 
 /**
@@ -21,6 +23,13 @@ import * as GameQualification from "./GameQualification.ts";
 export function qualificationTestLayer(stateDir?: string) {
   return GameQualification.layer({
     stateDir: stateDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-qualification-")),
+  });
+}
+/** A design approval store under the test's temporary directory. */
+export function designApprovalTestLayer(stateDir?: string) {
+  return GameDesignApproval.layer({
+    stateDir:
+      stateDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-design-approval-")),
   });
 }
 export function previewBrowserTestLayer(
@@ -43,8 +52,17 @@ export function projectTestLayer(
   onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void,
   options?: {
     readonly threads?: () => ReadonlyArray<OrchestrationV2ThreadShell>;
+    /** Hold the first send until released, so a second approval can race it. */
+    readonly sendGate?: {
+      readonly started: Deferred.Deferred<void>;
+      readonly release: Deferred.Deferred<void>;
+    };
+    /** Fail this many dispatches before succeeding, to test rollback. */
+    readonly sendFailures?: number;
   },
 ) {
+  let remainingSendFailures = options?.sendFailures ?? 0;
+  let enteredGate = false;
   let project: Project | undefined;
   const defaultThread = (): OrchestrationV2ThreadShell =>
     ({
@@ -104,9 +122,23 @@ export function projectTestLayer(
         }),
       sendToThread: (input) => {
         onSend?.(input);
+        const fail = remainingSendFailures > 0;
+        if (fail) remainingSendFailures -= 1;
+        const gate = options?.sendGate;
         // Only the dispatch input crosses this boundary; the real service is
         // covered by the orchestration tests.
-        return Effect.succeed({} as never);
+        return Effect.gen(function* () {
+          if (gate !== undefined && !enteredGate) {
+            enteredGate = true;
+            yield* Deferred.succeed(gate.started, undefined);
+            yield* Deferred.await(gate.release);
+          }
+          if (fail)
+            return yield* new ThreadManagementService.ThreadManagementThreadArchivedError({
+              threadId: input.threadId,
+            });
+          return {} as never;
+        });
       },
     }),
     Layer.mock(ThreadLaunchService.ThreadLaunchService)({

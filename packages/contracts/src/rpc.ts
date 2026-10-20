@@ -2,7 +2,6 @@ import {
   GameActionInput,
   GameActionResult,
   GameCreateInput,
-  GameDesignApprovalResult,
   GameListResult,
   GameOpenInput,
   GameOperationError,
@@ -11,6 +10,7 @@ import {
   GameThreadInput,
   GameToolchainStatus,
 } from "./game.ts";
+import { GameDesignApproveInput, GameDesignApprovalResult } from "./gameDesign.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -1314,7 +1314,7 @@ const WsGameOpenRpc = Rpc.make(WS_METHODS.gameOpen, {
   error: gameError,
 });
 const WsGameApproveDesignRpc = Rpc.make(WS_METHODS.gameApproveDesign, {
-  payload: GameThreadInput,
+  payload: GameDesignApproveInput,
   success: GameDesignApprovalResult,
   error: gameError,
 });

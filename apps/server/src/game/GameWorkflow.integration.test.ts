@@ -18,6 +18,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import {
   previewBrowserTestLayer,
   projectTestLayer,
+  designApprovalTestLayer,
   qualificationTestLayer,
 } from "./gameTestLayers.ts";
 const managed = GameToolchain.toolsDirectory();
@@ -39,6 +40,7 @@ it.live.skipIf(!available)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(qualificationTestLayer()),
+        Layer.provideMerge(designApprovalTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

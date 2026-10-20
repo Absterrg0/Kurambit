@@ -25,7 +25,11 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
-import { previewBrowserTestLayer, qualificationTestLayer } from "./gameTestLayers.ts";
+import {
+  designApprovalTestLayer,
+  previewBrowserTestLayer,
+  qualificationTestLayer,
+} from "./gameTestLayers.ts";
 
 it.live.each(["interrupt", "stop", "interrupted run"] as const)(
   "awaits child exit and clears tracked PIDs on %s",
@@ -98,6 +102,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
           ),
           Layer.provide(previewBrowserTestLayer()),
           Layer.provideMerge(qualificationTestLayer()),
+          Layer.provideMerge(designApprovalTestLayer()),
         );
         yield* Effect.gen(function* () {
           const game = yield* GameService.GameService;

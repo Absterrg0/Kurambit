@@ -29,15 +29,17 @@ import {
   type GameProjectResult,
   type GameSummary,
 } from "@t3tools/contracts";
+import { validateDesignDocument } from "@t3tools/contracts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { readLastPlaytest } from "./playtestEvidence.ts";
-import { initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
+import { designSkeleton, initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -67,12 +69,14 @@ export class GameProjectService extends Context.Service<
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
-     * The creator's approval of the design. Marks it approved in game.json and
-     * starts the first build turn; it deliberately does not build anything
-     * itself, so the build still runs through normal orchestration.
+     * The creator's approval of one specific DESIGN.md revision. It validates
+     * the document, records the revision and its acceptance outside the game,
+     * and starts the first build turn; re-approval of changed scope never
+     * dispatches another turn.
      */
     readonly approveDesign: (
       threadId: ThreadId,
+      expectedDesignHash: string,
     ) => Effect.Effect<GameDesignApprovalResult, GameOperationError>;
     readonly upsertAsset: (
       root: string,
@@ -100,6 +104,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
+  const approvals = yield* GameDesignApproval.GameDesignApproval;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const read = (root: string) =>
@@ -377,56 +382,142 @@ const make = Effect.gen(function* () {
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
   // the recorded verdicts the Game panel and the harness depend on.
   const buildAfterApproval =
-    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. Keep DESIGN.md truthful when scope changes. Do the engine work with the Game Studio tools; a build-turn report is only evidence the tools wrote: call game_status first, game_godot_import after every engine change, game_godot_check until it reports ok with zero errors, your godot/tests smoke test with game_godot_test until it passes, the web build with game_export, and game_web_playtest with steps over the core loop until it reports success and responded=true (a fresh evidence folder every round). Do not drive the godot binary, exporters, or tests from the shell — raw runs are not recorded as build evidence. Finish AGENTS.md's Definition of done, then report results and the game_preview URL.";
+    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Do the engine work with the Game Studio tools; a build-turn report is only evidence the tools wrote: call game_status first, game_godot_import after every engine change, game_godot_check until it reports ok with zero errors, your godot/tests smoke test with game_godot_test until it passes, the web build with game_export, and game_web_playtest with steps over the core loop until it reports success and responded=true (a fresh evidence folder every round). Do not drive the godot binary, exporters, or tests from the shell — raw runs are not recorded as build evidence. Finish AGENTS.md's Definition of done, then report results and the game_preview URL.";
   const approveDesign = Effect.fn("GameProjectService.approveDesign")(function* (
     threadId: ThreadId,
+    expectedDesignHash: string,
   ) {
     const target = yield* resolveTarget(threadId);
-    const manifest = yield* read(target.root);
-    if (manifest.design?.status === "approved")
-      return yield* new GameOperationError({
+    const root = target.root;
+    const designPath = NodePath.join(root, "DESIGN.md");
+    const fail = (
+      reason: "design-missing" | "design-invalid" | "design-hash-mismatch" | "design-legacy",
+      detail?: string,
+    ) =>
+      new GameOperationError({
         operation: "approve-design",
-        path: NodePath.join(target.root, "game.json"),
-        reason: "design-already-approved",
+        path: designPath,
+        reason,
+        ...(detail === undefined ? {} : { detail: detail.slice(0, 4096) }),
       });
-    const approvedAt = DateTime.formatIso(yield* DateTime.now);
-    yield* updateManifest(target.root, "approve-design", (current) => ({
-      ...current,
-      design: { status: "approved", approvedAt },
-    }));
-    yield* threads
-      .sendToThread({
-        projectId: target.projectId,
-        commandId: CommandId.make(NodeCrypto.randomUUID()),
-        threadId,
-        messageId: MessageId.make(NodeCrypto.randomUUID()),
-        text: buildAfterApproval,
-        attachments: [],
-        mode: "auto",
-        createdBy: "user",
-        creationSource: "web",
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new GameOperationError({
-              operation: "approve-design",
-              path: target.root,
-              reason: "thread-dispatch",
-              cause,
-            }),
-        ),
-        // An approved design with no build turn would leave the game stuck
-        // waiting; put the draft back so the creator can retry the approval.
-        Effect.catchTags({
-          GameOperationError: (error) =>
-            updateManifest(target.root, "approve-design", (current) => ({
-              ...current,
-              design: manifest.design ?? { status: "draft" },
-            })).pipe(Effect.andThen(Effect.fail(error))),
-        }),
-      );
-    return { approvedAt };
+    return yield* approvals.exclusive(
+      root,
+      Effect.gen(function* () {
+        // Read inside the lock: a concurrent approval or an agent's edit may
+        // have changed the revision since the caller started.
+        const manifest = yield* read(root);
+        if (manifest.design === undefined)
+          return yield* fail(
+            "design-legacy",
+            "This game was created before the design step, so it has no design to approve.",
+          );
+        // A skip-planning game has an approved mirror but never had a document;
+        // it reads as legacy rather than "missing design".
+        if (
+          manifest.design.status === "approved" &&
+          !(yield* Effect.promise(() => GameDesignApproval.designDocumentExists(root)))
+        )
+          return yield* fail(
+            "design-legacy",
+            "This game was planned without a design document, so it has no design to approve.",
+          );
+        const design = yield* Effect.promise(() => GameDesignApproval.readDesignDocument(root));
+        if (design === null) return yield* fail("design-missing");
+        const designHash = GameDesignApproval.designDocumentHash(design);
+        if (designHash !== expectedDesignHash)
+          return yield* fail(
+            "design-hash-mismatch",
+            "The design changed after it was shown. Review the current DESIGN.md and approve again.",
+          );
+        const validation = validateDesignDocument({
+          design,
+          skeleton: designSkeleton(manifest.name),
+        });
+        if (validation.issues.length > 0)
+          return yield* fail("design-invalid", validation.issues.join("\n"));
+        const existing = yield* approvals.read(root);
+        if (existing !== null && existing.designHash === designHash) {
+          // Retrying the same approval is a read, not another build turn.
+          yield* updateManifest(root, "approve-design", (current) => ({
+            ...current,
+            design: { status: "approved", approvedAt: existing.approvedAt },
+          }));
+          return {
+            approvedAt: existing.approvedAt,
+            approvalId: existing.approvalId,
+            designHash,
+          };
+        }
+        const approvedAt = DateTime.formatIso(yield* DateTime.now);
+        const approvalId = NodeCrypto.randomUUID();
+        const previousDesign = manifest.design;
+        const record: GameDesignApproval.DesignApprovalRecord = {
+          schemaVersion: 1,
+          game: root,
+          approvalId,
+          designHash,
+          approvedAt,
+          acceptance: validation.acceptance,
+        };
+        yield* approvals.write(root, record);
+        yield* updateManifest(root, "approve-design", (current) => ({
+          ...current,
+          design: { status: "approved", approvedAt },
+        })).pipe(
+          // The mirror is only display state; if it cannot be written, put the
+          // record back so the approval stays all-or-nothing.
+          Effect.catchTags({
+            GameOperationError: (error) =>
+              (existing === null
+                ? approvals.removeOwned(root, approvalId)
+                : approvals.write(root, existing)
+              ).pipe(Effect.andThen(Effect.fail(error))),
+          }),
+        );
+        // Only the first approval releases a build turn. Re-approving changed
+        // scope updates the contract in place; the turn that requested the
+        // change continues.
+        if (existing === null)
+          yield* threads
+            .sendToThread({
+              projectId: target.projectId,
+              commandId: CommandId.make(NodeCrypto.randomUUID()),
+              threadId,
+              messageId: MessageId.make(NodeCrypto.randomUUID()),
+              text: buildAfterApproval,
+              attachments: [],
+              mode: "auto",
+              createdBy: "user",
+              creationSource: "web",
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "approve-design",
+                    path: root,
+                    reason: "thread-dispatch",
+                    cause,
+                  }),
+              ),
+              // Roll back only this attempt: never another approval's record
+              // and never a mirror the approval did not own.
+              Effect.catchTags({
+                GameOperationError: (error) =>
+                  approvals.removeOwned(root, approvalId).pipe(
+                    Effect.andThen(
+                      updateManifest(root, "approve-design", (current) => ({
+                        ...current,
+                        design: previousDesign,
+                      })),
+                    ),
+                    Effect.andThen(Effect.fail(error)),
+                  ),
+              }),
+            );
+        return { approvedAt, approvalId, designHash };
+      }),
+    );
   });
   return GameProjectService.of({
     create,

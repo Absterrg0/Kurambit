@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  type GameDesignState,
   type GameQualificationRead,
   type GameQualificationStage,
   type GameQualificationStageRead,
@@ -19,7 +20,7 @@ import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest"] as const;
 export type RecordedQualificationStage = (typeof RECORDED_QUALIFICATION_STAGES)[number];
 /** The stages the read always reports, including the ones later work will own. */
-const ALL_STAGES = ["check", "test", "export", "playtest", "state", "visual"] as const;
+const ALL_STAGES = ["design", "check", "test", "export", "playtest", "state", "visual"] as const;
 
 export interface QualificationStageRecord {
   readonly outcome: "passed" | "failed";
@@ -82,6 +83,7 @@ const readRecord = async (file: string): Promise<QualificationRecord | null> => 
 const deriveQualification = (input: {
   readonly record: QualificationRecord | null;
   readonly source: SourceSnapshot;
+  readonly designState: GameDesignState | null;
 }): GameQualificationRead => {
   if (input.source.kind === "unknown")
     return {
@@ -98,6 +100,21 @@ const deriveQualification = (input: {
     };
   const currentSourceId = input.source.sourceId;
   const stageReads = new Map<GameQualificationStage, GameQualificationStageRead>();
+  // The design stage is the creator's approval, not a file the agent can edit.
+  // A changed or unapproved design blocks qualification; legacy games with no
+  // design document are accepted as they are.
+  stageReads.set("design", {
+    stage: "design",
+    status:
+      input.designState === "approved" || input.designState === "legacy"
+        ? "passed"
+        : input.designState === null
+          ? "missing"
+          : "failed",
+    sourceId: null,
+    buildId: null,
+    finishedAt: null,
+  });
   // Only the four stages with real operations can pass today. `state` and
   // `visual` are listed as missing and deliberately do not block qualification
   // yet; when their checks land they join this set and must pass too.
@@ -139,9 +156,9 @@ const deriveQualification = (input: {
     stageReads.set("playtest", { ...playtest, status: "stale" });
 
   const stages = ALL_STAGES.map((stage) => stageReads.get(stage)!);
-  const qualified = RECORDED_QUALIFICATION_STAGES.every(
-    (stage) => stageReads.get(stage)!.status === "passed",
-  );
+  const qualified =
+    stageReads.get("design")!.status === "passed" &&
+    RECORDED_QUALIFICATION_STAGES.every((stage) => stageReads.get(stage)!.status === "passed");
   return {
     state: qualified ? "qualified" : "unqualified",
     sourceId: currentSourceId,
@@ -163,9 +180,14 @@ export class GameQualification extends Context.Service<
   {
     /**
      * Qualification of a game's current sources. IO or a scan-bound hit reads as
-     * unknown, never as current.
+     * unknown, never as current. The caller passes the server-owned design
+     * state; without one the design stage is missing and never counts as passed.
      */
-    readonly read: (root: string, godotProject: string) => Effect.Effect<GameQualificationRead>;
+    readonly read: (
+      root: string,
+      godotProject: string,
+      designState?: GameDesignState,
+    ) => Effect.Effect<GameQualificationRead>;
     /** Records one real operation result. Concurrent writers are serialized per game. */
     readonly record: (
       root: string,
@@ -193,7 +215,7 @@ export const layer = (options: {
   return Layer.succeed(
     GameQualification,
     GameQualification.of({
-      read: (root, godotProject) =>
+      read: (root, godotProject, designState) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>
             snapshotSource(root, godotProject, {
@@ -203,7 +225,7 @@ export const layer = (options: {
           const record = yield* Effect.promise(() =>
             readRecord(recordPath(options.stateDir, root)),
           );
-          return deriveQualification({ record, source });
+          return deriveQualification({ record, source, designState: designState ?? null });
         }),
       record: (root, input) => {
         const file = recordPath(options.stateDir, root);
