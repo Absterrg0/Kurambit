@@ -50,8 +50,8 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
 /**
- * The design phase recorded in the manifest. A `draft` design is the only thing
- * the agent may work on; `approved` releases the build turns.
+ * The design phase shown in the manifest. This is a display mirror only: the
+ * server-owned approval record decides whether a design revision is approved.
  */
 export const GameDesign = Schema.Struct({
   status: Schema.Literals(["draft", "approved"]),
