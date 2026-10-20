@@ -4,7 +4,9 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import {
   DEFAULT_GAME_TEMPLATE,
@@ -798,6 +800,48 @@ it.effect("a failed dispatch rolls back only that attempt, and a retry dispatche
         Effect.provide(
           gameProjectLayer(
             projectTestLayer(undefined, (input) => sends.push(input), { sendFailures: 1 }),
+          ),
+        ),
+      ),
+    );
+    expect(sends).toHaveLength(2);
+  }),
+);
+
+it.effect("an interrupted approval leaves no record, so a retry can dispatch", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-interrupt-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const approvals = yield* GameDesignApproval.GameDesignApproval;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        yield* writeDesign(created.root, filledDesign());
+        const hash = yield* designHashOf(created.root);
+        const fiber = yield* Effect.forkScoped(projects.approveDesign(created.threadId, hash));
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(fiber);
+        expect(yield* approvals.read(created.root)).toBeNull();
+        expect((yield* projects.read(created.root)).design).toEqual({ status: "draft" });
+        const retry = yield* projects.approveDesign(created.threadId, hash);
+        expect(yield* approvals.read(created.root)).toMatchObject({ approvalId: retry.approvalId });
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer(undefined, (input) => sends.push(input), {
+              sendGate: { started, release },
+            }),
           ),
         ),
       ),

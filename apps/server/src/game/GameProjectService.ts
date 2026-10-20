@@ -460,61 +460,66 @@ const make = Effect.gen(function* () {
           acceptance: validation.acceptance,
         };
         yield* approvals.write(root, record);
-        yield* updateManifest(root, "approve-design", (current) => ({
-          ...current,
-          design: { status: "approved", approvedAt },
-        })).pipe(
-          // The mirror is only display state; if it cannot be written, put the
-          // record back so the approval stays all-or-nothing.
-          Effect.catchTags({
-            GameOperationError: (error) =>
-              (existing === null
-                ? approvals.removeOwned(root, approvalId)
-                : approvals.write(root, existing)
-              ).pipe(Effect.andThen(Effect.fail(error))),
-          }),
+        const rollBack = approvals.removeOwned(root, approvalId).pipe(
+          Effect.andThen(
+            updateManifest(root, "approve-design", (current) => ({
+              ...current,
+              design: previousDesign,
+            })),
+          ),
         );
-        // Only the first approval releases a build turn. Re-approving changed
-        // scope updates the contract in place; the turn that requested the
-        // change continues.
-        if (existing === null)
-          yield* threads
-            .sendToThread({
-              projectId: target.projectId,
-              commandId: CommandId.make(NodeCrypto.randomUUID()),
-              threadId,
-              messageId: MessageId.make(NodeCrypto.randomUUID()),
-              text: buildAfterApproval,
-              attachments: [],
-              mode: "auto",
-              createdBy: "user",
-              creationSource: "web",
-            })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "approve-design",
-                    path: root,
-                    reason: "thread-dispatch",
-                    cause,
-                  }),
-              ),
-              // Roll back only this attempt: never another approval's record
-              // and never a mirror the approval did not own.
-              Effect.catchTags({
-                GameOperationError: (error) =>
-                  approvals.removeOwned(root, approvalId).pipe(
-                    Effect.andThen(
-                      updateManifest(root, "approve-design", (current) => ({
-                        ...current,
-                        design: previousDesign,
-                      })),
-                    ),
-                    Effect.andThen(Effect.fail(error)),
-                  ),
-              }),
-            );
+        yield* Effect.gen(function* () {
+          yield* updateManifest(root, "approve-design", (current) => ({
+            ...current,
+            design: { status: "approved", approvedAt },
+          })).pipe(
+            // The mirror is only display state; if it cannot be written, put the
+            // record back so the approval stays all-or-nothing.
+            Effect.catchTags({
+              GameOperationError: (error) =>
+                (existing === null
+                  ? approvals.removeOwned(root, approvalId)
+                  : approvals.write(root, existing)
+                ).pipe(Effect.andThen(Effect.fail(error))),
+            }),
+          );
+          // Only the first approval releases a build turn. Re-approving changed
+          // scope updates the contract in place; the turn that requested the
+          // change continues.
+          if (existing === null)
+            yield* threads
+              .sendToThread({
+                projectId: target.projectId,
+                commandId: CommandId.make(NodeCrypto.randomUUID()),
+                threadId,
+                messageId: MessageId.make(NodeCrypto.randomUUID()),
+                text: buildAfterApproval,
+                attachments: [],
+                mode: "auto",
+                createdBy: "user",
+                creationSource: "web",
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new GameOperationError({
+                      operation: "approve-design",
+                      path: root,
+                      reason: "thread-dispatch",
+                      cause,
+                    }),
+                ),
+                // Roll back only this attempt: never another approval's record
+                // and never a mirror the approval did not own.
+                Effect.catchTags({
+                  GameOperationError: (error) => rollBack.pipe(Effect.andThen(Effect.fail(error))),
+                }),
+              );
+        }).pipe(
+          // A cancelled request must not leave a record with no build turn, or
+          // the retry would look idempotent and never dispatch.
+          Effect.onInterrupt(() => rollBack),
+        );
         return { approvedAt, approvalId, designHash };
       }),
     );
