@@ -294,9 +294,17 @@ const isCheckSummary = (record: Record<string, unknown>) =>
 const isActionResult = (record: Record<string, unknown>) =>
   typeof record.success === "boolean" && typeof record.message === "string" && "process" in record;
 const isTestSummary = (record: Record<string, unknown>) =>
-  record.pass === true &&
-  (record.test === true || record.exit === 0 || record.success === true) &&
-  (!Array.isArray(record.failed) || record.failed.length === 0);
+  (record.pass === true &&
+    (record.test === true || record.exit === 0 || record.success === true) &&
+    (!Array.isArray(record.failed) || record.failed.length === 0)) ||
+  // A code-mode `execute` that ran several tools returns its own summary, with
+  // each tool's action result nested under the tool name.
+  (typeof record.test === "object" &&
+    record.test !== null &&
+    !Array.isArray(record.test) &&
+    (record.test as Record<string, unknown>).success === true &&
+    (!Array.isArray((record.test as Record<string, unknown>).failed) ||
+      ((record.test as Record<string, unknown>).failed as unknown[]).length === 0));
 
 const waitForTurn = (
   client: Client,
