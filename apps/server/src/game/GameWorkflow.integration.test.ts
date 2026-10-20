@@ -47,6 +47,8 @@ it.live.skipIf(!available)(
               name: "Real Cube Game",
               parentDirectory: parent,
               brief: "A cube rotates as the core game loop advances.",
+              // The pipeline test builds without a design phase.
+              planFirst: false,
               modelSelection: {
                 instanceId: ProviderInstanceId.make("codex"),
                 model: "gpt-6.1-sol",

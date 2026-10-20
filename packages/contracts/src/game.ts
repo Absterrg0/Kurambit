@@ -92,6 +92,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "checksum",
       "download",
       "project-not-found",
+      "design-draft",
       "design-already-approved",
       "thread-dispatch",
     ]),
@@ -119,6 +120,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       download: "The tool download failed. Check network access and retry the install.",
       io: "Check that the path exists and is writable. Read the server log for the underlying error.",
       "unsupported-platform": "Managed installation currently supports Linux x86_64 only.",
+      "design-draft":
+        "DESIGN.md is still a draft, so this game may not export, preview, run or playtest yet. Finish the design and ask for review; after the creator approves it on the Design tab, retry.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
       "design-already-approved": "The design is already approved.",

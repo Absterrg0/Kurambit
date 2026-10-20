@@ -128,6 +128,8 @@ const templateJourney = (journey: TemplateJourney) =>
             parentDirectory: parent,
             template: journey.template,
             brief: journey.brief,
+            // The template journey is the build bar, not the design phase.
+            planFirst: false,
             modelSelection: {
               instanceId: ProviderInstanceId.make("codex"),
               model: "gpt-6.1-sol",

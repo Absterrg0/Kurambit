@@ -8,17 +8,33 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
   DEFAULT_GAME_TEMPLATE,
+  GameOperationError,
   ProviderInstanceId,
   ThreadId,
   type GameTemplateId,
 } from "@t3tools/contracts";
-import { projectTestLayer } from "./gameTestLayers.ts";
+import { previewBrowserTestLayer, projectTestLayer } from "./gameTestLayers.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as GamePreview from "./GamePreview.ts";
+import * as GameService from "./GameService.ts";
+import * as GameToolchain from "./GameToolchain.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" };
+/** Enough of the real services to resolve a game and hit the draft gate without Godot. */
+const gameServiceLayer = GameService.layer.pipe(
+  Layer.provideMerge(GameProjectService.layer),
+  Layer.provideMerge(GameToolchain.layer),
+  Layer.provideMerge(GamePreview.layer),
+  Layer.provideMerge(GameProcesses.layer),
+  Layer.provide(projectTestLayer()),
+  Layer.provide(previewBrowserTestLayer()),
+  Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(NodeServices.layer),
+);
 const gameProjectLayer = (registration = projectTestLayer()) =>
   GameProjectService.layer.pipe(
     Layer.provide(registration),
@@ -533,5 +549,51 @@ it.effect("approves a draft design once and starts exactly one build turn", () =
     expect(sends[0]?.createdBy).toBe("user");
     expect(sends[0]?.attachments).toEqual([]);
     expect(gameRoot).not.toBe("");
+  }),
+);
+
+it.effect("a draft design locks staging until it is approved", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-draft-gate-")),
+    );
+    try {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const projects = yield* GameProjectService.GameProjectService;
+          const game = yield* GameService.GameService;
+          const created = yield* projects.create({
+            name: "Planned First",
+            parentDirectory: parent,
+            brief: "Collect three coins.",
+            artDirection: "Clay",
+            modelSelection: selection,
+          });
+          const gated: ReadonlyArray<Effect.Effect<unknown, GameOperationError>> = [
+            game.action(created.threadId, "preview"),
+            game.action(created.threadId, "export-linux"),
+            game.action(created.threadId, "rebuild"),
+            game.action(created.threadId, "native"),
+            game.export(created.threadId, "Web"),
+            game.webPlaytest(created.threadId, {}),
+            game.blender(created.threadId, { id: "coin", script: "import bpy" }),
+          ];
+          for (const attempt of gated) {
+            const outcome = yield* Effect.result(attempt);
+            expect(outcome._tag).toBe("Failure");
+            if (outcome._tag === "Failure")
+              expect((outcome.failure as { reason?: string }).reason).toBe("design-draft");
+          }
+          // Read-only tools stay open; the agent can still see game state while drafting.
+          const status = yield* game.status(created.threadId);
+          expect(status.design?.status).toBe("draft");
+          // Approval is the only legal way out of the gate.
+          yield* projects.approveDesign(created.threadId);
+          expect((yield* projects.read(created.root)).design?.status).toBe("approved");
+        }).pipe(Effect.provide(gameServiceLayer)),
+      );
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
+    }
   }),
 );
