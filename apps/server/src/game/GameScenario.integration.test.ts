@@ -235,6 +235,51 @@ it.live.skipIf(!available)(
 );
 
 it.live.skipIf(!available)(
+  "each template route satisfies the approved observations and records them",
+  () =>
+    Effect.gen(function* () {
+      for (const template of ["2d-platformer", "3d-explorer"] as const) {
+        yield* withGame(
+          {
+            name: `${template} accepted route`,
+            template,
+            planFirst: true,
+            criteria: [
+              {
+                id: "collect",
+                kind: "content",
+                text: "Collect the content",
+                observe: { key: "collected", expect: ">=5" },
+              },
+              {
+                id: "win",
+                kind: "end",
+                text: "Finish the run",
+                observe: { key: "state", expect: "==3" },
+              },
+            ],
+          },
+          ({ game, threadId }) =>
+            Effect.gen(function* () {
+              const result = yield* game.scenariosRun(threadId);
+              expect(result.errors, `${template}: ${JSON.stringify(result.errors)}`).toEqual([]);
+              expect(result.ok, `${template}: ${JSON.stringify(result.summary)}`).toBe(true);
+              expect(result.summary).toMatchObject({ mode: "criteria", passed: true });
+              expect(
+                result.summary.criteria.map((criterion) => [criterion.id, criterion.status]),
+              ).toEqual([
+                ["collect", "passed"],
+                ["win", "passed"],
+              ]);
+              return result;
+            }),
+        );
+      }
+    }),
+  { timeout: 180_000 },
+);
+
+it.live.skipIf(!available)(
   "a still route never qualifies, even though the game is playing",
   () =>
     withGame(

@@ -19,11 +19,11 @@ export const GAME_SCENARIO_LIMITS = {
 const scenarioIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** One action down for a frame, then up. */
-export const GameScenarioPressStep = Schema.Struct({
+const GameScenarioPressStep = Schema.Struct({
   press: Schema.String.check(Schema.isMinLength(1)),
 });
 /** Actions held for a number of physics frames. */
-export const GameScenarioHoldStep = Schema.Struct({
+const GameScenarioHoldStep = Schema.Struct({
   hold: Schema.Array(Schema.String).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(GAME_SCENARIO_LIMITS.maxActionsPerStep),
@@ -31,7 +31,7 @@ export const GameScenarioHoldStep = Schema.Struct({
   frames: Schema.Int.check(Schema.isGreaterThan(0)),
 });
 /** No new input for a number of physics frames. */
-export const GameScenarioWaitStep = Schema.Struct({
+const GameScenarioWaitStep = Schema.Struct({
   wait: Schema.Int.check(Schema.isGreaterThan(0)),
 });
 export const GameScenarioStep = Schema.Union([

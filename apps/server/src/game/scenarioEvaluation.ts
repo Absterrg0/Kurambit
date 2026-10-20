@@ -10,7 +10,7 @@ import type {
 /** Legacy games prove the game started by observing this synthetic promise. */
 export const LEGACY_PLAYING_MATCH_ID = "legacy-playing";
 
-export type ScenarioExpectation =
+type ScenarioExpectation =
   | { readonly kind: "changes" }
   | { readonly kind: "equals"; readonly value: number }
   | { readonly kind: "atLeast"; readonly value: number }

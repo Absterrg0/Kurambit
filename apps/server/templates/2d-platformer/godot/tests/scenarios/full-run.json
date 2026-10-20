@@ -64,6 +64,10 @@
       "frames": 12
     },
     {
+      "hold": ["move_right"],
+      "frames": 1
+    },
+    {
       "hold": ["move_right", "jump"],
       "frames": 14
     },
