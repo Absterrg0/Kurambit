@@ -19,6 +19,10 @@ const LEVEL_CLEAR_DELAY := 0.9
 ## The level currently loaded. Read by the smoke test and by the HUD.
 var level: Level
 var _changing_level := false
+## Bumped whenever the run, level or scene changes. A delayed continuation captures
+## it before waiting and drops out when it moved, so a restart or the menu during a
+## clear or respawn delay cannot load a level or move the player in the new run.
+var _generation := 0
 
 func _ready() -> void:
 	GameState.life_lost.connect(_on_life_lost)
@@ -47,6 +51,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Clears the run inside `GameState` first, so the level's own resets see fresh
 ## counters, then loads the first level and puts the player on its spawn point.
 func start_run() -> void:
+	_generation += 1
 	GameState.start_run(levels.size())
 	_changing_level = false
 	load_level(0)
@@ -62,6 +67,11 @@ func restart_run() -> void:
 ## swapped rather than reloaded by scene change, so the HUD, the audio and the settings
 ## survive the transition.
 func load_level(index: int) -> void:
+	_generation += 1
+	# Park the body before the next level's Areas enter the tree. A restart taken
+	# while standing in the door reloads this level; without the move the fresh
+	# goal sees that stale overlap and completes the new run on its first frame.
+	player.global_position = Vector2(-100000.0, -100000.0)
 	if level != null:
 		level.queue_free()
 		level = null
@@ -90,6 +100,7 @@ func set_paused(paused: bool) -> void:
 	GameState.resume_game()
 
 func return_to_menu() -> void:
+	_generation += 1
 	GameState.to_menu()
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
@@ -99,7 +110,10 @@ func _on_resume() -> void:
 ## A lost life puts the player back on the last checkpoint. The short delay lets the
 ## knockback read as a hit instead of a teleport.
 func _on_life_lost(_reason: String) -> void:
+	var generation := _generation
 	await get_tree().create_timer(player.hurt_time + RESPAWN_DELAY, false).timeout
+	if generation != _generation:
+		return
 	if GameState.is_playing() and level != null:
 		player.respawn(level.respawn_position())
 
@@ -108,10 +122,13 @@ func _on_level_completed() -> void:
 	if _changing_level or level == null:
 		return
 	_changing_level = true
+	var generation := _generation
 	Audio.play("door")
 	if GameState.level_index + 1 < GameState.level_count:
 		player.set_active(false)
 		await get_tree().create_timer(LEVEL_CLEAR_DELAY, false).timeout
+		if generation != _generation:
+			return
 		load_level(GameState.level_index + 1)
 		_changing_level = false
 		GameState.notify("Level cleared")

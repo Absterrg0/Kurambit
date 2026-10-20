@@ -202,10 +202,13 @@ func _handle_jump(delta: float) -> void:
 		Audio.play("jump", randf_range(0.97, 1.05))
 		return
 	if _jump_buffer > 0.0 and _wall_dir != 0 and _wall_stick > 0.0:
-		velocity = Vector2(float(-_wall_dir) * wall_jump_velocity.x, -wall_jump_velocity.y)
+		# The normal points out of the wall, so the impulse follows it: away from
+		# the wall the player just kicked off.
+		velocity = Vector2(float(_wall_dir) * wall_jump_velocity.x, -wall_jump_velocity.y)
 		_jump_buffer = 0.0
 		_wall_stick = 0.0
-		_facing = -_wall_dir
+		_facing = _wall_dir
+		body.flip_h = _facing < 0
 		body.play("jump")
 		Audio.play("jump", randf_range(0.97, 1.05))
 		return

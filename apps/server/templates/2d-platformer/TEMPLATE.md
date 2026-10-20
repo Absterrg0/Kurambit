@@ -173,6 +173,11 @@ Two rules the checks teach, and that new ones have to respect:
   instead of respawning.
 - Levels are generated, so tiles are addressed by tile coordinates in the harness
   (`PLANK_TILE`, `SPIKE_TILE`). If you move them in the map, move them there too.
+- A delayed continuation — a timer, or an `await` that continues the run — captures
+  `Game._generation` before waiting and returns when it changed. `start_run()`,
+  `load_level()` and `return_to_menu()` bump it, so restarting during a level-clear or
+  respawn delay cannot load a level or move the player in the new run. Copy the same
+  guard for every new delay.
 
 Whenever you add a system, extend the harness: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.

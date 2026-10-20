@@ -14,6 +14,12 @@ var _used := false
 
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
+	# A restart can rebuild this level while the player still stands in the
+	# previous door. Stay unarmed for the frame the level is assembled, then arm:
+	# otherwise a stale physics pairing completes the fresh run immediately.
+	monitoring = false
+	await get_tree().physics_frame
+	monitoring = true
 
 func _process(delta: float) -> void:
 	_pulse += delta

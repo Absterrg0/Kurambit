@@ -1,8 +1,9 @@
 ## The real smoke-test checks, loaded at runtime by `tests/smoke_test.gd`.
 ##
 ## It boots the game scene and drives the real physics loop with synthetic input and
-## teleports: running, jumping, a one-way platform, coins, a stomp, spikes, a fall, the
-## pause loop, a restart, and finally the whole level flow through both doors to the
+## teleports: running, jumping, a wall jump off both sides, a one-way platform, coins,
+## a stomp, spikes, a fall, the pause loop, a restart, restarting during a pending
+## clear or respawn timer, and finally the whole level flow through both doors to the
 ## win screen. Nothing here is a "call the helper directly" shortcut: the player moves
 ## because input was pressed, and states change because the real signals fired.
 extends Node
@@ -55,6 +56,7 @@ func run() -> void:
 	_check(AudioServer.get_bus_index("SFX") > 0, "SFX bus exists")
 	await _check_movement()
 	await _check_jump()
+	await _check_wall_jump()
 	await _check_one_way()
 	await _check_coins()
 	await _check_stomp()
@@ -62,8 +64,11 @@ func run() -> void:
 	# The damage checks just spent every life, so the run is over: restart it first,
 	# then pause, then prove both doors still work on a fresh run.
 	await _check_restart()
+	await _check_restart_during_clear()
+	await _check_restart_during_respawn()
 	await _check_pause()
 	await _check_levels()
+	await _check_menu_during_respawn()
 	await _check_menu()
 	_finish()
 
@@ -113,6 +118,50 @@ func _check_jump() -> void:
 		absf(_player.global_position.y - ground_y) < 2.0,
 		"landing puts the feet back on the ground (y=%.1f)" % _player.global_position.y
 	)
+
+## Off by default, so turn it on and use real wall contact: the impulse has to move
+## the body away from the wall on both sides, not just assign a velocity.
+func _check_wall_jump() -> void:
+	_player.wall_slide_enabled = true
+	await _wall_jump_away(1)
+	await _wall_jump_away(-1)
+	_player.wall_slide_enabled = false
+	await _stand_on_ground()
+
+## `side` is 1 when the wall is on the player's right, -1 when it is on the left.
+func _wall_jump_away(side: int) -> void:
+	var wall := StaticBody2D.new()
+	wall.collision_layer = 1
+	var collider := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(16.0, 240.0)
+	collider.shape = shape
+	wall.add_child(collider)
+	_game.add_child(wall)
+	# A clear column outside the level's terrain: the probe must touch only the wall,
+	# not a platform or the floor, or the fallback ground jump would fire instead.
+	wall.global_position = Vector2(2000.0, 140.0)
+	# The body is 10 px wide, so its centre sits 5 px from the wall face.
+	_player.respawn(Vector2(2000.0 - 13.0 * side, 120.0))
+	# Hold into the wall: contact under pressure gives a stable normal, and there is
+	# no floor to grant coyote time.
+	var toward := "move_right" if side > 0 else "move_left"
+	Input.action_press(toward)
+	await _frames(8)
+	_check(_player.is_on_wall(), "the probe player touches the %s wall" % ("right" if side > 0 else "left"))
+	var start := _player.global_position
+	Input.action_press("jump")
+	await _frames(2)
+	Input.action_release("jump")
+	Input.action_release(toward)
+	await _frames(12)
+	var away := (_player.global_position.x - start.x) * float(side)
+	_check(
+		away < -20.0,
+		"the wall jump moves %.1f px away from the %s wall"
+		% [away, "right" if side > 0 else "left"]
+	)
+	wall.free()
 
 ## The one-way planks must let the player jump up through them and land on top: this
 ## is what proves the TileSet's lip polygons are one-way and not solid.
@@ -257,6 +306,62 @@ func _check_restart() -> void:
 		"restart returns the player to the spawn point"
 	)
 
+## Restarting during the door transition: the old timer belongs to the old run, so
+## it must not load level 2 after the new run already restarted on level 1.
+func _check_restart_during_clear() -> void:
+	_step_into_door()
+	await _frames(6)
+	_check(GameState.level_index == 0, "the door starts the clear delay on level 1")
+	_game.restart_run()
+	await _frames(80)
+	_check(GameState.level_index == 0, "a restart during the clear delay stays on level 1")
+	_check(_game.level.title == "Mossy Ridge", "the old door timer did not load level 2")
+	_check(GameState.is_playing(), "the restarted run is still playing after the old delay")
+
+## Restarting during the respawn delay: the old continuation must not yank the new
+## run's player back to the spawn point while they are already running.
+func _check_restart_during_respawn() -> void:
+	await _frames(95)
+	var lives := GameState.lives
+	var hit_from := _player.global_position + Vector2(-8.0, 0.0)
+	_player.hurt(hit_from, "probe")
+	_check(GameState.lives == lives - 1, "the respawn probe costs a life")
+	await _frames(2)
+	_game.restart_run()
+	await _frames(2)
+	var spawn := _player.global_position
+	Input.action_press("move_right")
+	await _frames(60)
+	Input.action_release("move_right")
+	_check(
+		_player.global_position.x > spawn.x + 80.0,
+		"the old respawn timer did not pull the restarted player back (x=%.1f)"
+		% _player.global_position.x
+	)
+
+## The same delay after returning to the menu: the player node keeps its position
+## until the scene is gone, so the guard has to stop the respawn as well.
+func _check_menu_during_respawn() -> void:
+	_game.restart_run()
+	await _frames(95)
+	var before := _player.global_position
+	_player.hurt(before + Vector2(-8.0, 0.0), "probe")
+	await _frames(2)
+	# Let the tumble settle on the floor, then leave a clear landmark between the
+	# player and the spawn point: a respawn would snap back to the spawn.
+	var resting := Vector2(_game.level.spawn_position().x + 100.0, _game.level.spawn_position().y)
+	_player.global_position = resting
+	_player.velocity = Vector2.ZERO
+	await _frames(2)
+	resting = _player.global_position
+	_game.return_to_menu()
+	await _frames(80)
+	_check(
+		absf(_player.global_position.x - resting.x) < 2.0,
+		"returning to the menu during the respawn delay leaves the player alone (x=%.1f)"
+		% _player.global_position.x
+	)
+
 ## Both doors: level 1 hands over to level 2, and level 2 wins the run.
 func _check_levels() -> void:
 	_step_into_door()
@@ -312,13 +417,17 @@ func _step_into_door() -> void:
 
 ## Puts the player a stride from a slime and reports which side it landed on, so the
 ## contact check never depends on where the patrol happens to be or which way it walks.
+## A slime near its ledge edge has only one safe side, so wait for the patrol to move
+## rather than assuming both sides are floor at the same instant.
 func _stand_beside(slime: Slime) -> int:
-	for side in [1, -1]:
-		_player.global_position = slime.global_position + Vector2(26.0 * side, 0.0)
-		_player.velocity = Vector2.ZERO
-		await _frames(6)
-		if _player.is_on_floor():
-			return side
+	for _attempt in 12:
+		for side in [1, -1]:
+			_player.global_position = slime.global_position + Vector2(26.0 * side, 0.0)
+			_player.velocity = Vector2.ZERO
+			await _frames(6)
+			if _player.is_on_floor():
+				return side
+		await _frames(10)
 	return 0
 
 func _stand_on_ground() -> void:
