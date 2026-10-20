@@ -52,22 +52,26 @@ export const gameInitial = (name: string): string => {
   return (letters || "G").slice(0, 2).toUpperCase();
 };
 
-/** A quiet, deterministic "edited 2h ago" for library cards. */
-export const formatGameEditedAt = (timestamp: string, now = Date.now()): string => {
+/** A quiet, deterministic "2h ago" used by cards and the qualification label. */
+export const formatGameEditedAgo = (timestamp: string, now = Date.now()): string => {
   const then = Date.parse(timestamp);
-  if (Number.isNaN(then)) return "edited recently";
+  if (Number.isNaN(then)) return "recently";
   const seconds = Math.max(0, Math.round((now - then) / 1000));
-  if (seconds < 60) return "edited just now";
+  if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `edited ${minutes}m ago`;
+  if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `edited ${hours}h ago`;
+  if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `edited ${days}d ago`;
+  if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `edited ${months}mo ago`;
-  return `edited ${Math.floor(months / 12)}y ago`;
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
 };
+
+/** A quiet, deterministic "edited 2h ago" for library cards. */
+export const formatGameEditedAt = (timestamp: string, now = Date.now()): string =>
+  `edited ${formatGameEditedAgo(timestamp, now)}`;
 
 export const sortGameSummaries = <T extends GameSummary>(games: readonly T[]): T[] =>
   [...games].sort(

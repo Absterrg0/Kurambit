@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import type { GameAsset, GameLastPlaytest, GameSummary } from "@t3tools/contracts";
 
-import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
+import {
+  gameCoverCandidates,
+  gameCoverFrame,
+  latestGameActivity,
+  sortGameSummaries,
+} from "./gameSummary.ts";
 
 const asset = (id: string, thumbnail?: string): GameAsset => ({
   id,
@@ -13,7 +18,10 @@ const asset = (id: string, thumbnail?: string): GameAsset => ({
   updatedAt: "2026-10-19T00:00:00.000Z",
 });
 
-const playtest = (frames: readonly string[]): GameLastPlaytest => ({
+const playtest = (
+  frames: readonly string[],
+  overrides: Partial<GameLastPlaytest> = {},
+): GameLastPlaytest => ({
   at: "2026-10-20T00:00:00.000Z",
   directory: "builds/playtests/run",
   success: true,
@@ -22,19 +30,64 @@ const playtest = (frames: readonly string[]): GameLastPlaytest => ({
   consoleErrorCount: 0,
   frames: frames.map((path, index) => ({ label: `frame-${index}`, path })),
   stale: false,
+  ...overrides,
+});
+
+const labelled = (
+  frames: readonly { readonly label: string; readonly path: string }[],
+  overrides: Partial<GameLastPlaytest> = {},
+): GameLastPlaytest =>
+  playtest(
+    frames.map((frame) => frame.path),
+    { ...overrides, frames },
+  );
+
+describe("gameCoverFrame", () => {
+  it("prefers a screenshot captured after the first step over the boot frame", () => {
+    expect(
+      gameCoverFrame(
+        labelled([
+          { label: "booted", path: "builds/playtests/run/01-booted.png" },
+          { label: "crossed-the-gap", path: "builds/playtests/run/02-crossed-the-gap.png" },
+          { label: "after-steps", path: "builds/playtests/run/03-after-steps.png" },
+        ]),
+      )?.path,
+    ).toBe("builds/playtests/run/02-crossed-the-gap.png");
+  });
+
+  it("falls back to the after-steps frame when every frame is boot or after-steps", () => {
+    expect(
+      gameCoverFrame(
+        labelled([
+          { label: "booted", path: "builds/playtests/run/01-booted.png" },
+          { label: "after-steps", path: "builds/playtests/run/02-after-steps.png" },
+        ]),
+      )?.path,
+    ).toBe("builds/playtests/run/02-after-steps.png");
+  });
+
+  it("never covers a game with the boot frame of a failed or unresponded run", () => {
+    expect(gameCoverFrame(labelled([{ label: "booted", path: "boot.png" }]))).toBeNull();
+    expect(
+      gameCoverFrame(labelled([{ label: "booted", path: "boot.png" }], { success: false })),
+    ).toBeNull();
+    expect(
+      gameCoverFrame(labelled([{ label: "booted", path: "boot.png" }], { responded: false })),
+    ).toBeNull();
+  });
 });
 
 describe("gameCoverCandidates", () => {
-  it("prefers the newest playtest frame, then asset thumbnails in manifest order", () => {
+  it("prefers a gameplay playtest frame, then asset thumbnails in manifest order", () => {
     expect(
       gameCoverCandidates({
-        lastPlaytest: playtest([
-          "builds/playtests/new/01-boot.png",
-          "builds/playtests/new/02-step.png",
+        lastPlaytest: labelled([
+          { label: "booted", path: "builds/playtests/new/01-booted.png" },
+          { label: "playing", path: "builds/playtests/new/02-playing.png" },
         ]),
         assets: [asset("rock", "art/previews/rock.png"), asset("tree")],
       }),
-    ).toEqual(["builds/playtests/new/01-boot.png", "art/previews/rock.png"]);
+    ).toEqual(["builds/playtests/new/02-playing.png", "art/previews/rock.png"]);
   });
 
   it("falls back to the first asset thumbnail when there is no playtest frame", () => {
@@ -60,7 +113,9 @@ describe("sortGameSummaries", () => {
       root: `/games/${name}`,
       name,
       template: "3d-explorer",
-      designStatus: null,
+      designState: null,
+      operation: null,
+      qualification: { state: "unqualified", asOf: null },
       updatedAt,
       coverImagePath: null,
     });

@@ -29,6 +29,8 @@ import {
   type GameProjectResult,
   type GameSummary,
 } from "@t3tools/contracts";
+import * as GameOperations from "./GameOperations.ts";
+import * as GameQualification from "./GameQualification.ts";
 import { validateDesignDocument } from "@t3tools/contracts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -39,7 +41,7 @@ import { commandDetail } from "./commandDetail.ts";
 import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { readLastPlaytest } from "./playtestEvidence.ts";
-import { designSkeleton, initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
+import { designSkeleton, initialGamePrompt, scaffoldFiles, scaffoldManifest } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -82,7 +84,16 @@ export class GameProjectService extends Context.Service<
       root: string,
       asset: GameAsset,
     ) => Effect.Effect<void, GameOperationError>;
-    readonly inventory: (root: string) => Effect.Effect<
+    /**
+     * Expensive reads (asset usage, scenes, viewport, builds). `sourceId` is the
+     * qualification snapshot the caller already computed; the result is cached
+     * until that snapshot changes, so a status refresh does not walk the tree
+     * again.
+     */
+    readonly inventory: (
+      root: string,
+      sourceId?: string | null,
+    ) => Effect.Effect<
       {
         manifest: GameManifest;
         design: GameDesign | null;
@@ -100,11 +111,25 @@ export class GameProjectService extends Context.Service<
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(GameManifest));
 const make = Effect.gen(function* () {
+  const inventoryCache = new Map<
+    string,
+    {
+      readonly sourceId: string;
+      readonly manifestSignature: string;
+      readonly value: {
+        readonly assets: readonly (GameAsset & { usedBy: string[] })[];
+        readonly scenes: string[];
+        readonly viewport: GodotViewport;
+      };
+    }
+  >();
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
   const approvals = yield* GameDesignApproval.GameDesignApproval;
+  const qualification = yield* GameQualification.GameQualification;
+  const operations = yield* GameOperations.GameOperations;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const read = (root: string) =>
@@ -301,7 +326,11 @@ const make = Effect.gen(function* () {
         // The creation-time design promise lives outside the workspace. Without
         // it, deleting DESIGN.md or editing game.json could pass a plan-first
         // game as legacy.
-        yield* approvals.recordIntent(root, input.planFirst === false ? "skipped" : "required");
+        yield* approvals.recordIntent(
+          root,
+          input.planFirst === false ? "skipped" : "required",
+          scaffoldManifest(input).probe === true,
+        );
         for (const args of [
           ["init"],
           ["add", "."],
@@ -584,6 +613,14 @@ const make = Effect.gen(function* () {
             const manifest = yield* read(project.workspaceRoot).pipe(Effect.option);
             if (Option.isNone(manifest)) return null;
             const latestThread = newestThreadByProject.get(project.id) ?? null;
+            // The cheap verdict: the server's records, never a source walk. The
+            // Stage still does the exact check when it opens this game.
+            const design = yield* approvals.status(project.workspaceRoot, manifest.value);
+            const progress = yield* qualification.summary(
+              project.workspaceRoot,
+              design.state === "approved" ? design.approvedHash : null,
+            );
+            const currentOperation = operations.current(project.workspaceRoot);
             const lastPlaytest = yield* Effect.promise(() =>
               readLastPlaytest(project.workspaceRoot, []),
             );
@@ -601,18 +638,24 @@ const make = Effect.gen(function* () {
               }
               return null;
             });
-            return {
+            const summary: GameSummary = {
               projectId: project.id,
               root: project.workspaceRoot,
               name: manifest.value.name,
               template: manifest.value.template ?? null,
-              designStatus: manifest.value.design?.status ?? null,
+              designState: design.state,
+              operation:
+                currentOperation === null
+                  ? null
+                  : { name: currentOperation.name, state: currentOperation.state },
+              qualification: progress,
               updatedAt: latestGameActivity(
                 project.updatedAt,
                 latestThread === null ? null : DateTime.formatIso(latestThread.updatedAt),
               ),
               coverImagePath,
-            } satisfies GameSummary;
+            };
+            return summary;
           }),
         { concurrency: 4 },
       );
@@ -642,84 +685,113 @@ const make = Effect.gen(function* () {
         ...manifest,
         assets: manifest.assets.filter((entry) => entry.id !== asset.id).concat(asset),
       })),
-    inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
+    inventory: Effect.fn("GameProjectService.inventory")(function* (root, sourceId) {
       const manifest = yield* read(root);
-      return yield* Effect.tryPromise({
-        try: async () => {
-          const engineRoot = insideGame(root, manifest.godotProject);
-          const present = async (relative: string) =>
-            NodeFSP.stat(NodePath.join(root, relative)).then(
-              (stat) => stat.isFile(),
-              () => false,
-            );
-          const projectGodot = await NodeFSP.readFile(
-            NodePath.join(engineRoot, "project.godot"),
-            "utf8",
-          ).catch(() => "");
-          const viewport = parseGodotViewport(projectGodot);
-          const scenes: string[] = [];
-          const sourceFiles: string[] = [];
-          const walk = async (directory: string) => {
-            for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
-              if (entry.isDirectory() && !entry.name.startsWith("."))
-                await walk(NodePath.join(directory, entry.name));
-              else if (
-                entry.isFile() &&
-                (entry.name.endsWith(".tscn") || entry.name.endsWith(".gd"))
-              ) {
-                const relative = NodePath.relative(root, NodePath.join(directory, entry.name));
-                sourceFiles.push(relative);
-                if (entry.name.endsWith(".tscn")) scenes.push(relative);
-              }
-            }
-          };
-          await walk(engineRoot);
-          const sources = await Promise.all(
-            sourceFiles.map(async (file) => ({
-              file,
-              source: await NodeFSP.readFile(insideGame(root, file), "utf8"),
-            })),
-          );
-          const assets = manifest.assets.map((asset) => ({
-            ...asset,
-            usedBy: sources
-              .filter(({ source }) =>
-                source.includes(
-                  `"res://${NodePath.relative(manifest.godotProject, asset.export).split(NodePath.sep).join("/")}"`,
-                ),
-              )
-              .map(({ file }) => file),
-          }));
-          const builds: { target: string; path: string; updatedAt: string }[] = [];
-          for (const [target, relative] of [
-            ["Web", "builds/web/index.html"],
-            ["Linux", "builds/linux/game.x86_64"],
-          ]) {
-            try {
-              const stat = await NodeFSP.stat(NodePath.join(root, relative!));
-              builds.push({
-                target: target!,
-                path: relative!,
-                updatedAt: stat.mtime.toISOString(),
-              });
-            } catch {
-              /* A game need not have been built yet. */
-            }
+      // The expensive reads depend on the engine root and the manifest's asset
+      // paths only; a cheap textual signature detects a manifest edit without
+      // walking or re-reading the tree.
+      const manifestSignature = [
+        manifest.godotProject,
+        ...manifest.assets.map((asset) => `${asset.id}\0${asset.export}`),
+      ].join("\0");
+      const cached = inventoryCache.get(root);
+      const reusable =
+        sourceId != null &&
+        cached !== undefined &&
+        cached.sourceId === sourceId &&
+        cached.manifestSignature === manifestSignature;
+      const expensive =
+        reusable && cached !== undefined
+          ? cached.value
+          : yield* Effect.tryPromise({
+              try: async () => {
+                const engineRoot = insideGame(root, manifest.godotProject);
+                const projectGodot = await NodeFSP.readFile(
+                  NodePath.join(engineRoot, "project.godot"),
+                  "utf8",
+                ).catch(() => "");
+                const viewport = parseGodotViewport(projectGodot);
+                const scenes: string[] = [];
+                const sourceFiles: string[] = [];
+                const walk = async (directory: string) => {
+                  for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
+                    if (entry.isDirectory() && !entry.name.startsWith("."))
+                      await walk(NodePath.join(directory, entry.name));
+                    else if (
+                      entry.isFile() &&
+                      (entry.name.endsWith(".tscn") || entry.name.endsWith(".gd"))
+                    ) {
+                      const relative = NodePath.relative(
+                        root,
+                        NodePath.join(directory, entry.name),
+                      );
+                      sourceFiles.push(relative);
+                      if (entry.name.endsWith(".tscn")) scenes.push(relative);
+                    }
+                  }
+                };
+                await walk(engineRoot);
+                const sources = await Promise.all(
+                  sourceFiles.map(async (file) => ({
+                    file,
+                    source: await NodeFSP.readFile(insideGame(root, file), "utf8"),
+                  })),
+                );
+                const assets = manifest.assets.map((asset) => ({
+                  ...asset,
+                  usedBy: sources
+                    .filter(({ source }) =>
+                      source.includes(
+                        `"res://${NodePath.relative(manifest.godotProject, asset.export).split(NodePath.sep).join("/")}"`,
+                      ),
+                    )
+                    .map(({ file }) => file),
+                }));
+                return { assets, scenes, viewport };
+              },
+              catch: (cause) =>
+                new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
+            });
+      if (sourceId != null)
+        inventoryCache.set(root, { sourceId, manifestSignature, value: expensive });
+      // Stat-only reads stay outside the cache: a rebuild with unchanged sources
+      // still has to move its build time, and a deleted manifest file must vanish.
+      const present = (relative: string) =>
+        NodeFSP.stat(NodePath.join(root, relative)).then(
+          (stat) => stat.isFile(),
+          () => false,
+        );
+      const [designPath, briefPath, builds] = yield* Effect.promise(async () => {
+        const designPresent = await present("DESIGN.md");
+        const briefPresent = await present("BRIEF.md");
+        const found: { target: string; path: string; updatedAt: string }[] = [];
+        for (const [target, relative] of [
+          ["Web", "builds/web/index.html"],
+          ["Linux", "builds/linux/game.x86_64"],
+        ] as const) {
+          try {
+            const stat = await NodeFSP.stat(NodePath.join(root, relative));
+            found.push({ target, path: relative, updatedAt: stat.mtime.toISOString() });
+          } catch {
+            /* A game need not have been built yet. */
           }
-          return {
-            manifest,
-            design: manifest.design ?? null,
-            designPath: (await present("DESIGN.md")) ? "DESIGN.md" : null,
-            briefPath: (await present("BRIEF.md")) ? "BRIEF.md" : null,
-            assets,
-            scenes,
-            builds,
-            viewport,
-          };
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
+        }
+        return [
+          designPresent ? "DESIGN.md" : null,
+          briefPresent ? "BRIEF.md" : null,
+          found,
+        ] as const;
       });
+      return {
+        manifest,
+        design: manifest.design ?? null,
+        designPath,
+        briefPath,
+        assets: expensive.assets,
+        scenes: expensive.scenes,
+        builds,
+        viewport: expensive.viewport,
+      };
     }),
   });
 });

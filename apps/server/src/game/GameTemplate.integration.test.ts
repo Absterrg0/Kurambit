@@ -11,6 +11,7 @@ import { ProviderInstanceId, type GamePlaytestStep, type GameTemplateId } from "
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -117,6 +118,7 @@ const templateJourney = (journey: TemplateJourney) =>
     yield* Effect.promise(() => NodeFSP.mkdir(evidenceDirectory, { recursive: true }));
     const dependencies = GameService.layer.pipe(
       Layer.provideMerge(GameProjectService.layer),
+      Layer.provideMerge(GameOperations.layer),
       Layer.provideMerge(GameToolchain.layer),
       Layer.provideMerge(GamePreview.layer),
       Layer.provideMerge(GameProcesses.layer),

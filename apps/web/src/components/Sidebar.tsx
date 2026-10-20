@@ -1,4 +1,5 @@
 import { useGameDialogStore } from "./game/gameDialogStore";
+import { gameProgress, type GameProgressKind } from "./game/gameProgress";
 import {
   gameInitial,
   gameTemplateAppearance,
@@ -2094,30 +2095,32 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const olderSessions = gameSessions.filter((session) => session.id !== thread.id);
     const working =
       status === "working" || status === "waiting" || status === "approval" || status === "input";
+    // The row's status comes from the server's records, never game.json's
+    // display mirror: a game with no qualification record is not "Ready".
+    const progress = gameProgress(gameSummary);
+    const progressIcon: Record<GameProgressKind, typeof CircleCheckIcon> = {
+      drafting: SquarePenIcon,
+      "design-changed": SquarePenIcon,
+      building: CircleDashedIcon,
+      unqualified: CircleDotDashedIcon,
+      qualified: CircleCheckIcon,
+    };
+    const progressClass: Record<GameProgressKind, string> = {
+      drafting: "text-warning-foreground",
+      "design-changed": "text-warning-foreground",
+      building: "text-info",
+      unqualified: "text-muted-foreground",
+      qualified: "text-success-foreground",
+    };
     const gameStatusLabel =
       status === "failed"
         ? "Needs attention"
         : working
           ? (topStatus?.label ?? "Working")
-          : gameSummary.designStatus === "draft"
-            ? "Design draft"
-            : "Ready";
-    const GameStatusIcon =
-      status === "failed"
-        ? CircleAlertIcon
-        : working
-          ? CircleDashedIcon
-          : gameSummary.designStatus === "draft"
-            ? SquarePenIcon
-            : CircleCheckIcon;
+          : progress.label;
+    const GameStatusIcon = status === "failed" ? CircleAlertIcon : progressIcon[progress.kind];
     const gameStatusClass =
-      status === "failed"
-        ? "text-error"
-        : working
-          ? "text-info"
-          : gameSummary.designStatus === "draft"
-            ? "text-warning-foreground"
-            : "text-success-foreground";
+      status === "failed" ? "text-error" : working ? "text-info" : progressClass[progress.kind];
     return (
       <li
         data-thread-item={threadKey}

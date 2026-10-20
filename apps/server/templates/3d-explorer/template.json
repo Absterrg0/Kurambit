@@ -4,5 +4,6 @@
   "description": "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
   "dimension": "3d",
   "testSuite": "res://tests/smoke_test.gd",
-  "gameplayScene": "res://scenes/game.tscn"
+  "gameplayScene": "res://scenes/game.tscn",
+  "probe": true
 }

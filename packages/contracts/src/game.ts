@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
-import { GameDesignRead } from "./gameDesign.ts";
+import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
 import { GameScenarioCriterionResult } from "./gameScenario.ts";
 
 export const GameAsset = Schema.Struct({
@@ -28,6 +28,12 @@ export const GameTemplate = Schema.Struct({
    * failure in gameplay initialization cannot hide behind the menu.
    */
   gameplayScene: Schema.optionalKey(Schema.String),
+  /**
+   * The template ships the read-only StudioProbe. Games built from such a
+   * template owe a state probe: a playtest that cannot read one has proven
+   * nothing about play, so it must not qualify the game.
+   */
+  probe: Schema.optionalKey(Schema.Boolean),
 });
 export type GameTemplate = typeof GameTemplate.Type;
 /** The suite a game qualifies with unless its manifest names another one. */
@@ -45,6 +51,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     dimension: "3d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
     gameplayScene: "res://scenes/game.tscn",
+    probe: true,
   },
   {
     id: "2d-platformer",
@@ -54,6 +61,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     dimension: "2d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
     gameplayScene: "res://scenes/game.tscn",
+    probe: true,
   },
   {
     id: "blank",
@@ -88,6 +96,9 @@ export const GameManifest = Schema.Struct({
   // Games created before the gameplay-entry check have no gameplayScene; their
   // check only runs the main scene (the menu).
   gameplayScene: Schema.optionalKey(Schema.String),
+  // Games created before probe enforcement have no probe key; only the
+  // server-owned creation record can add the obligation.
+  probe: Schema.optionalKey(Schema.Boolean),
   // Games created before the design step existed have no design key.
   design: Schema.optionalKey(GameDesign),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
@@ -126,6 +137,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "design-hash-mismatch",
       "design-legacy",
       "thread-dispatch",
+      "invalid-input",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -167,6 +179,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "Open this game as a project and start a thread before using game tools.",
       "thread-dispatch":
         "The design was approved, but starting the build turn failed. The approval was rolled back; try approving it again.",
+      "invalid-input":
+        "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
@@ -275,6 +289,13 @@ export const GameQualificationRead = Schema.Struct({
   stages: Schema.Array(GameQualificationStageRead),
 });
 export type GameQualificationRead = typeof GameQualificationRead.Type;
+/**
+ * A game operation the server is running, or the last one it ran. Its events
+ * replace polling: a stage opened while idle learns about a later agent build
+ * from the push, not from a two-second status loop.
+ */
+export const GameOperationState = Schema.Literals(["running", "succeeded", "failed"]);
+export type GameOperationState = typeof GameOperationState.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
@@ -307,7 +328,7 @@ export const GameStatus = Schema.Struct({
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,
-      state: Schema.Literals(["running", "succeeded", "failed"]),
+      state: GameOperationState,
       message: Schema.String,
       /** When the operation started, so clients can show elapsed time honestly. */
       at: Schema.String,
@@ -315,6 +336,29 @@ export const GameStatus = Schema.Struct({
   ),
 });
 export type GameStatus = typeof GameStatus.Type;
+/**
+ * One push about a game operation, for every client that might be showing that
+ * game. `at` identifies the event itself (start and finish are separate events),
+ * so a subscriber can tell a repeat from news.
+ */
+export const GameOperationEvent = Schema.Struct({
+  root: Schema.String,
+  name: Schema.String,
+  state: Schema.Union([GameOperationState, Schema.Literal("cancelled")]),
+  message: Schema.String,
+  at: Schema.String,
+});
+export type GameOperationEvent = typeof GameOperationEvent.Type;
+/**
+ * The cheap library verdict: the server's qualification record and design
+ * record, without walking the game's sources. `asOf` is when the record was
+ * written; the Stage still does the exact check against the files on disk.
+ */
+export const GameQualificationSummary = Schema.Struct({
+  state: Schema.Literals(["qualified", "unqualified"]),
+  asOf: Schema.NullOr(Schema.String),
+});
+export type GameQualificationSummary = typeof GameQualificationSummary.Type;
 export const GameCreateInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   parentDirectory: Schema.String,
@@ -343,7 +387,12 @@ export const GameSummary = Schema.Struct({
   root: Schema.String,
   name: Schema.String,
   template: Schema.NullOr(GameTemplateId),
-  designStatus: Schema.NullOr(Schema.Literals(["draft", "approved"])),
+  /** The server-owned design lifecycle, not game.json's display mirror. */
+  designState: Schema.NullOr(GameDesignState),
+  /** The operation running now, or the last one, for a building label. */
+  operation: Schema.NullOr(Schema.Struct({ name: Schema.String, state: GameOperationState })),
+  /** The qualification record's verdict, as of when it was written. */
+  qualification: GameQualificationSummary,
   updatedAt: Schema.String,
   coverImagePath: Schema.NullOr(Schema.String),
 });

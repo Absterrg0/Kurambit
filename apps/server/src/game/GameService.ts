@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import {
   GameOperationError,
   gameTestSuite,
@@ -24,8 +25,12 @@ import {
   GameBlenderResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
+  type GameOperationEvent,
   type GameProcessResult,
   type ThreadId,
+  fitScreenshotsToBudget,
+  GAME_PLAYTEST_BOUNDS,
+  playtestInputIssues,
 } from "@t3tools/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
@@ -37,6 +42,7 @@ import { commandDetail } from "./commandDetail.ts";
 import { isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
 import { exportedSourceId, snapshotSource } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
+import * as GameOperations from "./GameOperations.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import {
@@ -70,6 +76,8 @@ export class GameService extends Context.Service<
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
     readonly status: (threadId: ThreadId) => Effect.Effect<GameStatus, GameOperationError>;
+    /** Operation pushes for every game this server runs. */
+    readonly events: Stream.Stream<GameOperationEvent>;
     readonly action: (
       threadId: ThreadId,
       action: GameAction,
@@ -156,7 +164,7 @@ const make = Effect.gen(function* () {
   const qualification = yield* GameQualification.GameQualification;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
-  const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
+  const operations = yield* GameOperations.GameOperations;
   const active = new Map<
     string,
     { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
@@ -187,7 +195,12 @@ const make = Effect.gen(function* () {
       const done = yield* Deferred.make<void>();
       const at = DateTime.formatIso(yield* DateTime.now);
       active.set(root, { cancelled, done });
-      operations.set(root, { name, state: "running", message: `${name} is running.`, at });
+      yield* operations.record(
+        root,
+        { name, state: "running", message: `${name} is running.`, at },
+        "running",
+      );
+      const stopped = Deferred.isDone(cancelled);
       return yield* work.pipe(
         Effect.raceFirst(
           Deferred.await(cancelled).pipe(
@@ -204,27 +217,47 @@ const make = Effect.gen(function* () {
           ),
         ),
         Effect.tap((result) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             const failed = operationFailed(result);
-            operations.set(root, {
-              name,
-              state: failed ? "failed" : "succeeded",
-              message:
-                typeof result === "object" && result !== null && "message" in result
-                  ? String(result.message)
-                  : `${name} completed.`,
-              at,
-            });
+            yield* operations.record(
+              root,
+              {
+                name,
+                state: failed ? "failed" : "succeeded",
+                message:
+                  typeof result === "object" && result !== null && "message" in result
+                    ? String(result.message)
+                    : `${name} completed.`,
+                at,
+              },
+              failed ? "failed" : "succeeded",
+            );
           }),
         ),
         Effect.tapError((error) =>
-          Effect.sync(() => {
-            operations.set(root, { name, state: "failed", message: error.message, at });
+          Effect.gen(function* () {
+            const wasCancelled = yield* stopped;
+            yield* operations.record(
+              root,
+              {
+                name,
+                // The status field has no cancelled state; Stop reads as a
+                // failed run with an honest message.
+                state: "failed",
+                message: error.message,
+                at,
+              },
+              wasCancelled ? "cancelled" : "failed",
+            );
           }),
         ),
         Effect.onInterrupt(() =>
-          Effect.sync(() => {
-            operations.set(root, { name, state: "failed", message: `${name} was cancelled.`, at });
+          Effect.gen(function* () {
+            yield* operations.record(
+              root,
+              { name, state: "failed", message: `${name} was cancelled.`, at },
+              "cancelled",
+            );
           }),
         ),
         Effect.ensuring(
@@ -397,6 +430,16 @@ const make = Effect.gen(function* () {
     return result;
   });
   const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
+    // Reject before exporting, serving, or launching the browser: a bad capture
+    // request must not cost a build or hold the game's operation lock.
+    const issues = playtestInputIssues(input);
+    if (issues.length > 0)
+      return yield* new GameOperationError({
+        operation: "Web playtest",
+        path: root,
+        reason: "invalid-input",
+        detail: issues.join("\n"),
+      });
     const manifest = yield* projects.read(root);
     const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
     if (!(yield* webBuildIsCurrent(root, beforePlaytest))) {
@@ -441,6 +484,8 @@ const make = Effect.gen(function* () {
     const observationNote = hasObservable
       ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
       : "";
+    const budgeted = fitScreenshotsToBudget(result.screenshots);
+    const droppedFrames = budgeted.dropped.length;
     const evidence = yield* Effect.tryPromise({
       try: () =>
         writePlaytestEvidence({
@@ -467,30 +512,43 @@ const make = Effect.gen(function* () {
     const stepsGiven = (input.steps?.length ?? 0) > 0;
     const probe = result.state;
     const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
+    // A template game owes the probe it was created with. The creation record is
+    // server-owned, so deleting scripts/studio_probe.gd cannot downgrade the
+    // playtest to the pixel rule without failing the stage.
+    const probeRequired = (yield* designApprovals.readProbe(root)) ?? manifest.probe === true;
+    const missingProbe = probeRequired && probe === null;
     const gaps: string[] = [];
     if (!stepsGiven) gaps.push("input steps");
     if (!result.success) gaps.push("a run without console errors");
     if (!result.responded) gaps.push("a visible response");
     if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
+    if (missingProbe) gaps.push("the StudioProbe autoload (scripts/studio_probe.gd)");
     const qualifies = gaps.length === 0;
+    const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
     yield* recordQualification(root, {
       stage: "playtest",
       outcome: qualifies ? "passed" : "failed",
       sourceId: build?.status === "passed" ? build.sourceId : null,
       buildId: build?.status === "passed" ? build.buildId : null,
       evidenceDirectory: evidence.directory,
-      detail:
-        probe === null
+      detail: missingProbe
+        ? probesMissing
+        : probe === null
           ? "No state probe in this game; the playtest was judged on input steps and a visible response."
           : `State probe: ${describePlaytestState(probe)}.`,
     });
+    const framesNote =
+      droppedFrames === 0
+        ? ""
+        : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidence.directory}.`;
     return {
       ...result,
+      screenshots: budgeted.kept,
       message: `${
         qualifies
           ? result.message
-          : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.`
-      }${observationNote}`,
+          : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.${missingProbe ? ` ${probesMissing}.` : ""}`
+      }${observationNote}${framesNote}`,
       designObservations: observations,
       evidenceDirectory: evidence.directory,
     };
@@ -885,6 +943,7 @@ const make = Effect.gen(function* () {
       });
     });
   return GameService.of({
+    events: operations.events,
     cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
       const root = yield* projects.resolve(threadId).pipe(
         Effect.catchTags({
@@ -898,15 +957,19 @@ const make = Effect.gen(function* () {
     }),
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
-      const inventory = yield* projects.inventory(root);
-      const design = yield* designApprovals.status(root, inventory.manifest);
+      // Qualification first: its source snapshot is also the inventory cache
+      // key, so a status read that finds unchanged sources does no file walk
+      // beyond the snapshot it already needed for freshness.
+      const manifest = yield* projects.read(root);
+      const design = yield* designApprovals.status(root, manifest);
       const approval = yield* designApprovals.read(root);
       const qualificationRead = yield* qualification.read(
         root,
-        inventory.manifest.godotProject,
+        manifest.godotProject,
         design.state,
         approval?.designHash ?? null,
       );
+      const inventory = yield* projects.inventory(root, qualificationRead.sourceId);
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () => readLastPlaytest(root, inventory.builds),
@@ -935,7 +998,7 @@ const make = Effect.gen(function* () {
         previewUrl: preview.url(root),
         logsDirectory: NodePath.join(root, "builds/logs"),
         lastPlaytest,
-        operation: operations.get(root) ?? null,
+        operation: operations.current(root),
       };
     }),
     import: (threadId) => withRoot(threadId, "Import", importGame),
@@ -1211,7 +1274,13 @@ const make = Effect.gen(function* () {
     }),
   });
 });
-export const layer = Layer.effect(GameService, make).pipe(Layer.provide(GameWebPlaytest.layer));
+export const layer = Layer.effect(GameService, make).pipe(
+  Layer.provide(GameWebPlaytest.layer),
+  Layer.provideMerge(GameOperations.layer),
+);
 /** Tests inject a fake browser run; production uses the real playtest. */
 export const layerWithPlaytest = (run: typeof GameWebPlaytest.playtest) =>
-  Layer.effect(GameService, make).pipe(Layer.provide(GameWebPlaytest.layerOf(run)));
+  Layer.effect(GameService, make).pipe(
+    Layer.provide(GameWebPlaytest.layerOf(run)),
+    Layer.provideMerge(GameOperations.layer),
+  );

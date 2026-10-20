@@ -83,16 +83,12 @@ export function initialGamePrompt(input: GameCreateInput): string {
   return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block, covering every control, the core mechanic, the content counts, and how the game is won and lost. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
 }
 
-/**
- * Files the studio owns for every game. The starter template supplies the
- * `godot/` tree and TEMPLATE.md; see templates.ts.
- */
-export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
+/** The manifest a new game starts from; the creation record also reads its probe flag. */
+export function scaffoldManifest(input: GameCreateInput): GameManifest {
   const template = input.template ?? DEFAULT_GAME_TEMPLATE;
   const templateEntry = GAME_TEMPLATES.find((entry) => entry.id === template);
-  const templateName = templateEntry?.name ?? template;
   const planFirst = input.planFirst !== false;
-  const manifest: GameManifest = {
+  return {
     schemaVersion: 1,
     name: input.name.trim(),
     brief: input.brief,
@@ -102,11 +98,24 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     ...(templateEntry?.gameplayScene === undefined
       ? {}
       : { gameplayScene: templateEntry.gameplayScene }),
+    ...(templateEntry?.probe === true ? { probe: true } : {}),
     design: planFirst ? { status: "draft" } : { status: "approved" },
     engine: { name: "godot", version: "4.7.2" },
     godotProject: "godot",
     assets: [],
   };
+}
+
+/**
+ * Files the studio owns for every game. The starter template supplies the
+ * `godot/` tree and TEMPLATE.md; see templates.ts.
+ */
+export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
+  const template = input.template ?? DEFAULT_GAME_TEMPLATE;
+  const templateEntry = GAME_TEMPLATES.find((entry) => entry.id === template);
+  const templateName = templateEntry?.name ?? template;
+  const planFirst = input.planFirst !== false;
+  const manifest = scaffoldManifest(input);
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,

@@ -11,6 +11,7 @@ import { ProviderInstanceId, type GameQualificationRead } from "@t3tools/contrac
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -159,6 +160,7 @@ it.live.skipIf(!available || !templatesInstalled)(
       );
       const dependencies = GameService.layer.pipe(
         Layer.provideMerge(GameProjectService.layer),
+        Layer.provideMerge(GameOperations.layer),
         Layer.provideMerge(GameToolchain.layer),
         Layer.provideMerge(GamePreview.layer),
         Layer.provideMerge(GameProcesses.layer),
@@ -251,6 +253,7 @@ it.live.skipIf(!available || !templatesInstalled)(
       const stateDir = NodePath.join(parent, "state");
       const dependencies = GameService.layer.pipe(
         Layer.provideMerge(GameProjectService.layer),
+        Layer.provideMerge(GameOperations.layer),
         Layer.provideMerge(GameToolchain.layer),
         Layer.provideMerge(GamePreview.layer),
         Layer.provideMerge(GameProcesses.layer),

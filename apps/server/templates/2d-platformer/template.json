@@ -4,5 +4,6 @@
   "description": "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
   "dimension": "2d",
   "testSuite": "res://tests/smoke_test.gd",
-  "gameplayScene": "res://scenes/game.tscn"
+  "gameplayScene": "res://scenes/game.tscn",
+  "probe": true
 }

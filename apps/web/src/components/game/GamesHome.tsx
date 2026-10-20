@@ -25,6 +25,7 @@ import {
   gameTemplateAppearance,
   newestThreadByProject,
 } from "./gameLibrary.logic";
+import { gameProgress } from "./gameProgress";
 import { TemplatePreview } from "./TemplatePreview";
 import { useGameLibrary } from "./useGameLibrary";
 
@@ -219,6 +220,7 @@ function GameCard({
 }) {
   const appearance = gameTemplateAppearance(card.game.template);
   const initial = gameInitial(card.game.name);
+  const progress = gameProgress(card.game);
   return (
     <button
       type="button"
@@ -249,11 +251,14 @@ function GameCard({
           </span>
         )}
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/0" />
-        {card.game.designStatus === "draft" ? (
-          <span className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm">
-            Design draft
+        {progress.kind === "qualified" ? null : (
+          <span
+            title={progress.detail}
+            className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm"
+          >
+            {progress.label}
           </span>
-        ) : null}
+        )}
         <span className="absolute bottom-3 left-3 flex items-center gap-1.5 text-2xs font-medium text-white/90 drop-shadow">
           <Gamepad2Icon className="size-3.5" aria-hidden />
           {appearance.label}

@@ -30,6 +30,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" };
 /** Enough of the real services to resolve a game and hit the draft gate without Godot. */
@@ -39,6 +40,7 @@ const gameServiceLayers = (options?: {
 }) =>
   GameService.layer.pipe(
     Layer.provideMerge(GameProjectService.layer),
+    Layer.provideMerge(GameOperations.layer),
     Layer.provideMerge(GameToolchain.layer),
     Layer.provideMerge(GamePreview.layer),
     Layer.provideMerge(GameProcesses.layer),
@@ -55,6 +57,8 @@ const gameProjectLayer = (registration = projectTestLayer(), stateDir?: string) 
     Layer.provide(registration),
     Layer.provideMerge(GameProcesses.layer),
     Layer.provideMerge(designApprovalTestLayer(stateDir)),
+    Layer.provideMerge(qualificationTestLayer(stateDir)),
+    Layer.provideMerge(GameOperations.layer),
     Layer.provide(NodeServices.layer),
   );
 /** A design that clears every scaffold heading and binds acceptance. */
@@ -425,7 +429,9 @@ it.effect("lists games with their template, design state, activity and rendered 
     expect(games[0]).toMatchObject({
       name: "Library Game",
       template: DEFAULT_GAME_TEMPLATE,
-      designStatus: "draft",
+      designState: "draft",
+      operation: null,
+      qualification: { state: "unqualified", asOf: null },
       coverImagePath: "art/previews/coin.png",
     });
     // The mock's session is newer than the project row, so activity follows it.

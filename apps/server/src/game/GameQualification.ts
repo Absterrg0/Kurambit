@@ -14,6 +14,7 @@ import {
   type GameQualificationRead,
   type GameQualificationStage,
   type GameQualificationStageRead,
+  type GameQualificationSummary,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
@@ -184,6 +185,38 @@ const deriveQualification = (input: {
   };
 };
 
+/**
+ * The verdict a library row may show without touching the source tree: the
+ * record alone, bound to the design revision the caller already knows. It says
+ * what was true when the last stage was written; only `read` can say whether
+ * the files still match, so the Stage never inherits this as an exact answer.
+ */
+const deriveQualificationSummary = (
+  record: QualificationRecord | null,
+  designHash: string | null,
+): GameQualificationSummary => {
+  const stages = RECORDED_QUALIFICATION_STAGES.map((stage) => record?.stages[stage]);
+  const finished = stages
+    .flatMap((stage) => (stage === undefined ? [] : [stage.finishedAt]))
+    .sort()
+    .at(-1);
+  const recorded = record === null ? [] : RECORDED_QUALIFICATION_STAGES;
+  if (record === null) return { state: "unqualified", asOf: null };
+  const passed = recorded.every((stage) => record.stages[stage]?.outcome === "passed");
+  const sourceIds = new Set(recorded.map((stage) => record.stages[stage]?.sourceId ?? null));
+  const exportBuild = record.stages.export?.buildId ?? null;
+  const playtestBuild = record.stages.playtest?.buildId ?? null;
+  const designBound = (record.stages.state?.designHash ?? null) === designHash;
+  const qualified =
+    passed &&
+    sourceIds.size === 1 &&
+    !sourceIds.has(null) &&
+    exportBuild !== null &&
+    playtestBuild === exportBuild &&
+    designBound;
+  return { state: qualified ? "qualified" : "unqualified", asOf: finished ?? null };
+};
+
 export interface QualificationRecordInput {
   readonly stage: RecordedQualificationStage;
   readonly outcome: "passed" | "failed";
@@ -209,6 +242,14 @@ export class GameQualification extends Context.Service<
       designState?: GameDesignState,
       designHash?: string | null,
     ) => Effect.Effect<GameQualificationRead>;
+    /**
+     * The record-only verdict for a library row. Cheap by construction: it reads
+     * one small record and never walks the game's sources.
+     */
+    readonly summary: (
+      root: string,
+      designHash: string | null,
+    ) => Effect.Effect<GameQualificationSummary>;
     /** Records one real operation result. Concurrent writers are serialized per game. */
     readonly record: (
       root: string,
@@ -236,6 +277,11 @@ export const layer = (options: {
   return Layer.succeed(
     GameQualification,
     GameQualification.of({
+      summary: (root, designHash) =>
+        Effect.promise(async () => {
+          const record = await readRecord(recordPath(options.stateDir, root));
+          return deriveQualificationSummary(record, designHash);
+        }),
       read: (root, godotProject, designState, designHash) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>

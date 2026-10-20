@@ -112,10 +112,12 @@ export function GameStage({
   const refresh = query.refresh;
   const data = query.data;
   const operationState = data?.operation?.state ?? null;
-  // Poll only while an operation is in flight; otherwise the stage sits still.
+  // Operation events invalidate the status query, so this is only a fallback
+  // for a missed push while something is running. A whole-project status read
+  // must never be a two-second loop.
   useEffect(() => {
     if (operationState !== "running") return;
-    const interval = window.setInterval(refresh, 2_000);
+    const interval = window.setInterval(refresh, 10_000);
     return () => window.clearInterval(interval);
   }, [operationState, refresh]);
   // The moment a turn settles, the game on disk is probably different.
@@ -207,7 +209,9 @@ export function GameStage({
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
-  const frameKey = `${data.previewUrl ?? ""}#${webBuild?.updatedAt ?? ""}`;
+  // Reload the iframe only when the served preview or the export it came from
+  // changes; a tab switch must not restart the game.
+  const frameKey = `${data.previewUrl ?? ""}#${data.qualification.buildId ?? webBuild?.updatedAt ?? ""}`;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
     if (busy !== null && stageAction !== "stop") return;
@@ -532,7 +536,17 @@ export function GameStage({
           }}
         />
       ) : null}
-      {activeTab === "play" ? (
+      {/*
+        The stage stays mounted across workspace tabs. Unmounting it recreated
+        the iframe and killed the running Godot session; hiding it instead makes
+        the browser report the document as hidden, which is what the engine's
+        web shell uses to pause and mute. It is reset only by Stop, a new build
+        (frameKey), or the preview going away.
+      */}
+      <div
+        aria-hidden={activeTab !== "play"}
+        className={activeTab === "play" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      >
         <GamePlaySurface
           phase={phase}
           viewport={data.viewport}
@@ -546,7 +560,7 @@ export function GameStage({
           onAskAgent={askAgentToFix}
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
         />
-      ) : null}
+      </div>
       {activeTab === "assets" ? (
         <GameAssetsPanel threadRef={threadRef} assets={data.assets} />
       ) : null}

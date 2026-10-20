@@ -5,6 +5,7 @@ import {
   GameListResult,
   GameOpenInput,
   GameOperationError,
+  GameOperationEvent,
   GameProjectResult,
   GameStatus,
   GameThreadInput,
@@ -301,6 +302,7 @@ export const WS_METHODS = {
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
   gameVerify: "game.verify",
+  subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
 
@@ -1339,6 +1341,12 @@ const WsGameVerifyRpc = Rpc.make(WS_METHODS.gameVerify, {
   success: GameToolchainStatus,
   error: gameError,
 });
+const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
+  payload: Schema.Struct({}),
+  success: GameOperationEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
 
 export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
@@ -1350,6 +1358,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameToolchainStatusRpc,
   WsGameInstallRpc,
   WsGameVerifyRpc,
+  WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

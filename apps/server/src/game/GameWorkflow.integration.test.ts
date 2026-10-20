@@ -11,6 +11,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as GameService from "./GameService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -34,6 +35,7 @@ it.live.skipIf(!available)(
       );
       const dependencies = GameService.layer.pipe(
         Layer.provideMerge(GameProjectService.layer),
+        Layer.provideMerge(GameOperations.layer),
         Layer.provideMerge(GameToolchain.layer),
         Layer.provideMerge(GamePreview.layer),
         Layer.provideMerge(GameProcesses.layer),

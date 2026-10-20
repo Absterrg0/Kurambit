@@ -65,5 +65,6 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./game.ts";
+export * from "./playtestBounds.ts";
 export * from "./gameDesign.ts";
 export * from "./gameScenario.ts";

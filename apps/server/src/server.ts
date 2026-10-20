@@ -1,6 +1,7 @@
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameOperations from "./game/GameOperations.ts";
 import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -496,6 +497,7 @@ const layerCommandReadiness = HttpRouter.middleware(
 
 const layerGame = GameService.layer.pipe(
   Layer.provideMerge(GameProjectService.layer),
+  Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provide(GamePreview.layer),
   Layer.provide(GameProcesses.layer),

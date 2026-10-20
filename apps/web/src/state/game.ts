@@ -1,9 +1,32 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
 } from "@t3tools/client-runtime/state/runtime";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
+
+const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+  label: "game:events",
+  tag: WS_METHODS.subscribeGameEvents,
+  // Game operations are minutes apart; keep the stream warm while a game
+  // surface is open without holding it for the life of the app.
+  idleTtlMs: 5 * 60_000,
+});
+
+/**
+ * A value that changes on every game operation event. Queries read it through
+ * `refreshTrigger`, so an idle Stage learns about a later agent build from the
+ * push instead of polling the whole project on a timer.
+ */
+const gameEventSignal = Atom.family((environmentId: string) =>
+  Atom.make((get) => {
+    const result = get(gameEvents({ environmentId: environmentId as EnvironmentId, input: {} }));
+    return AsyncResult.isSuccess(result) ? `${result.value.root}\0${result.value.at}` : "";
+  }).pipe(Atom.withLabel(`game:event-signal:${environmentId}`)),
+);
+
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:toolchain",
@@ -20,13 +43,16 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
   }),
   list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:list",
     tag: WS_METHODS.gameList,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
   }),
+  events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:create",
     tag: WS_METHODS.gameCreate,

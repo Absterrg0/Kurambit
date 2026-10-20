@@ -41,12 +41,19 @@ interface DesignIntentRecord {
   readonly schemaVersion: 1;
   readonly game: string;
   readonly intent: GameDesignIntent;
+  /**
+   * The starter template shipped the StudioProbe, so this game owes a state
+   * probe. It lives here rather than only in game.json because an agent can edit
+   * that file, and deleting the probe must not silently weaken the playtest.
+   */
+  readonly probe?: boolean;
 }
 const StoredIntent = Schema.fromJsonString(
   Schema.Struct({
     schemaVersion: Schema.Literal(1),
     game: Schema.String,
     intent: Schema.Literals(["required", "skipped"]),
+    probe: Schema.optionalKey(Schema.Boolean),
   }),
 );
 const decodeStoredIntent = Schema.decodeUnknownSync(StoredIntent);
@@ -112,6 +119,15 @@ export const readDesignIntent = async (file: string): Promise<GameDesignIntent |
   }
 };
 
+/** Whether the game was created from a template that ships the StudioProbe. */
+export const readProbeIntent = async (file: string): Promise<boolean | null> => {
+  try {
+    return decodeStoredIntent(await NodeFSP.readFile(file, "utf8")).probe ?? null;
+  } catch {
+    return null;
+  }
+};
+
 const writeRecord = async (file: string, record: DesignApprovalRecord) => {
   const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
   await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
@@ -123,11 +139,21 @@ const writeRecord = async (file: string, record: DesignApprovalRecord) => {
   }
 };
 
-const writeIntent = async (file: string, game: string, intent: GameDesignIntent) => {
+const writeIntent = async (
+  file: string,
+  game: string,
+  intent: GameDesignIntent,
+  probe: boolean | undefined,
+) => {
   const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
   await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
   try {
-    const record: DesignIntentRecord = { schemaVersion: 1, game, intent };
+    const record: DesignIntentRecord = {
+      schemaVersion: 1,
+      game,
+      intent,
+      ...(probe === undefined ? {} : { probe }),
+    };
     await NodeFSP.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`);
     await NodeFSP.rename(temporary, file);
   } finally {
@@ -208,7 +234,10 @@ export class GameDesignApproval extends Context.Service<
     readonly recordIntent: (
       root: string,
       intent: GameDesignIntent,
+      probe?: boolean,
     ) => Effect.Effect<void, GameOperationError>;
+    /** The creation-time probe obligation, or null for games with no record. */
+    readonly readProbe: (root: string) => Effect.Effect<boolean | null>;
     /** The server-owned lifecycle plus what still blocks approval. */
     readonly status: (root: string, manifest: GameManifest) => Effect.Effect<GameDesignRead>;
     /**
@@ -241,10 +270,12 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.promise(() => readDesignApprovalRecord(recordPath(options.stateDir, root))),
       readIntent: (root) =>
         Effect.promise(() => readDesignIntent(intentPath(options.stateDir, root))),
-      recordIntent: (root, intent) => {
+      readProbe: (root) =>
+        Effect.promise(() => readProbeIntent(intentPath(options.stateDir, root))),
+      recordIntent: (root, intent, probe) => {
         const file = intentPath(options.stateDir, root);
         return Effect.tryPromise({
-          try: () => writeIntent(file, NodePath.resolve(root), intent),
+          try: () => writeIntent(file, NodePath.resolve(root), intent, probe),
           catch: (cause) =>
             new GameOperationError({
               operation: "create-game",

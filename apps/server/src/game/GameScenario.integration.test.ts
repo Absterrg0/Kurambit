@@ -12,6 +12,7 @@ import type { GameAcceptanceCriterion, GameTemplateId } from "@t3tools/contracts
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -68,6 +69,7 @@ const withGame = <A>(
     );
     const layer = GameService.layer.pipe(
       Layer.provideMerge(GameProjectService.layer),
+      Layer.provideMerge(GameOperations.layer),
       Layer.provideMerge(GameToolchain.layer),
       Layer.provideMerge(GamePreview.layer),
       Layer.provideMerge(GameProcesses.layer),

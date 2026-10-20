@@ -17,7 +17,9 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   root: `/games/${name}`,
   name,
   template: "3d-explorer",
-  designStatus: null,
+  designState: null,
+  operation: null,
+  qualification: { state: "unqualified", asOf: null },
   updatedAt,
   coverImagePath: null,
 });
