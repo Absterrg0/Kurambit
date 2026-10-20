@@ -15,7 +15,6 @@ export const RawCheckResult = Schema.fromJsonString(
     warnings: Schema.Array(RawIssue),
   }),
 );
-export type RawCheckResult = typeof RawCheckResult.Type;
 
 const MAX_ISSUES = 100;
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");

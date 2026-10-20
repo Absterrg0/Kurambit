@@ -379,12 +379,10 @@ const make = Effect.gen(function* () {
       const reported = decodeText(decodeCheckResult, resultText);
       const importedOutput =
         imported.process === null ? "" : `${imported.process.stdout}\n${imported.process.stderr}`;
-      const parsed = [
-        ...parseGodotIssues(importedOutput),
-        ...parseGodotIssues(`${run.stdout}\n${run.stderr}`),
-      ];
+      const importedIssues = parseGodotIssues(importedOutput);
+      const parsed = [...importedIssues, ...parseGodotIssues(`${run.stdout}\n${run.stderr}`)];
       const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
-      if (!imported.success && parseGodotIssues(importedOutput).length === 0)
+      if (!imported.success && importedIssues.length === 0)
         errors.unshift({
           file: "godot/project.godot",
           message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
@@ -466,11 +464,10 @@ const make = Effect.gen(function* () {
         operation: "godot-inspect",
         timeoutMs: 60_000,
       });
-      let raw: ReturnType<typeof decodeSceneInspect> | null = null;
       const resultText = yield* Effect.promise(() =>
         NodeFSP.readFile(resultPath, "utf8").catch(() => null),
       );
-      raw = decodeText(decodeSceneInspect, resultText);
+      const raw = decodeText(decodeSceneInspect, resultText);
       if (raw === null || raw.error !== undefined)
         return yield* new GameOperationError({
           operation: "inspect-scene",

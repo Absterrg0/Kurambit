@@ -14,7 +14,7 @@ export const FRAME_SAMPLE_HEIGHT = 36;
 /** Per-channel difference that still counts as the same pixel (compression, dithering). */
 const CHANNEL_TOLERANCE = 12;
 /** Share of sampled pixels that must change before the game is considered responsive. */
-export const RESPONDED_THRESHOLD_PERCENT = 0.5;
+const RESPONDED_THRESHOLD_PERCENT = 0.5;
 
 export function compareFrameSamples(
   before: FrameSample,

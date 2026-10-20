@@ -34,7 +34,7 @@ const StoredPlaytest = Schema.fromJsonString(
     frames: Schema.Array(StoredFrame),
   }),
 );
-export type StoredPlaytest = typeof StoredPlaytest.Type;
+type StoredPlaytest = typeof StoredPlaytest.Type;
 const decodeStoredPlaytest = Schema.decodeUnknownSync(StoredPlaytest);
 
 const slug = (label: string) => {
@@ -95,7 +95,7 @@ export const writePlaytestEvidence = async (input: {
   return { directory: relativeDirectory };
 };
 
-export const prunePlaytests = async (root: string): Promise<void> => {
+const prunePlaytests = async (root: string): Promise<void> => {
   const parent = NodePath.join(root, PLAYTEST_DIRECTORY);
   let entries: string[] = [];
   try {
