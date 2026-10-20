@@ -49,6 +49,8 @@ const { values } = NodeUtil.parseArgs({
     model: { type: "string", default: "gpt-6.1-sol" },
     "reasoning-effort": { type: "string", default: "medium" },
     revise: { type: "string" },
+    // Verifier-directed extra playtest: a JSON array of GamePlaytestStep the agent must replay.
+    "extra-playtest-steps": { type: "string" },
     "cancel-test": { type: "boolean", default: false },
     "timeout-ms": { type: "string", default: "3600000" },
     help: { type: "boolean", default: false },
@@ -65,6 +67,17 @@ if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms
 if (values["plan-first"] !== "true" && values["plan-first"] !== "false")
   throw new Error("--plan-first must be true or false");
 const planFirst = values["plan-first"] === "true";
+let extraPlaytestSteps: ReadonlyArray<Record<string, unknown>> | undefined;
+if (values["extra-playtest-steps"]) {
+  const raw = JSON.parse(
+    await NodeFSP.readFile(NodePath.resolve(values["extra-playtest-steps"]), "utf8"),
+  ) as unknown;
+  assert(
+    Array.isArray(raw) && raw.length > 0,
+    "--extra-playtest-steps must be a JSON array of playtest steps",
+  );
+  extraPlaytestSteps = raw as ReadonlyArray<Record<string, unknown>>;
+}
 const template = GAME_TEMPLATES.find((entry) => entry.id === values.template)?.id;
 if (template === undefined)
   throw new Error(
@@ -758,6 +771,30 @@ const main = Effect.gen(function* () {
         { cancel, onReady: () => send(text) },
       );
     });
+  // `game_web_playtest` exists only on the agent's MCP surface, so the verifier's
+  // extra playtest is a turn the agent drives with the exact steps it is given.
+  if (extraPlaytestSteps) {
+    const beforeExtra = yield* promise(() => latestPlaytest(created.root));
+    const extraRun = yield* followup(
+      `Run game_web_playtest now with exactly these steps: ${JSON.stringify(
+        extraPlaytestSteps,
+      )}. The web build is current; do not change any game files. Report the playtest result.`,
+    );
+    logTurnTools("extra-playtest", yield* collectTurnTools(client, created.threadId, extraRun.id));
+    const extraEvidence = yield* promise(() => latestPlaytest(created.root));
+    assert(
+      extraEvidence.directory !== beforeExtra.directory,
+      "Extra playtest wrote no new evidence folder",
+    );
+    assert(extraEvidence.result.success, `Extra playtest failed: ${extraEvidence.result.message}`);
+    assert(
+      extraEvidence.result.responded,
+      "Extra playtest did not prove that the game responded to input",
+    );
+    timeline(
+      `Extra playtest: ${extraEvidence.directory} (${extraEvidence.result.frames.length} frames, ${extraEvidence.result.changedPercent.toFixed(1)}% changed)`,
+    );
+  }
   if (values.revise) {
     const before = yield* promise(() => revisionSnapshot(created.root));
     // A throwaway index captures uncommitted agent work without touching the game's own index.
