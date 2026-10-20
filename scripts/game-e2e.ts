@@ -321,6 +321,7 @@ const waitForTurn = (
   options: {
     cancel?: boolean;
     observed?: Map<string, OrchestrationV2TurnItem>;
+    observedRuns?: Set<RunId>;
     onReady?: () => Effect.Effect<unknown, Error>;
   } = {},
 ) =>
@@ -331,6 +332,7 @@ const waitForTurn = (
     let interrupted = false;
     const observeRun = (run: OrchestrationV2Run) =>
       Effect.gen(function* () {
+        options.observedRuns?.add(run.id);
         if (previous.has(run.id)) return;
         target ??= run.id;
         if (run.id !== target) return;
@@ -577,6 +579,7 @@ const main = Effect.gen(function* () {
   // The live projection only keeps a bounded recent window; keep every item the
   // thread stream reports so long turns still have a complete tool timeline.
   const observedTurnItems = new Map<string, OrchestrationV2TurnItem>();
+  const observedRunIds = new Set<RunId>();
   yield* Effect.addFinalizer(() =>
     client[WS_METHODS.gameAction]({ threadId: created.threadId, action: "stop" }).pipe(
       Effect.ignore,
@@ -597,6 +600,7 @@ const main = Effect.gen(function* () {
   if (planFirst) {
     const designRun = yield* waitForTurn(client, created.threadId, new Set(), {
       observed: observedTurnItems,
+      observedRuns: observedRunIds,
     });
     logTurnTools(
       "design",
@@ -643,7 +647,6 @@ const main = Effect.gen(function* () {
       `Design turn touched files beyond DESIGN.md:\n${designChanges}`,
     );
     // Approve through the same RPC the Design tab calls, then wait for the build turn.
-    const projection = yield* client[O.getThreadProjection]({ threadId: created.threadId });
     const approval = yield* client[WS_METHODS.gameApproveDesign]({ threadId: created.threadId });
     assert(approval.approvedAt.length > 0, "Approval returned no timestamp");
     timeline(`Design approved at ${approval.approvedAt}`);
@@ -652,15 +655,14 @@ const main = Effect.gen(function* () {
       approvedStatus.design?.status === "approved",
       "game.json still reports a draft after approval",
     );
-    buildRun = yield* waitForTurn(
-      client,
-      created.threadId,
-      new Set(projection.runs.map((run) => run.id)),
-      { observed: observedTurnItems },
-    );
+    buildRun = yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
+      observed: observedTurnItems,
+      observedRuns: observedRunIds,
+    });
   } else {
     buildRun = yield* waitForTurn(client, created.threadId, new Set(), {
       observed: observedTurnItems,
+      observedRuns: observedRunIds,
     });
   }
   const buildCalls = yield* collectTurnTools(
@@ -807,13 +809,12 @@ const main = Effect.gen(function* () {
     });
   const followup = (text: string, cancel = false) =>
     Effect.gen(function* () {
-      const projection = yield* client[O.getThreadProjection]({ threadId: created.threadId });
-      return yield* waitForTurn(
-        client,
-        created.threadId,
-        new Set(projection.runs.map((run) => run.id)),
-        { cancel, observed: observedTurnItems, onReady: () => send(text) },
-      );
+      return yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
+        cancel,
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+        onReady: () => send(text),
+      });
     });
   // `game_web_playtest` exists only on the agent's MCP surface, so the verifier's
   // extra playtest is a turn the agent drives with the exact steps it is given.
