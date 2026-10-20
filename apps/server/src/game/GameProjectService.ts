@@ -380,7 +380,7 @@ const make = Effect.gen(function* () {
             new GameOperationError({
               operation: "approve-design",
               path: target.root,
-              reason: "io",
+              reason: "thread-dispatch",
               cause,
             }),
         ),

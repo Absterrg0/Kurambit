@@ -93,6 +93,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "download",
       "project-not-found",
       "design-already-approved",
+      "thread-dispatch",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -121,6 +122,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
       "design-already-approved": "The design is already approved.",
+      "thread-dispatch":
+        "The design was approved, but starting the build turn failed. It is back to draft; try approving it again.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
