@@ -149,16 +149,6 @@ const authenticate = async () => {
   return socket.toString();
 };
 
-const normalizeToolOutput = (output: unknown): unknown => {
-  if (typeof output !== "string") return output;
-  const text = output.trim();
-  if (text === "") return undefined;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
 /**
  * Providers call MCP tools directly, or wrap them in a code-mode `execute`; a
  * wrapped call only names its tools inside the code. Keep the extracted name as
@@ -200,22 +190,14 @@ const toolNameOf = (item: OrchestrationV2TurnItem): string => {
         ? [...calls].join(", ")
         : "execute";
 };
-const isDirectToolCall = (item: OrchestrationV2TurnItem) =>
-  item.type === "dynamic_tool" && item.toolName !== null && item.toolName !== "execute";
-
 interface TurnToolCall {
-  readonly itemId: string;
   readonly name: string;
-  readonly status: string;
-  readonly direct: boolean;
-  readonly output: unknown;
 }
 
 /**
- * Every tool item in one turn, with its result when the server still has it.
- * The live projection is a bounded window, so a long turn's early calls can
- * fall out of it; `observed` keeps the items as the thread stream delivered
- * them while the turn ran.
+ * Every tool item in one turn. The live projection is a bounded window, so a
+ * long turn's early calls can fall out of it; `observed` keeps the items as the
+ * thread stream delivered them while the turn ran.
  */
 const collectTurnTools = (
   client: Client,
@@ -231,22 +213,7 @@ const collectTurnTools = (
     for (const item of items.values()) {
       if (item.runId !== runId) continue;
       if (item.type !== "dynamic_tool" && item.type !== "command_execution") continue;
-      const name = toolNameOf(item);
-      let output: unknown = item.output;
-      // Large results are withheld on the wire; fetch only what assertions need.
-      if (item.type === "dynamic_tool" && output === undefined && /game_/.test(name)) {
-        const fetched = yield* client[O.getTurnItem]({ threadId, itemId: item.id }).pipe(
-          Effect.orElseSucceed(() => ({ item: null })),
-        );
-        output = fetched.item?.type === "dynamic_tool" ? fetched.item.output : undefined;
-      }
-      calls.push({
-        itemId: item.id,
-        name,
-        status: item.status,
-        direct: isDirectToolCall(item),
-        output: normalizeToolOutput(output),
-      });
+      calls.push({ name: toolNameOf(item) });
     }
     return calls;
   }).pipe(

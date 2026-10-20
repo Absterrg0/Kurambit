@@ -31,7 +31,7 @@ import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
-import { exportedSourceId, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
+import { exportedSourceId, snapshotSource } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -297,8 +297,8 @@ const make = Effect.gen(function* () {
             evidenceDirectory: null,
           })
         : Effect.void;
-    const failedSource = (snapshot: typeof before) =>
-      snapshot.kind === "known" ? snapshot.sourceId : null;
+    const knownSourceId = (value: typeof before) =>
+      value.kind === "known" ? value.sourceId : null;
     const toolStatus = yield* tools.status;
     const engineStatus = toolStatus.tools.find((tool) => tool.tool === "godot");
     if (!engineStatus?.ready)
@@ -310,7 +310,7 @@ const make = Effect.gen(function* () {
       });
     const imported = yield* importGame(root);
     if (!imported.success) {
-      yield* recordExport("failed", failedSource(before), null);
+      yield* recordExport("failed", knownSourceId(before), null);
       return imported;
     }
     const output = NodePath.join(
@@ -333,7 +333,7 @@ const make = Effect.gen(function* () {
       output,
     );
     if (!result.success) {
-      yield* recordExport("failed", failedSource(before), null);
+      yield* recordExport("failed", knownSourceId(before), null);
       return result;
     }
     yield* Effect.tryPromise({
