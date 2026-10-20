@@ -457,7 +457,7 @@ it.live.skipIf(!available)(
 );
 
 it.live.skipIf(!available)(
-  "unknown actions and extra scenario keys are rejected before Godot runs",
+  "unknown actions and extra scenario keys are rejected without running a route",
   () =>
     withGame(
       {
