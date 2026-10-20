@@ -28,8 +28,11 @@ and dispatch as one operation serialized per game, so two approvals cannot both 
 turn; approving the same hash again returns the existing record, and re-approving changed scope
 updates it without dispatching. A dispatch failure removes only that attempt's record. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
-block parses with at least one `end` and one `mechanic`; a game with no design document at all
-(created before the design step, or with planning skipped) is explicitly `legacy`.
+block parses with at least one `end` and one `mechanic`. Creation also writes an intent record
+beside the approval: `required` for a plan-first game, `skipped` for one created without planning.
+A skipped game is explicitly `legacy` and passes the design stage; a required game whose
+`DESIGN.md` is deleted stays a draft with a missing-document issue. Only a game with no server
+record at all (created before the record existed) is legacy.
 Qualification includes a `design` stage, so a draft or changed design leaves the game
 unqualified, and the staging gate in `GameService` reads that record rather than `game.json`.
 
@@ -125,10 +128,15 @@ because it only ever loads the game's own loopback server. Do not merge it into
 
 Booting is not a verdict. The playtest downsamples the boot frame and the after-steps frame and
 requires a visible difference when steps were given, so an inert game fails instead of passing on a
-clean console. Each run is kept under `builds/playtests/<timestamp>/` as frames plus a `result.json`
+clean console. The tool keeps a boot-only smoke result useful, but only a run that was given input
+steps, succeeded and visibly responded records a passed `playtest` stage; anything else records a
+failure with that reason in the tool result. Each run is kept under
+`builds/playtests/<timestamp>/` as frames plus a `result.json`
 with the steps, console and verdict; the newest five are kept, and `game_status` (and the Builds tab)
 reports the last run and whether the web build has been rebuilt since. Screenshots are evidence of
 what happened, not a substitute for a gameplay assertion, which stays in the headless smoke test.
+Only the suite named by `game.json`'s `testSuite` (templates set `res://tests/smoke_test.gd`) owns
+the `test` stage; other scripts still run as diagnostics but never record a pass.
 
 `game_godot_check` is the step before either: one bundled SceneTree checker loads every script,
 scene and resource, runs the main scene for 120 physics frames, and reports parse and runtime errors

@@ -723,25 +723,24 @@ const make = Effect.gen(function* () {
               timeoutMs: Math.max(1_000, Math.min(timeoutMs, 300_000)),
             }),
           );
-          const source = yield* snapshot(root, godotProject);
           // Only the game's canonical suite owns the test stage; any other script
           // is a diagnostic run and must not make the game look qualified.
           const ran = NodePath.relative(cwd, resolved).split(NodePath.sep).join("/");
           const canonical = suite.replace(/^res:\/\//, "").replaceAll("\\", "/");
-          if (ran === canonical) {
-            yield* recordQualification(root, {
-              stage: "test",
-              outcome: result.success ? "passed" : "failed",
-              sourceId: source.kind === "known" ? source.sourceId : null,
-              buildId: null,
-              evidenceDirectory: null,
-            });
-            return result;
-          }
-          return {
-            ...result,
-            message: `${result.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
-          };
+          if (ran !== canonical)
+            return {
+              ...result,
+              message: `${result.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
+            };
+          const source = yield* snapshot(root, godotProject);
+          yield* recordQualification(root, {
+            stage: "test",
+            outcome: result.success ? "passed" : "failed",
+            sourceId: source.kind === "known" ? source.sourceId : null,
+            buildId: null,
+            evidenceDirectory: null,
+          });
+          return result;
         }),
       ),
     blender: (threadId, input) =>

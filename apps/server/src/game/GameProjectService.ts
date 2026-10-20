@@ -410,15 +410,22 @@ const make = Effect.gen(function* () {
         // Read inside the lock: a concurrent approval or an agent's edit may
         // have changed the revision since the caller started.
         const manifest = yield* read(root);
-        if (manifest.design === undefined)
+        const intent = yield* approvals.readIntent(root);
+        if (intent === "skipped")
+          return yield* fail(
+            "design-legacy",
+            "This game was planned without a design document, so it has no design to approve.",
+          );
+        if (manifest.design === undefined && intent === null)
           return yield* fail(
             "design-legacy",
             "This game was created before the design step, so it has no design to approve.",
           );
-        // A skip-planning game has an approved mirror but never had a document;
-        // it reads as legacy rather than "missing design".
+        // A skip-planning game from before the intent record has an approved
+        // mirror but never had a document; only that old shape reads as legacy.
         if (
-          manifest.design.status === "approved" &&
+          intent === null &&
+          manifest.design?.status === "approved" &&
           !(yield* Effect.promise(() => GameDesignApproval.designDocumentExists(root)))
         )
           return yield* fail(
@@ -466,10 +473,12 @@ const make = Effect.gen(function* () {
         yield* approvals.write(root, record);
         const rollBack = approvals.removeOwned(root, approvalId).pipe(
           Effect.andThen(
-            updateManifest(root, "approve-design", (current) => ({
-              ...current,
-              design: previousDesign,
-            })),
+            updateManifest(root, "approve-design", (current) => {
+              const { design: _written, ...withoutDesign } = current;
+              return previousDesign === undefined
+                ? withoutDesign
+                : { ...withoutDesign, design: previousDesign };
+            }),
           ),
         );
         yield* Effect.gen(function* () {

@@ -647,6 +647,16 @@ it.effect("deleting DESIGN.md on a plan-first game reads draft, not legacy", () 
         expect(status.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
           "failed",
         );
+        // The approval path reads the same intent, so it reports the real
+        // problem instead of treating this as a legacy game.
+        const approval = yield* Effect.result(
+          projects.approveDesign(
+            created.threadId,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+          ),
+        );
+        expect(approval._tag).toBe("Failure");
+        if (approval._tag === "Failure") expect(approval.failure.reason).toBe("design-missing");
       }).pipe(Effect.provide(gameServiceLayers({ stateDir }))),
     );
   }),
