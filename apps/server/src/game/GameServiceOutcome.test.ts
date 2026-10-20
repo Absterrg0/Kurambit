@@ -106,6 +106,7 @@ it.live("a failing check sets both the operation and its qualification stage to 
       expect(check.ok).toBe(false);
       const status = yield* game.status(threadId);
       expect(status.operation?.state).toBe("failed");
+      expect(status.webBuildStale).toBe(true);
       expect(status.qualification.state).toBe("unqualified");
       expect(status.qualification.stages.find((stage) => stage.stage === "check")?.status).toBe(
         "failed",

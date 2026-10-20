@@ -79,7 +79,7 @@ const readRecord = async (file: string): Promise<QualificationRecord | null> => 
  * real service operations can pass; `state` and `visual` stay missing until
  * their checks exist, so they can never be reported passed by accident.
  */
-export const deriveQualification = (input: {
+const deriveQualification = (input: {
   readonly record: QualificationRecord | null;
   readonly source: SourceSnapshot;
 }): GameQualificationRead => {
@@ -98,6 +98,9 @@ export const deriveQualification = (input: {
     };
   const currentSourceId = input.source.sourceId;
   const stageReads = new Map<GameQualificationStage, GameQualificationStageRead>();
+  // Only the four stages with real operations can pass today. `state` and
+  // `visual` are listed as missing and deliberately do not block qualification
+  // yet; when their checks land they join this set and must pass too.
   for (const stage of RECORDED_QUALIFICATION_STAGES) {
     const recorded = input.record?.stages[stage];
     const read = (status: GameQualificationStageRead["status"]): GameQualificationStageRead => ({
