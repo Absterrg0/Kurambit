@@ -699,20 +699,71 @@ const main = Effect.gen(function* () {
         return (await exec("git", ["write-tree"], { cwd: created.root, env })).stdout.trim();
       });
     const baseline = yield* snapshotTree();
-    const reviseRun = yield* followup(values.revise);
+    let reviseRun = yield* followup(values.revise);
     logTurnTools(
       "revise",
       yield* collectTurnTools(client, created.threadId, reviseRun.id, observedTurnItems),
     );
+    let reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    // A revision that changes scope must not build against the old contract: the
+    // agent rewrites DESIGN.md and asks the creator to approve the new revision,
+    // which leaves the design "changed". The harness is the creator here, so it
+    // approves the revision the agent wrote and asks for the implementation in a
+    // second turn instead of treating the correct stage move as a failure.
+    if (reviseStatus.design.state !== "approved") {
+      assert(
+        reviseStatus.design.state === "changed",
+        `Revision left the design ${reviseStatus.design.state} instead of approved or changed`,
+      );
+      const revisedHash = reviseStatus.design.currentHash;
+      assert(revisedHash !== null, "The revised design has no hash to approve");
+      const approval = yield* client[WS_METHODS.gameApproveDesign]({
+        threadId: created.threadId,
+        expectedDesignHash: revisedHash,
+      });
+      assert(approval.designHash === revisedHash, "Re-approval recorded a different design hash");
+      const approved = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+      assert(
+        approved.design.state === "approved",
+        `Re-approval did not take (${JSON.stringify(approved.design)})`,
+      );
+      assert(
+        approved.design.acceptance.length >= 5,
+        `The revised design bound only ${approved.design.acceptance.length} acceptance criteria`,
+      );
+      timeline(`Revision design approved at ${approval.approvedAt}`);
+      // Re-approving changed scope does not dispatch a build turn: the server
+      // expects the requesting turn to continue, so the creator's follow-up asks
+      // for the implementation and the same qualification loop as a build turn.
+      reviseRun = yield* followup(
+        "The revised design is approved. Implement the revision now, then finish the build turn to AGENTS.md's Definition of done for the current sources: game_godot_check ok, game_godot_test passing, godot/tests/scenarios routes that still play every level to the win with game_scenarios_run, a fresh web export with game_export, and game_web_playtest with success and responded=true in a fresh evidence folder. Do not edit game files after the final playtest. Report the results and the game_preview URL.",
+      );
+      logTurnTools(
+        "revise-build",
+        yield* collectTurnTools(client, created.threadId, reviseRun.id, observedTurnItems),
+      );
+      reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    }
     const after = yield* promise(() => revisionSnapshot(created.root));
     console.log("Revision assets before/after:", JSON.stringify({ before, after }, null, 2));
     const revised = yield* snapshotTree();
+    const changedPaths = yield* promise(async () => {
+      const result = await exec("git", ["diff", "--name-only", baseline, revised], {
+        cwd: created.root,
+      });
+      return result.stdout.trim().split("\n").filter(Boolean);
+    });
     const diff = yield* promise(() =>
       exec("git", ["diff", "--stat", baseline, revised], { cwd: created.root }),
     );
     console.log("Changed files:\n" + diff.stdout);
     assert(diff.stdout.trim() !== "", "Revision turn changed no files");
-    const reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    // The design mirror in game.json changes on re-approval, and DESIGN.md on a
+    // scope edit; neither is the game. The revision has to reach real sources.
+    assert(
+      changedPaths.some((path) => path !== "DESIGN.md" && path !== "game.json"),
+      "Revision turn changed only design files, not the game",
+    );
     assert(
       reviseStatus.design.state === "approved",
       "Revision turn changed the approved design without re-approval",
