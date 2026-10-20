@@ -381,6 +381,18 @@ it.live("an approved design's observe criteria are reported without gating", () 
         const qualification = yield* GameQualification.GameQualification;
         const read = yield* qualification.read(root, "godot");
         expect(stageOf(read, "playtest")?.status).toBe("passed");
+        // The evidence keeps the snapshot and the informational report.
+        const status = yield* game.status(threadId);
+        const stored = JSON.parse(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(
+              NodePath.join(root, status.lastPlaytest!.directory, "result.json"),
+              "utf8",
+            ),
+          ),
+        );
+        expect(stored.designObservations).toEqual(["collect-two"]);
+        expect(stored.state.after.gameState.collected).toBe(2);
       }),
     {
       acceptance: [

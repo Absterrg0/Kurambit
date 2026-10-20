@@ -430,11 +430,22 @@ const make = Effect.gen(function* () {
       bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
       steps: input.steps ?? [],
     });
+    // Informational only: which approved promises this run happened to show. It
+    // never feeds qualification; the server-owned scenario runner is the gate.
+    const design = yield* designApprovals.status(root, manifest);
+    const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+    const observations = satisfiedObservations(approval?.acceptance ?? [], result.state);
+    const hasObservable = (approval?.acceptance ?? []).some(
+      (criterion) => criterion.observe !== undefined,
+    );
+    const observationNote = hasObservable
+      ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
+      : "";
     const evidence = yield* Effect.tryPromise({
       try: () =>
         writePlaytestEvidence({
           root,
-          result,
+          result: { ...result, designObservations: observations },
           steps: input.steps ?? [],
         }),
       catch: (cause) =>
@@ -462,16 +473,6 @@ const make = Effect.gen(function* () {
     if (!result.responded) gaps.push("a visible response");
     if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
     const qualifies = gaps.length === 0;
-    const design = yield* designApprovals.status(root, manifest);
-    const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
-    const observations = satisfiedObservations(approval?.acceptance ?? [], probe);
-    const hasObservable = (approval?.acceptance ?? []).some(
-      (criterion) => criterion.observe !== undefined,
-    );
-    // Informational only: which promises this run happened to show, never a gate.
-    const observationNote = hasObservable
-      ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
-      : "";
     yield* recordQualification(root, {
       stage: "playtest",
       outcome: qualifies ? "passed" : "failed",
