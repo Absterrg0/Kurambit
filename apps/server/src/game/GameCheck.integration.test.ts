@@ -71,6 +71,20 @@ it.live.skipIf(!available)(
             expect(inspected.nodes[0]).toMatchObject({ path: ".", type: "Control" });
             expect(inspected.nodes.some((node) => node.name === "SettingsPanel")).toBe(true);
 
+            const player = yield* game.inspectScene(
+              created.threadId,
+              "res://scenes/player/player.tscn",
+            );
+            const body = player.nodes.find((node) => node.name === "Player");
+            expect(body).toMatchObject({
+              type: "CharacterBody3D",
+              script: "res://scripts/player.gd",
+              collisionLayer: 2,
+              collisionMask: 1,
+            });
+            expect(body?.position).toHaveLength(3);
+            expect(body?.children).toContain("Collision");
+
             // The dump is capped, and the total still tells the agent how much it did not see.
             const crowded = ["[gd_scene format=3]", '[node name="Crowded" type="Node"]'];
             for (let index = 0; index < 405; index++)
