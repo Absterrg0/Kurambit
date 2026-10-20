@@ -168,6 +168,7 @@ export const GameStatus = Schema.Struct({
   ),
   previewUrl: Schema.NullOr(Schema.String),
   logsDirectory: Schema.String,
+  lastPlaytest: Schema.NullOr(GameLastPlaytest),
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,
@@ -226,11 +227,29 @@ export const GamePlaytestStep = Schema.Union([
     }),
     holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
   }),
+  Schema.Struct({
+    keys: Schema.Array(Schema.String).annotate({
+      description:
+        'Keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"].',
+    }),
+    holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
+  }),
   Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
   Schema.Struct({
     click: Schema.Literals(["left", "middle", "right"]).annotate({
       description:
         "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
+    }),
+  }),
+  Schema.Struct({
+    mouseMove: Schema.Struct({ dx: Schema.Number, dy: Schema.Number }).annotate({
+      description:
+        "Move the pointer by dx/dy pixels from its current position, for mouse-look and camera controls.",
+    }),
+  }),
+  Schema.Struct({
+    screenshot: Schema.String.check(Schema.isMaxLength(80)).annotate({
+      description: "Capture a frame mid-sequence and label it, for evidence between steps.",
     }),
   }),
 ]);
@@ -254,11 +273,68 @@ export const GameWebPlaytestResult = Schema.Struct({
   success: Schema.Boolean,
   booted: Schema.Boolean,
   bootMs: Schema.NullOr(Schema.Number),
+  responded: Schema.Boolean,
+  /** Share of sampled pixels that changed between the boot and after-steps frames. */
+  changedPercent: Schema.Number,
   message: Schema.String,
   consoleMessages: Schema.Array(GameConsoleMessage),
   screenshots: Schema.Array(GamePlaytestScreenshot),
+  /** Game-relative evidence directory, when the service persisted this run. */
+  evidenceDirectory: Schema.optionalKey(Schema.String),
 });
 export type GameWebPlaytestResult = typeof GameWebPlaytestResult.Type;
+export const GameCheckIssue = Schema.Struct({
+  file: Schema.String,
+  line: Schema.optionalKey(Schema.Number),
+  message: Schema.String,
+});
+export type GameCheckIssue = typeof GameCheckIssue.Type;
+export const GameCheckResult = Schema.Struct({
+  ok: Schema.Boolean,
+  errors: Schema.Array(GameCheckIssue),
+  warnings: Schema.Array(GameCheckIssue),
+  durationMs: Schema.Number,
+});
+export type GameCheckResult = typeof GameCheckResult.Type;
+export const GameSceneNode = Schema.Struct({
+  /** Scene-relative node path; "." is the scene root. */
+  path: Schema.String,
+  name: Schema.String,
+  type: Schema.String,
+  script: Schema.optionalKey(Schema.String),
+  groups: Schema.Array(Schema.String),
+  position: Schema.optionalKey(Schema.Array(Schema.Number)),
+  collisionLayer: Schema.optionalKey(Schema.Number),
+  collisionMask: Schema.optionalKey(Schema.Number),
+  /** Direct child names, in scene order. */
+  children: Schema.Array(Schema.String),
+});
+export type GameSceneNode = typeof GameSceneNode.Type;
+export const GameSceneInspectInput = Schema.Struct({ scenePath: Schema.String });
+export const GameSceneInspectResult = Schema.Struct({
+  scenePath: Schema.String,
+  nodes: Schema.Array(GameSceneNode),
+  nodeCount: Schema.Number,
+  truncated: Schema.Boolean,
+});
+export type GameSceneInspectResult = typeof GameSceneInspectResult.Type;
+export const GamePlaytestFrame = Schema.Struct({
+  label: Schema.String,
+  path: Schema.String,
+});
+export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
+export const GameLastPlaytest = Schema.Struct({
+  at: Schema.String,
+  directory: Schema.String,
+  success: Schema.Boolean,
+  responded: Schema.Boolean,
+  changedPercent: Schema.Number,
+  consoleErrorCount: Schema.Number,
+  frames: Schema.Array(GamePlaytestFrame),
+  /** The web build was rebuilt after this run. */
+  stale: Schema.Boolean,
+});
+export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 export const GameBlenderInput = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,80}$/)),
   script: Schema.String,

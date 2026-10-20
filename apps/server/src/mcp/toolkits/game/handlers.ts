@@ -30,6 +30,20 @@ const handlers = {
       return yield* game.import(scope.thread.threadId);
     }),
   ),
+  game_godot_check: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.check(scope.thread.threadId);
+    }),
+  ),
+  game_scene_inspect: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.inspectScene(scope.thread.threadId, input.scenePath);
+    }),
+  ),
   game_godot_test: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;

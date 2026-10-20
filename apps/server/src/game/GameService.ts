@@ -10,6 +10,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  type GameCheckResult,
+  type GameSceneInspectResult,
   type GameStatus,
   type GameAction,
   type GameActionResult,
@@ -29,6 +31,10 @@ import { commandDetail } from "./commandDetail.ts";
 import { isWebBuildStale, webBuildIndex } from "./webBuild.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
+import { RawCheckResult, mergeCheckIssues, parseGodotIssues, limitIssues } from "./godotCheckOutput.ts";
+import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
+import { GODOT_INSPECT_SCRIPT } from "./godotInspectScript.ts";
+import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
 export class GameService extends Context.Service<
@@ -58,6 +64,11 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameWebPlaytestInput,
     ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
+    readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
+    readonly inspectScene: (
+      threadId: ThreadId,
+      scenePath: string,
+    ) => Effect.Effect<GameSceneInspectResult, GameOperationError>;
   }
 >()("t3/game/GameService") {}
 const decodeBlenderMetadata = Schema.decodeUnknownSync(
@@ -71,6 +82,31 @@ const decodeBlenderMetadata = Schema.decodeUnknownSync(
     }),
   ),
 );
+const RawSceneInspect = Schema.fromJsonString(
+  Schema.Struct({
+    error: Schema.optionalKey(Schema.String),
+    scenePath: Schema.optionalKey(Schema.String),
+    nodes: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          path: Schema.String,
+          name: Schema.String,
+          type: Schema.String,
+          script: Schema.optionalKey(Schema.String),
+          groups: Schema.Array(Schema.String),
+          position: Schema.optionalKey(Schema.Array(Schema.Number)),
+          collisionLayer: Schema.optionalKey(Schema.Number),
+          collisionMask: Schema.optionalKey(Schema.Number),
+          children: Schema.Array(Schema.String),
+        }),
+      ),
+    ),
+    nodeCount: Schema.optionalKey(Schema.Number),
+    truncated: Schema.optionalKey(Schema.Boolean),
+  }),
+);
+const decodeSceneInspect = Schema.decodeUnknownSync(RawSceneInspect);
+const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
 const isGameOperationError = Schema.is(GameOperationError);
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
@@ -268,7 +304,7 @@ const make = Effect.gen(function* () {
           }),
       ),
     );
-    return yield* GameWebPlaytest.playtest({
+    const result = yield* GameWebPlaytest.playtest({
       executable,
       url,
       profileDirectory: NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`),
@@ -277,6 +313,162 @@ const make = Effect.gen(function* () {
       bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
       steps: input.steps ?? [],
     });
+    const evidence = yield* Effect.tryPromise({
+      try: () =>
+        writePlaytestEvidence({
+          root,
+          result,
+          steps: input.steps ?? [],
+        }),
+      catch: (cause) =>
+        new GameOperationError({
+          operation: "Web playtest evidence",
+          path: NodePath.join(root, "builds/playtests"),
+          reason: "io",
+          cause,
+        }),
+    });
+    return { ...result, evidenceDirectory: evidence.directory };
+  });
+  /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
+  const checkGame = Effect.fnUntraced(function* (root: string) {
+    const startedAt = Date.now();
+    const temporary = NodePath.join(root, "builds/logs", `godot-check-${NodeCrypto.randomUUID()}`);
+    const scriptPath = NodePath.join(temporary, "check.gd");
+    const resultPath = NodePath.join(temporary, "result.json");
+    const { godot, cwd } = yield* engine(root);
+    const imported = yield* importGame(root);
+    return yield* Effect.gen(function* () {
+      yield* Effect.tryPromise({
+        try: async () => {
+          await NodeFSP.mkdir(temporary, { recursive: true });
+          await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
+        },
+        catch: (cause) =>
+          new GameOperationError({ operation: "godot-check", path: temporary, reason: "io", cause }),
+      });
+      const run = yield* processes.run({
+        root,
+        executable: godot.path,
+        args: ["--headless", "--path", cwd, "--script", scriptPath, "--", resultPath],
+        operation: "godot-check",
+        timeoutMs: 120_000,
+      });
+      let reported: typeof RawCheckResult.Type | null = null;
+      try {
+        reported = decodeCheckResult(await NodeFSP.readFile(resultPath, "utf8"));
+      } catch {
+        // A failed run may die before writing; its output is still useful.
+      }
+      const importedOutput =
+        imported.process === undefined ? "" : `${imported.process.stdout}\n${imported.process.stderr}`;
+      const parsed = [
+        ...parseGodotIssues(importedOutput),
+        ...parseGodotIssues(`${run.stdout}\n${run.stderr}`),
+      ];
+      const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
+      if (!imported.success && parseGodotIssues(importedOutput).length === 0)
+        errors.unshift({
+          file: "godot/project.godot",
+          message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
+        });
+      if (reported === null)
+        errors.unshift({
+          file: "godot/project.godot",
+          message:
+            "The Godot check script did not report a result. The project may have crashed during startup.",
+        });
+      if (run.timedOut)
+        errors.unshift({
+          file: "godot/project.godot",
+          message: "The Godot check timed out before finishing its 120 physics frames.",
+        });
+      if (run.exitCode !== 0 && errors.length === 0)
+        errors.unshift({
+          file: "godot/project.godot",
+          message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
+        });
+      return {
+        ok: errors.length === 0 && reported !== null && !run.timedOut,
+        errors: limitIssues(errors),
+        warnings: limitIssues(reported?.warnings ?? []),
+        durationMs: Date.now() - startedAt,
+      };
+    }).pipe(
+      Effect.ensuring(
+        Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
+      ),
+    );
+  });
+  const inspectScene = Effect.fnUntraced(function* (root: string, scenePath: string) {
+    const { godot, cwd } = yield* engine(root);
+    const relative = scenePath.replace(/^res:\/\//, "");
+    const resolved = yield* Effect.try({
+      try: () => insideGame(cwd, relative),
+      catch: (cause) =>
+        isGameOperationError(cause)
+          ? cause
+          : new GameOperationError({
+              operation: "inspect-scene",
+              path: scenePath,
+              reason: "invalid-path",
+              cause,
+            }),
+    });
+    if (!resolved.endsWith(".tscn"))
+      return yield* new GameOperationError({
+        operation: "inspect-scene",
+        path: scenePath,
+        reason: "invalid-path",
+      });
+    const temporary = NodePath.join(root, "builds/logs", `godot-inspect-${NodeCrypto.randomUUID()}`);
+    const scriptPath = NodePath.join(temporary, "inspect.gd");
+    const resultPath = NodePath.join(temporary, "result.json");
+    return yield* Effect.gen(function* () {
+      yield* Effect.tryPromise({
+        try: async () => {
+          await NodeFSP.mkdir(temporary, { recursive: true });
+          await NodeFSP.writeFile(scriptPath, GODOT_INSPECT_SCRIPT);
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "inspect-scene",
+            path: temporary,
+            reason: "io",
+            cause,
+          }),
+      });
+      const run = yield* processes.run({
+        root,
+        executable: godot.path,
+        args: ["--headless", "--path", cwd, "--script", scriptPath, "--", resolved, resultPath],
+        operation: "godot-inspect",
+        timeoutMs: 60_000,
+      });
+      let raw: ReturnType<typeof decodeSceneInspect> | null = null;
+      try {
+        raw = decodeSceneInspect(await NodeFSP.readFile(resultPath, "utf8"));
+      } catch {
+        // Reported below with the command output.
+      }
+      if (raw === null || raw.error !== undefined)
+        return yield* new GameOperationError({
+          operation: "inspect-scene",
+          path: scenePath,
+          reason: "command-failed",
+          detail: (raw?.error ?? commandDetail(run)).slice(-4096),
+        });
+      return {
+        scenePath: `res://${NodePath.relative(cwd, resolved).split(NodePath.sep).join("/")}`,
+        nodes: raw.nodes ?? [],
+        nodeCount: raw.nodeCount ?? raw.nodes?.length ?? 0,
+        truncated: raw.truncated ?? false,
+      };
+    }).pipe(
+      Effect.ensuring(
+        Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
+      ),
+    );
   });
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
@@ -301,6 +493,15 @@ const make = Effect.gen(function* () {
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
       const inventory = yield* projects.inventory(root);
+      const lastPlaytest = yield* Effect.tryPromise({
+        try: () => readLastPlaytest(root, inventory.builds),
+        catch: () =>
+          new GameOperationError({
+            operation: "read-playtest",
+            path: NodePath.join(root, "builds/playtests"),
+            reason: "io",
+          }),
+      }).pipe(Effect.orElseSucceed(() => null));
       return {
         root,
         ...inventory,
@@ -308,6 +509,7 @@ const make = Effect.gen(function* () {
         processes: processes.list(root),
         previewUrl: preview.url(root),
         logsDirectory: NodePath.join(root, "builds/logs"),
+        lastPlaytest,
         operation: operations.get(root) ?? null,
       };
     }),
@@ -316,6 +518,9 @@ const make = Effect.gen(function* () {
       withRoot(threadId, `Export ${target}`, (root) => exportGame(root, target)),
     webPlaytest: (threadId, input) =>
       withRoot(threadId, "Web playtest", (root) => webPlaytest(root, input)),
+    check: (threadId) => withRoot(threadId, "Godot check", checkGame),
+    inspectScene: (threadId, scenePath) =>
+      withRoot(threadId, "Inspect scene", (root) => inspectScene(root, scenePath)),
     test: (threadId, script, timeoutMs = 60_000) =>
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {

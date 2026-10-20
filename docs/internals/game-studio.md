@@ -82,14 +82,28 @@ That staleness walk lives in one place (`webBuild.ts`) and is shared with the pl
 to rebuild, so both stay honest about what is on screen.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
-(SwiftShader), waits for Godot to boot, sends key presses and canvas clicks, and returns screenshots
-and console errors. It launches its own browser without the SOCKS proxy that `html_preview` uses,
+(SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and
+console errors. It launches its own browser without the SOCKS proxy that `html_preview` uses,
 because it only ever loads the game's own loopback server. Do not merge it into
 `htmlRender/headlessChrome.ts`: that launcher's proxy and sandbox flags protect untrusted HTML.
 
+Booting is not a verdict. The playtest downsamples the boot frame and the after-steps frame and
+requires a visible difference when steps were given, so an inert game fails instead of passing on a
+clean console. Each run is kept under `builds/playtests/<timestamp>/` as frames plus a `result.json`
+with the steps, console and verdict; the newest five are kept, and `game_status` (and the Builds tab)
+reports the last run and whether the web build has been rebuilt since. Screenshots are evidence of
+what happened, not a substitute for a gameplay assertion, which stays in the headless smoke test.
+
+`game_godot_check` is the step before either: one bundled SceneTree checker loads every script,
+scene and resource, runs the main scene for 120 physics frames, and reports parse and runtime errors
+with file:line plus lint findings such as an InputMap action a script uses but the project never
+defines, a CharacterBody without a CollisionShape, or a main scene with no camera.
+`game_scene_inspect` dumps a scene's node tree when the wiring, not the code, is the problem.
+
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
 re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`
-defines done: smoke test passes, web playtest boots cleanly, preview URL returned, end the turn.
+defines done: `game_godot_check` ok, smoke test passes, a web playtest whose steps prove the core
+loop responded, preview URL returned, end the turn.
 
 ## Toolchain
 

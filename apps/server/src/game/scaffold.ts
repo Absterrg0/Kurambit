@@ -43,21 +43,22 @@ Call game_status first for readiness, asset usage, scenes, builds and logs. If t
 
 Use game_blender_run with a stable asset id and bpy script to create or revise an asset. The tool opens the existing .blend on revisions, runs your script, saves the source and script, exports GLB with modifiers, and renders a thumbnail unless disabled. For revisions, edit existing objects by name, or pass reset=true with a complete rebuild script to start from an empty scene at the same source/export paths. Re-running an object-creation script without reset duplicates objects. Keep the .blend sources. Re-export revisions to the same path so scene references remain valid. Do not put .blend files inside godot/.
 
-Use game_godot_import after each asset transfer or engine change. Fix every import and GDScript parse error. Assemble scenes and GDScript files using your normal file tools.
+Use game_godot_import after each asset transfer or engine change. Assemble scenes and GDScript files using your normal file tools. Fix every import and GDScript parse error. Use game_godot_check for a fast static and boot check: it loads every script and scene, runs the main scene briefly, and reports errors with file:line. Use game_scene_inspect to dump a scene's node tree when wiring is wrong.
 
 Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. A screenshot is not a gameplay test.
 
-Use game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser and returns screenshots and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.
+Use game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser, runs your steps, compares the boot and after-steps frames, and returns a verdict, screenshots, evidence and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.
 
 ## Definition of done
 
 Finish every turn to this bar, then report to the user and end the turn:
 
-1. game_godot_test passes with your smoke test.
-2. game_web_playtest boots without console errors, and its after-steps screenshot shows the game responding to your steps.
-3. game_preview returns the playable URL; report it with the test results.
+1. game_godot_check returns ok with zero errors.
+2. game_godot_test passes with your smoke test.
+3. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
+4. game_preview returns the playable URL; report it with the test results.
 
-Playtest screenshots are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.
+Playtest screenshots and builds/playtests/ are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.
 `,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",

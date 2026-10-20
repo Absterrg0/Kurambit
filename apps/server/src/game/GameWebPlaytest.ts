@@ -11,6 +11,12 @@ import {
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
 import { sandboxDisabled } from "../preview/PreviewBrowserHost.ts";
+import {
+  compareFrameSamples,
+  FRAME_SAMPLE_HEIGHT,
+  FRAME_SAMPLE_WIDTH,
+  type FrameSample,
+} from "./playtestFrames.ts";
 
 export interface GameWebPlaytestInput {
   /** Headless browser executable, resolved the same way as for the preview pane. */
@@ -76,6 +82,10 @@ interface KeyEvent {
       Enter: { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
       Tab: { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
       Backspace: { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+      Escape: { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+      Shift: { type, key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+      Control: { type, key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+      Alt: { type, key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
     };
     const held = named[key] ?? (key === " " ? named.Space : undefined);
     if (held) return held;
@@ -105,6 +115,50 @@ const CANVAS_CENTRE = `(() => {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 })()`;
 
+const canvasCentre = async (
+  cdp: CdpSocket,
+  sessionId: string,
+): Promise<{ x: number; y: number } | null> => {
+  const evaluated = await cdp.send<{ result?: { value?: { x: number; y: number } | null } }>(
+    "Runtime.evaluate",
+    { expression: CANVAS_CENTRE, returnByValue: true },
+    sessionId,
+  );
+  const centre = evaluated.result?.value;
+  return centre ?? null;
+};
+
+/**
+ * Downscales the game canvas into a small RGBA buffer. Reading the canvas is
+ * cheaper and steadier than decoding two PNG screenshots, and it samples the
+ * same rendered frame the screenshots capture.
+ */
+const SAMPLE_FRAME = `(() => {
+  const canvas = document.querySelector("canvas");
+  if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
+  const sample = document.createElement("canvas");
+  sample.width = ${FRAME_SAMPLE_WIDTH};
+  sample.height = ${FRAME_SAMPLE_HEIGHT};
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(canvas, 0, 0, sample.width, sample.height);
+  return Array.from(context.getImageData(0, 0, sample.width, sample.height).data);
+})()`;
+
+const sampleFrame = async (
+  cdp: CdpSocket,
+  sessionId: string,
+): Promise<FrameSample | null> => {
+  const evaluated = await cdp.send<{ result?: { value?: number[] | null } }>(
+    "Runtime.evaluate",
+    { expression: SAMPLE_FRAME, returnByValue: true },
+    sessionId,
+  );
+  const data = evaluated.result?.value;
+  if (!Array.isArray(data)) return null;
+  return { width: FRAME_SAMPLE_WIDTH, height: FRAME_SAMPLE_HEIGHT, data };
+};
+
 /**
  * Presses and releases one mouse button at the centre of the canvas. Web games need
  * a real click before the shell lets them capture the pointer, and menu buttons need
@@ -114,14 +168,9 @@ const clickCanvas = async (
   cdp: CdpSocket,
   sessionId: string,
   button: "left" | "middle" | "right",
-): Promise<void> => {
-  const evaluated = await cdp.send<{ result?: { value?: { x: number; y: number } | null } }>(
-    "Runtime.evaluate",
-    { expression: CANVAS_CENTRE, returnByValue: true },
-    sessionId,
-  );
-  const centre = evaluated.result?.value;
-  if (!centre) return;
+): Promise<{ x: number; y: number } | null> => {
+  const centre = await canvasCentre(cdp, sessionId);
+  if (!centre) return null;
   const at = { x: Math.round(centre.x), y: Math.round(centre.y) };
   // No mouseMoved first: moving the pointer from wherever it happens to be would hand
   // the game one huge relative motion, which is not what a player clicking sees.
@@ -136,6 +185,7 @@ const clickCanvas = async (
     { type: "mouseReleased", ...options, button },
     sessionId,
   );
+  return at;
 };
 
 const launchBrowser = (input: GameWebPlaytestInput): BrowserHandle => {
@@ -415,6 +465,8 @@ const runPlaytest = async (
     }
     if (booted) bootMs = input.bootTimeoutMs - (bootDeadline - Date.now());
     screenshots.push(await screenshot(cdp, session.sessionId, "booted"));
+    const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    let pointer: { x: number; y: number } | null = null;
 
     for (const step of input.steps) {
       signal?.throwIfAborted();
@@ -422,8 +474,27 @@ const runPlaytest = async (
         await sleep(signal, step.waitMs);
         continue;
       }
+      if ("screenshot" in step) {
+        screenshots.push(await screenshot(cdp, session.sessionId, step.screenshot));
+        continue;
+      }
       if ("click" in step) {
-        await clickCanvas(cdp, session.sessionId, step.click);
+        pointer = (await clickCanvas(cdp, session.sessionId, step.click)) ?? pointer;
+        continue;
+      }
+      if ("mouseMove" in step) {
+        const centre = pointer ?? (await canvasCentre(cdp, session.sessionId));
+        if (!centre) continue;
+        const next = {
+          x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
+          y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
+        };
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mouseMoved", x: Math.round(next.x), y: Math.round(next.y), button: "none" },
+          session.sessionId,
+        );
+        pointer = next;
         continue;
       }
       try {
@@ -435,23 +506,37 @@ const runPlaytest = async (
       } catch {
         // The canvas may not be up yet; keyboard events still reach the document.
       }
-      await cdp.send("Input.dispatchKeyEvent", keyEvent(step.key, "keyDown"), session.sessionId);
+      const keys = "keys" in step ? step.keys : [step.key];
+      for (const key of keys)
+        await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
       await sleep(signal, step.holdMs);
-      await cdp.send("Input.dispatchKeyEvent", keyEvent(step.key, "keyUp"), session.sessionId);
+      for (const key of [...keys].reverse())
+        await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
     }
     screenshots.push(await screenshot(cdp, session.sessionId, "after-steps"));
+    const afterSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    const comparison =
+      bootSample !== null && afterSample !== null
+        ? compareFrameSamples(bootSample, afterSample)
+        : { changedPercent: 0, responded: false };
 
     const errors = consoleMessages.filter((message) => message.level === "error").length;
-    const success = booted && errors === 0;
+    const stepsGiven = input.steps.length > 0;
+    const success = booted && errors === 0 && (!stepsGiven || comparison.responded);
     const summary = [
       booted ? `Booted in ${bootMs}ms` : `Did not boot within ${input.bootTimeoutMs}ms`,
       errors === 0 ? "no console errors" : `${errors} console error(s)`,
       `${input.steps.length} step(s)`,
+      comparison.responded
+        ? `the game responded (${comparison.changedPercent}% of pixels changed)`
+        : `the game did not respond (${comparison.changedPercent}% of pixels changed)`,
     ].join("; ");
     return {
       success,
       booted,
       bootMs: booted ? bootMs : null,
+      responded: comparison.responded,
+      changedPercent: comparison.changedPercent,
       message: success ? `Playtest succeeded: ${summary}` : `Playtest failed: ${summary}`,
       consoleMessages,
       screenshots,

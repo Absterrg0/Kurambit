@@ -4,7 +4,10 @@ import {
   GameActionResult,
   GameBlenderInput,
   GameBlenderResult,
+  GameCheckResult,
   GameOperationFailure,
+  GameSceneInspectInput,
+  GameSceneInspectResult,
   GameStatus,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
@@ -44,6 +47,23 @@ const ImportTool = Tool.make("game_godot_import", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, false);
+const CheckTool = Tool.make("game_godot_check", {
+  description:
+    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene for 120 physics frames, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, CharacterBody nodes without a CollisionShape, a main scene with no camera, and scripts that do not compile. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
+  success: GameCheckResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Readonly, false);
+const InspectSceneTool = Tool.make("game_scene_inspect", {
+  description:
+    "Dump a scene's node tree headlessly: scene-relative path, name, type, script path, groups, position, collision layer/mask and child names, capped at 400 nodes with truncation reported. Use the res:// path shown by game_status, such as res://scenes/main_menu.tscn. Read-only; use it to debug scene wiring without opening the Godot editor.",
+  parameters: GameSceneInspectInput,
+  success: GameSceneInspectResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Readonly, true);
 const TestTool = Tool.make("game_godot_test", {
   description:
     "Run a headless GDScript in this thread's Godot project. The script must extend SceneTree and quit explicitly, using a nonzero code for failures. Supply a Godot-project-relative .gd path, such as tests/smoke_test.gd. Use this to simulate and assert the core gameplay loop. Returns real exit status, stdout/stderr and log path. Timeout defaults to 60 seconds and is bounded at 300 seconds.",
@@ -106,7 +126,9 @@ export const GameToolkit = Toolkit.make(
   GameStatusTool,
   BlenderTool,
   ImportTool,
+  CheckTool,
   TestTool,
+  InspectSceneTool,
   ExportTool,
   PreviewTool,
   NativeTool,
