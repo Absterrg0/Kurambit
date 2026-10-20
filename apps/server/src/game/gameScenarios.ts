@@ -13,6 +13,33 @@ import { LEGACY_PLAYING_MATCH_ID } from "./scenarioEvaluation.ts";
 
 const decodeEvidence = Schema.decodeUnknownSync(Schema.fromJsonString(GameScenarioEvidence));
 
+/** The runner request is internal, but it is still typed and encoded outside the game. */
+const ScenarioRequest = Schema.Struct({
+  scenarioPath: Schema.String,
+  observations: Schema.Array(
+    Schema.Struct({ id: Schema.String, key: Schema.String, expect: Schema.String }),
+  ),
+  sampleEvery: Schema.Number,
+  bootFrames: Schema.Number,
+});
+const encodeScenarioRequest = Schema.encodeSync(Schema.fromJsonString(ScenarioRequest));
+export const scenarioRequestJson = (input: {
+  readonly scenarioPath: string;
+  readonly observations: readonly {
+    readonly id: string;
+    readonly key: string;
+    readonly expect: string;
+  }[];
+  readonly sampleEvery: number;
+  readonly bootFrames: number;
+}) =>
+  encodeScenarioRequest({
+    scenarioPath: input.scenarioPath,
+    observations: input.observations.map((observation) => ({ ...observation })),
+    sampleEvery: input.sampleEvery,
+    bootFrames: input.bootFrames,
+  });
+
 export interface ScenarioFile {
   readonly scenario: GameScenario;
   /** Absolute path, passed to the runner so it never resolves game paths itself. */
@@ -146,7 +173,7 @@ export function scenarioObservations(
   return observations;
 }
 
-export function decodeScenarioEvidence(text: string): typeof GameScenarioEvidence.Type | null {
+export function decodeScenarioEvidence(text: string): GameScenarioEvidence | null {
   try {
     return decodeEvidence(text);
   } catch {

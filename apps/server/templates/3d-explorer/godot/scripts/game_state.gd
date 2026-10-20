@@ -38,6 +38,8 @@ var health := MAX_HEALTH
 var run_seconds := 0.0
 var best_score := 0
 var best_seconds := 0.0
+## True once this run reached the win screen, for state-based acceptance.
+var won := false
 
 func _ready() -> void:
 	_load_progress()
@@ -63,6 +65,7 @@ func start_run(relic_total: int) -> void:
 	lives = MAX_LIVES
 	health = MAX_HEALTH
 	run_seconds = 0.0
+	won = false
 	set_state(State.PLAYING)
 	run_started.emit(total)
 	collected_changed.emit(collected, total, score)
@@ -151,6 +154,7 @@ func _finish_run(reason: String) -> void:
 		if best_seconds <= 0.0 or run_seconds < best_seconds:
 			best_seconds = run_seconds
 		_save_progress()
+		won = true
 		set_state(State.WON)
 		run_won.emit(score, run_seconds, lives)
 		return

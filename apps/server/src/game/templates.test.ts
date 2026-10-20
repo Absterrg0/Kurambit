@@ -6,13 +6,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { GAME_TEMPLATES, GameTemplate } from "@t3tools/contracts";
+import { GAME_TEMPLATES, GameTemplate, parseGameScenario } from "@t3tools/contracts";
 import {
   copyTemplateIntoGame,
   isTemplateTextFile,
   resolveTemplatesDirectory,
   substituteGameName,
 } from "./templates.ts";
+import { parseProjectInputActions, scenarioActionIssues } from "./gameScenarios.ts";
 
 const decodeTemplate = Schema.decodeUnknownSync(Schema.fromJsonString(GameTemplate));
 
@@ -50,6 +51,29 @@ it.effect("offers only starter templates that exist on disk with matching metada
       ).toEqual(template);
       expect(yield* fs.exists(path.join(directory, "godot/project.godot"))).toBe(true);
       expect(yield* fs.exists(path.join(directory, "TEMPLATE.md"))).toBe(true);
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("ships a completion route whose actions exist in each template", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const templatesDirectory = yield* resolveTemplatesDirectory();
+    for (const template of ["2d-platformer", "3d-explorer"] as const) {
+      const root = path.join(templatesDirectory, template, "godot");
+      const actions = parseProjectInputActions(
+        yield* fs.readFileString(path.join(root, "project.godot")),
+      );
+      const parsed = parseGameScenario(
+        JSON.parse(yield* fs.readFileString(path.join(root, "tests/scenarios/full-run.json"))),
+      );
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      expect(
+        parsed.scenario.steps.some((step) => "press" in step && step.press === "ui_accept"),
+      ).toBe(true);
+      expect(scenarioActionIssues(parsed.scenario, actions)).toEqual([]);
     }
   }).pipe(Effect.provide(NodeServices.layer)),
 );

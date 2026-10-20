@@ -9,11 +9,11 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  GameScenarioCriterionResult,
   type GameDesignState,
   type GameQualificationRead,
   type GameQualificationStage,
   type GameQualificationStageRead,
-  type GameScenarioCriterionResult,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 

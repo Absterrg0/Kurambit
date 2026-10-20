@@ -7,8 +7,6 @@ import type {
   GameScenarioSummary,
 } from "@t3tools/contracts";
 
-/** The only value GameState's MENU → PLAYING enum uses in both templates. */
-const PLAYING_STATE = 1;
 /** Legacy games prove the game started by observing this synthetic promise. */
 export const LEGACY_PLAYING_MATCH_ID = "legacy-playing";
 
@@ -44,7 +42,8 @@ const matchesCriterion = (
   // Older results (and hand-written fixtures) may not carry matches. Fall back to
   // the statistics: min/max are exact for the numeric bounds, while equality has
   // no safe fallback and stays unmatched.
-  if (expectation.kind === "changes") return { matched: false, frame: null };
+  if (expectation.kind === "changes")
+    return { matched: observation.firstChangeFrame !== null, frame: null };
   const min = numeric(observation.min);
   const max = numeric(observation.max);
   if (min === null || max === null) return { matched: false, frame: null };

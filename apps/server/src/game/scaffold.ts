@@ -36,14 +36,16 @@ provides and what this game adds.
 The build is judged against these, not against a summary. Write a fenced block tagged
 \`acceptance\` with 5 to 12 concrete criteria. Each needs a slug id, a kind (\`mechanic\`,
 \`content\`, \`end\` or \`control\`), the promise in plain language, and optionally an
-\`observe\` of a GameState autoload property (\`state\`, \`collected\`, \`total\`, \`score\`,
+\`observe\` of a GameState autoload property (\`state\`, \`won\`, \`collected\`, \`total\`, \`score\`,
 \`lives\`, \`health\`, \`level_index\`) using \`==V\`, \`>=N\`, \`<=N\` or \`changes\`. Cover every
 control, the core mechanic, the content counts, how the game is won and how it is lost.
+An \`end\` criterion should observe \`state\` reaching the won value (3 in both templates) or
+\`won ==1\`.
 
 \`\`\`acceptance
 [
   { "id": "light-all-lanterns", "kind": "mechanic", "text": "Lighting every lantern opens the chimney", "observe": { "key": "collected", "expect": ">=1" } },
-  { "id": "reach-the-summit", "kind": "end", "text": "The run ends at the summit spire" }
+  { "id": "reach-the-summit", "kind": "end", "text": "The run ends at the summit spire", "observe": { "key": "state", "expect": "==3" } }
 ]
 \`\`\`
 
@@ -134,6 +136,8 @@ Use game_godot_import after each asset transfer or engine change. Assemble scene
 
 Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. game.json's testSuite names the canonical suite (res://tests/smoke_test.gd); only a pass of that suite records the test stage that qualification reads, so other scripts are diagnostics and cannot qualify the game. A screenshot is not a gameplay test.
 
+Write route files under godot/tests/scenarios/*.json that play the game from its main menu with normal input: press, hold and wait steps using actions from project.godot's InputMap. Routes are the server-owned exam; cover every level through to the win (collect every required item, reach the finish) under real physics. Run them with game_scenarios_run. It grades the approved DESIGN.md observations and records the state stage; no scenario, teleport or state setter can pass it. Keep routes as data; do not call game functions or set GameState from them.
+
 Use game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser, runs your steps, compares the boot and after-steps frames, and returns a verdict, screenshots, evidence and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.
 
 ## Definition of done
@@ -144,10 +148,11 @@ Finish every build turn to this bar, then report to the user and end the turn:
 
 1. game_godot_check returns ok with zero errors.
 2. game_godot_test passes with your smoke test.
-3. A web build exists for the final sources (game_web_playtest exports one when the build is stale).
-4. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
-5. game_status reports qualification "qualified": check, test, export and playtest all passed for the current sources. Any edit after a stage makes that stage stale, so rerun it; never edit game files after the final playtest.
-6. game_preview returns the playable URL; report it with the test results.
+3. game_scenarios_run passes every observable acceptance criterion and at least one \`end\` criterion, with the player actually moving; every route starts from the menu and wins under normal input.
+4. A web build exists for the final sources (game_web_playtest exports one when the build is stale).
+5. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
+6. game_status reports qualification "qualified": check, test, export, playtest and state all passed for the current sources. Any edit after a stage makes that stage stale, so rerun it; never edit game files after the final playtest.
+7. game_preview returns the playable URL; report it with the test results.
 
 Playtest screenshots and builds/playtests/ are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.
 `,

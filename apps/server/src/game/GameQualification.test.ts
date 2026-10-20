@@ -81,6 +81,7 @@ const recordAll = (
       passed("test", null),
       passed("export", buildId),
       passed("playtest", buildId, "builds/playtests/run-1"),
+      passed("state", null, "builds/logs/scenarios-1"),
     ])
       yield* qualification.record(root, { ...input, sourceId });
   });
@@ -103,7 +104,7 @@ it.effect("starts unqualified, with every stage missing and later stages never p
   ),
 );
 
-it.effect("records real stage results and only qualifies when all four are current", () =>
+it.effect("records real stage results and only qualifies when all stages are current", () =>
   withGame({}, ({ root, stateDir, qualification }) =>
     Effect.gen(function* () {
       const sourceId = yield* Effect.promise(() => sourceIdOf(root));
@@ -141,6 +142,38 @@ it.effect("records real stage results and only qualifies when all four are curre
   ),
 );
 
+it.effect("keeps the state stage's per-criterion summary with its record", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "state",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: "builds/logs/scenarios-1",
+        criteria: [
+          {
+            id: "reach-the-goal",
+            kind: "end",
+            text: "The run ends at the goal",
+            status: "passed",
+            observed: "full-run: state 1..3",
+            scenarios: ["full-run"],
+          },
+        ],
+        detail: "Every observable criterion passed.",
+      });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "state")).toMatchObject({
+        status: "passed",
+        detail: "Every observable criterion passed.",
+        criteria: [{ id: "reach-the-goal", status: "passed" }],
+      });
+    }),
+  ),
+);
+
 it.effect("an edit after the stages makes them stale, so the game is unqualified", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
@@ -156,7 +189,7 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
       expect(read.state).toBe("unqualified");
       expect(
         read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
-      ).toEqual(["check", "test", "export", "playtest"]);
+      ).toEqual(["check", "test", "export", "playtest", "state"]);
       expect(read.sourceId).not.toBe(sourceId);
     }),
   ),

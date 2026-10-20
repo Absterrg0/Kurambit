@@ -48,7 +48,7 @@ total)`, `collect(label)`, `lose_life(reason)`, `reach_goal()`, `pause_game()`,
 `resume_game()`, `to_menu()`, `is_playing()`, `notify(text)`, `reason_text(reason)`,
 `time_text(seconds)`, `level_number()`. State: `state`, `level_index`, `level_count`,
 `level_name`, `collected`, `total`, `run_coins`, `score`, `lives`, `run_seconds`,
-`best_score`, `best_seconds` (best score/time persist in `user://progress.cfg`).
+`best_score`, `best_seconds`, `won` (best score/time persist in `user://progress.cfg`).
 
 **Settings** (`scripts/settings.gd`) — `master_volume`, `music_volume`, `sfx_volume`,
 `screen_shake`, each with a `set_*` method that applies the change and saves
@@ -181,3 +181,18 @@ Two rules the checks teach, and that new ones have to respect:
 
 Whenever you add a system, extend the harness: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
+
+## Acceptance scenarios
+
+`godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
+the main menu, plays both levels with normal input and wins. It is data, not code —
+`press`, `hold` and `wait` steps using this project's InputMap actions. Extend it when
+you add a level or change the route: the server runs it under real physics and grades the
+approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks in
+the smoke harness; scenarios prove the whole game can be finished, not that a mechanic
+works in isolation. Do not teleport, call game methods or write GameState from a route.
+
+Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
+the failing criterion). The 2D route uses the slime stomp at the first spike platform as
+a bounce, the high stone steps, and sprint jumps over the spike runs; keep those timings
+in step with actual physics rather than shortening the level for the test.

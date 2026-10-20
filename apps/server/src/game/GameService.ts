@@ -54,6 +54,7 @@ import {
   readScenarioFiles,
   scenarioActionIssues,
   scenarioObservations,
+  scenarioRequestJson,
 } from "./gameScenarios.ts";
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
@@ -559,7 +560,7 @@ const make = Effect.gen(function* () {
         : design.state === "legacy"
           ? "legacy"
           : "none";
-    const criteria = mode === "criteria" ? approval.acceptance : [];
+    const criteria = mode === "criteria" && approval !== null ? approval.acceptance : [];
     const sourceBefore = yield* snapshot(root, godotProject);
     const evidenceDirectory = NodePath.join(
       root,
@@ -639,7 +640,7 @@ const make = Effect.gen(function* () {
       yield* Effect.promise(() =>
         NodeFSP.writeFile(
           requestPath,
-          JSON.stringify({
+          scenarioRequestJson({
             scenarioPath: file.path,
             observations,
             sampleEvery: 6,

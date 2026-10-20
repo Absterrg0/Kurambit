@@ -304,13 +304,18 @@ func _matches(expect: String, value: Variant, stats: Dictionary) -> bool:
 	if operator != "==" and operator != ">=" and operator != "<=":
 		return false
 	var target := expect.substr(2).to_float()
-	if not _is_number(value):
+	var number := 0.0
+	if typeof(value) == TYPE_BOOL:
+		number = 1.0 if value else 0.0
+	elif _is_number(value):
+		number = float(value)
+	else:
 		return false
 	if operator == "==":
-		return is_equal_approx(float(value), target)
+		return is_equal_approx(number, target)
 	if operator == ">=":
-		return float(value) >= target
-	return float(value) <= target
+		return number >= target
+	return number <= target
 
 func _write_result() -> void:
 	if _result_path.is_empty():

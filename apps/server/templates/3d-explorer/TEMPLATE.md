@@ -41,7 +41,7 @@ total, score)`, `health_changed(health, max_health)`, `lives_changed(lives)`,
 `apply_damage(amount, reason)`, `lose_life(reason)`, `reach_goal()`, `pause_game()`,
 `resume_game()`, `to_menu()`, `is_playing()`, `notify(text)`, `reason_text(reason)`,
 `time_text(seconds)`. State: `state`, `collected`, `total`, `score`, `lives`, `health`,
-`run_seconds`, `best_score`, `best_seconds` (best score/time persist in
+`run_seconds`, `best_score`, `best_seconds`, `won` (best score/time persist in
 `user://progress.cfg`).
 
 **Settings** (`scripts/settings.gd`) — `master_volume`, `music_volume`, `sfx_volume`,
@@ -153,3 +153,19 @@ alone. The harness drives the real loop — synthetic input for movement, jump a
 (`Input.parse_input_event`), teleports for content checks — and exits nonzero with a list
 of failures. Extend it whenever you add a system: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
+
+## Acceptance scenarios
+
+`godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
+the main menu, collects all five relics, and walks into the unlocked gate. It is data, not
+code — `press`, `hold` and `wait` steps using this project's InputMap actions. Extend it
+when you add a relic, level or platform: the server runs it under real physics and grades
+the approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks
+in the smoke harness; a scenario proves the whole game can be finished, not that one
+mechanic works in isolation. Do not teleport, call game methods or write GameState from a
+route.
+
+Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
+the failing criterion). The template route collects the Sunstone, Tideglass, Verdant Idol
+and Sky Shard on the east/north side, then crosses to Emberheart and the gate; keep the
+jump timings in step with actual physics rather than moving collectibles onto the path.

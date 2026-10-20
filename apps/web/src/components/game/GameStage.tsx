@@ -178,8 +178,8 @@ export function GameStage({
         : "Unqualified";
   const qualificationDetail =
     qualification.state === "qualified"
-      ? "Check, test, web export and playtest passed for the current sources."
-      : `${qualificationLabel} for the current sources. ${qualificationIssues.join(", ")}. State-based and visual acceptance are not implemented yet.`;
+      ? "Check, test, web export, playtest and state scenarios passed for the current sources."
+      : `${qualificationLabel} for the current sources. ${qualificationIssues.join(", ")}. Visual acceptance is not implemented yet.`;
   const stagePhaseLabel =
     phase.kind === "playing"
       ? qualification.state === "qualified"

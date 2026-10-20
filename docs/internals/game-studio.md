@@ -116,9 +116,18 @@ build identity. The snapshot is a sorted hash of the `godot/` tree's paths, size
 additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
 unknown. A stage counts only while its snapshot (and, for a playtest, its build) still matches, so
 an edit, a deletion, a later failure or a re-export invalidates earlier passes. `GameStatus`
-exposes the derived `qualified | unqualified | unknown` read with each stage's status. State-based
-and visual acceptance are declared in that read as `missing` until their checks exist; they can
-never be reported passed.
+exposes the derived `qualified | unqualified | unknown` read with each stage's status.
+State acceptance is a server-owned exam: `game_scenarios_run` reads pure input routes from
+`godot/tests/scenarios/*.json` (press, hold and wait steps, never code), starts the real main scene
+under `--headless --fixed-fps 60`, injects input every physics frame and samples the GameState
+autoload plus the `player` group. Routes can only press actions from the InputMap. The runner never
+calls a game function or writes a property; a route that only animates, a pickup behind a wall and
+an unreachable finish all fail the approved `observe` criteria. Criteria without an observation are
+`unverified` and belong to the visual judge; every observable criterion, an observed `end` criterion
+and real player movement are required for the `state` stage. Legacy games without acceptance pass
+only when a route moves the player and GameState reaches its playing state. The stage stores the
+approved source snapshot and a per-criterion summary, and `visual` stays declared as `missing` until
+its judge exists; it can never be reported passed by accident.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and
