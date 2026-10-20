@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test boundary stubs replace registration and provider execution, never game operations.
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { ThreadId, type Project, type OrchestrationV2ThreadShell } from "@t3tools/contracts";
@@ -25,8 +26,22 @@ export function previewBrowserTestLayer(
 export function projectTestLayer(
   onLaunch?: (input: ThreadLaunchService.ThreadLaunchInput) => void,
   onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void,
+  options?: {
+    readonly threads?: () => ReadonlyArray<OrchestrationV2ThreadShell>;
+  },
 ) {
   let project: Project | undefined;
+  const defaultThread = (): OrchestrationV2ThreadShell =>
+    ({
+      id: ThreadId.make("game-test-thread"),
+      projectId: project!.id,
+      title: "Game session",
+      updatedAt: DateTime.makeUnsafe("2026-10-20T00:00:00.000Z"),
+      archivedAt: null,
+      deletedAt: null,
+      worktreePath: null,
+    }) as OrchestrationV2ThreadShell;
+  const projectThreads = () => options?.threads?.() ?? (project ? [defaultThread()] : []);
   return Layer.mergeAll(
     Layer.mock(ProjectService.ProjectService)({
       bootstrap: (input) => {
@@ -47,6 +62,10 @@ export function projectTestLayer(
       },
       getByWorkspaceRoot: () => Effect.succeed(Option.fromUndefinedOr(project)),
       getById: () => Effect.succeed(Option.fromUndefinedOr(project)),
+      snapshot: Effect.sync(() => ({
+        projects: project ? [project] : [],
+        updatedAt: "2026-10-20T00:00:00.000Z",
+      })),
     }),
     Layer.mock(ThreadManagementService.ThreadManagementService)({
       getThreadShell: () =>
@@ -60,6 +79,14 @@ export function projectTestLayer(
                 worktreePath: null,
               } as OrchestrationV2ThreadShell),
         ),
+      listProjectThreads: () => Effect.succeed(projectThreads()),
+      getShellSnapshot: () =>
+        Effect.succeed({
+          schemaVersion: 1,
+          snapshotSequence: 0,
+          threads: projectThreads(),
+          archivedThreads: [],
+        }),
       sendToThread: (input) => {
         onSend?.(input);
         // Only the dispatch input crosses this boundary; the real service is

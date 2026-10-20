@@ -21,6 +21,12 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
   }),
+  list: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:list",
+    tag: WS_METHODS.gameList,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+  }),
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:create",
     tag: WS_METHODS.gameCreate,

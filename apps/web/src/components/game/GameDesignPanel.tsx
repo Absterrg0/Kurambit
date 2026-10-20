@@ -10,6 +10,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import { useProjectFileQuery } from "../files/projectFilesQueryState";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { useGameLibrary } from "./useGameLibrary";
 
 const approvedOn = (approvedAt: string | undefined) => {
   if (!approvedAt) return null;
@@ -50,6 +51,7 @@ export function GameDesignPanel({
     status.briefPath !== null,
   );
   const approveDesign = useAtomCommand(gameEnvironment.approveDesign, { reportFailure: false });
+  const refreshLibrary = useGameLibrary().refresh;
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +86,7 @@ export function GameDesignPanel({
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
+    refreshLibrary();
     onApproved();
   };
 

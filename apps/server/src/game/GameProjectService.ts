@@ -24,15 +24,19 @@ import {
   type GameCreateInput,
   type GameDesign,
   type GameDesignApprovalResult,
+  type GameListResult,
   type GameOpenInput,
   type GameProjectResult,
+  type GameSummary,
 } from "@t3tools/contracts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
+import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
+import { readLastPlaytest } from "./playtestEvidence.ts";
 import { isWebBuildStale } from "./webBuild.ts";
 import { initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
@@ -56,6 +60,11 @@ export class GameProjectService extends Context.Service<
     readonly open: (
       input: typeof GameOpenInput.Type,
     ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
+    /**
+     * The games library, in one batched read. The sidebar uses this instead of
+     * asking for game status per project.
+     */
+    readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
@@ -158,6 +167,7 @@ const make = Effect.gen(function* () {
     root: string,
     input: Pick<GameCreateInput, "modelSelection" | "runtimeMode">,
     message?: string,
+    options?: { readonly resume?: boolean },
   ) {
     const manifest = yield* read(root);
     const project = yield* projects.getByWorkspaceRoot(root).pipe(
@@ -178,6 +188,27 @@ const make = Effect.gen(function* () {
           new GameOperationError({ operation: "register-game", path: root, reason: "io", cause }),
       ),
     );
+    // Opening a folder is "continue this game", not "start another chat": the
+    // project's newest session already has the history and the context.
+    if (options?.resume === true) {
+      const existingThreads = yield* threads
+        .listProjectThreads({ projectId: project.id, includeSubagents: false })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "list-game-threads",
+                path: root,
+                reason: "io",
+                cause,
+              }),
+          ),
+        );
+      const latest = existingThreads.find(
+        (thread) => thread.deletedAt === null && thread.archivedAt === null,
+      );
+      if (latest !== undefined) return { projectId: project.id, threadId: latest.id, root };
+    }
     const result = yield* launches
       .launch({
         commandId: CommandId.make(NodeCrypto.randomUUID()),
@@ -398,8 +429,101 @@ const make = Effect.gen(function* () {
   });
   return GameProjectService.of({
     create,
+    list: Effect.fn("GameProjectService.list")(function* () {
+      const [projectSnapshot, threadSnapshot] = yield* Effect.all(
+        [
+          projects.snapshot.pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "list-games",
+                  path: "projects",
+                  reason: "io",
+                  cause,
+                }),
+            ),
+          ),
+          threads.getShellSnapshot().pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "list-games",
+                  path: "threads",
+                  reason: "io",
+                  cause,
+                }),
+            ),
+          ),
+        ],
+        { concurrency: 2 },
+      );
+      const newestThreadByProject = new Map<string, (typeof threadSnapshot.threads)[number]>();
+      for (const thread of threadSnapshot.threads) {
+        if (thread.deletedAt !== null) continue;
+        const current = newestThreadByProject.get(thread.projectId);
+        if (
+          current === undefined ||
+          DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(current.updatedAt)
+        )
+          newestThreadByProject.set(thread.projectId, thread);
+      }
+      const summaries = yield* Effect.forEach(
+        projectSnapshot.projects,
+        (project) =>
+          Effect.gen(function* () {
+            const manifest = yield* read(project.workspaceRoot).pipe(Effect.option);
+            if (Option.isNone(manifest)) return null;
+            const latestThread = newestThreadByProject.get(project.id) ?? null;
+            const lastPlaytest = yield* Effect.promise(() =>
+              readLastPlaytest(project.workspaceRoot, []),
+            );
+            const coverImagePath = yield* Effect.promise(async () => {
+              for (const candidate of gameCoverCandidates({
+                lastPlaytest,
+                assets: manifest.value.assets,
+              })) {
+                try {
+                  if ((await NodeFSP.stat(insideGame(project.workspaceRoot, candidate))).isFile())
+                    return candidate;
+                } catch {
+                  /* A missing cover is not an error; try the next candidate. */
+                }
+              }
+              return null;
+            });
+            return {
+              projectId: project.id,
+              root: project.workspaceRoot,
+              name: manifest.value.name,
+              template: manifest.value.template ?? null,
+              designStatus: manifest.value.design?.status ?? null,
+              updatedAt: latestGameActivity(
+                project.updatedAt,
+                latestThread === null ? null : DateTime.formatIso(latestThread.updatedAt),
+              ),
+              coverImagePath,
+            } satisfies GameSummary;
+          }),
+        { concurrency: 4 },
+      );
+      // A project row can outlive a move or a failed registration; the library
+      // shows one row per game root, newest activity first.
+      const seenRoots = new Set<string>();
+      return sortGameSummaries(
+        summaries.filter((game): game is GameSummary => {
+          if (game === null || seenRoots.has(game.root)) return false;
+          seenRoots.add(game.root);
+          return true;
+        }),
+      );
+    }),
     open: (input) =>
-      register(NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())), input),
+      register(
+        NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())),
+        input,
+        undefined,
+        { resume: true },
+      ),
     resolve,
     read,
     approveDesign,

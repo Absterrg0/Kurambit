@@ -1,5 +1,11 @@
-import { GameEntry } from "./game/GameEntry";
 import { useGameDialogStore } from "./game/gameDialogStore";
+import {
+  gameInitial,
+  gameTemplateAppearance,
+  newestThreadByProject,
+  sortGameThreadsByActivity,
+} from "./game/gameLibrary.logic";
+import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
@@ -71,6 +77,7 @@ import {
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -438,11 +445,46 @@ function useSidebarThreads(input: {
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly routeThreadKey: string | null;
+  readonly gameProjectKeys: ReadonlySet<string>;
 }) {
-  const { projectScopeKey, scopedProjectKeys, serverConfigs, optimisticDrop, routeThreadKey } =
-    input;
-  const threads = useThreadShells();
-  const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
+  const {
+    projectScopeKey,
+    scopedProjectKeys,
+    serverConfigs,
+    optimisticDrop,
+    routeThreadKey,
+    gameProjectKeys,
+  } = input;
+  const allThreads = useThreadShells();
+  const gameThreads = allThreads.filter(
+    (thread) =>
+      thread.deletedAt === null &&
+      thread.archivedAt === null &&
+      gameProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+  );
+  const gameThreadsByProjectKey = new Map<string, EnvironmentThreadShell[]>();
+  for (const thread of gameThreads) {
+    const key = `${thread.environmentId}:${thread.projectId}`;
+    const list = gameThreadsByProjectKey.get(key);
+    if (list === undefined) gameThreadsByProjectKey.set(key, [thread]);
+    else list.push(thread);
+  }
+  for (const [key, list] of gameThreadsByProjectKey)
+    gameThreadsByProjectKey.set(key, sortGameThreadsByActivity(list));
+  // A game is one library row; its newest session stands for it. Shelf states
+  // belong to sessions, not games, so the row never moves into a collapsed
+  // shelf and the library stays ordered by activity.
+  const threads = [...newestThreadByProject(gameThreads).values()].map((thread) => ({
+    ...thread,
+    settledOverride: null,
+    settledAt: null,
+    unsettledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    pinnedAt: null,
+    pinOrderKey: null,
+  })) satisfies EnvironmentThreadShell[];
+  const workingShelfEnabled = false;
   const nowMinute = useNowMinute();
   // Snooze wake times are second-precise, so classifying with the quantized
   // minute would hold a woken thread on the shelf for up to a minute.
@@ -489,8 +531,8 @@ function useSidebarThreads(input: {
   const partitionNextWakeAt = partition.snoozedThreads[0]?.snoozedUntil ?? null;
   if (partitionNextWakeAt !== nextSnoozeWakeAt) setNextSnoozeWakeAt(partitionNextWakeAt);
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const { pinnedThreads, workingThreads, snoozedThreads, settledThreads } = partition;
+  const activeThreads = sortGameThreadsByActivity(partition.activeThreads);
   const visibleSettledThreads = (() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
@@ -531,6 +573,7 @@ function useSidebarThreads(input: {
   return {
     ...partition,
     threads,
+    gameThreadsByProjectKey,
     workingShelfEnabled,
     searchableThreads: [
       ...pinnedThreads,
@@ -738,12 +781,33 @@ function isOptimisticDropReleased(input: {
 
 // Sidebar() is large enough that the compiler cannot prove its local maps stay
 // unmutated; built inside a hook they reach it frozen and cached.
-function useSidebarLookups() {
-  const projects = useProjects();
+function useSidebarLookups(gameProjectKeys: ReadonlySet<string>) {
+  const allProjects = useProjects();
+  const projects = allProjects.filter((project) =>
+    gameProjectKeys.has(`${project.environmentId}:${project.id}`),
+  );
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
-  const projectGroups = useSidebarProjectGroups();
+  const allProjectGroups = useSidebarProjectGroups();
+  const projectGroups = allProjectGroups.flatMap((group) => {
+    const memberProjects = group.memberProjects.filter((project) =>
+      gameProjectKeys.has(`${project.environmentId}:${project.id}`),
+    );
+    if (memberProjects.length === 0) return [];
+    const memberRefs = new Set(
+      memberProjects.map((project) => `${project.environmentId}:${project.id}`),
+    );
+    return [
+      {
+        ...group,
+        memberProjects,
+        memberProjectRefs: group.memberProjectRefs.filter((projectRef) =>
+          memberRefs.has(`${projectRef.environmentId}:${projectRef.projectId}`),
+        ),
+      },
+    ];
+  });
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
@@ -1506,8 +1570,11 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  variant: "card" | "slim" | "game";
   variantAction: SidebarSweepAction;
+  game: GameLibraryEntry | null;
+  gameSessions: readonly SidebarThreadSummary[];
+  onNewSession: (() => void) | null;
   settlementSupported: boolean;
   snoozeSupported: boolean;
   pinningSupported: boolean;
@@ -1573,9 +1640,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     thread,
     variant,
     variantAction,
+    game,
+    gameSessions,
+    onNewSession,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   useEffect(() => {
     if (!canOperateThread && isRenaming) onCancelRename();
@@ -2017,6 +2088,178 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       />
     )
   ) : null;
+
+  if (props.game !== null) {
+    const gameSummary = props.game;
+    const appearance = gameTemplateAppearance(gameSummary.template);
+    const initial = gameInitial(gameSummary.name);
+    const olderSessions = props.gameSessions.filter((session) => session.id !== thread.id);
+    const working =
+      status === "working" || status === "waiting" || status === "approval" || status === "input";
+    const gameStatusLabel =
+      status === "failed"
+        ? "Needs attention"
+        : working
+          ? (topStatus?.label ?? "Working")
+          : gameSummary.designStatus === "draft"
+            ? "Design draft"
+            : "Ready";
+    const GameStatusIcon =
+      status === "failed"
+        ? CircleAlertIcon
+        : working
+          ? CircleDashedIcon
+          : gameSummary.designStatus === "draft"
+            ? SquarePenIcon
+            : CircleCheckIcon;
+    const gameStatusClass =
+      status === "failed"
+        ? "text-error"
+        : working
+          ? "text-info"
+          : gameSummary.designStatus === "draft"
+            ? "text-warning-foreground"
+            : "text-success-foreground";
+    return (
+      <li
+        data-thread-item={threadKey}
+        {...sortableRootProps}
+        className={cn(
+          "group/game-row list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_62px]",
+          sortable?.isDragging && "relative z-20",
+        )}
+      >
+        <div
+          ref={rowRef}
+          role="button"
+          tabIndex={0}
+          aria-label={`${gameSummary.name}, ${gameStatusLabel}, ${appearance.label}`}
+          aria-current={props.isActive ? "page" : undefined}
+          data-testid="sidebar-row-game"
+          className={cn(rowSurfaceClassName, "relative overflow-hidden")}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+          onKeyDown={handleKeyDown}
+          onContextMenu={handleContextMenu}
+        >
+          <span className="sr-only">{gameSummary.name}</span>
+          <div className="flex items-center gap-2.5 px-2.5 py-2.5">
+            <span
+              className={cn(
+                "flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/60 text-sm font-semibold tabular-nums",
+                appearance.initialClassName,
+              )}
+              aria-hidden
+            >
+              {initial}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 flex-1 truncate font-medium text-sm">
+                  {gameSummary.name}
+                </span>
+              </span>
+              <span className="flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+                <GameStatusIcon className={cn("size-3 shrink-0", gameStatusClass)} aria-hidden />
+                <span className={cn("truncate", working && "text-info")}>{gameStatusLabel}</span>
+                <span aria-hidden className="text-muted-foreground/40">
+                  ·
+                </span>
+                <span className="truncate">{appearance.label}</span>
+              </span>
+            </span>
+            <span className="flex shrink-0 flex-col items-end gap-1">
+              <span className="text-secondary-label text-xs tabular-nums">
+                <RelativeTimeLabel timestamp={thread.updatedAt} />
+              </span>
+              <span className="flex items-center gap-0.5">
+                {olderSessions.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-label={`${sessionsOpen ? "Hide" : "Show"} ${olderSessions.length} older ${olderSessions.length === 1 ? "session" : "sessions"} of ${gameSummary.name}`}
+                    aria-expanded={sessionsOpen}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSessionsOpen((open) => !open);
+                    }}
+                    className="inline-flex h-5 cursor-pointer items-center gap-1 rounded-sm px-1 text-2xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                  >
+                    Sessions {olderSessions.length}
+                    <ChevronDownIcon
+                      className={cn("size-3 transition-transform", sessionsOpen && "rotate-180")}
+                      aria-hidden
+                    />
+                  </button>
+                ) : null}
+                {onNewSession !== null ? (
+                  <button
+                    type="button"
+                    aria-label={`New session in ${gameSummary.name}`}
+                    title="New session"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onNewSession();
+                    }}
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                  >
+                    <PlusIcon className="size-3" aria-hidden />
+                  </button>
+                ) : null}
+              </span>
+            </span>
+          </div>
+          {sessionsOpen && olderSessions.length > 0 ? (
+            <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-[3.25rem]">
+              <ul role="list" className="flex flex-col">
+                {olderSessions.map((session) => (
+                  <li key={session.id} className="list-none">
+                    <button
+                      type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onThreadActivate(scopeThreadRef(session.environmentId, session.id));
+                        setSessionsOpen(false);
+                      }}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {session.title === gameSummary.name ? "Session" : session.title}
+                      </span>
+                      <span className="shrink-0 text-2xs tabular-nums">
+                        <RelativeTimeLabel timestamp={session.updatedAt} />
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {onNewSession !== null ? (
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSessionsOpen(false);
+                    onNewSession();
+                  }}
+                  className="mt-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                >
+                  <PlusIcon className="size-3" aria-hidden />
+                  New session
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </li>
+    );
+  }
 
   if (variant === "slim") {
     return (
@@ -2613,6 +2856,13 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
+  const gameLibrary = useGameLibrary();
+  const gameProjectKeys = new Set(
+    gameLibrary.games.map((game) => `${game.environmentId}:${game.projectId}`),
+  );
+  const gameByProjectKey = new Map(
+    gameLibrary.games.map((game) => [`${game.environmentId}:${game.projectId}`, game] as const),
+  );
   const {
     projects,
     serverConfigs,
@@ -2623,7 +2873,7 @@ export default function Sidebar() {
     projectDisplayNameByKey,
     projectGroupByScopeKey,
     projectScopeItems,
-  } = useSidebarLookups();
+  } = useSidebarLookups(gameProjectKeys);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -2817,6 +3067,10 @@ export default function Sidebar() {
             (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
           ),
         );
+  const visibleGameProjectKeys =
+    scopedProjectKeys === null
+      ? gameProjectKeys
+      : new Set([...gameProjectKeys].filter((key) => scopedProjectKeys.has(key)));
   useEffect(() => {
     const nextKey = resolveSidebarProjectScopeKey({
       groups: projectGroups,
@@ -2845,6 +3099,9 @@ export default function Sidebar() {
         continue;
       }
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
+        continue;
+      }
+      if (!visibleGameProjectKeys.has(`${session.environmentId}:${session.projectId}`)) {
         continue;
       }
       if (
@@ -2922,12 +3179,14 @@ export default function Sidebar() {
     activeKeys,
     pinnedKeysById,
     activeKeysById,
+    gameThreadsByProjectKey,
   } = useSidebarThreads({
     projectScopeKey,
     scopedProjectKeys,
     serverConfigs,
     optimisticDrop,
     routeThreadKey,
+    gameProjectKeys,
   });
 
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
@@ -4453,11 +4712,14 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const startGameSession = (game: GameLibraryEntry) => {
+    if (isMobile) setOpenMobile(false);
+    void newThreadContext.handleNewThread(scopeProjectRef(game.environmentId, game.projectId));
+  };
   return (
     <>
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
-      <GameEntry />
       <SidebarContent
         className="min-h-full"
         fixedHeader={
@@ -4590,6 +4852,7 @@ export default function Sidebar() {
                 </Combobox>
               }
               onNewProject={openGameDialog}
+              onNewGame={() => useGameDialogStore.getState().show("create")}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
@@ -4675,7 +4938,7 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                {threadSearch.isPending ? "Searching thread messages…" : "No threads found"}
+                {threadSearch.isPending ? "Searching sessions…" : "No sessions found"}
               </p>
             )
           ) : null}
@@ -4720,7 +4983,10 @@ export default function Sidebar() {
                         );
                         const isCard =
                           section === "active" || section === "pinned" || section === "working";
-                        const rowVariant = isCard ? "card" : "slim";
+                        const game =
+                          gameByProjectKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+                          null;
+                        const rowVariant = game !== null ? "game" : isCard ? "card" : "slim";
                         return (
                           <SortableThreadRow
                             key={threadKey}
@@ -4733,6 +4999,15 @@ export default function Sidebar() {
                             }
                             thread={thread}
                             variant={rowVariant}
+                            game={game}
+                            gameSessions={
+                              game === null
+                                ? []
+                                : (gameThreadsByProjectKey.get(
+                                    `${game.environmentId}:${game.projectId}`,
+                                  ) ?? [])
+                            }
+                            onNewSession={game === null ? null : () => startGameSession(game)}
                             variantAction={
                               section === "snoozed"
                                 ? "unsnooze"
@@ -4824,7 +5099,7 @@ export default function Sidebar() {
                           key="draft-sessions"
                           projectByKey={projectByKey}
                           projectDisplayNameByKey={projectDisplayNameByKey}
-                          scopedProjectKeys={scopedProjectKeys}
+                          scopedProjectKeys={visibleGameProjectKeys}
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
                           onDraftContextMenu={handleDraftContextMenu}
@@ -4985,12 +5260,18 @@ export default function Sidebar() {
               {projects.length === 0 ? (
                 <>
                   <span>No games yet</span>
-                  <GameEntry />
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => useGameDialogStore.getState().show("create")}
+                  >
+                    New game
+                  </Button>
                 </>
               ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
+                `No sessions in ${scopedProjectGroup.displayName} yet`
               ) : (
-                "No threads yet"
+                "No sessions yet"
               )}
             </div>
           ) : null}

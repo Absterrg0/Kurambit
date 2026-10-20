@@ -113,6 +113,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsEnsureScratch]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectsCreateNew]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.gameList]: AuthOrchestrationReadScope,
   [WS_METHODS.gameToolchainStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.gameCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameOpen]: AuthOrchestrationOperateScope,

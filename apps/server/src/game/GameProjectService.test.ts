@@ -206,7 +206,126 @@ it.effect("reopens a registered workspace after reconstructing the game service"
       }).pipe(Effect.provide(freshService())),
     );
     expect(reopened.projectId).toBe(created.projectId);
+    expect(reopened.threadId).toBe(created.threadId);
   }).pipe(Effect.scoped),
+);
+
+it.effect("opening an existing game resumes its newest session instead of starting another", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-resume-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const launches: ThreadLaunchService.ThreadLaunchInput[] = [];
+    const result = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        const game = yield* service.create({
+          name: "Resume Me",
+          parentDirectory: parent,
+          brief: "Keep going.",
+          modelSelection: selection,
+        });
+        const opened = yield* service.open({ path: game.root, modelSelection: selection });
+        const reopened = yield* service.open({ path: game.root, modelSelection: selection });
+        return { game, opened, reopened };
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer((input) => {
+              launches.push(input);
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(result.opened.threadId).toBe(result.game.threadId);
+    expect(result.reopened.threadId).toBe(result.game.threadId);
+    expect(result.opened.projectId).toBe(result.game.projectId);
+    expect(launches).toHaveLength(1);
+  }),
+);
+
+it.effect("a project with no session gets one when the game is opened", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-new-session-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    let launches = 0;
+    const created = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        const game = yield* service.create({
+          name: "Sessionless",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+        });
+        // The mock had no session yet; opening the same project must create one.
+        const opened = yield* service.open({ path: game.root, modelSelection: selection });
+        expect(opened.projectId).toBe(game.projectId);
+        expect(opened.threadId).toBe(game.threadId);
+        return game;
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer(
+              () => {
+                launches += 1;
+              },
+              undefined,
+              { threads: () => [] },
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(created.root).toBe(NodePath.join(parent, "sessionless"));
+    expect(launches).toBe(2);
+  }),
+);
+
+it.effect("lists games with their template, design state, activity and rendered cover", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-list-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const games = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        const game = yield* service.create({
+          name: "Library Game",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+        });
+        yield* service.upsertAsset(game.root, {
+          id: "coin",
+          kind: "model",
+          source: "art/blender/coin.blend",
+          script: "art/scripts/coin.py",
+          export: "godot/assets/models/coin.glb",
+          thumbnail: "art/previews/coin.png",
+          updatedAt: "2026-10-19T00:00:00.000Z",
+        });
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(game.root, "art/previews/coin.png"), "png"),
+        );
+        return yield* service.list();
+      }).pipe(Effect.provide(gameProjectLayer())),
+    );
+    expect(games).toHaveLength(1);
+    expect(games[0]).toMatchObject({
+      name: "Library Game",
+      template: DEFAULT_GAME_TEMPLATE,
+      designStatus: "draft",
+      coverImagePath: "art/previews/coin.png",
+    });
+    // The mock's session is newer than the project row, so activity follows it.
+    expect(games[0]?.updatedAt).toBe("2026-10-20T00:00:00.000Z");
+  }),
 );
 
 it.effect("passes the chosen runtime mode to the game thread", () =>

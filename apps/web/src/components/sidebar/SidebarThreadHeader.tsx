@@ -1,4 +1,4 @@
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, PlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -17,6 +17,7 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   projectScope: ReactNode;
   onNewProject: () => void;
+  onNewGame: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
@@ -37,6 +38,7 @@ export function SidebarThreadHeader({
   hasProjects,
   projectScope,
   onNewProject,
+  onNewGame,
   onNewThread,
   newThreadDisabled,
   newThreadShortcutLabel,
@@ -57,8 +59,8 @@ export function SidebarThreadHeader({
   // screen reader on nothing.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadLabel = newThreadShortcutLabel
-    ? `New thread (${newThreadShortcutLabel})`
-    : "New thread";
+    ? `New session (${newThreadShortcutLabel})`
+    : "New session";
 
   return (
     <div className="flex items-center gap-1">
@@ -75,7 +77,7 @@ export function SidebarThreadHeader({
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
           onKeyDown={onSearchKeyDown}
           placeholder="Search"
-          aria-label="Search threads"
+          aria-label="Search sessions"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={resultsVisible}
@@ -104,22 +106,25 @@ export function SidebarThreadHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center">
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="Open game" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
+        {hasProjects ? projectScope : null}
+        <SidebarHeaderIconButton label="New game" tooltip="New game" onClick={onNewGame}>
+          <PlusIcon />
+        </SidebarHeaderIconButton>
         <SidebarHeaderIconButton
-          label="New thread"
+          label="Open game folder"
+          tooltip="Open an existing game folder"
+          onClick={onNewProject}
+        >
+          <FolderPlusIcon />
+        </SidebarHeaderIconButton>
+        <SidebarHeaderIconButton
+          label="New session"
           tooltip={
             showNewThreadInProjectHint ? (
               <span className="flex flex-col gap-0.5">
                 <span>{newThreadLabel}</span>
                 <span className="text-muted-foreground">
-                  New thread in current game: Shift+click
+                  New session in the current game: Shift+click
                   {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
                 </span>
               </span>

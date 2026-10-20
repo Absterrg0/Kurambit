@@ -238,6 +238,23 @@ export const GameProjectResult = Schema.Struct({
   threadId: ThreadId,
   root: Schema.String,
 });
+/**
+ * One row in the games library. It is a batched read: the sidebar must not ask
+ * for a game's status once per project. `coverImagePath` is game-relative; the
+ * client asks the asset service for a URL only when it actually shows a cover.
+ */
+export const GameSummary = Schema.Struct({
+  projectId: ProjectId,
+  root: Schema.String,
+  name: Schema.String,
+  template: Schema.NullOr(GameTemplateId),
+  designStatus: Schema.NullOr(Schema.Literals(["draft", "approved"])),
+  updatedAt: Schema.String,
+  coverImagePath: Schema.NullOr(Schema.String),
+});
+export type GameSummary = typeof GameSummary.Type;
+export const GameListResult = Schema.Array(GameSummary);
+export type GameListResult = typeof GameListResult.Type;
 export const GameThreadInput = Schema.Struct({ threadId: ThreadId });
 export const GameAction = Schema.Literals([
   "verify",

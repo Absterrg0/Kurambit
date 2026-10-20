@@ -3,6 +3,7 @@ import {
   GameActionResult,
   GameCreateInput,
   GameDesignApprovalResult,
+  GameListResult,
   GameOpenInput,
   GameOperationError,
   GameProjectResult,
@@ -292,6 +293,7 @@ export const WS_METHODS = {
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
   gameStatus: "game.status",
+  gameList: "game.list",
   gameCreate: "game.create",
   gameOpen: "game.open",
   gameApproveDesign: "game.approveDesign",
@@ -1301,6 +1303,11 @@ const WsGameCreateRpc = Rpc.make(WS_METHODS.gameCreate, {
   success: GameProjectResult,
   error: gameError,
 });
+const WsGameListRpc = Rpc.make(WS_METHODS.gameList, {
+  payload: Schema.Struct({}),
+  success: GameListResult,
+  error: gameError,
+});
 const WsGameOpenRpc = Rpc.make(WS_METHODS.gameOpen, {
   payload: GameOpenInput,
   success: GameProjectResult,
@@ -1336,6 +1343,7 @@ const WsGameVerifyRpc = Rpc.make(WS_METHODS.gameVerify, {
 export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
   WsGameCreateRpc,
+  WsGameListRpc,
   WsGameOpenRpc,
   WsGameApproveDesignRpc,
   WsGameActionRpc,
