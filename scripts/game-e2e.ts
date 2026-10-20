@@ -17,6 +17,8 @@ import * as Socket from "effect/socket/Socket";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import {
   CommandId,
+  DEFAULT_GAME_TEMPLATE,
+  GAME_TEMPLATES,
   MessageId,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
@@ -38,6 +40,9 @@ const { values } = NodeUtil.parseArgs({
     "home-dir": { type: "string", default: NodePath.join(checkout, ".t3") },
     name: { type: "string", default: `Tiny game ${Date.now()}` },
     "parent-dir": { type: "string", default: NodePath.join(checkout, ".t3/e2e-games") },
+    template: { type: "string", default: DEFAULT_GAME_TEMPLATE },
+    // `--plan-first false` skips the design turn for harness debugging; the product default is on.
+    "plan-first": { type: "string", default: "true" },
     brief: { type: "string" },
     "art-direction": { type: "string", default: "Simple low-poly clay" },
     provider: { type: "string", default: "codex" },
@@ -51,12 +56,20 @@ const { values } = NodeUtil.parseArgs({
 });
 if (values.help || !values.brief) {
   console.log(
-    'Usage: node scripts/game-e2e.ts --brief "<game brief>" [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--provider codex] [--model gpt-6.1-sol] [--reasoning-effort medium] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 1200000]',
+    'Usage: node scripts/game-e2e.ts --brief "<game brief>" [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 1200000]',
   );
   process.exit(values.help ? 0 : 1);
 }
 const timeoutMs = Number(values["timeout-ms"]);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
+if (values["plan-first"] !== "true" && values["plan-first"] !== "false")
+  throw new Error("--plan-first must be true or false");
+const planFirst = values["plan-first"] === "true";
+const template = GAME_TEMPLATES.find((entry) => entry.id === values.template)?.id;
+if (template === undefined)
+  throw new Error(
+    `--template must be one of ${GAME_TEMPLATES.map((entry) => entry.id).join(", ")}`,
+  );
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
 const makeClient = RpcClient.make(WsRpcGroup);
 type Client = Effect.Success<typeof makeClient>;
@@ -123,6 +136,147 @@ const authenticate = async () => {
   return socket.toString();
 };
 
+const normalizeToolOutput = (output: unknown): unknown => {
+  if (typeof output !== "string") return output;
+  const text = output.trim();
+  if (text === "") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+/**
+ * Providers call MCP tools directly, or wrap them in a code-mode `execute`; a
+ * wrapped call only names its tools inside the code. Keep the extracted name as
+ * the harness's record of what ran in a turn.
+ */
+const toolNameOf = (item: OrchestrationV2TurnItem): string => {
+  if (item.type !== "dynamic_tool") return item.title ?? "command";
+  const code =
+    item.toolName === "execute" &&
+    typeof (item.input as { code?: unknown } | undefined)?.code === "string"
+      ? (item.input as { code: string }).code
+      : "";
+  // `const G = tools["t3-code-…"]` aliases the MCP namespace before calling.
+  const aliases = new Set<string>();
+  for (const match of code.matchAll(
+    /(?:const|let|var)\s+([\w$]+)\s*=\s*tools(?:\s*\.\s*\w+|\s*\[[^\]]+\])/g,
+  ))
+    aliases.add(match[1]!);
+  const namespace = `tools(?:\\s*\\.\\s*\\w+|\\s*\\[[^\\]]+\\])?${
+    aliases.size > 0 ? `|\\b(?:${[...aliases].join("|")})\\b` : ""
+  }`;
+  const calls = new Set<string>();
+  for (const match of code.matchAll(
+    new RegExp(`(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\.\\s*([A-Za-z]\\w*)\\s*\\(`, "g"),
+  ))
+    calls.add(match[1]!);
+  for (const match of code.matchAll(
+    new RegExp(
+      `(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\[\\s*["'\`]([\\w/:-]+)["'\`]\\s*\\]\\s*\\(`,
+      "g",
+    ),
+  ))
+    calls.add(match[1]!);
+  return item.toolName !== null && item.toolName !== "execute"
+    ? item.toolName
+    : code === ""
+      ? (item.title ?? "execute")
+      : calls.size > 0
+        ? [...calls].join(", ")
+        : "execute";
+};
+const isDirectToolCall = (item: OrchestrationV2TurnItem) =>
+  item.type === "dynamic_tool" && item.toolName !== null && item.toolName !== "execute";
+
+interface TurnToolCall {
+  readonly itemId: string;
+  readonly name: string;
+  readonly status: string;
+  readonly direct: boolean;
+  readonly output: unknown;
+}
+
+/** Every tool item in one turn, with its result when the server still has it. */
+const collectTurnTools = (
+  client: Client,
+  threadId: ThreadId,
+  runId: RunId,
+): Effect.Effect<ReadonlyArray<TurnToolCall>, HarnessError> =>
+  Effect.gen(function* () {
+    const projection = yield* client[O.getThreadProjection]({ threadId });
+    const calls: TurnToolCall[] = [];
+    for (const item of projection.turnItems) {
+      if (item.runId !== runId) continue;
+      if (item.type !== "dynamic_tool" && item.type !== "command_execution") continue;
+      const name = toolNameOf(item);
+      let output: unknown = item.output;
+      // Large results are withheld on the wire; fetch only what assertions need.
+      if (item.type === "dynamic_tool" && output === undefined && /game_/.test(name)) {
+        const fetched = yield* client[O.getTurnItem]({ threadId, itemId: item.id }).pipe(
+          Effect.orElseSucceed(() => ({ item: null })),
+        );
+        output = fetched.item?.type === "dynamic_tool" ? fetched.item.output : undefined;
+      }
+      calls.push({
+        itemId: item.id,
+        name,
+        status: item.status,
+        direct: isDirectToolCall(item),
+        output: normalizeToolOutput(output),
+      });
+    }
+    return calls;
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new HarnessError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    ),
+  );
+
+const logTurnTools = (label: string, calls: ReadonlyArray<TurnToolCall>) => {
+  const counts = new Map<string, number>();
+  for (const call of calls)
+    for (const name of call.name
+      .split(", ")
+      .map((part) => part.trim())
+      .filter(Boolean))
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+  const summary = [...counts].map(([name, count]) => `${name} x${count}`).join(", ");
+  timeline(`${label} tools: ${summary === "" ? "none" : summary}`);
+};
+const findDeep = (
+  value: unknown,
+  predicate: (record: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findDeep(entry, predicate);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (predicate(record)) return record;
+  for (const entry of Object.values(record)) {
+    const found = findDeep(entry, predicate);
+    if (found) return found;
+  }
+  return undefined;
+};
+const isCheckResult = (record: Record<string, unknown>) =>
+  typeof record.ok === "boolean" &&
+  Array.isArray(record.errors) &&
+  Array.isArray(record.warnings) &&
+  typeof record.durationMs === "number";
+const isActionResult = (record: Record<string, unknown>) =>
+  typeof record.success === "boolean" && typeof record.message === "string" && "process" in record;
+
 const waitForTurn = (
   client: Client,
   threadId: ThreadId,
@@ -145,45 +299,7 @@ const waitForTurn = (
       Effect.gen(function* () {
         if (item.runId && previous.has(item.runId)) return;
         if (item.type !== "dynamic_tool" && item.type !== "command_execution") return;
-        let name: string;
-        if (item.type === "dynamic_tool") {
-          // Providers call MCP tools directly, or wrap them in a code-mode
-          // `execute`; a wrapped call only names its tools inside the code.
-          const code =
-            item.toolName === "execute" &&
-            typeof (item.input as { code?: unknown } | undefined)?.code === "string"
-              ? (item.input as { code: string }).code
-              : "";
-          // `const G = tools["t3-code-…"]` aliases the MCP namespace before calling.
-          const aliases = new Set<string>();
-          for (const match of code.matchAll(
-            /(?:const|let|var)\s+([\w$]+)\s*=\s*tools(?:\s*\.\s*\w+|\s*\[[^\]]+\])/g,
-          ))
-            aliases.add(match[1]!);
-          const namespace = `tools(?:\\s*\\.\\s*\\w+|\\s*\\[[^\\]]+\\])?${
-            aliases.size > 0 ? `|\\b(?:${[...aliases].join("|")})\\b` : ""
-          }`;
-          const calls = new Set<string>();
-          for (const match of code.matchAll(
-            new RegExp(`(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\.\\s*([A-Za-z]\\w*)\\s*\\(`, "g"),
-          ))
-            calls.add(match[1]!);
-          for (const match of code.matchAll(
-            new RegExp(
-              `(?:${namespace})\\s*(?:\\.\\s*\\w+\\s*)?\\[\\s*["'\`]([\\w/:-]+)["'\`]\\s*\\]\\s*\\(`,
-              "g",
-            ),
-          ))
-            calls.add(match[1]!);
-          name =
-            item.toolName !== null && item.toolName !== "execute"
-              ? item.toolName
-              : code === ""
-                ? (item.title ?? "execute")
-                : calls.size > 0
-                  ? [...calls].join(", ")
-                  : "execute";
-        } else name = item.title ?? "command";
+        const name = toolNameOf(item);
         if (seen.get(item.id) !== item.status) {
           seen.set(item.id, item.status);
           timeline(`${name}: ${item.status}`);
@@ -277,6 +393,101 @@ const revisionSnapshot = async (root: string) => {
   );
   return assets;
 };
+const designHeading = (line: string) => line.match(/^##\s+(.+?)\s*$/)?.[1];
+const designSections = (markdown: string) => {
+  const sections = new Map<string, string[]>();
+  let current: string | undefined;
+  for (const line of markdown.split("\n")) {
+    const heading = designHeading(line);
+    if (heading !== undefined) {
+      current = heading;
+      sections.set(heading, []);
+      continue;
+    }
+    if (current !== undefined) sections.get(current)!.push(line);
+  }
+  return new Map([...sections].map(([heading, lines]) => [heading, lines.join("\n").trim()]));
+};
+const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/** The design turn's bar: the skeleton is gone and every heading has real decisions under it. */
+const assertDesignFilled = (skeleton: string, design: string) => {
+  const headings = skeleton
+    .split("\n")
+    .map(designHeading)
+    .filter((heading): heading is string => heading !== undefined);
+  assert(headings.length >= 5, "The scaffolded DESIGN.md has no section headings");
+  const sections = designSections(design);
+  for (const heading of headings) {
+    assert(sections.has(heading), `DESIGN.md is missing the "${heading}" section`);
+    const body = normalizeText(sections.get(heading)!);
+    assert(body.length >= 40, `DESIGN.md's "${heading}" section is still empty`);
+  }
+  const normalizedDesign = normalizeText(design);
+  assert(
+    normalizedDesign.length >= 1_200,
+    `DESIGN.md is too thin for a one-page design (${normalizedDesign.length} characters)`,
+  );
+  // Paragraph hints are copied verbatim only when the agent forgot to replace one.
+  for (const paragraph of skeleton.split(/\n\s*\n/).map(normalizeText)) {
+    if (paragraph === "" || paragraph.startsWith("#")) continue;
+    if (/^(?:-|\d+\.)\s/.test(paragraph)) continue;
+    assert(
+      !normalizedDesign.includes(paragraph),
+      `DESIGN.md still contains the skeleton hint "${paragraph.slice(0, 70)}..."`,
+    );
+  }
+  for (const line of skeleton.split("\n")) {
+    const hint = line.match(/^(?:-|\d+\.)\s+\*\*[^*]+\*\*\s+—\s+(.+)$/)?.[1];
+    if (hint === undefined) continue;
+    assert(
+      !normalizedDesign.includes(normalizeText(hint)),
+      `DESIGN.md still contains the skeleton hint "${normalizeText(hint).slice(0, 70)}..."`,
+    );
+  }
+};
+
+const filesUnder = async (directory: string): Promise<string[]> => {
+  const found: string[] = [];
+  const walk = async (current: string) => {
+    const entries = await NodeFSP.readdir(current, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const path = NodePath.join(current, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else found.push(NodePath.relative(directory, path));
+    }
+  };
+  await walk(directory);
+  return found;
+};
+
+interface PlaytestEvidence {
+  readonly directory: string;
+  readonly result: {
+    readonly success: boolean;
+    readonly responded: boolean;
+    readonly changedPercent: number;
+    readonly message: string;
+    readonly frames: ReadonlyArray<{ label: string; file: string }>;
+  };
+}
+/** The newest playtest evidence folder, read the same way the Game panel does. */
+const latestPlaytest = async (root: string): Promise<PlaytestEvidence> => {
+  const parent = NodePath.join(root, "builds/playtests");
+  const directories = (await NodeFSP.readdir(parent).catch(() => []))
+    .filter((name) => /^\d{4}-\d{2}-\d{2}T/.test(name))
+    .sort();
+  const newest = directories.at(-1);
+  assert(newest, "No playtest evidence folder was written");
+  const result = JSON.parse(
+    await NodeFSP.readFile(NodePath.join(parent, newest, "result.json"), "utf8"),
+  ) as PlaytestEvidence["result"];
+  for (const frame of result.frames)
+    await NodeFSP.access(NodePath.join(parent, newest, frame.file)).catch(() => {
+      throw new Error(`Playtest frame ${frame.file} referenced by result.json is missing`);
+    });
+  return { directory: `builds/playtests/${newest}`, result };
+};
 let gameRoot: string | undefined;
 const main = Effect.gen(function* () {
   const url = yield* promise(authenticate);
@@ -296,8 +507,10 @@ const main = Effect.gen(function* () {
   const created = yield* client[WS_METHODS.gameCreate]({
     name: values.name,
     parentDirectory: NodePath.resolve(values["parent-dir"]),
+    template,
     brief: values.brief!,
     artDirection: values["art-direction"],
+    planFirst,
     modelSelection: {
       instanceId: ProviderInstanceId.make(values.provider),
       model: values.model,
@@ -324,7 +537,74 @@ const main = Effect.gen(function* () {
       Effect.ignore,
     ),
   );
-  yield* waitForTurn(client, created.threadId, new Set());
+  // The create commit holds the untouched skeleton; read it before the design
+  // turn can edit or commit over the file it has to replace.
+  const designSkeleton = planFirst
+    ? yield* promise(async () => {
+        try {
+          return (await exec("git", ["show", "HEAD:DESIGN.md"], { cwd: created.root })).stdout;
+        } catch {
+          return NodeFSP.readFile(NodePath.join(created.root, "DESIGN.md"), "utf8");
+        }
+      })
+    : "";
+  let buildRun: OrchestrationV2Run;
+  if (planFirst) {
+    const designRun = yield* waitForTurn(client, created.threadId, new Set());
+    logTurnTools("design", yield* collectTurnTools(client, created.threadId, designRun.id));
+    const design = yield* promise(() =>
+      NodeFSP.readFile(NodePath.join(created.root, "DESIGN.md"), "utf8"),
+    );
+    yield* promise(async () => assertDesignFilled(designSkeleton, design));
+    const designStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    assert(
+      designStatus.design?.status === "draft",
+      `Design turn did not leave the design in draft (${JSON.stringify(designStatus.design)})`,
+    );
+    assert(designStatus.assets.length === 0, "Design turn created Blender assets");
+    assert(designStatus.builds.length === 0, "Design turn produced a build");
+    assert(designStatus.lastPlaytest === null, "Design turn ran a playtest");
+    const designArtifacts = yield* promise(async () => [
+      ...(await filesUnder(NodePath.join(created.root, "builds/web"))),
+      ...(await filesUnder(NodePath.join(created.root, "builds/linux"))),
+      ...(await filesUnder(NodePath.join(created.root, "builds/playtests"))),
+      ...(await filesUnder(NodePath.join(created.root, "art/blender"))),
+      ...(await filesUnder(NodePath.join(created.root, "art/scripts"))),
+      ...(await filesUnder(NodePath.join(created.root, "art/previews"))),
+    ]);
+    assert(
+      designArtifacts.length === 0,
+      `Design turn created build or art artifacts: ${designArtifacts.join(", ")}`,
+    );
+    const designChanges = yield* promise(async () => {
+      const result = await exec("git", ["status", "--porcelain", "--untracked-files=all"], {
+        cwd: created.root,
+      });
+      return result.stdout.trim();
+    });
+    timeline(
+      `Design turn changed paths: ${designChanges === "" ? "none" : designChanges.replace(/\n/g, ", ")}`,
+    );
+    // Approve through the same RPC the Design tab calls, then wait for the build turn.
+    const projection = yield* client[O.getThreadProjection]({ threadId: created.threadId });
+    const approval = yield* client[WS_METHODS.gameApproveDesign]({ threadId: created.threadId });
+    assert(approval.approvedAt.length > 0, "Approval returned no timestamp");
+    timeline(`Design approved at ${approval.approvedAt}`);
+    const approvedStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    assert(
+      approvedStatus.design?.status === "approved",
+      "game.json still reports a draft after approval",
+    );
+    buildRun = yield* waitForTurn(
+      client,
+      created.threadId,
+      new Set(projection.runs.map((run) => run.id)),
+    );
+  } else {
+    buildRun = yield* waitForTurn(client, created.threadId, new Set());
+  }
+  const buildCalls = yield* collectTurnTools(client, created.threadId, buildRun.id);
+  logTurnTools("build", buildCalls);
   const action = (operation: "preview" | "export-linux" | "native" | "stop") =>
     client[WS_METHODS.gameAction]({ threadId: created.threadId, action: operation }).pipe(
       Effect.tap((result) =>
@@ -336,10 +616,60 @@ const main = Effect.gen(function* () {
     );
   const status = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
   printStatus(status);
-  assert(status.assets.length > 0, "Agent produced no Blender assets");
+  if (status.assets.length === 0) timeline("Build turn produced no Blender assets");
+  else
+    assert(
+      status.assets.some((asset) => asset.usedBy.length > 0),
+      "No Blender asset is used by a Godot scene",
+    );
+  const checkCalls = buildCalls.filter((call) => call.name.includes("game_godot_check"));
+  assert(checkCalls.length > 0, "Build turn never called game_godot_check");
+  const checkResults = checkCalls
+    .map((call) => (call.output === undefined ? undefined : findDeep(call.output, isCheckResult)))
+    .filter((result): result is Record<string, unknown> => result !== undefined);
+  const passingCheck = checkResults.find((result) => result.ok === true);
   assert(
-    status.assets.some((asset) => asset.usedBy.length > 0),
-    "No Blender asset is used by a Godot scene",
+    passingCheck !== undefined,
+    `game_godot_check did not report ok: ${JSON.stringify(
+      checkResults.map((result) => ({ ok: result.ok, errors: result.errors })),
+    )}`,
+  );
+  timeline(
+    `game_godot_check ok (${(passingCheck.warnings as unknown[]).length} warning(s), ${String(passingCheck.durationMs)}ms)`,
+  );
+  const testCalls = buildCalls.filter((call) => call.name.includes("game_godot_test"));
+  assert(testCalls.length > 0, "Build turn never ran a headless smoke test (game_godot_test)");
+  const testResults = testCalls
+    .map((call) => (call.output === undefined ? undefined : findDeep(call.output, isActionResult)))
+    .filter((result): result is Record<string, unknown> => result !== undefined);
+  const passingTest = testResults.find(
+    (result) =>
+      result.success === true &&
+      (result.process as { exitCode?: unknown } | null | undefined)?.exitCode === 0,
+  );
+  assert(
+    passingTest !== undefined,
+    `game_godot_test did not pass: ${JSON.stringify(
+      testResults.map((result) => ({ success: result.success, message: result.message })),
+    )}`,
+  );
+  timeline(`game_godot_test passed: ${String(passingTest.message)}`);
+  assert(
+    status.builds.some((build) => build.target === "Web"),
+    "No web build exists after the build turn",
+  );
+  const evidence = yield* promise(() => latestPlaytest(created.root));
+  assert(evidence.result.success, `Newest playtest failed: ${evidence.result.message}`);
+  assert(evidence.result.responded, "Playtest did not prove that the game responded to input");
+  assert(status.lastPlaytest !== null, "Game status reports no playtest evidence");
+  assert(
+    status.lastPlaytest.directory === evidence.directory,
+    `Status playtest ${status.lastPlaytest.directory} is not the newest evidence ${evidence.directory}`,
+  );
+  timeline(
+    `Playtest evidence: ${evidence.directory} (${evidence.result.frames.length} frames, ${evidence.result.changedPercent.toFixed(1)}% changed${
+      status.lastPlaytest.stale ? ", stale" : ""
+    })`,
   );
   const preview = yield* action("preview");
   yield* promise(async () => {
@@ -418,7 +748,8 @@ const main = Effect.gen(function* () {
         return (await exec("git", ["write-tree"], { cwd: created.root, env })).stdout.trim();
       });
     const baseline = yield* snapshotTree();
-    yield* followup(values.revise);
+    const reviseRun = yield* followup(values.revise);
+    logTurnTools("revise", yield* collectTurnTools(client, created.threadId, reviseRun.id));
     const after = yield* promise(() => revisionSnapshot(created.root));
     console.log("Revision assets before/after:", JSON.stringify({ before, after }, null, 2));
     const revised = yield* snapshotTree();
@@ -426,6 +757,17 @@ const main = Effect.gen(function* () {
       exec("git", ["diff", "--stat", baseline, revised], { cwd: created.root }),
     );
     console.log("Changed files:\n" + diff.stdout);
+    assert(diff.stdout.trim() !== "", "Revision turn changed no files");
+    const reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    assert(
+      reviseStatus.design?.status === "approved",
+      "Revision turn knocked the design back to draft",
+    );
+    timeline(
+      `After revise: webBuildStale=${String(reviseStatus.webBuildStale)}, newest playtest=${
+        reviseStatus.lastPlaytest?.directory ?? "none"
+      }`,
+    );
   }
   if (values["cancel-test"]) {
     yield* followup(
