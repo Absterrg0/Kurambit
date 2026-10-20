@@ -22,12 +22,19 @@ func _ready() -> void:
 	if window == null:
 		return
 	_callback = JavaScriptBridge.create_callback(_read)
+	window.__studioProbeCallback = _callback
 	window.__studioProbe = _callback
+	# A Godot callback's return value does not cross back into JavaScript, so the
+	# public probe is a small JS wrapper around it: it calls the callback, which
+	# parks the snapshot on the window, and returns that JSON string. The raw
+	# callback stays installed if this eval is ever unavailable.
+	JavaScriptBridge.eval(
+		"window.__studioProbe = function () { window.__studioProbeLast = null; window.__studioProbeCallback(); return window.__studioProbeLast; };",
+		true,
+	)
 
 func _read(_args: Array) -> String:
 	var text := JSON.stringify(snapshot())
-	# A callback's return value does not cross back into JavaScript, so the probe
-	# also parks the snapshot on the window for the browser to read.
 	JavaScriptBridge.eval("window.__studioProbeLast = %s" % JSON.stringify(text), true)
 	return text
 
