@@ -117,9 +117,16 @@ it.effect(
         expect(launch?.initialMessage?.text).toContain("Clay");
         // Planning is the default, so the first turn asks for DESIGN.md, not a build.
         expect(launch?.initialMessage?.text).toContain("DESIGN.md");
+        expect(launch?.initialMessage?.text).toContain("Keep the scaffold's section headings");
         expect(launch?.initialMessage?.text).not.toContain("Build a playable game");
-        expect(yield* readFile(NodePath.join(created.root, "DESIGN.md"))).toContain(
-          "## Milestones",
+        // The design turn fills the scaffold instead of inventing its own structure;
+        // both the prompt and the game's AGENTS.md have to say so.
+        const design = yield* readFile(NodePath.join(created.root, "DESIGN.md"));
+        expect(design).toContain("## Pitch");
+        expect(design).toContain("## Milestones");
+        expect(design).toContain("Keep these headings");
+        expect(yield* readFile(NodePath.join(created.root, "AGENTS.md"))).toContain(
+          "Keep the scaffold's section headings",
         );
         expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(

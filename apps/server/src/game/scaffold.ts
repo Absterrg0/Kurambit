@@ -7,7 +7,7 @@ import {
 
 const designSkeleton = (name: string) => `# ${name} — design
 
-One page. Replace every hint with a concrete decision.
+One page. Keep these headings and replace every hint with a concrete decision.
 
 ## Pitch
 
@@ -61,7 +61,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
   const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
   if (input.planFirst === false)
     return `${brief}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
 }
 
 /**
@@ -97,7 +97,7 @@ This game started from the **${templateName}** starter template. Read TEMPLATE.m
 
 ## Design first
 
-game.json's design section decides what this turn may do. When design.status is "draft", this is a design turn: write or update DESIGN.md only. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
+game.json's design section decides what this turn may do. When design.status is "draft", this is a design turn: write or update DESIGN.md only. Keep the scaffold's section headings (Pitch, Core loop, Controls, Win & lose, Content, Art direction, Audio, Scope, Milestones) and replace every hint with a concrete decision; do not delete, rename or merge them. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
 
 When design.status is "approved" and DESIGN.md exists, build to its milestones one at a time. Keep DESIGN.md truthful when scope changes.
 
