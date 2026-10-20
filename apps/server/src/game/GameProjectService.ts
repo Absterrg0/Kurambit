@@ -345,7 +345,7 @@ const make = Effect.gen(function* () {
     return (yield* resolveTarget(threadId)).root;
   });
   const buildAfterApproval =
-    "The design is approved. Build milestone 1 from DESIGN.md, then continue milestone by milestone. Keep DESIGN.md truthful when scope changes, and finish with the usual checks and web playtest before you report back.";
+    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. Keep DESIGN.md truthful when scope changes, and finish with the usual checks and web playtest before you report back.";
   const approveDesign = Effect.fn("GameProjectService.approveDesign")(function* (
     threadId: ThreadId,
   ) {
