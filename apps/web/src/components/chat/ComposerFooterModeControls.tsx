@@ -25,13 +25,10 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   size?: "sm" | "xs";
   hidden?: boolean;
-  /** Game threads have no access level to pick. */
-  showRuntimeMode?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const size = props.size ?? "sm";
-  const showRuntimeMode = props.showRuntimeMode ?? true;
   const composerFloatingLayerProps = useComposerMenuProps();
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const runtimeModeOption =
@@ -81,7 +78,6 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
     </>
   ) : null;
 
-  if (!showRuntimeMode) return interactionModeToggle;
   return (
     <>
       <ComposerControlSeparator size={size} />
