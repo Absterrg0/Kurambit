@@ -584,6 +584,8 @@ describe("provider update launch notification logic", () => {
         [
           provider({
             driver: driver("codex"),
+            latestVersion: null,
+            advisoryStatus: "current",
             updateState: {
               status: "failed",
               startedAt: checkedAt,
@@ -645,13 +647,17 @@ describe("provider update launch notification logic", () => {
     });
   });
 
-  it("does not show a sidebar pill for passive update availability", () => {
+  it("shows passive update availability in the sidebar without a toast", () => {
     expect(
       getProviderUpdateSidebarPillView([
         provider({ driver: driver("codex"), canUpdate: true }),
         provider({ driver: driver("cursor"), canUpdate: false }),
       ]),
-    ).toBeNull();
+    ).toMatchObject({
+      tone: "available",
+      title: "2 provider updates available",
+      description: "Open Settings → Providers to update Codex and Cursor.",
+    });
   });
 
   describe("multi-backend update outcomes", () => {

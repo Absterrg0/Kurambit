@@ -77,6 +77,6 @@ describe("formatGameChangeSummary", () => {
     expect(formatGameChangeSummary([])).toBe("No changes");
     expect(
       formatGameChangeSummary(groupGameChanges([file("art/previews/rock.png"), file("notes.txt")])),
-    ).toBe("Changed 1 art & audio file · 1 design doc");
+    ).toBe("Changed 1 art · 1 doc");
   });
 });

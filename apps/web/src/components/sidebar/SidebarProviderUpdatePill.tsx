@@ -13,6 +13,8 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const PROVIDER_UPDATE_PILL_STYLES = {
+  available:
+    "bg-sidebar-control-surface text-sidebar-foreground group-has-[button[data-provider-update-main]:hover]/provider-update:bg-sidebar-row-hover",
   loading:
     "bg-sidebar-control-surface text-sidebar-foreground group-has-[button[data-provider-update-main]:hover]/provider-update:bg-sidebar-row-hover",
   success:
@@ -24,6 +26,7 @@ const PROVIDER_UPDATE_PILL_STYLES = {
 } as const;
 
 const PROVIDER_UPDATE_PILL_PROGRESS_STYLES = {
+  available: "bg-foreground/8",
   success: "bg-foreground/8",
   warning: "bg-warning/14",
   error: "bg-destructive/14",

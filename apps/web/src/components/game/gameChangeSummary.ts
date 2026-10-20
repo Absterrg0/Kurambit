@@ -27,9 +27,9 @@ const GROUP_LABELS: Record<GameChangeKind, { one: string; many: string }> = {
   scenes: { one: "scene", many: "scenes" },
   scripts: { one: "script", many: "scripts" },
   models: { one: "model", many: "models" },
-  art: { one: "art & audio file", many: "art & audio files" },
-  design: { one: "design doc", many: "design docs" },
-  other: { one: "other file", many: "other files" },
+  art: { one: "art", many: "art" },
+  design: { one: "doc", many: "docs" },
+  other: { one: "other", many: "other" },
 };
 
 const EXTENSION_KINDS: Readonly<Record<string, GameChangeKind>> = {
@@ -91,12 +91,22 @@ export function groupGameChanges(files: ReadonlyArray<TurnDiffFileChange>): Game
   });
 }
 
-/** One line per turn: "Changed 2 scenes · 3 scripts · 1 model". */
-export function formatGameChangeSummary(groups: ReadonlyArray<GameChangeGroup>): string {
+/**
+ * One line per turn: "Changed 2 scenes · 3 scripts · 1 model". A narrow chat
+ * cannot hold every group, so callers can cap the parts and the remainder
+ * becomes "+N" instead of an ellipsis that hides which group was cut.
+ */
+export function formatGameChangeSummary(
+  groups: ReadonlyArray<GameChangeGroup>,
+  maxParts = Number.POSITIVE_INFINITY,
+): string {
   if (groups.length === 0) return "No changes";
-  const parts = groups.map((group) => {
+  const shown = groups.slice(0, Math.max(1, maxParts));
+  const parts = shown.map((group) => {
     const labels = GROUP_LABELS[group.kind];
     return `${group.count} ${group.count === 1 ? labels.one : labels.many}`;
   });
+  const hidden = groups.length - shown.length;
+  if (hidden > 0) parts.push(`+${hidden} more`);
   return `Changed ${parts.join(" · ")}`;
 }

@@ -48,7 +48,12 @@ export function isTerminalProviderUpdatePhase(phase: ProviderUpdateToastPhase): 
   return phase === "succeeded" || phase === "failed" || phase === "unchanged";
 }
 
-export type ProviderUpdateSidebarPillTone = "loading" | "warning" | "error" | "success";
+export type ProviderUpdateSidebarPillTone =
+  | "available"
+  | "loading"
+  | "warning"
+  | "error"
+  | "success";
 
 export interface ProviderUpdateSidebarPillView {
   readonly key: string;
@@ -564,7 +569,7 @@ export function getProviderUpdateSidebarPillView(
     });
   }
 
-  return (
+  const terminalView =
     terminalCandidates
       .toSorted((left, right) => {
         const leftProviders =
@@ -583,8 +588,24 @@ export function getProviderUpdateSidebarPillView(
         const rightFinishedAt = latestFinishedAtForProviders(rightProviders) ?? "";
         return rightFinishedAt.localeCompare(leftFinishedAt);
       })
-      .find((candidate) => !options?.dismissedKeys?.has(candidate.key)) ?? null
-  );
+      .find((candidate) => !options?.dismissedKeys?.has(candidate.key)) ?? null;
+  if (terminalView !== null) return terminalView;
+
+  // Updates that are merely available used to be a toast. The sidebar footer
+  // carries that quiet state now, so nothing overlays the game.
+  const availableProviders = collectProviderUpdateCandidates(providers);
+  if (availableProviders.length === 0) return null;
+  const availableKey = providerUpdateNotificationKey(availableProviders);
+  if (availableKey === null) return null;
+  return {
+    key: `available:${availableKey}`,
+    tone: "available",
+    title:
+      availableProviders.length === 1
+        ? `${PROVIDER_DISPLAY_NAMES[availableProviders[0]!.driver] ?? availableProviders[0]!.driver} update available`
+        : `${availableProviders.length} provider updates available`,
+    description: `Open Settings → Providers to update ${formatProviderList(availableProviders)}.`,
+  };
 }
 
 function getProviderUpdateInitialToastTitle(

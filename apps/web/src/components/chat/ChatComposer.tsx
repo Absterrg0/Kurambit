@@ -4702,22 +4702,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    {
-      id: "mode",
-      content: (
-        <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
-          interactionMode={interactionMode}
-          runtimeMode={compatibleRuntimeMode}
-          runtimeModeOptions={compatibleRuntimeModeOptions}
-          size={composerControlsCollapsed ? "xs" : "sm"}
-          hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-          showRuntimeMode={!gameThread}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      ),
-    },
+    // A game thread has no access level and no plan/build mode to pick; the
+    // model and reasoning pickers are the whole footer.
+    ...(gameThread
+      ? []
+      : [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                showInteractionModeToggle={planModeUiEnabled}
+                interactionMode={interactionMode}
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+                onToggleInteractionMode={toggleInteractionMode}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]),
   ];
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
@@ -6808,10 +6813,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Choose a project above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : gameThread
-                                    ? "Describe a change to your game…"
+                                : gameThread
+                                  ? "Describe a change to your game…"
+                                  : phase === "disconnected"
+                                    ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={

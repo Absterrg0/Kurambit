@@ -27,7 +27,15 @@ import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { clampGameChatWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameAssetsPanel } from "./GameAssetsPanel";
@@ -48,7 +56,9 @@ const BUSY_LABELS: Record<GameAction, string> = {
 };
 
 const TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
-  { value: "play", label: "Play" },
+  // The stage is the game itself; "Play" is the action, not the tab, so the
+  // header does not read as two Play buttons side by side.
+  { value: "play", label: "Stage" },
   { value: "assets", label: "Assets" },
   { value: "builds", label: "Builds" },
 ];
@@ -138,7 +148,7 @@ export function GameStage({
       ? operation.message
       : null);
   const noticeVisible =
-    message ?? (operation !== null && operationVisible ? operation.message : null);
+    (message ?? (operation !== null && operationVisible ? operation.message : "")).trim() || null;
   // One status line, and a failure outranks the staleness it just caused.
   const staleChipVisible =
     failureVisible === null &&
@@ -217,18 +227,18 @@ export function GameStage({
       aria-label={`${data.manifest.name} game stage`}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2 pl-3">
+      <header className="@container/stage-header flex h-12 shrink-0 items-center gap-2 border-b border-border px-2 pl-3">
         <Gamepad2Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <h2 className="shrink-0 truncate text-sm font-semibold">
+        <h2 className="min-w-0 max-w-56 truncate text-sm font-semibold">
           <TruncatedText text={data.manifest.name} />
         </h2>
-        <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">
+        <span className="hidden shrink-0 text-xs text-muted-foreground @[44rem]/stage-header:inline">
           {template?.name ?? `Godot ${data.manifest.engine.version}`}
         </span>
         <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
         <ToggleGroup
           aria-label="Game workspace"
-          className="shrink-0"
+          className="hidden shrink-0 @[32rem]/stage-header:flex"
           variant="segmented"
           value={[tab]}
           onValueChange={(value) => {
@@ -250,7 +260,7 @@ export function GameStage({
         </ToggleGroup>
         <div
           data-game-stage-status
-          className="flex min-w-0 flex-1 items-center justify-center px-1"
+          className="flex min-w-0 flex-1 items-center justify-center overflow-hidden px-1"
         >
           {building ? (
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -304,7 +314,7 @@ export function GameStage({
               Rebuild to see latest changes
             </button>
           ) : (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground @[42rem]/stage-header:flex">
               {stagePhaseLabel === null ? null : (
                 <>
                   {phase.kind === "playing" ? (
@@ -335,7 +345,7 @@ export function GameStage({
                   size="icon-sm"
                   variant="ghost"
                   aria-label="Rebuild the web build"
-                  className="hidden md:inline-flex"
+                  className="hidden @[46rem]/stage-header:inline-flex"
                   disabled={!canOperate || building}
                   onClick={() => void perform("rebuild")}
                 />
@@ -352,6 +362,7 @@ export function GameStage({
                   size="icon-sm"
                   variant="ghost"
                   aria-label="Stop the game"
+                  className="hidden @[40rem]/stage-header:inline-flex"
                   disabled={!canOperate || !runningSomething}
                   onClick={() => void perform("stop")}
                 />
@@ -368,7 +379,7 @@ export function GameStage({
                   size="icon-sm"
                   variant="ghost"
                   aria-label="Run native"
-                  className="hidden lg:inline-flex"
+                  className="hidden @[54rem]/stage-header:inline-flex"
                   disabled={!canOperate || building || nativeRunning}
                   onClick={() => void perform("native")}
                 />
@@ -408,12 +419,33 @@ export function GameStage({
                 {nativeRunning ? "Game window is running" : "Run native"}
               </MenuItem>
               <MenuItem
+                disabled={!canOperate || !runningSomething}
+                onClick={() => void perform("stop")}
+              >
+                <SquareIcon />
+                Stop the game
+              </MenuItem>
+              <MenuItem
                 disabled={!canOperate || building}
                 onClick={() => void perform("export-linux")}
               >
                 <DownloadIcon />
                 Export Linux build
               </MenuItem>
+              <MenuSeparator />
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
+              <MenuRadioGroup
+                value={tab}
+                onValueChange={(value) => {
+                  if (value === "play" || value === "assets" || value === "builds") setTab(value);
+                }}
+              >
+                {TABS.map((entry) => (
+                  <MenuRadioItem key={entry.value} value={entry.value}>
+                    {entry.label}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
               <MenuSeparator />
               <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
                 {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}

@@ -50,7 +50,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setChatCollapsed: (collapsed) => set({ chatCollapsed: collapsed }),
     }),
     {
-      name: "t3code:game-workspace:v1",
+      name: "t3code:game-workspace:v2",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
