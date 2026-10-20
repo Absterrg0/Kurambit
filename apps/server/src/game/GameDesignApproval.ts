@@ -126,20 +126,26 @@ const designRead = async (
     manifestDesign: manifest.design,
     documentExists: exists,
   });
-  const issues =
+  const validation =
     state === "approved" || state === "legacy"
-      ? []
+      ? { issues: [], acceptance: [] }
       : validateDesignDocument({
           design,
           skeleton: designSkeleton(manifest.name),
-        }).issues;
+        });
+  // Show the criteria the document currently carries so the creator can review
+  // them before approving. When an edit leaves the document invalid, fall back
+  // to the last approved set rather than hiding what was agreed.
+  const currentAcceptance = validation.acceptance;
   return {
     state,
     approvedHash: record?.designHash ?? null,
     currentHash,
     approvedAt: record?.approvedAt ?? null,
-    acceptance: record?.acceptance ?? [],
-    issues: [...issues],
+    acceptance: [
+      ...(currentAcceptance.length > 0 ? currentAcceptance : (record?.acceptance ?? [])),
+    ],
+    issues: [...validation.issues],
   };
 };
 
@@ -184,7 +190,9 @@ export const layer = (options: { readonly stateDir: string }) => {
           const key = NodePath.resolve(root);
           let lock = locks.get(key);
           if (lock === undefined) {
-            lock = yield* Semaphore.make(1);
+            // Creating the lock is synchronous, so two callers cannot both
+            // install a different semaphore for the same game.
+            lock = Semaphore.makeUnsafe(1);
             locks.set(key, lock);
           }
           return yield* lock.withPermits(1)(effect);

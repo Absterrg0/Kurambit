@@ -198,8 +198,9 @@ export const GameLastPlaytest = Schema.Struct({
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**
- * One qualification stage. `state` and `visual` are declared now so the read is
- * stable, but their checks arrive in later work and never report passed yet.
+ * One qualification stage. `design` is the creator's approval of the current
+ * DESIGN.md; `state` and `visual` are declared now so the read is stable, but
+ * their checks arrive in later work and never report passed yet.
  */
 export const GameQualificationStage = Schema.Literals([
   "design",

@@ -33,14 +33,23 @@ headless gameplay test, and checks the web build in a headless browser before it
 
 New games start with a design, not code. The agent writes a one-page `DESIGN.md` from your brief and
 the starter template: the pitch, core loop, controls, win and lose conditions, content, art
-direction, audio, scope and milestones. It ends that turn asking you to review the draft. **Plan the
-design first** in the New game dialog is on by default; turn it off to skip straight to building.
+direction, audio, scope and milestones. It also writes an **Acceptance** section: a fenced
+`acceptance` block of 5 to 12 concrete criteria covering each control, the core mechanic, content
+counts, and how the game is won and lost. It ends that turn asking you to review the draft. **Plan
+the design first** in the New game dialog is on by default; turn it off to skip straight to
+building.
 
-The design lives on the **Design** tab, first in the stage while it is a draft. Read it, then ask
-for changes in chat, or open **Edit file** to change `DESIGN.md` yourself. When it looks right,
-choose **Approve & build**. The agent then builds milestone 1 and continues through the milestones,
-keeping `DESIGN.md` current when scope changes. After that, the game and the design change together
-in normal build turns.
+The design lives on the **Design** tab, first in the stage while it is a draft. Read it and its
+acceptance checklist, then ask for changes in chat, or open **Edit file** to change `DESIGN.md`
+yourself. When it looks right, choose **Approve & build**. Approval binds that exact revision:
+Game Studio stores its hash and acceptance outside the game, so editing `game.json` cannot grant
+approval, and a document that is still the scaffold, missing a section or missing the acceptance
+block cannot be approved. The agent then builds milestone 1 and continues through the milestones.
+
+If `DESIGN.md` changes after approval, the Design tab says **Design changed since approval** and the
+game is unqualified until you review the new scope and choose **Re-approve design**. Re-approval
+updates the contract without starting another build turn; the agent is told to put scope changes in
+`DESIGN.md` and ask for that review instead of quietly dropping a criterion.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an

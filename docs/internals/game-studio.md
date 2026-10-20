@@ -21,10 +21,22 @@ A plan-first game starts with `design.status: "draft"` in `game.json`. The scaff
 says a draft turn may only write `DESIGN.md`, and the first prompt asks for it, so no Blender or
 Godot work starts before the creator agrees to a design. The Design tab renders that file.
 
-Approval flips the status in `game.json`, then sends the build message through ordinary thread
-dispatch, so the build is a normal turn with checkpoints, cancellation and the same tool surface.
-It builds nothing itself. There is deliberately no `game_*` tool for approval: the design is the
-creator's decision, and an agent must not approve its own design.
+Approval records a specific `DESIGN.md` revision in `<stateDir>/game-design/`, outside the game:
+the document hash, its parsed acceptance and an approval id. The game's own `game.json` design
+status is only a display mirror. `GameProjectService.approveDesign` runs read, validate, record
+and dispatch as one operation serialized per game, so two approvals cannot both release a build
+turn; approving the same hash again returns the existing record, and re-approving changed scope
+updates it without dispatching. A dispatch failure removes only that attempt's record. The
+document is valid only when every scaffold section has real content and the fenced `acceptance`
+block parses with at least one `end` and one `mechanic`; a game with no design document at all
+(created before the design step, or with planning skipped) is explicitly `legacy`.
+Qualification includes a `design` stage, so a draft or changed design leaves the game
+unqualified, and the staging gate in `GameService` reads that record rather than `game.json`.
+
+The first approval sends the build message through ordinary thread dispatch, so the build is a
+normal turn with checkpoints, cancellation and the same tool surface. It builds nothing itself.
+There is deliberately no `game_*` tool for approval: the design is the creator's decision, and an
+agent must not approve its own design.
 
 ## Starter templates
 

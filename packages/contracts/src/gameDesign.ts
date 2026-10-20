@@ -206,8 +206,10 @@ export function validateDesignDocument(input: {
       );
   }
   return {
-    issues: issues.slice(0, 20),
-    acceptance: parsed.ok && issues.length === 0 ? parsed.criteria : [],
+    issues: [...new Set(issues)].slice(0, 20),
+    // Display can show the parsed criteria even while another section is still
+    // unfinished; approval still requires an empty issue list.
+    acceptance: parsed.ok ? parsed.criteria : [],
   };
 }
 
@@ -221,7 +223,10 @@ export const GameDesignRead = Schema.Struct({
   /** The hash of DESIGN.md on disk right now. */
   currentHash: Schema.NullOr(Schema.String),
   approvedAt: Schema.NullOr(Schema.String),
-  /** The acceptance bound to the approved revision. */
+  /**
+   * The criteria in the current DESIGN.md, or the last approved set when an
+   * edit left the document invalid.
+   */
   acceptance: Schema.Array(GameAcceptanceCriterion),
   /** What has to change before this design can be approved. */
   issues: Schema.Array(Schema.String),

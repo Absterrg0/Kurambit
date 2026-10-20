@@ -118,11 +118,8 @@ export function GameDesignPanel({
             </>
           ) : changed ? (
             <>
-              <p className="flex items-center gap-2 text-sm font-medium">
-                Design changed since approval
-                <span className="rounded-full border border-warning/50 px-1.5 py-0.5 text-2xs font-normal text-warning">
-                  review needed
-                </span>
+              <p className="text-sm font-medium">
+                Design changed since approval — review &amp; re-approve
               </p>
               <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
                 DESIGN.md no longer matches the revision you approved, so the game is unqualified
@@ -231,9 +228,11 @@ export function GameDesignPanel({
         <section className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
           <h3 className="text-sm font-medium">Acceptance</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {changed
-              ? "These bind the revision you approved. Re-approve to bind the current design."
-              : "The build is judged against these, not against a summary."}
+            {approved
+              ? "The approved revision binds the build to these."
+              : issues.length > 0
+                ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
+                : "These are the criteria in DESIGN.md. Approve the design to bind them."}
           </p>
           <ul className="mt-2 space-y-1.5">
             {acceptance.map((criterion) => (

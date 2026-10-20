@@ -372,23 +372,6 @@ const revisionSnapshot = async (root: string) => {
   );
   return assets;
 };
-const designHeading = (line: string) => line.match(/^##\s+(.+?)\s*$/)?.[1];
-const designSections = (markdown: string) => {
-  const sections = new Map<string, string[]>();
-  let current: string | undefined;
-  for (const line of markdown.split("\n")) {
-    const heading = designHeading(line);
-    if (heading !== undefined) {
-      current = heading;
-      sections.set(heading, []);
-      continue;
-    }
-    if (current !== undefined) sections.get(current)!.push(line);
-  }
-  return new Map([...sections].map(([heading, lines]) => [heading, lines.join("\n").trim()]));
-};
-const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
-
 /** The design turn's bar, shared with the server so both agree on approvability. */
 const assertDesignFilled = (skeleton: string, design: string) => {
   const validation = validateDesignDocument({ design, skeleton });
