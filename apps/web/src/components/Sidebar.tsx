@@ -148,9 +148,8 @@ import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadAc
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
-import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -217,7 +216,6 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
   searchSidebarThreads,
-  shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
@@ -2089,11 +2087,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     )
   ) : null;
 
-  if (props.game !== null) {
-    const gameSummary = props.game;
+  if (game !== null) {
+    const gameSummary = game;
     const appearance = gameTemplateAppearance(gameSummary.template);
     const initial = gameInitial(gameSummary.name);
-    const olderSessions = props.gameSessions.filter((session) => session.id !== thread.id);
+    const olderSessions = gameSessions.filter((session) => session.id !== thread.id);
     const working =
       status === "working" || status === "waiting" || status === "approval" || status === "input";
     const gameStatusLabel =
@@ -2143,10 +2141,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           onContextMenu={handleContextMenu}
         >
           <span className="sr-only">{gameSummary.name}</span>
-          <div className="flex items-center gap-2.5 px-2.5 py-2.5">
+          <div className="flex items-center gap-2.5 px-2.5 py-2">
             <span
               className={cn(
-                "flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/60 text-sm font-semibold tabular-nums",
+                "flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 text-xs font-semibold tabular-nums",
                 appearance.initialClassName,
               )}
               aria-hidden
@@ -2162,58 +2160,74 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <span className="flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
                 <GameStatusIcon className={cn("size-3 shrink-0", gameStatusClass)} aria-hidden />
                 <span className={cn("truncate", working && "text-info")}>{gameStatusLabel}</span>
-                <span aria-hidden className="text-muted-foreground/40">
-                  ·
-                </span>
-                <span className="truncate">{appearance.label}</span>
               </span>
             </span>
-            <span className="flex shrink-0 flex-col items-end gap-1">
+            <span className="flex shrink-0 flex-col items-end gap-0.5">
               <span className="text-secondary-label text-xs tabular-nums">
                 <RelativeTimeLabel timestamp={thread.updatedAt} />
               </span>
               <span className="flex items-center gap-0.5">
                 {olderSessions.length > 0 ? (
-                  <button
-                    type="button"
-                    aria-label={`${sessionsOpen ? "Hide" : "Show"} ${olderSessions.length} older ${olderSessions.length === 1 ? "session" : "sessions"} of ${gameSummary.name}`}
-                    aria-expanded={sessionsOpen}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setSessionsOpen((open) => !open);
-                    }}
-                    className="inline-flex h-5 cursor-pointer items-center gap-1 rounded-sm px-1 text-2xs text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                  >
-                    Sessions {olderSessions.length}
-                    <ChevronDownIcon
-                      className={cn("size-3 transition-transform", sessionsOpen && "rotate-180")}
-                      aria-hidden
-                    />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={`${sessionsOpen ? "Hide" : "Show"} ${olderSessions.length} older ${olderSessions.length === 1 ? "session" : "sessions"} of ${gameSummary.name}`}
+                          aria-expanded={sessionsOpen}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setSessionsOpen((open) => !open);
+                          }}
+                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                        />
+                      }
+                    >
+                      <ChevronDownIcon
+                        className={cn(
+                          "size-3.5 transition-transform",
+                          sessionsOpen && "rotate-180",
+                        )}
+                        aria-hidden
+                      />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      {sessionsOpen ? "Hide" : "Show"} sessions ({olderSessions.length})
+                    </TooltipPopup>
+                  </Tooltip>
                 ) : null}
                 {onNewSession !== null ? (
-                  <button
-                    type="button"
-                    aria-label={`New session in ${gameSummary.name}`}
-                    title="New session"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onNewSession();
-                    }}
-                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
-                  >
-                    <PlusIcon className="size-3" aria-hidden />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={`New session in ${gameSummary.name}`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onNewSession();
+                          }}
+                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                        />
+                      }
+                    >
+                      <PlusIcon className="size-3" aria-hidden />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">New session</TooltipPopup>
+                  </Tooltip>
                 ) : null}
               </span>
             </span>
           </div>
           {sessionsOpen && olderSessions.length > 0 ? (
-            <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-[3.25rem]">
+            <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-13">
+              <p className="px-1.5 pb-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground/70">
+                Sessions
+              </p>
               <ul role="list" className="flex flex-col">
                 {olderSessions.map((session) => (
                   <li key={session.id} className="list-none">
@@ -3741,10 +3755,12 @@ export default function Sidebar() {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
     }
-    items.push({ kind: "marker", marker: "settled-header" });
-    const settledRows = rowsOf(renderedSettledThreads, "settled");
-    items.push({ kind: "marker", marker: "settled-placeholder" });
-    items.push(...settledRows);
+    if (renderedSettledThreads.length > 0) {
+      items.push({ kind: "marker", marker: "settled-header" });
+      const settledRows = rowsOf(renderedSettledThreads, "settled");
+      items.push({ kind: "marker", marker: "settled-placeholder" });
+      items.push(...settledRows);
+    }
     return items;
   })();
   // Thread shells update on every streamed event without moving rows. Keep the
@@ -4693,28 +4709,23 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
-  const handleNewThreadClick = (event?: ReactMouseEvent) => {
-    if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
-      if (isMobile) setOpenMobile(false);
-      void startNewThreadFromContext({
-        activeDraftThread: newThreadContext.activeDraftThread,
-        activeThread: newThreadContext.activeThread ?? undefined,
-        defaultProjectRef: newThreadContext.defaultProjectRef,
-        handleNewThread: newThreadContext.handleNewThread,
-      });
-      return;
-    }
-    if (isMobile) setOpenMobile(false);
-    openCommandPalette({ open: "new-thread-in" });
-  };
-
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
-  const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   const startGameSession = (game: GameLibraryEntry) => {
     if (isMobile) setOpenMobile(false);
     void newThreadContext.handleNewThread(scopeProjectRef(game.environmentId, game.projectId));
+  };
+  const scopedGame =
+    gameLibrary.games.find((game) =>
+      scopedProjectGroup?.memberProjectRefs.some(
+        (projectRef) =>
+          projectRef.environmentId === game.environmentId &&
+          projectRef.projectId === game.projectId,
+      ),
+    ) ?? gameLibrary.games[0];
+  const startNewSession = () => {
+    if (scopedGame !== undefined) startGameSession(scopedGame);
   };
   return (
     <>
@@ -4853,11 +4864,9 @@ export default function Sidebar() {
               }
               onNewProject={openGameDialog}
               onNewGame={() => useGameDialogStore.getState().show("create")}
-              onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              onNewThread={startNewSession}
+              newThreadDisabled={gameLibrary.games.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
-              newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {

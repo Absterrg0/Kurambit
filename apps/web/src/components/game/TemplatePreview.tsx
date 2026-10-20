@@ -40,8 +40,13 @@ export function TemplatePreview({
   return (
     <div
       aria-hidden
+      style={{
+        backgroundImage:
+          "linear-gradient(135deg, var(--color-muted) 25%, transparent 25%, transparent 50%, var(--color-muted) 50%, var(--color-muted) 75%, transparent 75%)",
+        backgroundSize: "18px 18px",
+      }}
       className={cn(
-        "relative flex size-full items-center justify-center overflow-hidden bg-[linear-gradient(135deg,var(--color-muted)_25%,transparent_25%,transparent_50%,var(--color-muted)_50%,var(--color-muted)_75%,transparent_75%)] bg-[length:18px_18px] text-muted-foreground",
+        "relative flex size-full items-center justify-center overflow-hidden text-muted-foreground",
         className,
       )}
     >

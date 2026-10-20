@@ -19,11 +19,12 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 ## Start a game
 
-Choose **New game** on the home screen or in the sidebar. Give it a name, pick a starter template
-(each one is a working Godot project the agent extends instead of starting from nothing), choose a
-parent folder (`~/Games` by default), write a brief and optional art direction, then pick the agent
-and model. Game Studio creates the project folder with the template's Godot project already in
-place, starts a thread with your brief, and opens the **Game** panel.
+Choose **New game** on the home screen or in the sidebar. First pick a starter template — each card
+shows a real frame from a working Godot project the agent extends instead of starting from nothing.
+Then name the game, write a brief and optional art direction, and choose where to save it
+(`~/Games/<slug>` by default). Pick the agent and model, then choose **Create game**. Game Studio
+creates the project folder with the template in place, starts a session with your brief, and opens
+the game workspace.
 
 The agent models assets in Blender, brings them into Godot, writes the scenes and GDScript, runs a
 headless gameplay test, and checks the web build in a headless browser before it reports back.
@@ -41,13 +42,15 @@ choose **Approve & build**. The agent then builds milestone 1 and continues thro
 keeping `DESIGN.md` current when scope changes. After that, the game and the design change together
 in normal build turns.
 
-To continue an existing game, choose it under **Recent games**, or use **Open game** and pick a
-folder that contains `game.json`.
+To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
+folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
+empty one. The sidebar keeps one row per game; use its sessions button to reach older sessions or
+start a new one.
 
 ## Play and revise
 
-A game thread opens as a game workspace: the game owns the middle of the window and the chat is
-docked to its right.
+A game opens on its latest session: the game owns the middle of the window and the chat is docked to
+its right.
 
 - **Play** builds the web version when it is missing or older than the game's files, then plays it
   in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
@@ -65,7 +68,7 @@ docked to its right.
   or `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) to give the game the whole window. It starts narrow and
   never takes more than about half the window, so the game stays the main surface.
 
-To change the game, write a follow-up in the thread, for example "make the rocks taller and spread the
+To change the game, write a follow-up in the session, for example "make the rocks taller and spread the
 artifacts out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
 keep their references.
 

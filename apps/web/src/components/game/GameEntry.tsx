@@ -12,7 +12,7 @@ import {
   type ModelSelection,
 } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { ArrowLeftIcon, CheckIcon, FolderIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, FolderIcon, PencilIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -248,6 +248,22 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                   : "Your agent writes a design first, then builds in Blender and Godot."
                 : "Open a game folder containing game.json."}
             </DialogDescription>
+            {isCreate && step === "details" ? (
+              <button
+                type="button"
+                onClick={() => setStep("template")}
+                className="mt-0.5 inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span className="h-5 w-9 shrink-0 overflow-hidden rounded-sm border border-border bg-muted">
+                  <TemplatePreview template={template} />
+                </span>
+                Starting from{" "}
+                <span className="font-medium text-foreground">
+                  {GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? "Blank"}
+                </span>
+                <PencilIcon className="size-3" aria-hidden />
+              </button>
+            ) : null}
           </DialogHeader>
           <DialogPanel>
             {isCreate ? (
@@ -261,7 +277,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       const picked = GAME_TEMPLATES.find((entry) => entry.id === value);
                       if (picked) setTemplate(picked.id);
                     }}
-                    className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                    className="grid grid-cols-1 sm:grid-cols-3"
                   >
                     {GAME_TEMPLATES.map((entry) => {
                       const selected = template === entry.id;
@@ -271,7 +287,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                           className={cn(
                             "group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card text-left transition-[border-color,box-shadow]",
                             selected
-                              ? "border-primary shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-primary)_16%,transparent)]"
+                              ? "border-primary ring-2 ring-primary/20"
                               : "border-border hover:border-foreground/25",
                           )}
                         >
@@ -332,7 +348,10 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
-                    Art direction <span className="text-xs text-muted-foreground">optional</span>
+                    <span className="flex items-baseline gap-1.5">
+                      Art direction
+                      <span className="text-xs font-normal text-muted-foreground">optional</span>
+                    </span>
                     <Textarea
                       value={artDirection}
                       onChange={(event) => setArtDirection(event.target.value)}
@@ -377,7 +396,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                         {pickingFolder ? "Choosing…" : "Change"}
                       </Button>
                     </div>
-                    {editingFolder || !isElectron ? (
+                    {editingFolder ? (
                       <Input
                         aria-label="Games folder"
                         value={directory}
@@ -385,7 +404,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                         placeholder="~/Games"
                         required
                         disabled={busy || pickingFolder}
-                        className="h-8 bg-background font-mono text-xs"
+                        className="h-8"
                       />
                     ) : null}
                   </div>
@@ -481,7 +500,9 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             </div>
             <Button
               type="submit"
-              disabled={busy || pickingFolder || (isCreate && step === "details" && !canSubmit)}
+              disabled={
+                busy || pickingFolder || (isCreate ? step === "details" && !canSubmit : !canSubmit)
+              }
             >
               {busy
                 ? isCreate

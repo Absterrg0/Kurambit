@@ -36,10 +36,16 @@ export function GamesHome() {
   const newestThreads = newestThreadByProject(
     threads.filter((thread) => thread.archivedAt === null && thread.deletedAt === null),
   );
-  const cards = games.map((game) => ({
-    game,
-    latestThread: newestThreads.get(game.projectId) ?? null,
-  }));
+  const cards = games
+    .map((game) => ({
+      game,
+      latestThread: newestThreads.get(game.projectId) ?? null,
+    }))
+    .sort(
+      (left, right) =>
+        gameActivityMs(right) - gameActivityMs(left) ||
+        left.game.name.localeCompare(right.game.name),
+    );
   const openGame = (card: (typeof cards)[number]) => {
     if (card.latestThread !== null) {
       void navigate({
@@ -61,7 +67,7 @@ export function GamesHome() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div className="mx-auto flex w-full max-w-[86rem] flex-col gap-8 px-8 py-8">
             <header className="flex flex-wrap items-end justify-between gap-4">
               <div className="flex min-w-0 flex-col gap-1">
@@ -96,7 +102,7 @@ export function GamesHome() {
             ) : null}
 
             {isLoading ? (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
                 {[0, 1, 2].map((index) => (
                   <div
                     key={index}
@@ -132,6 +138,20 @@ type GameCard = {
   readonly latestThread: EnvironmentThreadShell | null;
 };
 
+const gameActivityTimestamp = (card: GameCard): string => {
+  if (
+    card.latestThread !== null &&
+    Date.parse(card.latestThread.updatedAt) > Date.parse(card.game.updatedAt)
+  )
+    return card.latestThread.updatedAt;
+  return card.game.updatedAt;
+};
+
+const gameActivityMs = (card: GameCard): number => {
+  const time = Date.parse(gameActivityTimestamp(card));
+  return Number.isNaN(time) ? 0 : time;
+};
+
 function GameGrid({
   environmentId,
   cards,
@@ -164,7 +184,7 @@ function GameGrid({
     }
   }
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => (
         <GameCard
           key={card.game.projectId}
@@ -230,9 +250,9 @@ function GameCard({
         )}
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/0" />
         {card.game.designStatus === "draft" ? (
-          <Badge variant="warning" className="absolute left-3 top-3 shadow-sm">
+          <span className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm">
             Design draft
-          </Badge>
+          </span>
         ) : null}
         <span className="absolute bottom-3 left-3 flex items-center gap-1.5 text-2xs font-medium text-white/90 drop-shadow">
           <Gamepad2Icon className="size-3.5" aria-hidden />
@@ -248,7 +268,7 @@ function GameCard({
           />
         </span>
         <span className="text-xs text-muted-foreground">
-          {appearance.label} · {formatGameEditedAt(card.game.updatedAt)}
+          {appearance.label} · {formatGameEditedAt(gameActivityTimestamp(card))}
         </span>
       </span>
     </button>
@@ -266,7 +286,7 @@ function GamesEmptyState({
   return (
     <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:py-10">
       <div className="flex min-w-0 flex-col items-start gap-4">
-        <Badge variant="outline" className="gap-1.5">
+        <Badge variant="outline">
           <SparklesIcon className="size-3" aria-hidden />
           Your first game is one sentence away
         </Badge>

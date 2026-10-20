@@ -8,6 +8,7 @@ import {
   gameTemplateAppearance,
   newestThreadByProject,
   sortGameSummaries,
+  sortGameThreadsByActivity,
 } from "./gameLibrary.logic";
 
 const NOW = Date.parse("2026-10-20T12:00:00.000Z");
@@ -85,5 +86,16 @@ describe("newestThreadByProject", () => {
     ]);
     expect(newest.get("a")?.id).toBe("new");
     expect(newest.get("b")?.id).toBe("only");
+  });
+});
+
+describe("sortGameThreadsByActivity", () => {
+  it("orders a game's sessions newest first", () => {
+    expect(
+      sortGameThreadsByActivity([
+        { id: "older", updatedAt: "2026-10-18T00:00:00.000Z" },
+        { id: "newer", updatedAt: "2026-10-20T00:00:00.000Z" },
+      ]).map((thread) => thread.id),
+    ).toEqual(["newer", "older"]);
   });
 });
