@@ -1,14 +1,10 @@
-import { describe, expect, it } from "vitest";
-import {
-  mergeCheckIssues,
-  parseGodotIssues,
-  limitIssues,
-} from "./godotCheckOutput.ts";
+import { describe, expect, it } from "@effect/vitest";
+import { mergeCheckIssues, parseGodotIssues, limitIssues } from "./godotCheckOutput.ts";
 
 describe("parseGodotIssues", () => {
   it("pairs a parse error with the Godot file and line", () => {
     const output = [
-      "\u001b[91mSCRIPT ERROR: Parse Error: Identifier \"this\" not declared in the current scope.\u001b[0m",
+      '\u001b[91mSCRIPT ERROR: Parse Error: Identifier "this" not declared in the current scope.\u001b[0m',
       "          at: GDScript::reload (res://scripts/broken.gd:4)",
       "          GDScript backtrace (most recent call first):",
       "              [0] _collect_files (/home/user/check.gd:39)",
@@ -42,9 +38,7 @@ describe("parseGodotIssues", () => {
       "WARNING: 4 ObjectDB instances were leaked at exit",
       "ERROR: ObjectDB instances leaked",
     ].join("\n");
-    expect(parseGodotIssues(output)).toEqual([
-      { file: "", message: "The player has no camera" },
-    ]);
+    expect(parseGodotIssues(output)).toEqual([{ file: "", message: "The player has no camera" }]);
   });
 
   it("deduplicates repeated errors and bounds the list", () => {

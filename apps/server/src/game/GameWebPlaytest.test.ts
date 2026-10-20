@@ -180,6 +180,27 @@ it.live.skipIf(!available || !templatesInstalled)(
             expect(result.bootMs).not.toBeNull();
             expect(result.success).toBe(true);
             expect(result.screenshots.map((shot) => shot.label)).toEqual(["booted", "after-steps"]);
+            // Evidence is persisted and the status exposes the newest run.
+            const status = yield* game.status(registered.threadId);
+            expect(status.lastPlaytest).toMatchObject({
+              success: true,
+              responded: true,
+              consoleErrorCount: 0,
+              stale: false,
+            });
+            expect(status.lastPlaytest?.frames).toHaveLength(2);
+            const evidence = NodePath.join(root, status.lastPlaytest!.directory);
+            const stored = JSON.parse(
+              yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(evidence, "result.json"), "utf8"),
+              ),
+            );
+            expect(stored.steps).toEqual([{ key: "ArrowUp", holdMs: 1000 }]);
+            expect(stored.responded).toBe(true);
+            for (const frame of status.lastPlaytest?.frames ?? [])
+              expect(
+                yield* Effect.promise(() => NodeFSP.stat(NodePath.join(root, frame.path))),
+              ).toBeDefined();
             // The stale branch must not have re-exported behind the test's back.
             expect((yield* Effect.promise(() => NodeFSP.stat(index))).mtimeMs).toBe(builtBefore);
             // The browser profile is scratch and cleaned up with the run.

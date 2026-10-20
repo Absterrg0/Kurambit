@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off -- Evidence folder names and result timestamps are wall-clock records of a run.
 // @effect-diagnostics nodeBuiltinImport:off -- Playtest evidence is files under the game's builds/ directory.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -119,7 +120,10 @@ export const readLastPlaytest = async (
   } catch {
     return null;
   }
-  const newest = entries.filter((name) => DIRECTORY_NAME.test(name)).sort().at(-1);
+  const newest = entries
+    .filter((name) => DIRECTORY_NAME.test(name))
+    .sort()
+    .at(-1);
   if (newest === undefined) return null;
   let stored: StoredPlaytest;
   try {
@@ -130,16 +134,14 @@ export const readLastPlaytest = async (
     return null;
   }
   const webBuild = builds.find((build) => build.target === "Web");
-  const stale =
-    webBuild === undefined || Date.parse(stored.at) < Date.parse(webBuild.updatedAt);
+  const stale = webBuild === undefined || Date.parse(stored.at) < Date.parse(webBuild.updatedAt);
   return {
     at: stored.at,
     directory: `${PLAYTEST_DIRECTORY}/${newest}`,
     success: stored.success,
     responded: stored.responded,
     changedPercent: stored.changedPercent,
-    consoleErrorCount: stored.consoleMessages.filter((message) => message.level === "error")
-      .length,
+    consoleErrorCount: stored.consoleMessages.filter((message) => message.level === "error").length,
     frames: stored.frames.map((frame) => ({
       label: frame.label,
       path: `${PLAYTEST_DIRECTORY}/${newest}/${frame.file}`,

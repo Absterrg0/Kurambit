@@ -3,6 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -31,7 +32,12 @@ import { commandDetail } from "./commandDetail.ts";
 import { isWebBuildStale, webBuildIndex } from "./webBuild.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
-import { RawCheckResult, mergeCheckIssues, parseGodotIssues, limitIssues } from "./godotCheckOutput.ts";
+import {
+  RawCheckResult,
+  mergeCheckIssues,
+  parseGodotIssues,
+  limitIssues,
+} from "./godotCheckOutput.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
 import { GODOT_INSPECT_SCRIPT } from "./godotInspectScript.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
@@ -107,6 +113,14 @@ const RawSceneInspect = Schema.fromJsonString(
 );
 const decodeSceneInspect = Schema.decodeUnknownSync(RawSceneInspect);
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
+const decodeText = <A>(decode: (text: string) => A, text: string | null): A | null => {
+  if (text === null) return null;
+  try {
+    return decode(text);
+  } catch {
+    return null;
+  }
+};
 const isGameOperationError = Schema.is(GameOperationError);
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
@@ -332,7 +346,7 @@ const make = Effect.gen(function* () {
   });
   /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
   const checkGame = Effect.fnUntraced(function* (root: string) {
-    const startedAt = Date.now();
+    const startedAt = yield* Clock.currentTimeMillis;
     const temporary = NodePath.join(root, "builds/logs", `godot-check-${NodeCrypto.randomUUID()}`);
     const scriptPath = NodePath.join(temporary, "check.gd");
     const resultPath = NodePath.join(temporary, "result.json");
@@ -345,7 +359,12 @@ const make = Effect.gen(function* () {
           await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
         },
         catch: (cause) =>
-          new GameOperationError({ operation: "godot-check", path: temporary, reason: "io", cause }),
+          new GameOperationError({
+            operation: "godot-check",
+            path: temporary,
+            reason: "io",
+            cause,
+          }),
       });
       const run = yield* processes.run({
         root,
@@ -354,14 +373,12 @@ const make = Effect.gen(function* () {
         operation: "godot-check",
         timeoutMs: 120_000,
       });
-      let reported: typeof RawCheckResult.Type | null = null;
-      try {
-        reported = decodeCheckResult(await NodeFSP.readFile(resultPath, "utf8"));
-      } catch {
-        // A failed run may die before writing; its output is still useful.
-      }
+      const resultText = yield* Effect.promise(() =>
+        NodeFSP.readFile(resultPath, "utf8").catch(() => null),
+      );
+      const reported = decodeText(decodeCheckResult, resultText);
       const importedOutput =
-        imported.process === undefined ? "" : `${imported.process.stdout}\n${imported.process.stderr}`;
+        imported.process === null ? "" : `${imported.process.stdout}\n${imported.process.stderr}`;
       const parsed = [
         ...parseGodotIssues(importedOutput),
         ...parseGodotIssues(`${run.stdout}\n${run.stderr}`),
@@ -392,7 +409,7 @@ const make = Effect.gen(function* () {
         ok: errors.length === 0 && reported !== null && !run.timedOut,
         errors: limitIssues(errors),
         warnings: limitIssues(reported?.warnings ?? []),
-        durationMs: Date.now() - startedAt,
+        durationMs: (yield* Clock.currentTimeMillis) - startedAt,
       };
     }).pipe(
       Effect.ensuring(
@@ -421,7 +438,11 @@ const make = Effect.gen(function* () {
         path: scenePath,
         reason: "invalid-path",
       });
-    const temporary = NodePath.join(root, "builds/logs", `godot-inspect-${NodeCrypto.randomUUID()}`);
+    const temporary = NodePath.join(
+      root,
+      "builds/logs",
+      `godot-inspect-${NodeCrypto.randomUUID()}`,
+    );
     const scriptPath = NodePath.join(temporary, "inspect.gd");
     const resultPath = NodePath.join(temporary, "result.json");
     return yield* Effect.gen(function* () {
@@ -446,11 +467,10 @@ const make = Effect.gen(function* () {
         timeoutMs: 60_000,
       });
       let raw: ReturnType<typeof decodeSceneInspect> | null = null;
-      try {
-        raw = decodeSceneInspect(await NodeFSP.readFile(resultPath, "utf8"));
-      } catch {
-        // Reported below with the command output.
-      }
+      const resultText = yield* Effect.promise(() =>
+        NodeFSP.readFile(resultPath, "utf8").catch(() => null),
+      );
+      raw = decodeText(decodeSceneInspect, resultText);
       if (raw === null || raw.error !== undefined)
         return yield* new GameOperationError({
           operation: "inspect-scene",

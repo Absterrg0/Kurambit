@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off globalDateInEffect:off -- Fixed timestamps make retention order deterministic.
 // @effect-diagnostics nodeBuiltinImport:off -- Real temporary folders prove the evidence layout and retention rule.
 import { it, expect } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
@@ -30,7 +31,12 @@ it.live("keeps the newest five playtest runs and reads the last verdict", () =>
       for (let run = 0; run < 6; run++) {
         const at = new Date(Date.UTC(2026, 9, 20, 12, run, 0));
         const written = yield* Effect.promise(() =>
-          writePlaytestEvidence({ root, steps: [{ key: "w", holdMs: 100 }], result: result("after-steps"), at }),
+          writePlaytestEvidence({
+            root,
+            steps: [{ key: "w", holdMs: 100 }],
+            result: result("after-steps"),
+            at,
+          }),
         );
         expect(written.directory).toMatch(/^builds\/playtests\//);
       }
@@ -42,9 +48,7 @@ it.live("keeps the newest five playtest runs and reads the last verdict", () =>
       expect(runs.at(-1)).toContain("T12-05-00");
 
       const last = yield* Effect.promise(() =>
-        readLastPlaytest(root, [
-          { target: "Web", updatedAt: "2026-10-20T12:04:30.000Z" },
-        ]),
+        readLastPlaytest(root, [{ target: "Web", updatedAt: "2026-10-20T12:04:30.000Z" }]),
       );
       expect(last).toMatchObject({
         success: true,
@@ -60,9 +64,7 @@ it.live("keeps the newest five playtest runs and reads the last verdict", () =>
         ).toBeDefined();
 
       const stale = yield* Effect.promise(() =>
-        readLastPlaytest(root, [
-          { target: "Web", updatedAt: "2026-10-20T12:05:30.000Z" },
-        ]),
+        readLastPlaytest(root, [{ target: "Web", updatedAt: "2026-10-20T12:05:30.000Z" }]),
       );
       expect(stale?.stale).toBe(true);
     } finally {

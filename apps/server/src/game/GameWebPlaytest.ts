@@ -145,10 +145,7 @@ const SAMPLE_FRAME = `(() => {
   return Array.from(context.getImageData(0, 0, sample.width, sample.height).data);
 })()`;
 
-const sampleFrame = async (
-  cdp: CdpSocket,
-  sessionId: string,
-): Promise<FrameSample | null> => {
+const sampleFrame = async (cdp: CdpSocket, sessionId: string): Promise<FrameSample | null> => {
   const evaluated = await cdp.send<{ result?: { value?: number[] | null } }>(
     "Runtime.evaluate",
     { expression: SAMPLE_FRAME, returnByValue: true },
@@ -510,7 +507,7 @@ const runPlaytest = async (
       for (const key of keys)
         await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
       await sleep(signal, step.holdMs);
-      for (const key of [...keys].reverse())
+      for (const key of [...keys].toReversed())
         await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
     }
     screenshots.push(await screenshot(cdp, session.sessionId, "after-steps"));

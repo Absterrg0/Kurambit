@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { compareFrameSamples, type FrameSample } from "./playtestFrames.ts";
 
 const frame = (width: number, height: number, pixel: readonly number[]): FrameSample => ({
@@ -37,7 +37,11 @@ describe("compareFrameSamples", () => {
   it("requires the changed share to cross the response threshold", () => {
     // One changed pixel out of 2304 is noise; twelve (0.52%) is a response.
     const before = frame(64, 36, [0, 0, 0, 255]);
-    const faint = frame(64, 36, [0, 0, 0, 255]) as { width: number; height: number; data: number[] };
+    const faint = frame(64, 36, [0, 0, 0, 255]) as {
+      width: number;
+      height: number;
+      data: number[];
+    };
     faint.data[0] = 255;
     expect(compareFrameSamples(before, faint).responded).toBe(false);
 

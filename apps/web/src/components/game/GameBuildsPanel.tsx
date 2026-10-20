@@ -159,8 +159,8 @@ function LastPlaytestSection({
       >
         <h3 className="text-sm font-medium">Last playtest</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          No playtest yet. Ask your agent to run <span className="font-mono">game_web_playtest</span>{" "}
-          with steps that play the core loop.
+          No playtest yet. Ask your agent to run{" "}
+          <span className="font-mono">game_web_playtest</span> with steps that play the core loop.
         </p>
       </section>
     );
@@ -217,7 +217,12 @@ function LastPlaytestSection({
           ))}
         </ul>
       ) : null}
-      <Button size="xs" variant="ghost" className="mt-2" onClick={() => onReveal(lastPlaytest.directory)}>
+      <Button
+        size="xs"
+        variant="ghost"
+        className="mt-2"
+        onClick={() => onReveal(lastPlaytest.directory)}
+      >
         <FolderOpenIcon className="size-3" aria-hidden="true" />
         Open evidence
       </Button>
@@ -246,7 +251,11 @@ function PlaytestFrame({
       <button type="button" onClick={onOpen} className="block w-full cursor-pointer text-left">
         <span className="flex aspect-video items-center justify-center overflow-hidden rounded-md border border-border bg-stage">
           {frame._tag === "Success" ? (
-            <img src={frame.url} alt={`Playtest frame ${label}`} className="size-full object-cover" />
+            <img
+              src={frame.url}
+              alt={`Playtest frame ${label}`}
+              className="size-full object-cover"
+            />
           ) : (
             <span className="text-2xs text-stage-subtle">No frame</span>
           )}

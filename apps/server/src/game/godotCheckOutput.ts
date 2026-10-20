@@ -18,7 +18,7 @@ export const RawCheckResult = Schema.fromJsonString(
 export type RawCheckResult = typeof RawCheckResult.Type;
 
 const MAX_ISSUES = 100;
-const ANSI = /\x1b\[[0-9;]*m/g;
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const ERROR_LINE = /^(SCRIPT ERROR|USER ERROR|ERROR):\s*(.*)$/;
 const LOCATION = /^\s+at: .+\((.+):(\d+)\)\s*$/;
 const SCRIPT_LOAD_FAILURE = /^Failed to load script "(res:\/\/[^"]+)"/;

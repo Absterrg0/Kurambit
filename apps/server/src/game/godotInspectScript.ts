@@ -49,7 +49,7 @@ func _walk(node: Node, path: String) -> void:
 			"groups": _groups(node),
 			"children": children,
 		}
-		var script := node.get_script()
+		var script: Variant = node.get_script()
 		if script is Script and not script.resource_path.is_empty():
 			entry["script"] = script.resource_path
 		var position := _position(node)
@@ -69,16 +69,13 @@ func _groups(node: Node) -> Array:
 	return groups
 
 func _position(node: Node) -> Array:
-	var value = null
 	if node is Node3D:
-		value = node.position
-	elif node is Node2D or node is Control:
-		value = node.position
-	if value == null:
-		return []
-	if value is Vector3:
-		return [snappedf(value.x, 0.001), snappedf(value.y, 0.001), snappedf(value.z, 0.001)]
-	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001)]
+		var point: Vector3 = node.position
+		return [snappedf(point.x, 0.001), snappedf(point.y, 0.001), snappedf(point.z, 0.001)]
+	if node is Node2D or node is Control:
+		var point: Vector2 = node.position
+		return [snappedf(point.x, 0.001), snappedf(point.y, 0.001)]
+	return []
 
 func _write(result: Dictionary) -> void:
 	if _result_path.is_empty():

@@ -147,6 +147,23 @@ export const GameProcessResult = Schema.Struct({
 export type GameProcessResult = typeof GameProcessResult.Type;
 export const GameViewport = Schema.Struct({ width: Schema.Number, height: Schema.Number });
 export type GameViewport = typeof GameViewport.Type;
+export const GamePlaytestFrame = Schema.Struct({
+  label: Schema.String,
+  path: Schema.String,
+});
+export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
+export const GameLastPlaytest = Schema.Struct({
+  at: Schema.String,
+  directory: Schema.String,
+  success: Schema.Boolean,
+  responded: Schema.Boolean,
+  changedPercent: Schema.Number,
+  consoleErrorCount: Schema.Number,
+  frames: Schema.Array(GamePlaytestFrame),
+  /** The web build was rebuilt after this run. */
+  stale: Schema.Boolean,
+});
+export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
@@ -318,23 +335,6 @@ export const GameSceneInspectResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type GameSceneInspectResult = typeof GameSceneInspectResult.Type;
-export const GamePlaytestFrame = Schema.Struct({
-  label: Schema.String,
-  path: Schema.String,
-});
-export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
-export const GameLastPlaytest = Schema.Struct({
-  at: Schema.String,
-  directory: Schema.String,
-  success: Schema.Boolean,
-  responded: Schema.Boolean,
-  changedPercent: Schema.Number,
-  consoleErrorCount: Schema.Number,
-  frames: Schema.Array(GamePlaytestFrame),
-  /** The web build was rebuilt after this run. */
-  stale: Schema.Boolean,
-});
-export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 export const GameBlenderInput = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,80}$/)),
   script: Schema.String,
