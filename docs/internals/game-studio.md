@@ -138,27 +138,43 @@ because it only ever loads the game's own loopback server. Do not merge it into
 
 Booting is not a verdict. The playtest downsamples the boot frame and the after-steps frame and
 requires a visible difference when steps were given, so an inert game fails instead of passing on a
-clean console. The tool keeps a boot-only smoke result useful, but only a run that was given input
-steps, succeeded and visibly responded records a passed `playtest` stage; anything else records a
-failure with that reason in the tool result. Each run is kept under
-`builds/playtests/<timestamp>/` as frames plus a `result.json`
-with the steps, console and verdict; the newest five are kept, and `game_status` (and the Builds tab)
-reports the last run and whether the web build has been rebuilt since. Screenshots are evidence of
-what happened, not a substitute for a gameplay assertion, which stays in the headless smoke test.
-Only the suite named by `game.json`'s `testSuite` (templates set `res://tests/smoke_test.gd`) owns
-the `test` stage; other scripts still run as diagnostics but never record a pass.
+clean console. Pixels alone still are not gameplay: both starter templates autoload `StudioProbe`,
+which exposes a read-only `window.__studioProbe()` snapshot (GameState's public numeric, boolean and
+string members plus the first `player`-group position). The playtest reads it after boot, after
+every step and at the end, and reports `state: { before, after }` with a short diff such as
+`collected 0→2, player moved 312`. Movement and state changes are measured only between samples
+that have a player, so starting the game from its menu is not mistaken for play; clocks
+(`run_seconds`, `best_seconds`) never count. A run with a probe records a passed `playtest` stage
+only when the player moved or a numeric GameState value changed. Games created before the probe
+keep the pixel rule, and the result says `no state probe`. When the approved design has `observe`
+criteria, the result also lists the ones this run happened to satisfy; that list is informational
+and the scenario runner still gates the `state` stage. The tool keeps a boot-only smoke result
+useful, but only a run that was given input steps, succeeded, responded and (with a probe) showed
+gameplay records a pass; anything else records a failure with that reason in the tool result. Each
+run is kept under `builds/playtests/<timestamp>/` as frames plus a `result.json` with the steps,
+console, probe snapshot and verdict; the newest five are kept, and `game_status` (and the Builds
+tab) reports the last run and whether the web build has been rebuilt since. Screenshots are
+evidence of what happened, not a substitute for a gameplay assertion, which stays in the headless
+smoke test. Only the suite named by `game.json`'s `testSuite` (templates set
+`res://tests/smoke_test.gd`) owns the `test` stage; other scripts still run as diagnostics but
+never record a pass.
 
 `game_godot_check` is the step before either: one bundled SceneTree checker loads every script,
-scene and resource, runs the main scene for 120 physics frames, and reports parse and runtime errors
-with file:line plus lint findings such as an InputMap action a script uses but the project never
-defines, a CharacterBody without a CollisionShape, or a main scene with no camera.
+scene and resource, then runs the main scene and the scene `game.json`'s `gameplayScene` names (the
+one the menu starts) for 120 physics frames each, and reports which entries ran. It reports parse
+and runtime errors with file:line plus lint findings such as an InputMap action a script uses but
+the project never defines, a CharacterBody without a CollisionShape, or a scene with no camera. A
+CharacterBody in the `player` group is stricter: it must have a direct, enabled CollisionShape with
+a real shape, because a decorative shape nested elsewhere does not move the body. A game created
+before gameplay entries has no `gameplayScene`; its check runs only the main scene and says so in a
+warning rather than implying gameplay was exercised.
 `game_scene_inspect` dumps a scene's node tree when the wiring, not the code, is the problem.
 
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
 re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`
 defines done: the qualification read reports check, test, export and playtest current for the final
-sources, with a playtest whose steps prove the core loop responded; preview URL returned, end the
-turn.
+sources, with a playtest whose steps prove the core loop responded (and, for a game with the probe,
+moved the player or changed a GameState value); preview URL returned, end the turn.
 
 ## Toolchain
 

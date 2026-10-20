@@ -12,10 +12,6 @@ import {
   summarizePlaytestSamples,
 } from "./playtestState.ts";
 
-const at = (x: number, z = 0): GamePlaytestProbe => ({
-  gameState: {},
-  player: { x, y: 0, z },
-});
 const menu: GamePlaytestProbe = { gameState: { state: 0 }, player: null };
 const gameplay = (
   gameState: Record<string, number | boolean | string>,

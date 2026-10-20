@@ -68,21 +68,24 @@ it.live.skipIf(!available)(
             expect(checked.entries).toEqual(["main", "gameplay"]);
             expect(checked.durationMs).toBeGreaterThan(0);
 
-            // The other starter template reaches the same bar: its own gameplay
-            // scene initializes and its player has a usable collider.
-            const platformer = yield* projects.create({
-              name: "Check Runner 2D",
-              parentDirectory: parent,
-              template: "2d-platformer",
-              brief: "Run the ridge.",
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("codex"),
-                model: "gpt-6.1-sol",
-              },
-            });
-            const platformerCheck = yield* game.check(platformer.threadId);
-            expect(platformerCheck.ok, JSON.stringify(platformerCheck.errors)).toBe(true);
-            expect(platformerCheck.entries).toEqual(["main", "gameplay"]);
+            // Every starter template reaches the same bar: its own gameplay
+            // entry initializes and its player (when it has one) has a usable
+            // collider. Blank has no menu, so its gameplay entry is its main scene.
+            for (const template of ["2d-platformer", "blank"] as const) {
+              const other = yield* projects.create({
+                name: `Check Runner ${template}`,
+                parentDirectory: parent,
+                template,
+                brief: "Run the template.",
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("codex"),
+                  model: "gpt-6.1-sol",
+                },
+              });
+              const otherCheck = yield* game.check(other.threadId);
+              expect(otherCheck.ok, JSON.stringify(otherCheck.errors)).toBe(true);
+              expect(otherCheck.entries).toEqual(["main", "gameplay"]);
+            }
 
             const inspected = yield* game.inspectScene(
               created.threadId,
@@ -152,17 +155,25 @@ it.live.skipIf(!available)(
                 playerScript,
                 playerSource.replace(
                   "func _ready() -> void:\n",
-                  'func _ready() -> void:\n\tpush_error("R1 gameplay ready error")\n',
+                  'func _ready() -> void:\n\tpush_error("R1 gameplay ready error")\n\tvar missing = null\n\tmissing.explode()\n',
                 ),
               ),
             );
             const failedGameplay = yield* game.check(created.threadId);
             expect(failedGameplay.ok).toBe(false);
             expect(failedGameplay.entries).toEqual(["main", "gameplay"]);
+            // push_error is the review's probe: Godot reports it without a script
+            // location, because the innermost frame is the builtin itself.
+            expect(failedGameplay.errors).toContainEqual(
+              expect.objectContaining({
+                message: expect.stringContaining("R1 gameplay ready error"),
+              }),
+            );
+            // A real script failure in the same entry does carry its source.
             expect(failedGameplay.errors).toContainEqual(
               expect.objectContaining({
                 file: "res://scripts/player.gd",
-                message: expect.stringContaining("R1 gameplay ready error"),
+                message: expect.stringContaining("explode"),
               }),
             );
             yield* Effect.promise(() => NodeFSP.writeFile(playerScript, playerSource));
