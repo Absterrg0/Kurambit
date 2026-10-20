@@ -14,6 +14,7 @@ import {
   type GameCheckResult,
   type GameSceneInspectResult,
   type GameStatus,
+  type GameQualificationRead,
   type GameAction,
   type GameActionResult,
   type GameBlenderInput,
@@ -30,7 +31,7 @@ import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
-import { snapshotSource } from "./sourceSnapshot.ts";
+import { exportedSourceId, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -221,6 +222,16 @@ const make = Effect.gen(function* () {
   const snapshot = (root: string, godotProject: string) =>
     Effect.promise(() => snapshotSource(root, godotProject));
   /**
+   * Qualification says the export matches the sources; the artifact still has to
+   * exist. A deleted or half-cleaned build is stale even when its record is not.
+   */
+  const webBuildIsCurrent = (root: string, read: GameQualificationRead) =>
+    Effect.promise(async () => {
+      if (!isWebBuildFresh(read)) return false;
+      const stat = await NodeFSP.stat(webBuildIndex(root)).catch(() => null);
+      return stat?.isFile() ?? false;
+    });
+  /**
    * Qualification is a server-owned record written from actual operation
    * results. Failing to persist it must not turn a real build into a crash; the
    * missing stage keeps the game unqualified either way.
@@ -352,20 +363,19 @@ const make = Effect.gen(function* () {
         }),
     });
     const after = yield* snapshot(root, godotProject);
-    const stable =
-      before.kind === "known" && after.kind === "known" && before.sourceId === after.sourceId;
+    const exportedSource = exportedSourceId(before, after);
     const finishedAt = DateTime.formatIso(yield* DateTime.now);
     yield* recordExport(
-      stable ? "passed" : "failed",
-      failedSource(after),
-      stable && after.kind === "known" ? `${after.sourceId}:${finishedAt}` : null,
+      exportedSource === null ? "failed" : "passed",
+      exportedSource,
+      exportedSource === null ? null : `${exportedSource}:${finishedAt}`,
     );
     return result;
   });
   const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
     const manifest = yield* projects.read(root);
     const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
-    if (!isWebBuildFresh(beforePlaytest)) {
+    if (!(yield* webBuildIsCurrent(root, beforePlaytest))) {
       const exported = yield* exportGame(root, "Web");
       if (!exported.success)
         return yield* new GameOperationError({
@@ -637,7 +647,7 @@ const make = Effect.gen(function* () {
       return {
         root,
         ...inventory,
-        webBuildStale: !isWebBuildFresh(qualificationRead),
+        webBuildStale: !(yield* webBuildIsCurrent(root, qualificationRead)),
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
@@ -885,7 +895,10 @@ const make = Effect.gen(function* () {
           const manifest = yield* projects.read(root);
           const needsExport =
             action === "rebuild" ||
-            !isWebBuildFresh(yield* qualification.read(root, manifest.godotProject));
+            !(yield* webBuildIsCurrent(
+              root,
+              yield* qualification.read(root, manifest.godotProject),
+            ));
           if (needsExport) {
             const exported = yield* exportGame(root, "Web");
             if (!exported.success) return exported;

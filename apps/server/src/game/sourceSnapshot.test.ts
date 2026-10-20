@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { snapshotSource } from "./sourceSnapshot.ts";
+import { exportedSourceId, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
 const withTree = <A, E, R>(run: (root: string) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
@@ -98,4 +98,16 @@ it.effect("reports unknown when the tree cannot be read", () =>
       expect(missing).toEqual({ kind: "unknown", reason: "io" });
     }),
   ),
+);
+
+it.effect("an export only claims sources that did not change while it ran", () =>
+  Effect.sync(() => {
+    const known = (sourceId: string): SourceSnapshot => ({ kind: "known", sourceId, entries: 1 });
+    const unknown: SourceSnapshot = { kind: "unknown", reason: "entry-limit" };
+    expect(exportedSourceId(known("a"), known("a"))).toBe("a");
+    // A mixed build and an unreadable input can never be current.
+    expect(exportedSourceId(known("a"), known("b"))).toBeNull();
+    expect(exportedSourceId(unknown, known("a"))).toBeNull();
+    expect(exportedSourceId(known("a"), unknown)).toBeNull();
+  }),
 );

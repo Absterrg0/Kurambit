@@ -8,7 +8,7 @@ import * as NodePath from "node:path";
  * identified, so callers must treat the result as unknown (and therefore stale)
  * rather than guessing that it did not change.
  */
-export const DEFAULT_MAX_SOURCE_ENTRIES = 10_000;
+const DEFAULT_MAX_SOURCE_ENTRIES = 10_000;
 
 export type SourceSnapshot =
   | { readonly kind: "known"; readonly sourceId: string; readonly entries: number }
@@ -54,3 +54,13 @@ export const snapshotSource = async (
   for (const line of lines) hash.update(line);
   return { kind: "known", sourceId: hash.digest("hex"), entries: lines.length };
 };
+
+/**
+ * The source identity an export can claim. Two different snapshots mean the
+ * sources changed while the build ran, so the artifact is mixed and cannot be
+ * treated as current; neither can a build whose inputs are unknown.
+ */
+export const exportedSourceId = (before: SourceSnapshot, after: SourceSnapshot): string | null =>
+  before.kind === "known" && after.kind === "known" && before.sourceId === after.sourceId
+    ? after.sourceId
+    : null;

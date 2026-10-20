@@ -161,6 +161,19 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
   ),
 );
 
+it.effect("a deletion after the stages also invalidates them", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
+      yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, "godot/scripts/main.gd")));
+      const read = yield* qualification.read(root, "godot");
+      expect(read.state).toBe("unqualified");
+      expect(read.stages.find((entry) => entry.stage === "export")?.status).toBe("stale");
+    }),
+  ),
+);
+
 it.effect("a later failing check replaces the pass", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {

@@ -16,7 +16,7 @@ import {
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
 /** The stages a real service operation can record today. */
-export const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest"] as const;
+const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest"] as const;
 export type RecordedQualificationStage = (typeof RECORDED_QUALIFICATION_STAGES)[number];
 /** The stages the read always reports, including the ones later work will own. */
 const ALL_STAGES = ["check", "test", "export", "playtest", "state", "visual"] as const;
