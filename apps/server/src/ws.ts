@@ -1725,6 +1725,7 @@ const layerWsRpc = (
         [WS_METHODS.gameStatus]: ({ threadId }) => game.status(threadId),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
+        [WS_METHODS.gameApproveDesign]: ({ threadId }) => gameProjects.approveDesign(threadId),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,

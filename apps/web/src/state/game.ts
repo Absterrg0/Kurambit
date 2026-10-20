@@ -29,6 +29,10 @@ export const gameEnvironment = {
     label: "game:open",
     tag: WS_METHODS.gameOpen,
   }),
+  approveDesign: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:approveDesign",
+    tag: WS_METHODS.gameApproveDesign,
+  }),
   action: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:action",
     tag: WS_METHODS.gameAction,

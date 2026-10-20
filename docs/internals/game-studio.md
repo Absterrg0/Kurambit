@@ -15,6 +15,17 @@ instead of acting on an arbitrary directory.
 The game stage's buttons call the same `GameService` methods over RPC. Anything a user can do from
 the stage, an agent can do through a tool, and the reverse.
 
+## Design before building
+
+A plan-first game starts with `design.status: "draft"` in `game.json`. The scaffolded `AGENTS.md`
+says a draft turn may only write `DESIGN.md`, and the first prompt asks for it, so no Blender or
+Godot work starts before the creator agrees to a design. The Design tab renders that file.
+
+Approval flips the status in `game.json`, then sends the build message through ordinary thread
+dispatch, so the build is a normal turn with checkpoints, cancellation and the same tool surface.
+It builds nothing itself. There is deliberately no `game_*` tool for approval: the design is the
+creator's decision, and an agent must not approve its own design.
+
 ## Starter templates
 
 New games start from a template under `apps/server/templates/<id>/`: `template.json` (catalog

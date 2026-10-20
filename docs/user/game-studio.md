@@ -28,6 +28,19 @@ place, starts a thread with your brief, and opens the **Game** panel.
 The agent models assets in Blender, brings them into Godot, writes the scenes and GDScript, runs a
 headless gameplay test, and checks the web build in a headless browser before it reports back.
 
+## Design the game first
+
+New games start with a design, not code. The agent writes a one-page `DESIGN.md` from your brief and
+the starter template: the pitch, core loop, controls, win and lose conditions, content, art
+direction, audio, scope and milestones. It ends that turn asking you to review the draft. **Plan the
+design first** in the New game dialog is on by default; turn it off to skip straight to building.
+
+The design lives on the **Design** tab, first in the stage while it is a draft. Read it, then ask
+for changes in chat, or open **Edit file** to change `DESIGN.md` yourself. When it looks right,
+choose **Approve & build**. The agent then builds milestone 1 and continues through the milestones,
+keeping `DESIGN.md` current when scope changes. After that, the game and the design change together
+in normal build turns.
+
 To continue an existing game, choose it under **Recent games**, or use **Open game** and pick a
 folder that contains `game.json`.
 

@@ -2,7 +2,7 @@ import { useGameDialogStore } from "./gameDialogStore";
 import { ensureLocalApi } from "../../localApi";
 import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   DEFAULT_GAME_TEMPLATE,
@@ -16,6 +16,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RadioGroup, Radio } from "../ui/radio-group";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import {
   Dialog,
@@ -103,6 +104,8 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [template, setTemplate] = useState<GameTemplateId>(DEFAULT_GAME_TEMPLATE);
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
+  const [planFirst, setPlanFirst] = useState(true);
+  const planFirstId = useId();
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +138,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
               template,
               brief,
               artDirection,
+              planFirst,
               modelSelection: model,
             },
           })
@@ -272,6 +276,24 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                         value={artDirection}
                         onChange={(event) => setArtDirection(event.target.value)}
                         disabled={busy}
+                      />
+                    </label>
+                    <label
+                      htmlFor={planFirstId}
+                      className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-border/70 px-3 py-2.5"
+                    >
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="font-medium">Plan the design first</span>
+                        <span className="text-xs text-muted-foreground">
+                          The agent writes a one-page design for you to approve before it builds.
+                        </span>
+                      </span>
+                      <Switch
+                        id={planFirstId}
+                        className="mt-0.5"
+                        checked={planFirst}
+                        disabled={busy}
+                        onCheckedChange={(checked) => setPlanFirst(Boolean(checked))}
                       />
                     </label>
                   </>

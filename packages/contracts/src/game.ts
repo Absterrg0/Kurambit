@@ -48,6 +48,15 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
+/**
+ * The design phase recorded in the manifest. A `draft` design is the only thing
+ * the agent may work on; `approved` releases the build turns.
+ */
+export const GameDesign = Schema.Struct({
+  status: Schema.Literals(["draft", "approved"]),
+  approvedAt: Schema.optionalKey(Schema.String),
+});
+export type GameDesign = typeof GameDesign.Type;
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -55,6 +64,8 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
+  // Games created before the design step existed have no design key.
+  design: Schema.optionalKey(GameDesign),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
@@ -81,6 +92,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "checksum",
       "download",
       "project-not-found",
+      "design-already-approved",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -108,6 +120,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "unsupported-platform": "Managed installation currently supports Linux x86_64 only.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
+      "design-already-approved": "The design is already approved.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
@@ -167,6 +180,11 @@ export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
+  /** The design phase, or null for games created before it existed. */
+  design: Schema.NullOr(GameDesign),
+  /** Game-relative paths, when the file exists on disk. */
+  designPath: Schema.NullOr(Schema.String),
+  briefPath: Schema.NullOr(Schema.String),
   toolchain: GameToolchainStatus,
   assets: Schema.Array(Schema.Struct({ ...GameAsset.fields, usedBy: Schema.Array(Schema.String) })),
   scenes: Schema.Array(Schema.String),
@@ -203,10 +221,14 @@ export const GameCreateInput = Schema.Struct({
   template: Schema.optionalKey(GameTemplateId),
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
+  /** Write and approve a design before the first build turn. Defaults to true. */
+  planFirst: Schema.optionalKey(Schema.Boolean),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
+export const GameDesignApprovalResult = Schema.Struct({ approvedAt: Schema.String });
+export type GameDesignApprovalResult = typeof GameDesignApprovalResult.Type;
 export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });
 export const GameProjectResult = Schema.Struct({
   projectId: ProjectId,

@@ -2,6 +2,7 @@ import {
   GameActionInput,
   GameActionResult,
   GameCreateInput,
+  GameDesignApprovalResult,
   GameOpenInput,
   GameOperationError,
   GameProjectResult,
@@ -293,6 +294,7 @@ export const WS_METHODS = {
   gameStatus: "game.status",
   gameCreate: "game.create",
   gameOpen: "game.open",
+  gameApproveDesign: "game.approveDesign",
   gameAction: "game.action",
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
@@ -1304,6 +1306,11 @@ const WsGameOpenRpc = Rpc.make(WS_METHODS.gameOpen, {
   success: GameProjectResult,
   error: gameError,
 });
+const WsGameApproveDesignRpc = Rpc.make(WS_METHODS.gameApproveDesign, {
+  payload: GameThreadInput,
+  success: GameDesignApprovalResult,
+  error: gameError,
+});
 const WsGameActionRpc = Rpc.make(WS_METHODS.gameAction, {
   payload: GameActionInput,
   success: GameActionResult,
@@ -1330,6 +1337,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
   WsGameCreateRpc,
   WsGameOpenRpc,
+  WsGameApproveDesignRpc,
   WsGameActionRpc,
   WsGameToolchainStatusRpc,
   WsGameInstallRpc,

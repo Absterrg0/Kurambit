@@ -24,6 +24,7 @@ export function previewBrowserTestLayer(
 }
 export function projectTestLayer(
   onLaunch?: (input: ThreadLaunchService.ThreadLaunchInput) => void,
+  onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void,
 ) {
   let project: Project | undefined;
   return Layer.mergeAll(
@@ -59,6 +60,12 @@ export function projectTestLayer(
                 worktreePath: null,
               } as OrchestrationV2ThreadShell),
         ),
+      sendToThread: (input) => {
+        onSend?.(input);
+        // Only the dispatch input crosses this boundary; the real service is
+        // covered by the orchestration tests.
+        return Effect.succeed({} as never);
+      },
     }),
     Layer.mock(ThreadLaunchService.ThreadLaunchService)({
       launch: (input) => {

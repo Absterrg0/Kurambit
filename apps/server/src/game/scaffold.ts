@@ -5,6 +5,65 @@ import {
   type GameManifest,
 } from "@t3tools/contracts";
 
+const designSkeleton = (name: string) => `# ${name} — design
+
+One page. Replace every hint with a concrete decision.
+
+## Pitch
+
+What the player does, and why it is fun, in two or three sentences.
+
+## Core loop
+
+The repeating 30 seconds: what the player does, what changes, and what pulls them forward.
+
+## Controls
+
+Movement, camera and actions, with keyboard and gamepad bindings.
+
+## Win & lose
+
+How a run ends in success and in failure, and what retrying costs.
+
+## Content
+
+Levels, enemies and pickups, with counts and names. Say what the starter template
+provides and what this game adds.
+
+## Art direction
+
+Palette, shapes, materials and camera framing.
+
+## Audio
+
+Music, ambience and the sound effects that have to exist.
+
+## Scope
+
+- **Must have** — the smallest game that is worth playing.
+- **Nice to have** — only if the core lands.
+- **Cut** — what this game deliberately does not do.
+
+## Milestones
+
+1. **Playable core** — the loop above running end to end.
+2. **Content** — the levels, enemies and pickups the design needs.
+3. **Polish** — art, audio and the states a player expects.
+`;
+
+/**
+ * The first message of a game's thread. A plan-first game spends that turn on
+ * DESIGN.md; a skip-planning game goes straight to today's build prompt.
+ */
+export function initialGamePrompt(input: GameCreateInput): string {
+  const template = input.template ?? DEFAULT_GAME_TEMPLATE;
+  const templateName = GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? template;
+  const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
+  if (input.planFirst === false)
+    return `${brief}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
+}
+
 /**
  * Files the studio owns for every game. The starter template supplies the
  * `godot/` tree and TEMPLATE.md; see templates.ts.
@@ -12,12 +71,14 @@ import {
 export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const template = input.template ?? DEFAULT_GAME_TEMPLATE;
   const templateName = GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? template;
+  const planFirst = input.planFirst !== false;
   const manifest: GameManifest = {
     schemaVersion: 1,
     name: input.name.trim(),
     brief: input.brief,
     artDirection: input.artDirection ?? "",
     template,
+    design: planFirst ? { status: "draft" } : { status: "approved" },
     engine: { name: "godot", version: "4.7.2" },
     godotProject: "godot",
     assets: [],
@@ -25,6 +86,7 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
+    ...(planFirst ? { "DESIGN.md": designSkeleton(manifest.name) } : {}),
     "AGENTS.md": `# Game Studio project
 
 Build the game described in BRIEF.md. Use GDScript and Godot 4.7 Compatibility rendering. Keep scope focused on a playable core loop.
@@ -32,6 +94,12 @@ Build the game described in BRIEF.md. Use GDScript and Godot 4.7 Compatibility r
 ## Starter template
 
 This game started from the **${templateName}** starter template. Read TEMPLATE.md at the project root first: it describes the scenes, systems, conventions and tests you inherit. Extend the template's systems instead of replacing them, and keep its tests passing.
+
+## Design first
+
+game.json's design section decides what this turn may do. When design.status is "draft", this is a design turn: write or update DESIGN.md only. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
+
+When design.status is "approved" and DESIGN.md exists, build to its milestones one at a time. Keep DESIGN.md truthful when scope changes.
 
 ## Layout
 
@@ -51,7 +119,9 @@ Use game_export with target Web or Linux for real builds and real import/export 
 
 ## Definition of done
 
-Finish every turn to this bar, then report to the user and end the turn:
+During a design turn, done is a one-page DESIGN.md and the review request; the bar below applies to build turns.
+
+Finish every build turn to this bar, then report to the user and end the turn:
 
 1. game_godot_check returns ok with zero errors.
 2. game_godot_test passes with your smoke test.

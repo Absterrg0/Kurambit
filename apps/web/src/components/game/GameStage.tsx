@@ -40,11 +40,12 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameAssetsPanel } from "./GameAssetsPanel";
 import { GameBuildsPanel } from "./GameBuildsPanel";
+import { GameDesignPanel } from "./GameDesignPanel";
 import { GameElapsed } from "./GameElapsed";
 import { GamePlaySurface } from "./GamePlaySurface";
 import { buildFailurePrompt, deriveGameStagePhase } from "./gameStageLogic";
 
-type GameStageTab = "play" | "assets" | "builds";
+type GameStageTab = "design" | "play" | "assets" | "builds";
 
 const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
@@ -55,9 +56,18 @@ const BUSY_LABELS: Record<GameAction, string> = {
   verify: "Verifying game tools",
 };
 
-const TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
+const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
   // The stage is the game itself; "Play" is the action, not the tab, so the
   // header does not read as two Play buttons side by side.
+  { value: "play", label: "Stage" },
+  { value: "design", label: "Design" },
+  { value: "assets", label: "Assets" },
+  { value: "builds", label: "Builds" },
+];
+const DESIGN_FIRST_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
+  // While the design is a draft it is the only thing the agent may work on,
+  // so it is the tab the creator starts on.
+  { value: "design", label: "Design" },
   { value: "play", label: "Stage" },
   { value: "assets", label: "Assets" },
   { value: "builds", label: "Builds" },
@@ -86,7 +96,7 @@ export function GameStage({
   const chatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
-  const [tab, setTab] = useState<GameStageTab>("play");
+  const [tab, setTab] = useState<GameStageTab | null>(null);
   // The server keeps the last operation per game for the whole session, so the
   // stage treats an operation as news only when it happened after this stage
   // mounted. Older ones would greet the user with a build they already know about.
@@ -121,6 +131,9 @@ export function GameStage({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
   if (!data) return null;
+  const designDraft = data.design?.status === "draft";
+  const tabs = designDraft ? DESIGN_FIRST_TABS : PLAY_TABS;
+  const activeTab = tab ?? (designDraft ? "design" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
     toolchainReady: data.toolchain.tools.every((tool) => tool.ready),
@@ -240,13 +253,14 @@ export function GameStage({
           aria-label="Game workspace"
           className="hidden shrink-0 @[32rem]/stage-header:flex"
           variant="segmented"
-          value={[tab]}
+          value={[activeTab]}
           onValueChange={(value) => {
             const next = value[0];
-            if (next === "play" || next === "assets" || next === "builds") setTab(next);
+            if (next === "design" || next === "play" || next === "assets" || next === "builds")
+              setTab(next);
           }}
         >
-          {TABS.map((entry) => (
+          {tabs.map((entry) => (
             <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
               {entry.label}
               {entry.value === "assets" && data.assets.length > 0 ? (
@@ -435,12 +449,18 @@ export function GameStage({
               <MenuSeparator />
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
               <MenuRadioGroup
-                value={tab}
+                value={activeTab}
                 onValueChange={(value) => {
-                  if (value === "play" || value === "assets" || value === "builds") setTab(value);
+                  if (
+                    value === "design" ||
+                    value === "play" ||
+                    value === "assets" ||
+                    value === "builds"
+                  )
+                    setTab(value);
                 }}
               >
-                {TABS.map((entry) => (
+                {tabs.map((entry) => (
                   <MenuRadioItem key={entry.value} value={entry.value}>
                     {entry.label}
                   </MenuRadioItem>
@@ -476,7 +496,19 @@ export function GameStage({
           </Tooltip>
         </div>
       </header>
-      {tab === "play" ? (
+      {activeTab === "design" ? (
+        <GameDesignPanel
+          threadRef={threadRef}
+          status={data}
+          turnRunning={turnRunning}
+          canOperate={canOperate}
+          onApproved={() => {
+            setTab(null);
+            refresh();
+          }}
+        />
+      ) : null}
+      {activeTab === "play" ? (
         <GamePlaySurface
           phase={phase}
           viewport={data.viewport}
@@ -491,8 +523,10 @@ export function GameStage({
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
         />
       ) : null}
-      {tab === "assets" ? <GameAssetsPanel threadRef={threadRef} assets={data.assets} /> : null}
-      {tab === "builds" ? (
+      {activeTab === "assets" ? (
+        <GameAssetsPanel threadRef={threadRef} assets={data.assets} />
+      ) : null}
+      {activeTab === "builds" ? (
         <GameBuildsPanel
           threadRef={threadRef}
           builds={data.builds}

@@ -6,9 +6,15 @@ import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { DEFAULT_GAME_TEMPLATE, ProviderInstanceId, type GameTemplateId } from "@t3tools/contracts";
+import {
+  DEFAULT_GAME_TEMPLATE,
+  ProviderInstanceId,
+  ThreadId,
+  type GameTemplateId,
+} from "@t3tools/contracts";
 import { projectTestLayer } from "./gameTestLayers.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { scaffoldFiles } from "./scaffold.ts";
@@ -109,6 +115,12 @@ it.effect(
         expect(launch?.runtimeMode).toBe("full-access");
         expect(launch?.initialMessage?.text).toContain("Collect three coins.");
         expect(launch?.initialMessage?.text).toContain("Clay");
+        // Planning is the default, so the first turn asks for DESIGN.md, not a build.
+        expect(launch?.initialMessage?.text).toContain("DESIGN.md");
+        expect(launch?.initialMessage?.text).not.toContain("Build a playable game");
+        expect(yield* readFile(NodePath.join(created.root, "DESIGN.md"))).toContain(
+          "## Milestones",
+        );
         expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
           "gl_compatibility",
@@ -311,5 +323,89 @@ it.effect("keeps a pre-existing folder when creation cannot adopt it", () =>
     expect(failure._tag).toBe("Failure");
     if (failure._tag === "Failure") expect(failure.failure.reason).toBe("io");
     expect(yield* readFile(NodePath.join(root, "keep.txt"))).toBe("keep");
+  }),
+);
+
+it.effect("starts a skip-planning game approved, without a design turn", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-skip-design-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    let launch: ThreadLaunchService.ThreadLaunchInput | undefined;
+    const created = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* projects.create({
+          name: "Straight To Build",
+          parentDirectory: parent,
+          brief: "Jump over the crates.",
+          planFirst: false,
+          modelSelection: selection,
+        });
+        return { game, inventory: yield* projects.inventory(game.root) };
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            projectTestLayer((input) => {
+              launch = input;
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(created.inventory.manifest.design).toEqual({ status: "approved" });
+    expect(created.inventory.designPath).toBeNull();
+    expect(created.inventory.briefPath).toBe("BRIEF.md");
+    expect(launch?.initialMessage?.text).toContain("Build a playable game");
+    expect(launch?.initialMessage?.text).not.toContain("DESIGN.md");
+    expect(yield* exists(NodePath.join(created.game.root, "DESIGN.md"))).toBe(false);
+  }),
+);
+
+it.effect("approves a draft design once and starts exactly one build turn", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-approve-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    let gameRoot = "";
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        gameRoot = created.root;
+        yield* projects.upsertAsset(created.root, {
+          id: "coin",
+          kind: "model",
+          source: "art/blender/coin.blend",
+          script: "art/scripts/coin.py",
+          export: "godot/assets/models/coin.glb",
+          updatedAt: "2026-10-20T09:00:00Z",
+        });
+        const approval = yield* projects.approveDesign(created.threadId);
+        const manifest = yield* projects.read(created.root);
+        expect(manifest.design).toEqual({ status: "approved", approvedAt: approval.approvedAt });
+        expect(manifest.assets).toHaveLength(1);
+        const again = yield* Effect.result(projects.approveDesign(created.threadId));
+        expect(again._tag).toBe("Failure");
+        if (again._tag === "Failure") expect(again.failure.reason).toBe("design-already-approved");
+      }).pipe(
+        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+      ),
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.threadId).toBe(ThreadId.make("game-test-thread"));
+    expect(sends[0]?.text).toContain("The design is approved");
+    expect(sends[0]?.text).toContain("milestone 1");
+    expect(sends[0]?.createdBy).toBe("user");
+    expect(sends[0]?.attachments).toEqual([]);
+    expect(gameRoot).not.toBe("");
   }),
 );

@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -14,12 +15,15 @@ import * as Schema from "effect/Schema";
 import {
   CommandId,
   DEFAULT_GAME_TEMPLATE,
+  MessageId,
   ProjectId,
   ThreadId,
   GameManifest,
   GameOperationError,
   type GameAsset,
   type GameCreateInput,
+  type GameDesign,
+  type GameDesignApprovalResult,
   type GameOpenInput,
   type GameProjectResult,
 } from "@t3tools/contracts";
@@ -30,7 +34,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { isWebBuildStale } from "./webBuild.ts";
-import { scaffoldFiles } from "./scaffold.ts";
+import { initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -54,6 +58,14 @@ export class GameProjectService extends Context.Service<
     ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
+    /**
+     * The creator's approval of the design. Marks it approved in game.json and
+     * starts the first build turn; it deliberately does not build anything
+     * itself, so the build still runs through normal orchestration.
+     */
+    readonly approveDesign: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameDesignApprovalResult, GameOperationError>;
     readonly upsertAsset: (
       root: string,
       asset: GameAsset,
@@ -61,6 +73,9 @@ export class GameProjectService extends Context.Service<
     readonly inventory: (root: string) => Effect.Effect<
       {
         manifest: GameManifest;
+        design: GameDesign | null;
+        designPath: string | null;
+        briefPath: string | null;
         assets: readonly (GameAsset & { usedBy: string[] })[];
         scenes: string[];
         viewport: GodotViewport;
@@ -104,6 +119,40 @@ const make = Effect.gen(function* () {
           reason: "invalid-project",
           cause,
         }),
+    });
+  // Manifest writes are serialized per game: an asset revision and a design
+  // approval can land close together, and neither may drop the other's change.
+  const manifestWrites = new Map<string, Promise<void>>();
+  const updateManifest = (
+    root: string,
+    operation: string,
+    update: (manifest: GameManifest) => GameManifest,
+  ) =>
+    Effect.tryPromise({
+      try: async () => {
+        const previous = manifestWrites.get(root) ?? Promise.resolve();
+        const write = previous
+          .catch(() => {})
+          .then(async () => {
+            const manifest = decodeManifest(
+              await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8"),
+            );
+            const temporary = NodePath.join(root, `.game-${NodeCrypto.randomUUID()}.json`);
+            try {
+              await NodeFSP.writeFile(temporary, encodeManifest(update(manifest)) + "\n");
+              await NodeFSP.rename(temporary, NodePath.join(root, "game.json"));
+            } finally {
+              await NodeFSP.rm(temporary, { force: true });
+            }
+          });
+        manifestWrites.set(root, write);
+        try {
+          await write;
+        } finally {
+          if (manifestWrites.get(root) === write) manifestWrites.delete(root);
+        }
+      },
+      catch: (cause) => new GameOperationError({ operation, path: root, reason: "io", cause }),
     });
   const register = Effect.fnUntraced(function* (
     root: string,
@@ -243,11 +292,7 @@ const make = Effect.gen(function* () {
               detail: commandDetail(result),
             });
         }
-        return yield* register(
-          root,
-          input,
-          `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`,
-        );
+        return yield* register(root, input, initialGamePrompt(input));
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder
         // behind; never remove a directory this call did not create.
@@ -255,7 +300,9 @@ const make = Effect.gen(function* () {
       );
     },
   );
-  const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
+  const resolveTarget = Effect.fn("GameProjectService.resolveTarget")(function* (
+    threadId: ThreadId,
+  ) {
     const thread = yield* threads.getThreadShell(threadId).pipe(
       Effect.mapError(
         (cause) =>
@@ -292,50 +339,86 @@ const make = Effect.gen(function* () {
       });
     const root = NodePath.resolve(thread.worktreePath ?? project.value.workspaceRoot);
     yield* read(root);
-    return root;
+    return { root, projectId: thread.projectId };
   });
-  const assetWrites = new Map<string, Promise<void>>();
+  const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
+    return (yield* resolveTarget(threadId)).root;
+  });
+  const buildAfterApproval =
+    "The design is approved. Build milestone 1 from DESIGN.md, then continue milestone by milestone. Keep DESIGN.md truthful when scope changes, and finish with the usual checks and web playtest before you report back.";
+  const approveDesign = Effect.fn("GameProjectService.approveDesign")(function* (
+    threadId: ThreadId,
+  ) {
+    const target = yield* resolveTarget(threadId);
+    const manifest = yield* read(target.root);
+    if (manifest.design?.status === "approved")
+      return yield* new GameOperationError({
+        operation: "approve-design",
+        path: NodePath.join(target.root, "game.json"),
+        reason: "design-already-approved",
+      });
+    const approvedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* updateManifest(target.root, "approve-design", (current) => ({
+      ...current,
+      design: { status: "approved", approvedAt },
+    }));
+    yield* threads
+      .sendToThread({
+        projectId: target.projectId,
+        commandId: CommandId.make(NodeCrypto.randomUUID()),
+        threadId,
+        messageId: MessageId.make(NodeCrypto.randomUUID()),
+        text: buildAfterApproval,
+        attachments: [],
+        mode: "auto",
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GameOperationError({
+              operation: "approve-design",
+              path: target.root,
+              reason: "io",
+              cause,
+            }),
+        ),
+        // An approved design with no build turn would leave the game stuck
+        // waiting; put the draft back so the creator can retry the approval.
+        Effect.catchTags({
+          GameOperationError: (error) =>
+            updateManifest(target.root, "approve-design", (current) => ({
+              ...current,
+              design: manifest.design ?? { status: "draft" },
+            })).pipe(Effect.andThen(Effect.fail(error))),
+        }),
+      );
+    return { approvedAt };
+  });
   return GameProjectService.of({
     create,
     open: (input) =>
       register(NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())), input),
     resolve,
     read,
+    approveDesign,
     upsertAsset: (root, asset) =>
-      Effect.tryPromise({
-        try: async () => {
-          const previous = assetWrites.get(root) ?? Promise.resolve();
-          const write = previous
-            .catch(() => {})
-            .then(async () => {
-              const manifest = decodeManifest(
-                await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8"),
-              );
-              const assets = manifest.assets.filter((entry) => entry.id !== asset.id).concat(asset);
-              const temporary = NodePath.join(root, `.game-${NodeCrypto.randomUUID()}.json`);
-              try {
-                await NodeFSP.writeFile(temporary, encodeManifest({ ...manifest, assets }) + "\n");
-                await NodeFSP.rename(temporary, NodePath.join(root, "game.json"));
-              } finally {
-                await NodeFSP.rm(temporary, { force: true });
-              }
-            });
-          assetWrites.set(root, write);
-          try {
-            await write;
-          } finally {
-            if (assetWrites.get(root) === write) assetWrites.delete(root);
-          }
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "save-asset", path: root, reason: "io", cause }),
-      }),
+      updateManifest(root, "save-asset", (manifest) => ({
+        ...manifest,
+        assets: manifest.assets.filter((entry) => entry.id !== asset.id).concat(asset),
+      })),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
       const webBuildStale = yield* isWebBuildStale(root, manifest.godotProject);
       return yield* Effect.tryPromise({
         try: async () => {
           const engineRoot = insideGame(root, manifest.godotProject);
+          const present = async (relative: string) =>
+            NodeFSP.stat(NodePath.join(root, relative)).then(
+              (stat) => stat.isFile(),
+              () => false,
+            );
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),
             "utf8",
@@ -390,7 +473,17 @@ const make = Effect.gen(function* () {
               /* A game need not have been built yet. */
             }
           }
-          return { manifest, assets, scenes, builds, viewport, webBuildStale };
+          return {
+            manifest,
+            design: manifest.design ?? null,
+            designPath: (await present("DESIGN.md")) ? "DESIGN.md" : null,
+            briefPath: (await present("BRIEF.md")) ? "BRIEF.md" : null,
+            assets,
+            scenes,
+            builds,
+            viewport,
+            webBuildStale,
+          };
         },
         catch: (cause) =>
           new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),

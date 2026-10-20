@@ -38,6 +38,34 @@ describe("game manifest starter template", () => {
   });
 });
 
+describe("game manifest design phase", () => {
+  it("keeps decoding games created before the design step existed", () => {
+    const manifest = decodeManifest(JSON.stringify(legacyManifest));
+    expect(manifest.design).toBeUndefined();
+    expect(encodeManifest(manifest)).not.toContain("design");
+  });
+
+  it("records a draft and its approval time", () => {
+    const draft = decodeManifest(
+      JSON.stringify({ ...legacyManifest, design: { status: "draft" } }),
+    );
+    expect(draft.design).toEqual({ status: "draft" });
+    const approved = decodeManifest(
+      JSON.stringify({
+        ...legacyManifest,
+        design: { status: "approved", approvedAt: "2026-10-20T10:00:00.000Z" },
+      }),
+    );
+    expect(encodeManifest(approved)).toContain('"approvedAt":"2026-10-20T10:00:00.000Z"');
+  });
+
+  it("rejects an unknown design status", () => {
+    expect(() =>
+      decodeManifest(JSON.stringify({ ...legacyManifest, design: { status: "reviewing" } })),
+    ).toThrow();
+  });
+});
+
 describe("game template registry", () => {
   it("offers unique named templates including the default", () => {
     const ids = GAME_TEMPLATES.map((template) => template.id);
@@ -58,6 +86,8 @@ describe("game template registry", () => {
       modelSelection: { instanceId: "codex", model: "gpt-6.1-sol" },
     };
     expect(decodeCreateInput(base).template).toBeUndefined();
+    expect(decodeCreateInput(base).planFirst).toBeUndefined();
+    expect(decodeCreateInput({ ...base, planFirst: false }).planFirst).toBe(false);
     expect(() => decodeCreateInput({ ...base, template: "nope" })).toThrow();
   });
 });
