@@ -507,15 +507,15 @@ const make = Effect.gen(function* () {
         { concurrency: 4 },
       );
       // A project row can outlive a move or a failed registration; the library
-      // shows one row per game root, newest activity first.
+      // shows one row per game root, choosing the row with the newest activity.
       const seenRoots = new Set<string>();
       return sortGameSummaries(
-        summaries.filter((game): game is GameSummary => {
-          if (game === null || seenRoots.has(game.root)) return false;
-          seenRoots.add(game.root);
-          return true;
-        }),
-      );
+        summaries.filter((game): game is GameSummary => game !== null),
+      ).filter((game) => {
+        if (seenRoots.has(game.root)) return false;
+        seenRoots.add(game.root);
+        return true;
+      });
     }),
     open: (input) =>
       register(
