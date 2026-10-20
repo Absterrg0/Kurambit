@@ -86,6 +86,22 @@ it.live.skipIf(!available)(
             expect(limited.nodeCount).toBe(406);
             expect(limited.nodes).toHaveLength(400);
 
+            // A script the engine can load, but with an action the project never defines.
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                NodePath.join(created.root, "godot/scripts/missing_input.gd"),
+                'extends Node\n\nfunc _ready() -> void:\n\tif Input.is_action_pressed("does_not_exist"):\n\t\tpass\n',
+              ),
+            );
+            const linted = yield* game.check(created.threadId);
+            expect(linted.ok, JSON.stringify(linted.errors)).toBe(true);
+            expect(linted.warnings).toContainEqual(
+              expect.objectContaining({
+                file: "res://scripts/missing_input.gd",
+                message: expect.stringContaining('"does_not_exist"'),
+              }),
+            );
+
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
                 NodePath.join(created.root, "godot/scripts/broken.gd"),
