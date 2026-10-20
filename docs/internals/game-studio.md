@@ -126,8 +126,9 @@ an unreachable finish all fail the approved `observe` criteria. Criteria without
 `unverified` and belong to the visual judge; every observable criterion, an observed `end` criterion
 and real player movement are required for the `state` stage. Legacy games without acceptance pass
 only when a route moves the player and GameState reaches its playing state. The stage stores the
-approved source snapshot and a per-criterion summary, and `visual` stays declared as `missing` until
-its judge exists; it can never be reported passed by accident.
+approved source snapshot, the approved design hash and a per-criterion summary; a newly approved
+design revision makes the old route result stale even when the game sources did not change. `visual`
+stays declared as `missing` until its judge exists; it can never be reported passed by accident.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and

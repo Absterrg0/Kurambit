@@ -174,6 +174,29 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
   ),
 );
 
+it.effect("a newly approved design invalidates an old state pass", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "state",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: "builds/logs/scenarios-1",
+        designHash: "hash-a",
+        criteria: [],
+        detail: "Passed against the first design.",
+      });
+      const same = yield* qualification.read(root, "godot", "approved", "hash-a");
+      expect(same.stages.find((entry) => entry.stage === "state")?.status).toBe("passed");
+      const changed = yield* qualification.read(root, "godot", "approved", "hash-b");
+      expect(changed.stages.find((entry) => entry.stage === "state")?.status).toBe("stale");
+      expect(changed.state).toBe("unqualified");
+    }),
+  ),
+);
+
 it.effect("an edit after the stages makes them stale, so the game is unqualified", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {

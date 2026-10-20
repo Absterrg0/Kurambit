@@ -593,6 +593,7 @@ const make = Effect.gen(function* () {
         sourceId: sourceBefore.kind === "known" ? sourceBefore.sourceId : null,
         buildId: null,
         evidenceDirectory: null,
+        designHash: approval?.designHash ?? null,
         criteria: failed.summary.criteria,
         detail: failed.summary.detail,
       });
@@ -715,6 +716,7 @@ const make = Effect.gen(function* () {
       sourceId,
       buildId: null,
       evidenceDirectory: evidenceReference,
+      designHash: approval?.designHash ?? null,
       criteria: summary.criteria,
       detail: summary.detail,
     });
@@ -840,10 +842,12 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const inventory = yield* projects.inventory(root);
       const design = yield* designApprovals.status(root, inventory.manifest);
+      const approval = yield* designApprovals.read(root);
       const qualificationRead = yield* qualification.read(
         root,
         inventory.manifest.godotProject,
         design.state,
+        approval?.designHash ?? null,
       );
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({

@@ -31,6 +31,8 @@ export interface QualificationStageRecord {
   readonly buildId: string | null;
   readonly finishedAt: string;
   readonly evidenceDirectory: string | null;
+  /** The approved design revision the state stage graded, when there was one. */
+  readonly designHash?: string | null;
   /** The per-criterion summary for the state stage. */
   readonly criteria?: readonly GameScenarioCriterionResult[];
   /** Why the state stage passed or failed, including legacy rules. */
@@ -47,6 +49,7 @@ const StoredStage = Schema.Struct({
   buildId: Schema.NullOr(Schema.String),
   finishedAt: Schema.String,
   evidenceDirectory: Schema.NullOr(Schema.String),
+  designHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
   detail: Schema.optionalKey(Schema.String),
 });
@@ -91,6 +94,7 @@ const deriveQualification = (input: {
   readonly record: QualificationRecord | null;
   readonly source: SourceSnapshot;
   readonly designState: GameDesignState | null;
+  readonly designHash: string | null;
 }): GameQualificationRead => {
   if (input.source.kind === "unknown")
     return {
@@ -140,6 +144,10 @@ const deriveQualification = (input: {
     else if (recorded.outcome === "failed") stageReads.set(stage, read("failed"));
     else if (recorded.sourceId === null) stageReads.set(stage, read("unknown"));
     else if (recorded.sourceId !== currentSourceId) stageReads.set(stage, read("stale"));
+    else if (stage === "state" && (recorded.designHash ?? null) !== input.designHash)
+      // A new approved design binds new acceptance; an old route result cannot
+      // silently grade it even when the game sources did not change.
+      stageReads.set(stage, read("stale"));
     else stageReads.set(stage, read("passed"));
   }
   for (const stage of ["visual"] as const)
@@ -182,6 +190,7 @@ export interface QualificationRecordInput {
   readonly sourceId: string | null;
   readonly buildId: string | null;
   readonly evidenceDirectory: string | null;
+  readonly designHash?: string | null;
   readonly criteria?: readonly GameScenarioCriterionResult[];
   readonly detail?: string;
 }
@@ -198,6 +207,7 @@ export class GameQualification extends Context.Service<
       root: string,
       godotProject: string,
       designState?: GameDesignState,
+      designHash?: string | null,
     ) => Effect.Effect<GameQualificationRead>;
     /** Records one real operation result. Concurrent writers are serialized per game. */
     readonly record: (
@@ -226,7 +236,7 @@ export const layer = (options: {
   return Layer.succeed(
     GameQualification,
     GameQualification.of({
-      read: (root, godotProject, designState) =>
+      read: (root, godotProject, designState, designHash) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>
             snapshotSource(root, godotProject, {
@@ -236,7 +246,12 @@ export const layer = (options: {
           const record = yield* Effect.promise(() =>
             readRecord(recordPath(options.stateDir, root)),
           );
-          return deriveQualification({ record, source, designState: designState ?? null });
+          return deriveQualification({
+            record,
+            source,
+            designState: designState ?? null,
+            designHash: designHash ?? null,
+          });
         }),
       record: (root, input) => {
         const file = recordPath(options.stateDir, root);
@@ -261,6 +276,7 @@ export const layer = (options: {
                       buildId: input.buildId,
                       finishedAt,
                       evidenceDirectory: input.evidenceDirectory,
+                      ...(input.designHash === undefined ? {} : { designHash: input.designHash }),
                       ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
                       ...(input.detail === undefined ? {} : { detail: input.detail }),
                     },
