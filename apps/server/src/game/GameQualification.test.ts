@@ -338,3 +338,28 @@ it.effect("serializes concurrent stage writes instead of losing one", () =>
     }),
   ),
 );
+
+it.effect("summarizes the record without reading the source tree", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      expect(yield* qualification.summary(root, null)).toEqual({
+        state: "unqualified",
+        asOf: null,
+      });
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      const buildId = `${sourceId}:first`;
+      yield* recordAll(qualification, root, sourceId, buildId);
+      const summary = yield* qualification.summary(root, null);
+      expect(summary.state).toBe("qualified");
+      expect(summary.asOf).not.toBeNull();
+      // A record bound to another design revision cannot speak for this one.
+      expect((yield* qualification.summary(root, "another-design")).state).toBe("unqualified");
+      // The summary trusts the record; the exact read sees the deleted source.
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(root, "godot/scripts/main.gd"), { force: true }),
+      );
+      expect((yield* qualification.summary(root, null)).state).toBe("qualified");
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("unqualified");
+    }),
+  ),
+);

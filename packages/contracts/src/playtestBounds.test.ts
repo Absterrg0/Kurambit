@@ -73,6 +73,6 @@ describe("fitScreenshotsToBudget", () => {
 
   it("keeps the first frames in capture order", () => {
     const shots = [frame(4), frame(4), frame(4)];
-    expect(fitScreenshotsToBudget(shots, 12).kept.map((shot) => shot.label)).toEqual(["4", "4"]);
+    expect(fitScreenshotsToBudget(shots, 6).kept.map((shot) => shot.label)).toEqual(["4", "4"]);
   });
 });

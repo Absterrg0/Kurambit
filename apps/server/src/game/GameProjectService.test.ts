@@ -1114,3 +1114,74 @@ it.effect("a draft design locks staging until it is approved", () =>
     }
   }),
 );
+
+it.effect("reuses the inventory until the source snapshot or manifest changes", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-inventory-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        const game = yield* service.create({
+          name: "Cached Inventory",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+        });
+        const coin = {
+          id: "coin",
+          kind: "model" as const,
+          source: "art/blender/coin.blend",
+          script: "art/scripts/coin.py",
+          export: "godot/assets/models/coin.glb",
+          updatedAt: "2026-10-19T00:00:00.000Z",
+        };
+        yield* service.upsertAsset(game.root, coin);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(game.root, "godot/scenes/coin.tscn"),
+            '[gd_scene format=3]\n[ext_resource type="PackedScene" path="res://assets/models/coin.glb" id="1"]\n[node name="Coin" instance=ExtResource("1")]\n',
+          ),
+        );
+        const first = yield* service.inventory(game.root, "source-a");
+        // The template's own scenes are there too; this test tracks the delta.
+        expect(first.scenes).toContain("godot/scenes/coin.tscn");
+        expect(first.assets[0]?.usedBy).toContain("godot/scenes/coin.tscn");
+        const templateScenes = first.scenes.filter((scene) => !scene.includes("coin"));
+
+        // A source change with the same snapshot id is a caller bug the cache
+        // must not paper over silently; a new snapshot id is what re-scans.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(game.root, "godot/scenes/coin-2.tscn"),
+            '[gd_scene format=3]\n[ext_resource type="PackedScene" path="res://assets/models/coin.glb" id="1"]\n[node name="Coin2" instance=ExtResource("1")]\n',
+          ),
+        );
+        const cached = yield* service.inventory(game.root, "source-a");
+        expect(cached.scenes).not.toContain("godot/scenes/coin-2.tscn");
+        expect(cached.scenes).toHaveLength(templateScenes.length + 1);
+        const rescanned = yield* service.inventory(game.root, "source-b");
+        expect(rescanned.scenes).toContain("godot/scenes/coin-2.tscn");
+        expect(rescanned.scenes).toHaveLength(templateScenes.length + 2);
+        expect([...(rescanned.assets[0]?.usedBy ?? [])].sort()).toEqual([
+          "godot/scenes/coin-2.tscn",
+          "godot/scenes/coin.tscn",
+        ]);
+
+        // game.json is outside the source snapshot, so the manifest signature
+        // has to invalidate the cached asset list on its own.
+        yield* service.upsertAsset(game.root, {
+          ...coin,
+          id: "gem",
+          source: "art/blender/gem.blend",
+          script: "art/scripts/gem.py",
+          export: "godot/assets/models/gem.glb",
+        });
+        const withGem = yield* service.inventory(game.root, "source-b");
+        expect(withGem.assets.map((asset) => asset.id)).toEqual(["coin", "gem"]);
+      }).pipe(Effect.provide(gameProjectLayer())),
+    );
+  }),
+);

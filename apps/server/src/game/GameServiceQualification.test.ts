@@ -19,7 +19,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
-import { approvalRecordFile, designDocumentHash } from "./GameDesignApproval.ts";
+import { approvalRecordFile, designDocumentHash, designIntentFile } from "./GameDesignApproval.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -78,6 +78,8 @@ const withFixture = <A, E, R>(
     readonly playtest?: typeof GameWebPlaytest.playtest;
     /** An approved design whose acceptance the playtest reports on. */
     readonly acceptance?: readonly GameAcceptanceCriterion[];
+    /** Record the creation-time promise that this game's template ships StudioProbe. */
+    readonly probeRequired?: boolean;
   } = {},
 ) =>
   Effect.scoped(
@@ -100,6 +102,20 @@ const withFixture = <A, E, R>(
         );
         await NodeFSP.writeFile(NodePath.join(root, "godot/tests/other.gd"), "extends SceneTree\n");
         await NodeFSP.writeFile(executable, fakeGodot, { mode: 0o755 });
+        if (options.probeRequired === true) {
+          await NodeFSP.mkdir(NodePath.dirname(designIntentFile(stateDir, root)), {
+            recursive: true,
+          });
+          await NodeFSP.writeFile(
+            designIntentFile(stateDir, root),
+            JSON.stringify({
+              schemaVersion: 1,
+              game: NodePath.resolve(root),
+              intent: "skipped",
+              probe: true,
+            }),
+          );
+        }
         if (options.acceptance !== undefined) {
           const design = "# Fixture design\n\nA disposable acceptance fixture.\n";
           await NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), design);
@@ -419,6 +435,85 @@ it.live("an approved design's observe criteria are reported without gating", () 
               after: probe({ state: 1, collected: 2, won: false }),
               playerMoved: 42,
               changes: [{ key: "collected", before: 0, after: 2 }],
+            },
+          }),
+        ),
+    },
+  ),
+);
+
+it.live("rejects an out-of-bounds capture before exporting or launching the browser", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const error = yield* game
+          .webPlaytest(threadId, {
+            width: 100,
+            steps: [{ waitMs: 1 }, { key: "w", holdMs: 10_001 }],
+          })
+          .pipe(Effect.flip);
+        expect(error.reason).toBe("invalid-input");
+        expect(error.detail).toContain("width must be between 320 and 1920 pixels.");
+        expect(error.detail).toContain("one step may last at most 10000 ms");
+        // The rejection lands before the stale-build export the run would need.
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "export")?.status).toBe("missing");
+        expect(NodeFS.existsSync(NodePath.join(root, "builds/playtests"))).toBe(false);
+      }),
+    {
+      // A browser launch would be a defect in this test, not a slow pass.
+      playtest: () => Effect.die(new Error("browser launched for an invalid capture")),
+    },
+  ),
+);
+
+it.live("fails the playtest stage when a probe-required game has no probe", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ key: "w", holdMs: 100 }] });
+        expect(playtest.message).toContain("StudioProbe missing");
+        expect(playtest.message).toContain("restore scripts/studio_probe.gd");
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("failed");
+        expect(stageOf(read, "playtest")?.detail).toBe(
+          "StudioProbe missing — restore scripts/studio_probe.gd autoload",
+        );
+      }),
+    {
+      probeRequired: true,
+      playtest: () => Effect.succeed(playtestResult({ success: true, responded: true })),
+    },
+  ),
+);
+
+it.live("a probe-required game passes when the probe reports real gameplay", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ key: "w", holdMs: 100 }] });
+        expect(playtest.message).not.toContain("StudioProbe missing");
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("passed");
+      }),
+    {
+      probeRequired: true,
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            state: {
+              before: probe({ state: 1, collected: 0 }),
+              after: probe({ state: 1, collected: 0 }),
+              playerMoved: 42,
+              changes: [],
             },
           }),
         ),
