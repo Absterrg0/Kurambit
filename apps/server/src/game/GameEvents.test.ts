@@ -16,6 +16,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GameService from "./GameService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameQualification from "./GameQualification.ts";
 import { designApprovalTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
 
@@ -106,13 +107,17 @@ exit 0
 const takeEvents = (queue: Queue.Dequeue<GameOperationEvent, Cause.Done>) => Queue.takeAll(queue);
 
 it.live("publishes the start and the success of a game operation", () =>
-  withFixture({}, ({ game }) =>
+  withFixture({}, ({ game, root }) =>
     Effect.gen(function* () {
       // Subscribe before the operation: a push stream does not replay.
       const queue = yield* game.events.pipe(Stream.toQueue({ capacity: 16 }));
       yield* Effect.yieldNow;
       const check = yield* game.check(threadId);
       expect(check.ok).toBe(true);
+      // The service and the library share one record; the outer layer must not
+      // have built a second GameOperations instance.
+      const operations = yield* GameOperations.GameOperations;
+      expect(operations.current(root)?.state).toBe("succeeded");
       const events = yield* takeEvents(queue);
       expect(events.map((event) => event.state)).toEqual(["running", "succeeded"]);
       expect(events.every((event) => event.name === "Godot check")).toBe(true);
