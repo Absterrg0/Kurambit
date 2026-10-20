@@ -606,6 +606,13 @@ const main = Effect.gen(function* () {
     timeline(
       `Design turn changed paths: ${designChanges === "" ? "none" : designChanges.replace(/\n/g, ", ")}`,
     );
+    // The draft stage's contract is one file: DESIGN.md. The server gate refuses
+    // staging tools, but files under godot/ and art/ are written by the agent
+    // directly, so diff-only-DESIGN.md is what proves the turn kept its stage.
+    assert(
+      designChanges.split("\n").every((line) => line === "M DESIGN.md" || line === ""),
+      `Design turn touched files beyond DESIGN.md:\n${designChanges}`,
+    );
     // Approve through the same RPC the Design tab calls, then wait for the build turn.
     const projection = yield* client[O.getThreadProjection]({ threadId: created.threadId });
     const approval = yield* client[WS_METHODS.gameApproveDesign]({ threadId: created.threadId });
