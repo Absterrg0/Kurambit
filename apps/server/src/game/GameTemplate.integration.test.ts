@@ -213,6 +213,8 @@ const templateJourney = (journey: TemplateJourney) =>
                   game: created.root,
                   message: playtest.message,
                   bootMs: playtest.bootMs,
+                  responded: playtest.responded,
+                  changedPercent: playtest.changedPercent,
                   console: playtest.consoleMessages,
                 },
                 null,
