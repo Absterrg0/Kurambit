@@ -183,6 +183,52 @@ export const GameLastPlaytest = Schema.Struct({
   stale: Schema.Boolean,
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
+/**
+ * One qualification stage. `state` and `visual` are declared now so the read is
+ * stable, but their checks arrive in later work and never report passed yet.
+ */
+export const GameQualificationStage = Schema.Literals([
+  "check",
+  "test",
+  "export",
+  "playtest",
+  "state",
+  "visual",
+]);
+export type GameQualificationStage = typeof GameQualificationStage.Type;
+export const GameQualificationStageStatus = Schema.Literals([
+  "passed",
+  "failed",
+  "missing",
+  "stale",
+  "unknown",
+]);
+export type GameQualificationStageStatus = typeof GameQualificationStageStatus.Type;
+export const GameQualificationStageRead = Schema.Struct({
+  stage: GameQualificationStage,
+  status: GameQualificationStageStatus,
+  /** The source snapshot the stage recorded, or null when it never recorded one. */
+  sourceId: Schema.NullOr(Schema.String),
+  /** The build an export produced or a playtest played, when applicable. */
+  buildId: Schema.NullOr(Schema.String),
+  finishedAt: Schema.NullOr(Schema.String),
+});
+export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
+/**
+ * The server's own verdict, derived from records it wrote after real operations.
+ * A stage only counts while its source snapshot (and, for playtests, its build)
+ * still matches the files on disk. `unknown` means the source tree could not be
+ * snapshotted within the scan bound, so nothing can be called current.
+ */
+export const GameQualificationRead = Schema.Struct({
+  state: Schema.Literals(["qualified", "unqualified", "unknown"]),
+  /** The game's current source snapshot, or null when it is unknown. */
+  sourceId: Schema.NullOr(Schema.String),
+  /** The current qualified web build, when one exists. */
+  buildId: Schema.NullOr(Schema.String),
+  stages: Schema.Array(GameQualificationStageRead),
+});
+export type GameQualificationRead = typeof GameQualificationRead.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
@@ -201,6 +247,8 @@ export const GameStatus = Schema.Struct({
   viewport: GameViewport,
   /** A web build exists but game sources changed after it: play would be out of date. */
   webBuildStale: Schema.Boolean,
+  /** Server-owned qualification of the current sources. */
+  qualification: GameQualificationRead,
   builds: Schema.Array(
     Schema.Struct({ target: Schema.String, path: Schema.String, updatedAt: Schema.String }),
   ),

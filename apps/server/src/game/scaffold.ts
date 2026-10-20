@@ -125,8 +125,10 @@ Finish every build turn to this bar, then report to the user and end the turn:
 
 1. game_godot_check returns ok with zero errors.
 2. game_godot_test passes with your smoke test.
-3. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
-4. game_preview returns the playable URL; report it with the test results.
+3. A web build exists for the final sources (game_web_playtest exports one when the build is stale).
+4. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
+5. game_status reports qualification "qualified": check, test, export and playtest all passed for the current sources. Any edit after a stage makes that stage stale, so rerun it; never edit game files after the final playtest.
+6. game_preview returns the playable URL; report it with the test results.
 
 Playtest screenshots and builds/playtests/ are your only visual check; never build custom browser, screenshot, or HTTP tooling. At most 3 export/playtest rounds for cosmetic fixes.
 `,

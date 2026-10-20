@@ -87,10 +87,23 @@ track.
 
 The stage letterboxes the preview to the design resolution in `godot/project.godot`, which
 `game_status` reports, and loads the loopback URL in a sandboxed iframe instead of the browser
-panel: the game is a surface of the app, not a tab in it. Play reuses an existing build and only
-exports when one is missing or older than the newest file under `godot/`; Rebuild always exports.
-That staleness walk lives in one place (`webBuild.ts`) and is shared with the playtest's decision
-to rebuild, so both stay honest about what is on screen.
+panel: the game is a surface of the app, not a tab in it. Play reuses an existing build only while
+its export stage is current for the game's sources and otherwise exports first; Rebuild always
+exports. The source snapshot and the build identity it produced live in the qualification record
+(`GameQualification.ts`), so a missing, stale, failed or unknown export is never served as current.
+
+## Qualification is server-owned
+
+`GameService` writes a qualification record after each real check, test, web export and playtest.
+The record lives under the server's `stateDir` (`game-qualification/`), never inside the game, and
+each stage stores its outcome, the source snapshot it covered, and for exports and playtests the
+build identity. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
+additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
+unknown. A stage counts only while its snapshot (and, for a playtest, its build) still matches, so
+an edit, a deletion, a later failure or a re-export invalidates earlier passes. `GameStatus`
+exposes the derived `qualified | unqualified | unknown` read with each stage's status. State-based
+and visual acceptance are declared in that read as `missing` until their checks exist; they can
+never be reported passed.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and
@@ -113,8 +126,9 @@ defines, a CharacterBody without a CollisionShape, or a main scene with no camer
 
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
 re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`
-defines done: `game_godot_check` ok, smoke test passes, a web playtest whose steps prove the core
-loop responded, preview URL returned, end the turn.
+defines done: the qualification read reports check, test, export and playtest current for the final
+sources, with a playtest whose steps prove the core loop responded; preview URL returned, end the
+turn.
 
 ## Toolchain
 

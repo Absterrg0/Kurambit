@@ -15,7 +15,11 @@ import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { previewBrowserTestLayer, projectTestLayer } from "./gameTestLayers.ts";
+import {
+  previewBrowserTestLayer,
+  projectTestLayer,
+  qualificationTestLayer,
+} from "./gameTestLayers.ts";
 
 const workspaceRoot = (() => {
   let directory = process.cwd();
@@ -155,6 +159,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(GameProcesses.layer),
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
+        Layer.provide(qualificationTestLayer()),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

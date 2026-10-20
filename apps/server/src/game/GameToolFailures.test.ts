@@ -26,7 +26,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GamePreview from "./GamePreview.ts";
-import { previewBrowserTestLayer } from "./gameTestLayers.ts";
+import { previewBrowserTestLayer, qualificationTestLayer } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("tool-failures");
 const scope: McpInvocationContext.McpInvocationScope = {
@@ -105,12 +105,12 @@ const withFixture = <A, E, R>(
                 scenes: [],
                 builds: [],
                 viewport: { width: 1152, height: 648 },
-                webBuildStale: true,
               }),
           }),
         ),
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
         Layer.provide(previewBrowserTestLayer()),
+        Layer.provide(qualificationTestLayer()),
       );
       return yield* run(root, executable).pipe(
         Effect.provide(

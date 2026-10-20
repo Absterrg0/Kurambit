@@ -1,6 +1,7 @@
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameQualification from "./game/GameQualification.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
@@ -499,6 +500,14 @@ const layerGame = GameService.layer.pipe(
   Layer.provide(GameProcesses.layer),
   // Web playtest drives the same headless browser the html toolkit drives.
   Layer.provide(PreviewBrowser.layer),
+  Layer.provide(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        return GameQualification.layer({ stateDir: config.stateDir });
+      }),
+    ),
+  ),
 );
 
 const layerMakeRoutes = Layer.mergeAll(

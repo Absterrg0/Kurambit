@@ -14,7 +14,11 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { previewBrowserTestLayer, projectTestLayer } from "./gameTestLayers.ts";
+import {
+  previewBrowserTestLayer,
+  projectTestLayer,
+  qualificationTestLayer,
+} from "./gameTestLayers.ts";
 
 const workspaceRoot = (() => {
   let directory = process.cwd();
@@ -114,6 +118,7 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provideMerge(GameProcesses.layer),
       Layer.provide(projectTestLayer()),
       Layer.provide(previewBrowserTestLayer(browserExecutable!)),
+      Layer.provide(qualificationTestLayer()),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );

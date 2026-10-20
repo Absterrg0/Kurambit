@@ -166,11 +166,29 @@ export function GameStage({
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
+  const qualification = data.qualification;
+  const qualificationIssues = qualification.stages
+    .filter((stage) => stage.status !== "passed")
+    .map((stage) => `${stage.stage}: ${stage.status}`);
+  const qualificationLabel =
+    qualification.state === "qualified"
+      ? "Qualified"
+      : qualification.state === "unknown"
+        ? "Qualification unknown"
+        : "Unqualified";
+  const qualificationDetail =
+    qualification.state === "qualified"
+      ? "Check, test, web export and playtest passed for the current sources."
+      : `${qualificationLabel} for the current sources. ${qualificationIssues.join(", ")}. State-based and visual acceptance are not implemented yet.`;
   const stagePhaseLabel =
     phase.kind === "playing"
-      ? "Playing"
+      ? qualification.state === "qualified"
+        ? "Playing"
+        : `Playing · ${qualificationLabel}`
       : phase.kind === "ready"
-        ? "Ready to play"
+        ? qualification.state === "qualified"
+          ? "Ready to play"
+          : qualificationLabel
         : phase.kind === "never-built"
           ? "No build yet"
           : phase.kind === "failed"
@@ -331,13 +349,18 @@ export function GameStage({
             <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground @[42rem]/stage-header:flex">
               {stagePhaseLabel === null ? null : (
                 <>
-                  {phase.kind === "playing" ? (
+                  {phase.kind === "playing" && qualification.state === "qualified" ? (
                     <span
                       className="size-1.5 shrink-0 rounded-full bg-success"
                       aria-hidden="true"
                     />
                   ) : null}
-                  <span className="truncate">{stagePhaseLabel}</span>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="truncate" />}>
+                      {stagePhaseLabel}
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">{qualificationDetail}</TooltipPopup>
+                  </Tooltip>
                 </>
               )}
             </span>

@@ -270,49 +270,15 @@ const logTurnTools = (label: string, calls: ReadonlyArray<TurnToolCall>) => {
   const summary = [...counts].map(([name, count]) => `${name} x${count}`).join(", ");
   timeline(`${label} tools: ${summary === "" ? "none" : summary}`);
 };
-const findDeep = (
-  value: unknown,
-  predicate: (record: Record<string, unknown>) => boolean,
-): Record<string, unknown> | undefined => {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const found = findDeep(entry, predicate);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  if (value === null || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  if (predicate(record)) return record;
-  for (const entry of Object.values(record)) {
-    const found = findDeep(entry, predicate);
-    if (found) return found;
-  }
-  return undefined;
+const stageSummary = (status: GameStatus) =>
+  status.qualification.stages.map((stage) => `${stage.stage}=${stage.status}`).join(", ");
+/** PASS follows the server's own qualification read, never an agent's summary. */
+const assertQualified = (label: string, status: GameStatus) => {
+  assert(
+    status.qualification.state === "qualified",
+    `${label}: the game is ${status.qualification.state} (${stageSummary(status)})`,
+  );
 };
-const isCheckResult = (record: Record<string, unknown>) =>
-  typeof record.ok === "boolean" && Array.isArray(record.errors) && Array.isArray(record.warnings);
-/**
- * A code-mode `execute` returns the script's own object, not the raw MCP
- * result. Agents that call several tools in one script summarize them as
- * `{ check: true, errors: [] }`, which is still the tool's reported verdict.
- */
-const isCheckSummary = (record: Record<string, unknown>) =>
-  record.check === true && Array.isArray(record.errors) && record.errors.length === 0;
-const isActionResult = (record: Record<string, unknown>) =>
-  typeof record.success === "boolean" && typeof record.message === "string" && "process" in record;
-const isTestSummary = (record: Record<string, unknown>) =>
-  (record.pass === true &&
-    (record.test === true || record.exit === 0 || record.success === true) &&
-    (!Array.isArray(record.failed) || record.failed.length === 0)) ||
-  // A code-mode `execute` that ran several tools returns its own summary, with
-  // each tool's action result nested under the tool name.
-  (typeof record.test === "object" &&
-    record.test !== null &&
-    !Array.isArray(record.test) &&
-    (record.test as Record<string, unknown>).success === true &&
-    (!Array.isArray((record.test as Record<string, unknown>).failed) ||
-      ((record.test as Record<string, unknown>).failed as unknown[]).length === 0));
 
 const waitForTurn = (
   client: Client,
@@ -505,33 +471,6 @@ const filesUnder = async (directory: string): Promise<string[]> => {
   return found;
 };
 
-interface PlaytestEvidence {
-  readonly directory: string;
-  readonly result: {
-    readonly success: boolean;
-    readonly responded: boolean;
-    readonly changedPercent: number;
-    readonly message: string;
-    readonly frames: ReadonlyArray<{ label: string; file: string }>;
-  };
-}
-/** The newest playtest evidence folder, read the same way the Game panel does. */
-const latestPlaytest = async (root: string): Promise<PlaytestEvidence> => {
-  const parent = NodePath.join(root, "builds/playtests");
-  const directories = (await NodeFSP.readdir(parent).catch(() => []))
-    .filter((name) => /^\d{4}-\d{2}-\d{2}T/.test(name))
-    .sort();
-  const newest = directories.at(-1);
-  assert(newest, "No playtest evidence folder was written");
-  const result = JSON.parse(
-    await NodeFSP.readFile(NodePath.join(parent, newest, "result.json"), "utf8"),
-  ) as PlaytestEvidence["result"];
-  for (const frame of result.frames)
-    await NodeFSP.access(NodePath.join(parent, newest, frame.file)).catch(() => {
-      throw new Error(`Playtest frame ${frame.file} referenced by result.json is missing`);
-    });
-  return { directory: `builds/playtests/${newest}`, result };
-};
 let gameRoot: string | undefined;
 const main = Effect.gen(function* () {
   const url = yield* promise(authenticate);
@@ -689,65 +628,16 @@ const main = Effect.gen(function* () {
       status.assets.some((asset) => asset.usedBy.length > 0),
       "No Blender asset is used by a Godot scene",
     );
-  const checkCalls = buildCalls.filter((call) => call.name.includes("game_godot_check"));
-  assert(checkCalls.length > 0, "Build turn never called game_godot_check");
-  const checkResults = checkCalls
-    .map((call) =>
-      call.output === undefined
-        ? undefined
-        : findDeep(call.output, (record) => isCheckResult(record) || isCheckSummary(record)),
-    )
-    .filter((result): result is Record<string, unknown> => result !== undefined);
-  const passingCheck = checkResults.find((result) => result.ok === true || isCheckSummary(result));
-  assert(
-    passingCheck !== undefined,
-    `game_godot_check did not report ok: ${JSON.stringify(
-      checkResults.map((result) => ({ ok: result.ok, check: result.check, errors: result.errors })),
-    )}`,
-  );
-  const checkSummary = Array.isArray(passingCheck.warnings)
-    ? `${String((passingCheck.warnings as unknown[]).length)} warning(s)`
-    : "summarized as ok";
-  timeline(`game_godot_check ok (${checkSummary})`);
-  const testCalls = buildCalls.filter((call) => call.name.includes("game_godot_test"));
-  assert(testCalls.length > 0, "Build turn never ran a headless smoke test (game_godot_test)");
-  const passingTest = testCalls
-    .map((call) =>
-      call.output === undefined
-        ? undefined
-        : findDeep(
-            call.output,
-            (record) =>
-              (isActionResult(record) &&
-                record.success === true &&
-                (record.process as { exitCode?: unknown } | null | undefined)?.exitCode === 0) ||
-              isTestSummary(record),
-          ),
-    )
-    .find((result): result is Record<string, unknown> => result !== undefined);
-  assert(
-    passingTest !== undefined,
-    `game_godot_test did not pass: ${JSON.stringify(
-      testCalls.map((call) => call.output ?? null),
-    ).slice(0, 2_000)}`,
-  );
-  timeline(
-    `game_godot_test passed: ${String(passingTest.message ?? passingTest.summary ?? "smoke test reported pass")}`,
-  );
   assert(
     status.builds.some((build) => build.target === "Web"),
     "No web build exists after the build turn",
   );
-  const evidence = yield* promise(() => latestPlaytest(created.root));
-  assert(evidence.result.success, `Newest playtest failed: ${evidence.result.message}`);
-  assert(evidence.result.responded, "Playtest did not prove that the game responded to input");
+  assertQualified("after the build turn", status);
+  timeline(`Qualification: ${stageSummary(status)}`);
   assert(status.lastPlaytest !== null, "Game status reports no playtest evidence");
-  assert(
-    status.lastPlaytest.directory === evidence.directory,
-    `Status playtest ${status.lastPlaytest.directory} is not the newest evidence ${evidence.directory}`,
-  );
+  assert(status.lastPlaytest.responded, "Playtest did not prove that the game responded to input");
   timeline(
-    `Playtest evidence: ${evidence.directory} (${evidence.result.frames.length} frames, ${evidence.result.changedPercent.toFixed(1)}% changed${
+    `Playtest evidence: ${status.lastPlaytest.directory} (${status.lastPlaytest.frames.length} frames, ${status.lastPlaytest.changedPercent.toFixed(1)}% changed${
       status.lastPlaytest.stale ? ", stale" : ""
     })`,
   );
@@ -819,7 +709,7 @@ const main = Effect.gen(function* () {
   // `game_web_playtest` exists only on the agent's MCP surface, so the verifier's
   // extra playtest is a turn the agent drives with the exact steps it is given.
   if (extraPlaytestSteps) {
-    const beforeExtra = yield* promise(() => latestPlaytest(created.root));
+    const beforeExtra = status.lastPlaytest;
     const extraRun = yield* followup(
       `Run game_web_playtest now with exactly these steps: ${JSON.stringify(
         extraPlaytestSteps,
@@ -829,18 +719,19 @@ const main = Effect.gen(function* () {
       "extra-playtest",
       yield* collectTurnTools(client, created.threadId, extraRun.id, observedTurnItems),
     );
-    const extraEvidence = yield* promise(() => latestPlaytest(created.root));
+    const extraStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     assert(
-      extraEvidence.directory !== beforeExtra.directory,
+      extraStatus.lastPlaytest !== null &&
+        extraStatus.lastPlaytest.directory !== beforeExtra?.directory,
       "Extra playtest wrote no new evidence folder",
     );
-    assert(extraEvidence.result.success, `Extra playtest failed: ${extraEvidence.result.message}`);
     assert(
-      extraEvidence.result.responded,
+      extraStatus.lastPlaytest.responded,
       "Extra playtest did not prove that the game responded to input",
     );
+    assertQualified("after the verifier playtest", extraStatus);
     timeline(
-      `Extra playtest: ${extraEvidence.directory} (${extraEvidence.result.frames.length} frames, ${extraEvidence.result.changedPercent.toFixed(1)}% changed)`,
+      `Extra playtest: ${extraStatus.lastPlaytest.directory} (${extraStatus.lastPlaytest.frames.length} frames, ${extraStatus.lastPlaytest.changedPercent.toFixed(1)}% changed)`,
     );
   }
   if (values.revise) {
@@ -872,10 +763,11 @@ const main = Effect.gen(function* () {
       reviseStatus.design?.status === "approved",
       "Revision turn knocked the design back to draft",
     );
+    assertQualified("after the revision turn", reviseStatus);
     timeline(
       `After revise: webBuildStale=${String(reviseStatus.webBuildStale)}, newest playtest=${
         reviseStatus.lastPlaytest?.directory ?? "none"
-      }`,
+      }, ${stageSummary(reviseStatus)}`,
     );
   }
   if (values["cancel-test"]) {

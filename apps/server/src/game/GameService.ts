@@ -29,7 +29,9 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
-import { isWebBuildStale, webBuildIndex } from "./webBuild.ts";
+import { isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
+import { snapshotSource } from "./sourceSnapshot.ts";
+import * as GameQualification from "./GameQualification.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import {
@@ -128,6 +130,7 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const preview = yield* GamePreview.GamePreview;
   const browser = yield* PreviewBrowser.PreviewBrowser;
+  const qualification = yield* GameQualification.GameQualification;
   const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
   const active = new Map<
     string,
@@ -140,6 +143,17 @@ const make = Effect.gen(function* () {
     // The race interrupts work and awaits its finalizers, including native child exit.
     yield* Deferred.await(operation.done);
   });
+  /**
+   * Operations report failure in more than one shape: action results use
+   * `success`, the Godot check uses `ok`. The shared operation state has to see
+   * both, or a failed check announces success to the stage.
+   */
+  const operationFailed = (result: unknown): boolean => {
+    if (typeof result !== "object" || result === null) return false;
+    if ("success" in result && result.success === false) return true;
+    if ("ok" in result && result.ok === false) return true;
+    return false;
+  };
   const exclusive = <A>(root: string, name: string, work: Effect.Effect<A, GameOperationError>) =>
     Effect.gen(function* () {
       if (active.has(root))
@@ -166,11 +180,7 @@ const make = Effect.gen(function* () {
         ),
         Effect.tap((result) =>
           Effect.sync(() => {
-            const failed =
-              typeof result === "object" &&
-              result !== null &&
-              "success" in result &&
-              result.success === false;
+            const failed = operationFailed(result);
             operations.set(root, {
               name,
               state: failed ? "failed" : "succeeded",
@@ -202,8 +212,29 @@ const make = Effect.gen(function* () {
   const engine = Effect.fnUntraced(function* (root: string) {
     const manifest = yield* projects.read(root);
     const godot = yield* tools.executable("godot");
-    return { godot, cwd: insideGame(root, manifest.godotProject) };
+    return {
+      godot,
+      cwd: insideGame(root, manifest.godotProject),
+      godotProject: manifest.godotProject,
+    };
   });
+  const snapshot = (root: string, godotProject: string) =>
+    Effect.promise(() => snapshotSource(root, godotProject));
+  /**
+   * Qualification is a server-owned record written from actual operation
+   * results. Failing to persist it must not turn a real build into a crash; the
+   * missing stage keeps the game unqualified either way.
+   */
+  const recordQualification = (root: string, input: GameQualification.QualificationRecordInput) =>
+    qualification.record(root, input).pipe(
+      Effect.catchTags({
+        GameOperationError: (error) =>
+          Effect.logWarning("Could not write the game qualification record.", {
+            operation: error.operation,
+            reason: error.reason,
+          }),
+      }),
+    );
   const response = (
     process: GameProcessResult,
     outputPath: string | null = null,
@@ -235,7 +266,28 @@ const make = Effect.gen(function* () {
     );
   });
   const exportGame = Effect.fnUntraced(function* (root: string, target: "Web" | "Linux") {
-    const { godot, cwd } = yield* engine(root);
+    const { godot, cwd, godotProject } = yield* engine(root);
+    // Capture the inputs before the import/export pipeline touches the tree, then
+    // again after: a source edit during the export would otherwise qualify a
+    // mixed build. Only the web build is what players and playtests see, so only
+    // it owns the export stage.
+    const before = yield* snapshot(root, godotProject);
+    const recordExport = (
+      outcome: "passed" | "failed",
+      sourceId: string | null,
+      buildId: string | null,
+    ) =>
+      target === "Web"
+        ? recordQualification(root, {
+            stage: "export",
+            outcome,
+            sourceId,
+            buildId,
+            evidenceDirectory: null,
+          })
+        : Effect.void;
+    const failedSource = (snapshot: typeof before) =>
+      snapshot.kind === "known" ? snapshot.sourceId : null;
     const toolStatus = yield* tools.status;
     const engineStatus = toolStatus.tools.find((tool) => tool.tool === "godot");
     if (!engineStatus?.ready)
@@ -246,7 +298,10 @@ const make = Effect.gen(function* () {
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
     const imported = yield* importGame(root);
-    if (!imported.success) return imported;
+    if (!imported.success) {
+      yield* recordExport("failed", failedSource(before), null);
+      return imported;
+    }
     const output = NodePath.join(
       root,
       target === "Web" ? "builds/web/index.html" : "builds/linux/game.x86_64",
@@ -266,7 +321,10 @@ const make = Effect.gen(function* () {
       }),
       output,
     );
-    if (!result.success) return result;
+    if (!result.success) {
+      yield* recordExport("failed", failedSource(before), null);
+      return result;
+    }
     yield* Effect.tryPromise({
       try: async () => {
         for (const file of target === "Web"
@@ -293,10 +351,21 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+    const after = yield* snapshot(root, godotProject);
+    const stable =
+      before.kind === "known" && after.kind === "known" && before.sourceId === after.sourceId;
+    const finishedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* recordExport(
+      stable ? "passed" : "failed",
+      failedSource(after),
+      stable && after.kind === "known" ? `${after.sourceId}:${finishedAt}` : null,
+    );
     return result;
   });
   const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
-    if (yield* isWebBuildStale(root, (yield* projects.read(root)).godotProject)) {
+    const manifest = yield* projects.read(root);
+    const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
+    if (!isWebBuildFresh(beforePlaytest)) {
       const exported = yield* exportGame(root, "Web");
       if (!exported.success)
         return yield* new GameOperationError({
@@ -342,6 +411,18 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+    // The playtest played whatever export was current before it ran: either the
+    // reused build or the one this call just made.
+    const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
+      (stage) => stage.stage === "export",
+    );
+    yield* recordQualification(root, {
+      stage: "playtest",
+      outcome: result.success ? "passed" : "failed",
+      sourceId: build?.status === "passed" ? build.sourceId : null,
+      buildId: build?.status === "passed" ? build.buildId : null,
+      evidenceDirectory: evidence.directory,
+    });
     return { ...result, evidenceDirectory: evidence.directory };
   });
   /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
@@ -350,7 +431,7 @@ const make = Effect.gen(function* () {
     const temporary = NodePath.join(root, "builds/logs", `godot-check-${NodeCrypto.randomUUID()}`);
     const scriptPath = NodePath.join(temporary, "check.gd");
     const resultPath = NodePath.join(temporary, "result.json");
-    const { godot, cwd } = yield* engine(root);
+    const { godot, cwd, godotProject } = yield* engine(root);
     const imported = yield* importGame(root);
     return yield* Effect.gen(function* () {
       yield* Effect.tryPromise({
@@ -403,12 +484,21 @@ const make = Effect.gen(function* () {
           file: "godot/project.godot",
           message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
         });
-      return {
+      const result = {
         ok: errors.length === 0 && reported !== null && !run.timedOut,
         errors: limitIssues(errors),
         warnings: limitIssues(reported?.warnings ?? []),
         durationMs: (yield* Clock.currentTimeMillis) - startedAt,
       };
+      const source = yield* snapshot(root, godotProject);
+      yield* recordQualification(root, {
+        stage: "check",
+        outcome: result.ok ? "passed" : "failed",
+        sourceId: source.kind === "known" ? source.sourceId : null,
+        buildId: null,
+        evidenceDirectory: null,
+      });
+      return result;
     }).pipe(
       Effect.ensuring(
         Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
@@ -526,6 +616,8 @@ const make = Effect.gen(function* () {
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
       const inventory = yield* projects.inventory(root);
+      const qualificationRead = yield* qualification.read(root, inventory.manifest.godotProject);
+      const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () => readLastPlaytest(root, inventory.builds),
         catch: () =>
@@ -534,10 +626,19 @@ const make = Effect.gen(function* () {
             path: NodePath.join(root, "builds/playtests"),
             reason: "io",
           }),
-      }).pipe(Effect.orElseSucceed(() => null));
+      }).pipe(
+        Effect.orElseSucceed(() => null),
+        // Qualification owns freshness: the newest run is only current when its
+        // recorded source and build still match the game.
+        Effect.map((playtest) =>
+          playtest === null ? null : { ...playtest, stale: playtestStage?.status !== "passed" },
+        ),
+      );
       return {
         root,
         ...inventory,
+        webBuildStale: !isWebBuildFresh(qualificationRead),
+        qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
         previewUrl: preview.url(root),
@@ -561,7 +662,7 @@ const make = Effect.gen(function* () {
     test: (threadId, script, timeoutMs = 60_000) =>
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {
-          const { godot, cwd } = yield* engine(root);
+          const { godot, cwd, godotProject } = yield* engine(root);
           const resolved = yield* Effect.try({
             try: () => insideGame(cwd, script.replace(/^res:\/\//, "")),
             catch: (cause) =>
@@ -580,7 +681,7 @@ const make = Effect.gen(function* () {
               path: script,
               reason: "invalid-path",
             });
-          return response(
+          const result = response(
             yield* processes.run({
               root,
               executable: godot.path,
@@ -589,6 +690,15 @@ const make = Effect.gen(function* () {
               timeoutMs: Math.max(1_000, Math.min(timeoutMs, 300_000)),
             }),
           );
+          const source = yield* snapshot(root, godotProject);
+          yield* recordQualification(root, {
+            stage: "test",
+            outcome: result.success ? "passed" : "failed",
+            sourceId: source.kind === "known" ? source.sourceId : null,
+            buildId: null,
+            evidenceDirectory: null,
+          });
+          return result;
         }),
       ),
     blender: (threadId, input) =>
@@ -771,10 +881,11 @@ const make = Effect.gen(function* () {
           }
           // Play reuses a fresh web build; Rebuild forces a new export. Scenes
           // and scripts can be edited by any provider outside this service, so
-          // the freshness check is the only thing that decides.
+          // the qualification export stage is the only thing that decides.
           const manifest = yield* projects.read(root);
           const needsExport =
-            action === "rebuild" || (yield* isWebBuildStale(root, manifest.godotProject));
+            action === "rebuild" ||
+            !isWebBuildFresh(yield* qualification.read(root, manifest.godotProject));
           if (needsExport) {
             const exported = yield* exportGame(root, "Web");
             if (!exported.success) return exported;

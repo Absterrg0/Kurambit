@@ -37,7 +37,6 @@ import { commandDetail } from "./commandDetail.ts";
 import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { readLastPlaytest } from "./playtestEvidence.ts";
-import { isWebBuildStale } from "./webBuild.ts";
 import { initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
@@ -88,7 +87,6 @@ export class GameProjectService extends Context.Service<
         assets: readonly (GameAsset & { usedBy: string[] })[];
         scenes: string[];
         viewport: GodotViewport;
-        webBuildStale: boolean;
         builds: { target: string; path: string; updatedAt: string }[];
       },
       GameOperationError
@@ -537,7 +535,6 @@ const make = Effect.gen(function* () {
       })),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
-      const webBuildStale = yield* isWebBuildStale(root, manifest.godotProject);
       return yield* Effect.tryPromise({
         try: async () => {
           const engineRoot = insideGame(root, manifest.godotProject);
@@ -609,7 +606,6 @@ const make = Effect.gen(function* () {
             scenes,
             builds,
             viewport,
-            webBuildStale,
           };
         },
         catch: (cause) =>

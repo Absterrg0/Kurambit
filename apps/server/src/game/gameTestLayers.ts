@@ -1,4 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test boundary stubs replace registration and provider execution, never game operations.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
@@ -8,6 +11,18 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as GameQualification from "./GameQualification.ts";
+
+/**
+ * A qualification store under the test's temporary directory. Game operations
+ * in these tests never qualify, so the directory only receives a record when the
+ * test exercises recording explicitly.
+ */
+export function qualificationTestLayer(stateDir?: string) {
+  return GameQualification.layer({
+    stateDir: stateDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-qualification-")),
+  });
+}
 export function previewBrowserTestLayer(
   executable?: string,
   installed = Effect.succeed(Option.fromUndefinedOr(executable)),
