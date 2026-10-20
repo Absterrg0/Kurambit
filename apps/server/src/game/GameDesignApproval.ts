@@ -96,7 +96,7 @@ const writeRecord = async (file: string, record: DesignApprovalRecord) => {
  * skip-planning) is legacy. A creator or agent editing game.json to "approved"
  * therefore cannot pass a plan-first game.
  */
-export const deriveDesignState = (input: {
+const deriveDesignState = (input: {
   readonly record: DesignApprovalRecord | null;
   readonly currentHash: string | null;
   readonly manifestDesign: GameManifest["design"];

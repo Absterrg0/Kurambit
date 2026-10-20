@@ -27,7 +27,7 @@ export const GameAcceptanceCriterion = Schema.Struct({
 });
 export type GameAcceptanceCriterion = typeof GameAcceptanceCriterion.Type;
 
-export const GAME_ACCEPTANCE_HEADING = "Acceptance";
+const GAME_ACCEPTANCE_HEADING = "Acceptance";
 const kindNames = "mechanic, content, end or control";
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const keyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
