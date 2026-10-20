@@ -98,6 +98,9 @@ const withFixture = <A, E, R>(
             inventory: () =>
               Effect.succeed({
                 manifest,
+                design: null,
+                designPath: null,
+                briefPath: null,
                 assets: [],
                 scenes: [],
                 builds: [],

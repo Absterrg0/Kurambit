@@ -88,7 +88,7 @@ export function GameDesignPanel({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div className="min-h-0 flex-1 overflow-auto scrollbar-gutter-both">
       <div className="mx-auto flex w-full max-w-4xl flex-wrap items-start gap-3 px-6 pt-5">
         <div className="min-w-0 flex-1">
           {draft ? (
@@ -147,7 +147,11 @@ export function GameDesignPanel({
             </Button>
           ) : null}
           {draft ? (
-            <Button size="sm" disabled={!canOperate || turnRunning || approving} onClick={approve}>
+            <Button
+              size="sm"
+              disabled={!canOperate || turnRunning || approving}
+              onClick={() => void approve()}
+            >
               {approving ? "Approving…" : "Approve & build"}
             </Button>
           ) : null}
@@ -179,10 +183,13 @@ export function GameDesignPanel({
       ) : (
         <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
           <FileTextIcon className="size-5 text-muted-foreground" aria-hidden="true" />
-          <p className="text-sm font-medium">The agent is drafting the design</p>
+          <p className="text-sm font-medium">
+            {draft ? "The agent is drafting the design" : "No design document"}
+          </p>
           <p className="max-w-sm text-xs text-muted-foreground">
-            DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it
-            here before building.
+            {draft
+              ? "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
+              : "This game has no DESIGN.md yet. Ask the agent to write one in chat."}
           </p>
           <Button size="xs" variant="ghost" onClick={design.refresh}>
             Refresh
@@ -190,25 +197,27 @@ export function GameDesignPanel({
         </div>
       )}
       {briefContents ? (
-        <Collapsible className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
-          <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-sm font-medium">
-            <ChevronRightIcon
-              className="size-3.5 transition-transform group-data-panel-open:rotate-90"
-              aria-hidden="true"
-            />
-            Brief
-            <span className="text-xs font-normal text-muted-foreground">BRIEF.md</span>
-          </CollapsibleTrigger>
-          <CollapsiblePanel>
-            <ChatMarkdown
-              text={briefContents}
-              cwd={status.root}
-              imageBaseDir={status.root}
-              threadRef={threadRef}
-              className="pt-3"
-            />
-          </CollapsiblePanel>
-        </Collapsible>
+        <div className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
+          <Collapsible>
+            <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-sm font-medium">
+              <ChevronRightIcon
+                className="size-3.5 transition-transform group-data-panel-open:rotate-90"
+                aria-hidden="true"
+              />
+              Brief
+              <span className="text-xs font-normal text-muted-foreground">BRIEF.md</span>
+            </CollapsibleTrigger>
+            <CollapsiblePanel>
+              <ChatMarkdown
+                text={briefContents}
+                cwd={status.root}
+                imageBaseDir={status.root}
+                threadRef={threadRef}
+                className="pt-3"
+              />
+            </CollapsiblePanel>
+          </Collapsible>
+        </div>
       ) : null}
     </div>
   );
