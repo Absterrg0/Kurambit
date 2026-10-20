@@ -43,7 +43,7 @@ import { GameBuildsPanel } from "./GameBuildsPanel";
 import { GameDesignPanel } from "./GameDesignPanel";
 import { GameElapsed } from "./GameElapsed";
 import { GamePlaySurface } from "./GamePlaySurface";
-import { buildFailurePrompt, deriveGameStagePhase } from "./gameStageLogic";
+import { buildFailurePrompt, deriveGameStagePhase, gamePreviewFrameKey } from "./gameStageLogic";
 
 type GameStageTab = "design" | "play" | "assets" | "builds";
 
@@ -211,7 +211,11 @@ export function GameStage({
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
   // Reload the iframe only when the served preview or the export it came from
   // changes; a tab switch must not restart the game.
-  const frameKey = `${data.previewUrl ?? ""}#${data.qualification.buildId ?? webBuild?.updatedAt ?? ""}`;
+  const frameKey = gamePreviewFrameKey({
+    previewUrl: data.previewUrl,
+    buildId: data.qualification.buildId,
+    buildUpdatedAt: webBuild?.updatedAt ?? null,
+  });
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
     if (busy !== null && stageAction !== "stop") return;

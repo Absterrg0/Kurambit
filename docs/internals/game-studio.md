@@ -102,14 +102,30 @@ track.
 
 The stage letterboxes the preview to the design resolution in `godot/project.godot`, which
 `game_status` reports, and loads the loopback URL in a sandboxed iframe instead of the browser
-panel: the game is a surface of the app, not a tab in it. Play reuses an existing build only while
-its export stage is current for the game's sources and otherwise exports first; Rebuild always
-exports. The source snapshot and the build identity it produced live in the qualification record
+panel: the game is a surface of the app, not a tab in it. The stage stays mounted across the
+Design, Assets and Builds workspace tabs and is hidden with `display: none` rather than unmounted:
+unmounting recreated the iframe and killed the run, while hiding reports the document as hidden,
+which is the signal the Godot web shell pauses and mutes on. The iframe's identity is the preview
+URL plus the qualified build; a tab switch does not change it, and only Stop, a deliberate restart
+or a new build may reset the game. Play reuses an existing build only while its export stage is
+current for the game's sources and otherwise exports first; Rebuild always exports. The source snapshot and the build identity it produced live in the qualification record
 (`GameQualification.ts`), so a missing, stale, failed or unknown export is never served as current.
 
 ## Qualification is server-owned
 
 `GameService` writes a qualification record after each real check, test, web export and playtest.
+Every game operation also publishes a start and finish/failure/cancellation event on the
+`subscribeGameEvents` websocket stream. The Stage subscribes through the game status atom's
+`refreshTrigger`, so a stage opened while the agent is idle learns about a later build without
+polling; the status query keeps only a ten-second fallback timer while an operation is running.
+The games library does not use that exact read: `GameSummary` carries a qualification summary
+derived from the record alone plus the record's write time (`Qualified as of …`), the server-owned
+design state and the last operation. The Stage remains the place that re-checks the sources; a
+library row can say qualified for sources that changed since, which is why the time is shown.
+Status also separates the cheap reads (operation, design state, qualification) from the inventory
+(asset usage, scenes, viewport): the inventory is cached by the qualification source snapshot, and
+only game.json's asset list can invalidate it in between, so a refresh no longer walks and reads
+the whole `godot/` tree.
 The record lives under the server's `stateDir` (`game-qualification/`), never inside the game, and
 each stage stores its outcome, the source snapshot it covered, and for exports and playtests the
 build identity. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
@@ -145,15 +161,25 @@ every step and at the end, and reports `state: { before, after }` with a short d
 `collected 0→2, player moved 312`. Movement and state changes are measured only between samples
 that have a player, so starting the game from its menu is not mistaken for play; clocks
 (`run_seconds`, `best_seconds`) never count. A run with a probe records a passed `playtest` stage
-only when the player moved or a numeric GameState value changed. Games created before the probe
-keep the pixel rule, and the result says `no state probe`. When the approved design has `observe`
+only when the player moved or a numeric GameState value changed. The creation record is
+authoritative about the obligation: templates declare `probe: true` in `template.json`, the
+scaffold copies it into `game.json` and the server-owned design-intent record, and a game whose
+record requires the probe fails its playtest stage with "StudioProbe missing — restore
+scripts/studio_probe.gd autoload" when no probe can be read. Games created before probe
+enforcement keep the pixel rule, and the result says `no state probe`. When the approved design has `observe`
 criteria, the result also lists the ones this run happened to satisfy; that list is informational
 and the scenario runner still gates the `state` stage. The tool keeps a boot-only smoke result
 useful, but only a run that was given input steps, succeeded, responded and (with a probe) showed
 gameplay records a pass; anything else records a failure with that reason in the tool result. Each
 run is kept under `builds/playtests/<timestamp>/` as frames plus a `result.json` with the steps,
 console, probe snapshot and verdict; the newest five are kept, and `game_status` (and the Builds
-tab) reports the last run and whether the web build has been rebuilt since. Screenshots are
+tab) reports the last run and whether the web build has been rebuilt since. Capture is bounded
+before the browser launches: width and height 320–1920, one step at most 10 s, the step sequence at
+most 120 s, at most 60 steps and 12 screenshots, and a boot timeout at most 120 s. The response
+carries at most 6 MB of PNG data; frames over that budget stay on disk as evidence and the result
+names how many were dropped. The library cover prefers a screenshot taken after the first step of
+a successful run, then its after-steps frame, then an asset thumbnail, so a menu or loading frame
+never covers a game. Screenshots are
 evidence of what happened, not a substitute for a gameplay assertion, which stays in the headless
 smoke test. Only the suite named by `game.json`'s `testSuite` (templates set
 `res://tests/smoke_test.gd`) owns the `test` stage; other scripts still run as diagnostics but

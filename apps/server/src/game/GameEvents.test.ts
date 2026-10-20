@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -102,7 +103,7 @@ exit 0
     }),
   );
 
-const takeEvents = (queue: Queue.Queue<GameOperationEvent>) => Queue.takeAll(queue);
+const takeEvents = (queue: Queue.Dequeue<GameOperationEvent, Cause.Done>) => Queue.takeAll(queue);
 
 it.live("publishes the start and the success of a game operation", () =>
   withFixture({}, ({ game }) =>

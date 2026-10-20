@@ -200,10 +200,13 @@ const deriveQualificationSummary = (
     .flatMap((stage) => (stage === undefined ? [] : [stage.finishedAt]))
     .sort()
     .at(-1);
-  const recorded = record === null ? [] : RECORDED_QUALIFICATION_STAGES;
   if (record === null) return { state: "unqualified", asOf: null };
-  const passed = recorded.every((stage) => record.stages[stage]?.outcome === "passed");
-  const sourceIds = new Set(recorded.map((stage) => record.stages[stage]?.sourceId ?? null));
+  const passed = RECORDED_QUALIFICATION_STAGES.every(
+    (stage) => record.stages[stage]?.outcome === "passed",
+  );
+  const sourceIds = new Set(
+    RECORDED_QUALIFICATION_STAGES.map((stage) => record.stages[stage]?.sourceId ?? null),
+  );
   const exportBuild = record.stages.export?.buildId ?? null;
   const playtestBuild = record.stages.playtest?.buildId ?? null;
   const designBound = (record.stages.state?.designHash ?? null) === designHash;

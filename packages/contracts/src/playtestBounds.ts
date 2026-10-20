@@ -1,26 +1,6 @@
-import type { GamePlaytestStep, GameWebPlaytestInput } from "./game.ts";
+import { GAME_PLAYTEST_BOUNDS, type GamePlaytestStep, type GameWebPlaytestInput } from "./game.ts";
 
-/**
- * The capture envelope. A routine agent mistake must not hold the game's
- * operation lock for hours, allocate a huge result, or push an oversized frame
- * over the websocket: these are the most one run may ask for.
- */
-export const GAME_PLAYTEST_BOUNDS = {
-  minDimension: 320,
-  maxDimension: 1920,
-  /** One key hold, wait, or mouse move may not take longer than this. */
-  maxStepMs: 10_000,
-  /** The whole step sequence, waits included. */
-  maxSequenceMs: 120_000,
-  maxSteps: 60,
-  maxScreenshotSteps: 12,
-  maxBootTimeoutMs: 120_000,
-  /**
-   * Aggregate PNG bytes returned to the caller. Frames above this budget stay
-   * on disk as evidence and are dropped from the response with a note.
-   */
-  maxResultImageBytes: 6 * 1024 * 1024,
-} as const;
+export { GAME_PLAYTEST_BOUNDS };
 
 const durationMs = (step: GamePlaytestStep) => {
   if ("waitMs" in step) return step.waitMs;

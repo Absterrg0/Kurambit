@@ -465,11 +465,46 @@ export const GamePlaytestScreenshot = Schema.Struct({
   height: Schema.Number,
 });
 export type GamePlaytestScreenshot = typeof GamePlaytestScreenshot.Type;
+/**
+ * The capture envelope. A routine agent mistake must not hold the game's
+ * operation lock for hours, allocate a huge result, or push an oversized frame
+ * over the websocket. Step counts, per-step and total durations are enforced by
+ * `playtestInputIssues` because they span the whole sequence.
+ */
+export const GAME_PLAYTEST_BOUNDS = {
+  minDimension: 320,
+  maxDimension: 1920,
+  maxStepMs: 10_000,
+  maxSequenceMs: 120_000,
+  maxSteps: 60,
+  maxScreenshotSteps: 12,
+  maxBootTimeoutMs: 120_000,
+  /** Aggregate PNG bytes returned to the caller; the rest stay as evidence. */
+  maxResultImageBytes: 6 * 1024 * 1024,
+} as const;
 export const GameWebPlaytestInput = Schema.Struct({
   steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
-  width: Schema.optionalKey(Schema.Number),
-  height: Schema.optionalKey(Schema.Number),
-  bootTimeoutMs: Schema.optionalKey(Schema.Number),
+  width: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isBetween({
+        minimum: GAME_PLAYTEST_BOUNDS.minDimension,
+        maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
+      }),
+    ),
+  ),
+  height: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isBetween({
+        minimum: GAME_PLAYTEST_BOUNDS.minDimension,
+        maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
+      }),
+    ),
+  ),
+  bootTimeoutMs: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),
+    ),
+  ),
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
 /** One primitive GameState value the StudioProbe reports. */

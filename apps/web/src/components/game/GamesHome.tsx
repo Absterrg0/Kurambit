@@ -17,6 +17,7 @@ import type { EnvironmentId, GameSummary, GameTemplateId } from "@t3tools/contra
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { useGameDialogStore } from "./gameDialogStore";
 import {
@@ -252,12 +253,16 @@ function GameCard({
         )}
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/0" />
         {progress.kind === "qualified" ? null : (
-          <span
-            title={progress.detail}
-            className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm"
-          >
-            {progress.label}
-          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm" />
+              }
+            >
+              {progress.label}
+            </TooltipTrigger>
+            <TooltipPopup>{progress.detail}</TooltipPopup>
+          </Tooltip>
         )}
         <span className="absolute bottom-3 left-3 flex items-center gap-1.5 text-2xs font-medium text-white/90 drop-shadow">
           <Gamepad2Icon className="size-3.5" aria-hidden />

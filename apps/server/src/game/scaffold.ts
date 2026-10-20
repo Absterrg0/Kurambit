@@ -162,7 +162,7 @@ Finish every build turn to this bar, then report to the user and end the turn:
 2. game_godot_test passes with your smoke test.
 3. game_scenarios_run passes every observable acceptance criterion and at least one \`end\` criterion, with the player actually moving; every route starts from the menu and wins under normal input.
 4. A web build exists for the final sources (game_web_playtest exports one when the build is stale).
-5. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true). The templates ship a read-only StudioProbe, so the playtest must also see the player move or a GameState value change; keep the probe and extend GameState instead of replacing it.
+5. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true). The templates ship a read-only StudioProbe, so the playtest must also see the player move or a GameState value change; keep the probe and extend GameState instead of replacing it. Deleting scripts/studio_probe.gd or its autoload entry fails the playtest stage outright for a template game.
 6. game_status reports qualification "qualified": check, test, export, playtest and state all passed for the current sources. Any edit after a stage makes that stage stale, so rerun it; never edit game files after the final playtest.
 7. game_preview returns the playable URL; report it with the test results.
 

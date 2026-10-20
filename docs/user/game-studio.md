@@ -51,6 +51,13 @@ game is unqualified until you review the new scope and choose **Re-approve desig
 updates the contract without starting another build turn; the agent is told to put scope changes in
 `DESIGN.md` and ask for that review instead of quietly dropping a criterion.
 
+Each game card and sidebar row says what the game actually is: **Design draft** before approval,
+**Building** while an agent operation runs, **Design changed** when an edit needs review, and
+**Qualified as of …** once the server's record shows the check, test, web export, playtest and
+state scenarios passed. The time matters: it is when the record was written, and the Stage re-checks
+the current files when you open the game. A card's cover is a frame of the game being played from
+its last successful run, not its menu.
+
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
 empty one. The sidebar keeps one row per game; use its sessions button to reach older sessions or
@@ -64,7 +71,9 @@ its right.
 - **Play** builds the web version when it is missing or older than the game's files, then plays it
   in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
   it, and use **Fullscreen** to give it the whole screen. The line beside the game name says what the
-  stage is doing — playing, building, or waiting for a rebuild.
+  stage is doing — playing, building, or waiting for a rebuild. Opening **Design**, **Assets** or
+  **Builds** keeps the game running; it pauses and mutes while hidden and resumes when you come
+  back. Only **Stop**, a rebuild that lands a new build, or pressing Play again starts a new session.
 - **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
   the stage says so and offers to rebuild.
 - **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio

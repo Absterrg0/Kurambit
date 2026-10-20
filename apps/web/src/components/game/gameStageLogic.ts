@@ -57,3 +57,16 @@ export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
 export function buildFailurePrompt(error: string): string {
   return `The web preview build failed. Fix the error and rebuild the game.\n\n${error.trim()}`;
 }
+
+/**
+ * The iframe's identity. A tab switch must not change it, or the game restarts;
+ * a Stop removes the preview and a new build (or a newly served export) changes
+ * the identity, which is the one intended reset.
+ */
+export function gamePreviewFrameKey(input: {
+  previewUrl: string | null;
+  buildId: string | null;
+  buildUpdatedAt: string | null;
+}): string {
+  return `${input.previewUrl ?? ""}#${input.buildId ?? input.buildUpdatedAt ?? ""}`;
+}

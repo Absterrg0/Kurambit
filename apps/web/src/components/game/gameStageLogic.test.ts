@@ -1,6 +1,11 @@
 import { expect, it } from "vite-plus/test";
 
-import { buildFailurePrompt, deriveGameStagePhase, type GameStageInput } from "./gameStageLogic";
+import {
+  buildFailurePrompt,
+  deriveGameStagePhase,
+  gamePreviewFrameKey,
+  type GameStageInput,
+} from "./gameStageLogic";
 
 const BASE: GameStageInput = {
   toolchainReady: true,
@@ -128,4 +133,23 @@ it("carries the error into the message it asks the agent to fix", () => {
     "ERROR: Parse Error at main.gd",
   );
   expect(buildFailurePrompt("boom")).toContain("Fix the error and rebuild the game.");
+});
+
+it("keeps the preview identity across tabs and changes it for a new build or a stop", () => {
+  const playing = {
+    previewUrl: "http://127.0.0.1:9/index.html",
+    buildId: "source:first",
+    buildUpdatedAt: "2026-10-20T04:00:00.000Z",
+  };
+  const key = gamePreviewFrameKey(playing);
+  // A tab switch re-renders the stage with the same data: no reload.
+  expect(gamePreviewFrameKey({ ...playing })).toBe(key);
+  // A new export (even with the same mtime second) is a new identity.
+  expect(gamePreviewFrameKey({ ...playing, buildId: "source:second" })).not.toBe(key);
+  // Stop clears the preview; Play again starts a fresh session.
+  expect(gamePreviewFrameKey({ ...playing, previewUrl: null })).not.toBe(key);
+  // Builds without a qualification record still reset on the artifact time.
+  expect(
+    gamePreviewFrameKey({ ...playing, buildId: null, buildUpdatedAt: "2026-10-20T05:00:00.000Z" }),
+  ).not.toBe(gamePreviewFrameKey({ ...playing, buildId: null }));
 });
