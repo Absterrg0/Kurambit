@@ -20,8 +20,12 @@ export const GameTemplate = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   dimension: Schema.Literals(["2d", "3d"]),
+  /** The game-relative suite whose pass is the game's qualification test. */
+  testSuite: Schema.String,
 });
 export type GameTemplate = typeof GameTemplate.Type;
+/** The suite a game qualifies with unless its manifest names another one. */
+export const DEFAULT_GAME_TEST_SUITE = "res://tests/smoke_test.gd";
 /**
  * The starter templates the New game dialog offers. Template files live under
  * apps/server/templates/<id>/; a server test keeps this list and those folders in step.
@@ -33,6 +37,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     description:
       "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
     dimension: "3d",
+    testSuite: DEFAULT_GAME_TEST_SUITE,
   },
   {
     id: "2d-platformer",
@@ -40,12 +45,14 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     description:
       "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
     dimension: "2d",
+    testSuite: DEFAULT_GAME_TEST_SUITE,
   },
   {
     id: "blank",
     name: "Blank",
     description: "An empty Godot project: a camera, a light, and Web and Linux export presets.",
     dimension: "3d",
+    testSuite: DEFAULT_GAME_TEST_SUITE,
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
@@ -65,6 +72,9 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
+  // Games created before the canonical-suite rule have no testSuite and default
+  // to DEFAULT_GAME_TEST_SUITE.
+  testSuite: Schema.optionalKey(Schema.String),
   // Games created before the design step existed have no design key.
   design: Schema.optionalKey(GameDesign),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
@@ -73,6 +83,9 @@ export const GameManifest = Schema.Struct({
 });
 export type GameManifest = typeof GameManifest.Type;
 export type GameAsset = typeof GameAsset.Type;
+/** The suite that owns the `test` qualification stage for this game. */
+export const gameTestSuite = (manifest: GameManifest): string =>
+  manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE;
 export class GameOperationError extends Schema.TaggedError<GameOperationError>()(
   "GameOperationError",
   {

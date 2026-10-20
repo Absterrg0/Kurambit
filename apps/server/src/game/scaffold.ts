@@ -1,5 +1,6 @@
 import {
   DEFAULT_GAME_TEMPLATE,
+  DEFAULT_GAME_TEST_SUITE,
   GAME_TEMPLATES,
   type GameCreateInput,
   type GameManifest,
@@ -86,7 +87,8 @@ export function initialGamePrompt(input: GameCreateInput): string {
  */
 export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const template = input.template ?? DEFAULT_GAME_TEMPLATE;
-  const templateName = GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? template;
+  const templateEntry = GAME_TEMPLATES.find((entry) => entry.id === template);
+  const templateName = templateEntry?.name ?? template;
   const planFirst = input.planFirst !== false;
   const manifest: GameManifest = {
     schemaVersion: 1,
@@ -94,6 +96,7 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     brief: input.brief,
     artDirection: input.artDirection ?? "",
     template,
+    testSuite: templateEntry?.testSuite ?? DEFAULT_GAME_TEST_SUITE,
     design: planFirst ? { status: "draft" } : { status: "approved" },
     engine: { name: "godot", version: "4.7.2" },
     godotProject: "godot",
@@ -129,7 +132,7 @@ Use game_blender_run with a stable asset id and bpy script to create or revise a
 
 Use game_godot_import after each asset transfer or engine change. Assemble scenes and GDScript files using your normal file tools. Fix every import and GDScript parse error. Use game_godot_check for a fast static and boot check: it loads every script and scene, runs the main scene briefly, and reports errors with file:line. Use game_scene_inspect to dump a scene's node tree when wiring is wrong.
 
-Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. A screenshot is not a gameplay test.
+Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. game.json's testSuite names the canonical suite (res://tests/smoke_test.gd); only a pass of that suite records the test stage that qualification reads, so other scripts are diagnostics and cannot qualify the game. A screenshot is not a gameplay test.
 
 Use game_export with target Web or Linux for real builds and real import/export errors. Use game_web_playtest for the final web check: it loads the real export in a headless browser, runs your steps, compares the boot and after-steps frames, and returns a verdict, screenshots, evidence and console errors. Use game_run_native for an interactive native run and game_stop to terminate only this game's managed processes and preview server. Each tool returns real output or an actionable error with a log path.
 

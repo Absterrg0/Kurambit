@@ -2,5 +2,6 @@
   "id": "blank",
   "name": "Blank",
   "description": "An empty Godot project: a camera, a light, and Web and Linux export presets.",
-  "dimension": "3d"
+  "dimension": "3d",
+  "testSuite": "res://tests/smoke_test.gd"
 }

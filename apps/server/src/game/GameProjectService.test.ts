@@ -187,6 +187,8 @@ it.effect(
             ]);
             // The template survives a manifest re-encode (upsertAsset above).
             expect((yield* projects.read(game.root)).template).toBe(DEFAULT_GAME_TEMPLATE);
+            // The canonical suite is copied from the template metadata.
+            expect((yield* projects.read(game.root)).testSuite).toBe("res://tests/smoke_test.gd");
             const processes = yield* GameProcesses.GameProcesses;
             const commit = yield* processes.run({
               root: game.root,
@@ -554,6 +556,12 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
       Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-skip-design-"))),
       (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
     );
+    const stateDir = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-skip-design-state-")),
+      ),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
     let launch: ThreadLaunchService.ThreadLaunchInput | undefined;
     const created = yield* Effect.scoped(
       Effect.gen(function* () {
@@ -572,6 +580,7 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
             projectTestLayer((input) => {
               launch = input;
             }),
+            stateDir,
           ),
         ),
       ),
@@ -579,9 +588,67 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
     expect(created.inventory.manifest.design).toEqual({ status: "approved" });
     expect(created.inventory.designPath).toBeNull();
     expect(created.inventory.briefPath).toBe("BRIEF.md");
+    // Skip planning is an explicit server-owned decision, not a missing record.
+    expect(
+      yield* Effect.promise(() =>
+        GameDesignApproval.readDesignIntent(
+          GameDesignApproval.designIntentFile(stateDir, created.game.root),
+        ),
+      ),
+    ).toBe("skipped");
     expect(launch?.initialMessage?.text).toContain("Build a playable game");
     expect(launch?.initialMessage?.text).not.toContain("DESIGN.md");
     expect(yield* exists(NodePath.join(created.game.root, "DESIGN.md"))).toBe(false);
+  }),
+);
+
+it.effect("deleting DESIGN.md on a plan-first game reads draft, not legacy", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-missing-design-")),
+      ),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-missing-design-state-")),
+      ),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        expect(
+          yield* Effect.promise(() =>
+            GameDesignApproval.readDesignIntent(
+              GameDesignApproval.designIntentFile(stateDir, created.root),
+            ),
+          ),
+        ).toBe("required");
+        yield* Effect.promise(() => NodeFSP.rm(NodePath.join(created.root, "DESIGN.md")));
+        // A raw manifest edit to approved is the old forged-legacy route.
+        const manifestFile = NodePath.join(created.root, "game.json");
+        const raw = JSON.parse(yield* readFile(manifestFile)) as Record<string, unknown>;
+        raw.design = { status: "approved", approvedAt: "2026-10-20T00:00:00.000Z" };
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(manifestFile, `${JSON.stringify(raw, null, 2)}\n`),
+        );
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("draft");
+        expect(status.design.issues.join("\n")).toContain("DESIGN.md is missing");
+        expect(status.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
+          "failed",
+        );
+      }).pipe(Effect.provide(gameServiceLayers({ stateDir }))),
+    );
   }),
 );
 

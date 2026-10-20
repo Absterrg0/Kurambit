@@ -298,6 +298,10 @@ const make = Effect.gen(function* () {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
+        // The creation-time design promise lives outside the workspace. Without
+        // it, deleting DESIGN.md or editing game.json could pass a plan-first
+        // game as legacy.
+        yield* approvals.recordIntent(root, input.planFirst === false ? "skipped" : "required");
         for (const args of [
           ["init"],
           ["add", "."],

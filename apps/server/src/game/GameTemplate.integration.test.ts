@@ -80,11 +80,11 @@ const templatesInstalled = (() => {
 })();
 const available =
   NodeFS.existsSync(godotExecutable) && browserExecutable !== null && templatesInstalled;
-// Evidence the playtest frames are read from: the orchestrator inspects these files.
-const evidenceDirectories: Record<GameTemplateId, string> = {
-  "3d-explorer": "/home/abstergo/Programming/Projects/game-studio-orch/t16-shots",
-  "2d-platformer": "/home/abstergo/Programming/Projects/game-studio-orch/t17-shots",
-  blank: "/home/abstergo/Programming/Projects/game-studio-orch/blank-shots",
+// Evidence is per-test scratch space unless the caller asks to retain it at a
+// stable destination for review.
+const evidenceDirectoryFor = (parent: string, template: GameTemplateId) => {
+  const retained = process.env.GAME_STUDIO_EVIDENCE_DIR?.trim();
+  return retained ? NodePath.join(retained, template) : NodePath.join(parent, "evidence");
 };
 
 interface TemplateJourney {
@@ -112,6 +112,9 @@ const templateJourney = (journey: TemplateJourney) =>
     const parent = yield* Effect.promise(() =>
       NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-studio-template-")),
     );
+    const evidenceDirectory = evidenceDirectoryFor(parent, journey.template);
+    // Created before the first write: a fresh evidence destination must work.
+    yield* Effect.promise(() => NodeFSP.mkdir(evidenceDirectory, { recursive: true }));
     const dependencies = GameService.layer.pipe(
       Layer.provideMerge(GameProjectService.layer),
       Layer.provideMerge(GameToolchain.layer),
@@ -124,7 +127,6 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );
-    const evidenceDirectory = evidenceDirectories[journey.template];
     try {
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -195,7 +197,6 @@ const templateJourney = (journey: TemplateJourney) =>
                 ),
               );
           }
-          yield* Effect.promise(() => NodeFSP.mkdir(evidenceDirectory, { recursive: true }));
           for (const shot of playtest.screenshots) {
             yield* Effect.promise(() =>
               NodeFSP.writeFile(

@@ -160,8 +160,8 @@ export function validateDesignDocument(input: {
   readonly skeleton: string;
 }): DesignValidation {
   const { design, skeleton } = input;
-  if (design === null || design.trim() === "")
-    return { issues: ["DESIGN.md is missing or empty."], acceptance: [] };
+  if (design === null) return { issues: ["DESIGN.md is missing."], acceptance: [] };
+  if (design.trim() === "") return { issues: ["DESIGN.md is empty."], acceptance: [] };
   const issues: string[] = [];
   const headings = skeleton
     .split(/\r?\n/)

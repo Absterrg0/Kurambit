@@ -2,7 +2,9 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This module owns the browser process and the raw DevTools WebSocket boundary.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import {
   GameOperationError,
   type GameConsoleMessage,
@@ -579,3 +581,16 @@ export const playtest = (
     (profileDirectory) =>
       Effect.promise(() => NodeFSP.rm(profileDirectory, { recursive: true, force: true })),
   );
+
+/**
+ * The playtest seam. Production runs the real browser; service tests provide a
+ * fake through `layerOf` so qualification rules stay deterministic without Chrome.
+ */
+export class GamePlaytest extends Context.Service<
+  GamePlaytest,
+  { readonly run: typeof playtest }
+>()("t3/game/GameWebPlaytest/GamePlaytest") {}
+
+export const layer = Layer.succeed(GamePlaytest, GamePlaytest.of({ run: playtest }));
+export const layerOf = (run: typeof playtest) =>
+  Layer.succeed(GamePlaytest, GamePlaytest.of({ run }));

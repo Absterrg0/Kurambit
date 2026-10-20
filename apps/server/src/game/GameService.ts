@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  gameTestSuite,
   type GameCheckResult,
   type GameSceneInspectResult,
   type GameStatus,
@@ -134,6 +135,7 @@ const make = Effect.gen(function* () {
   const browser = yield* PreviewBrowser.PreviewBrowser;
   const qualification = yield* GameQualification.GameQualification;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
+  const playtest = yield* GameWebPlaytest.GamePlaytest;
   const operations = new Map<string, NonNullable<GameStatus["operation"]>>();
   const active = new Map<
     string,
@@ -399,7 +401,7 @@ const make = Effect.gen(function* () {
           }),
       ),
     );
-    const result = yield* GameWebPlaytest.playtest({
+    const result = yield* playtest.run({
       executable,
       url,
       profileDirectory: NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`),
@@ -428,14 +430,23 @@ const make = Effect.gen(function* () {
     const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
       (stage) => stage.stage === "export",
     );
+    // The tool may report a boot smoke result with no steps; only a scripted run
+    // that visibly responded proves anything about gameplay.
+    const qualifies = (input.steps?.length ?? 0) > 0 && result.success && result.responded;
     yield* recordQualification(root, {
       stage: "playtest",
-      outcome: result.success ? "passed" : "failed",
+      outcome: qualifies ? "passed" : "failed",
       sourceId: build?.status === "passed" ? build.sourceId : null,
       buildId: build?.status === "passed" ? build.buildId : null,
       evidenceDirectory: evidence.directory,
     });
-    return { ...result, evidenceDirectory: evidence.directory };
+    return {
+      ...result,
+      message: qualifies
+        ? result.message
+        : `${result.message} Qualification: a qualifying playtest needs input steps and a visible response.`,
+      evidenceDirectory: evidence.directory,
+    };
   });
   /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
   const checkGame = Effect.fnUntraced(function* (root: string) {
@@ -683,6 +694,8 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {
           const { godot, cwd, godotProject } = yield* engine(root);
+          const manifest = yield* projects.read(root);
+          const suite = gameTestSuite(manifest);
           const resolved = yield* Effect.try({
             try: () => insideGame(cwd, script.replace(/^res:\/\//, "")),
             catch: (cause) =>
@@ -711,14 +724,24 @@ const make = Effect.gen(function* () {
             }),
           );
           const source = yield* snapshot(root, godotProject);
-          yield* recordQualification(root, {
-            stage: "test",
-            outcome: result.success ? "passed" : "failed",
-            sourceId: source.kind === "known" ? source.sourceId : null,
-            buildId: null,
-            evidenceDirectory: null,
-          });
-          return result;
+          // Only the game's canonical suite owns the test stage; any other script
+          // is a diagnostic run and must not make the game look qualified.
+          const ran = NodePath.relative(cwd, resolved).split(NodePath.sep).join("/");
+          const canonical = suite.replace(/^res:\/\//, "").replaceAll("\\", "/");
+          if (ran === canonical) {
+            yield* recordQualification(root, {
+              stage: "test",
+              outcome: result.success ? "passed" : "failed",
+              sourceId: source.kind === "known" ? source.sourceId : null,
+              buildId: null,
+              evidenceDirectory: null,
+            });
+            return result;
+          }
+          return {
+            ...result,
+            message: `${result.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
+          };
         }),
       ),
     blender: (threadId, input) =>
@@ -928,4 +951,7 @@ const make = Effect.gen(function* () {
     }),
   });
 });
-export const layer = Layer.effect(GameService, make);
+export const layer = Layer.effect(GameService, make).pipe(Layer.provide(GameWebPlaytest.layer));
+/** Tests inject a fake browser run; production uses the real playtest. */
+export const layerWithPlaytest = (run: typeof GameWebPlaytest.playtest) =>
+  Layer.effect(GameService, make).pipe(Layer.provide(GameWebPlaytest.layerOf(run)));

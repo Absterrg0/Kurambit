@@ -30,6 +30,26 @@ export interface DesignApprovalRecord {
   readonly approvedAt: string;
   readonly acceptance: readonly GameAcceptanceCriterion[];
 }
+/**
+ * What the server promised at creation: a plan-first game owes a reviewable
+ * DESIGN.md, a skip-planning game explicitly skips it. Written once, outside the
+ * workspace, so deleting DESIGN.md or editing game.json cannot turn a plan-first
+ * game into a legacy one.
+ */
+export type GameDesignIntent = "required" | "skipped";
+interface DesignIntentRecord {
+  readonly schemaVersion: 1;
+  readonly game: string;
+  readonly intent: GameDesignIntent;
+}
+const StoredIntent = Schema.fromJsonString(
+  Schema.Struct({
+    schemaVersion: Schema.Literal(1),
+    game: Schema.String,
+    intent: Schema.Literals(["required", "skipped"]),
+  }),
+);
+const decodeStoredIntent = Schema.decodeUnknownSync(StoredIntent);
 const StoredRecord = Schema.fromJsonString(
   Schema.Struct({
     schemaVersion: Schema.Literal(1),
@@ -67,6 +87,11 @@ const recordPath = (stateDir: string, root: string) => {
   const digest = NodeCrypto.createHash("sha256").update(normalised).digest("hex").slice(0, 32);
   return NodePath.join(stateDir, "game-design", `${digest}.json`);
 };
+const intentPath = (stateDir: string, root: string) => {
+  const normalised = NodePath.resolve(root);
+  const digest = NodeCrypto.createHash("sha256").update(normalised).digest("hex").slice(0, 32);
+  return NodePath.join(stateDir, "game-design", `${digest}.intent.json`);
+};
 
 export const readDesignApprovalRecord = async (
   file: string,
@@ -75,6 +100,14 @@ export const readDesignApprovalRecord = async (
     return decodeStoredRecord(await NodeFSP.readFile(file, "utf8"));
   } catch {
     // A record that cannot be read proves nothing; it must never become a pass.
+    return null;
+  }
+};
+
+export const readDesignIntent = async (file: string): Promise<GameDesignIntent | null> => {
+  try {
+    return decodeStoredIntent(await NodeFSP.readFile(file, "utf8")).intent;
+  } catch {
     return null;
   }
 };
@@ -90,14 +123,27 @@ const writeRecord = async (file: string, record: DesignApprovalRecord) => {
   }
 };
 
+const writeIntent = async (file: string, game: string, intent: GameDesignIntent) => {
+  const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
+  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+  try {
+    const record: DesignIntentRecord = { schemaVersion: 1, game, intent };
+    await NodeFSP.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`);
+    await NodeFSP.rename(temporary, file);
+  } finally {
+    await NodeFSP.rm(temporary, { force: true });
+  }
+};
+
 /**
  * The approval lifecycle. A game with no record is a draft while it still has a
- * DESIGN.md to review; only a game that never had one (pre-design or
- * skip-planning) is legacy. A creator or agent editing game.json to "approved"
- * therefore cannot pass a plan-first game.
+ * DESIGN.md to review; only a game with no server records at all (created before
+ * the intent record existed) is legacy. A creator or agent editing game.json to
+ * "approved" therefore cannot pass a plan-first game.
  */
 const deriveDesignState = (input: {
   readonly record: DesignApprovalRecord | null;
+  readonly intent: GameDesignIntent | null;
   readonly currentHash: string | null;
   readonly manifestDesign: GameManifest["design"];
   readonly documentExists: boolean;
@@ -106,6 +152,8 @@ const deriveDesignState = (input: {
     return input.currentHash !== null && input.currentHash === input.record.designHash
       ? "approved"
       : "changed";
+  if (input.intent === "skipped") return "legacy";
+  if (input.intent === "required") return "draft";
   if (input.manifestDesign === undefined) return "legacy";
   if (input.manifestDesign.status === "draft") return "draft";
   return input.documentExists ? "draft" : "legacy";
@@ -117,11 +165,13 @@ const designRead = async (
   manifest: GameManifest,
 ): Promise<GameDesignRead> => {
   const record = await readDesignApprovalRecord(recordPath(stateDir, root));
+  const intent = await readDesignIntent(intentPath(stateDir, root));
   const design = await readDesignDocument(root);
   const currentHash = design === null ? null : designDocumentHash(design);
   const exists = design === null ? await designDocumentExists(root) : true;
   const state = deriveDesignState({
     record,
+    intent,
     currentHash,
     manifestDesign: manifest.design,
     documentExists: exists,
@@ -153,6 +203,12 @@ export class GameDesignApproval extends Context.Service<
   GameDesignApproval,
   {
     readonly read: (root: string) => Effect.Effect<DesignApprovalRecord | null>;
+    /** The creation-time promise: required to design, or explicitly skipped. */
+    readonly readIntent: (root: string) => Effect.Effect<GameDesignIntent | null>;
+    readonly recordIntent: (
+      root: string,
+      intent: GameDesignIntent,
+    ) => Effect.Effect<void, GameOperationError>;
     /** The server-owned lifecycle plus what still blocks approval. */
     readonly status: (root: string, manifest: GameManifest) => Effect.Effect<GameDesignRead>;
     /**
@@ -183,6 +239,21 @@ export const layer = (options: { readonly stateDir: string }) => {
     GameDesignApproval.of({
       read: (root) =>
         Effect.promise(() => readDesignApprovalRecord(recordPath(options.stateDir, root))),
+      readIntent: (root) =>
+        Effect.promise(() => readDesignIntent(intentPath(options.stateDir, root))),
+      recordIntent: (root, intent) => {
+        const file = intentPath(options.stateDir, root);
+        return Effect.tryPromise({
+          try: () => writeIntent(file, NodePath.resolve(root), intent),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "create-game",
+              path: file,
+              reason: "io",
+              cause,
+            }),
+        });
+      },
       status: (root, manifest) =>
         Effect.promise(() => designRead(options.stateDir, root, manifest)),
       exclusive: (root, effect) =>
@@ -233,3 +304,4 @@ export const layer = (options: { readonly stateDir: string }) => {
 
 /** Exposed for tests and diagnostics; the hash keeps game names off the state path. */
 export const approvalRecordFile = (stateDir: string, root: string) => recordPath(stateDir, root);
+export const designIntentFile = (stateDir: string, root: string) => intentPath(stateDir, root);

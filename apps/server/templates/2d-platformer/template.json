@@ -2,5 +2,6 @@
   "id": "2d-platformer",
   "name": "2D Platformer",
   "description": "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
-  "dimension": "2d"
+  "dimension": "2d",
+  "testSuite": "res://tests/smoke_test.gd"
 }

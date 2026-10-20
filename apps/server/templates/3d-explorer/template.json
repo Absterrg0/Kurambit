@@ -2,5 +2,6 @@
   "id": "3d-explorer",
   "name": "3D Explorer",
   "description": "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
-  "dimension": "3d"
+  "dimension": "3d",
+  "testSuite": "res://tests/smoke_test.gd"
 }
