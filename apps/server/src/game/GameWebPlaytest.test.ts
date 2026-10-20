@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId, type GameQualificationRead } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -200,6 +200,9 @@ it.live.skipIf(!available || !templatesInstalled)(
             expect(result.booted).toBe(true);
             expect(result.bootMs).not.toBeNull();
             expect(result.success).toBe(true);
+            // The fixture predates StudioProbe: keep the pixel rule and say so.
+            expect(result.state).toBeNull();
+            expect(result.message).toContain("no state probe");
             expect(result.screenshots.map((shot) => shot.label)).toEqual(["booted", "after-steps"]);
             // Evidence is persisted and the status exposes the newest run.
             const status = yield* game.status(registered.threadId);
@@ -236,4 +239,109 @@ it.live.skipIf(!available || !templatesInstalled)(
       }
     }),
   240_000,
+);
+
+it.live.skipIf(!available || !templatesInstalled)(
+  "reads the template's state probe and qualifies only a run where the player moved",
+  () =>
+    Effect.gen(function* () {
+      const parent = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-probe-playtest-")),
+      );
+      const stateDir = NodePath.join(parent, "state");
+      const dependencies = GameService.layer.pipe(
+        Layer.provideMerge(GameProjectService.layer),
+        Layer.provideMerge(GameToolchain.layer),
+        Layer.provideMerge(GamePreview.layer),
+        Layer.provideMerge(GameProcesses.layer),
+        Layer.provide(projectTestLayer()),
+        Layer.provide(previewBrowserTestLayer(browserExecutable!)),
+        Layer.provideMerge(qualificationTestLayer(stateDir)),
+        Layer.provideMerge(designApprovalTestLayer()),
+        Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(NodeServices.layer),
+      );
+      const playtestStage = (status: { qualification: GameQualificationRead }) =>
+        status.qualification.stages.find((stage) => stage.stage === "playtest")?.status;
+      try {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const projects = yield* GameProjectService.GameProjectService;
+            const game = yield* GameService.GameService;
+            const created = yield* projects.create({
+              name: "Probe Runner",
+              parentDirectory: parent,
+              template: "3d-explorer",
+              brief: "Collect the relics.",
+              // The probe belongs to the build bar, not the design phase.
+              planFirst: false,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-6.1-sol",
+              },
+            });
+            const exported = yield* game.export(created.threadId, "Web");
+            expect(exported.success, exported.message).toBe(true);
+
+            // Open the game from its menu and stand still: the scene changes, so
+            // pixels move, but no input reached the player. The probe must catch it.
+            const still = yield* game.webPlaytest(created.threadId, {
+              steps: [
+                { click: "left" },
+                { waitMs: 600 },
+                { key: "Enter", holdMs: 80 },
+                { waitMs: 2500 },
+              ],
+            });
+            yield* Effect.log(still.message);
+            expect(still.booted, still.message).toBe(true);
+            expect(still.state, still.message).not.toBeNull();
+            // The boot sample is the menu: no player exists yet.
+            expect(still.state?.before?.player).toBeNull();
+            expect(still.state?.after?.gameState.state).toBe(1);
+            expect(still.state?.playerMoved ?? 0).toBeLessThan(1);
+            // The run clock advances, but a clock is not gameplay.
+            expect(still.state?.changes).toEqual([]);
+            expect(still.message).toContain("player movement or a GameState change");
+            expect(playtestStage(yield* game.status(created.threadId))).toBe("failed");
+
+            // Walking forward moves the body: the same export now qualifies.
+            const walked = yield* game.webPlaytest(created.threadId, {
+              steps: [
+                { click: "left" },
+                { waitMs: 600 },
+                { key: "Enter", holdMs: 80 },
+                { waitMs: 2500 },
+                { key: "w", holdMs: 1200 },
+                { waitMs: 300 },
+              ],
+            });
+            yield* Effect.log(walked.message);
+            expect(walked.success, walked.message).toBe(true);
+            expect(walked.state?.playerMoved ?? 0).toBeGreaterThan(2);
+            expect(walked.message).toContain("player moved");
+            expect(walked.message).toContain("state: player moved");
+            expect(walked.message).not.toContain("Qualification:");
+            const status = yield* game.status(created.threadId);
+            expect(playtestStage(status)).toBe("passed");
+            expect(status.lastPlaytest?.responded).toBe(true);
+            // The evidence keeps the probe snapshot the verdict was made from.
+            const evidence = JSON.parse(
+              yield* Effect.promise(() =>
+                NodeFSP.readFile(
+                  NodePath.join(created.root, status.lastPlaytest!.directory, "result.json"),
+                  "utf8",
+                ),
+              ),
+            );
+            expect(evidence.state.before.player).toBeNull();
+            expect(evidence.state.after.gameState.state).toBe(1);
+            expect(evidence.state.playerMoved).toBeGreaterThan(2);
+          }).pipe(Effect.provide(dependencies)),
+        );
+      } finally {
+        yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
+      }
+    }),
+  600_000,
 );

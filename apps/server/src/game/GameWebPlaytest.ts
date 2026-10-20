@@ -5,8 +5,11 @@ import * as NodeFSP from "node:fs/promises";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   GameOperationError,
+  GamePlaytestProbe,
   type GameConsoleMessage,
   type GamePlaytestScreenshot,
   type GamePlaytestStep,
@@ -19,6 +22,7 @@ import {
   FRAME_SAMPLE_WIDTH,
   type FrameSample,
 } from "./playtestFrames.ts";
+import { describePlaytestState, summarizePlaytestSamples } from "./playtestState.ts";
 
 export interface GameWebPlaytestInput {
   /** Headless browser executable, resolved the same way as for the preview pane. */
@@ -50,6 +54,25 @@ const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 500;
 const CONNECT_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Reads StudioProbe's snapshot. The probe parks the JSON on the window because a
+ * JavaScriptBridge callback's return value does not cross back into JavaScript;
+ * the return value is still accepted for templates that can return one.
+ */
+const READ_PROBE = `(() => {
+  const probe = window.__studioProbe;
+  if (typeof probe !== "function") return null;
+  try {
+    window.__studioProbeLast = null;
+    const returned = probe();
+    if (typeof returned === "string") return returned;
+    return typeof window.__studioProbeLast === "string" ? window.__studioProbeLast : null;
+  } catch (error) {
+    return null;
+  }
+})()`;
+const decodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(GamePlaytestProbe));
 
 interface BrowserHandle {
   readonly child: NodeChildProcess.ChildProcess;
@@ -465,59 +488,74 @@ const runPlaytest = async (
     if (booted) bootMs = input.bootTimeoutMs - (bootDeadline - Date.now());
     screenshots.push(await screenshot(cdp, session.sessionId, "booted"));
     const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    // The state probe is optional: games created before it existed have none, and
+    // a scene change can make one evaluation fail, so a sample is best-effort.
+    const probes: GamePlaytestProbe[] = [];
+    const readProbe = async () => {
+      const evaluated = await cdp
+        .send<{ result?: { value?: unknown } }>(
+          "Runtime.evaluate",
+          { expression: READ_PROBE, returnByValue: true },
+          session.sessionId,
+        )
+        .catch(() => null);
+      const value = evaluated?.result?.value;
+      if (typeof value !== "string") return;
+      const probe = decodeProbe(value);
+      if (Option.isSome(probe)) probes.push(probe.value);
+    };
     let pointer: { x: number; y: number } | null = null;
+    await readProbe();
 
     for (const step of input.steps) {
       signal?.throwIfAborted();
-      if ("waitMs" in step) {
-        await sleep(signal, step.waitMs);
-        continue;
-      }
-      if ("screenshot" in step) {
+      if ("waitMs" in step) await sleep(signal, step.waitMs);
+      else if ("screenshot" in step)
         screenshots.push(await screenshot(cdp, session.sessionId, step.screenshot));
-        continue;
-      }
-      if ("click" in step) {
+      else if ("click" in step)
         pointer = (await clickCanvas(cdp, session.sessionId, step.click)) ?? pointer;
-        continue;
+      else if ("mouseMove" in step) {
+        const centre: { x: number; y: number } | null =
+          pointer ?? (await canvasCentre(cdp, session.sessionId));
+        if (centre) {
+          const next: { x: number; y: number } = {
+            x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
+            y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
+          };
+          await cdp.send(
+            "Input.dispatchMouseEvent",
+            { type: "mouseMoved", x: Math.round(next.x), y: Math.round(next.y), button: "none" },
+            session.sessionId,
+          );
+          pointer = next;
+        }
+      } else {
+        try {
+          await cdp.send<unknown>(
+            "Runtime.evaluate",
+            { expression: `document.querySelector("canvas")?.focus()` },
+            session.sessionId,
+          );
+        } catch {
+          // The canvas may not be up yet; keyboard events still reach the document.
+        }
+        const keys = "keys" in step ? step.keys : [step.key];
+        for (const key of keys)
+          await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
+        await sleep(signal, step.holdMs);
+        for (const key of [...keys].toReversed())
+          await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
       }
-      if ("mouseMove" in step) {
-        const centre = pointer ?? (await canvasCentre(cdp, session.sessionId));
-        if (!centre) continue;
-        const next = {
-          x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
-          y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
-        };
-        await cdp.send(
-          "Input.dispatchMouseEvent",
-          { type: "mouseMoved", x: Math.round(next.x), y: Math.round(next.y), button: "none" },
-          session.sessionId,
-        );
-        pointer = next;
-        continue;
-      }
-      try {
-        await cdp.send<unknown>(
-          "Runtime.evaluate",
-          { expression: `document.querySelector("canvas")?.focus()` },
-          session.sessionId,
-        );
-      } catch {
-        // The canvas may not be up yet; keyboard events still reach the document.
-      }
-      const keys = "keys" in step ? step.keys : [step.key];
-      for (const key of keys)
-        await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
-      await sleep(signal, step.holdMs);
-      for (const key of [...keys].toReversed())
-        await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
+      await readProbe();
     }
     screenshots.push(await screenshot(cdp, session.sessionId, "after-steps"));
     const afterSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    await readProbe();
     const comparison =
       bootSample !== null && afterSample !== null
         ? compareFrameSamples(bootSample, afterSample)
         : { changedPercent: 0, responded: false };
+    const state = probes.length === 0 ? null : summarizePlaytestSamples(probes);
 
     const errors = consoleMessages.filter((message) => message.level === "error").length;
     const stepsGiven = input.steps.length > 0;
@@ -529,6 +567,7 @@ const runPlaytest = async (
       comparison.responded
         ? `the game responded (${comparison.changedPercent}% of pixels changed)`
         : `the game did not respond (${comparison.changedPercent}% of pixels changed)`,
+      `state: ${describePlaytestState(state)}`,
     ].join("; ");
     return {
       success,
@@ -539,6 +578,7 @@ const runPlaytest = async (
       message: success ? `Playtest succeeded: ${summary}` : `Playtest failed: ${summary}`,
       consoleMessages,
       screenshots,
+      state,
     };
   } finally {
     cdp.close();

@@ -9,7 +9,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
   ThreadId,
+  type GameAcceptanceCriterion,
   type GameManifest,
+  type GamePlaytestState,
   type GameQualificationRead,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
@@ -17,6 +19,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
+import { approvalRecordFile, designDocumentHash } from "./GameDesignApproval.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -49,9 +52,14 @@ case "$*" in
 esac
 exit 0
 `;
+const probe = (gameState: Record<string, number | boolean | string>) => ({
+  gameState,
+  player: { x: 0, y: 0, z: 0 },
+});
 const playtestResult = (input: {
   readonly success: boolean;
   readonly responded: boolean;
+  readonly state?: GamePlaytestState | null;
 }): GameWebPlaytestResult => ({
   success: input.success,
   booted: true,
@@ -61,12 +69,15 @@ const playtestResult = (input: {
   message: input.success ? "Playtest succeeded: fake run." : "Playtest failed: fake run.",
   consoleMessages: [],
   screenshots: [],
+  state: input.state ?? null,
 });
 const withFixture = <A, E, R>(
   run: (input: { readonly root: string }) => Effect.Effect<A, E, R>,
   options: {
     readonly manifest?: GameManifest;
     readonly playtest?: typeof GameWebPlaytest.playtest;
+    /** An approved design whose acceptance the playtest reports on. */
+    readonly acceptance?: readonly GameAcceptanceCriterion[];
   } = {},
 ) =>
   Effect.scoped(
@@ -89,6 +100,27 @@ const withFixture = <A, E, R>(
         );
         await NodeFSP.writeFile(NodePath.join(root, "godot/tests/other.gd"), "extends SceneTree\n");
         await NodeFSP.writeFile(executable, fakeGodot, { mode: 0o755 });
+        if (options.acceptance !== undefined) {
+          const design = "# Fixture design\n\nA disposable acceptance fixture.\n";
+          await NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), design);
+          // The approval record the server would write: outside the game, bound
+          // to the document's hash. Written directly so the fixture setup does
+          // not need the approval service's context.
+          await NodeFSP.mkdir(NodePath.dirname(approvalRecordFile(stateDir, root)), {
+            recursive: true,
+          });
+          await NodeFSP.writeFile(
+            approvalRecordFile(stateDir, root),
+            JSON.stringify({
+              schemaVersion: 1,
+              game: NodePath.resolve(root),
+              approvalId: "fixture-approval",
+              designHash: designDocumentHash(design),
+              approvedAt: "2026-10-20T00:00:00.000Z",
+              acceptance: options.acceptance,
+            }),
+          );
+        }
       });
       const current = options.manifest ?? manifest();
       const services = GameService.layerWithPlaytest(
@@ -209,9 +241,8 @@ it.live("a playtest with no steps succeeds as a tool result but fails qualificat
         const playtest = yield* game.webPlaytest(threadId, { steps: [] });
         // The boot smoke result stays useful to the tool caller.
         expect(playtest.success, playtest.message).toBe(true);
-        expect(playtest.message).toContain(
-          "a qualifying playtest needs input steps and a visible response",
-        );
+        expect(playtest.message).toContain("a qualifying playtest needs input steps");
+        expect(playtest.message).toContain("a visible response");
         const qualification = yield* GameQualification.GameQualification;
         const read = yield* qualification.read(root, "godot");
         expect(stageOf(read, "export")?.status).toBe("passed");
@@ -231,6 +262,8 @@ it.live("a scripted playtest that responded records a passed playtest", () =>
         const playtest = yield* game.webPlaytest(threadId, { steps: [{ waitMs: 1 }] });
         expect(playtest.success, playtest.message).toBe(true);
         expect(playtest.message).not.toContain("a qualifying playtest needs input steps");
+        // Without a probe the older pixel rule still decides.
+        expect(playtest.state).toBeNull();
         const qualification = yield* GameQualification.GameQualification;
         const read = yield* qualification.read(root, "godot");
         expect(stageOf(read, "playtest")?.status).toBe("passed");
@@ -238,6 +271,145 @@ it.live("a scripted playtest that responded records a passed playtest", () =>
       }),
     {
       playtest: () => Effect.succeed(playtestResult({ success: true, responded: true })),
+    },
+  ),
+);
+
+it.live("a probe that saw only a menu change fails the playtest stage", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ waitMs: 1 }] });
+        // The picture changed, so the tool itself succeeded; the run still proved
+        // nothing about play.
+        expect(playtest.success, playtest.message).toBe(true);
+        expect(playtest.message).toContain("player movement or a GameState change");
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("failed");
+        expect(stageOf(read, "playtest")?.detail).toContain("no player movement");
+      }),
+    {
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            state: {
+              before: probe({ state: 0 }),
+              after: probe({ state: 1 }),
+              playerMoved: 0,
+              changes: [],
+            },
+          }),
+        ),
+    },
+  ),
+);
+
+it.live("a probe that saw the player move records a passed playtest", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ key: "w", holdMs: 800 }] });
+        expect(playtest.message).not.toContain("player movement or a GameState change");
+        expect(playtest.state?.playerMoved).toBe(42);
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("passed");
+      }),
+    {
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            state: {
+              before: probe({ state: 1, collected: 0 }),
+              after: probe({ state: 1, collected: 0 }),
+              playerMoved: 42,
+              changes: [],
+            },
+          }),
+        ),
+    },
+  ),
+);
+
+it.live("a probe that saw a numeric GameState change records a passed playtest", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ key: "e", holdMs: 80 }] });
+        expect(playtest.message).not.toContain("player movement or a GameState change");
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("passed");
+      }),
+    {
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            state: {
+              before: probe({ state: 1, collected: 0 }),
+              after: probe({ state: 1, collected: 2 }),
+              playerMoved: 0.1,
+              changes: [{ key: "collected", before: 0, after: 2 }],
+            },
+          }),
+        ),
+    },
+  ),
+);
+
+it.live("an approved design's observe criteria are reported without gating", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ key: "w", holdMs: 800 }] });
+        // The playtest satisfied the collection promise but not the finish, and
+        // neither changes the qualification outcome: the scenario runner gates.
+        expect(playtest.designObservations).toEqual(["collect-two"]);
+        expect(playtest.message).toContain("collect-two");
+        expect(playtest.message).toContain("informational");
+        const qualification = yield* GameQualification.GameQualification;
+        const read = yield* qualification.read(root, "godot");
+        expect(stageOf(read, "playtest")?.status).toBe("passed");
+      }),
+    {
+      acceptance: [
+        {
+          id: "collect-two",
+          kind: "content",
+          text: "Collect two relics",
+          observe: { key: "collected", expect: ">=2" },
+        },
+        {
+          id: "win-the-run",
+          kind: "end",
+          text: "Reach the gate",
+          observe: { key: "won", expect: "==1" },
+        },
+      ],
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            state: {
+              before: probe({ state: 1, collected: 0, won: false }),
+              after: probe({ state: 1, collected: 2, won: false }),
+              playerMoved: 42,
+              changes: [{ key: "collected", before: 0, after: 2 }],
+            },
+          }),
+        ),
     },
   ),
 );

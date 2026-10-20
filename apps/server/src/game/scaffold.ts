@@ -99,6 +99,9 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     artDirection: input.artDirection ?? "",
     template,
     testSuite: templateEntry?.testSuite ?? DEFAULT_GAME_TEST_SUITE,
+    ...(templateEntry?.gameplayScene === undefined
+      ? {}
+      : { gameplayScene: templateEntry.gameplayScene }),
     design: planFirst ? { status: "draft" } : { status: "approved" },
     engine: { name: "godot", version: "4.7.2" },
     godotProject: "godot",
@@ -132,7 +135,7 @@ Call game_status first for readiness, asset usage, scenes, builds and logs. If t
 
 Use game_blender_run with a stable asset id and bpy script to create or revise an asset. The tool opens the existing .blend on revisions, runs your script, saves the source and script, exports GLB with modifiers, and renders a thumbnail unless disabled. For revisions, edit existing objects by name, or pass reset=true with a complete rebuild script to start from an empty scene at the same source/export paths. Re-running an object-creation script without reset duplicates objects. Keep the .blend sources. Re-export revisions to the same path so scene references remain valid. Do not put .blend files inside godot/.
 
-Use game_godot_import after each asset transfer or engine change. Assemble scenes and GDScript files using your normal file tools. Fix every import and GDScript parse error. Use game_godot_check for a fast static and boot check: it loads every script and scene, runs the main scene briefly, and reports errors with file:line. Use game_scene_inspect to dump a scene's node tree when wiring is wrong.
+Use game_godot_import after each asset transfer or engine change. Assemble scenes and GDScript files using your normal file tools. Fix every import and GDScript parse error. Use game_godot_check for a fast static and boot check: it loads every script and scene, runs the main scene and the scene game.json's gameplayScene names (the one the menu starts) for 120 physics frames each, and reports errors with file:line. It also fails a player in the \`player\` group that has no direct, enabled CollisionShape with a shape. Use game_scene_inspect to dump a scene's node tree when wiring is wrong.
 
 Write a headless GDScript smoke test under godot/tests/ extending SceneTree. Simulate the core gameplay loop, assert observable outcomes, and quit with a nonzero exit code on failure. Run it with game_godot_test using a project-relative script path such as tests/smoke_test.gd. game.json's testSuite names the canonical suite (res://tests/smoke_test.gd); only a pass of that suite records the test stage that qualification reads, so other scripts are diagnostics and cannot qualify the game. A screenshot is not a gameplay test.
 
@@ -150,7 +153,7 @@ Finish every build turn to this bar, then report to the user and end the turn:
 2. game_godot_test passes with your smoke test.
 3. game_scenarios_run passes every observable acceptance criterion and at least one \`end\` criterion, with the player actually moving; every route starts from the menu and wins under normal input.
 4. A web build exists for the final sources (game_web_playtest exports one when the build is stale).
-5. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true).
+5. game_web_playtest succeeds with steps that exercise the core loop and prove the game responded (responded=true). The templates ship a read-only StudioProbe, so the playtest must also see the player move or a GameState value change; keep the probe and extend GameState instead of replacing it.
 6. game_status reports qualification "qualified": check, test, export, playtest and state all passed for the current sources. Any edit after a stage makes that stage stale, so rerun it; never edit game files after the final playtest.
 7. game_preview returns the playable URL; report it with the test results.
 

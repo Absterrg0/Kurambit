@@ -20,6 +20,7 @@ const result = (label: string): GameWebPlaytestResult => ({
     { label: "booted", mimeType: "image/png", data: "cG5n", width: 960, height: 540 },
     { label, mimeType: "image/png", data: "cG5n", width: 960, height: 540 },
   ],
+  state: null,
 });
 
 it.live("keeps the newest five playtest runs and reads the last verdict", () =>

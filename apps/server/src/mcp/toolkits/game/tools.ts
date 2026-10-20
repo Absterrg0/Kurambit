@@ -50,7 +50,7 @@ const ImportTool = Tool.make("game_godot_import", {
 }).annotate(Tool.Readonly, false);
 const CheckTool = Tool.make("game_godot_check", {
   description:
-    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene for 120 physics frames, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, CharacterBody nodes without a CollisionShape, a main scene with no camera, and scripts that do not compile. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
+    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
   success: GameCheckResult,
   failure,
   failureMode: "return",
@@ -120,7 +120,7 @@ const StopTool = Tool.make("game_stop", {
 }).annotate(Tool.Readonly, false);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description:
-    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Use this as the final web check instead of building your own browser tooling.",
+    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Use this as the final web check instead of building your own browser tooling.",
   parameters: GameWebPlaytestInput,
   success: GameWebPlaytestResult,
   failure,

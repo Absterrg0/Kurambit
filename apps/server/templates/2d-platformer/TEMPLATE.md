@@ -24,7 +24,7 @@ godot/
     player/player.tscn     CharacterBody2D + AnimatedSprite2D + dust + follow camera
     enemies/slime.tscn, pickups/coin.tscn, checkpoint.tscn, goal.tscn
     ui/hud.tscn, ui/pause_menu.tscn, ui/settings_menu.tscn, ui/end_screen.tscn
-  scripts/                 one script per scene, plus the three autoloads
+  scripts/                 one script per scene, plus the four autoloads
   assets/tiles/tileset.tres      the TileSet: solid, one-way and hazard tiles
   assets/sprites/*_frames.tres   SpriteFrames for the player, slime, coin, flag
   tools/generate_art.mjs   the pixel-art generator (PNG sheets)
@@ -61,6 +61,18 @@ focus sounds to every button in a UI scene. Every sound, and the level theme (fo
 of Am–F–C–G with bass, arpeggio and percussion), is synthesised at startup: there are no
 `.wav` files to manage. Replace the bodies of `_build_library()` and `_music_loop()` with
 loaded streams when real audio exists and nothing else has to change.
+
+## Web playtest probe
+
+`scripts/studio_probe.gd` is autoloaded as `StudioProbe`. In web builds only, it registers
+`window.__studioProbe()`, which returns JSON with GameState's public primitive members and the
+player's world position. `game_web_playtest` reads it after boot, between steps and at the end,
+and will not qualify a run in which the player neither moved nor changed a GameState value.
+
+Keep the probe and its autoload line: removing them does not make the check stricter, it only
+falls back to the weaker pixel-only rule. Add new observable values to `GameState` as public
+variables (anything without a leading `_`); the probe reports up to 40 of them and truncates
+strings to 80 characters. It is read-only and never writes to the game.
 
 ## Level anatomy
 

@@ -23,6 +23,11 @@ export const GameTemplate = Schema.Struct({
   dimension: Schema.Literals(["2d", "3d"]),
   /** The game-relative suite whose pass is the game's qualification test. */
   testSuite: Schema.String,
+  /**
+   * The scene play starts in, which the check runs after the main scene so a
+   * failure in gameplay initialization cannot hide behind the menu.
+   */
+  gameplayScene: Schema.optionalKey(Schema.String),
 });
 export type GameTemplate = typeof GameTemplate.Type;
 /** The suite a game qualifies with unless its manifest names another one. */
@@ -39,6 +44,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
       "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
     dimension: "3d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
+    gameplayScene: "res://scenes/game.tscn",
   },
   {
     id: "2d-platformer",
@@ -47,6 +53,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
       "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
     dimension: "2d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
+    gameplayScene: "res://scenes/game.tscn",
   },
   {
     id: "blank",
@@ -54,6 +61,8 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     description: "An empty Godot project: a camera, a light, and Web and Linux export presets.",
     dimension: "3d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
+    // Blank has no menu: its main scene is the game, and the check runs it once.
+    gameplayScene: "res://scenes/main.tscn",
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
@@ -76,6 +85,9 @@ export const GameManifest = Schema.Struct({
   // Games created before the canonical-suite rule have no testSuite and default
   // to DEFAULT_GAME_TEST_SUITE.
   testSuite: Schema.optionalKey(Schema.String),
+  // Games created before the gameplay-entry check have no gameplayScene; their
+  // check only runs the main scene (the menu).
+  gameplayScene: Schema.optionalKey(Schema.String),
   // Games created before the design step existed have no design key.
   design: Schema.optionalKey(GameDesign),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
@@ -411,6 +423,37 @@ export const GameWebPlaytestInput = Schema.Struct({
   bootTimeoutMs: Schema.optionalKey(Schema.Number),
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
+/** One primitive GameState value the StudioProbe reports. */
+export const GamePlaytestStateValue = Schema.Union([Schema.Number, Schema.Boolean, Schema.String]);
+export type GamePlaytestStateValue = typeof GamePlaytestStateValue.Type;
+export const GamePlaytestProbe = Schema.Struct({
+  /** Public GameState members, bounded by the probe to 40 keys and 80-character strings. */
+  gameState: Schema.Record(Schema.String, GamePlaytestStateValue),
+  /** World position of the first node in the `player` group, or null outside gameplay. */
+  player: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number, z: Schema.Number })),
+});
+export type GamePlaytestProbe = typeof GamePlaytestProbe.Type;
+export const GamePlaytestStateChange = Schema.Struct({
+  key: Schema.String,
+  before: GamePlaytestStateValue,
+  after: GamePlaytestStateValue,
+});
+export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
+/**
+ * What the in-game probe saw during a playtest. `before` and `after` are the
+ * first and last successful samples; `playerMoved` and `changes` are measured
+ * across the samples where gameplay was actually running, so opening the game
+ * from its menu is not mistaken for movement.
+ */
+export const GamePlaytestState = Schema.Struct({
+  before: Schema.NullOr(GamePlaytestProbe),
+  after: Schema.NullOr(GamePlaytestProbe),
+  /** World units the player travelled between gameplay samples. */
+  playerMoved: Schema.Number,
+  /** GameState values that changed while gameplay was running (clocks excluded). */
+  changes: Schema.Array(GamePlaytestStateChange),
+});
+export type GamePlaytestState = typeof GamePlaytestState.Type;
 export const GameWebPlaytestResult = Schema.Struct({
   success: Schema.Boolean,
   booted: Schema.Boolean,
@@ -421,6 +464,13 @@ export const GameWebPlaytestResult = Schema.Struct({
   message: Schema.String,
   consoleMessages: Schema.Array(GameConsoleMessage),
   screenshots: Schema.Array(GamePlaytestScreenshot),
+  /** Null when the game has no StudioProbe (games created before the probe existed). */
+  state: Schema.NullOr(GamePlaytestState),
+  /**
+   * Approved observe criteria this playtest happened to satisfy. Informational:
+   * the server-owned scenario runner is what gates the state stage.
+   */
+  designObservations: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Game-relative evidence directory, when the service persisted this run. */
   evidenceDirectory: Schema.optionalKey(Schema.String),
 });
@@ -435,6 +485,8 @@ export const GameCheckResult = Schema.Struct({
   ok: Schema.Boolean,
   errors: Schema.Array(GameCheckIssue),
   warnings: Schema.Array(GameCheckIssue),
+  /** Which entry scenes the checker actually ran, in order: `main`, then `gameplay`. */
+  entries: Schema.Array(Schema.String),
   durationMs: Schema.Number,
 });
 export type GameCheckResult = typeof GameCheckResult.Type;

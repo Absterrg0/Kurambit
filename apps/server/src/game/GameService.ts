@@ -58,6 +58,11 @@ import {
 } from "./gameScenarios.ts";
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
+import {
+  describePlaytestState,
+  playtestShowsGameplay,
+  satisfiedObservations,
+} from "./playtestState.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
 export class GameService extends Context.Service<
@@ -445,21 +450,47 @@ const make = Effect.gen(function* () {
     const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
       (stage) => stage.stage === "export",
     );
-    // The tool may report a boot smoke result with no steps; only a scripted run
-    // that visibly responded proves anything about gameplay.
-    const qualifies = (input.steps?.length ?? 0) > 0 && result.success && result.responded;
+    // A template game ships StudioProbe, so a run that only changed pixels (an
+    // idle animation, a menu transition, a clock) must not qualify. Games created
+    // before the probe keep the pixel rule and say so.
+    const stepsGiven = (input.steps?.length ?? 0) > 0;
+    const probe = result.state;
+    const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
+    const gaps: string[] = [];
+    if (!stepsGiven) gaps.push("input steps");
+    if (!result.success) gaps.push("a run without console errors");
+    if (!result.responded) gaps.push("a visible response");
+    if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
+    const qualifies = gaps.length === 0;
+    const design = yield* designApprovals.status(root, manifest);
+    const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+    const observations = satisfiedObservations(approval?.acceptance ?? [], probe);
+    const hasObservable = (approval?.acceptance ?? []).some(
+      (criterion) => criterion.observe !== undefined,
+    );
+    // Informational only: which promises this run happened to show, never a gate.
+    const observationNote = hasObservable
+      ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
+      : "";
     yield* recordQualification(root, {
       stage: "playtest",
       outcome: qualifies ? "passed" : "failed",
       sourceId: build?.status === "passed" ? build.sourceId : null,
       buildId: build?.status === "passed" ? build.buildId : null,
       evidenceDirectory: evidence.directory,
+      detail:
+        probe === null
+          ? "No state probe in this game; the playtest was judged on input steps and a visible response."
+          : `State probe: ${describePlaytestState(probe)}.`,
     });
     return {
       ...result,
-      message: qualifies
-        ? result.message
-        : `${result.message} Qualification: a qualifying playtest needs input steps and a visible response.`,
+      message: `${
+        qualifies
+          ? result.message
+          : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.`
+      }${observationNote}`,
+      designObservations: observations,
       evidenceDirectory: evidence.directory,
     };
   });
@@ -470,6 +501,8 @@ const make = Effect.gen(function* () {
     const scriptPath = NodePath.join(temporary, "check.gd");
     const resultPath = NodePath.join(temporary, "result.json");
     const { godot, cwd, godotProject } = yield* engine(root);
+    const manifest = yield* projects.read(root);
+    const gameplayScene = manifest.gameplayScene ?? "";
     const imported = yield* importGame(root);
     return yield* Effect.gen(function* () {
       yield* Effect.tryPromise({
@@ -488,7 +521,16 @@ const make = Effect.gen(function* () {
       const run = yield* processes.run({
         root,
         executable: godot.path,
-        args: ["--headless", "--path", cwd, "--script", scriptPath, "--", resultPath],
+        args: [
+          "--headless",
+          "--path",
+          cwd,
+          "--script",
+          scriptPath,
+          "--",
+          resultPath,
+          gameplayScene,
+        ],
         operation: "godot-check",
         timeoutMs: 120_000,
       });
@@ -515,17 +557,32 @@ const make = Effect.gen(function* () {
       if (run.timedOut)
         errors.unshift({
           file: "godot/project.godot",
-          message: "The Godot check timed out before finishing its 120 physics frames.",
+          message: "The Godot check timed out before finishing its physics frames.",
         });
       if (run.exitCode !== 0 && errors.length === 0)
         errors.unshift({
           file: "godot/project.godot",
           message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
         });
+      // A game created before gameplay entries is checked as it always was, but
+      // the warning says what the check did not cover rather than implying it did.
+      const warnings = [
+        ...(reported?.warnings ?? []),
+        ...(manifest.gameplayScene === undefined
+          ? [
+              {
+                file: "game.json",
+                message:
+                  "No gameplayScene is declared, so the check ran only the main scene (the menu); gameplay initialization was not exercised. Add the scene play starts in to game.json.",
+              },
+            ]
+          : []),
+      ];
       const result = {
         ok: errors.length === 0 && reported !== null && !run.timedOut,
         errors: limitIssues(errors),
-        warnings: limitIssues(reported?.warnings ?? []),
+        warnings: limitIssues(warnings),
+        entries: reported?.entries ?? [],
         durationMs: (yield* Clock.currentTimeMillis) - startedAt,
       };
       const source = yield* snapshot(root, godotProject);

@@ -2,7 +2,8 @@
  * The check script Godot runs headlessly for `game_godot_check`. It is a
  * string, not an asset, so the packed server archive carries it without a
  * second asset-copy rule. GameService writes it under the game's ignored
- * `builds/logs/` tree and passes the result path after `--`.
+ * `builds/logs/` tree and passes the result path and the game's declared
+ * gameplay scene after `--`.
  */
 export const GODOT_CHECK_SCRIPT = `extends SceneTree
 
@@ -13,11 +14,14 @@ var _errors: Array = []
 var _warnings: Array = []
 var _result_path := ""
 var _main_scene := ""
+var _gameplay_scene := ""
+var _entries: Array = []
 var _seen_warnings := {}
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	_result_path = args[0] if args.size() > 0 else ""
+	_gameplay_scene = args[1] if args.size() > 1 else ""
 	_main_scene = str(ProjectSettings.get_setting("application/run/main_scene", ""))
 	var scripts: Array = []
 	var resources: Array = []
@@ -32,7 +36,11 @@ func _initialize() -> void:
 		if load(file) == null:
 			_add_error(file, "Failed to load resource.")
 	_lint_inputs(scripts)
-	await _run_main()
+	# The menu alone proves nothing about gameplay: a failure in Player._ready()
+	# only shows once the scene the menu starts is instantiated and stepped.
+	await _run_entry(_main_scene, "main", "main scene")
+	if not _gameplay_scene.is_empty():
+		await _run_entry(_gameplay_scene, "gameplay", "gameplay scene")
 	_write_result()
 	quit(0 if _errors.is_empty() else 1)
 
@@ -70,29 +78,35 @@ func _lint_inputs(files: Array) -> void:
 			if not InputMap.has_action(action):
 				_add_warning(file, "Input action \\"%s\\" is used but not defined in the InputMap." % action)
 
-func _run_main() -> void:
-	if _main_scene.is_empty():
-		_add_error("project.godot", "No main scene is configured (application/run/main_scene).")
+func _run_entry(scene_path: String, label: String, noun: String) -> void:
+	if scene_path.is_empty():
+		_add_error("project.godot", "No %s is configured." % noun)
 		return
-	var packed := load(_main_scene) as PackedScene
+	var packed := load(scene_path) as PackedScene
 	if packed == null:
-		_add_error(_main_scene, "The main scene does not load.")
+		_add_error(scene_path, "The %s does not load." % noun)
 		return
 	var instance := packed.instantiate()
 	if instance == null:
-		_add_error(_main_scene, "The main scene does not instantiate.")
+		_add_error(scene_path, "The %s does not instantiate." % noun)
 		return
+	_entries.append(label)
 	root.add_child(instance)
 	for i in PHYSICS_FRAMES:
 		await physics_frame
-	if is_instance_valid(instance):
-		_lint_tree(instance)
+	if not is_instance_valid(instance):
+		_add_error(scene_path, "The %s freed itself during its first %d physics frames." % [noun, PHYSICS_FRAMES])
+		return
+	_lint_tree(instance, scene_path)
+	if instance.get_parent() != null:
 		instance.queue_free()
+		# Let the freed tree leave the scene before the next entry adds its own.
+		await process_frame
 
-func _lint_tree(instance: Node) -> void:
+func _lint_tree(instance: Node, scene_path: String) -> void:
 	if not _tree_has_camera(instance):
-		_add_warning(_main_scene, "No Camera2D or Camera3D in the main scene tree.")
-	_lint_nodes(instance)
+		_add_warning(scene_path, "No Camera2D or Camera3D in this scene tree.")
+	_lint_nodes(instance, scene_path)
 
 func _tree_has_camera(node: Node) -> bool:
 	if node is Camera2D or node is Camera3D:
@@ -102,12 +116,28 @@ func _tree_has_camera(node: Node) -> bool:
 			return true
 	return false
 
-func _lint_nodes(node: Node) -> void:
+func _lint_nodes(node: Node, scene_path: String) -> void:
 	if node is CharacterBody2D or node is CharacterBody3D:
-		if _find_collision(node) == null:
+		# The player is the one body a game cannot ship broken. Only a direct,
+		# enabled collision shape with a real shape moves it; a decorative shape
+		# nested elsewhere does not count.
+		if node.is_in_group("player"):
+			if not _has_usable_collider(node):
+				_add_error(scene_path, "%s is in the player group but has no direct, enabled CollisionShape with a shape; it cannot collide." % _node_path(node))
+		elif _find_collision(node) == null:
 			_add_warning(_node_path(node), "%s has no CollisionShape child; it cannot collide." % node.get_class())
 	for child in node.get_children():
-		_lint_nodes(child)
+		_lint_nodes(child, scene_path)
+
+func _has_usable_collider(node: Node) -> bool:
+	for child in node.get_children():
+		if child is CollisionShape2D:
+			if not child.disabled and child.shape != null:
+				return true
+		elif child is CollisionShape3D:
+			if not child.disabled and child.shape != null:
+				return true
+	return false
 
 func _find_collision(node: Node) -> Node:
 	for child in node.get_children():
@@ -141,6 +171,8 @@ func _write_result() -> void:
 		return
 	file.store_string(JSON.stringify({
 		"mainScene": _main_scene,
+		"gameplayScene": _gameplay_scene,
+		"entries": _entries,
 		"errors": _errors,
 		"warnings": _warnings,
 	}))

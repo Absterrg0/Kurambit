@@ -11,6 +11,12 @@ const RawIssue = Schema.Struct({ file: Schema.String, message: Schema.String });
 export const RawCheckResult = Schema.fromJsonString(
   Schema.Struct({
     mainScene: Schema.String,
+    gameplayScene: Schema.optionalKey(Schema.String),
+    /**
+     * Which entries the checker ran. Optional so a checker written by an older
+     * server still decodes; GameService treats a missing list as no entry run.
+     */
+    entries: Schema.optionalKey(Schema.Array(Schema.String)),
     errors: Schema.Array(RawIssue),
     warnings: Schema.Array(RawIssue),
   }),

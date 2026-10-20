@@ -23,7 +23,7 @@ godot/
     player/player.tscn    CharacterBody3D + placeholder body + third-person camera rig
     pickups/collectible.tscn, hazards/hazard.tscn, checkpoint.tscn, goal.tscn
     ui/hud.tscn, ui/pause_menu.tscn, ui/settings_menu.tscn, ui/end_screen.tscn
-  scripts/                one script per scene, plus the three autoloads
+  scripts/                one script per scene, plus the four autoloads
   materials/*.tres        the shared colour palette (grass, stone, wood, lava, glow…)
   tests/smoke_test.gd     entry point,  tests/smoke_harness.gd  the checks
 ```
@@ -54,6 +54,18 @@ audio buses and saves `user://settings.cfg` (debounced; `apply()` and `save()` a
 scene. Every sound is synthesised at startup, so there are no `.wav` files to manage:
 replace the bodies of `_build_library()` and `_ambient_loop()` with loaded streams when
 real audio exists and nothing else has to change.
+
+## Web playtest probe
+
+`scripts/studio_probe.gd` is autoloaded as `StudioProbe`. In web builds only, it registers
+`window.__studioProbe()`, which returns JSON with GameState's public primitive members and the
+player's world position. `game_web_playtest` reads it after boot, between steps and at the end,
+and will not qualify a run in which the player neither moved nor changed a GameState value.
+
+Keep the probe and its autoload line: removing them does not make the check stricter, it only
+falls back to the weaker pixel-only rule. Add new observable values to `GameState` as public
+variables (anything without a leading `_`); the probe reports up to 40 of them and truncates
+strings to 80 characters. It is read-only and never writes to the game.
 
 ## Level anatomy
 

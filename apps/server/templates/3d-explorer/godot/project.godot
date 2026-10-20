@@ -19,6 +19,7 @@ boot_splash/bg_color=Color(0.07, 0.09, 0.13, 1)
 GameState="*res://scripts/game_state.gd"
 Settings="*res://scripts/settings.gd"
 Audio="*res://scripts/audio.gd"
+StudioProbe="*res://scripts/studio_probe.gd"
 
 [display]
 

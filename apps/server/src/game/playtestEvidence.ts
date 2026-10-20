@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import {
   GameConsoleMessage,
+  GamePlaytestState,
   type GameLastPlaytest,
   type GamePlaytestStep,
   type GameWebPlaytestResult,
@@ -32,6 +33,10 @@ const StoredPlaytest = Schema.fromJsonString(
     steps: Schema.Array(Schema.Unknown),
     consoleMessages: Schema.Array(GameConsoleMessage),
     frames: Schema.Array(StoredFrame),
+    // Older evidence has no probe snapshot; it is still valid evidence of what
+    // the run did, just without the state the probe would have reported.
+    state: Schema.optionalKey(Schema.NullOr(GamePlaytestState)),
+    designObservations: Schema.optionalKey(Schema.Array(Schema.String)),
   }),
 );
 type StoredPlaytest = typeof StoredPlaytest.Type;
@@ -86,6 +91,10 @@ export const writePlaytestEvidence = async (input: {
     steps: [...input.steps],
     consoleMessages: input.result.consoleMessages,
     frames,
+    state: input.result.state,
+    ...(input.result.designObservations === undefined
+      ? {}
+      : { designObservations: input.result.designObservations }),
   };
   await NodeFSP.writeFile(
     NodePath.join(directory, "result.json"),

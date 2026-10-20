@@ -65,7 +65,24 @@ it.live.skipIf(!available)(
             const checked = yield* game.check(created.threadId);
             expect(checked.ok, JSON.stringify(checked.errors)).toBe(true);
             expect(checked.errors).toEqual([]);
+            expect(checked.entries).toEqual(["main", "gameplay"]);
             expect(checked.durationMs).toBeGreaterThan(0);
+
+            // The other starter template reaches the same bar: its own gameplay
+            // scene initializes and its player has a usable collider.
+            const platformer = yield* projects.create({
+              name: "Check Runner 2D",
+              parentDirectory: parent,
+              template: "2d-platformer",
+              brief: "Run the ridge.",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-6.1-sol",
+              },
+            });
+            const platformerCheck = yield* game.check(platformer.threadId);
+            expect(platformerCheck.ok, JSON.stringify(platformerCheck.errors)).toBe(true);
+            expect(platformerCheck.entries).toEqual(["main", "gameplay"]);
 
             const inspected = yield* game.inspectScene(
               created.threadId,
@@ -123,6 +140,74 @@ it.live.skipIf(!available)(
               }),
             );
 
+            // The review-r1 probe: a failure that only happens once gameplay
+            // initializes. The menu never touches this code, so a check that only
+            // runs the main scene reports it as clean.
+            const playerScript = NodePath.join(created.root, "godot/scripts/player.gd");
+            const playerSource = yield* Effect.promise(() =>
+              NodeFSP.readFile(playerScript, "utf8"),
+            );
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                playerScript,
+                playerSource.replace(
+                  "func _ready() -> void:\n",
+                  'func _ready() -> void:\n\tpush_error("R1 gameplay ready error")\n',
+                ),
+              ),
+            );
+            const failedGameplay = yield* game.check(created.threadId);
+            expect(failedGameplay.ok).toBe(false);
+            expect(failedGameplay.entries).toEqual(["main", "gameplay"]);
+            expect(failedGameplay.errors).toContainEqual(
+              expect.objectContaining({
+                file: "res://scripts/player.gd",
+                message: expect.stringContaining("R1 gameplay ready error"),
+              }),
+            );
+            yield* Effect.promise(() => NodeFSP.writeFile(playerScript, playerSource));
+
+            // A player without a usable collider is not a player. Disabled first,
+            // then a shape nested under Visual, which the body does not own.
+            const playerScene = NodePath.join(created.root, "godot/scenes/player/player.tscn");
+            const sceneSource = yield* Effect.promise(() => NodeFSP.readFile(playerScene, "utf8"));
+            const collisionBlock =
+              '[node name="Collision" type="CollisionShape3D" parent="."]\nposition = Vector3(0, 0.9, 0)\nshape = SubResource("shape_body")\n';
+            expect(sceneSource).toContain(collisionBlock);
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                playerScene,
+                sceneSource.replace(
+                  collisionBlock,
+                  '[node name="Collision" type="CollisionShape3D" parent="."]\nposition = Vector3(0, 0.9, 0)\ndisabled = true\nshape = SubResource("shape_body")\n',
+                ),
+              ),
+            );
+            const disabledCollider = yield* game.check(created.threadId);
+            expect(disabledCollider.ok).toBe(false);
+            expect(disabledCollider.errors).toContainEqual(
+              expect.objectContaining({
+                file: "res://scenes/game.tscn",
+                message: expect.stringContaining("is in the player group"),
+              }),
+            );
+
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(
+                playerScene,
+                `${sceneSource.replace(collisionBlock, "")}\n[node name="NestedCollision" type="CollisionShape3D" parent="Visual"]\nshape = SubResource("shape_body")\n`,
+              ),
+            );
+            const nestedCollider = yield* game.check(created.threadId);
+            expect(nestedCollider.ok).toBe(false);
+            expect(nestedCollider.errors).toContainEqual(
+              expect.objectContaining({
+                file: "res://scenes/game.tscn",
+                message: expect.stringContaining("is in the player group"),
+              }),
+            );
+            yield* Effect.promise(() => NodeFSP.writeFile(playerScene, sceneSource));
+
             yield* Effect.promise(() =>
               NodeFSP.writeFile(
                 NodePath.join(created.root, "godot/scripts/broken.gd"),
@@ -140,5 +225,5 @@ it.live.skipIf(!available)(
         yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
       }
     }),
-  180_000,
+  300_000,
 );
