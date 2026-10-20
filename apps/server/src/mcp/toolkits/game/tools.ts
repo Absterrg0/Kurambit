@@ -8,6 +8,7 @@ import {
   GameOperationFailure,
   GameSceneInspectInput,
   GameSceneInspectResult,
+  GameScenariosRunResult,
   GameStatus,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
@@ -76,6 +77,14 @@ const TestTool = Tool.make("game_godot_test", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, false);
+const ScenariosTool = Tool.make("game_scenarios_run", {
+  description:
+    "Run every route in godot/tests/scenarios/*.json through the real game, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation and records the state qualification stage. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam.",
+  success: GameScenariosRunResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Readonly, false);
 const ExportTool = Tool.make("game_export", {
   description:
     "Import and export this thread's game with the Web or Linux release preset. Verifies matching Godot export templates and nonempty build output. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. Use game_preview to build and serve a playable browser URL.",
@@ -128,6 +137,7 @@ export const GameToolkit = Toolkit.make(
   ImportTool,
   CheckTool,
   TestTool,
+  ScenariosTool,
   InspectSceneTool,
   ExportTool,
   PreviewTool,

@@ -66,3 +66,4 @@ export * from "./clientRpcPermissions.ts";
 
 export * from "./game.ts";
 export * from "./gameDesign.ts";
+export * from "./gameScenario.ts";

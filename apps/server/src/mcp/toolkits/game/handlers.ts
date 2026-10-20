@@ -51,6 +51,13 @@ const handlers = {
       return yield* game.test(scope.thread.threadId, input.script, input.timeoutMs);
     }),
   ),
+  game_scenarios_run: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.scenariosRun(scope.thread.threadId);
+    }),
+  ),
   game_export: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;

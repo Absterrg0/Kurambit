@@ -13,11 +13,12 @@ import {
   type GameQualificationRead,
   type GameQualificationStage,
   type GameQualificationStageRead,
+  type GameScenarioCriterionResult,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
 /** The stages a real service operation can record today. */
-const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest"] as const;
+const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest", "state"] as const;
 export type RecordedQualificationStage = (typeof RECORDED_QUALIFICATION_STAGES)[number];
 /** The stages the read always reports, including the ones later work will own. */
 const ALL_STAGES = ["design", "check", "test", "export", "playtest", "state", "visual"] as const;
@@ -30,6 +31,10 @@ export interface QualificationStageRecord {
   readonly buildId: string | null;
   readonly finishedAt: string;
   readonly evidenceDirectory: string | null;
+  /** The per-criterion summary for the state stage. */
+  readonly criteria?: readonly GameScenarioCriterionResult[];
+  /** Why the state stage passed or failed, including legacy rules. */
+  readonly detail?: string;
 }
 export interface QualificationRecord {
   readonly schemaVersion: 1;
@@ -42,6 +47,8 @@ const StoredStage = Schema.Struct({
   buildId: Schema.NullOr(Schema.String),
   finishedAt: Schema.String,
   evidenceDirectory: Schema.NullOr(Schema.String),
+  criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
+  detail: Schema.optionalKey(Schema.String),
 });
 const StoredRecord = Schema.fromJsonString(
   Schema.Struct({
@@ -126,6 +133,8 @@ const deriveQualification = (input: {
       sourceId: recorded?.sourceId ?? null,
       buildId: recorded?.buildId ?? null,
       finishedAt: recorded?.finishedAt ?? null,
+      ...(recorded?.criteria === undefined ? {} : { criteria: recorded.criteria }),
+      ...(recorded?.detail === undefined ? {} : { detail: recorded.detail }),
     });
     if (recorded === undefined) stageReads.set(stage, read("missing"));
     else if (recorded.outcome === "failed") stageReads.set(stage, read("failed"));
@@ -133,7 +142,7 @@ const deriveQualification = (input: {
     else if (recorded.sourceId !== currentSourceId) stageReads.set(stage, read("stale"));
     else stageReads.set(stage, read("passed"));
   }
-  for (const stage of ["state", "visual"] as const)
+  for (const stage of ["visual"] as const)
     stageReads.set(stage, {
       stage,
       status: "missing",
@@ -173,6 +182,8 @@ export interface QualificationRecordInput {
   readonly sourceId: string | null;
   readonly buildId: string | null;
   readonly evidenceDirectory: string | null;
+  readonly criteria?: readonly GameScenarioCriterionResult[];
+  readonly detail?: string;
 }
 
 export class GameQualification extends Context.Service<
@@ -250,6 +261,8 @@ export const layer = (options: {
                       buildId: input.buildId,
                       finishedAt,
                       evidenceDirectory: input.evidenceDirectory,
+                      ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
+                      ...(input.detail === undefined ? {} : { detail: input.detail }),
                     },
                   },
                 };

@@ -3,6 +3,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead } from "./gameDesign.ts";
+import { GameScenarioCriterionResult } from "./gameScenario.ts";
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -241,6 +242,10 @@ export const GameQualificationStageRead = Schema.Struct({
   /** The build an export produced or a playtest played, when applicable. */
   buildId: Schema.NullOr(Schema.String),
   finishedAt: Schema.NullOr(Schema.String),
+  /** The per-criterion result the state stage recorded, when there is one. */
+  criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
+  /** Why the state stage passed or failed, including legacy rules. */
+  detail: Schema.optionalKey(Schema.String),
 });
 export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
 /**
