@@ -230,7 +230,7 @@ export function GameDesignPanel({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {approved
               ? "The approved revision binds the build to these."
-              : issues.length > 0
+              : changed && issues.length > 0
                 ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
                 : "These are the criteria in DESIGN.md. Approve the design to bind them."}
           </p>
