@@ -211,16 +211,24 @@ interface TurnToolCall {
   readonly output: unknown;
 }
 
-/** Every tool item in one turn, with its result when the server still has it. */
+/**
+ * Every tool item in one turn, with its result when the server still has it.
+ * The live projection is a bounded window, so a long turn's early calls can
+ * fall out of it; `observed` keeps the items as the thread stream delivered
+ * them while the turn ran.
+ */
 const collectTurnTools = (
   client: Client,
   threadId: ThreadId,
   runId: RunId,
+  observed?: ReadonlyMap<string, OrchestrationV2TurnItem>,
 ): Effect.Effect<ReadonlyArray<TurnToolCall>, HarnessError> =>
   Effect.gen(function* () {
     const projection = yield* client[O.getThreadProjection]({ threadId });
+    const items = new Map<string, OrchestrationV2TurnItem>(observed);
+    for (const item of projection.turnItems) items.set(item.id, item);
     const calls: TurnToolCall[] = [];
-    for (const item of projection.turnItems) {
+    for (const item of items.values()) {
       if (item.runId !== runId) continue;
       if (item.type !== "dynamic_tool" && item.type !== "command_execution") continue;
       const name = toolNameOf(item);
@@ -310,7 +318,11 @@ const waitForTurn = (
   client: Client,
   threadId: ThreadId,
   previous: ReadonlySet<RunId>,
-  options: { cancel?: boolean; onReady?: () => Effect.Effect<unknown, Error> } = {},
+  options: {
+    cancel?: boolean;
+    observed?: Map<string, OrchestrationV2TurnItem>;
+    onReady?: () => Effect.Effect<unknown, Error>;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const done = yield* Deferred.make<OrchestrationV2Run, HarnessError>();
@@ -327,6 +339,7 @@ const waitForTurn = (
     const observeTool = (item: OrchestrationV2TurnItem) =>
       Effect.gen(function* () {
         if (item.runId && previous.has(item.runId)) return;
+        options.observed?.set(item.id, item);
         if (item.type !== "dynamic_tool" && item.type !== "command_execution") return;
         const name = toolNameOf(item);
         if (seen.get(item.id) !== item.status) {
@@ -561,6 +574,9 @@ const main = Effect.gen(function* () {
   gameRoot = created.root;
   console.log(`Game root: ${created.root}`);
   console.log(`Thread: ${created.threadId}`);
+  // The live projection only keeps a bounded recent window; keep every item the
+  // thread stream reports so long turns still have a complete tool timeline.
+  const observedTurnItems = new Map<string, OrchestrationV2TurnItem>();
   yield* Effect.addFinalizer(() =>
     client[WS_METHODS.gameAction]({ threadId: created.threadId, action: "stop" }).pipe(
       Effect.ignore,
@@ -579,8 +595,13 @@ const main = Effect.gen(function* () {
     : "";
   let buildRun: OrchestrationV2Run;
   if (planFirst) {
-    const designRun = yield* waitForTurn(client, created.threadId, new Set());
-    logTurnTools("design", yield* collectTurnTools(client, created.threadId, designRun.id));
+    const designRun = yield* waitForTurn(client, created.threadId, new Set(), {
+      observed: observedTurnItems,
+    });
+    logTurnTools(
+      "design",
+      yield* collectTurnTools(client, created.threadId, designRun.id, observedTurnItems),
+    );
     const design = yield* promise(() =>
       NodeFSP.readFile(NodePath.join(created.root, "DESIGN.md"), "utf8"),
     );
@@ -635,11 +656,19 @@ const main = Effect.gen(function* () {
       client,
       created.threadId,
       new Set(projection.runs.map((run) => run.id)),
+      { observed: observedTurnItems },
     );
   } else {
-    buildRun = yield* waitForTurn(client, created.threadId, new Set());
+    buildRun = yield* waitForTurn(client, created.threadId, new Set(), {
+      observed: observedTurnItems,
+    });
   }
-  const buildCalls = yield* collectTurnTools(client, created.threadId, buildRun.id);
+  const buildCalls = yield* collectTurnTools(
+    client,
+    created.threadId,
+    buildRun.id,
+    observedTurnItems,
+  );
   logTurnTools("build", buildCalls);
   const action = (operation: "preview" | "export-linux" | "native" | "stop") =>
     client[WS_METHODS.gameAction]({ threadId: created.threadId, action: operation }).pipe(
@@ -783,7 +812,7 @@ const main = Effect.gen(function* () {
         client,
         created.threadId,
         new Set(projection.runs.map((run) => run.id)),
-        { cancel, onReady: () => send(text) },
+        { cancel, observed: observedTurnItems, onReady: () => send(text) },
       );
     });
   // `game_web_playtest` exists only on the agent's MCP surface, so the verifier's
@@ -795,7 +824,10 @@ const main = Effect.gen(function* () {
         extraPlaytestSteps,
       )}. The web build is current; do not change any game files. Report the playtest result.`,
     );
-    logTurnTools("extra-playtest", yield* collectTurnTools(client, created.threadId, extraRun.id));
+    logTurnTools(
+      "extra-playtest",
+      yield* collectTurnTools(client, created.threadId, extraRun.id, observedTurnItems),
+    );
     const extraEvidence = yield* promise(() => latestPlaytest(created.root));
     assert(
       extraEvidence.directory !== beforeExtra.directory,
@@ -822,7 +854,10 @@ const main = Effect.gen(function* () {
       });
     const baseline = yield* snapshotTree();
     const reviseRun = yield* followup(values.revise);
-    logTurnTools("revise", yield* collectTurnTools(client, created.threadId, reviseRun.id));
+    logTurnTools(
+      "revise",
+      yield* collectTurnTools(client, created.threadId, reviseRun.id, observedTurnItems),
+    );
     const after = yield* promise(() => revisionSnapshot(created.root));
     console.log("Revision assets before/after:", JSON.stringify({ before, after }, null, 2));
     const revised = yield* snapshotTree();
