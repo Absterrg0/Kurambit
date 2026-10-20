@@ -546,6 +546,16 @@ it.effect("approves a draft design once and starts exactly one build turn", () =
     expect(sends[0]?.threadId).toBe(ThreadId.make("game-test-thread"));
     expect(sends[0]?.text).toContain("The design is approved");
     expect(sends[0]?.text).toContain("milestone 1");
+    // The build turn runs the product's qualification loop with the recorded
+    // tools; the prompt has to name them, because a do-it-yourself agent that
+    // drives the godot CLI by hand leaves no verdicts the panel can show.
+    expect(sends[0]?.text).toContain("game_status");
+    expect(sends[0]?.text).toContain("game_godot_import");
+    expect(sends[0]?.text).toContain("game_godot_check");
+    expect(sends[0]?.text).toContain("game_godot_test");
+    expect(sends[0]?.text).toContain("game_export");
+    expect(sends[0]?.text).toContain("game_web_playtest");
+    expect(sends[0]?.text).toContain("Do not drive the godot binary");
     expect(sends[0]?.createdBy).toBe("user");
     expect(sends[0]?.attachments).toEqual([]);
     expect(gameRoot).not.toBe("");

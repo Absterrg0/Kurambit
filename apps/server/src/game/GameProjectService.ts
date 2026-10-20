@@ -375,8 +375,11 @@ const make = Effect.gen(function* () {
   const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
     return (yield* resolveTarget(threadId)).root;
   });
+  // Name the qualification loop every build turn must run. A blunt model otherwise
+  // treats "the usual checks" as license to drive the godot CLI by hand — which skips
+  // the recorded verdicts the Game panel and the harness depend on.
   const buildAfterApproval =
-    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. Keep DESIGN.md truthful when scope changes, and finish with the usual checks and web playtest before you report back.";
+    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. Keep DESIGN.md truthful when scope changes. Do the engine work with the Game Studio tools; a build-turn report is only evidence the tools wrote: call game_status first, game_godot_import after every engine change, game_godot_check until it reports ok with zero errors, your godot/tests smoke test with game_godot_test until it passes, the web build with game_export, and game_web_playtest with steps over the core loop until it reports success and responded=true (a fresh evidence folder every round). Do not drive the godot binary, exporters, or tests from the shell — raw runs are not recorded as build evidence. Finish AGENTS.md's Definition of done, then report results and the game_preview URL.";
   const approveDesign = Effect.fn("GameProjectService.approveDesign")(function* (
     threadId: ThreadId,
   ) {
