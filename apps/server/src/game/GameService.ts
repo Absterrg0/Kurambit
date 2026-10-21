@@ -1058,11 +1058,21 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
       if (manifest === null) return;
       const design = yield* designApprovals.status(root, manifest);
-      if (design.state !== "draft" && design.state !== "changed") return;
+      if (
+        design.state !== "draft" &&
+        design.state !== "changed" &&
+        design.state !== "revision-pending"
+      )
+        return;
       return yield* new GameOperationError({
         operation,
         path: NodePath.join(root, "DESIGN.md"),
-        reason: design.state === "changed" ? "design-changed" : "design-draft",
+        reason:
+          design.state === "changed"
+            ? "design-changed"
+            : design.state === "revision-pending"
+              ? "design-revision-pending"
+              : "design-draft",
       });
     });
   /** Runs one Godot script and returns what the test stage would record for it. */

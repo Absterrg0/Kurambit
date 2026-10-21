@@ -159,6 +159,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "design-invalid",
       "design-hash-mismatch",
       "design-legacy",
+      "design-revision-pending",
+      "revision-missing",
       "thread-dispatch",
       "invalid-input",
     ]),
@@ -190,6 +192,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "DESIGN.md is still a draft, so this game may not export, preview, run or playtest yet. Finish the design and ask for review; after the creator approves it on the Design tab, retry.",
       "design-changed":
         "DESIGN.md changed after the creator approved it, so this game may not export, preview, run or playtest until they review the new scope and re-approve it on the Design tab.",
+      "design-revision-pending":
+        "A change request is pending its review on the Design tab, so this game may not export, preview, run or playtest until they approve the change, or discard the request there.",
       "design-missing":
         "DESIGN.md is missing or unreadable. Write the design and ask the creator to approve it on the Design tab.",
       "design-invalid":
@@ -198,10 +202,12 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The design changed after the creator reviewed it. Refresh the Design tab, read the current version, and approve that.",
       "design-legacy":
         "This game was created before the design step, so it has no design to approve.",
+      "revision-missing":
+        "There is no pending change request for this game. Ask for a change on the Design tab first.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
       "thread-dispatch":
-        "The design was approved, but starting the build turn failed. The approval was rolled back; try approving it again.",
+        "The turn that follows this game operation could not be sent. For design approval, try approving again; for a change request, discard the pending request on the Design tab and request the change again.",
       "invalid-input":
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
     };
