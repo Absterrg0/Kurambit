@@ -28,6 +28,8 @@ var _visibility_callback: JavaScriptObject = null
 ## running and audible until a first hide says otherwise.
 var _resume_paused := false
 var _resume_muted := false
+## A repeated hide (a restated request) must not overwrite the state to restore.
+var _hidden := false
 
 
 func _ready() -> void:
@@ -135,12 +137,16 @@ func _on_visibility_requested(args: Array) -> void:
 func _apply_visibility(visible: bool) -> void:
 	var tree := get_tree()
 	if visible:
-		if tree != null:
-			tree.paused = _resume_paused
-		AudioServer.set_bus_mute(0, _resume_muted)
+		if _hidden:
+			if tree != null:
+				tree.paused = _resume_paused
+			AudioServer.set_bus_mute(0, _resume_muted)
+			_hidden = false
 	else:
-		_resume_paused = tree != null and tree.paused
-		_resume_muted = AudioServer.is_bus_mute(0)
+		if not _hidden:
+			_resume_paused = tree != null and tree.paused
+			_resume_muted = AudioServer.is_bus_mute(0)
+			_hidden = true
 		if tree != null:
 			tree.paused = true
 		AudioServer.set_bus_mute(0, true)

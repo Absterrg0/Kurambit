@@ -82,7 +82,10 @@ export function GamePlaySurface({
       if (event.source !== frameRef.current?.contentWindow) return;
       const ack = event.data as Partial<VisibilityAck> | null;
       if (ack?.type !== "studio-visibility-ack") return;
-      // Any settled answer dissolves the hint: the game demonstrated the bridge.
+      // Only a hide the game actually applied retires the warning. A resumed
+      // ack, or one that admits the tree is still running or the bus is
+      // audible, does not: that is exactly the state the hint names.
+      if (ack.visible !== false || ack.paused !== true || ack.muted !== true) return;
       pendingAck.current = false;
       setUnacknowledged(false);
     };
