@@ -825,6 +825,9 @@ const make = Effect.gen(function* () {
               evidenceDirectory: null,
               designHash: approval?.designHash ?? null,
               criteria: failed.summary.criteria,
+              ...(failed.summary.coverage === undefined
+                ? {}
+                : { coverage: failed.summary.coverage }),
               detail: failed.summary.detail,
             },
           };
@@ -957,6 +960,7 @@ const make = Effect.gen(function* () {
             evidenceDirectory: evidenceReference,
             designHash: approval?.designHash ?? null,
             criteria: summary.criteria,
+            ...(summary.coverage === undefined ? {} : { coverage: summary.coverage }),
             policyRevision: identity.revision,
             detail: comparison.kind === "current" ? summary.detail : comparison.detail,
           },

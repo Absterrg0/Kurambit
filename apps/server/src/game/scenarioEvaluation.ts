@@ -4,7 +4,6 @@ import type {
   GameScenarioCriterionResult,
   GameScenarioEvidence,
   GameScenarioKindCoverage,
-  GameScenarioObservation,
   GameScenarioStageReason,
   GameScenarioSummary,
 } from "@t3tools/contracts";

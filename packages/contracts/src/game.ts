@@ -3,7 +3,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
-import { GameScenarioCriterionResult } from "./gameScenario.ts";
+import { GameScenarioCriterionResult, GameScenarioKindCoverage } from "./gameScenario.ts";
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -293,6 +293,8 @@ export const GameQualificationStageRead = Schema.Struct({
   finishedAt: Schema.NullOr(Schema.String),
   /** The per-criterion result the state stage recorded, when there is one. */
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
+  /** Proven/failed/missing counts per kind for the state stage. */
+  coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   /** Why the state stage passed or failed, including legacy rules. */
   detail: Schema.optionalKey(Schema.String),
 });

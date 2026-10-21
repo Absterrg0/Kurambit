@@ -177,6 +177,7 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
             scenarios: ["full-run"],
           },
         ],
+        coverage: [{ kind: "win", proven: 1, failed: 0, missing: 0 }],
         detail: "Every observable criterion passed.",
       });
       const read = yield* qualification.read(root, "godot", "approved");
@@ -184,6 +185,7 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
         status: "passed",
         detail: "Every observable criterion passed.",
         criteria: [{ id: "reach-the-goal", status: "passed" }],
+        coverage: [{ kind: "win", proven: 1, failed: 0, missing: 0 }],
       });
     }),
   ),

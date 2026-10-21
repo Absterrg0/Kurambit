@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   GameScenarioCriterionResult,
+  GameScenarioKindCoverage,
   type GameAcceptanceCriterion,
   type GameDesignState,
   type GameQualificationRead,
@@ -56,6 +57,8 @@ export interface QualificationStageRecord {
   readonly designHash?: string | null;
   /** The per-criterion summary for the state stage. */
   readonly criteria?: readonly GameScenarioCriterionResult[];
+  /** Proven/failed/missing counts per kind for the state stage. */
+  readonly coverage?: readonly GameScenarioKindCoverage[];
   /** Why the state stage passed or failed, including legacy rules. */
   readonly detail?: string;
   /** For web exports, the exact files the build produced. */
@@ -83,6 +86,7 @@ const StoredStage = Schema.Struct({
   evidenceDirectory: Schema.NullOr(Schema.String),
   designHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
+  coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   detail: Schema.optionalKey(Schema.String),
   artifacts: Schema.optionalKey(Schema.Array(StoredArtifact)),
   policyRevision: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -197,6 +201,7 @@ const deriveQualification = (input: {
       buildId: recorded?.buildId ?? null,
       finishedAt: recorded?.finishedAt ?? null,
       ...(recorded?.criteria === undefined ? {} : { criteria: recorded.criteria }),
+      ...(recorded?.coverage === undefined ? {} : { coverage: recorded.coverage }),
       ...(recorded?.detail === undefined ? {} : { detail: recorded.detail }),
     });
     if (recorded === undefined) stageReads.set(stage, read("missing"));
@@ -339,6 +344,7 @@ export interface QualificationRecordInput {
   readonly evidenceDirectory: string | null;
   readonly designHash?: string | null;
   readonly criteria?: readonly GameScenarioCriterionResult[];
+  readonly coverage?: readonly GameScenarioKindCoverage[];
   readonly detail?: string;
   readonly artifacts?: readonly WebArtifactFile[];
   readonly policyRevision?: string | null;
@@ -464,6 +470,7 @@ export const layer = (options: {
                       evidenceDirectory: input.evidenceDirectory,
                       ...(input.designHash === undefined ? {} : { designHash: input.designHash }),
                       ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
+                      ...(input.coverage === undefined ? {} : { coverage: input.coverage }),
                       ...(input.detail === undefined ? {} : { detail: input.detail }),
                       ...(input.artifacts === undefined ? {} : { artifacts: input.artifacts }),
                       ...(input.policyRevision === undefined

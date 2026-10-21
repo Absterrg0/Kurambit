@@ -238,8 +238,8 @@ it.live.skipIf(!available)(
               expect(full?.frames).toBeGreaterThan(500);
               expect(lose).toMatchObject({ playerMoved: true, error: null });
               expect(lose?.baselineFrame).not.toBeNull();
-              const lives = lose?.observations.find((entry) => entry.key === "lives");
-              expect(lives?.last).toBe(0);
+              const state = lose?.observations.find((entry) => entry.key === "state");
+              expect(state?.last).toBe(4);
               return run;
             }),
         );
@@ -319,6 +319,14 @@ it.live.skipIf(!available)(
               expect(win?.provenBy?.frame).toBeGreaterThan(0);
               const lose = result.summary.criteria.find((criterion) => criterion.id === "lose");
               expect(lose?.provenBy?.scenario).toBe("lose-run");
+              // The readable state stage keeps the same coverage and proof.
+              const status = yield* game.status(threadId);
+              const state = status.qualification.stages.find((stage) => stage.stage === "state");
+              expect(state?.status).toBe("passed");
+              expect(state?.coverage).toEqual(result.summary.coverage);
+              expect(
+                state?.criteria?.find((criterion) => criterion.id === "win")?.provenBy,
+              ).toEqual({ scenario: "full-run", frame: win?.provenBy?.frame });
               return result;
             }),
         );
