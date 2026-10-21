@@ -23,6 +23,62 @@ export const BENCHMARK_OUTCOMES = [
 ] as const;
 export type BenchmarkOutcome = (typeof BENCHMARK_OUTCOMES)[number];
 
+export const BENCHMARK_LANES = ["harness", "raw"] as const;
+/** `harness` runs today's e2e flow; `raw` asks the bare agent to build the game. */
+export type BenchmarkLane = (typeof BENCHMARK_LANES)[number];
+
+/**
+ * The independent grader's row, read from `<brief>/grade/grade.json`. It is
+ * deliberately small: the full grade and its frames stay next to the run.
+ */
+export interface BenchmarkGrade {
+  readonly build: string;
+  readonly quick: {
+    readonly booted: boolean;
+    readonly consoleErrors: number;
+    readonly responded: boolean;
+  } | null;
+  readonly obligationIds: ReadonlyArray<string>;
+  readonly obligations: { readonly yes: number; readonly total: number };
+  readonly control: boolean;
+  readonly void: boolean;
+  readonly solCalls: number;
+}
+
+/** A malformed or missing grade reads as absent, never as a pass. */
+export function readGradeSummary(value: unknown): BenchmarkGrade | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const build = record.build as { readonly kind?: unknown } | undefined;
+  if (build === undefined || typeof build.kind !== "string") return null;
+  const quick = record.quick as Record<string, unknown> | null | undefined;
+  const obligations = Array.isArray(record.obligations)
+    ? (record.obligations as ReadonlyArray<Record<string, unknown>>)
+    : [];
+  const control = record.control as { readonly yes?: unknown } | undefined;
+  return {
+    build: build.kind,
+    quick:
+      quick === null || quick === undefined
+        ? null
+        : {
+            booted: quick.booted === true,
+            consoleErrors: Number(quick.consoleErrors ?? 0),
+            responded: quick.responded === true,
+          },
+    obligationIds: obligations
+      .filter((obligation) => obligation.yes === true && typeof obligation.id === "string")
+      .map((obligation) => obligation.id as string),
+    obligations: {
+      yes: obligations.filter((obligation) => obligation.yes === true).length,
+      total: obligations.length,
+    },
+    control: control?.yes === true,
+    void: record.void === true,
+    solCalls: Number(record.solCalls ?? 0),
+  };
+}
+
 /** What the command observed outside the runner's own summary. */
 export interface BenchmarkRunObservation {
   readonly timedOut: boolean;
@@ -33,6 +89,7 @@ export interface BenchmarkRunObservation {
 
 export interface BenchmarkBriefResult {
   readonly schemaVersion: 1;
+  readonly lane: BenchmarkLane;
   readonly harnessCommit: string;
   readonly fixtureId: string;
   readonly title: string;
@@ -66,6 +123,8 @@ export interface BenchmarkBriefResult {
     readonly blockers: ReadonlyArray<string>;
   } | null;
   readonly stages: ReadonlyArray<{ readonly stage: string; readonly status: string }>;
+  /** The independent grader's reading; null when the game was never gradeable. */
+  readonly grade: BenchmarkGrade | null;
 }
 
 const GAMEPLAY_ROLES = new Set(["early", "interaction", "hazard", "later", "finish"]);
@@ -216,6 +275,8 @@ export function readBenchmarkResult(input: {
   readonly startedAt: string;
   readonly durationMs: number;
   readonly observation: BenchmarkRunObservation;
+  readonly lane?: BenchmarkLane;
+  readonly grade?: BenchmarkGrade | null;
 }): BenchmarkBriefResult {
   const summary = input.observation.summary;
   const verdict = classifyRun(input.observation);
@@ -223,6 +284,7 @@ export function readBenchmarkResult(input: {
   const judgements = summary?.visualJudgements ?? [];
   return {
     schemaVersion: 1,
+    lane: input.lane ?? "harness",
     harnessCommit: input.harnessCommit,
     fixtureId: input.brief.id,
     title: input.brief.title,
@@ -260,6 +322,87 @@ export function readBenchmarkResult(input: {
         stage: stage.stage,
         status: stage.status,
       })) ?? [],
+    grade: input.grade ?? null,
+  };
+}
+
+/**
+ * The raw lane's row: there is no run summary, so the independent grade is the
+ * only reading. `outcome` records whether a gradable build came out of the run,
+ * not how good the game was; the obligation table carries quality.
+ */
+export function readRawResult(input: {
+  readonly harnessCommit: string;
+  readonly brief: GameBenchmarkBrief;
+  readonly fixtureChecksum: string;
+  readonly startedAt: string;
+  readonly durationMs: number;
+  readonly timedOut: boolean;
+  readonly exitCode: number | null;
+  readonly grade: BenchmarkGrade | null;
+}): BenchmarkBriefResult {
+  const grade = input.grade;
+  const outcome: BenchmarkOutcome = input.timedOut
+    ? "timeout"
+    : grade === null || grade.build === "no-build"
+      ? "crashed"
+      : "passed";
+  const reason = input.timedOut
+    ? "The raw agent hit its cap."
+    : grade === null
+      ? `No grade was written (exit ${input.exitCode ?? "?"}).`
+      : `build=${grade.build}; quick=${
+          grade.quick === null
+            ? "—"
+            : `${grade.quick.booted ? "booted" : "no-boot"}, ${grade.quick.consoleErrors} console error(s), ${
+                grade.quick.responded ? "responded" : "no response"
+              }`
+        }; obligations ${grade.obligations.yes}/${grade.obligations.total} YES; void=${grade.void}.`;
+  return {
+    schemaVersion: 1,
+    lane: "raw",
+    harnessCommit: input.harnessCommit,
+    fixtureId: input.brief.id,
+    title: input.brief.title,
+    template: input.brief.template,
+    fixtureChecksum: input.fixtureChecksum,
+    outcome,
+    failureReason: reason,
+    startedAt: input.startedAt,
+    durationMs: input.durationMs,
+    turns: [],
+    judgeCalls: grade?.solCalls ?? 0,
+    obligations: input.brief.obligations.map((obligation) => ({
+      id: obligation.id,
+      kind: obligation.kind,
+      description: obligation.description,
+      key: obligation.key ?? null,
+      expect: obligation.expect ?? null,
+      status:
+        grade !== null && grade.obligationIds.includes(obligation.id)
+          ? ("proven" as const)
+          : ("failed" as const),
+      detail:
+        grade === null
+          ? "No gradable build."
+          : grade.void
+            ? "The grade is void: the control item passed."
+            : obligation.description,
+      criteria: [],
+    })),
+    visual: { status: null, dimensions: [], judgements: [], frames: [], detail: null },
+    repairDelta: null,
+    playtest:
+      grade?.quick === null || grade?.quick === undefined
+        ? null
+        : {
+            frames: 0,
+            responded: grade.quick.responded,
+            qualifies: grade.quick.booted && grade.quick.consoleErrors === 0,
+            blockers: [],
+          },
+    stages: [],
+    grade,
   };
 }
 
@@ -343,15 +486,24 @@ const judgementLine = (judgement: GameVisualJudgement): string =>
     .map((score) => `${DIMENSION_KEYS[score.dimension]}=${score.score}`)
     .join(" ")}`;
 
-/** A row is only reused when it measures the same harness commit and fixture bytes. */
+/** A row is only reused when it measures the same commit, lane and fixture bytes. */
 export function shouldResume(
-  existing: { readonly harnessCommit: string; readonly fixtureChecksum: string } | null,
-  expected: { readonly harnessCommit: string; readonly checksum: string },
+  existing: {
+    readonly harnessCommit: string;
+    readonly fixtureChecksum: string;
+    readonly lane?: BenchmarkLane;
+  } | null,
+  expected: {
+    readonly harnessCommit: string;
+    readonly checksum: string;
+    readonly lane?: BenchmarkLane;
+  },
 ): boolean {
   return (
     existing !== null &&
     existing.harnessCommit === expected.harnessCommit &&
-    existing.fixtureChecksum === expected.checksum
+    existing.fixtureChecksum === expected.checksum &&
+    (existing.lane ?? "harness") === (expected.lane ?? "harness")
   );
 }
 
@@ -365,7 +517,9 @@ export function decodeBenchmarkResult(value: unknown): BenchmarkBriefResult | nu
     typeof record.fixtureChecksum !== "string" ||
     typeof record.fixtureId !== "string" ||
     typeof record.outcome !== "string" ||
-    !(BENCHMARK_OUTCOMES as ReadonlyArray<string>).includes(record.outcome)
+    !(BENCHMARK_OUTCOMES as ReadonlyArray<string>).includes(record.outcome) ||
+    (record.lane !== undefined &&
+      !(BENCHMARK_LANES as ReadonlyArray<string>).includes(record.lane as string))
   )
     return null;
   return record as unknown as BenchmarkBriefResult;
@@ -374,18 +528,27 @@ export function decodeBenchmarkResult(value: unknown): BenchmarkBriefResult | nu
 /** The human table a reviewer reads; every attempted brief keeps its row. */
 export function renderResultsMarkdown(input: {
   readonly harnessCommit: string;
+  readonly lane?: BenchmarkLane;
   readonly results: ReadonlyArray<BenchmarkBriefResult>;
 }): string {
+  const lane = input.lane ?? "harness";
   const totals = summarizeResults(input.results);
   const outcomeText = BENCHMARK_OUTCOMES.filter((outcome) => totals.outcomes[outcome] > 0)
     .map((outcome) => `${totals.outcomes[outcome]} ${outcome}`)
     .join(", ");
   const lines = [
-    `# Game Studio benchmark — ${input.harnessCommit}`,
+    `# Game Studio benchmark — ${input.harnessCommit} (${lane} lane)`,
     "",
     `${totals.attempted} brief(s) attempted: ${outcomeText || "none"}.`,
-    `Pass rate ${totals.outcomes.passed}/${totals.attempted} (${percent(totals.passRate)}); failures stay in the denominator.`,
-    `Obligations: ${totals.obligations.proven} proven, ${totals.obligations.failed} failed, ${totals.obligations.unsupported} unsupported.`,
+    ...(lane === "harness"
+      ? [
+          `Pass rate ${totals.outcomes.passed}/${totals.attempted} (${percent(totals.passRate)}); failures stay in the denominator.`,
+          `Obligations: ${totals.obligations.proven} proven, ${totals.obligations.failed} failed, ${totals.obligations.unsupported} unsupported.`,
+        ]
+      : [
+          "The outcome column only records whether a gradable build came out of the run; the independent grade below carries quality.",
+          `Obligations (independent grade): ${totals.obligations.proven} YES, ${totals.obligations.failed} NO.`,
+        ]),
     "",
     "| Brief | Outcome | Obligations p/f/u | Visual | Repair Δ | Judge calls | Turns |",
     "| --- | --- | --- | --- | --- | --- | --- |",
@@ -415,6 +578,25 @@ export function renderResultsMarkdown(input: {
       return `| ${result.fixtureId} | ${DIMENSION_HEADERS.map((dimension) =>
         dimensionCell(result, dimension, String(byDimension.get(dimension) ?? "—")),
       ).join(" | ")} |`;
+    }),
+    "",
+    "## Independent grade",
+    "",
+    "`scripts/game-grade.ts` over pixels and console only; obligations are judged from their descriptions,",
+    "so the design vocabulary's `unsupported` ones are graded too. A passing control item voids the grade.",
+    "",
+    "| Brief | Build | Boot | Console errors | Input changed | Obligations YES | Control | Void | Sol calls |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...input.results.map((result) => {
+      const grade = result.grade;
+      if (grade === null) return `| ${result.fixtureId} | no grade | — | — | — | — | — | — | — |`;
+      return `| ${result.fixtureId} | ${grade.build} | ${
+        grade.quick === null ? "—" : grade.quick.booted ? "booted" : "no boot"
+      } | ${grade.quick === null ? "—" : grade.quick.consoleErrors} | ${
+        grade.quick === null ? "—" : grade.quick.responded ? "yes" : "no"
+      } | ${grade.obligations.yes}/${grade.obligations.total} | ${grade.control ? "YES" : "no"} | ${
+        grade.void ? "VOID" : "no"
+      } | ${grade.solCalls} |`;
     }),
     "",
     "## Judgements",
