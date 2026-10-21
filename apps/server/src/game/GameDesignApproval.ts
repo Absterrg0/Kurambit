@@ -199,7 +199,7 @@ export const readDesignIntent = async (file: string): Promise<GameDesignIntent |
   (await readStoredIntent(file))?.intent ?? null;
 
 /** Whether the game was created from a template that ships the StudioProbe. */
-export const readProbeIntent = async (file: string): Promise<boolean | null> =>
+const readProbeIntent = async (file: string): Promise<boolean | null> =>
   (await readStoredIntent(file))?.probe ?? null;
 
 const writeRecord = async (file: string, record: DesignApprovalRecord) => {

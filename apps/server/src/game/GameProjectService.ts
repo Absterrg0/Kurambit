@@ -63,7 +63,7 @@ export const insideGame = (root: string, relative: string) => {
  * accepted: the exam must name a file inside the game's project, not an
  * arbitrary script on the machine.
  */
-export const engineResourcePath = (value: string, suffix: ".gd" | ".tscn"): string | null => {
+const engineResourcePath = (value: string, suffix: ".gd" | ".tscn"): string | null => {
   if (!value.startsWith("res://") || value.includes("\\")) return null;
   const relative = value.slice("res://".length);
   if (
