@@ -2,9 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   NO_LOSE_STATE_TEXT,
+  diffAcceptance,
   normalizeAcceptance,
   parseAcceptance,
+  removedCriteriaWithoutRemovedLine,
+  unmetRevisionObligations,
   validateDesignDocument,
+  type GameAcceptanceCriterion,
 } from "./gameDesign.ts";
 
 const skeleton = `# Tiny Quest — design
@@ -292,5 +296,150 @@ This game has no lose state: a run always ends in a win, and there is no failure
 \`\`\``,
     );
     expect(validateDesignDocument({ design, skeleton }).issues).toEqual([]);
+  });
+});
+
+describe("diffAcceptance", () => {
+  const move: GameAcceptanceCriterion = {
+    id: "move",
+    kind: "control",
+    text: "Move",
+    observe: { key: "jumps", expect: ">=1" },
+  };
+  const lanterns: GameAcceptanceCriterion = {
+    id: "light-lanterns",
+    kind: "mechanic",
+    text: "Touching a lantern lights it",
+    observe: { key: "collected", expect: ">=1" },
+  };
+  const win: GameAcceptanceCriterion = {
+    id: "win",
+    kind: "win",
+    text: "Win",
+    observe: { key: "state", expect: "==3" },
+  };
+
+  it("counts only the promises that differ, keyed by id", () => {
+    expect(diffAcceptance([move, lanterns, win], [move, lanterns, win])).toEqual({
+      added: [],
+      changed: [],
+      removed: [],
+    });
+    const diff = diffAcceptance([move, lanterns, win], [move, lanterns]);
+    expect(diff.added).toEqual([]);
+    expect(diff.changed).toEqual([]);
+    expect(diff.removed.map((criterion) => criterion.id)).toEqual(["win"]);
+  });
+
+  it("shows an added criterion and an in-place change of one id", () => {
+    const raised: GameAcceptanceCriterion = {
+      ...lanterns,
+      observe: { key: "collected", expect: ">=2" },
+    };
+    const doubleJump: GameAcceptanceCriterion = {
+      id: "double-jump",
+      kind: "mechanic",
+      text: "A second jump while airborne raises the courier",
+      observe: { key: "air_jumps", expect: ">=1" },
+    };
+    const diff = diffAcceptance([move, lanterns], [move, raised, doubleJump]);
+    expect(diff.added.map((criterion) => criterion.id)).toEqual(["double-jump"]);
+    expect(diff.changed.map((criterion) => criterion.id)).toEqual(["light-lanterns"]);
+    // The change is the raised bar, not a removed-then-added pair.
+    expect(diff.changed[0]).toEqual(raised);
+    expect(diff.removed).toEqual([]);
+  });
+
+  it("treats reordering and a kind or observe edit as changes, not removals", () => {
+    const rethrown: GameAcceptanceCriterion = { ...move, kind: "mechanic" };
+    const expectEdit: GameAcceptanceCriterion = {
+      ...move,
+      observe: { key: "jumps", expect: ">=2" },
+    };
+    for (const current of [
+      [rethrown, lanterns],
+      [expectEdit, lanterns],
+    ]) {
+      const diff = diffAcceptance([move, lanterns], current);
+      expect(diff.changed.map((criterion) => criterion.id)).toEqual(["move"]);
+      expect(diff.removed).toEqual([]);
+      expect(diff.added).toEqual([]);
+    }
+  });
+});
+
+describe("removedCriteriaWithoutRemovedLine", () => {
+  const nine: GameAcceptanceCriterion = {
+    id: "nine-lanterns",
+    kind: "content",
+    text: "Nine lanterns exist",
+    observe: { key: "total", expect: "==9" },
+  };
+
+  it("returns a removal the document never owned", () => {
+    const diff = diffAcceptance([nine], []);
+    expect(removedCriteriaWithoutRemovedLine(diff, "## Content\n\nOne rooftop now.")).toEqual([
+      nine,
+    ]);
+  });
+
+  it("accepts a Removed line with bullet, prose or casing, matching by id", () => {
+    for (const line of [
+      "- Removed: nine-lanterns",
+      "* Removed: nine-lanterns",
+      "Removed: the nine-lanterns promise went away with the second roof",
+      "  Removed: Nine-Lanterns",
+    ]) {
+      const diff = diffAcceptance([nine], []);
+      expect(removedCriteriaWithoutRemovedLine(diff, `## Content\n\n${line}\n`)).toEqual([]);
+    }
+  });
+
+  it("needs a token that names the id, not just any Removed line", () => {
+    const diff = diffAcceptance([nine], []);
+    expect(
+      removedCriteriaWithoutRemovedLine(diff, "## Content\n\nRemoved: the second roof\n"),
+    ).toEqual([nine]);
+    // An id split by its hyphen cannot be named; the line must carry the slug.
+    expect(
+      removedCriteriaWithoutRemovedLine(diff, "## Content\n\nRemoved: the nine lanterns\n"),
+    ).toEqual([nine]);
+  });
+});
+
+describe("unmetRevisionObligations", () => {
+  it("passes an obligation one criterion observes with kind, key and expect", () => {
+    const airJumps: GameAcceptanceCriterion = {
+      id: "double-jump",
+      kind: "mechanic",
+      text: "A second jump while airborne raises the courier",
+      observe: { key: "air_jumps", expect: ">=1" },
+    };
+    expect(
+      unmetRevisionObligations([airJumps], [{ kind: "mechanic", key: "air_jumps", expect: ">=1" }]),
+    ).toEqual([]);
+  });
+
+  it("reports an obligation nothing observes, including observe-less criteria", () => {
+    const paint: GameAcceptanceCriterion = {
+      id: "paint",
+      kind: "mechanic",
+      text: "Paint the wall",
+    };
+    const win: GameAcceptanceCriterion = {
+      id: "win",
+      kind: "win",
+      text: "Win",
+      observe: { key: "state", expect: "==3" },
+    };
+    expect(
+      unmetRevisionObligations(
+        [paint, win],
+        [
+          { kind: "mechanic", key: "air_jumps", expect: ">=1" },
+          { kind: "mechanic", key: "collected", expect: ">=1" },
+        ],
+      ).map((obligation) => obligation.key),
+    ).toEqual(["air_jumps", "collected"]);
   });
 });
