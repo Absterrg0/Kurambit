@@ -60,17 +60,22 @@ real audio exists and nothing else has to change.
 `scripts/studio_probe.gd` is autoloaded as `StudioProbe`. In web builds only, it registers
 `window.__studioProbe()`, which returns JSON with GameState's public primitive members and the
 player's world position. `game_web_playtest` reads it after boot, between steps and at the end,
-and will not qualify a run in which the player neither moved nor changed a GameState value.
+and qualifies a run only when the player moved after the first input step and an approved
+mechanic, content, win or lose observation that was false at that gameplay baseline came true.
+A game without an approved design instead needs movement plus a GameState change whose sampled
+ride is not just a clock rising.
 The same probe carries the stage's visibility bridge: `studio-visibility` postMessages from the
 app pause the SceneTree and mute the master bus while the stage tab is closed, and answer with
 `studio-visibility-ack` plus the observed state. The generated harness sends it once before the
 steps, so the pause must be answered there — never delete the bridge while keeping the snapshot
 half.
 
-Keep the probe and its autoload line: removing them does not make the check stricter, it only
-falls back to the weaker pixel-only rule. Add new observable values to `GameState` as public
-variables (anything without a leading `_`); the probe reports up to 40 of them and truncates
-strings to 80 characters. It is read-only and never writes to the game.
+Keep the probe and its autoload line. The playtest obligation is server-owned from creation: a
+game made with the probe owes it for good, so deleting the script or the autoload entry makes
+the playtest fail instead of falling back to the weaker pixel-only rule. Add new observable
+values to `GameState` as public variables (anything without a leading `_`); the probe reports up
+to 40 of them and truncates strings to 80 characters. It is read-only and never writes to the
+game.
 
 ## Level anatomy
 

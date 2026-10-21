@@ -59,8 +59,8 @@ Each game card and sidebar row says what the game actually is: **Design draft** 
 **Qualified as of …** once the server's record shows the check, test, web export, playtest and
 state scenarios passed. State scenarios prove the acceptance after play starts, including a route
 that wins and, when the design has one, a route that loses the run. The time matters: it is when the
-record was written, and the Stage re-checks the current files when you open the game. A card's cover is a frame of the game being played from
-its last successful run, not its menu.
+record was written, and the Stage re-checks the current files when you open the game. A card's
+cover is a frame of real play from the latest run that qualified, not its menu or a failed attempt.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an

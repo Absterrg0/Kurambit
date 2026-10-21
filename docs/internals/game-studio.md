@@ -49,12 +49,14 @@ unqualified, and the staging gate in `GameService` reads that record rather than
 The same creation record carries the game's verification policy: the canonical `testSuite`, the
 `gameplayScene` the check boots, and whether a qualifying playtest owes the StudioProbe. The
 service reads that record, never `game.json`, which keeps only a display mirror. A game created
-before the policy existed adopts one from its manifest on first read; the adoption is persisted
-and logged, so later manifest edits cannot change the exam. Changing the policy is an explicit
-`game.updateVerificationPolicy` RPC and deliberately not a `game_*` tool: an agent must not widen
-or weaken its own exam. Each policy has a derived revision, and check, test and state results store
-the revision they ran under, so a change makes those passes stale. A playtest stores whether it
-owed the probe for the same reason. Arbitrary diagnostic scripts still run through `game_godot_test`
+before the policy existed adopts one on first read; the adoption also inspects the game tree, so
+a pre-27 template game carrying `scripts/studio_probe.gd` or its autoload adopts `probe: true`
+even though its record never named the obligation. The adoption is persisted and logged, so later
+manifest edits and deleting the probe files cannot change the exam; only an explicit change can.
+Changing the policy is an explicit `game.updateVerificationPolicy` RPC and deliberately not a
+`game_*` tool: an agent must not widen or weaken its own exam. Each policy has a derived revision,
+and check, test and state results store the revision they ran under, so a change makes those passes
+stale. A playtest stores whether it owed the probe for the same reason. Arbitrary diagnostic scripts still run through `game_godot_test`
 but only the policy's canonical suite records the test stage.
 
 The first approval sends the build message through ordinary thread dispatch, so the build is a
@@ -198,32 +200,51 @@ clean console. Pixels alone still are not gameplay: both starter templates autol
 which exposes a read-only `window.__studioProbe()` snapshot (GameState's public numeric, boolean and
 string members plus the first `player`-group position). The playtest reads it after boot, after
 every step and at the end, and reports `state: { before, after }` with a short diff such as
-`collected 0→2, player moved 312`. Movement and state changes are measured only between samples
-that have a player, so starting the game from its menu is not mistaken for play; clocks
-(`run_seconds`, `best_seconds`) never count. A run with a probe records a passed `playtest` stage
-only when the player moved or a numeric GameState value changed. The creation record is
+`collected 0→2, player moved 312`. The baseline is the first sample after an input step with a
+player present, so starting the game from its menu is not mistaken for play. With an approved
+design, a run passes the `playtest` stage only when the player moved from that baseline and at
+least one approved mechanic, content, win or lose observation that was false at the baseline came
+true; a win or lose has to hold where the run ended. A legacy game without acceptance needs
+movement plus a GameState change whose sampled ride is not strictly increasing, so clocks are
+excluded by shape rather than by a list of names. A failing run reports structured `blockers` and
+`interaction` beside `booted`, never only a sentence on a green success. The creation record is
 authoritative about the obligation: templates declare `probe: true` in `template.json`, the
-scaffold copies it into `game.json` and the server-owned design-intent record, and a game whose
-record requires the probe fails its playtest stage with "StudioProbe missing — restore
-scripts/studio_probe.gd autoload" when no probe can be read. Games created before probe
-enforcement keep the pixel rule, and the result says `no state probe`. When the approved design has `observe`
+scaffold copies it into `game.json` and the server-owned design-intent record, and a pre-27 game
+whose tree carries the probe adopts the obligation on first read. A game whose policy requires the
+probe fails its playtest stage with "StudioProbe missing — restore scripts/studio_probe.gd
+autoload" when no probe can be read; games that never owed one keep the pixel rule, and the result
+says `no state probe`. When the approved design has `observe`
 criteria, the result also lists the ones this run happened to satisfy; that list is informational
 and the scenario runner still gates the `state` stage. The tool keeps a boot-only smoke result
-useful, but only a run that was given input steps, succeeded, responded and (with a probe) showed
-gameplay records a pass; anything else records a failure with that reason in the tool result. Each
+useful, but only a run that was given input steps, succeeded, responded and met the rule above
+records a pass; anything else records a failure with those blockers in the tool result. Each
 run is kept under `builds/playtests/<timestamp>/` as frames plus a `result.json` with the steps,
-console, probe snapshot and verdict; the newest five are kept, and `game_status` (and the Builds
-tab) reports the last run and whether the web build has been rebuilt since. Capture is bounded
-before the browser launches: width and height 320–1920, one step at most 10 s, the step sequence at
-most 120 s, at most 60 steps and 12 screenshots, and a boot timeout at most 120 s. The response
+console, probe snapshot, the probe nearest each screenshot and the verdict; the newest five are
+kept, and `game_status` (and the Builds tab) reports the last run and whether the web build has
+been rebuilt since. Capture is bounded before the browser launches: the result may be 320–1920 px,
+one step at most 10 s, the step sequence at most 120 s, at most 60 steps and 12 screenshots, and a
+boot timeout at most 120 s. The response
 carries at most 6 MB of PNG data; frames over that budget stay on disk as evidence and the result
-names how many were dropped. The library cover prefers a screenshot taken after the first step of
-a successful run, then its after-steps frame, then an asset thumbnail, so a menu or loading frame
-never covers a game. Screenshots are
+names how many were dropped. The capture size is a whole-number multiple of the project's base
+viewport (`display/window/size/viewport_width` and height) that fits the requested box, 1280×720
+by default, so a 640×360 game is recorded at a true 1280×720 rather than letterboxed. The library
+cover is the latest qualifying run's first frame whose persisted probe shows a player and an
+approved criterion progressing (else a player away from the baseline), then the after-steps frame,
+then an asset thumbnail; captions never choose a cover. Screenshots are
 evidence of what happened, not a substitute for a gameplay assertion, which stays in the headless
 smoke test. Only the suite named by the game's server-owned verification policy (templates set
 `res://tests/smoke_test.gd`) owns the `test` stage; other scripts still run as diagnostics but
 never record a pass.
+
+The stage keeps the game iframe mounted across workspace tabs, so switching to Design or Assets
+does not restart a running game. CSS hiding does not change an iframe document's Page Visibility,
+so the play surface sends a `studio-visibility` postMessage instead; the template's StudioProbe
+pauses the SceneTree, mutes the master bus, restores the pause and mute state it found when the
+game returns, and answers with `studio-visibility-ack` carrying the observed state. The surface
+shows a quiet "Game may still be running" hint when a hide gets no applying ack. This is also why
+the iframe key is a fold of the preview session plus the _served_ artifact identity: a source edit
+or a failed rebuild leaves the bytes under `builds/web` untouched and must not remount the game,
+while a successful replacement remounts it exactly once.
 
 `game_godot_check` is the step before either: one bundled SceneTree checker loads every script,
 scene and resource, then runs the main scene and the gameplay scene named by the game's
