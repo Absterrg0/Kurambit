@@ -43,27 +43,40 @@ const labelled = (
   );
 
 describe("gameCoverFrame", () => {
-  it("prefers a screenshot captured after the first step over the boot frame", () => {
+  it("covers a game with the observed-play frame the evidence picked", () => {
     expect(
       gameCoverFrame(
-        labelled([
-          { label: "booted", path: "builds/playtests/run/01-booted.png" },
-          { label: "crossed-the-gap", path: "builds/playtests/run/02-crossed-the-gap.png" },
-          { label: "after-steps", path: "builds/playtests/run/03-after-steps.png" },
-        ]),
+        labelled(
+          [
+            { label: "booted", path: "builds/playtests/run/01-booted.png" },
+            { label: "menu", path: "builds/playtests/run/02-menu.png" },
+          ],
+          // The reader chose this one from per-frame probe state, captions aside.
+          { coverFrame: { label: "menu", path: "builds/playtests/run/02-menu.png" } },
+        ),
       )?.path,
-    ).toBe("builds/playtests/run/02-crossed-the-gap.png");
+    ).toBe("builds/playtests/run/02-menu.png");
   });
 
-  it("falls back to the after-steps frame when every frame is boot or after-steps", () => {
+  it("falls back to the after-steps frame when no frame proved gameplay", () => {
     expect(
       gameCoverFrame(
         labelled([
           { label: "booted", path: "builds/playtests/run/01-booted.png" },
-          { label: "after-steps", path: "builds/playtests/run/02-after-steps.png" },
+          { label: "menu", path: "builds/playtests/run/02-menu.png" },
+          { label: "after-steps", path: "builds/playtests/run/03-after-steps.png" },
         ]),
+        { coverFrame: null },
       )?.path,
-    ).toBe("builds/playtests/run/02-after-steps.png");
+    ).toBe("builds/playtests/run/03-after-steps.png");
+  });
+
+  it("a menu caption on an unproven run grants nothing", () => {
+    // No coverFrame and no after-steps frame: the arbitrary screenshot stays a
+    // screenshot, so there is no playtest cover at all.
+    expect(
+      gameCoverFrame(labelled([{ label: "menu", path: "menu.png" }], { coverFrame: null })),
+    ).toBeNull();
   });
 
   it("never covers a game with the boot frame of a failed or unresponded run", () => {
@@ -78,13 +91,18 @@ describe("gameCoverFrame", () => {
 });
 
 describe("gameCoverCandidates", () => {
-  it("prefers a gameplay playtest frame, then asset thumbnails in manifest order", () => {
+  it("prefers the observed-play frame, then asset thumbnails in manifest order", () => {
     expect(
       gameCoverCandidates({
-        lastPlaytest: labelled([
-          { label: "booted", path: "builds/playtests/new/01-booted.png" },
-          { label: "playing", path: "builds/playtests/new/02-playing.png" },
-        ]),
+        lastPlaytest: labelled(
+          [
+            { label: "booted", path: "builds/playtests/new/01-booted.png" },
+            { label: "playing", path: "builds/playtests/new/02-playing.png" },
+          ],
+          {
+            coverFrame: { label: "playing", path: "builds/playtests/new/02-playing.png" },
+          },
+        ),
         assets: [asset("rock", "art/previews/rock.png"), asset("tree")],
       }),
     ).toEqual(["builds/playtests/new/02-playing.png", "art/previews/rock.png"]);

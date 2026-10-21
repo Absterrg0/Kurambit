@@ -67,6 +67,10 @@ const playtestResult: GameWebPlaytestResult = {
   consoleMessages: [],
   screenshots: [],
   state: null,
+  // This fixture's game owes no probe, so the evaluator's pixel rule qualifies.
+  qualifies: true,
+  blockers: [],
+  interaction: "no state probe",
 };
 
 interface FixtureOptions {

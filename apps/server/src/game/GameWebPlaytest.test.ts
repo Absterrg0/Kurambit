@@ -116,6 +116,9 @@ it.live.skipIf(!available)(
           height: 720,
           bootTimeoutMs: 30_000,
           steps: [{ key: "ArrowUp", holdMs: 1500 }],
+          // This fixture predates the probe, so nothing here qualifies it.
+          probeRequired: false,
+          acceptance: null,
         });
         yield* Effect.log(result.message);
         yield* Effect.log(

@@ -94,17 +94,45 @@ const verificationPolicyRevision = (policy: GameVerificationPolicy): string =>
 
 /**
  * The policy a game with no server-owned one adopts, from the manifest it was
- * created with. The creation probe obligation wins over the manifest's mirror,
- * so a template game cannot drop it by editing game.json. This runs once.
+ * created with and from what the game tree itself shows. The creation probe
+ * obligation wins over both, so a template game cannot drop it by editing
+ * game.json after creation. This runs once.
  */
 const deriveVerificationPolicy = (
   manifest: GameManifest,
   probeIntent: boolean | null,
+  observedProbe: boolean,
 ): GameVerificationPolicy => ({
   testSuite: manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE,
   gameplayScene: manifest.gameplayScene ?? null,
-  probe: probeIntent ?? manifest.probe === true,
+  probe: probeIntent ?? (observedProbe || manifest.probe === true),
 });
+
+/**
+ * Whether the game tree actually carries an instrumented probe: the task-26c
+ * script at the manifest's godot project root, or an autoload wired to it.
+ * Pre-27 template games were created before the obligation was recorded, so the
+ * tree is the honest witness and adoption is one-way: once the persisted policy
+ * exists later, deleting the probe only breaks the playtest.
+ */
+export const gameTreeOwesProbe = async (root: string, godotProject: string): Promise<boolean> => {
+  const projectDirectory = NodePath.join(root, godotProject);
+  try {
+    await NodeFSP.access(NodePath.join(projectDirectory, "scripts", "studio_probe.gd"));
+    return true;
+  } catch {
+    // Absent script files are expected for non-instrumented games.
+  }
+  try {
+    const project = await NodeFSP.readFile(
+      NodePath.join(projectDirectory, "project.godot"),
+      "utf8",
+    );
+    return /^[ \t]*StudioProbe[ \t]*=/m.test(project);
+  } catch {
+    return false;
+  }
+};
 
 /**
  * The intent a pre-record game had, expressed without changing its design
@@ -581,7 +609,21 @@ export const layer = (options: { readonly stateDir: string }) => {
                   policy: record.verification,
                   revision: verificationPolicyRevision(record.verification),
                 };
-              const policy = deriveVerificationPolicy(manifest, record?.probe ?? null);
+              const observedProbe = yield* Effect.tryPromise({
+                try: () => gameTreeOwesProbe(root, manifest.godotProject),
+                catch: (cause) =>
+                  new GameOperationError({
+                    operation: "adopt-verification-policy",
+                    path: NodePath.join(root, manifest.godotProject),
+                    reason: "io",
+                    cause,
+                  }),
+              });
+              const policy = deriveVerificationPolicy(
+                manifest,
+                record?.probe ?? null,
+                observedProbe,
+              );
               const documentExists = yield* Effect.promise(() => designDocumentExists(root));
               yield* Effect.tryPromise({
                 try: () =>
@@ -601,7 +643,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                   }),
               });
               yield* Effect.logInfo(
-                "Adopted the game's verification policy from its manifest; later manifest edits cannot change it.",
+                "Adopted the game's verification policy from its creation record, manifest and probe obligation; later manifest edits cannot change it.",
                 { file: location.file },
               );
               return { policy, revision: verificationPolicyRevision(policy) };

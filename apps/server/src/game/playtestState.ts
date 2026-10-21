@@ -1,5 +1,6 @@
 import type {
   GameAcceptanceCriterion,
+  GamePlaytestFrame,
   GamePlaytestProbe,
   GamePlaytestState,
   GamePlaytestStateChange,
@@ -145,6 +146,52 @@ const satisfies = (expectation: Expectation, raw: GamePlaytestStateValue): boole
 const isCoreKind = (kind: GameAcceptanceCriterion["kind"]): boolean =>
   kind === "mechanic" || kind === "content" || kind === "win" || kind === "lose";
 
+/** One approved criterion compressed to what a probe sample can decide. */
+interface CriterionCheck {
+  readonly id: string;
+  readonly key: string;
+  /** Win and lose claims only count when the run ends still satisfying them. */
+  readonly terminal: boolean;
+  readonly expectation: Expectation;
+}
+
+const coreChecks = (criteria: readonly GameAcceptanceCriterion[]): CriterionCheck[] => {
+  const checks: CriterionCheck[] = [];
+  for (const criterion of criteria) {
+    if (!isCoreKind(criterion.kind)) continue;
+    const observe = criterion.observe;
+    if (observe === undefined) continue;
+    const expectation = parseScenarioExpectation(observe.expect);
+    if (expectation === null) continue;
+    checks.push({
+      id: criterion.id,
+      key: observe.key,
+      terminal: criterion.kind === "win" || criterion.kind === "lose",
+      expectation,
+    });
+  }
+  return checks;
+};
+
+/**
+ * Whether one checklist item holds in a specific probe. A `changes` item is a
+ * relative claim: it holds only where the key has moved off the baseline value.
+ */
+const checkSatisfiedAt = (
+  check: CriterionCheck,
+  probe: GamePlaytestProbe,
+  baselineValue: GamePlaytestStateValue | undefined,
+): boolean => {
+  if (check.expectation.kind === "changes") {
+    const value = probe.gameState[check.key];
+    return value !== undefined && value !== baselineValue;
+  }
+  const raw = probe.gameState[check.key];
+  // `won ==1` is how the design vocabulary spells a boolean claim.
+  const value = typeof raw === "boolean" ? (raw ? 1 : 0) : raw;
+  return typeof value === "number" && satisfies(check.expectation, value);
+};
+
 /**
  * Which approved criteria a run achieved: each must have been false at the
  * gameplay baseline and true at a sample the run reached. A win or lose has to
@@ -159,35 +206,24 @@ const achievedCriteria = (
 ): string[] => {
   const terminal = later.at(-1) ?? null;
   const achieved: string[] = [];
-  for (const criterion of criteria) {
-    if (!isCoreKind(criterion.kind)) continue;
-    const observe = criterion.observe;
-    if (observe === undefined) continue;
-    const expectation = parseScenarioExpectation(observe.expect);
-    if (expectation === null) continue;
-    if (expectation.kind === "changes") {
-      // A `changes` observation proves state churn; the approval rules keep
-      // terminal claims out of this vocabulary, and here they stay unproven,
-      // the same way a route treats a boot constant.
-      if (criterion.kind !== "win" && criterion.kind !== "lose") {
-        const changed = later.some(
-          (probe) =>
-            probe.gameState[observe.key] !== undefined &&
-            probe.gameState[observe.key] !== baseline.gameState[observe.key],
-        );
-        if (changed) achieved.push(criterion.id);
-      }
+  for (const check of coreChecks(criteria)) {
+    const baselineValue = baseline.gameState[check.key];
+    // The probe can only prove a transition it saw both ends of: a key the
+    // baseline never named has no value the run changed away from.
+    if (baselineValue === undefined) continue;
+    if (checkSatisfiedAt(check, baseline, baselineValue)) continue;
+    if (check.expectation.kind === "changes") {
+      // Terminal claims live in the equals/atLeast/atMost vocabulary; here a
+      // `changes` win claim stays unproven, the way a route treats a boot constant.
+      if (check.terminal) continue;
+      if (later.some((probe) => checkSatisfiedAt(check, probe, baselineValue)))
+        achieved.push(check.id);
       continue;
     }
-    const baselineValue = baseline.gameState[observe.key];
-    if (baselineValue === undefined || satisfies(expectation, baselineValue)) continue;
-    const reached =
-      criterion.kind === "win" || criterion.kind === "lose"
-        ? terminal !== null &&
-          terminal.gameState[observe.key] !== undefined &&
-          satisfies(expectation, terminal.gameState[observe.key]!)
-        : later.some((probe) => satisfies(expectation, probe.gameState[observe.key] ?? ""));
-    if (reached) achieved.push(criterion.id);
+    const reached = check.terminal
+      ? terminal !== null && checkSatisfiedAt(check, terminal, baselineValue)
+      : later.some((probe) => checkSatisfiedAt(check, probe, baselineValue));
+    if (reached) achieved.push(check.id);
   }
   return achieved;
 };
@@ -214,11 +250,18 @@ export interface PlaytestQualification {
  *   can never be the whole story;
  * - a game whose policy never owed a probe keeps its pixel rule, which the
  *   caller reaches for through `probeRequired` with zero samples.
+ *
+ * The universal checks (boot, console errors, steps given, a visible response)
+ * stay in the verdict too so no qualification can rely on a game that crashed
+ * or froze.
  */
 export function evaluatePlaytestRun(input: {
   readonly samples: readonly GamePlaytestSample[];
   readonly stepsGiven: boolean;
   readonly booted: boolean;
+  /** Whether the sampled frames kept changing while the steps ran. */
+  readonly responded: boolean;
+  readonly consoleErrors: number;
   readonly probeRequired: boolean;
   /** The approved acceptance, or null for a game created without a design. */
   readonly acceptance: readonly GameAcceptanceCriterion[] | null;
@@ -227,9 +270,11 @@ export function evaluatePlaytestRun(input: {
   const state = input.samples.length > 0 ? summarizePlaytestSamples(input.samples) : null;
   let achieved: string[] = [];
   if (!input.booted) blockers.push("the game did not boot");
+  if (input.consoleErrors > 0) blockers.push(`${input.consoleErrors} console error(s)`);
   if (!input.stepsGiven) blockers.push("no input steps were given");
+  if (!input.responded) blockers.push("the game did not visibly respond to the input steps");
   if (input.probeRequired && input.samples.length === 0)
-    blockers.push("the StudioProbe autoload is missing");
+    blockers.push("the StudioProbe autoload is missing or never answered");
   else if (input.probeRequired) {
     const startIndex = playtestBaseline(input.samples);
     if (startIndex === null) {
@@ -309,3 +354,55 @@ export function satisfiedObservations(
   }
   return satisfied;
 }
+
+/** Net distance between two player positions, the movement a frame can show. */
+const playerDisplacement = (
+  from: NonNullable<GamePlaytestProbe["player"]>,
+  to: NonNullable<GamePlaytestProbe["player"]>,
+): number => Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+
+/** The final frame every web playtest captures, the run's last observed word. */
+const AFTER_STEPS_LABEL = "after-steps";
+
+/**
+ * The frame that represents a run, chosen from what its persisted probe state
+ * proves, not from what its screenshots are captioned: the first frame where a
+ * player is present and an approved criterion moved off its baseline value,
+ * else the first frame with a player away from the baseline, else the run's
+ * final frame. Screens the labels could never vouch for do not feed this.
+ */
+export const selectPlaytestCoverFrame = (
+  frames: readonly GamePlaytestFrame[],
+  state: GamePlaytestState | null,
+  acceptance: readonly GameAcceptanceCriterion[] | null,
+): GamePlaytestFrame | null => {
+  const baseline = state?.before ?? null;
+  if (baseline !== null) {
+    const origin = baseline;
+    const originPlayer = origin.player;
+    if (originPlayer !== null) {
+      const from: { x: number; y: number; z: number } = originPlayer;
+      const checks = coreChecks(acceptance ?? []);
+      const progressed = frames.find((frame) => {
+        const probe = frame.probe;
+        if (probe === undefined || probe.player === null) return false;
+        return checks.some((check) => {
+          const baselineValue = origin.gameState[check.key];
+          // The transition has to start inside the observed world, the same way
+          // qualification reads it: a key the baseline never named is unproven.
+          if (baselineValue === undefined) return false;
+          if (checkSatisfiedAt(check, origin, baselineValue)) return false;
+          return checkSatisfiedAt(check, probe, baselineValue);
+        });
+      });
+      if (progressed !== undefined) return progressed;
+      const moved = frames.find((frame) => {
+        const at = frame.probe?.player;
+        if (at === null || at === undefined) return false;
+        return playerDisplacement(from, at) > MIN_PLAYER_MOVEMENT;
+      });
+      if (moved !== undefined) return moved;
+    }
+  }
+  return frames.findLast((frame) => frame.label === AFTER_STEPS_LABEL) ?? null;
+};

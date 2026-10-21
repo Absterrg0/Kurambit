@@ -132,3 +132,62 @@ it.effect("an explicit policy change gets a new revision", () =>
     }),
   ),
 );
+
+it.effect("a pre-27 game's probe files adopt the probe obligation on first read", () =>
+  withPolicyFixture({}, ({ root, stateDir, writeManifest }) =>
+    Effect.gen(function* () {
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      // The manifest mirrors no obligation, but the instrumented tree does.
+      yield* writeManifest(manifest({ probe: false }));
+      yield* Effect.promise(() =>
+        NodeFSP.mkdir(NodePath.join(root, "godot", "scripts"), { recursive: true }),
+      );
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot", "scripts", "studio_probe.gd"), "# probe\n"),
+      );
+      const adopted = yield* approvals.readPolicy(root, manifest({ probe: false }));
+      expect(adopted.policy.probe).toBe(true);
+      // The obligation is persisted once; deleting the probe files afterwards
+      // cannot downgrade the policy — only an explicit policy change may.
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(root, "godot", "scripts", "studio_probe.gd")),
+      );
+      expect((yield* approvals.readPolicy(root, manifest({ probe: false }))).policy.probe).toBe(
+        true,
+      );
+      expect(
+        JSON.parse(
+          yield* Effect.promise(() => NodeFSP.readFile(designIntentFile(stateDir, root), "utf8")),
+        ),
+      ).toMatchObject({ verification: { probe: true } });
+    }),
+  ),
+);
+
+it.effect("an autoload-only probe is adopted the same way", () =>
+  withPolicyFixture({}, ({ root, writeManifest }) =>
+    Effect.gen(function* () {
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      yield* writeManifest(manifest({ probe: false }));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(root, "godot", "project.godot"),
+          '[autoload]\nStudioProbe="*res://scripts/studio_probe.gd"\n',
+        ),
+      );
+      expect((yield* approvals.readPolicy(root, manifest({ probe: false }))).policy.probe).toBe(
+        true,
+      );
+    }),
+  ),
+);
+
+it.effect("a game without any probe keeps its manifest-derived policy", () =>
+  withPolicyFixture({}, ({ root }) =>
+    Effect.gen(function* () {
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      const adopted = yield* approvals.readPolicy(root, manifest({ probe: false }));
+      expect(adopted.policy.probe).toBe(false);
+    }),
+  ),
+);

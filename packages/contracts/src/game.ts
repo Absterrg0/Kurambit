@@ -249,9 +249,50 @@ export const GameProcessResult = Schema.Struct({
 export type GameProcessResult = typeof GameProcessResult.Type;
 export const GameViewport = Schema.Struct({ width: Schema.Number, height: Schema.Number });
 export type GameViewport = typeof GameViewport.Type;
+/** One primitive GameState value the StudioProbe reports. */
+export const GamePlaytestStateValue = Schema.Union([Schema.Number, Schema.Boolean, Schema.String]);
+export type GamePlaytestStateValue = typeof GamePlaytestStateValue.Type;
+export const GamePlaytestProbe = Schema.Struct({
+  /** Public GameState members, bounded by the probe to 40 keys and 80-character strings. */
+  gameState: Schema.Record(Schema.String, GamePlaytestStateValue),
+  /** World position of the first node in the `player` group, or null outside gameplay. */
+  player: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number, z: Schema.Number })),
+});
+export type GamePlaytestProbe = typeof GamePlaytestProbe.Type;
+export const GamePlaytestStateChange = Schema.Struct({
+  key: Schema.String,
+  before: GamePlaytestStateValue,
+  after: GamePlaytestStateValue,
+});
+export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
+/**
+ * What the in-game probe saw during a playtest. `before` is the gameplay
+ * baseline (the first sample a player input step set up), `after` the last
+ * gameplay sample; `playerMoved` and `changes` are measured against the
+ * baseline, so opening the game from its menu is not mistaken for movement.
+ */
+export const GamePlaytestState = Schema.Struct({
+  before: Schema.NullOr(GamePlaytestProbe),
+  after: Schema.NullOr(GamePlaytestProbe),
+  /** Net player displacement from the gameplay baseline to the last gameplay sample. */
+  playerMoved: Schema.Number,
+  /**
+   * GameState values that moved away from their gameplay baseline (clocks ride
+   * out of the baseline test because a value that only ever rises proves
+   * nothing; no key names are needed).
+   */
+  changes: Schema.Array(GamePlaytestStateChange),
+});
+export type GamePlaytestState = typeof GamePlaytestState.Type;
 export const GamePlaytestFrame = Schema.Struct({
   label: Schema.String,
   path: Schema.String,
+  /**
+   * The probe snapshot taken nearest this frame, persisted with the evidence
+   * so a cover can be chosen from observed play rather than frame labels.
+   * Older evidence and the boot frame may have none.
+   */
+  probe: Schema.optionalKey(GamePlaytestProbe),
 });
 export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
 export const GameLastPlaytest = Schema.Struct({
@@ -507,6 +548,8 @@ export const GamePlaytestScreenshot = Schema.Struct({
   data: Schema.String,
   width: Schema.Number,
   height: Schema.Number,
+  /** The latest probe state when this frame was taken, so evidence can pair them. */
+  probe: Schema.optionalKey(GamePlaytestProbe),
 });
 export type GamePlaytestScreenshot = typeof GamePlaytestScreenshot.Type;
 /**
@@ -551,41 +594,6 @@ export const GameWebPlaytestInput = Schema.Struct({
   ),
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
-/** One primitive GameState value the StudioProbe reports. */
-export const GamePlaytestStateValue = Schema.Union([Schema.Number, Schema.Boolean, Schema.String]);
-export type GamePlaytestStateValue = typeof GamePlaytestStateValue.Type;
-export const GamePlaytestProbe = Schema.Struct({
-  /** Public GameState members, bounded by the probe to 40 keys and 80-character strings. */
-  gameState: Schema.Record(Schema.String, GamePlaytestStateValue),
-  /** World position of the first node in the `player` group, or null outside gameplay. */
-  player: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number, z: Schema.Number })),
-});
-export type GamePlaytestProbe = typeof GamePlaytestProbe.Type;
-export const GamePlaytestStateChange = Schema.Struct({
-  key: Schema.String,
-  before: GamePlaytestStateValue,
-  after: GamePlaytestStateValue,
-});
-export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
-/**
- * What the in-game probe saw during a playtest. `before` and `after` are the
- * first and last successful samples; `playerMoved` and `changes` are measured
- * across the samples where gameplay was actually running, so opening the game
- * from its menu is not mistaken for movement.
- */
-export const GamePlaytestState = Schema.Struct({
-  before: Schema.NullOr(GamePlaytestProbe),
-  after: Schema.NullOr(GamePlaytestProbe),
-  /** Net player displacement from the gameplay baseline to the last gameplay sample. */
-  playerMoved: Schema.Number,
-  /**
-   * GameState values that moved away from their gameplay baseline (clocks ride
-   * out of the baseline test because a value that only ever rises proves
-   * nothing; no key names are needed).
-   */
-  changes: Schema.Array(GamePlaytestStateChange),
-});
-export type GamePlaytestState = typeof GamePlaytestState.Type;
 export const GameWebPlaytestResult = Schema.Struct({
   success: Schema.Boolean,
   booted: Schema.Boolean,

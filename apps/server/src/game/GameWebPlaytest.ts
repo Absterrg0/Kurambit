@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   GamePlaytestProbe,
+  type GameAcceptanceCriterion,
   type GameConsoleMessage,
   type GamePlaytestScreenshot,
   type GamePlaytestStep,
@@ -22,7 +23,12 @@ import {
   FRAME_SAMPLE_WIDTH,
   type FrameSample,
 } from "./playtestFrames.ts";
-import { describePlaytestState, summarizePlaytestSamples } from "./playtestState.ts";
+import {
+  describePlaytestState,
+  evaluatePlaytestRun,
+  type GamePlaytestSample,
+  summarizePlaytestSamples,
+} from "./playtestState.ts";
 
 export interface GameWebPlaytestInput {
   /** Headless browser executable, resolved the same way as for the preview pane. */
@@ -35,6 +41,10 @@ export interface GameWebPlaytestInput {
   readonly height: number;
   readonly bootTimeoutMs: number;
   readonly steps: readonly GamePlaytestStep[];
+  /** The engine owes a probe, so qualification reads the probe samples. */
+  readonly probeRequired: boolean;
+  /** The approved acceptance, or null for a game created without a design. */
+  readonly acceptance: readonly GameAcceptanceCriterion[] | null;
 }
 
 // Godot's HTML shell keeps #status visible while loading and hides it once the canvas takes over.
@@ -391,13 +401,20 @@ const screenshot = async (
   cdp: CdpSocket,
   sessionId: string,
   label: string,
+  probe: GamePlaytestProbe | null,
 ): Promise<GamePlaytestScreenshot> => {
   const shot = await cdp.send<{ data: string }>(
     "Page.captureScreenshot",
     { format: "png" },
     sessionId,
   );
-  return { label, mimeType: "image/png" as const, data: shot.data, ...decodePngSize(shot.data) };
+  return {
+    label,
+    mimeType: "image/png" as const,
+    data: shot.data,
+    ...decodePngSize(shot.data),
+    ...(probe === null ? {} : { probe }),
+  };
 };
 
 /** Drives one browser run to completion; the caller's acquire/release finalizers own cleanup. */
@@ -486,11 +503,13 @@ const runPlaytest = async (
       }
     }
     if (booted) bootMs = input.bootTimeoutMs - (bootDeadline - Date.now());
-    screenshots.push(await screenshot(cdp, session.sessionId, "booted"));
-    const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
     // The state probe is optional: games created before it existed have none, and
     // a scene change can make one evaluation fail, so a sample is best-effort.
-    const probes: GamePlaytestProbe[] = [];
+    // Samples carry what made the recorder take them: only input the game can
+    // receive as player input proves the game was played, so the first key,
+    // click or mouse-move step turns the marker on and it stays on.
+    const samples: GamePlaytestSample[] = [];
+    let sawInput = false;
     const readProbe = async () => {
       const evaluated = await cdp
         .send<{ result?: { value?: unknown } }>(
@@ -502,17 +521,27 @@ const runPlaytest = async (
       const value = evaluated?.result?.value;
       if (typeof value !== "string") return;
       const probe = decodeProbe(value);
-      if (Option.isSome(probe)) probes.push(probe.value);
+      if (Option.isSome(probe)) samples.push({ probe: probe.value, afterInput: sawInput });
     };
+    const latestProbe = () => samples.findLast((sample) => sample.probe)?.probe ?? null;
+    screenshots.push(await screenshot(cdp, session.sessionId, "booted", null));
+    const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
     let pointer: { x: number; y: number } | null = null;
     await readProbe();
 
     for (const step of input.steps) {
       signal?.throwIfAborted();
+      // Waits and screenshots receive nothing; everything else is player input.
+      const inputStep = !("waitMs" in step) && !("screenshot" in step);
+      if (inputStep) sawInput = true;
       if ("waitMs" in step) await sleep(signal, step.waitMs);
-      else if ("screenshot" in step)
-        screenshots.push(await screenshot(cdp, session.sessionId, step.screenshot));
-      else if ("click" in step)
+      else if ("screenshot" in step) {
+        screenshots.push(await screenshot(cdp, session.sessionId, step.screenshot, latestProbe()));
+        // The frame itself is the step's product; the next read pairs the probe
+        // that follows it, not the one before it.
+        await readProbe();
+        continue;
+      } else if ("click" in step)
         pointer = (await clickCanvas(cdp, session.sessionId, step.click)) ?? pointer;
       else if ("mouseMove" in step) {
         const centre: { x: number; y: number } | null =
@@ -548,17 +577,31 @@ const runPlaytest = async (
       }
       await readProbe();
     }
-    screenshots.push(await screenshot(cdp, session.sessionId, "after-steps"));
+    screenshots.push(await screenshot(cdp, session.sessionId, "after-steps", latestProbe()));
     const afterSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
     await readProbe();
     const comparison =
       bootSample !== null && afterSample !== null
         ? compareFrameSamples(bootSample, afterSample)
         : { changedPercent: 0, responded: false };
-    const state = probes.length === 0 ? null : summarizePlaytestSamples(probes);
-
+    const state =
+      samples.length === 0
+        ? null
+        : // One summary serves both the report and the evidence: the same
+          // baseline-inclusive picture evaluatePlaytestRun judges.
+          summarizePlaytestSamples(samples);
     const errors = consoleMessages.filter((message) => message.level === "error").length;
     const stepsGiven = input.steps.length > 0;
+    const verdict = evaluatePlaytestRun({
+      samples,
+      stepsGiven,
+      booted,
+      responded: comparison.responded,
+      consoleErrors: errors,
+      probeRequired: input.probeRequired,
+      acceptance: input.acceptance,
+    });
+
     const success = booted && errors === 0 && (!stepsGiven || comparison.responded);
     const summary = [
       booted ? `Booted in ${bootMs}ms` : `Did not boot within ${input.bootTimeoutMs}ms`,
@@ -579,6 +622,9 @@ const runPlaytest = async (
       consoleMessages,
       screenshots,
       state,
+      qualifies: verdict.qualifies,
+      blockers: [...verdict.blockers],
+      interaction: verdict.interaction,
     };
   } finally {
     cdp.close();

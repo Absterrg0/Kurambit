@@ -1056,7 +1056,9 @@ const make = Effect.gen(function* () {
               { policyRevision: policy.revision, probeRequired: policy.policy.probe },
             );
             const currentOperation = operations.current(root);
-            const lastPlaytest = yield* Effect.promise(() => readLastPlaytest(root, []));
+            const lastPlaytest = yield* Effect.promise(() =>
+              readLastPlaytest(root, [], design.state === "approved" ? design.acceptance : null),
+            );
             const coverImagePath = yield* Effect.promise(async () => {
               for (const candidate of gameCoverCandidates({
                 lastPlaytest,

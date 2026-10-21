@@ -1,23 +1,24 @@
-import type { GameAsset, GameLastPlaytest, GameSummary } from "@t3tools/contracts";
+import type {
+  GameAsset,
+  GameLastPlaytest,
+  GamePlaytestFrame,
+  GameSummary,
+} from "@t3tools/contracts";
 
-/** The two frames every run captures, neither of which shows the game being played. */
-const BOOT_FRAME = "booted";
+/** The run's final frame, the fallback when no probe state proves gameplay. */
 const AFTER_STEPS_FRAME = "after-steps";
 
 /**
- * The frame that represents the game: a screenshot the agent took after the
- * first step of a successful run, then the after-steps frame. The boot frame is
- * a menu or a loading screen and never becomes a cover.
+ * The frame that represents the game: readLastPlaytest already picked a cover
+ * from the run's persisted per-frame probe state (an observed moment of play),
+ * so captions say nothing here. A run that left no provable gameplay frame
+ * falls back to its final frame, but only when the run itself was sound.
  */
-export const gameCoverFrame = (
-  lastPlaytest: GameLastPlaytest | null,
-): GameLastPlaytest["frames"][number] | null => {
+export const gameCoverFrame = (lastPlaytest: GameLastPlaytest | null): GamePlaytestFrame | null => {
   if (lastPlaytest === null || !lastPlaytest.success || !lastPlaytest.responded) return null;
-  const gameplay = lastPlaytest.frames.find(
-    (frame) => frame.label !== BOOT_FRAME && frame.label !== AFTER_STEPS_FRAME,
-  );
-  if (gameplay !== undefined) return gameplay;
-  return lastPlaytest.frames.find((frame) => frame.label === AFTER_STEPS_FRAME) ?? null;
+  if (lastPlaytest.coverFrame !== null && lastPlaytest.coverFrame !== undefined)
+    return lastPlaytest.coverFrame;
+  return lastPlaytest.frames.findLast((frame) => frame.label === AFTER_STEPS_FRAME) ?? null;
 };
 
 /**

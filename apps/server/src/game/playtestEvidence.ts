@@ -6,10 +6,13 @@ import * as Schema from "effect/Schema";
 import {
   GameConsoleMessage,
   GamePlaytestState,
+  GamePlaytestProbe,
+  type GameAcceptanceCriterion,
   type GameLastPlaytest,
   type GamePlaytestStep,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
+import { selectPlaytestCoverFrame } from "./playtestState.ts";
 
 const PLAYTEST_DIRECTORY = "builds/playtests";
 const DIRECTORY_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-\d+)?$/;
@@ -20,6 +23,9 @@ const StoredFrame = Schema.Struct({
   file: Schema.String,
   width: Schema.Number,
   height: Schema.Number,
+  // The probe state taken nearest this frame, the read a cover can be picked
+  // from. Older evidence has none and simply cannot act as observed gameplay.
+  probe: Schema.optionalKey(GamePlaytestProbe),
 });
 const StoredPlaytest = Schema.fromJsonString(
   Schema.Struct({
@@ -37,6 +43,14 @@ const StoredPlaytest = Schema.fromJsonString(
     // the run did, just without the state the probe would have reported.
     state: Schema.optionalKey(Schema.NullOr(GamePlaytestState)),
     designObservations: Schema.optionalKey(Schema.Array(Schema.String)),
+    // Whether the run counted as honest gameplay evidence and why it did not.
+    qualifies: Schema.optionalKey(Schema.Boolean),
+    blockers: Schema.optionalKey(Schema.Array(Schema.String)),
+    interaction: Schema.optionalKey(Schema.String),
+    // The project's base viewport and the integer multiple it was captured at.
+    baseWidth: Schema.optionalKey(Schema.Number),
+    baseHeight: Schema.optionalKey(Schema.Number),
+    captureScale: Schema.optionalKey(Schema.Number),
   }),
 );
 type StoredPlaytest = typeof StoredPlaytest.Type;
@@ -74,11 +88,17 @@ export const writePlaytestEvidence = async (input: {
   const relativeDirectory = `${PLAYTEST_DIRECTORY}/${name}`;
   const directory = NodePath.join(input.root, relativeDirectory);
   await NodeFSP.mkdir(directory, { recursive: true });
-  const frames: { label: string; file: string; width: number; height: number }[] = [];
+  const frames: (typeof StoredFrame)["Type"][] = [];
   for (const [index, shot] of input.result.screenshots.entries()) {
     const file = `${String(index + 1).padStart(2, "0")}-${slug(shot.label)}.png`;
     await NodeFSP.writeFile(NodePath.join(directory, file), Buffer.from(shot.data, "base64"));
-    frames.push({ label: shot.label, file, width: shot.width, height: shot.height });
+    frames.push({
+      label: shot.label,
+      file,
+      width: shot.width,
+      height: shot.height,
+      ...(shot.probe === undefined ? {} : { probe: shot.probe }),
+    });
   }
   const stored: StoredPlaytest = {
     at: at.toISOString(),
@@ -95,6 +115,24 @@ export const writePlaytestEvidence = async (input: {
     ...(input.result.designObservations === undefined
       ? {}
       : { designObservations: input.result.designObservations }),
+    ...(input.result.qualifies === undefined
+      ? {}
+      : {
+          qualifies: input.result.qualifies,
+          ...(input.result.blockers === undefined ? {} : { blockers: [...input.result.blockers] }),
+          ...(input.result.interaction === undefined
+            ? {}
+            : { interaction: input.result.interaction }),
+        }),
+    ...(input.result.baseViewport === undefined
+      ? {}
+      : {
+          baseWidth: input.result.baseViewport.width,
+          baseHeight: input.result.baseViewport.height,
+          ...(input.result.captureScale === undefined
+            ? {}
+            : { captureScale: input.result.captureScale }),
+        }),
   };
   await NodeFSP.writeFile(
     NodePath.join(directory, "result.json"),
@@ -121,6 +159,7 @@ const prunePlaytests = async (root: string): Promise<void> => {
 export const readLastPlaytest = async (
   root: string,
   builds: readonly { readonly target: string; readonly updatedAt: string }[],
+  acceptance: readonly GameAcceptanceCriterion[] | null = null,
 ): Promise<GameLastPlaytest | null> => {
   const parent = NodePath.join(root, PLAYTEST_DIRECTORY);
   let entries: string[] = [];
@@ -144,6 +183,14 @@ export const readLastPlaytest = async (
   }
   const webBuild = builds.find((build) => build.target === "Web");
   const stale = webBuild === undefined || Date.parse(stored.at) < Date.parse(webBuild.updatedAt);
+  const frames = stored.frames.map((frame) => ({
+    label: frame.label,
+    path: `${PLAYTEST_DIRECTORY}/${newest}/${frame.file}`,
+    ...(frame.probe === undefined ? {} : { probe: frame.probe }),
+  }));
+  // The cover is picked here, from the same persisted probe state the verdict
+  // was made on, so every reader (status, library) sees the same frame.
+  const cover = selectPlaytestCoverFrame(frames, stored.state ?? null, acceptance);
   return {
     at: stored.at,
     directory: `${PLAYTEST_DIRECTORY}/${newest}`,
@@ -151,10 +198,8 @@ export const readLastPlaytest = async (
     responded: stored.responded,
     changedPercent: stored.changedPercent,
     consoleErrorCount: stored.consoleMessages.filter((message) => message.level === "error").length,
-    frames: stored.frames.map((frame) => ({
-      label: frame.label,
-      path: `${PLAYTEST_DIRECTORY}/${newest}/${frame.file}`,
-    })),
+    frames,
+    coverFrame: cover === undefined || cover === null ? null : cover,
     stale,
   };
 };

@@ -73,3 +73,99 @@ it.live("keeps the newest five playtest runs and reads the last verdict", () =>
     }
   }),
 );
+
+it.live("picks last run's cover from the per-frame probe state it persisted", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "playtest-cover-")),
+    );
+    const acceptance = [
+      {
+        id: "pickup",
+        kind: "content" as const,
+        text: "collect a pearl",
+        observe: { key: "collected", expect: ">=1" },
+      },
+    ];
+    try {
+      const written = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root,
+          steps: [{ click: "left" }, { key: "Enter", holdMs: 80 }, { waitMs: 800 }],
+          result: {
+            ...result("pose"),
+            qualifies: true,
+            blockers: [],
+            interaction: "collected 0→1, player moved 24",
+            baseViewport: { width: 640, height: 360 },
+            captureScale: 2,
+            state: {
+              before: { gameState: { state: 1, collected: 0 }, player: { x: 0, y: 2, z: 4 } },
+              after: { gameState: { state: 1, collected: 1 }, player: { x: 4, y: 6, z: 8 } },
+              playerMoved: 24,
+              changes: [
+                { key: "collected", before: 0, after: 1 },
+                { key: "run_seconds", before: 0.2, after: 6.4 },
+              ],
+            },
+            screenshots: [
+              {
+                label: "booted",
+                mimeType: "image/png",
+                data: "cG5n",
+                width: 1280,
+                height: 720,
+              },
+              {
+                label: "menu",
+                mimeType: "image/png",
+                data: "cG5n",
+                width: 1280,
+                height: 720,
+                probe: { gameState: { state: 1, collected: 0 }, player: { x: 0, y: 2, z: 4 } },
+              },
+              {
+                label: "pose",
+                mimeType: "image/png",
+                data: "cG5n",
+                width: 1280,
+                height: 720,
+                probe: { gameState: { state: 1, collected: 1 }, player: { x: 4, y: 6, z: 8 } },
+              },
+            ],
+          },
+        }),
+      );
+      const last = yield* Effect.promise(() => readLastPlaytest(root, [], acceptance));
+      // The persisted per-frame probe decides: the frame whose own state shows
+      // the approved criterion progressing, not a caption.
+      expect(last?.coverFrame).toMatchObject({
+        label: "pose",
+        path: `${written.directory}/03-pose.png`,
+        probe: { gameState: { collected: 1 } },
+      });
+      // Without the exam, the same run still proves movement on screen.
+      const noAcceptance = yield* Effect.promise(() => readLastPlaytest(root, [], null));
+      expect(noAcceptance?.coverFrame?.label).toBe("pose");
+
+      const raw = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, written.directory, "result.json"), "utf8"),
+        ),
+      );
+      expect(raw).toMatchObject({
+        qualifies: true,
+        interaction: "collected 0→1, player moved 24",
+        baseWidth: 640,
+        baseHeight: 360,
+        captureScale: 2,
+      });
+      expect(raw.frames[2]).toMatchObject({
+        label: "pose",
+        probe: { gameState: { collected: 1 } },
+      });
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
+    }
+  }),
+);

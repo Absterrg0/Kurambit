@@ -32,6 +32,8 @@ import {
   type ThreadId,
   fitScreenshotsToBudget,
   GAME_PLAYTEST_BOUNDS,
+  integerScaledCapture,
+  PLAYTEST_DEFAULT_CAPTURE,
   playtestInputIssues,
 } from "@t3tools/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -66,11 +68,8 @@ import {
 } from "./gameScenarios.ts";
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
-import {
-  describePlaytestState,
-  playtestShowsGameplay,
-  satisfiedObservations,
-} from "./playtestState.ts";
+import { describePlaytestState, satisfiedObservations } from "./playtestState.ts";
+import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
 export class GameService extends Context.Service<
@@ -538,6 +537,36 @@ const make = Effect.gen(function* () {
                 }),
             ),
           );
+          // The exam this run is judged against, read before the run starts so a
+          // mid-run approval change cannot swap the rules under the agent's feet.
+          const design = yield* designApprovals.status(root, manifest);
+          const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+          // The game keeps its own pixel grid: capture a whole-number multiple of
+          // the project's base viewport that fits the requested box, so a 640×360
+          // game is recorded in real pixels instead of letterboxed into a box.
+          const projectGodot = yield* Effect.tryPromise({
+            try: () =>
+              NodeFSP.readFile(NodePath.join(root, manifest.godotProject, "project.godot"), "utf8"),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "Web playtest",
+                path: NodePath.join(root, manifest.godotProject, "project.godot"),
+                reason: "io",
+                cause,
+              }),
+          });
+          const baseViewport = parseGodotViewport(projectGodot);
+          const capture = integerScaledCapture(baseViewport, {
+            width: input.width ?? PLAYTEST_DEFAULT_CAPTURE.width,
+            height: input.height ?? PLAYTEST_DEFAULT_CAPTURE.height,
+          });
+          if (capture === null)
+            return yield* new GameOperationError({
+              operation: "Web playtest",
+              path: root,
+              reason: "invalid-input",
+              detail: `The game's base viewport (${baseViewport.width}×${baseViewport.height}) does not fit the capture bounds (${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension} px). Change display/window/size in project.godot first.`,
+            });
           const result = yield* playtest.run({
             executable,
             url,
@@ -546,15 +575,15 @@ const make = Effect.gen(function* () {
               "builds/logs",
               `playtest-${NodeCrypto.randomUUID()}`,
             ),
-            width: input.width ?? 960,
-            height: input.height ?? 540,
+            width: capture.width,
+            height: capture.height,
             bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
             steps: input.steps ?? [],
+            probeRequired: identity.policy.probe,
+            acceptance: approval?.acceptance ?? null,
           });
           // Informational only: which approved promises this run happened to show. It
-          // never feeds qualification; the server-owned scenario runner is the gate.
-          const design = yield* designApprovals.status(root, manifest);
-          const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+          // never feeds qualification; the evaluator and the scenario runner do.
           const observations = satisfiedObservations(approval?.acceptance ?? [], result.state);
           const hasObservable = (approval?.acceptance ?? []).some(
             (criterion) => criterion.observe !== undefined,
@@ -562,13 +591,27 @@ const make = Effect.gen(function* () {
           const observationNote = hasObservable
             ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
             : "";
+          const qualifies = result.qualifies ?? false;
+          const blockers = result.blockers ?? [];
+          // A template game owes the probe it was created with. The verification
+          // policy is server-owned, so deleting scripts/studio_probe.gd or editing
+          // game.json cannot downgrade the playtest to the pixel rule.
+          const probeRequired = identity.policy.probe;
+          const missingProbe = probeRequired && result.state === null;
+          const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
           const budgeted = fitScreenshotsToBudget(result.screenshots);
           const droppedFrames = budgeted.dropped.length;
+          const enriched = {
+            ...result,
+            designObservations: observations,
+            baseViewport,
+            captureScale: capture.scale,
+          };
           const evidence = yield* Effect.tryPromise({
             try: () =>
               writePlaytestEvidence({
                 root,
-                result: { ...result, designObservations: observations },
+                result: enriched,
                 steps: input.steps ?? [],
               }),
             catch: (cause) =>
@@ -579,39 +622,20 @@ const make = Effect.gen(function* () {
                 cause,
               }),
           });
-          // A template game ships StudioProbe, so a run that only changed pixels (an
-          // idle animation, a menu transition, a clock) must not qualify. Games created
-          // before the probe keep the pixel rule and say so.
-          const stepsGiven = (input.steps?.length ?? 0) > 0;
-          const probe = result.state;
-          const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
-          // A template game owes the probe it was created with. The verification
-          // policy is server-owned, so deleting scripts/studio_probe.gd or editing
-          // game.json cannot downgrade the playtest to the pixel rule.
-          const probeRequired = identity.policy.probe;
-          const missingProbe = probeRequired && probe === null;
-          const gaps: string[] = [];
-          if (!stepsGiven) gaps.push("input steps");
-          if (!result.success) gaps.push("a run without console errors");
-          if (!result.responded) gaps.push("a visible response");
-          if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
-          if (missingProbe) gaps.push("the StudioProbe autoload (scripts/studio_probe.gd)");
-          const qualifies = gaps.length === 0;
-          const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
           const framesNote =
             droppedFrames === 0
               ? ""
               : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidence.directory}.`;
+          const qualificationNote = qualifies
+            ? ""
+            : ` Qualification: this run does not count as honest gameplay evidence${
+                blockers.length === 0 ? "" : `: ${blockers.join("; ")}`
+              }.${missingProbe ? ` ${probesMissing}.` : ""}`;
           return {
             value: {
-              ...result,
+              ...enriched,
               screenshots: budgeted.kept,
-              message: `${
-                qualifies
-                  ? result.message
-                  : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.${missingProbe ? ` ${probesMissing}.` : ""}`
-              }${observationNote}${framesNote}`,
-              designObservations: observations,
+              message: `${result.message}${qualificationNote}${observationNote}${framesNote}`,
               evidenceDirectory: evidence.directory,
             },
             record: {
@@ -622,9 +646,9 @@ const make = Effect.gen(function* () {
               probeRequired,
               detail: missingProbe
                 ? probesMissing
-                : probe === null
+                : result.state === null
                   ? "No state probe in this game; the playtest was judged on input steps and a visible response."
-                  : `State probe: ${describePlaytestState(probe)}.`,
+                  : `Interaction: ${result.interaction}.`,
             },
           };
         }),
@@ -1162,7 +1186,14 @@ const make = Effect.gen(function* () {
       const inventory = yield* projects.inventory(root, qualificationRead.sourceId);
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
-        try: () => readLastPlaytest(root, inventory.builds),
+        try: () =>
+          // The approved exam the cover selection reads the same way the
+          // playtest stage did: unapproved drafts prove nothing.
+          readLastPlaytest(
+            root,
+            inventory.builds,
+            design.state === "approved" ? (approval?.acceptance ?? design.acceptance) : null,
+          ),
         catch: () =>
           new GameOperationError({
             operation: "read-playtest",

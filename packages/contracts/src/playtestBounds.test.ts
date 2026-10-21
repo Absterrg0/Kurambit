@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   GAME_PLAYTEST_BOUNDS,
+  PLAYTEST_DEFAULT_CAPTURE,
   base64ByteLength,
   fitScreenshotsToBudget,
+  integerScaledCapture,
   playtestInputIssues,
 } from "./playtestBounds.ts";
 
@@ -74,5 +76,57 @@ describe("fitScreenshotsToBudget", () => {
   it("keeps the first frames in capture order", () => {
     const shots = [frame(4), frame(4), frame(4)];
     expect(fitScreenshotsToBudget(shots, 6).kept.map((shot) => shot.label)).toEqual(["4", "4"]);
+  });
+});
+
+describe("integerScaledCapture", () => {
+  it("targets a whole-number multiple of the game's own viewport", () => {
+    // A 640×360 game fills a 1280×720 window at exactly 2×, no letterbox.
+    expect(integerScaledCapture({ width: 640, height: 360 }, PLAYTEST_DEFAULT_CAPTURE)).toEqual({
+      width: 1280,
+      height: 720,
+      scale: 2,
+    });
+    // A 1280×720 game already fills the default box at 1×.
+    expect(integerScaledCapture({ width: 1280, height: 720 }, PLAYTEST_DEFAULT_CAPTURE)).toEqual({
+      width: 1280,
+      height: 720,
+      scale: 1,
+    });
+  });
+
+  it("scales down to the largest whole multiple that fits a smaller box, never up", () => {
+    expect(integerScaledCapture({ width: 640, height: 360 }, { width: 640, height: 360 })).toEqual({
+      width: 640,
+      height: 360,
+      scale: 1,
+    });
+    expect(integerScaledCapture({ width: 640, height: 360 }, { width: 960, height: 540 })).toEqual({
+      width: 640,
+      height: 360,
+      scale: 1,
+    });
+  });
+
+  it("respects the result bounds and keeps non-16:9 games whole", () => {
+    expect(integerScaledCapture({ width: 480, height: 360 }, PLAYTEST_DEFAULT_CAPTURE)).toEqual({
+      width: 960,
+      height: 720,
+      scale: 2,
+    });
+    // A base already at the 1920 bound cannot scale again.
+    expect(integerScaledCapture({ width: 1920, height: 1080 }, PLAYTEST_DEFAULT_CAPTURE)).toEqual({
+      width: 1920,
+      height: 1080,
+      scale: 1,
+    });
+  });
+
+  it("rejects a base viewport the capture bounds cannot hold", () => {
+    expect(
+      integerScaledCapture({ width: 2000, height: 1000 }, PLAYTEST_DEFAULT_CAPTURE),
+    ).toBeNull();
+    expect(integerScaledCapture({ width: 100, height: 100 }, PLAYTEST_DEFAULT_CAPTURE)).toBeNull();
+    expect(integerScaledCapture({ width: 0, height: 0 }, PLAYTEST_DEFAULT_CAPTURE)).toBeNull();
   });
 });

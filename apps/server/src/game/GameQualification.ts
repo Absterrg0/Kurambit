@@ -292,8 +292,8 @@ const deriveQualification = (input: {
   });
 
   // A playtest proves nothing about a build it did not play, so it also has to
-  // name the export that is current right now.
-  const exportRecord = input.record?.stages.export;
+  // name the export that is current right now. The record was already read once
+  // at the top of this derivation.
   const playtest = stageReads.get("playtest")!;
   const exportRead = stageReads.get("export")!;
   if (
