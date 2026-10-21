@@ -13,7 +13,14 @@ import {
   GameVerificationPolicyRead,
   GameVerificationPolicyUpdateInput,
 } from "./game.ts";
-import { GameDesignApproveInput, GameDesignApprovalResult } from "./gameDesign.ts";
+import {
+  GameDesignApproveInput,
+  GameDesignApprovalResult,
+  GameRevisionDiscardInput,
+  GameRevisionDiscardResult,
+  GameRevisionRequestInput,
+  GameRevisionRequestResult,
+} from "./gameDesign.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -300,6 +307,9 @@ export const WS_METHODS = {
   gameCreate: "game.create",
   gameOpen: "game.open",
   gameApproveDesign: "game.approveDesign",
+  gameRequestChange: "game.requestChange",
+  gameApproveRevision: "game.approveRevision",
+  gameDiscardRevision: "game.discardRevision",
   gameUpdateVerificationPolicy: "game.updateVerificationPolicy",
   gameAction: "game.action",
   gameToolchainStatus: "game.toolchainStatus",
@@ -1323,6 +1333,21 @@ const WsGameApproveDesignRpc = Rpc.make(WS_METHODS.gameApproveDesign, {
   success: GameDesignApprovalResult,
   error: gameError,
 });
+const WsGameRequestChangeRpc = Rpc.make(WS_METHODS.gameRequestChange, {
+  payload: GameRevisionRequestInput,
+  success: GameRevisionRequestResult,
+  error: gameError,
+});
+const WsGameApproveRevisionRpc = Rpc.make(WS_METHODS.gameApproveRevision, {
+  payload: GameDesignApproveInput,
+  success: GameDesignApprovalResult,
+  error: gameError,
+});
+const WsGameDiscardRevisionRpc = Rpc.make(WS_METHODS.gameDiscardRevision, {
+  payload: GameRevisionDiscardInput,
+  success: GameRevisionDiscardResult,
+  error: gameError,
+});
 const WsGameUpdateVerificationPolicyRpc = Rpc.make(WS_METHODS.gameUpdateVerificationPolicy, {
   payload: GameVerificationPolicyUpdateInput,
   success: GameVerificationPolicyRead,
@@ -1362,6 +1387,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameListRpc,
   WsGameOpenRpc,
   WsGameApproveDesignRpc,
+  WsGameRequestChangeRpc,
+  WsGameApproveRevisionRpc,
+  WsGameDiscardRevisionRpc,
   WsGameUpdateVerificationPolicyRpc,
   WsGameActionRpc,
   WsGameToolchainStatusRpc,

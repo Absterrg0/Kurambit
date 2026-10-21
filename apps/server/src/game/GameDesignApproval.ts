@@ -9,12 +9,15 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   DEFAULT_GAME_TEST_SUITE,
+  diffAcceptance,
   GameAcceptanceCriterion,
   GameOperationError,
   StoredGameAcceptanceCriterion,
   normalizeAcceptance,
   type GameDesignRead,
   type GameDesignState,
+  type GamePendingRevision,
+  type GameAcceptanceDiff,
   GameVerificationPolicy,
   type GameManifest,
   type GameVerificationPolicyRead,
@@ -133,6 +136,22 @@ const StoredRecord = Schema.fromJsonString(
   }),
 );
 const decodeStoredRecord = Schema.decodeUnknownSync(StoredRecord);
+/**
+ * One creator change request while it stays open. `GamePendingRevision` is the
+ * wire shape; the stored file adds the same envelope the approval record
+ * carries so the record names its game and can evolve without breaking reads.
+ */
+const StoredPendingRevision = Schema.fromJsonString(
+  Schema.Struct({
+    schemaVersion: Schema.Literal(1),
+    game: Schema.String,
+    id: Schema.String,
+    text: Schema.String,
+    requestedAt: Schema.String,
+    baseHash: Schema.String,
+  }),
+);
+const decodeStoredRevision = Schema.decodeUnknownSync(StoredPendingRevision);
 
 export const designDocumentHash = (design: string) =>
   NodeCrypto.createHash("sha256").update(design).digest("hex");
@@ -195,6 +214,8 @@ const recordPath = (stateDir: string, root: string) =>
   gameRecordFile(stateDir, "game-design", root, ".json");
 const intentPath = (stateDir: string, root: string) =>
   gameRecordFile(stateDir, "game-design", root, ".intent.json");
+const revisionPath = (stateDir: string, root: string) =>
+  gameRecordFile(stateDir, "game-design", root, ".revision.json");
 
 /**
  * The record's real location. Records written before roots were canonical live
@@ -295,7 +316,10 @@ const deriveDesignState = (input: {
   readonly currentHash: string | null;
   readonly manifestDesign: GameManifest["design"];
   readonly documentExists: boolean;
+  /** An open change request keeps the design under review until it resolves. */
+  readonly pendingRevision: GamePendingRevision | null;
 }): GameDesignState => {
+  if (input.pendingRevision !== null && input.record !== null) return "revision-pending";
   if (input.record !== null)
     return input.currentHash !== null && input.currentHash === input.record.designHash
       ? "approved"
@@ -312,12 +336,14 @@ const designRead = async (
   root: string,
   manifest: GameManifest,
 ): Promise<GameDesignRead> => {
-  const [approvalLocation, intentLocation] = await Promise.all([
+  const [approvalLocation, intentLocation, revisionLocation] = await Promise.all([
     prepareLocation(stateDir, root, ".json"),
     prepareLocation(stateDir, root, ".intent.json"),
+    prepareLocation(stateDir, root, ".revision.json"),
   ]);
   const record = await readDesignApprovalRecord(approvalLocation.file);
   const intent = await readDesignIntent(intentLocation.file);
+  const pendingRevision = await readPendingRevision(revisionLocation.file);
   // One read is the snapshot: the text, its hash and the parsed acceptance all
   // come from these bytes, so the Design tab cannot show one revision and
   // approve another.
@@ -331,6 +357,7 @@ const designRead = async (
     currentHash,
     manifestDesign: manifest.design,
     documentExists: exists,
+    pendingRevision,
   });
   const validation = snapshot.truncated
     ? {
@@ -349,6 +376,16 @@ const designRead = async (
   // them before approving. When an edit leaves the document invalid, fall back
   // to the last approved set rather than hiding what was agreed.
   const currentAcceptance = validation.acceptance;
+  // The revision review shows one diff, computed from the same document bytes
+  // the hash covers, against the approved set this record binds.
+  const revisionDiff =
+    pendingRevision !== null &&
+    record !== null &&
+    !snapshot.truncated &&
+    design !== null &&
+    currentAcceptance.length > 0
+      ? diffAcceptance(record.acceptance, currentAcceptance)
+      : null;
   return {
     state,
     document: design,
@@ -360,7 +397,36 @@ const designRead = async (
       ...(currentAcceptance.length > 0 ? currentAcceptance : (record?.acceptance ?? [])),
     ],
     issues: [...validation.issues],
+    pendingRevision,
+    revisionDiff,
   };
+};
+
+/** The open change request for this game; null when none is pending. */
+const readPendingRevision = async (file: string): Promise<GamePendingRevision | null> => {
+  const text = await readRecordText(file);
+  if (text === null) return null;
+  const stored = decodeStoredRevision(text);
+  return {
+    id: stored.id,
+    text: stored.text,
+    requestedAt: stored.requestedAt,
+    baseHash: stored.baseHash,
+  };
+};
+
+const writePendingRevision = async (file: string, game: string, revision: GamePendingRevision) => {
+  const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
+  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+  try {
+    await NodeFSP.writeFile(
+      temporary,
+      `${JSON.stringify({ schemaVersion: 1, game, ...revision }, null, 2)}\n`,
+    );
+    await NodeFSP.rename(temporary, file);
+  } finally {
+    await NodeFSP.rm(temporary, { force: true });
+  }
 };
 
 export class GameDesignApproval extends Context.Service<
@@ -418,6 +484,17 @@ export class GameDesignApproval extends Context.Service<
       root: string,
       approvalId: string,
     ) => Effect.Effect<void, GameOperationError>;
+    /** The creator's open change request for this game, or null. */
+    readonly readRevision: (
+      root: string,
+    ) => Effect.Effect<GamePendingRevision | null, GameOperationError>;
+    /** Records the request before the agent turn that acts on it is notified. */
+    readonly writeRevision: (
+      root: string,
+      revision: GamePendingRevision,
+    ) => Effect.Effect<void, GameOperationError>;
+    /** Resolves (approves or discards) the open change request. */
+    readonly removeRevision: (root: string) => Effect.Effect<void, GameOperationError>;
   }
 >()("t3/game/GameDesignApproval") {}
 
@@ -657,6 +734,58 @@ export const layer = (options: { readonly stateDir: string }) => {
               }),
           });
         }),
+      readRevision: (root) =>
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".revision.json", "read-design");
+          return yield* Effect.tryPromise({
+            try: () => readPendingRevision(location.file),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "read-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
+      writeRevision: (root, revision) =>
+        Effect.gen(function* () {
+          const location = yield* located(
+            options.stateDir,
+            root,
+            ".revision.json",
+            "request-change",
+          );
+          yield* Effect.tryPromise({
+            try: () => writePendingRevision(location.file, location.canonicalRoot, revision),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "request-change",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
+      removeRevision: (root) =>
+        Effect.gen(function* () {
+          const location = yield* located(
+            options.stateDir,
+            root,
+            ".revision.json",
+            "request-change",
+          );
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rm(location.file, { force: true }),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "request-change",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
     }),
   );
 };
@@ -667,3 +796,5 @@ export const layer = (options: { readonly stateDir: string }) => {
  */
 export const approvalRecordFile = (stateDir: string, root: string) => recordPath(stateDir, root);
 export const designIntentFile = (stateDir: string, root: string) => intentPath(stateDir, root);
+/** Exposed for tests and diagnostics; same routing rules as the approval record. */
+export const pendingRevisionFile = (stateDir: string, root: string) => revisionPath(stateDir, root);

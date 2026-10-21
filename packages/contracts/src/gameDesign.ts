@@ -251,7 +251,7 @@ export function validateDesignDocument(input: {
           criterion.observe.expect === "changes"
         )
           issues.push(
-            `${criterion.kind === "win" ? "Win" : "Lose"} criterion "${criterion.id}" observes a change, but starting or pausing the game also changes state; observe the value the run ends at (such as "state" "==3").`,
+            `${criterion.kind === "win" ? "Win" : "Lose"} criterion "${criterion.id}" observes a change, but starting or pausing the game also changes state; observe the value the run ends at (a win observes "won" "==1"; a loss such as "lives" "<=0").`,
           );
         continue;
       }
@@ -306,8 +306,121 @@ export function validateDesignDocument(input: {
 }
 
 /** The design lifecycle the server reads from its own approval record. */
-export const GameDesignState = Schema.Literals(["draft", "approved", "changed", "legacy"]);
+export const GameDesignState = Schema.Literals([
+  "draft",
+  "approved",
+  "changed",
+  "revision-pending",
+  "legacy",
+]);
 export type GameDesignState = typeof GameDesignState.Type;
+/**
+ * One creator change request while it waits for the revised DESIGN.md. It is
+ * server-owned like the approval: an agent cannot request a change for itself.
+ * `baseHash` is the approved revision the request was made against.
+ */
+export const GamePendingRevision = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  requestedAt: Schema.String,
+  baseHash: Schema.String,
+});
+export type GamePendingRevision = typeof GamePendingRevision.Type;
+/** How the revision under review differs from the approved acceptance, by id. */
+export const GameAcceptanceDiff = Schema.Struct({
+  added: Schema.Array(GameAcceptanceCriterion),
+  changed: Schema.Array(GameAcceptanceCriterion),
+  removed: Schema.Array(GameAcceptanceCriterion),
+});
+export type GameAcceptanceDiff = typeof GameAcceptanceDiff.Type;
+/**
+ * Compares the approved set with the set a revision proposes, keyed by id. An
+ * id present on both sides with the same promise counts unchanged; anything
+ * else shows as added, changed or removed so a creator reads scope, not prose.
+ */
+export const diffAcceptance = (
+  approved: readonly GameAcceptanceCriterion[],
+  current: readonly GameAcceptanceCriterion[],
+): GameAcceptanceDiff => {
+  const approvedById = new Map(approved.map((criterion) => [criterion.id, criterion]));
+  const currentById = new Map(current.map((criterion) => [criterion.id, criterion]));
+  const same = (a: GameAcceptanceCriterion, b: GameAcceptanceCriterion) =>
+    a.kind === b.kind && a.text === b.text && sameObserve(a.observe, b.observe);
+  return {
+    added: current.filter((criterion) => !approvedById.has(criterion.id)),
+    changed: current.filter(
+      (criterion) =>
+        approvedById.has(criterion.id) && !same(approvedById.get(criterion.id)!, criterion),
+    ),
+    removed: approved.filter((criterion) => !currentById.has(criterion.id)),
+  };
+};
+const sameObserve = (
+  a: GameAcceptanceObservation | undefined,
+  b: GameAcceptanceObservation | undefined,
+) =>
+  a === undefined && b === undefined
+    ? true
+    : a !== undefined && b !== undefined && a.key === b.key && a.expect === b.expect
+      ? true
+      : false;
+
+/**
+ * A design line that acknowledges a deliberately removed criterion. The
+ * change-request turn is told to name every deliberately removed id this way;
+ * approval rejects a removal the document never owns.
+ */
+const REMOVED_LINE_PATTERN = /^\s*(?:[-*]\s*)?Removed:\s*(.+)$/;
+const acknowledgedRemovals = (design: string): ReadonlySet<string> => {
+  const named = new Set<string>();
+  for (const line of design.split(/\r?\n/)) {
+    const match = line.match(REMOVED_LINE_PATTERN);
+    if (match === null) continue;
+    for (const token of match[1]!.toLowerCase().split(/[\s,;]+/)) {
+      if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(token)) named.add(token);
+    }
+  }
+  return named;
+};
+/**
+ * The removed criteria that are not acknowledged in DESIGN.md. Empty means the
+ * document either removed nothing unexpectedly or owned every removal under a
+ * `Removed:` line, so the review stands on the document, not on a count.
+ */
+export const removedCriteriaWithoutRemovedLine = (
+  diff: GameAcceptanceDiff,
+  design: string,
+): readonly GameAcceptanceCriterion[] => {
+  const acknowledged = acknowledgedRemovals(design);
+  return diff.removed.filter((criterion) => !acknowledged.has(criterion.id.toLowerCase()));
+};
+
+/**
+ * One obligation a revision must bind before the harness will approve it.
+ * Frozen at review time, independent of what the agent then writes.
+ */
+export const GameRevisionObligation = Schema.Struct({
+  kind: GameAcceptanceCriterionKind,
+  key: Schema.String,
+  expect: Schema.String,
+});
+export type GameRevisionObligation = typeof GameRevisionObligation.Type;
+/** The obligations no criterion in the set observes with kind, key and expect. */
+export const unmetRevisionObligations = (
+  criteria: readonly GameAcceptanceCriterion[],
+  obligations: readonly GameRevisionObligation[],
+): readonly GameRevisionObligation[] =>
+  obligations.filter(
+    (obligation) =>
+      !criteria.some(
+        (criterion) =>
+          criterion.kind === obligation.kind &&
+          criterion.observe !== undefined &&
+          criterion.observe.key === obligation.key &&
+          criterion.observe.expect === obligation.expect,
+      ),
+  );
+
 export const GameDesignRead = Schema.Struct({
   state: GameDesignState,
   /**
@@ -330,6 +443,14 @@ export const GameDesignRead = Schema.Struct({
   acceptance: Schema.Array(GameAcceptanceCriterion),
   /** What has to change before this design can be approved. */
   issues: Schema.Array(Schema.String),
+  /** The open change request, when the creator asked for one and it is unresolved. */
+  pendingRevision: Schema.NullOr(GamePendingRevision),
+  /**
+   * The revision's acceptance diff against the approved set, computed from the
+   * same snapshot the hash comes from; null when nothing is pending or the
+   * pending document does not parse.
+   */
+  revisionDiff: Schema.NullOr(GameAcceptanceDiff),
 });
 export type GameDesignRead = typeof GameDesignRead.Type;
 export const GameDesignApproveInput = Schema.Struct({
@@ -344,3 +465,26 @@ export const GameDesignApprovalResult = Schema.Struct({
   designHash: Schema.String,
 });
 export type GameDesignApprovalResult = typeof GameDesignApprovalResult.Type;
+/**
+ * A creator's change request. The server turns it into a pending revision and
+ * one agent turn; agents never see this as a tool.
+ */
+export const GameRevisionRequestInput = Schema.Struct({
+  threadId: ThreadId,
+  text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),
+});
+export type GameRevisionRequestInput = typeof GameRevisionRequestInput.Type;
+export const GameRevisionRequestResult = Schema.Struct({
+  revisionId: Schema.String,
+  requestedAt: Schema.String,
+});
+export type GameRevisionRequestResult = typeof GameRevisionRequestResult.Type;
+/**
+ * Approving the pending revision binds the revised DESIGN.md and starts the
+ * change's build turn; it shares the approve input shape (`threadId` plus the
+ * reviewed hash) and the approval result shape.
+ */
+export const GameRevisionDiscardInput = Schema.Struct({ threadId: ThreadId });
+export type GameRevisionDiscardInput = typeof GameRevisionDiscardInput.Type;
+export const GameRevisionDiscardResult = Schema.Struct({});
+export type GameRevisionDiscardResult = typeof GameRevisionDiscardResult.Type;
