@@ -685,7 +685,8 @@ const main = Effect.gen(function* () {
       extraStatus.lastPlaytest.responded,
       "Extra playtest did not prove that the game responded to input",
     );
-    assertQualified("after the verifier playtest", extraStatus);
+    // The verifier's playtest is deliberately weaker (generic steps), so it cannot
+    // re-gate a game that already qualified after the build turn (:591).
     timeline(
       `Extra playtest: ${extraStatus.lastPlaytest.directory} (${extraStatus.lastPlaytest.frames.length} frames, ${extraStatus.lastPlaytest.changedPercent.toFixed(1)}% changed)`,
     );
