@@ -5,7 +5,6 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   GAME_VISUAL_DIMENSIONS,
   TextGenerationError,
@@ -46,7 +45,11 @@ const frames = [
 ];
 
 const review = (score: 2 | 4 = 4): GameVisualReview => ({
-  dimensions: GAME_VISUAL_DIMENSIONS.map((dimension) => ({ dimension, score })),
+  dimensions: GAME_VISUAL_DIMENSIONS.map((dimension) => ({
+    dimension,
+    score,
+    note: `${dimension} in this frame`,
+  })),
   repairRequests:
     score === 4
       ? []

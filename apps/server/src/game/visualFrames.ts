@@ -6,7 +6,6 @@ import type {
   GameVisualFrame,
 } from "@t3tools/contracts";
 import { parseScenarioExpectation } from "./scenarioEvaluation.ts";
-import { MIN_PLAYER_MOVEMENT } from "./playtestState.ts";
 
 /**
  * A frame as persisted by `playtestEvidence.ts`. Captions are carried for the
@@ -19,8 +18,6 @@ export interface VisualEvidenceFrame {
   readonly file: string;
   readonly probe?: GamePlaytestProbe;
 }
-
-const DISPLACEMENT_EPSILON = MIN_PLAYER_MOVEMENT;
 
 const numeric = (value: GamePlaytestStateValue | undefined): number | null =>
   typeof value === "boolean" ? (value ? 1 : 0) : typeof value === "number" ? value : null;
@@ -49,11 +46,6 @@ const observedCriteria = (acceptance: readonly GameAcceptanceCriterion[]) =>
     const expectation = parseScenarioExpectation(criterion.observe.expect);
     return expectation === null ? [] : [{ criterion, key: criterion.observe.key, expectation }];
   });
-
-const moved = (from: GamePlaytestProbe["player"], to: GamePlaytestProbe["player"]): boolean => {
-  if (from === null || to === null) return false;
-  return Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z) > DISPLACEMENT_EPSILON;
-};
 
 /** A bounded, factual line about what the probe showed at this frame. */
 const frameEvidence = (baseline: GamePlaytestProbe | null, probe: GamePlaytestProbe): string => {
@@ -148,7 +140,7 @@ export function selectVisualFrames(input: {
 
     const finishEntry = indexed.at(-1);
     // A later area is the last observed gameplay before the run's final frame.
-    const later = gameplay.filter((entry) => entry.index < (finishEntry?.index ?? Infinity)).at(-1);
+    const later = gameplay.findLast((entry) => entry.index < (finishEntry?.index ?? Infinity));
     pick(later, "later");
     pick(finishEntry, "finish");
     return [...chosen.values()].slice(0, 6);

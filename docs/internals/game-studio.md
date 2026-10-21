@@ -184,9 +184,34 @@ the state stage passes only when every graded criterion passed and a `win` did. 
 acceptance pass only when a route moves the player and GameState reaches its playing state at the
 baseline. The stage stores the approved source snapshot, the approved design hash and a
 per-criterion summary; a newly approved design revision makes the old route result stale even when
-the game sources did not change. `visual` stays declared as `missing` until its judge exists, and
-the approved `presentation` criteria are listed there as `missing`; none can be reported passed or
-"unverified ok".
+the game sources did not change.
+
+The `visual` stage is an independent judgement of the latest qualifying playtest's frames
+(`GameVisualJudge.ts`), never of the builder's prose. The frames are chosen from the persisted
+per-frame probe state: early gameplay, the frame where an approved criterion first progressed, one
+where a lose claim was met (the only probe-decidable hazard evidence), the last gameplay frame
+before the end, and the run's final frame. Captions are carried as captions only; t29's
+`04-double-jump.png` does not show a second jump and its `04-moon-pearl.png` was still 0/5
+collected. Evidence without per-frame probes falls back to run order, which can never tag an
+interaction or a hazard. At most six frames are sent, with the design's `Art direction` section and
+the approved `presentation` criteria.
+
+The judge is Codex `gpt-6.1-sol` at high reasoning, through the existing text-generation provider
+path (`generateImageReview`); only that operation accepts absolute image paths, and a runner
+without image support fails rather than answering blind. A synthetic PNG (a large "7" on magenta)
+is checked once per server process before any game is judged: a provider that returns the wrong
+answer makes the stage `unavailable` with that reason, and availability is never assumed from the
+model catalog. The model returns 0–4 scores against written anchors per dimension, with `missing`
+distinct from 0 when no frame shows the dimension at all. The server computes the verdict: every
+dimension must reach 3, and a review without hazard or finish evidence fails regardless of scores.
+Repair requests are bounded to three and must name one of the supplied frames. The typed judgement
+lives beside the playtest evidence (`visual-review.json`) and in the qualification record, bound to
+the same source, build and approved design as the other stages, so a re-export, edit or re-approval
+makes it stale. One approved design revision gets two judgements: the initial one and one after the
+bounded repair turn. The playtest tool result prints the score table and either "one repair round
+left" or "no rounds left"; a third run is refused. Overall `qualified` now requires the visual stage
+too, and `mechanicsQualified` says whether everything except the look passed. Approval's
+`presentation` criteria report the visual stage's verdict; they are never claimed from a scenario.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and
@@ -260,9 +285,10 @@ than implying gameplay was exercised.
 
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
 re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`
-defines done: the qualification read reports check, test, export and playtest current for the final
-sources, with a playtest whose steps prove the core loop responded (and, for a game with the probe,
-moved the player or changed a GameState value); preview URL returned, end the turn.
+defines done: the qualification read reports check, test, export, playtest, state and visual current
+for the final sources, with a playtest whose steps prove the core loop responded (and, for a game
+with the probe, moved the player or changed a GameState value), and one bounded visual repair turn at
+most; preview URL returned, end the turn.
 
 ## Toolchain
 

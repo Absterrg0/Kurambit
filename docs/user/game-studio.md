@@ -56,11 +56,14 @@ updates the contract without starting another build turn; the agent is told to p
 
 Each game card and sidebar row says what the game actually is: **Design draft** before approval,
 **Building** while an agent operation runs, **Design changed** when an edit needs review, and
-**Qualified as of …** once the server's record shows the check, test, web export, playtest and
-state scenarios passed. State scenarios prove the acceptance after play starts, including a route
-that wins and, when the design has one, a route that loses the run. The time matters: it is when the
-record was written, and the Stage re-checks the current files when you open the game. A card's
-cover is a frame of real play from the latest run that qualified, not its menu or a failed attempt.
+**Qualified as of …** once the server's record shows the check, test, web export, playtest, state
+scenarios and independent visual review passed. State scenarios prove the acceptance after play
+starts, including a route that wins and, when the design has one, a route that loses the run. The
+visual review grades the playtest's frames on readability, value separation, camera and framing,
+style consistency, feedback and design compliance, and its presentation claims follow that verdict.
+The time matters: it is when the record was written, and the Stage re-checks the current files when
+you open the game. A card's cover is a frame of real play from the latest run that qualified, not
+its menu or a failed attempt.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
@@ -83,7 +86,10 @@ its right.
 - **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio
   started for this game, and closes its preview server.
 - **Export Linux** writes a standalone build to `builds/linux/`. The **Builds** tab lists both
-  targets with their times, folders and logs.
+  targets with their times, folders and logs, the last playtest's verdict and frames, and the
+  independent visual review with its scores and repair requests. A failed review comes with at most
+  three concrete fixes; the agent gets one repair round, then it must report the remaining problems
+  instead of restyling on its own judgement.
 - **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
   scenes or scripts that use it.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header

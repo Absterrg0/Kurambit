@@ -13,9 +13,9 @@ import {
   GameVisualJudgement,
   GameVisualRepairRequest,
   GameVisualReview,
+  GAME_VISUAL_DIMENSIONS,
   evaluateVisualReview,
   type GameAcceptanceCriterion,
-  type GameManifest,
   type ModelSelection,
 } from "@t3tools/contracts";
 import { ProviderInstanceId } from "@t3tools/contracts";
@@ -43,6 +43,9 @@ const REVIEWER_LABEL = `${REVIEWER.instanceId}/${REVIEWER.model}`;
 const MAX_JUDGEMENTS_PER_DESIGN = 2;
 
 const VISUAL_DIRECTORY = "visual-review.json";
+/** The untrusted model answer kept beside a failed review, bounded. */
+const VISUAL_RAW_DIRECTORY = "visual-review.raw.json";
+const RAW_REPLY_LIMIT = 64 * 1024;
 const ART_DIRECTION_HEADING = "Art direction";
 
 /** What the judge needs from the caller: the identities the result is bound to. */
@@ -75,12 +78,50 @@ export class GameVisualJudge extends Context.Service<
 >()("t3/game/GameVisualJudge") {}
 
 /** The model's loose envelope; the strict review is decoded by the server. */
+const RawDimension = Schema.Struct({
+  dimension: Schema.String,
+  score: Schema.Union([Schema.Number, Schema.String]),
+  /** Required: the structured-output API cannot carry optional keys. */
+  note: Schema.String,
+});
+const RawRepair = Schema.Struct({ frame: Schema.String, fix: Schema.String });
 const RawReview = Schema.Struct({
-  dimensions: Schema.Array(Schema.Unknown),
-  repairRequests: Schema.Array(Schema.Unknown),
+  dimensions: Schema.Array(RawDimension),
+  repairRequests: Schema.Array(RawRepair),
 });
 const decodeRawReview = Schema.decodeUnknownSync(RawReview);
 const decodeReview = Schema.decodeUnknownSync(GameVisualReview);
+
+/** Lowercase, punctuation-free spelling of a dimension name. */
+const dimensionKey = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
+const DIMENSION_NAMES = new Map(
+  GAME_VISUAL_DIMENSIONS.map((dimension) => [dimensionKey(dimension), dimension]),
+);
+const DIMENSION_ALIASES = new Map([
+  ["cameraandframing", "cameraFraming"],
+  ["cameraframing", "cameraFraming"],
+  ["valueseparation", "valueSeparation"],
+]);
+
+/**
+ * Maps a permissive reply onto the canonical rubric. The result is still
+ * decoded against the strict schema, so an unrecognised dimension, a score
+ * outside 0–4 or a caption-named repair request can never become a pass.
+ */
+const normalizeDimension = (value: string): string => {
+  const key = dimensionKey(value);
+  for (const [alias, dimension] of DIMENSION_ALIASES) if (key.startsWith(alias)) return dimension;
+  for (const [name, dimension] of DIMENSION_NAMES) if (key.startsWith(name)) return dimension;
+  return value;
+};
+const normalizeReview = (raw: typeof RawReview.Type): unknown => ({
+  dimensions: raw.dimensions.map((entry) => ({
+    dimension: normalizeDimension(entry.dimension),
+    score: typeof entry.score === "number" ? entry.score : entry.score.toLowerCase().trim(),
+    note: entry.note,
+  })),
+  repairRequests: raw.repairRequests,
+});
 
 const RawCanary = Schema.Struct({
   digit: Schema.String,
@@ -100,6 +141,8 @@ const StoredBudget = Schema.fromJsonString(
 const decodeStoredBudget = Schema.decodeUnknownSync(StoredBudget);
 const encodeStoredBudget = Schema.encodeSync(StoredBudget);
 const encodeJudgement = Schema.encodeSync(Schema.fromJsonString(GameVisualJudgement));
+const encodeRawValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const encodeRawReply = (value: unknown): string => encodeRawValue(value).slice(0, RAW_REPLY_LIMIT);
 
 /** The `## Art direction` section of DESIGN.md, or null when the design omits it. */
 export const readArtDirection = (design: string | null): string | null => {
@@ -179,6 +222,73 @@ ${DIMENSION_ANCHORS}
 const describeReviewFailure = (issues: readonly string[]): string =>
   `The visual judge's reply was not a usable review: ${issues.join("; ")}`.slice(0, 400);
 
+export type VisualCanaryResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Proves the provider actually receives a PNG and can answer about it. Run
+ * once per server process before any game is judged; a synthetic image with a
+ * known answer is the only way to tell a working vision path from a catalog
+ * entry that cannot carry an image.
+ */
+export const runVisualCanary = (
+  textGeneration: TextGeneration.TextGeneration["Service"],
+): Effect.Effect<VisualCanaryResult> =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.tryPromise({
+      try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-visual-canary-")),
+      catch: () => null,
+    }).pipe(Effect.orElseSucceed(() => null));
+    if (directory === null) return { ok: false as const, reason: "no temp directory" };
+    const file = NodePath.join(directory, "canary.png");
+    const answer = yield* Effect.gen(function* () {
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.writeFile(file, canaryPng()),
+        catch: () => null,
+      }).pipe(Effect.orElseSucceed(() => null));
+      return yield* textGeneration
+        .generateImageReview({
+          cwd: directory,
+          prompt:
+            "The attached PNG contains one large digit on a solid background. Report the digit as a single character and the background as its plain colour name.",
+          imagePaths: [file],
+          outputSchema: RawCanary,
+          modelSelection: REVIEWER,
+        })
+        .pipe(
+          Effect.map((value) => ({ ok: true as const, value })),
+          Effect.catch((error) =>
+            Effect.logWarning("The visual canary could not answer.", {
+              operation: error.operation,
+            }).pipe(Effect.as({ ok: false as const, value: null })),
+          ),
+        );
+    }).pipe(
+      Effect.ensuring(
+        Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+      ),
+    );
+    if (!answer.ok) return { ok: false as const, reason: "the provider call failed" };
+    try {
+      const parsed = decodeRawCanary(answer.value);
+      const digit = parsed.digit.trim();
+      const background = parsed.backgroundColor.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const colourOk =
+        background.includes(VISUAL_CANARY_ANSWER.backgroundColor) ||
+        background.includes("ff00ff") ||
+        background === "f0f";
+      return digit === VISUAL_CANARY_ANSWER.digit && colourOk
+        ? { ok: true as const }
+        : {
+            ok: false as const,
+            reason: `it answered "${digit}" on "${parsed.backgroundColor}"`,
+          };
+    } catch {
+      return { ok: false as const, reason: "it did not answer with a digit and a colour" };
+    }
+  });
+
 const make = (stateDir: string) =>
   Effect.gen(function* () {
     const textGeneration = yield* TextGeneration.TextGeneration;
@@ -229,58 +339,7 @@ const make = (stateDir: string) =>
      * keeps a transient provider failure from poisoning every later judgement
      * and keeps a passing check from paying for another image.
      */
-    const canary = yield* Effect.cached(
-      Effect.gen(function* () {
-        const directory = yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-visual-canary-")),
-          catch: () => null,
-        }).pipe(Effect.orElseSucceed(() => null));
-        if (directory === null) return { ok: false as const, reason: "no temp directory" };
-        const file = NodePath.join(directory, "canary.png");
-        const answer = yield* Effect.gen(function* () {
-          yield* Effect.tryPromise({
-            try: () => NodeFSP.writeFile(file, canaryPng()),
-            catch: () => null,
-          }).pipe(Effect.orElseSucceed(() => null));
-          const raw = yield* textGeneration
-            .generateImageReview({
-              cwd: directory,
-              prompt:
-                "The attached PNG contains one large digit on a solid background. Report the digit as a single character and the background as its plain colour name.",
-              imagePaths: [file],
-              outputSchema: RawCanary,
-              modelSelection: REVIEWER,
-            })
-            .pipe(
-              Effect.map((value) => ({ ok: true as const, value })),
-              Effect.catch(() => Effect.succeed({ ok: false as const, value: null })),
-            );
-          return raw;
-        }).pipe(
-          Effect.ensuring(
-            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
-          ),
-        );
-        if (!answer.ok) return { ok: false as const, reason: "the provider call failed" };
-        try {
-          const parsed = decodeRawCanary(answer.value);
-          const digit = parsed.digit.trim();
-          const background = parsed.backgroundColor.toLowerCase().replace(/[^a-z0-9]/g, "");
-          const colourOk =
-            background.includes(VISUAL_CANARY_ANSWER.backgroundColor) ||
-            background.includes("ff00ff") ||
-            background === "f0f";
-          return digit === VISUAL_CANARY_ANSWER.digit && colourOk
-            ? { ok: true as const }
-            : {
-                ok: false as const,
-                reason: `it answered "${digit}" on "${parsed.backgroundColor}"`,
-              };
-        } catch {
-          return { ok: false as const, reason: "it did not answer with a digit and a colour" };
-        }
-      }),
-    );
+    const canary = yield* Effect.cached(runVisualCanary(textGeneration));
 
     const run: GameVisualJudge["Service"]["run"] = (root, input) =>
       Effect.gen(function* () {
@@ -386,12 +445,21 @@ const make = (stateDir: string) =>
 
         let review: GameVisualReview;
         try {
-          review = decodeReview(decodeRawReview(raw.value));
-        } catch {
+          review = decodeReview(normalizeReview(decodeRawReview(raw.value)));
+        } catch (cause) {
+          const issue = cause instanceof Error ? cause.message : "unknown decode failure";
           const judgement: GameVisualJudgement = {
-            ...unavailable(describeReviewFailure(["malformed structured output"]), roundsLeft),
+            ...unavailable(describeReviewFailure([issue.slice(0, 200)]), roundsLeft),
             status: "failed",
           };
+          yield* Effect.tryPromise({
+            try: () =>
+              NodeFSP.writeFile(
+                NodePath.join(root, input.evidenceDirectory, VISUAL_RAW_DIRECTORY),
+                encodeRawReply(raw.value),
+              ).catch(() => undefined),
+            catch: () => undefined,
+          }).pipe(Effect.orElseSucceed(() => undefined));
           return { status: "judged" as const, judgement };
         }
         const frameIds = new Set(frames.map((frame) => frame.id));
