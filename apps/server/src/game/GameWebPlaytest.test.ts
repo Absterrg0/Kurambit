@@ -17,6 +17,7 @@ import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import { snapshotSource } from "./sourceSnapshot.ts";
+import { describeWebArtifacts } from "./webBuild.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   previewBrowserTestLayer,
@@ -194,6 +195,9 @@ it.live.skipIf(!available || !templatesInstalled)(
               sourceId: snapshot.sourceId,
               buildId: `${snapshot.sourceId}:fixture`,
               evidenceDirectory: null,
+              // The fixture build is the artifact the playtest must reuse; the
+              // record has to name its files or the read correctly calls it stale.
+              artifacts: (yield* Effect.promise(() => describeWebArtifacts(root)))!,
             });
             const result = yield* game.webPlaytest(registered.threadId, {
               steps: [{ key: "ArrowUp", holdMs: 1000 }],
