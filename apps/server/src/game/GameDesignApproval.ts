@@ -225,7 +225,7 @@ const revisionPath = (stateDir: string, root: string) =>
 const prepareLocation = async (
   stateDir: string,
   root: string,
-  extension: ".json" | ".intent.json",
+  extension: ".json" | ".intent.json" | ".revision.json",
 ): Promise<GameRecordLocation> => {
   const location = await gameRecordLocation(stateDir, "game-design", root, extension);
   await migrateGameRecord(location);
@@ -234,7 +234,7 @@ const prepareLocation = async (
 const located = (
   stateDir: string,
   root: string,
-  extension: ".json" | ".intent.json",
+  extension: ".json" | ".intent.json" | ".revision.json",
   operation: string,
 ) =>
   Effect.tryPromise({
