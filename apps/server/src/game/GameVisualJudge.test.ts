@@ -246,7 +246,9 @@ describe("the visual judge", () => {
           expect(second.status).toBe("judged");
           if (second.status === "judged") expect(second.judgement.roundsLeft).toBe(0);
           expect((yield* judge.run(root, input(evidenceDirectory))).status).toBe("exhausted");
+          expect(yield* judge.remaining(root, "design-1")).toBe(0);
           // A new approved design revision starts a fresh pair of judgements.
+          expect(yield* judge.remaining(root, "design-2")).toBe(2);
           expect((yield* judge.run(root, input(evidenceDirectory, "design-2"))).status).toBe(
             "judged",
           );

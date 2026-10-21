@@ -373,52 +373,57 @@ const make = Effect.gen(function* () {
     readonly evidenceDirectory: string;
     readonly acceptance: readonly GameAcceptanceCriterion[];
   }) =>
-    ownStage(
-      input.root,
-      "visual",
-      "Visual judge",
-      visualJudge.run(input.root, input).pipe(
-        Effect.map(
-          (
-            run,
-          ): {
-            readonly value: GameVisualJudge.GameVisualJudgeRun;
-            readonly record: StageOutcome;
-          } => {
-            if (run.status === "exhausted")
+    Effect.gen(function* () {
+      // An exhausted budget must not open a stage it will refuse: `begin`
+      // deletes the previous verdict and the refusal would leave it missing.
+      if ((yield* visualJudge.remaining(input.root, input.designHash)) <= 0) return null;
+      return yield* ownStage(
+        input.root,
+        "visual",
+        "Visual judge",
+        visualJudge.run(input.root, input).pipe(
+          Effect.map(
+            (
+              run,
+            ): {
+              readonly value: GameVisualJudge.GameVisualJudgeRun;
+              readonly record: StageOutcome;
+            } => {
+              if (run.status === "exhausted")
+                return {
+                  value: run,
+                  record: {
+                    outcome: "failed",
+                    sourceId: input.sourceId,
+                    buildId: input.buildId,
+                    evidenceDirectory: input.evidenceDirectory,
+                    designHash: input.designHash,
+                    detail: "No visual repair rounds are left for this approved design revision.",
+                  },
+                };
+              const judgement = run.judgement;
               return {
                 value: run,
                 record: {
-                  outcome: "failed",
+                  outcome:
+                    judgement.status === "passed"
+                      ? "passed"
+                      : judgement.status === "unavailable"
+                        ? "unknown"
+                        : "failed",
                   sourceId: input.sourceId,
                   buildId: input.buildId,
                   evidenceDirectory: input.evidenceDirectory,
                   designHash: input.designHash,
-                  detail: "No visual repair rounds are left for this approved design revision.",
+                  visual: judgement,
+                  detail: judgement.detail ?? `Visual judge: ${judgement.status}.`,
                 },
               };
-            const judgement = run.judgement;
-            return {
-              value: run,
-              record: {
-                outcome:
-                  judgement.status === "passed"
-                    ? "passed"
-                    : judgement.status === "unavailable"
-                      ? "unknown"
-                      : "failed",
-                sourceId: input.sourceId,
-                buildId: input.buildId,
-                evidenceDirectory: input.evidenceDirectory,
-                designHash: input.designHash,
-                visual: judgement,
-                detail: judgement.detail ?? `Visual judge: ${judgement.status}.`,
-              },
-            };
-          },
+            },
+          ),
         ),
-      ),
-    );
+      );
+    });
   const response = (
     process: GameProcessResult,
     outputPath: string | null = null,
@@ -696,7 +701,7 @@ const make = Effect.gen(function* () {
               }.${missingProbe ? ` ${probesMissing}.` : ""}`;
           // Only a qualifying mechanics run reaches the visual stage: there is
           // no point grading the look of a run that did not prove gameplay.
-          const visualRun =
+          const visualAttempt =
             qualifies &&
             build?.status === "passed" &&
             build.sourceId !== null &&
@@ -709,13 +714,13 @@ const make = Effect.gen(function* () {
                   evidenceDirectory: evidence.directory,
                   acceptance: approval?.acceptance ?? [],
                 })
-              : null;
-          const visual = visualRun?.status === "judged" ? visualRun.judgement : null;
+              : undefined;
+          const visual = visualAttempt?.status === "judged" ? visualAttempt.judgement : null;
           const visualNote =
             visual !== null
               ? `\n${formatVisualReport(visual)}`
-              : visualRun?.status === "exhausted"
-                ? "\nVisual judge: no repair rounds left for this approved design revision — visual failed, report it and stop."
+              : visualAttempt === null
+                ? "\nVisual judge: no rounds left — visual failed, report it and stop."
                 : "";
           return {
             value: {

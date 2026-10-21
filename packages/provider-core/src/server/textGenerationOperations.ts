@@ -176,16 +176,14 @@ export function fromRunner(
 
   const generateImageReview: ProviderTextGeneration["generateImageReview"] = (input) =>
     capabilities.images === true
-      ? // The schema is an untrusted-reply shape with no decoding services, but
-        // the generic runner type cannot prove that for `Schema.Top`.
-        (run({
+      ? run({
           operation: "generateImageReview",
           cwd: input.cwd,
           prompt: input.prompt,
           outputSchema: input.outputSchema,
           modelSelection: input.modelSelection,
           imagePaths: input.imagePaths,
-        }) as Effect.Effect<unknown, TextGenerationError>)
+        })
       : Effect.fail(
           new TextGenerationError({
             operation: "generateImageReview",

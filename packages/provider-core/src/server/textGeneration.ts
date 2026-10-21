@@ -107,8 +107,10 @@ export interface ImageReviewGenerationInput {
   /**
    * Guides the provider's structured-output mode. The answer is still
    * untrusted, so the caller decodes it strictly against its own schema.
+   * `Codec<unknown, unknown>` keeps decoding services out of the provider
+   * seam: a codec that needs services cannot be attached to an image review.
    */
-  outputSchema: Schema.Top;
+  outputSchema: Schema.Codec<unknown, unknown>;
   modelSelection: ModelSelection;
 }
 

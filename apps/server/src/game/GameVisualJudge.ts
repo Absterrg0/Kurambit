@@ -14,11 +14,11 @@ import {
   GameVisualRepairRequest,
   GameVisualReview,
   GAME_VISUAL_DIMENSIONS,
+  ProviderInstanceId,
   evaluateVisualReview,
   type GameAcceptanceCriterion,
   type ModelSelection,
 } from "@t3tools/contracts";
-import { ProviderInstanceId } from "@t3tools/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { readDesignDocument } from "./GameDesignApproval.ts";
 import { readPlaytestEvidence } from "./playtestEvidence.ts";
@@ -74,6 +74,15 @@ export class GameVisualJudge extends Context.Service<
       root: string,
       input: GameVisualJudgeInput,
     ) => Effect.Effect<GameVisualJudgeRun, GameOperationError>;
+    /**
+     * Judgements left for this approved design revision. Callers check this
+     * before opening a visual attempt so an exhausted budget cannot erase the
+     * last verdict by starting a stage it will refuse.
+     */
+    readonly remaining: (
+      root: string,
+      designHash: string | null,
+    ) => Effect.Effect<number, GameOperationError>;
   }
 >()("t3/game/GameVisualJudge") {}
 
@@ -515,7 +524,14 @@ const make = (stateDir: string) =>
         return { status: "judged" as const, judgement };
       });
 
-    return GameVisualJudge.of({ run });
+    const remaining: GameVisualJudge["Service"]["remaining"] = (root, designHash) =>
+      Effect.gen(function* () {
+        const budgetRoot = yield* Effect.promise(() => NodeFSP.realpath(root).catch(() => root));
+        const used = yield* Effect.promise(() => readBudget(budgetRoot, designHash));
+        return Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used);
+      });
+
+    return GameVisualJudge.of({ run, remaining });
   });
 
 export const layer = (options: { readonly stateDir: string }) =>
