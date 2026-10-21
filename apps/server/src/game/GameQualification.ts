@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 import { webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
+import { gameRecordFile, gameRecordLocation, migrateGameRecord } from "./gameRecord.ts";
 
 /** The stages a real service operation can record today. */
 const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest", "state"] as const;
@@ -82,10 +83,16 @@ const decodeStoredRecord = Schema.decodeUnknownSync(StoredRecord);
 const isRecordedStage = (key: string): key is RecordedQualificationStage =>
   (RECORDED_QUALIFICATION_STAGES as readonly string[]).includes(key);
 
-const recordPath = (stateDir: string, root: string) => {
-  const normalised = NodePath.resolve(root);
-  const digest = NodeCrypto.createHash("sha256").update(normalised).digest("hex").slice(0, 32);
-  return NodePath.join(stateDir, "game-qualification", `${digest}.json`);
+const recordPath = (stateDir: string, root: string) =>
+  gameRecordFile(stateDir, "game-qualification", root);
+/**
+ * Qualification records are fail-closed already, so a failed migration just
+ * leaves the read to the canonical key; it must never crash a status read.
+ */
+const qualificationLocation = async (stateDir: string, root: string) => {
+  const location = await gameRecordLocation(stateDir, "game-qualification", root);
+  await migrateGameRecord(location).catch(() => false);
+  return location;
 };
 
 const readRecord = async (file: string): Promise<QualificationRecord | null> => {
@@ -331,7 +338,8 @@ export const layer = (options: {
     GameQualification.of({
       summary: (root, designHash) =>
         Effect.promise(async () => {
-          const record = await readRecord(recordPath(options.stateDir, root));
+          const location = await qualificationLocation(options.stateDir, root);
+          const record = await readRecord(location.file);
           return deriveQualificationSummary(record, designHash);
         }),
       read: (root, godotProject, designState, designHash) =>
@@ -341,9 +349,10 @@ export const layer = (options: {
               maxEntries: options.maxSourceEntries,
             }),
           );
-          const record = yield* Effect.promise(() =>
-            readRecord(recordPath(options.stateDir, root)),
-          );
+          const record = yield* Effect.promise(async () => {
+            const location = await qualificationLocation(options.stateDir, root);
+            return readRecord(location.file);
+          });
           const artifactsCurrent = yield* Effect.promise(() =>
             webArtifactsMatch(root, record?.stages.export?.artifacts),
           );
@@ -355,10 +364,13 @@ export const layer = (options: {
             artifactsCurrent,
           });
         }),
-      record: (root, input) => {
-        const file = recordPath(options.stateDir, root);
-        const game = NodePath.resolve(root);
-        return Effect.gen(function* () {
+      record: (root, input) =>
+        Effect.gen(function* () {
+          const location = yield* Effect.promise(() =>
+            qualificationLocation(options.stateDir, root),
+          );
+          const file = location.file;
+          const game = location.canonicalRoot;
           const finishedAt = DateTime.formatIso(yield* DateTime.now);
           yield* Effect.tryPromise({
             try: () =>
@@ -395,29 +407,32 @@ export const layer = (options: {
                 cause,
               }),
           });
-        });
-      },
-      begin: (root, stage) => {
-        const file = recordPath(options.stateDir, root);
-        const game = NodePath.resolve(root);
-        return Effect.tryPromise({
-          try: () =>
-            serialized(game, async () => {
-              const previous = await readRecord(file);
-              if (previous === null || previous.stages[stage] === undefined) return;
-              const stages = { ...previous.stages };
-              delete stages[stage];
-              await writeRecordFile(file, { ...previous, stages });
-            }),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "qualification",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        });
-      },
+        }),
+      begin: (root, stage) =>
+        Effect.gen(function* () {
+          const location = yield* Effect.promise(() =>
+            qualificationLocation(options.stateDir, root),
+          );
+          const file = location.file;
+          const game = location.canonicalRoot;
+          yield* Effect.tryPromise({
+            try: () =>
+              serialized(game, async () => {
+                const previous = await readRecord(file);
+                if (previous === null || previous.stages[stage] === undefined) return;
+                const stages = { ...previous.stages };
+                delete stages[stage];
+                await writeRecordFile(file, { ...previous, stages });
+              }),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "qualification",
+                path: file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
     }),
   );
 };

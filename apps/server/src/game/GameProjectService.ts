@@ -41,6 +41,7 @@ import { commandDetail } from "./commandDetail.ts";
 import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { readLastPlaytest } from "./playtestEvidence.ts";
+import { realGameRoot } from "./gameRecord.ts";
 import { designSkeleton, initialGamePrompt, scaffoldFiles, scaffoldManifest } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
@@ -132,6 +133,16 @@ const make = Effect.gen(function* () {
   const operations = yield* GameOperations.GameOperations;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  /**
+   * Every record, lock and cache is keyed by this path, so registration and
+   * resolution settle on one real root instead of a lexical alias.
+   */
+  const resolveCanonicalRoot = (root: string, operation: string) =>
+    Effect.tryPromise({
+      try: () => realGameRoot(root),
+      catch: (cause) =>
+        new GameOperationError({ operation, path: root, reason: "invalid-project", cause }),
+    });
   const read = (root: string) =>
     Effect.tryPromise({
       try: async () => {
@@ -197,8 +208,17 @@ const make = Effect.gen(function* () {
     message?: string,
     options?: { readonly resume?: boolean },
   ) {
-    const manifest = yield* read(root);
-    const project = yield* projects.getByWorkspaceRoot(root).pipe(
+    const lexicalRoot = NodePath.resolve(root);
+    const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
+    const manifest = yield* read(canonicalRoot);
+    const project = yield* projects.getByWorkspaceRoot(canonicalRoot).pipe(
+      // A project registered before this canonical rule may still store the
+      // alias; reuse that row rather than creating a second one for one game.
+      Effect.flatMap((existing) =>
+        Option.isSome(existing) || lexicalRoot === canonicalRoot
+          ? Effect.succeed(existing)
+          : projects.getByWorkspaceRoot(lexicalRoot),
+      ),
       Effect.flatMap((existing) =>
         Option.isSome(existing)
           ? Effect.succeed(existing.value)
@@ -207,13 +227,18 @@ const make = Effect.gen(function* () {
                 commandId: CommandId.make(NodeCrypto.randomUUID()),
                 projectId: ProjectId.make(NodeCrypto.randomUUID()),
                 title: manifest.name,
-                workspaceRoot: root,
+                workspaceRoot: canonicalRoot,
               })
               .pipe(Effect.map((result) => result.project)),
       ),
       Effect.mapError(
         (cause) =>
-          new GameOperationError({ operation: "register-game", path: root, reason: "io", cause }),
+          new GameOperationError({
+            operation: "register-game",
+            path: canonicalRoot,
+            reason: "io",
+            cause,
+          }),
       ),
     );
     // Opening a folder is "continue this game", not "start another chat": the
@@ -226,7 +251,7 @@ const make = Effect.gen(function* () {
             (cause) =>
               new GameOperationError({
                 operation: "list-game-threads",
-                path: root,
+                path: canonicalRoot,
                 reason: "io",
                 cause,
               }),
@@ -235,7 +260,8 @@ const make = Effect.gen(function* () {
       const latest = existingThreads.find(
         (thread) => thread.deletedAt === null && thread.archivedAt === null,
       );
-      if (latest !== undefined) return { projectId: project.id, threadId: latest.id, root };
+      if (latest !== undefined)
+        return { projectId: project.id, threadId: latest.id, root: canonicalRoot };
     }
     const result = yield* launches
       .launch({
@@ -255,13 +281,13 @@ const make = Effect.gen(function* () {
           (cause) =>
             new GameOperationError({
               operation: "launch-game-thread",
-              path: root,
+              path: canonicalRoot,
               reason: "io",
               cause,
             }),
         ),
       );
-    return { projectId: project.id, threadId: result.threadId, root };
+    return { projectId: project.id, threadId: result.threadId, root: canonicalRoot };
   });
   const create: GameProjectService["Service"]["create"] = Effect.fn("GameProjectService.create")(
     function* (input) {
@@ -277,7 +303,11 @@ const make = Effect.gen(function* () {
           reason: "invalid-path",
         });
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
-      const root = NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir()), slug);
+      const requestedRoot = NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir()), slug);
+      // Start through the requested path, then settle on the real root before
+      // writing any server-owned record. A symlinked parent must not mint keys
+      // that the rest of the app cannot match.
+      let root = requestedRoot;
       const template = input.template ?? DEFAULT_GAME_TEMPLATE;
       let created = false;
       let intentRecorded = false;
@@ -332,6 +362,7 @@ const make = Effect.gen(function* () {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
+        root = yield* resolveCanonicalRoot(root, "create-game");
         // The creation-time design promise lives outside the workspace. Without
         // it, deleting DESIGN.md or editing game.json could pass a plan-first
         // game as legacy.
@@ -414,7 +445,10 @@ const make = Effect.gen(function* () {
         path: thread.projectId,
         reason: "project-not-found",
       });
-    const root = NodePath.resolve(thread.worktreePath ?? project.value.workspaceRoot);
+    const root = yield* resolveCanonicalRoot(
+      NodePath.resolve(thread.worktreePath ?? project.value.workspaceRoot),
+      "resolve-project",
+    );
     yield* read(root);
     return { root, projectId: thread.projectId };
   });
@@ -620,28 +654,28 @@ const make = Effect.gen(function* () {
         projectSnapshot.projects,
         (project) =>
           Effect.gen(function* () {
-            const manifest = yield* read(project.workspaceRoot).pipe(Effect.option);
+            const root = yield* Effect.tryPromise(() => realGameRoot(project.workspaceRoot)).pipe(
+              Effect.orElseSucceed(() => NodePath.resolve(project.workspaceRoot)),
+            );
+            const manifest = yield* read(root).pipe(Effect.option);
             if (Option.isNone(manifest)) return null;
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             // The cheap verdict: the server's records, never a source walk. The
             // Stage still does the exact check when it opens this game.
-            const design = yield* approvals.status(project.workspaceRoot, manifest.value);
+            const design = yield* approvals.status(root, manifest.value);
             const progress = yield* qualification.summary(
-              project.workspaceRoot,
+              root,
               design.state === "approved" ? design.approvedHash : null,
             );
-            const currentOperation = operations.current(project.workspaceRoot);
-            const lastPlaytest = yield* Effect.promise(() =>
-              readLastPlaytest(project.workspaceRoot, []),
-            );
+            const currentOperation = operations.current(root);
+            const lastPlaytest = yield* Effect.promise(() => readLastPlaytest(root, []));
             const coverImagePath = yield* Effect.promise(async () => {
               for (const candidate of gameCoverCandidates({
                 lastPlaytest,
                 assets: manifest.value.assets,
               })) {
                 try {
-                  if ((await NodeFSP.stat(insideGame(project.workspaceRoot, candidate))).isFile())
-                    return candidate;
+                  if ((await NodeFSP.stat(insideGame(root, candidate))).isFile()) return candidate;
                 } catch {
                   /* A missing cover is not an error; try the next candidate. */
                 }
@@ -650,7 +684,7 @@ const make = Effect.gen(function* () {
             });
             const summary: GameSummary = {
               projectId: project.id,
-              root: project.workspaceRoot,
+              root,
               name: manifest.value.name,
               template: manifest.value.template ?? null,
               designState: design.state,
@@ -666,7 +700,17 @@ const make = Effect.gen(function* () {
               coverImagePath,
             };
             return summary;
-          }),
+          }).pipe(
+            // One corrupt record must not take the whole library down; the game
+            // still opens for a status read that reports the real error.
+            Effect.catch((error) =>
+              Effect.logWarning("Skipped a game whose server records could not be read.", {
+                projectId: project.id,
+                operation: error.operation,
+                reason: error.reason,
+              }).pipe(Effect.as(null)),
+            ),
+          ),
         { concurrency: 4 },
       );
       // A project row can outlive a move or a failed registration; the library

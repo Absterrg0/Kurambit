@@ -16,6 +16,13 @@ import {
 } from "@t3tools/contracts";
 import { validateDesignDocument } from "@t3tools/contracts";
 import { designSkeleton } from "./scaffold.ts";
+import {
+  gameRecordFile,
+  gameRecordLocation,
+  migrateGameRecord,
+  readRecordText,
+  type GameRecordLocation,
+} from "./gameRecord.ts";
 
 /**
  * What the creator approved: a specific DESIGN.md revision and the acceptance
@@ -89,43 +96,54 @@ export const designDocumentExists = async (root: string) => {
   }
 };
 
-const recordPath = (stateDir: string, root: string) => {
-  const normalised = NodePath.resolve(root);
-  const digest = NodeCrypto.createHash("sha256").update(normalised).digest("hex").slice(0, 32);
-  return NodePath.join(stateDir, "game-design", `${digest}.json`);
+const recordPath = (stateDir: string, root: string) =>
+  gameRecordFile(stateDir, "game-design", root, ".json");
+const intentPath = (stateDir: string, root: string) =>
+  gameRecordFile(stateDir, "game-design", root, ".intent.json");
+
+/**
+ * The record's real location. Records written before roots were canonical live
+ * under the lexical key; migrate one before the read so an alias and the real
+ * root share one record from then on.
+ */
+const prepareLocation = async (
+  stateDir: string,
+  root: string,
+  extension: ".json" | ".intent.json",
+): Promise<GameRecordLocation> => {
+  const location = await gameRecordLocation(stateDir, "game-design", root, extension);
+  await migrateGameRecord(location);
+  return location;
 };
-const intentPath = (stateDir: string, root: string) => {
-  const normalised = NodePath.resolve(root);
-  const digest = NodeCrypto.createHash("sha256").update(normalised).digest("hex").slice(0, 32);
-  return NodePath.join(stateDir, "game-design", `${digest}.intent.json`);
-};
+const located = (
+  stateDir: string,
+  root: string,
+  extension: ".json" | ".intent.json",
+  operation: string,
+) =>
+  Effect.tryPromise({
+    try: () => prepareLocation(stateDir, root, extension),
+    catch: (cause) => new GameOperationError({ operation, path: root, reason: "io", cause }),
+  });
 
 export const readDesignApprovalRecord = async (
   file: string,
 ): Promise<DesignApprovalRecord | null> => {
-  try {
-    return decodeStoredRecord(await NodeFSP.readFile(file, "utf8"));
-  } catch {
-    // A record that cannot be read proves nothing; it must never become a pass.
-    return null;
-  }
+  const text = await readRecordText(file);
+  // A missing record proves nothing; a record that exists but cannot be decoded
+  // throws, so the caller can refuse rather than downgrade the game.
+  return text === null ? null : decodeStoredRecord(text);
 };
 
 export const readDesignIntent = async (file: string): Promise<GameDesignIntent | null> => {
-  try {
-    return decodeStoredIntent(await NodeFSP.readFile(file, "utf8")).intent;
-  } catch {
-    return null;
-  }
+  const text = await readRecordText(file);
+  return text === null ? null : decodeStoredIntent(text).intent;
 };
 
 /** Whether the game was created from a template that ships the StudioProbe. */
 export const readProbeIntent = async (file: string): Promise<boolean | null> => {
-  try {
-    return decodeStoredIntent(await NodeFSP.readFile(file, "utf8")).probe ?? null;
-  } catch {
-    return null;
-  }
+  const text = await readRecordText(file);
+  return text === null ? null : (decodeStoredIntent(text).probe ?? null);
 };
 
 const writeRecord = async (file: string, record: DesignApprovalRecord) => {
@@ -190,8 +208,12 @@ const designRead = async (
   root: string,
   manifest: GameManifest,
 ): Promise<GameDesignRead> => {
-  const record = await readDesignApprovalRecord(recordPath(stateDir, root));
-  const intent = await readDesignIntent(intentPath(stateDir, root));
+  const [approvalLocation, intentLocation] = await Promise.all([
+    prepareLocation(stateDir, root, ".json"),
+    prepareLocation(stateDir, root, ".intent.json"),
+  ]);
+  const record = await readDesignApprovalRecord(approvalLocation.file);
+  const intent = await readDesignIntent(intentLocation.file);
   const design = await readDesignDocument(root);
   const currentHash = design === null ? null : designDocumentHash(design);
   const exists = design === null ? await designDocumentExists(root) : true;
@@ -228,9 +250,11 @@ const designRead = async (
 export class GameDesignApproval extends Context.Service<
   GameDesignApproval,
   {
-    readonly read: (root: string) => Effect.Effect<DesignApprovalRecord | null>;
+    readonly read: (root: string) => Effect.Effect<DesignApprovalRecord | null, GameOperationError>;
     /** The creation-time promise: required to design, or explicitly skipped. */
-    readonly readIntent: (root: string) => Effect.Effect<GameDesignIntent | null>;
+    readonly readIntent: (
+      root: string,
+    ) => Effect.Effect<GameDesignIntent | null, GameOperationError>;
     readonly recordIntent: (
       root: string,
       intent: GameDesignIntent,
@@ -239,9 +263,12 @@ export class GameDesignApproval extends Context.Service<
     /** Removes the intent this creation attempt wrote; never another game's record. */
     readonly removeIntent: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The creation-time probe obligation, or null for games with no record. */
-    readonly readProbe: (root: string) => Effect.Effect<boolean | null>;
+    readonly readProbe: (root: string) => Effect.Effect<boolean | null, GameOperationError>;
     /** The server-owned lifecycle plus what still blocks approval. */
-    readonly status: (root: string, manifest: GameManifest) => Effect.Effect<GameDesignRead>;
+    readonly status: (
+      root: string,
+      manifest: GameManifest,
+    ) => Effect.Effect<GameDesignRead, GameOperationError>;
     /**
      * Serializes one design operation per game. Approval has to cover read,
      * validate, write and dispatch as one unit, not just the manifest write, or
@@ -250,7 +277,7 @@ export class GameDesignApproval extends Context.Service<
     readonly exclusive: <A, E, R>(
       root: string,
       effect: Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A, E, R>;
+    ) => Effect.Effect<A, E | GameOperationError, R>;
     readonly write: (
       root: string,
       record: DesignApprovalRecord,
@@ -269,42 +296,92 @@ export const layer = (options: { readonly stateDir: string }) => {
     GameDesignApproval,
     GameDesignApproval.of({
       read: (root) =>
-        Effect.promise(() => readDesignApprovalRecord(recordPath(options.stateDir, root))),
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".json", "read-design");
+          return yield* Effect.tryPromise({
+            try: () => readDesignApprovalRecord(location.file),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "read-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
       readIntent: (root) =>
-        Effect.promise(() => readDesignIntent(intentPath(options.stateDir, root))),
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".intent.json", "read-design");
+          return yield* Effect.tryPromise({
+            try: () => readDesignIntent(location.file),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "read-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
       readProbe: (root) =>
-        Effect.promise(() => readProbeIntent(intentPath(options.stateDir, root))),
-      recordIntent: (root, intent, probe) => {
-        const file = intentPath(options.stateDir, root);
-        return Effect.tryPromise({
-          try: () => writeIntent(file, NodePath.resolve(root), intent, probe),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "create-game",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        });
-      },
-      removeIntent: (root) => {
-        const file = intentPath(options.stateDir, root);
-        return Effect.tryPromise({
-          try: () => NodeFSP.rm(file, { force: true }),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "create-game",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        });
-      },
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".intent.json", "read-design");
+          return yield* Effect.tryPromise({
+            try: () => readProbeIntent(location.file),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "read-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
+      recordIntent: (root, intent, probe) =>
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".intent.json", "create-game");
+          yield* Effect.tryPromise({
+            try: () => writeIntent(location.file, location.canonicalRoot, intent, probe),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "create-game",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
+      removeIntent: (root) =>
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".intent.json", "create-game");
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rm(location.file, { force: true }),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "create-game",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
       status: (root, manifest) =>
-        Effect.promise(() => designRead(options.stateDir, root, manifest)),
+        Effect.tryPromise({
+          try: () => designRead(options.stateDir, root, manifest),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "read-design",
+              path: root,
+              reason: "io",
+              cause,
+            }),
+        }),
       exclusive: (root, effect) =>
         Effect.gen(function* () {
-          const key = NodePath.resolve(root);
+          // The lock is keyed by the real root, so a directory-symlink alias and
+          // the real path serialize against each other.
+          const location = yield* located(options.stateDir, root, ".json", "approve-design");
+          const key = location.canonicalRoot;
           let lock = locks.get(key);
           if (lock === undefined) {
             // Creating the lock is synchronous, so two callers cannot both
@@ -314,40 +391,45 @@ export const layer = (options: { readonly stateDir: string }) => {
           }
           return yield* lock.withPermits(1)(effect);
         }),
-      write: (root, record) => {
-        const file = recordPath(options.stateDir, root);
-        return Effect.tryPromise({
-          try: () => writeRecord(file, record),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "approve-design",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        });
-      },
-      removeOwned: (root, approvalId) => {
-        const file = recordPath(options.stateDir, root);
-        return Effect.tryPromise({
-          try: async () => {
-            const current = await readDesignApprovalRecord(file);
-            if (current === null || current.approvalId !== approvalId) return;
-            await NodeFSP.rm(file, { force: true });
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "approve-design",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        });
-      },
+      write: (root, record) =>
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".json", "approve-design");
+          yield* Effect.tryPromise({
+            try: () => writeRecord(location.file, { ...record, game: location.canonicalRoot }),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "approve-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
+      removeOwned: (root, approvalId) =>
+        Effect.gen(function* () {
+          const location = yield* located(options.stateDir, root, ".json", "approve-design");
+          yield* Effect.tryPromise({
+            try: async () => {
+              const current = await readDesignApprovalRecord(location.file);
+              if (current === null || current.approvalId !== approvalId) return;
+              await NodeFSP.rm(location.file, { force: true });
+            },
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "approve-design",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+        }),
     }),
   );
 };
 
-/** Exposed for tests and diagnostics; the hash keeps game names off the state path. */
+/**
+ * Exposed for tests and diagnostics; the hash keeps game names off the state
+ * path. A symlinked root must go through the service, which resolves realpath.
+ */
 export const approvalRecordFile = (stateDir: string, root: string) => recordPath(stateDir, root);
 export const designIntentFile = (stateDir: string, root: string) => intentPath(stateDir, root);
