@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This helper owns the game build path on the native filesystem.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type { GameQualificationRead } from "@t3tools/contracts";
@@ -76,6 +77,24 @@ export const webArtifactsMatch = async (
   if (recorded === undefined) return false;
   const current = await describeWebArtifacts(root);
   return current !== null && sameArtifacts(recorded, current);
+};
+
+/**
+ * The one identity of the exact files the preview serves, from the export
+ * record's task-30a artifact descriptor. A rebuild produces fresh mtimes and
+ * therefore a fresh identity; a source edit (which touches nothing under
+ * builds/), a mid-flight export and a failed rebuild all keep the identity, so
+ * the running game only resets when its served bytes really were replaced.
+ * Derived, not stored: rewriting the same artifact keeps the same identity.
+ */
+export const webArtifactIdentity = (
+  artifacts: readonly WebArtifactFile[] | undefined,
+): string | null => {
+  if (artifacts === undefined || artifacts.length === 0) return null;
+  return NodeCrypto.createHash("sha256")
+    .update(JSON.stringify(artifacts))
+    .digest("hex")
+    .slice(0, 24);
 };
 
 /**

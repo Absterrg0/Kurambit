@@ -19,7 +19,7 @@ import {
   type GameQualificationSummary,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
-import { webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
+import { webArtifactIdentity, webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
 import { gameRecordFile, gameRecordLocation, migrateGameRecord } from "./gameRecord.ts";
 
 /** The stages a real service operation can record today. */
@@ -159,11 +159,24 @@ const deriveQualification = (input: {
   /** The approved acceptance, so presentation claims can be listed as missing. */
   readonly acceptance: readonly GameAcceptanceCriterion[];
 }): GameQualificationRead => {
+  // The identity of the bytes actually served from builds/web: the recorded
+  // export's own descriptor while it still matches the directory. Source
+  // currentness is a different question, so even an unknown source snapshot
+  // leaves this standing.
+  const exportRecord = input.record?.stages.export;
+  const servedArtifactId =
+    exportRecord?.outcome === "passed" &&
+    exportRecord.buildId !== null &&
+    exportRecord.artifacts !== undefined &&
+    input.artifactsCurrent
+      ? webArtifactIdentity(exportRecord.artifacts)
+      : null;
   if (input.source.kind === "unknown")
     return {
       state: "unknown",
       sourceId: null,
       buildId: null,
+      servedArtifactId,
       stages: ALL_STAGES.map((stage) => ({
         stage,
         status: "unknown" as const,
@@ -299,6 +312,7 @@ const deriveQualification = (input: {
     state: qualified ? "qualified" : "unqualified",
     sourceId: currentSourceId,
     buildId: exportRead.status === "passed" ? (exportRecord?.buildId ?? null) : null,
+    servedArtifactId,
     stages,
   };
 };

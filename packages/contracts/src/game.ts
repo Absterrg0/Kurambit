@@ -264,6 +264,12 @@ export const GameLastPlaytest = Schema.Struct({
   frames: Schema.Array(GamePlaytestFrame),
   /** The web build was rebuilt after this run. */
   stale: Schema.Boolean,
+  /**
+   * The frame chosen to represent the game, picked from the run's persisted
+   * per-frame probe state (a real observed moment of play), or null when no
+   * frame could prove gameplay. Falls back to the after-steps frame.
+   */
+  coverFrame: Schema.optionalKey(Schema.NullOr(GamePlaytestFrame)),
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**
@@ -317,6 +323,13 @@ export const GameQualificationRead = Schema.Struct({
   sourceId: Schema.NullOr(Schema.String),
   /** The current qualified web build, when one exists. */
   buildId: Schema.NullOr(Schema.String),
+  /**
+   * Identity of the web build actually served from `builds/web`, from the
+   * export record's artifact descriptor while those bytes are still on disk.
+   * Current with stale sources is not the same thing: a source edit or a failed
+   * rebuild must not treat the running preview as replaced.
+   */
+  servedArtifactId: Schema.NullOr(Schema.String),
   stages: Schema.Array(GameQualificationStageRead),
 });
 export type GameQualificationRead = typeof GameQualificationRead.Type;
@@ -563,9 +576,13 @@ export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
 export const GamePlaytestState = Schema.Struct({
   before: Schema.NullOr(GamePlaytestProbe),
   after: Schema.NullOr(GamePlaytestProbe),
-  /** World units the player travelled between gameplay samples. */
+  /** Net player displacement from the gameplay baseline to the last gameplay sample. */
   playerMoved: Schema.Number,
-  /** GameState values that changed while gameplay was running (clocks excluded). */
+  /**
+   * GameState values that moved away from their gameplay baseline (clocks ride
+   * out of the baseline test because a value that only ever rises proves
+   * nothing; no key names are needed).
+   */
   changes: Schema.Array(GamePlaytestStateChange),
 });
 export type GamePlaytestState = typeof GamePlaytestState.Type;
@@ -588,6 +605,16 @@ export const GameWebPlaytestResult = Schema.Struct({
   designObservations: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Game-relative evidence directory, when the service persisted this run. */
   evidenceDirectory: Schema.optionalKey(Schema.String),
+  /** Whether this run was honest gameplay evidence for the game's exam. */
+  qualifies: Schema.optionalKey(Schema.Boolean),
+  /** Structured reasons this run did not qualify; empty when it qualified. */
+  blockers: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** What changed from the run's gameplay baseline, human readable. */
+  interaction: Schema.optionalKey(Schema.String),
+  /** The project's base viewport the frames were scaled up from. */
+  baseViewport: Schema.optionalKey(GameViewport),
+  /** The integer multiple of the base viewport the frames were captured at. */
+  captureScale: Schema.optionalKey(Schema.Number),
 });
 export type GameWebPlaytestResult = typeof GameWebPlaytestResult.Type;
 export const GameCheckIssue = Schema.Struct({

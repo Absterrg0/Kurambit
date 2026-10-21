@@ -1,4 +1,9 @@
-import { GAME_PLAYTEST_BOUNDS, type GamePlaytestStep, type GameWebPlaytestInput } from "./game.ts";
+import {
+  GAME_PLAYTEST_BOUNDS,
+  type GamePlaytestStep,
+  type GameViewport,
+  type GameWebPlaytestInput,
+} from "./game.ts";
 
 export { GAME_PLAYTEST_BOUNDS };
 
@@ -24,8 +29,8 @@ export const playtestInputIssues = (input: GameWebPlaytestInput): readonly strin
     if (value === undefined) continue;
     if (!Number.isFinite(value) || value <= 0) issues.push(`${name} must be a positive number.`);
   }
-  const width = input.width ?? 960;
-  const height = input.height ?? 540;
+  const width = input.width ?? PLAYTEST_DEFAULT_CAPTURE.width;
+  const height = input.height ?? PLAYTEST_DEFAULT_CAPTURE.height;
   const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
   if (Number.isFinite(width) && (width < bounds.minDimension || width > bounds.maxDimension))
     issues.push(`width must be between ${bounds.minDimension} and ${bounds.maxDimension} pixels.`);
@@ -58,6 +63,49 @@ export const playtestInputIssues = (input: GameWebPlaytestInput): readonly strin
       `The steps take ${sequenceMs} ms; a playtest may run at most ${bounds.maxSequenceMs} ms of steps.`,
     );
   return issues;
+};
+
+/** The capture box a playtest targets when the caller does not ask for one. */
+export const PLAYTEST_DEFAULT_CAPTURE = { width: 1280, height: 720 } as const;
+
+/**
+ * The integer-scaled capture size for a web playtest. The game keeps its own
+ * pixel grid: the browser window is a whole-number multiple of the project's
+ * base viewport, so a 640×360 game is captured at 1280×720 instead of fit
+ * inside an unrelated box that would letterbox most of the frame.
+ *
+ * The box bounds the scale, never up: a base wider than the box still captures
+ * at least at scale 1, and a game larger than a result bound must not silently
+ * report an oversized capture. Returns null when the base viewport itself does
+ * not fit the result bounds, which the caller must reject.
+ */
+export const integerScaledCapture = (
+  base: GameViewport,
+  box: GameViewport,
+  bounds: {
+    readonly maxDimension: number;
+    readonly minDimension: number;
+  } = GAME_PLAYTEST_BOUNDS,
+): (GameViewport & { readonly scale: number }) | null => {
+  const widest = Math.max(base.width, base.height);
+  if (
+    !Number.isFinite(base.width) ||
+    !Number.isFinite(base.height) ||
+    base.width <= 0 ||
+    base.height <= 0
+  )
+    return null;
+  if (widest > bounds.maxDimension || Math.min(base.width, base.height) < bounds.minDimension)
+    return null;
+  const scale = Math.max(
+    1,
+    Math.min(
+      Math.floor(box.width / base.width),
+      Math.floor(box.height / base.height),
+      Math.floor(bounds.maxDimension / widest),
+    ),
+  );
+  return { width: base.width * scale, height: base.height * scale, scale };
 };
 
 /** Decoded PNG bytes a base64 payload represents, without allocating the buffer. */
