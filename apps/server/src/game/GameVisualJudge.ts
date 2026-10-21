@@ -420,7 +420,17 @@ const make = (stateDir: string) =>
 
         const used = yield* Effect.promise(() => readBudget(budgetRoot, input.designHash));
         if (used >= MAX_JUDGEMENTS_PER_DESIGN) return { status: "exhausted" as const };
-        yield* writeBudget(budgetRoot, input.designHash, used + 1);
+        // A budget write is bookkeeping, not the judgement: a failed write must
+        // not discard a real review or fail the mechanics run that earned it.
+        yield* writeBudget(budgetRoot, input.designHash, used + 1).pipe(
+          Effect.catchTags({
+            GameOperationError: (error) =>
+              Effect.logWarning("Could not record a visual judgement budget.", {
+                operation: error.operation,
+                reason: error.reason,
+              }),
+          }),
+        );
         const roundsLeft = Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - (used + 1));
 
         const state = evidence?.state ?? null;
@@ -507,20 +517,16 @@ const make = (stateDir: string) =>
           roundsLeft,
           detail: verdict.detail,
         };
+        // The qualification record already carries the typed result; a failed
+        // evidence copy must not turn a real verdict into a failed playtest.
         yield* Effect.tryPromise({
           try: () =>
             NodeFSP.writeFile(
               NodePath.join(root, input.evidenceDirectory, VISUAL_DIRECTORY),
               encodeJudgement(judgement),
             ),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "visual-judge",
-              path: NodePath.join(root, input.evidenceDirectory),
-              reason: "io",
-              cause,
-            }),
-        });
+          catch: () => undefined,
+        }).pipe(Effect.orElseSucceed(() => undefined));
         return { status: "judged" as const, judgement };
       });
 
