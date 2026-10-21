@@ -26,7 +26,12 @@ the document hash, its parsed acceptance and an approval id. The game's own `gam
 status is only a display mirror. `GameProjectService.approveDesign` runs read, validate, record
 and dispatch as one operation serialized per game, so two approvals cannot both release a build
 turn; approving the same hash again returns the existing record, and re-approving changed scope
-updates it without dispatching. A dispatch failure removes only that attempt's record. The
+updates it without dispatching. The record also owns the build attempt: it stores the command and
+message ids plus `pending | dispatched` before anything is sent. A retry of a pending attempt asks
+the orchestration receipt store whether that exact command already committed and then either marks
+it dispatched or sends the same ids. A dispatch failure therefore keeps the creator's approval and
+a retry cannot create a second build message; only a failed display-mirror write, before any
+dispatch, rolls the record back. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
 block parses with at least one `end` and one `mechanic`. Creation also writes an intent record
 beside the approval: `required` for a plan-first game, `skipped` for one created without planning.
@@ -35,6 +40,17 @@ A skipped game is explicitly `legacy` and passes the design stage; a required ga
 record at all (created before the record existed) is legacy.
 Qualification includes a `design` stage, so a draft or changed design leaves the game
 unqualified, and the staging gate in `GameService` reads that record rather than `game.json`.
+
+The same creation record carries the game's verification policy: the canonical `testSuite`, the
+`gameplayScene` the check boots, and whether a qualifying playtest owes the StudioProbe. The
+service reads that record, never `game.json`, which keeps only a display mirror. A game created
+before the policy existed adopts one from its manifest on first read; the adoption is persisted
+and logged, so later manifest edits cannot change the exam. Changing the policy is an explicit
+`game.updateVerificationPolicy` RPC and deliberately not a `game_*` tool: an agent must not widen
+or weaken its own exam. Each policy has a derived revision, and check, test and state results store
+the revision they ran under, so a change makes those passes stale. A playtest stores whether it
+owed the probe for the same reason. Arbitrary diagnostic scripts still run through `game_godot_test`
+but only the policy's canonical suite records the test stage.
 
 The first approval sends the build message through ordinary thread dispatch, so the build is a
 normal turn with checkpoints, cancellation and the same tool surface. It builds nothing itself.
@@ -127,8 +143,12 @@ Status also separates the cheap reads (operation, design state, qualification) f
 only game.json's asset list can invalidate it in between, so a refresh no longer walks and reads
 the whole `godot/` tree.
 The record lives under the server's `stateDir` (`game-qualification/`), never inside the game, and
-each stage stores its outcome, the source snapshot it covered, and for exports and playtests the
-build identity. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
+each stage stores its outcome, the source snapshot it covered, the verification-policy revision
+(for check, test and state) or probe obligation (for a playtest), and for exports and playtests the
+build identity. Design and qualification records are keyed by the game root's realpath, so a
+directory-symlink alias shares one record, one operation lock and one design state; a record
+written under the old lexical key is renamed when the alias is read, and an unreadable required
+record is reported as an error rather than downgraded to legacy. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
 additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
 unknown. Symlinks fail closed with the linked path in the reason rather than being followed, and
 size+mtime is the identity limit: a same-size edit inside one mtime tick is not detected. A web
@@ -188,19 +208,20 @@ names how many were dropped. The library cover prefers a screenshot taken after 
 a successful run, then its after-steps frame, then an asset thumbnail, so a menu or loading frame
 never covers a game. Screenshots are
 evidence of what happened, not a substitute for a gameplay assertion, which stays in the headless
-smoke test. Only the suite named by `game.json`'s `testSuite` (templates set
+smoke test. Only the suite named by the game's server-owned verification policy (templates set
 `res://tests/smoke_test.gd`) owns the `test` stage; other scripts still run as diagnostics but
 never record a pass.
 
 `game_godot_check` is the step before either: one bundled SceneTree checker loads every script,
-scene and resource, then runs the main scene and the scene `game.json`'s `gameplayScene` names (the
-one the menu starts) for 120 physics frames each, and reports which entries ran. It reports parse
+scene and resource, then runs the main scene and the gameplay scene named by the game's
+verification policy (the one the menu starts) for 120 physics frames each, and reports which
+entries ran. It reports parse
 and runtime errors with file:line plus lint findings such as an InputMap action a script uses but
 the project never defines, a CharacterBody without a CollisionShape, or a scene with no camera. A
 CharacterBody in the `player` group is stricter: it must have a direct, enabled CollisionShape with
-a real shape, because a decorative shape nested elsewhere does not move the body. A game created
-before gameplay entries has no `gameplayScene`; its check runs only the main scene and says so in a
-warning rather than implying gameplay was exercised.
+a real shape, because a decorative shape nested elsewhere does not move the body. A game whose policy
+declares no gameplay scene has its check run only the main scene, and the warning says so rather
+than implying gameplay was exercised.
 `game_scene_inspect` dumps a scene's node tree when the wiring, not the code, is the problem.
 
 Agents need a clear stopping point. Without one, a model that passed its gameplay test kept

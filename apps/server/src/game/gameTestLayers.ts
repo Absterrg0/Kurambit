@@ -49,11 +49,18 @@ export function projectTestLayer(
       readonly started: Deferred.Deferred<void>;
       readonly release: Deferred.Deferred<void>;
     };
-    /** Fail this many dispatches before succeeding, to test rollback. */
+    /** Fail this many dispatches before accepting them, to test a pre-commit failure. */
     readonly sendFailures?: number;
+    /**
+     * Accept this many dispatches and then fail reading the reply projection, the
+     * boundary `sendToThread` has after the command commits.
+     */
+    readonly sendProjectionFailures?: number;
   },
 ) {
   let remainingSendFailures = options?.sendFailures ?? 0;
+  let remainingProjectionFailures = options?.sendProjectionFailures ?? 0;
+  const accepted = new Set<string>();
   let enteredGate = false;
   let project: Project | undefined;
   const defaultThread = (): OrchestrationV2ThreadShell =>
@@ -116,22 +123,33 @@ export function projectTestLayer(
         onSend?.(input);
         const fail = remainingSendFailures > 0;
         if (fail) remainingSendFailures -= 1;
+        const projectionFails = !fail && remainingProjectionFailures > 0;
+        if (projectionFails) remainingProjectionFailures -= 1;
         const gate = options?.sendGate;
         // Only the dispatch input crosses this boundary; the real service is
         // covered by the orchestration tests.
         return Effect.gen(function* () {
+          if (fail)
+            return yield* new ThreadManagementService.ThreadManagementThreadArchivedError({
+              threadId: input.threadId,
+            });
+          // Past this point the command committed. The gate models a reply
+          // projection that is still loading, not another chance to refuse.
+          accepted.add(input.commandId);
           if (gate !== undefined && !enteredGate) {
             enteredGate = true;
             yield* Deferred.succeed(gate.started, undefined);
             yield* Deferred.await(gate.release);
           }
-          if (fail)
-            return yield* new ThreadManagementService.ThreadManagementThreadArchivedError({
+          if (projectionFails)
+            return yield* new ThreadManagementService.ThreadManagementDurableRunProjectionError({
               threadId: input.threadId,
+              messageId: input.messageId,
             });
           return {} as never;
         });
       },
+      hasReceipt: (commandId) => Effect.succeed(accepted.has(commandId)),
     }),
     Layer.mock(ThreadLaunchService.ThreadLaunchService)({
       launch: (input) => {

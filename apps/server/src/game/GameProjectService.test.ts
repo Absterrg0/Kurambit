@@ -992,7 +992,7 @@ it.effect("two concurrent approvals write one record and dispatch one turn", () 
   }),
 );
 
-it.effect("a failed dispatch rolls back only that attempt, and a retry dispatches once", () =>
+it.effect("a failed dispatch keeps the approval and a retry reuses its command", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(
       Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-retry-"))),
@@ -1014,13 +1014,15 @@ it.effect("a failed dispatch rolls back only that attempt, and a retry dispatche
         const failed = yield* Effect.result(projects.approveDesign(created.threadId, hash));
         expect(failed._tag).toBe("Failure");
         if (failed._tag === "Failure") expect(failed.failure.reason).toBe("thread-dispatch");
-        expect((yield* projects.read(created.root)).design).toEqual({ status: "draft" });
-        expect(yield* approvals.read(created.root)).toBeNull();
+        // The creator's decision survives a dispatch failure; only the build
+        // attempt is still pending.
+        expect((yield* projects.read(created.root)).design?.status).toBe("approved");
+        const pending = yield* approvals.read(created.root);
+        expect(pending?.buildDispatch?.state).toBe("pending");
         const approval = yield* projects.approveDesign(created.threadId, hash);
-        expect(yield* approvals.read(created.root)).toMatchObject({
-          approvalId: approval.approvalId,
-          designHash: hash,
-        });
+        expect(approval.approvalId).toBe(pending?.approvalId);
+        const sent = yield* approvals.read(created.root);
+        expect(sent?.buildDispatch?.state).toBe("dispatched");
         // A successful approval is never duplicated or undone by a retry.
         const retry = yield* projects.approveDesign(created.threadId, hash);
         expect(retry.approvalId).toBe(approval.approvalId);
@@ -1034,10 +1036,12 @@ it.effect("a failed dispatch rolls back only that attempt, and a retry dispatche
       ),
     );
     expect(sends).toHaveLength(2);
+    expect(sends[0]?.commandId).toBe(sends[1]?.commandId);
+    expect(sends[0]?.messageId).toBe(sends[1]?.messageId);
   }),
 );
 
-it.effect("an interrupted approval leaves no record, so a retry can dispatch", () =>
+it.effect("an interrupted dispatch keeps its record and a retry does not send twice", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(
       Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-interrupt-"))),
@@ -1061,10 +1065,15 @@ it.effect("an interrupted approval leaves no record, so a retry can dispatch", (
         const fiber = yield* Effect.forkScoped(projects.approveDesign(created.threadId, hash));
         yield* Deferred.await(started);
         yield* Fiber.interrupt(fiber);
-        expect(yield* approvals.read(created.root)).toBeNull();
-        expect((yield* projects.read(created.root)).design).toEqual({ status: "draft" });
+        // The dispatch committed before the interrupted reply read; the retry
+        // reconciles that receipt instead of sending a second message.
+        expect((yield* approvals.read(created.root))?.buildDispatch?.state).toBe("pending");
+        expect((yield* projects.read(created.root)).design?.status).toBe("approved");
         const retry = yield* projects.approveDesign(created.threadId, hash);
-        expect(yield* approvals.read(created.root)).toMatchObject({ approvalId: retry.approvalId });
+        expect(yield* approvals.read(created.root)).toMatchObject({
+          approvalId: retry.approvalId,
+          buildDispatch: { state: "dispatched" },
+        });
       }).pipe(
         Effect.provide(
           gameProjectLayer(
@@ -1076,7 +1085,99 @@ it.effect("an interrupted approval leaves no record, so a retry can dispatch", (
         ),
       ),
     );
-    expect(sends).toHaveLength(2);
+    expect(sends).toHaveLength(1);
+  }),
+);
+
+it.effect("a crash after writing a pending approval sends once with its ids", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-crash-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const approvals = yield* GameDesignApproval.GameDesignApproval;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        yield* writeDesign(created.root, filledDesign());
+        const hash = yield* designHashOf(created.root);
+        // What a process that died between the record write and its first send
+        // leaves behind.
+        yield* approvals.write(created.root, {
+          schemaVersion: 1,
+          game: created.root,
+          approvalId: "crashed-approval",
+          designHash: hash,
+          approvedAt: "2026-10-20T00:00:00.000Z",
+          acceptance: [],
+          buildDispatch: {
+            commandId: "stable-command",
+            messageId: "stable-message",
+            threadId: created.threadId,
+            state: "pending",
+          },
+        });
+        const retry = yield* projects.approveDesign(created.threadId, hash);
+        expect(retry.approvalId).toBe("crashed-approval");
+        expect((yield* approvals.read(created.root))?.buildDispatch?.state).toBe("dispatched");
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            fixtureState(parent),
+            projectTestLayer(undefined, (input) => sends.push(input)),
+          ),
+        ),
+      ),
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.commandId).toBe("stable-command");
+    expect(sends[0]?.messageId).toBe("stable-message");
+  }),
+);
+
+it.effect("a committed dispatch with a failed reply read is never sent twice", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-post-commit-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const approvals = yield* GameDesignApproval.GameDesignApproval;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        yield* writeDesign(created.root, filledDesign());
+        const hash = yield* designHashOf(created.root);
+        const approval = yield* projects.approveDesign(created.threadId, hash);
+        // The command committed; only the reply projection read failed.
+        expect((yield* approvals.read(created.root))?.buildDispatch?.state).toBe("dispatched");
+        const retry = yield* projects.approveDesign(created.threadId, hash);
+        expect(retry.approvalId).toBe(approval.approvalId);
+      }).pipe(
+        Effect.provide(
+          gameProjectLayer(
+            fixtureState(parent),
+            projectTestLayer(undefined, (input) => sends.push(input), {
+              sendProjectionFailures: 1,
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(sends).toHaveLength(1);
   }),
 );
 

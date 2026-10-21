@@ -497,6 +497,77 @@ const make = Effect.gen(function* () {
   // the recorded verdicts the Game panel and the harness depend on.
   const buildAfterApproval =
     "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Do the engine work with the Game Studio tools; a build-turn report is only evidence the tools wrote: call game_status first, game_godot_import after every engine change, game_godot_check until it reports ok with zero errors, your godot/tests smoke test with game_godot_test until it passes, write godot/tests/scenarios routes that play every level to the win with normal input and run game_scenarios_run until every observable criterion and an end criterion pass (the assertions come from the approved design, not from you), the web build with game_export, and game_web_playtest with steps over the core loop until it reports success and responded=true (a fresh evidence folder every round). Do not drive the godot binary, exporters, or tests from the shell — raw runs are not recorded as build evidence. Finish AGENTS.md's Definition of done, then report results and the game_preview URL.";
+  /**
+   * Sends the approval's one build turn, reconciling the persisted attempt
+   * first. The command id is the orchestration idempotency key, so after a crash
+   * the retry asks the receipt store whether that exact command already
+   * committed instead of creating a second message.
+   */
+  const dispatchBuild = (
+    projectId: ProjectId,
+    root: string,
+    record: GameDesignApproval.DesignApprovalRecord,
+    options?: { readonly fresh?: boolean },
+  ) =>
+    Effect.gen(function* () {
+      const dispatch = record.buildDispatch;
+      if (dispatch === undefined || dispatch.state === "dispatched") return;
+      const commandId = CommandId.make(dispatch.commandId);
+      // A record written by this very call has provably never been sent. Any
+      // older pending record may already have committed before a crash.
+      const accepted =
+        options?.fresh === true
+          ? false
+          : yield* threads.hasReceipt(commandId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "approve-design",
+                    path: root,
+                    reason: "thread-dispatch",
+                    cause,
+                  }),
+              ),
+            );
+      if (!accepted)
+        yield* threads
+          .sendToThread({
+            projectId,
+            commandId,
+            threadId: ThreadId.make(dispatch.threadId),
+            messageId: MessageId.make(dispatch.messageId),
+            text: buildAfterApproval,
+            attachments: [],
+            mode: "auto",
+            createdBy: "user",
+            creationSource: "web",
+          })
+          .pipe(
+            // sendToThread commits the dispatch and only then reads its reply
+            // projection. That later failure still means the build turn exists,
+            // so it counts as accepted rather than being sent again.
+            Effect.catchTags({
+              ThreadManagementDurableRunProjectionError: () => Effect.void,
+            }),
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "approve-design",
+                  path: root,
+                  reason: "thread-dispatch",
+                  cause,
+                }),
+            ),
+          );
+      const current = yield* approvals.read(root);
+      if (current === null || current.approvalId !== record.approvalId) return;
+      const pending = current.buildDispatch;
+      if (pending === undefined || pending.state === "dispatched") return;
+      yield* approvals.write(root, {
+        ...current,
+        buildDispatch: { ...pending, state: "dispatched" },
+      });
+    });
   const approveDesign = Effect.fn("GameProjectService.approveDesign")(function* (
     threadId: ThreadId,
     expectedDesignHash: string,
@@ -558,11 +629,14 @@ const make = Effect.gen(function* () {
           return yield* fail("design-invalid", validation.issues.join("\n"));
         const existing = yield* approvals.read(root);
         if (existing !== null && existing.designHash === designHash) {
-          // Retrying the same approval is a read, not another build turn.
+          // Retrying the same approval is a read, not another build turn. A
+          // pending dispatch is reconciled: the record was written, but the
+          // process may have died before or after the command committed.
           yield* updateManifest(root, "approve-design", (current) => ({
             ...current,
             design: { status: "approved", approvedAt: existing.approvedAt },
           }));
+          yield* dispatchBuild(target.projectId, root, existing);
           return {
             approvedAt: existing.approvedAt,
             approvalId: existing.approvalId,
@@ -571,7 +645,25 @@ const make = Effect.gen(function* () {
         }
         const approvedAt = DateTime.formatIso(yield* DateTime.now);
         const approvalId = NodeCrypto.randomUUID();
-        const previousDesign = manifest.design;
+        // A first approval releases the build turn. Re-approving changed scope
+        // does not start another one, unless the previous approval's turn was
+        // never dispatched: then the same durable attempt carries over.
+        const pendingBuild =
+          existing === null
+            ? undefined
+            : existing.buildDispatch?.state === "pending"
+              ? existing.buildDispatch
+              : null;
+        const carriesPendingBuild = pendingBuild !== undefined && pendingBuild !== null;
+        const dispatch =
+          existing === null || carriesPendingBuild
+            ? {
+                commandId: pendingBuild?.commandId ?? NodeCrypto.randomUUID(),
+                messageId: pendingBuild?.messageId ?? NodeCrypto.randomUUID(),
+                threadId: pendingBuild?.threadId ?? threadId,
+                state: "pending" as const,
+              }
+            : undefined;
         const record: GameDesignApproval.DesignApprovalRecord = {
           schemaVersion: 1,
           game: root,
@@ -579,70 +671,25 @@ const make = Effect.gen(function* () {
           designHash,
           approvedAt,
           acceptance: validation.acceptance,
+          ...(dispatch === undefined ? {} : { buildDispatch: dispatch }),
         };
         yield* approvals.write(root, record);
-        const rollBack = approvals.removeOwned(root, approvalId).pipe(
-          Effect.andThen(
-            updateManifest(root, "approve-design", (current) => {
-              const { design: _written, ...withoutDesign } = current;
-              return previousDesign === undefined
-                ? withoutDesign
-                : { ...withoutDesign, design: previousDesign };
-            }),
-          ),
+        // The record and mirror are the creator's decision and stay if dispatch
+        // fails. Only a failed display-mirror write, before any dispatch, rolls
+        // this attempt back.
+        yield* updateManifest(root, "approve-design", (current) => ({
+          ...current,
+          design: { status: "approved", approvedAt },
+        })).pipe(
+          Effect.catchTags({
+            GameOperationError: (error) =>
+              (existing === null
+                ? approvals.removeOwned(root, approvalId)
+                : approvals.write(root, existing)
+              ).pipe(Effect.andThen(Effect.fail(error))),
+          }),
         );
-        yield* Effect.gen(function* () {
-          yield* updateManifest(root, "approve-design", (current) => ({
-            ...current,
-            design: { status: "approved", approvedAt },
-          })).pipe(
-            // The mirror is only display state; if it cannot be written, put the
-            // record back so the approval stays all-or-nothing.
-            Effect.catchTags({
-              GameOperationError: (error) =>
-                (existing === null
-                  ? approvals.removeOwned(root, approvalId)
-                  : approvals.write(root, existing)
-                ).pipe(Effect.andThen(Effect.fail(error))),
-            }),
-          );
-          // Only the first approval releases a build turn. Re-approving changed
-          // scope updates the contract in place; the turn that requested the
-          // change continues.
-          if (existing === null)
-            yield* threads
-              .sendToThread({
-                projectId: target.projectId,
-                commandId: CommandId.make(NodeCrypto.randomUUID()),
-                threadId,
-                messageId: MessageId.make(NodeCrypto.randomUUID()),
-                text: buildAfterApproval,
-                attachments: [],
-                mode: "auto",
-                createdBy: "user",
-                creationSource: "web",
-              })
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new GameOperationError({
-                      operation: "approve-design",
-                      path: root,
-                      reason: "thread-dispatch",
-                      cause,
-                    }),
-                ),
-                // Roll back only this attempt: never another approval's record
-                // and never a mirror the approval did not own.
-                Effect.catchTags({
-                  GameOperationError: (error) => rollBack.pipe(Effect.andThen(Effect.fail(error))),
-                }),
-              );
-        }).pipe(
-          // A cancelled request must not leave a record with no build turn, or
-          // the retry would look idempotent and never dispatch.
-          Effect.onInterrupt(() => rollBack),
-        );
+        yield* dispatchBuild(target.projectId, root, record, { fresh: true });
         return { approvedAt, approvalId, designHash };
       }),
     );

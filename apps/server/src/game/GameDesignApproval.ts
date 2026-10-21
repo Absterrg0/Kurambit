@@ -11,7 +11,6 @@ import {
   DEFAULT_GAME_TEST_SUITE,
   GameAcceptanceCriterion,
   GameOperationError,
-  gameTestSuite,
   type GameDesignRead,
   type GameDesignState,
   GameVerificationPolicy,
@@ -40,6 +39,19 @@ export interface DesignApprovalRecord {
   readonly designHash: string;
   readonly approvedAt: string;
   readonly acceptance: readonly GameAcceptanceCriterion[];
+  /**
+   * The one build turn this approval owns. The ids are chosen and persisted
+   * before dispatch, so a crash or a post-commit reply failure can reconcile the
+   * orchestration receipt instead of sending a second message. `pending` means
+   * "may or may not have been accepted"; `dispatched` means the command path
+   * accepted it.
+   */
+  readonly buildDispatch?: {
+    readonly commandId: string;
+    readonly messageId: string;
+    readonly threadId: string;
+    readonly state: "pending" | "dispatched";
+  };
 }
 /**
  * What the server promised at creation: a plan-first game owes a reviewable
@@ -106,6 +118,14 @@ const StoredRecord = Schema.fromJsonString(
     designHash: Schema.String,
     approvedAt: Schema.String,
     acceptance: Schema.Array(GameAcceptanceCriterion),
+    buildDispatch: Schema.optionalKey(
+      Schema.Struct({
+        commandId: Schema.String,
+        messageId: Schema.String,
+        threadId: Schema.String,
+        state: Schema.Literals(["pending", "dispatched"]),
+      }),
+    ),
   }),
 );
 const decodeStoredRecord = Schema.decodeUnknownSync(StoredRecord);
