@@ -13,7 +13,7 @@ const Palette := preload("res://materials/palette.tres")
 @onready var pips: LifePips = $Status/Box/Lives/Pips
 @onready var toast: Label = $Toast
 @onready var hint: Label = $Hint
-@onready var click_prompt: PanelContainer = $ClickPrompt
+@onready var click_prompt: Label = $ClickPrompt
 
 var _hint_timer := HINT_SECONDS
 var _toast_tween: Tween

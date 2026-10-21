@@ -206,6 +206,8 @@ The explorer is a dusk diorama. The kit is deliberately small and lives in
 - Value order in the scene: sky and far walls darkest, stone mid, ground mid-warm, the
   player and relics brightest, the lava the most saturated. New props should pick a value
   from that ladder rather than a new saturation.
+- Keep the ground mid-value; the player must differ from it in brightness, not only hue;
+  noise ±10%, large features.
 - Ambient, key and fill are set once in `level_01.tscn`. If you need a mood change, change
   the environment and the two lights together; adding a third shadow-casting light
   flattens those shadows and costs the Web build.

@@ -5,9 +5,9 @@
 [resource]
 resource_name = "Lava"
 shader = ExtResource("1_lava")
-shader_parameter/crust_color = Color(0.28, 0.045, 0.03, 1)
+shader_parameter/crust_color = Color(0.5, 0.14, 0.04, 1)
 shader_parameter/hot_color = Color(0.95, 0.26, 0.05, 1)
 shader_parameter/core_color = Color(1, 0.78, 0.28, 1)
 shader_parameter/wave_height = 0.035
 shader_parameter/wave_speed = 0.8
-shader_parameter/vein_scale = 0.9
+shader_parameter/vein_scale = 0.3

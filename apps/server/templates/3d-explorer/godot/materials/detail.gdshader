@@ -3,9 +3,10 @@ render_mode diffuse_burley, specular_schlick_ggx;
 
 // One shared material shader for the world's stone, soil and wood. It breaks up the
 // flat, stretched UVs of box geometry with two octaves of world-space noise (triplanar,
-// so a 60 m ground slab and a 1 m block get the same grain density), and darkens
-// vertical faces so every block has a lit top and a shadowed side. Compatibility-safe:
-// it only uses MODEL_MATRIX, INV_VIEW_MATRIX and TIME-free procedural noise.
+// so a 60 m ground slab and a 1 m block get the same grain density) at feature sizes the
+// third-person camera can read as material, and darkens vertical faces so every block has
+// a lit top and a shadowed side. Compatibility-safe: it only uses MODEL_MATRIX,
+// INV_VIEW_MATRIX and TIME-free procedural noise.
 uniform vec3 base_color : source_color = vec3(0.30, 0.36, 0.24);
 uniform vec3 accent_color : source_color = vec3(0.42, 0.47, 0.30);
 uniform float noise_scale = 0.5;
@@ -58,10 +59,13 @@ void fragment() {
 	vec2 uv = world_position.xz;
 	if (weight.x > weight.y && weight.x > weight.z) uv = world_position.zy;
 	else if (weight.z > weight.y) uv = world_position.xy;
-	float broad = value_noise(uv * noise_scale);
-	float grain = value_noise(uv * noise_scale * 9.0 + vec2(7.3, 1.9));
-	vec3 albedo = mix(base_color, accent_color, smoothstep(0.28, 0.78, broad) * accent_strength);
-	albedo *= 1.0 - detail_strength * 0.5 + grain * detail_strength;
+	// Both octaves stay large: a ~4 m patch and a ~2 m grain at the default scale.
+	// Finer noise reads as blotchy camo at the 5.6 m third-person camera, not texture.
+	float broad = value_noise(uv * noise_scale * 0.5);
+	float grain = value_noise(uv * noise_scale + vec2(7.3, 1.9));
+	vec3 albedo = mix(base_color, accent_color, smoothstep(0.32, 0.72, broad) * accent_strength);
+	// Half of detail_strength either way: one material with slow, quiet variation.
+	albedo *= 1.0 + (grain - 0.5) * detail_strength;
 	albedo *= mix(1.0, masonry_pattern(uv), masonry);
 	float up = clamp(world_normal.y, 0.0, 1.0);
 	albedo = mix(albedo * (1.0 - slope_darkening), albedo, up);

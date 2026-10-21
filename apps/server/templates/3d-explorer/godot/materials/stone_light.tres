@@ -5,11 +5,11 @@
 [resource]
 resource_name = "StoneLight"
 shader = ExtResource("1_detail")
-shader_parameter/base_color = Color(0.4, 0.372, 0.32, 1)
-shader_parameter/accent_color = Color(0.485, 0.452, 0.392, 1)
+shader_parameter/base_color = Color(0.3, 0.277, 0.238, 1)
+shader_parameter/accent_color = Color(0.365, 0.34, 0.297, 1)
 shader_parameter/noise_scale = 0.7
-shader_parameter/accent_strength = 0.35
+shader_parameter/accent_strength = 0.18
 shader_parameter/slope_darkening = 0.36
 shader_parameter/masonry = 0.65
-shader_parameter/detail_strength = 0.14
+shader_parameter/detail_strength = 0.1
 shader_parameter/roughness_value = 0.9

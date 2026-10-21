@@ -95,27 +95,18 @@ text = "WASD move · Space jump · Shift sprint · E interact · Esc pause"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="ClickPrompt" type="PanelContainer" parent="."]
+[node name="ClickPrompt" type="Label" parent="."]
 anchor_left = 0.5
-anchor_top = 0.5
+anchor_top = 1.0
 anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -250.0
-offset_top = -64.0
-offset_right = 250.0
-offset_bottom = 64.0
+anchor_bottom = 1.0
+offset_left = -470.0
+offset_top = -76.0
+offset_right = 470.0
+offset_bottom = -50.0
 mouse_filter = 2
-
-[node name="Box" type="VBoxContainer" parent="ClickPrompt"]
-theme_override_constants/separation = 6
-
-[node name="Title" type="Label" parent="ClickPrompt/Box"]
-theme_override_font_sizes/font_size = 27
-text = "Click to look around"
-horizontal_alignment = 1
-
-[node name="Detail" type="Label" parent="ClickPrompt/Box"]
 theme_override_colors/font_color = Color(0.72, 0.79, 0.88, 1)
-theme_override_font_sizes/font_size = 16
-text = "Movement works without it · Esc pauses"
+theme_override_font_sizes/font_size = 15
+text = "Click to look around · movement works without it"
 horizontal_alignment = 1
+vertical_alignment = 1

@@ -10,7 +10,7 @@ uniform vec3 hot_color : source_color = vec3(0.95, 0.28, 0.06);
 uniform vec3 core_color : source_color = vec3(1.0, 0.78, 0.28);
 uniform float wave_height = 0.035;
 uniform float wave_speed = 0.8;
-uniform float vein_scale = 0.9;
+uniform float vein_scale = 0.3;
 
 varying vec3 world_position;
 
@@ -53,12 +53,17 @@ void fragment() {
 	float time = TIME * 0.22;
 	vec2 flow = world_position.xz * vein_scale;
 	float veins = fbm(flow + vec2(time, time * 0.6));
-	float crust = smoothstep(0.34, 0.58, veins);
-	vec3 color = mix(hot_color, core_color, crust * 0.75);
-	color = mix(crust_color, color, smoothstep(0.18, 0.42, veins));
+	// Low contrast: the veins shift hue and value gently over ~3 m, so the pool stays
+	// one hot surface. The warning is the hue, the emission and the pool light, never
+	// dark blotches, which read as camo at the gameplay camera distance.
+	float hot = smoothstep(0.34, 0.72, veins);
+	vec3 color = mix(hot_color, core_color, hot * 0.55);
+	color = mix(crust_color, color, 0.88);
 	// A brighter halo where the surface faces the camera sells the liquid.
 	float facing = clamp(abs(normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y), 0.0, 1.0);
-	color = mix(color, core_color, (1.0 - facing) * 0.25);
+	color = mix(color, core_color, (1.0 - facing) * 0.2);
 	ALBEDO = color;
-	EMISSION = color * (1.1 + crust * 0.9);
+	// Unshaded ALBEDO already sits near the top of the range: a small emission keeps
+	// the pool glowing without clipping the veins into one flat orange plate.
+	EMISSION = color * (0.55 + hot * 0.3);
 }

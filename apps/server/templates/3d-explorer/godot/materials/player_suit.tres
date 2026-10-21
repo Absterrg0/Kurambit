@@ -2,5 +2,8 @@
 
 [resource]
 resource_name = "PlayerSuit"
-albedo_color = Color(0.93, 0.55, 0.22, 1)
+albedo_color = Color(0.98, 0.6, 0.24, 1)
 roughness = 0.55
+emission_enabled = true
+emission = Color(0.98, 0.6, 0.24, 1)
+emission_energy_multiplier = 0.3
