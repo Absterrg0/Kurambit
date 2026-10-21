@@ -19,6 +19,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameCreate]: "game",
   [WS_METHODS.gameOpen]: "game",
   [WS_METHODS.gameApproveDesign]: "game",
+  [WS_METHODS.gameUpdateVerificationPolicy]: "game",
   [WS_METHODS.gameAction]: "game",
   [WS_METHODS.gameToolchainStatus]: "game",
   [WS_METHODS.gameInstall]: "game",

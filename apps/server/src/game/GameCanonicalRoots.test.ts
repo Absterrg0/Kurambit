@@ -197,7 +197,7 @@ const shell = (id: string, projectId: string): OrchestrationV2ThreadShell =>
     archivedAt: null,
     deletedAt: null,
     worktreePath: null,
-  }) as OrchestrationV2ThreadShell;
+  }) as unknown as OrchestrationV2ThreadShell;
 
 it.effect("a real root and an alias thread share one operation lock", () =>
   withAliasFixture(({ base, root, alias, stateDir }) =>
@@ -251,10 +251,15 @@ it.effect("a real root and an alias thread share one operation lock", () =>
               Effect.succeed({ path: "/unexecuted/godot", version: "4.7.2", templates: null }),
           }),
         ),
-        Layer.provide(Layer.mock(GamePreview.GamePreview)({})),
+        Layer.provide(
+          Layer.mock(GamePreview.GamePreview)({
+            url: () => "http://127.0.0.1:0",
+          }),
+        ),
         Layer.provide(Layer.mock(PreviewBrowser.PreviewBrowser)({})),
         Layer.provide(
           Layer.mock(GameProcesses.GameProcesses)({
+            list: () => [],
             run: (input) =>
               Effect.gen(function* () {
                 if (input.operation === "godot-check") {

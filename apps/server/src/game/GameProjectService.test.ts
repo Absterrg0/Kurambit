@@ -880,6 +880,79 @@ it.effect("refuses a missing, skeleton, unreadable or acceptance-less design", (
   }),
 );
 
+it.effect("only an explicit service call changes the verification policy", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-policy-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-policy-state-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const approvals = yield* GameDesignApproval.GameDesignApproval;
+        const created = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        const createdPolicy = yield* approvals.readPolicy(
+          created.root,
+          yield* projects.read(created.root),
+        );
+        expect(createdPolicy.policy).toEqual({
+          testSuite: "res://tests/smoke_test.gd",
+          gameplayScene: "res://scenes/game.tscn",
+          probe: true,
+        });
+        const updated = yield* projects.updateVerificationPolicy(created.threadId, {
+          testSuite: "res://tests/other.gd",
+          gameplayScene: null,
+          probe: false,
+        });
+        expect(updated.policy.testSuite).toBe("res://tests/other.gd");
+        expect(updated.revision).not.toBe(createdPolicy.revision);
+        // game.json mirrors the change for display, but the record is authority.
+        const mirror = yield* projects.read(created.root);
+        expect(mirror.testSuite).toBe("res://tests/other.gd");
+        expect(mirror.gameplayScene).toBeUndefined();
+        expect(mirror.probe).toBe(false);
+        // A manifest edit is not another way to change the exam.
+        yield* Effect.promise(async () => {
+          const file = NodePath.join(created.root, "game.json");
+          const raw = JSON.parse(await NodeFSP.readFile(file, "utf8")) as Record<string, unknown>;
+          raw.testSuite = "res://tests/trivial.gd";
+          raw.gameplayScene = "res://scenes/menu.tscn";
+          await NodeFSP.writeFile(file, `${JSON.stringify(raw, null, 2)}\n`);
+        });
+        expect(
+          (yield* approvals.readPolicy(created.root, yield* projects.read(created.root))).policy,
+        ).toEqual(updated.policy);
+        for (const policy of [
+          { testSuite: "tests/other.gd", gameplayScene: null, probe: false },
+          { testSuite: "res://../other.gd", gameplayScene: null, probe: false },
+          { testSuite: "res://tests/other.txt", gameplayScene: null, probe: false },
+          {
+            testSuite: "res://tests/other.gd",
+            gameplayScene: "res://scenes/menu.gd",
+            probe: false,
+          },
+        ]) {
+          const rejected = yield* Effect.result(
+            projects.updateVerificationPolicy(created.threadId, policy),
+          );
+          expect(rejected._tag).toBe("Failure");
+          if (rejected._tag === "Failure") expect(rejected.failure.reason).toBe("invalid-path");
+        }
+      }).pipe(Effect.provide(gameProjectLayer(stateDir))),
+    );
+  }),
+);
+
 it.effect("two concurrent approvals write one record and dispatch one turn", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(

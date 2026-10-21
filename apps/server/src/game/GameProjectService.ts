@@ -20,6 +20,7 @@ import {
   ThreadId,
   GameManifest,
   GameOperationError,
+  gameTestSuite,
   type GameAsset,
   type GameCreateInput,
   type GameDesign,
@@ -28,6 +29,8 @@ import {
   type GameOpenInput,
   type GameProjectResult,
   type GameSummary,
+  type GameVerificationPolicy,
+  type GameVerificationPolicyRead,
 } from "@t3tools/contracts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameQualification from "./GameQualification.ts";
@@ -55,6 +58,23 @@ export const insideGame = (root: string, relative: string) => {
     });
   return target;
 };
+/**
+ * A Godot resource path for the verification policy. Only `res://` paths are
+ * accepted: the exam must name a file inside the game's project, not an
+ * arbitrary script on the machine.
+ */
+export const engineResourcePath = (value: string, suffix: ".gd" | ".tscn"): string | null => {
+  if (!value.startsWith("res://") || value.includes("\\")) return null;
+  const relative = value.slice("res://".length);
+  if (
+    relative.length === 0 ||
+    relative.startsWith("/") ||
+    relative.split("/").includes("..") ||
+    !relative.endsWith(suffix)
+  )
+    return null;
+  return `res://${relative}`;
+};
 export class GameProjectService extends Context.Service<
   GameProjectService,
   {
@@ -81,6 +101,16 @@ export class GameProjectService extends Context.Service<
       threadId: ThreadId,
       expectedDesignHash: string,
     ) => Effect.Effect<GameDesignApprovalResult, GameOperationError>;
+    /**
+     * The creator's explicit change to this game's exam. It is the only way to
+     * move the canonical suite, gameplay scene or probe obligation; the RPC
+     * exposes it, agent tools do not. Existing evidence recorded under the old
+     * policy no longer counts.
+     */
+    readonly updateVerificationPolicy: (
+      threadId: ThreadId,
+      policy: GameVerificationPolicy,
+    ) => Effect.Effect<GameVerificationPolicyRead, GameOperationError>;
     readonly upsertAsset: (
       root: string,
       asset: GameAsset,
@@ -365,11 +395,18 @@ const make = Effect.gen(function* () {
         root = yield* resolveCanonicalRoot(root, "create-game");
         // The creation-time design promise lives outside the workspace. Without
         // it, deleting DESIGN.md or editing game.json could pass a plan-first
-        // game as legacy.
+        // game as legacy. The same record owns the exam the game qualifies
+        // against, so a later manifest edit cannot redefine acceptance.
+        const creationManifest = scaffoldManifest(input);
         yield* approvals.recordIntent(
           root,
           input.planFirst === false ? "skipped" : "required",
-          scaffoldManifest(input).probe === true,
+          creationManifest.probe === true,
+          {
+            testSuite: gameTestSuite(creationManifest),
+            gameplayScene: creationManifest.gameplayScene ?? null,
+            probe: creationManifest.probe === true,
+          },
         );
         intentRecorded = true;
         for (const args of [
@@ -610,6 +647,49 @@ const make = Effect.gen(function* () {
       }),
     );
   });
+  const updateVerificationPolicy = Effect.fn("GameProjectService.updateVerificationPolicy")(
+    function* (threadId: ThreadId, policy: GameVerificationPolicy) {
+      const target = yield* resolveTarget(threadId);
+      const root = target.root;
+      const testSuite = engineResourcePath(policy.testSuite, ".gd");
+      const gameplayScene =
+        policy.gameplayScene === null ? null : engineResourcePath(policy.gameplayScene, ".tscn");
+      if (testSuite === null || (policy.gameplayScene !== null && gameplayScene === null))
+        return yield* new GameOperationError({
+          operation: "update-verification-policy",
+          path: policy.testSuite,
+          reason: "invalid-path",
+          detail:
+            "The test suite must be a res:// .gd path and the gameplay scene a res:// .tscn path inside the game project.",
+        });
+      const manifest = yield* read(root);
+      return yield* approvals.exclusive(
+        root,
+        Effect.gen(function* () {
+          // A pre-policy game adopts from its manifest first, so there is always
+          // a record to change rather than a silent second source of truth.
+          yield* approvals.readPolicy(root, manifest);
+          const updated = yield* approvals.updatePolicy(root, {
+            testSuite,
+            gameplayScene,
+            probe: policy.probe,
+          });
+          // game.json is a display mirror only; the record above already holds
+          // the exam, so a failed mirror write is reported but not authoritative.
+          yield* updateManifest(root, "update-verification-policy", (current) => {
+            const { gameplayScene: _previous, ...rest } = current;
+            return {
+              ...rest,
+              testSuite,
+              ...(gameplayScene === null ? {} : { gameplayScene }),
+              probe: policy.probe,
+            };
+          });
+          return updated;
+        }),
+      );
+    },
+  );
   return GameProjectService.of({
     create,
     list: Effect.fn("GameProjectService.list")(function* () {
@@ -663,9 +743,11 @@ const make = Effect.gen(function* () {
             // The cheap verdict: the server's records, never a source walk. The
             // Stage still does the exact check when it opens this game.
             const design = yield* approvals.status(root, manifest.value);
+            const policy = yield* approvals.readPolicy(root, manifest.value);
             const progress = yield* qualification.summary(
               root,
               design.state === "approved" ? design.approvedHash : null,
+              { policyRevision: policy.revision, probeRequired: policy.policy.probe },
             );
             const currentOperation = operations.current(root);
             const lastPlaytest = yield* Effect.promise(() => readLastPlaytest(root, []));
@@ -734,6 +816,7 @@ const make = Effect.gen(function* () {
     resolve,
     read,
     approveDesign,
+    updateVerificationPolicy,
     upsertAsset: (root, asset) =>
       updateManifest(root, "save-asset", (manifest) => ({
         ...manifest,

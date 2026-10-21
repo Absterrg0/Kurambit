@@ -15,7 +15,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   GameOperationError,
-  gameTestSuite,
   type GameCheckResult,
   type GameSceneInspectResult,
   type GameScenariosRunResult,
@@ -510,6 +509,7 @@ const make = Effect.gen(function* () {
         "playtest",
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
+          const identity = yield* designApprovals.readPolicy(root, manifest);
           const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
           if (!(yield* webBuildIsCurrent(beforePlaytest))) {
             const exported = yield* exportGame(root, "Web");
@@ -585,10 +585,10 @@ const make = Effect.gen(function* () {
           const stepsGiven = (input.steps?.length ?? 0) > 0;
           const probe = result.state;
           const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
-          // A template game owes the probe it was created with. The creation record is
-          // server-owned, so deleting scripts/studio_probe.gd cannot downgrade the
-          // playtest to the pixel rule without failing the stage.
-          const probeRequired = (yield* designApprovals.readProbe(root)) ?? manifest.probe === true;
+          // A template game owes the probe it was created with. The verification
+          // policy is server-owned, so deleting scripts/studio_probe.gd or editing
+          // game.json cannot downgrade the playtest to the pixel rule.
+          const probeRequired = identity.policy.probe;
           const missingProbe = probeRequired && probe === null;
           const gaps: string[] = [];
           if (!stepsGiven) gaps.push("input steps");
@@ -619,6 +619,7 @@ const make = Effect.gen(function* () {
               sourceId: build?.status === "passed" ? build.sourceId : null,
               buildId: build?.status === "passed" ? build.buildId : null,
               evidenceDirectory: evidence.directory,
+              probeRequired,
               detail: missingProbe
                 ? probesMissing
                 : probe === null
@@ -646,7 +647,9 @@ const make = Effect.gen(function* () {
         const resultPath = NodePath.join(temporary, "result.json");
         const { godot, cwd, godotProject } = yield* engine(root);
         const manifest = yield* projects.read(root);
-        const gameplayScene = manifest.gameplayScene ?? "";
+        // The server-owned exam, never game.json: the agent can edit that file.
+        const identity = yield* designApprovals.readPolicy(root, manifest);
+        const gameplayScene = identity.policy.gameplayScene ?? "";
         // Import is cache preparation, not the check itself: Godot's import can
         // write sidecar files inside the project, so the inputs are read after it
         // and before the checking script runs.
@@ -718,12 +721,12 @@ const make = Effect.gen(function* () {
           // the warning says what the check did not cover rather than implying it did.
           const warnings = [
             ...(reported?.warnings ?? []),
-            ...(manifest.gameplayScene === undefined
+            ...(identity.policy.gameplayScene === null
               ? [
                   {
                     file: "game.json",
                     message:
-                      "No gameplayScene is declared, so the check ran only the main scene (the menu); gameplay initialization was not exercised. Add the scene play starts in to game.json.",
+                      "The verification policy declares no gameplay scene, so the check ran only the main scene (the menu); gameplay initialization was not exercised.",
                   },
                 ]
               : []),
@@ -750,6 +753,7 @@ const make = Effect.gen(function* () {
               sourceId: comparison.kind === "current" ? comparison.sourceId : null,
               buildId: null,
               evidenceDirectory: null,
+              policyRevision: identity.revision,
               ...(comparison.kind === "current" ? {} : { detail: comparison.detail }),
             },
           };
@@ -773,6 +777,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { godot, cwd, godotProject } = yield* engine(root);
         const manifest = yield* projects.read(root);
+        const identity = yield* designApprovals.readPolicy(root, manifest);
         const imported = yield* importGame(root);
         // Import may write sidecars inside the project; read the inputs after it
         // and before the scenario runners execute them.
@@ -950,6 +955,7 @@ const make = Effect.gen(function* () {
             evidenceDirectory: evidenceReference,
             designHash: approval?.designHash ?? null,
             criteria: summary.criteria,
+            policyRevision: identity.revision,
             detail: comparison.kind === "current" ? summary.detail : comparison.detail,
           },
         };
@@ -1054,7 +1060,7 @@ const make = Effect.gen(function* () {
       });
     });
   /** Runs one Godot script and returns what the test stage would record for it. */
-  const testGame = (root: string, script: string, timeoutMs: number) =>
+  const testGame = (root: string, script: string, timeoutMs: number, policyRevision?: string) =>
     Effect.gen(function* () {
       const { godot, cwd, godotProject } = yield* engine(root);
       const resolved = yield* Effect.try({
@@ -1102,6 +1108,7 @@ const make = Effect.gen(function* () {
           sourceId: comparison.kind === "current" ? comparison.sourceId : null,
           buildId: null,
           evidenceDirectory: null,
+          ...(policyRevision === undefined ? {} : { policyRevision }),
           ...(comparison.kind === "current" ? {} : { detail: comparison.detail }),
         },
       };
@@ -1127,11 +1134,13 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const design = yield* designApprovals.status(root, manifest);
       const approval = yield* designApprovals.read(root);
+      const policy = yield* designApprovals.readPolicy(root, manifest);
       const qualificationRead = yield* qualification.read(
         root,
         manifest.godotProject,
         design.state,
         approval?.designHash ?? null,
+        { policyRevision: policy.revision, probeRequired: policy.policy.probe },
       );
       const inventory = yield* projects.inventory(root, qualificationRead.sourceId);
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
@@ -1182,7 +1191,10 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
-          const suite = gameTestSuite(manifest);
+          // The canonical suite comes from the server-owned policy, not the
+          // manifest an agent can edit.
+          const identity = yield* designApprovals.readPolicy(root, manifest);
+          const suite = identity.policy.testSuite;
           const canonical = suite.replace(/^res:\/\//, "").replaceAll("\\", "/");
           const requested = NodePath.normalize(script.replace(/^res:\/\//, ""))
             .split(NodePath.sep)
@@ -1196,7 +1208,12 @@ const make = Effect.gen(function* () {
               message: `${diagnostic.value.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
             };
           }
-          return yield* ownStage(root, "test", "test", testGame(root, script, timeoutMs));
+          return yield* ownStage(
+            root,
+            "test",
+            "test",
+            testGame(root, script, timeoutMs, identity.revision),
+          );
         }),
       ),
     blender: (threadId, input) =>

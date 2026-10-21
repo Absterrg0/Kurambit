@@ -33,6 +33,16 @@ const ALL_STAGES = ["design", "check", "test", "export", "playtest", "state", "v
  */
 export type QualificationOutcome = "passed" | "failed" | "unknown" | "cancelled";
 
+/**
+ * The exam a recorded result was earned under. A stage written under another
+ * policy revision (or another probe obligation) is stale even when the sources
+ * did not change.
+ */
+export interface QualificationIdentity {
+  readonly policyRevision: string;
+  readonly probeRequired: boolean;
+}
+
 export interface QualificationStageRecord {
   readonly outcome: QualificationOutcome;
   /** The source snapshot the operation actually covered; null when unknowable. */
@@ -49,6 +59,10 @@ export interface QualificationStageRecord {
   readonly detail?: string;
   /** For web exports, the exact files the build produced. */
   readonly artifacts?: readonly WebArtifactFile[];
+  /** The verification-policy revision the check/test/state ran under. */
+  readonly policyRevision?: string | null;
+  /** Whether the playtest owed a StudioProbe reading. */
+  readonly probeRequired?: boolean | null;
 }
 export interface QualificationRecord {
   readonly schemaVersion: 1;
@@ -70,6 +84,8 @@ const StoredStage = Schema.Struct({
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
   detail: Schema.optionalKey(Schema.String),
   artifacts: Schema.optionalKey(Schema.Array(StoredArtifact)),
+  policyRevision: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  probeRequired: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 const StoredRecord = Schema.fromJsonString(
   Schema.Struct({
@@ -133,6 +149,8 @@ const deriveQualification = (input: {
   readonly designHash: string | null;
   /** Whether the recorded web artifact still matches builds/web. */
   readonly artifactsCurrent: boolean;
+  /** The current exam, when the caller knows it. */
+  readonly identity: QualificationIdentity | null;
 }): GameQualificationRead => {
   if (input.source.kind === "unknown")
     return {
@@ -184,6 +202,27 @@ const deriveQualification = (input: {
     else if (recorded.outcome === "unknown") stageReads.set(stage, read("unknown"));
     else if (recorded.sourceId === null) stageReads.set(stage, read("unknown"));
     else if (recorded.sourceId !== currentSourceId) stageReads.set(stage, read("stale"));
+    else if (
+      input.identity !== null &&
+      stage !== "export" &&
+      stage !== "playtest" &&
+      (recorded.policyRevision ?? null) !== input.identity.policyRevision
+    )
+      // The exam changed. A pass earned under another canonical suite, gameplay
+      // scene or probe rule does not certify this one.
+      stageReads.set(stage, {
+        ...read("stale"),
+        detail: "The game's verification policy changed after this result was recorded.",
+      });
+    else if (
+      input.identity !== null &&
+      stage === "playtest" &&
+      (recorded.probeRequired ?? null) !== input.identity.probeRequired
+    )
+      stageReads.set(stage, {
+        ...read("stale"),
+        detail: "The game's probe requirement changed after this playtest was recorded.",
+      });
     else if (stage === "export" && !input.artifactsCurrent)
       // The record names a build whose files are missing or were replaced. The
       // source ID is not enough: players and playtests load these exact bytes.
@@ -240,6 +279,7 @@ const deriveQualification = (input: {
 const deriveQualificationSummary = (
   record: QualificationRecord | null,
   designHash: string | null,
+  identity: QualificationIdentity | null,
 ): GameQualificationSummary => {
   const stages = RECORDED_QUALIFICATION_STAGES.map((stage) => record?.stages[stage]);
   const finished = stages
@@ -256,13 +296,22 @@ const deriveQualificationSummary = (
   const exportBuild = record.stages.export?.buildId ?? null;
   const playtestBuild = record.stages.playtest?.buildId ?? null;
   const designBound = (record.stages.state?.designHash ?? null) === designHash;
+  const policyBound =
+    identity === null ||
+    (RECORDED_QUALIFICATION_STAGES.filter(
+      (stage) => stage !== "export" && stage !== "playtest",
+    ).every(
+      (stage) => (record.stages[stage]?.policyRevision ?? null) === identity.policyRevision,
+    ) &&
+      (record.stages.playtest?.probeRequired ?? null) === identity.probeRequired);
   const qualified =
     passed &&
     sourceIds.size === 1 &&
     !sourceIds.has(null) &&
     exportBuild !== null &&
     playtestBuild === exportBuild &&
-    designBound;
+    designBound &&
+    policyBound;
   return { state: qualified ? "qualified" : "unqualified", asOf: finished ?? null };
 };
 
@@ -276,6 +325,8 @@ export interface QualificationRecordInput {
   readonly criteria?: readonly GameScenarioCriterionResult[];
   readonly detail?: string;
   readonly artifacts?: readonly WebArtifactFile[];
+  readonly policyRevision?: string | null;
+  readonly probeRequired?: boolean | null;
 }
 
 export class GameQualification extends Context.Service<
@@ -291,6 +342,7 @@ export class GameQualification extends Context.Service<
       godotProject: string,
       designState?: GameDesignState,
       designHash?: string | null,
+      identity?: QualificationIdentity | null,
     ) => Effect.Effect<GameQualificationRead>;
     /**
      * The record-only verdict for a library row. Cheap by construction: it reads
@@ -299,6 +351,7 @@ export class GameQualification extends Context.Service<
     readonly summary: (
       root: string,
       designHash: string | null,
+      identity?: QualificationIdentity | null,
     ) => Effect.Effect<GameQualificationSummary>;
     /** Records one real operation result. Concurrent writers are serialized per game. */
     readonly record: (
@@ -336,13 +389,13 @@ export const layer = (options: {
   return Layer.succeed(
     GameQualification,
     GameQualification.of({
-      summary: (root, designHash) =>
+      summary: (root, designHash, identity) =>
         Effect.promise(async () => {
           const location = await qualificationLocation(options.stateDir, root);
           const record = await readRecord(location.file);
-          return deriveQualificationSummary(record, designHash);
+          return deriveQualificationSummary(record, designHash, identity ?? null);
         }),
-      read: (root, godotProject, designState, designHash) =>
+      read: (root, godotProject, designState, designHash, identity) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>
             snapshotSource(root, godotProject, {
@@ -362,6 +415,7 @@ export const layer = (options: {
             designState: designState ?? null,
             designHash: designHash ?? null,
             artifactsCurrent,
+            identity: identity ?? null,
           });
         }),
       record: (root, input) =>
@@ -394,6 +448,12 @@ export const layer = (options: {
                       ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
                       ...(input.detail === undefined ? {} : { detail: input.detail }),
                       ...(input.artifacts === undefined ? {} : { artifacts: input.artifacts }),
+                      ...(input.policyRevision === undefined
+                        ? {}
+                        : { policyRevision: input.policyRevision }),
+                      ...(input.probeRequired === undefined
+                        ? {}
+                        : { probeRequired: input.probeRequired }),
                     },
                   },
                 };

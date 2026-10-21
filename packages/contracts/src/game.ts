@@ -110,6 +110,32 @@ export type GameAsset = typeof GameAsset.Type;
 /** The suite that owns the `test` qualification stage for this game. */
 export const gameTestSuite = (manifest: GameManifest): string =>
   manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE;
+/**
+ * The server-owned exam for one game. It is written at creation and changed
+ * only through an explicit creator action, never by editing game.json.
+ */
+export const GameVerificationPolicy = Schema.Struct({
+  /** The canonical suite whose pass records the test stage. */
+  testSuite: Schema.String,
+  /** The scene play starts in; null when the game has no separate gameplay scene. */
+  gameplayScene: Schema.NullOr(Schema.String),
+  /** Whether a qualifying playtest must read the StudioProbe. */
+  probe: Schema.Boolean,
+});
+export type GameVerificationPolicy = typeof GameVerificationPolicy.Type;
+export const GameVerificationPolicyRead = Schema.Struct({
+  policy: GameVerificationPolicy,
+  /** Stable identity of this policy; a change invalidates recorded evidence. */
+  revision: Schema.String,
+});
+export type GameVerificationPolicyRead = typeof GameVerificationPolicyRead.Type;
+export const GameVerificationPolicyUpdateInput = Schema.Struct({
+  threadId: ThreadId,
+  testSuite: Schema.String,
+  gameplayScene: Schema.NullOr(Schema.String),
+  probe: Schema.Boolean,
+});
+export type GameVerificationPolicyUpdateInput = typeof GameVerificationPolicyUpdateInput.Type;
 export class GameOperationError extends Schema.TaggedError<GameOperationError>()(
   "GameOperationError",
   {

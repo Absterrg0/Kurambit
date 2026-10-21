@@ -1728,6 +1728,17 @@ const layerWsRpc = (
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
         [WS_METHODS.gameApproveDesign]: ({ threadId, expectedDesignHash }) =>
           gameProjects.approveDesign(threadId, expectedDesignHash),
+        [WS_METHODS.gameUpdateVerificationPolicy]: ({
+          threadId,
+          testSuite,
+          gameplayScene,
+          probe,
+        }) =>
+          gameProjects.updateVerificationPolicy(threadId, {
+            testSuite,
+            gameplayScene,
+            probe,
+          }),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.subscribeGameEvents]: () => game.events,
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,

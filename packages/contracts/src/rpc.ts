@@ -10,6 +10,8 @@ import {
   GameStatus,
   GameThreadInput,
   GameToolchainStatus,
+  GameVerificationPolicyRead,
+  GameVerificationPolicyUpdateInput,
 } from "./game.ts";
 import { GameDesignApproveInput, GameDesignApprovalResult } from "./gameDesign.ts";
 import {
@@ -298,6 +300,7 @@ export const WS_METHODS = {
   gameCreate: "game.create",
   gameOpen: "game.open",
   gameApproveDesign: "game.approveDesign",
+  gameUpdateVerificationPolicy: "game.updateVerificationPolicy",
   gameAction: "game.action",
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
@@ -1320,6 +1323,11 @@ const WsGameApproveDesignRpc = Rpc.make(WS_METHODS.gameApproveDesign, {
   success: GameDesignApprovalResult,
   error: gameError,
 });
+const WsGameUpdateVerificationPolicyRpc = Rpc.make(WS_METHODS.gameUpdateVerificationPolicy, {
+  payload: GameVerificationPolicyUpdateInput,
+  success: GameVerificationPolicyRead,
+  error: gameError,
+});
 const WsGameActionRpc = Rpc.make(WS_METHODS.gameAction, {
   payload: GameActionInput,
   success: GameActionResult,
@@ -1354,6 +1362,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameListRpc,
   WsGameOpenRpc,
   WsGameApproveDesignRpc,
+  WsGameUpdateVerificationPolicyRpc,
   WsGameActionRpc,
   WsGameToolchainStatusRpc,
   WsGameInstallRpc,

@@ -19,6 +19,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import { approvalRecordFile, designDocumentHash, designIntentFile } from "./GameDesignApproval.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -225,6 +226,45 @@ it.live("the canonical suite records the test stage", () =>
       const qualification = yield* GameQualification.GameQualification;
       const read = yield* qualification.read(root, "godot");
       expect(stageOf(read, "test")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("a policy change invalidates the test evidence recorded under it", () =>
+  withFixture(({ root }) =>
+    Effect.gen(function* () {
+      const game = yield* GameService.GameService;
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      const qualification = yield* GameQualification.GameQualification;
+      const before = yield* approvals.readPolicy(root, manifest());
+      const tested = yield* game.test(threadId, "tests/smoke_test.gd");
+      expect(tested.message).not.toContain("Only the canonical suite");
+      const identity = { policyRevision: before.revision, probeRequired: before.policy.probe };
+      const current = yield* qualification.read(root, "godot", undefined, null, identity);
+      expect(stageOf(current, "test")?.status).toBe("passed");
+      // The creator moves the canonical suite: the old pass cannot certify it.
+      const after = yield* approvals.updatePolicy(root, {
+        ...before.policy,
+        testSuite: "res://tests/other.gd",
+      });
+      const invalidated = yield* qualification.read(root, "godot", undefined, null, {
+        policyRevision: after.revision,
+        probeRequired: after.policy.probe,
+      });
+      expect(stageOf(invalidated, "test")?.status).toBe("stale");
+      // The service now follows the record: the old suite is diagnostic and the
+      // new canonical suite records under the new revision.
+      expect((yield* game.test(threadId, "tests/smoke_test.gd")).message).toContain(
+        "Only the canonical suite",
+      );
+      expect((yield* game.test(threadId, "tests/other.gd")).message).not.toContain(
+        "Only the canonical suite",
+      );
+      const reread = yield* qualification.read(root, "godot", undefined, null, {
+        policyRevision: after.revision,
+        probeRequired: after.policy.probe,
+      });
+      expect(stageOf(reread, "test")?.status).toBe("passed");
     }),
   ),
 );
