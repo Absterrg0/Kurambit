@@ -530,6 +530,7 @@ it.effect("a failed creation removes the intent record it wrote", () =>
               stderr: "injected git failure",
               logPath: NodePath.join(parent, "git.log"),
             }),
+          list: () => [],
         }),
       ),
       Layer.provideMerge(designApprovalTestLayer(stateDir)),

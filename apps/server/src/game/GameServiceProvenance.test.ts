@@ -136,6 +136,7 @@ const withGame = <A, E>(
         Layer.provide(
           Layer.mock(GameProcesses.GameProcesses)({
             run: (input) => options.run({ root, operation: input.operation, args: input.args }),
+            list: () => [],
           }),
         ),
         Layer.provide(
@@ -375,7 +376,7 @@ it.live("deleting the .pck makes the export stale and Play rebuilds it", () => {
         expect(stale.webBuildStale).toBe(true);
         expect(stageOf(stale.qualification, "export")?.status).toBe("stale");
 
-        const played = yield* game.action(threadId, "play");
+        const played = yield* game.action(threadId, "preview");
         expect(played.success, played.message).toBe(true);
         expect(exports).toBe(2);
         expect((yield* qualification.read(root, "godot")).buildId).not.toBeNull();

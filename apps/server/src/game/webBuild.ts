@@ -13,6 +13,9 @@ export interface WebArtifactFile {
   readonly mtimeMs: number;
 }
 
+/** A served build is a handful of files; a directory past this is not one we can vouch for. */
+const MAX_WEB_ARTIFACT_ENTRIES = 1_000;
+
 /** The files under builds/web, or null when the directory cannot be read. */
 export const describeWebArtifacts = async (
   root: string,
@@ -20,10 +23,13 @@ export const describeWebArtifacts = async (
   const buildRoot = NodePath.join(root, "builds/web");
   const files: WebArtifactFile[] = [];
   const stack = [buildRoot];
+  let visited = 0;
   try {
     while (stack.length > 0) {
       const directory = stack.pop()!;
       for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
+        visited += 1;
+        if (visited > MAX_WEB_ARTIFACT_ENTRIES) return null;
         const path = NodePath.join(directory, entry.name);
         // A linked build file can be replaced without changing what the record
         // names, so it is not an artifact this server can vouch for.

@@ -285,7 +285,7 @@ const make = Effect.gen(function* () {
    * Qualification says the export matches the sources and its artifact files;
    * the read verifies both, so anything else forces a rebuild.
    */
-  const webBuildIsCurrent = (_root: string, read: GameQualificationRead) =>
+  const webBuildIsCurrent = (read: GameQualificationRead) =>
     Effect.sync(() => isWebBuildFresh(read));
   /**
    * Qualification is a server-owned record written from actual operation
@@ -390,14 +390,9 @@ const make = Effect.gen(function* () {
   });
   const runExport = Effect.fnUntraced(function* (root: string, target: "Web" | "Linux") {
     const { godot, cwd, godotProject } = yield* engine(root);
-    // Capture the inputs before the import/export pipeline touches the tree, then
-    // again after: a source edit during the export would otherwise qualify a
-    // mixed build. Only the web build is what players and playtests see, so only
-    // it owns the export stage.
-    const before = yield* snapshot(root, godotProject);
-    const failedExport = (detail?: string): StageOutcome => ({
+    const failedExport = (sourceId: string | null, detail?: string): StageOutcome => ({
       outcome: "failed",
-      sourceId: before.kind === "known" ? before.sourceId : null,
+      sourceId,
       buildId: null,
       evidenceDirectory: null,
       ...(detail === undefined ? {} : { detail }),
@@ -411,8 +406,13 @@ const make = Effect.gen(function* () {
         reason: "templates-missing",
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
+    // Import first: Godot's import can write sidecars inside the project, so the
+    // before snapshot is taken after it and before the export process runs. A
+    // source edit during the export itself still makes the build mixed.
     const imported = yield* importGame(root);
-    if (!imported.success) return { value: imported, record: failedExport() };
+    if (!imported.success) return { value: imported, record: failedExport(null) };
+    const before = yield* snapshot(root, godotProject);
+    const beforeSourceId = before.kind === "known" ? before.sourceId : null;
     const output = NodePath.join(
       root,
       target === "Web" ? "builds/web/index.html" : "builds/linux/game.x86_64",
@@ -432,7 +432,7 @@ const make = Effect.gen(function* () {
       }),
       output,
     );
-    if (!result.success) return { value: result, record: failedExport() };
+    if (!result.success) return { value: result, record: failedExport(beforeSourceId) };
     yield* Effect.tryPromise({
       try: async () => {
         for (const file of target === "Web"
@@ -467,11 +467,14 @@ const make = Effect.gen(function* () {
     const comparison = comparedSource(before, after, "export");
     const finishedAt = DateTime.formatIso(yield* DateTime.now);
     if (comparison.kind !== "current")
-      return { value: result, record: failedExport(comparison.detail) };
+      return { value: result, record: failedExport(beforeSourceId, comparison.detail) };
     if (target === "Web" && artifacts === null)
       return {
         value: result,
-        record: failedExport("The exported web build directory could not be read back."),
+        record: failedExport(
+          beforeSourceId,
+          "The exported web build directory could not be read back.",
+        ),
       };
     return {
       value: result,
@@ -508,7 +511,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
           const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
-          if (!(yield* webBuildIsCurrent(root, beforePlaytest))) {
+          if (!(yield* webBuildIsCurrent(beforePlaytest))) {
             const exported = yield* exportGame(root, "Web");
             if (!exported.success)
               return yield* new GameOperationError({
@@ -644,10 +647,11 @@ const make = Effect.gen(function* () {
         const { godot, cwd, godotProject } = yield* engine(root);
         const manifest = yield* projects.read(root);
         const gameplayScene = manifest.gameplayScene ?? "";
-        // The inputs must be read before Godot loads them: an edit after the run
-        // starts would otherwise attach this result to sources it never saw.
-        const before = yield* snapshot(root, godotProject);
+        // Import is cache preparation, not the check itself: Godot's import can
+        // write sidecar files inside the project, so the inputs are read after it
+        // and before the checking script runs.
         const imported = yield* importGame(root);
+        const before = yield* snapshot(root, godotProject);
         return yield* Effect.gen(function* () {
           yield* Effect.tryPromise({
             try: async () => {
@@ -727,7 +731,7 @@ const make = Effect.gen(function* () {
           const after = yield* snapshot(root, godotProject);
           const comparison = comparedSource(before, after, "check");
           if (comparison.kind !== "current")
-            warnings.unshift({ file: "godot/project.godot", message: comparison.detail });
+            warnings.unshift({ file: "godot/", message: comparison.detail });
           const result = {
             ok: errors.length === 0 && reported !== null && !run.timedOut,
             errors: limitIssues(errors),
@@ -769,9 +773,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { godot, cwd, godotProject } = yield* engine(root);
         const manifest = yield* projects.read(root);
-        // Read the sources before the import and the runs touch the tree.
-        const sourceBefore = yield* snapshot(root, godotProject);
         const imported = yield* importGame(root);
+        // Import may write sidecars inside the project; read the inputs after it
+        // and before the scenario runners execute them.
+        const sourceBefore = yield* snapshot(root, godotProject);
         const design = yield* designApprovals.status(root, manifest);
         const approval = yield* designApprovals.read(root);
         const mode: "criteria" | "legacy" | "none" =
@@ -1150,7 +1155,7 @@ const make = Effect.gen(function* () {
         root,
         ...inventory,
         design,
-        webBuildStale: !(yield* webBuildIsCurrent(root, qualificationRead)),
+        webBuildStale: !(yield* webBuildIsCurrent(qualificationRead)),
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
@@ -1378,10 +1383,7 @@ const make = Effect.gen(function* () {
           const manifest = yield* projects.read(root);
           const needsExport =
             action === "rebuild" ||
-            !(yield* webBuildIsCurrent(
-              root,
-              yield* qualification.read(root, manifest.godotProject),
-            ));
+            !(yield* webBuildIsCurrent(yield* qualification.read(root, manifest.godotProject)));
           if (needsExport) {
             const exported = yield* exportGame(root, "Web");
             if (!exported.success) return exported;
