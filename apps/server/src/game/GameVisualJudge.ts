@@ -527,7 +527,7 @@ const make = (stateDir: string) =>
             reused: false,
             judgement: {
               ...unavailable(
-                `Not enough gameplay evidence: no ${missing.join(", ")} frame. Add screenshot steps for ${missing
+                `Visual judge: not enough gameplay evidence — no ${missing.join(", ")} frame. Add screenshot steps for ${missing
                   .map((role) => VISUAL_EVIDENCE_STEP[role])
                   .join(", ")}, then run the playtest again. No visual round was spent`,
                 MAX_JUDGEMENTS_PER_DESIGN - used,

@@ -423,7 +423,7 @@ describe("the visual judge", () => {
         expect(run.status).toBe("judged");
         if (run.status !== "judged") return;
         expect(run.judgement.status).toBe("failed");
-        expect(run.judgement.detail).toContain("Not enough gameplay evidence");
+        expect(run.judgement.detail).toContain("not enough gameplay evidence");
         // The message names the screenshot steps the next run needs.
         expect(run.judgement.detail).toContain("mid-run");
         expect(run.judgement.detail).toContain("hazard hit");
