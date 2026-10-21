@@ -472,6 +472,17 @@ const verifyPauseBridge = async (
   sessionId: string,
   signal: AbortSignal | undefined,
 ): Promise<boolean> => {
+  /** The GameState JSON as the probe just reported it, or null when it cannot. */
+  const probeState = async (): Promise<string | null> => {
+    const evaluated = await cdp
+      .send<{ result?: { value?: unknown } }>(
+        "Runtime.evaluate",
+        { expression: READ_PROBE, returnByValue: true },
+        sessionId,
+      )
+      .catch(() => null);
+    return typeof evaluated?.result?.value === "string" ? evaluated.result.value : null;
+  };
   try {
     await cdp.send(
       "Runtime.evaluate",
@@ -480,6 +491,14 @@ const verifyPauseBridge = async (
     );
     const hiddenAck = await waitForVisibilityAck(cdp, sessionId, false, signal);
     if (hiddenAck === null || !hiddenAck.paused || !hiddenAck.muted) return false;
+    // The ack is the engine's word about itself; this is the world's word: two
+    // spaced probe reads while hidden must show the same GameState, so the
+    // per-frame clocks the probe reports are held, not just claimed held. A
+    // game that genuinely ticks a value while hidden keeps this unconfirmed.
+    const held = await probeState();
+    await sleep(signal, 700);
+    const stillHeld = await probeState();
+    if (held === null || stillHeld === null || held !== stillHeld) return false;
     await cdp.send(
       "Runtime.evaluate",
       { expression: sendVisibility(true), returnByValue: true },
