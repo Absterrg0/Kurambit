@@ -108,7 +108,7 @@ unmounting recreated the iframe and killed the run, while hiding reports the doc
 which is the signal the Godot web shell pauses and mutes on. The iframe's identity is the preview
 URL plus the qualified build; a tab switch does not change it, and only Stop, a deliberate restart
 or a new build may reset the game. Play reuses an existing build only while its export stage is
-current for the game's sources and otherwise exports first; Rebuild always exports. The source snapshot and the build identity it produced live in the qualification record
+current for the game's sources and exported files and otherwise exports first; Rebuild always exports. The source snapshot and the build identity it produced live in the qualification record
 (`GameQualification.ts`), so a missing, stale, failed or unknown export is never served as current.
 
 ## Qualification is server-owned
