@@ -1,0 +1,37 @@
+{
+  "id": "twin-stick-arena",
+  "title": "Drone Yard",
+  "template": "blank",
+  "brief": "A top-down twin-stick arena: WASD moves the pilot, the mouse aims, and left click fires; waves of drones chase you and shoot back. In GameState keep shots, kills, hp and wave, and set won to true after the fifth wave is cleared. Drones that touch or shoot you cost hp; losing all hp ends the run.",
+  "artDirection": "Neon hangar floor with dark metal drones, one bright player silhouette, strong muzzle flashes and hit flashes.",
+  "obligations": [
+    {
+      "id": "fire-shot",
+      "kind": "control",
+      "description": "Clicking fire spends a shot.",
+      "key": "shots",
+      "expect": ">=1"
+    },
+    {
+      "id": "kill-drone",
+      "kind": "mechanic",
+      "description": "Shots destroy drones and raise the kill count.",
+      "key": "kills",
+      "expect": ">=1"
+    },
+    {
+      "id": "take-damage",
+      "kind": "lose",
+      "description": "A drone hit lowers hp from its starting five.",
+      "key": "hp",
+      "expect": "<=4"
+    },
+    {
+      "id": "clear-five-waves",
+      "kind": "win",
+      "description": "Clearing the fifth wave wins the arena.",
+      "key": "won",
+      "expect": "==1"
+    }
+  ]
+}

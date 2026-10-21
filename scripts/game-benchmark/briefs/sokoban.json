@@ -1,0 +1,43 @@
+{
+  "id": "sokoban",
+  "title": "Crate Dock",
+  "template": "blank",
+  "brief": "Grid Sokoban: arrow keys move the keeper one cell, push crates onto the three goals, and R restarts the board. In GameState count moves, pushes and crates_on_goal, and set won to true when all three crates are on goals. Walking into a wall or into a crate that cannot move is not a move and not a push.",
+  "artDirection": "Clean top-down warehouse tiles, warm wooden crates, distinctly marked goal plates, one clearly readable keeper.",
+  "obligations": [
+    {
+      "id": "count-move",
+      "kind": "control",
+      "description": "Walking into an open cell counts a move.",
+      "key": "moves",
+      "expect": ">=1"
+    },
+    {
+      "id": "count-push",
+      "kind": "mechanic",
+      "description": "Shoving a crate counts a push.",
+      "key": "pushes",
+      "expect": ">=1"
+    },
+    {
+      "id": "crate-on-goal",
+      "kind": "content",
+      "description": "A crate pushed onto a goal raises crates_on_goal.",
+      "key": "crates_on_goal",
+      "expect": ">=1"
+    },
+    {
+      "id": "solve-board",
+      "kind": "win",
+      "description": "All three crates on goals wins the board.",
+      "key": "won",
+      "expect": "==1"
+    },
+    {
+      "id": "illegal-move-is-free",
+      "kind": "mechanic",
+      "description": "A move into a wall or an immovable crate leaves moves and pushes unchanged.",
+      "unsupported": "The proof vocabulary can prove that a value changed, never that it stayed unchanged; illegal-action rejection needs a negative route and invariance, which the current expect forms cannot express."
+    }
+  ]
+}

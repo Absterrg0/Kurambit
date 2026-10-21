@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off cryptoRandomUUID:off globalConsoleInEffect:off preferSchemaOverJson:off -- Maintainer CLI owns process, filesystem, logging, authentication, and HTTP boundaries.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalDateInEffect:off globalFetch:off cryptoRandomUUID:off globalConsoleInEffect:off preferSchemaOverJson:off -- Maintainer CLI owns process, filesystem, logging, authentication, and HTTP boundaries.
 import * as NodeUtil from "node:util";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
@@ -8,6 +8,7 @@ import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Data from "effect/Data";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Fiber from "effect/Fiber";
@@ -36,19 +37,31 @@ import {
   validateDesignDocument,
   type GameRevisionObligation,
 } from "../packages/contracts/src/index.ts";
+import {
+  encodeRunSummary,
+  loadGameBenchmarkBrief,
+  readObligations,
+  type GameBenchmarkObligationRead,
+  type GameE2eRunSummary,
+  type GameE2eTurnRead,
+} from "./game-benchmark/artifacts.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const { values } = NodeUtil.parseArgs({
   options: {
     url: { type: "string" },
     "home-dir": { type: "string", default: NodePath.join(checkout, ".t3") },
-    name: { type: "string", default: `Tiny game ${Date.now()}` },
+    name: { type: "string" },
     "parent-dir": { type: "string", default: NodePath.join(checkout, ".t3/e2e-games") },
-    template: { type: "string", default: DEFAULT_GAME_TEMPLATE },
+    template: { type: "string" },
     // `--plan-first false` skips the design turn for harness debugging; the product default is on.
     "plan-first": { type: "string", default: "true" },
     brief: { type: "string" },
-    "art-direction": { type: "string", default: "Simple low-poly clay" },
+    "art-direction": { type: "string" },
+    // A frozen brief fixture carries the brief, art direction, template and obligations.
+    fixture: { type: "string" },
+    // Where the benchmark reads this run's facts; the exit status stays the verdict.
+    summary: { type: "string" },
     provider: { type: "string", default: "codex" },
     model: { type: "string", default: "gpt-6.1-sol" },
     "reasoning-effort": { type: "string", default: "medium" },
@@ -60,9 +73,9 @@ const { values } = NodeUtil.parseArgs({
     help: { type: "boolean", default: false },
   },
 });
-if (values.help || !values.brief) {
+if (values.help || (!values.brief && !values.fixture)) {
   console.log(
-    'Usage: node scripts/game-e2e.ts --brief "<game brief>" [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
+    'Usage: node scripts/game-e2e.ts (--brief "<game brief>" | --fixture scripts/game-benchmark/briefs/<id>.json) [--summary FILE] [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
   );
   process.exit(values.help ? 0 : 1);
 }
@@ -82,11 +95,24 @@ if (values["extra-playtest-steps"]) {
   );
   extraPlaytestSteps = raw as ReadonlyArray<Record<string, unknown>>;
 }
-const template = GAME_TEMPLATES.find((entry) => entry.id === values.template)?.id;
+const fixture =
+  values.fixture === undefined
+    ? null
+    : await loadGameBenchmarkBrief(NodePath.resolve(values.fixture));
+if (fixture !== null && (values.brief !== undefined || values["art-direction"] !== undefined))
+  throw new Error("--fixture already carries the brief and art direction");
+if (fixture !== null && values.template !== undefined && values.template !== fixture.template)
+  throw new Error(`--template ${values.template} disagrees with the fixture's ${fixture.template}`);
+const template = GAME_TEMPLATES.find(
+  (entry) => entry.id === (fixture?.template ?? values.template ?? DEFAULT_GAME_TEMPLATE),
+)?.id;
 if (template === undefined)
   throw new Error(
     `--template must be one of ${GAME_TEMPLATES.map((entry) => entry.id).join(", ")}`,
   );
+const briefText = fixture?.brief ?? values.brief!;
+const artDirection = values["art-direction"] ?? fixture?.artDirection ?? "Simple low-poly clay";
+const gameName = values.name ?? fixture?.title ?? `Tiny game ${Date.now()}`;
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
 const makeClient = RpcClient.make(WsRpcGroup);
 type Client = Effect.Success<typeof makeClient>;
@@ -94,6 +120,55 @@ const terminal = new Set(["completed", "failed", "interrupted", "cancelled", "ro
 const started = Date.now();
 const timeline = (message: string) =>
   console.log(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${message}`);
+// The benchmark reads these facts; the process exit and PASS lines stay the e2e verdict.
+const summaryStartedAt = new Date().toISOString();
+let summaryPhase = "create";
+let summaryTimedOut = false;
+let summaryError: string | null = null;
+let gameInfo: GameE2eRunSummary["game"] = null;
+let qualification: GameStatus["qualification"] | null = null;
+let lastPlaytest: GameStatus["lastPlaytest"] = null;
+let obligations: ReadonlyArray<GameBenchmarkObligationRead> = [];
+const turns: GameE2eTurnRead[] = [];
+const harnessCommit = await exec("git", ["rev-parse", "HEAD"], {
+  cwd: checkout,
+  timeout: 30_000,
+})
+  .then((result) => result.stdout.trim())
+  .catch(() => "unknown");
+const writeSummary = async () => {
+  if (values.summary === undefined) return;
+  const path = NodePath.resolve(values.summary);
+  await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true });
+  const summary: GameE2eRunSummary = {
+    schemaVersion: 1,
+    harnessCommit,
+    startedAt: summaryStartedAt,
+    durationMs: Date.now() - started,
+    phase: summaryPhase,
+    timedOut: summaryTimedOut,
+    fixture: fixture === null ? null : { id: fixture.id, checksum: fixture.checksum },
+    game: gameInfo,
+    turns,
+    qualification,
+    lastPlaytest,
+    obligations,
+    error: summaryError,
+  };
+  await NodeFSP.writeFile(path, encodeRunSummary(summary));
+};
+const recordStatus = (status: GameStatus) => {
+  qualification = status.qualification;
+  lastPlaytest = status.lastPlaytest;
+  obligations =
+    fixture === null
+      ? []
+      : readObligations(
+          fixture.obligations,
+          status.design.state === "approved" ? status.design.acceptance : [],
+          status.qualification.stages.find((stage) => stage.stage === "state")?.criteria ?? [],
+        );
+};
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
@@ -345,6 +420,20 @@ const waitForTurn = (
     }
   });
 
+/** Wall time and fate per turn, so a slow build is visible in the results table. */
+const timedTurn = <A, E>(name: string, run: Effect.Effect<A, E>) =>
+  Effect.gen(function* () {
+    const startedTurn = Date.now();
+    const exit = yield* Effect.exit(run);
+    turns.push({
+      name,
+      status: exit._tag === "Success" ? "completed" : "failed",
+      durationMs: Date.now() - startedTurn,
+    });
+    if (exit._tag === "Failure") return yield* Effect.failCause(exit.cause);
+    return exit.value;
+  });
+
 const printStatus = (status: GameStatus) => {
   console.log(
     JSON.stringify(
@@ -438,11 +527,11 @@ const main = Effect.gen(function* () {
   const context = yield* Layer.build(protocol);
   const client = yield* makeClient.pipe(Effect.provide(context));
   const created = yield* client[WS_METHODS.gameCreate]({
-    name: values.name,
+    name: gameName,
     parentDirectory: NodePath.resolve(values["parent-dir"]),
     template,
-    brief: values.brief!,
-    artDirection: values["art-direction"],
+    brief: briefText,
+    artDirection,
     planFirst,
     modelSelection: {
       instanceId: ProviderInstanceId.make(values.provider),
@@ -463,6 +552,8 @@ const main = Effect.gen(function* () {
     runtimeMode: "full-access",
   });
   gameRoot = created.root;
+  gameInfo = { name: gameName, root: created.root, threadId: created.threadId };
+  summaryPhase = planFirst ? "design" : "build";
   console.log(`Game root: ${created.root}`);
   console.log(`Thread: ${created.threadId}`);
   // The live projection only keeps a bounded recent window; keep every item the
@@ -487,10 +578,13 @@ const main = Effect.gen(function* () {
     : "";
   let buildRun: OrchestrationV2Run;
   if (planFirst) {
-    const designRun = yield* waitForTurn(client, created.threadId, new Set(), {
-      observed: observedTurnItems,
-      observedRuns: observedRunIds,
-    });
+    const designRun = yield* timedTurn(
+      "design",
+      waitForTurn(client, created.threadId, new Set(), {
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+      }),
+    );
     logTurnTools(
       "design",
       yield* collectTurnTools(client, created.threadId, designRun.id, observedTurnItems),
@@ -560,15 +654,21 @@ const main = Effect.gen(function* () {
         approvedStatus.design.acceptance.some((criterion) => criterion.kind === "mechanic"),
       "Approved acceptance is missing an end or mechanic criterion",
     );
-    buildRun = yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
-      observed: observedTurnItems,
-      observedRuns: observedRunIds,
-    });
+    buildRun = yield* timedTurn(
+      "build",
+      waitForTurn(client, created.threadId, new Set(observedRunIds), {
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+      }),
+    );
   } else {
-    buildRun = yield* waitForTurn(client, created.threadId, new Set(), {
-      observed: observedTurnItems,
-      observedRuns: observedRunIds,
-    });
+    buildRun = yield* timedTurn(
+      "build",
+      waitForTurn(client, created.threadId, new Set(), {
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+      }),
+    );
   }
   const buildCalls = yield* collectTurnTools(
     client,
@@ -587,6 +687,8 @@ const main = Effect.gen(function* () {
       ),
     );
   const status = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+  // Record before any assertion: a failed run still has to say what it graded.
+  recordStatus(status);
   printStatus(status);
   if (status.assets.length === 0) timeline("Build turn produced no Blender assets");
   else
@@ -599,6 +701,7 @@ const main = Effect.gen(function* () {
     "No web build exists after the build turn",
   );
   assertQualified("after the build turn", status);
+  summaryPhase = "qualified";
   timeline(`Qualification: ${stageSummary(status)}`);
   assert(status.lastPlaytest !== null, "Game status reports no playtest evidence");
   assert(status.lastPlaytest.responded, "Playtest did not prove that the game responded to input");
@@ -608,6 +711,7 @@ const main = Effect.gen(function* () {
     })`,
   );
   const preview = yield* action("preview");
+  summaryPhase = "preview";
   yield* promise(async () => {
     assert(preview.url, "Preview has no URL");
     const index = await fetch(preview.url, { signal: AbortSignal.timeout(30_000) });
@@ -630,6 +734,7 @@ const main = Effect.gen(function* () {
     timeline(`Preview HTTP: index.html text/html; ${wasmFile} application/wasm`);
   });
   yield* action("export-linux");
+  summaryPhase = "native";
   try {
     yield* action("native");
     const running = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
@@ -676,16 +781,21 @@ const main = Effect.gen(function* () {
   // extra playtest is a turn the agent drives with the exact steps it is given.
   if (extraPlaytestSteps) {
     const beforeExtra = status.lastPlaytest;
-    const extraRun = yield* followup(
-      `Run game_web_playtest now with exactly these steps: ${JSON.stringify(
-        extraPlaytestSteps,
-      )}. The web build is current; do not change any game files. Report the playtest result.`,
+    const extraRun = yield* timedTurn(
+      "extra-playtest",
+      followup(
+        `Run game_web_playtest now with exactly these steps: ${JSON.stringify(
+          extraPlaytestSteps,
+        )}. The web build is current; do not change any game files. Report the playtest result.`,
+      ),
     );
     logTurnTools(
       "extra-playtest",
       yield* collectTurnTools(client, created.threadId, extraRun.id, observedTurnItems),
     );
     const extraStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    recordStatus(extraStatus);
+    summaryPhase = "extra-playtest";
     assert(
       extraStatus.lastPlaytest !== null &&
         extraStatus.lastPlaytest.directory !== beforeExtra?.directory,
@@ -722,15 +832,18 @@ const main = Effect.gen(function* () {
         return (await exec("git", ["write-tree"], { cwd: created.root, env })).stdout.trim();
       });
     const baseline = yield* snapshotTree();
-    const requestChangeRun = yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
-      observed: observedTurnItems,
-      observedRuns: observedRunIds,
-      onReady: () =>
-        client[WS_METHODS.gameRequestChange]({
-          threadId: created.threadId,
-          text: reviseText,
-        }),
-    });
+    const requestChangeRun = yield* timedTurn(
+      "revise-request",
+      waitForTurn(client, created.threadId, new Set(observedRunIds), {
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+        onReady: () =>
+          client[WS_METHODS.gameRequestChange]({
+            threadId: created.threadId,
+            text: reviseText,
+          }),
+      }),
+    );
     logTurnTools(
       "revise-request",
       yield* collectTurnTools(client, created.threadId, requestChangeRun.id, observedTurnItems),
@@ -776,11 +889,9 @@ const main = Effect.gen(function* () {
     assert(revisedHash !== null, "The revised design has no hash to approve");
     // Approving the revision both records it and dispatches the revision's own
     // build turn, so the harness observes that turn from subscription time.
-    const approveRevisionRun = yield* waitForTurn(
-      client,
-      created.threadId,
-      new Set(observedRunIds),
-      {
+    const approveRevisionRun = yield* timedTurn(
+      "revise-build",
+      waitForTurn(client, created.threadId, new Set(observedRunIds), {
         observed: observedTurnItems,
         observedRuns: observedRunIds,
         onReady: () =>
@@ -788,13 +899,15 @@ const main = Effect.gen(function* () {
             threadId: created.threadId,
             expectedDesignHash: revisedHash,
           }),
-      },
+      }),
     );
     logTurnTools(
       "revise-build",
       yield* collectTurnTools(client, created.threadId, approveRevisionRun.id, observedTurnItems),
     );
     reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    recordStatus(reviseStatus);
+    summaryPhase = "revise";
     assert(reviseStatus.design.state === "approved", "The approved revision did not take");
     assert(reviseStatus.design.pendingRevision === null, "The approved revision is still pending");
     assert(
@@ -839,9 +952,12 @@ const main = Effect.gen(function* () {
     );
   }
   if (values["cancel-test"]) {
-    yield* followup(
-      "Use game_blender_run now with id cancellation_probe, reset=true, thumbnail=false, and Python script: import time; time.sleep(120). This is an intentional cancellation test. Do not use shell commands, do not build anything else.",
-      true,
+    yield* timedTurn(
+      "cancel-test",
+      followup(
+        "Use game_blender_run now with id cancellation_probe, reset=true, thumbnail=false, and Python script: import time; time.sleep(120). This is an intentional cancellation test. Do not use shell commands, do not build anything else.",
+        true,
+      ),
     );
     const cancelled = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     assert(
@@ -850,12 +966,26 @@ const main = Effect.gen(function* () {
     );
     timeline("Cancellation: no tracked processes remain");
   }
+  summaryPhase = "done";
   timeline("PASS");
 });
-await Effect.runPromise(main.pipe(Effect.timeout(`${timeoutMs} millis`), Effect.scoped)).catch(
-  (error: unknown) => {
-    console.error("FAIL:", error);
-    if (gameRoot) console.error(`Game root: ${gameRoot}`);
+try {
+  const completed = await Effect.runPromise(
+    main.pipe(Effect.timeoutOption(`${timeoutMs} millis`), Effect.scoped),
+  );
+  if (Option.isNone(completed)) {
+    summaryTimedOut = true;
+    summaryError = `Timed out after ${timeoutMs} ms.`;
+    console.error("FAIL: timed out");
     process.exitCode = 1;
-  },
-);
+  }
+} catch (error: unknown) {
+  summaryError = error instanceof Error ? error.message : String(error);
+  console.error("FAIL:", error);
+  if (gameRoot) console.error(`Game root: ${gameRoot}`);
+  process.exitCode = 1;
+} finally {
+  await writeSummary().catch((cause: unknown) => {
+    console.error("Could not write --summary:", cause);
+  });
+}

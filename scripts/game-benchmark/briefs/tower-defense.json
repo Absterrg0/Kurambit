@@ -1,0 +1,49 @@
+{
+  "id": "tower-defense",
+  "title": "Last Gate",
+  "template": "blank",
+  "brief": "Top-down tower defense: click a marked pad to build a turret for 10 gold, then survive five waves of enemies walking a fixed path. GameState keeps gold, towers, wave, leaks and won. Enemies that reach the exit add a leak; ten leaks lose the run; clearing wave five sets won.",
+  "artDirection": "Moody stone gate at dusk, bright turret muzzles and enemy outlines, gold and leak counters legible at a glance, clear build pads.",
+  "obligations": [
+    {
+      "id": "build-turret",
+      "kind": "control",
+      "description": "Clicking a build pad places a turret and raises towers.",
+      "key": "towers",
+      "expect": ">=1"
+    },
+    {
+      "id": "pay-gold",
+      "kind": "mechanic",
+      "description": "Building a turret lowers gold from its starting fifty.",
+      "key": "gold",
+      "expect": "<=40"
+    },
+    {
+      "id": "enemy-leak",
+      "kind": "lose",
+      "description": "An enemy reaching the gate adds a leak.",
+      "key": "leaks",
+      "expect": ">=1"
+    },
+    {
+      "id": "clear-five-waves",
+      "kind": "win",
+      "description": "Clearing the fifth wave wins the defence.",
+      "key": "won",
+      "expect": "==1"
+    },
+    {
+      "id": "illegal-build-rejected",
+      "kind": "mechanic",
+      "description": "Building on an occupied pad is rejected and costs no gold.",
+      "unsupported": "The vocabulary has no negative route or invariance check; rejecting a build and leaving gold untouched is the opposite of the changes it can prove."
+    },
+    {
+      "id": "seeded-waves",
+      "kind": "content",
+      "description": "Each wave's composition is fixed by the run seed, so the same seed sends the same enemies.",
+      "unsupported": "Wave composition is a list of enemy identities, and repeatability needs two runs compared under one seed; the probe reads scalars and the vocabulary has no seed identity."
+    }
+  ]
+}
