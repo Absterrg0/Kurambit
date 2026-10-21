@@ -42,10 +42,11 @@ property the player changes (\`state\`, \`won\`, \`collected\`, \`score\`, \`liv
 \`level_index\`, \`jumps\`) using \`==V\`, \`>=N\`, \`<=N\` or \`changes\`. The observed value has to
 be false when play starts and become true later: observe what the player achieves, not a
 boot constant or a world total. Content counts are proven by collecting or visiting them
-(\`collected >= 5\`), never by a world total such as \`total == 5\`. A \`win\` or \`lose\`
-observes the value the run ends at (for example \`state == 3\` or \`lives <= 0\`), not
-\`changes\`; starting or pausing the game also changes state. \`presentation\` claims carry no
-observe because the visual stage owns them, and that stage is not implemented yet.
+(\`collected >= 5\`), never by a world total such as \`total == 5\`. A \`win\` observes the
+template's \`won\` flag (\`won == 1\`), not a \`state\` enum value that pausing could also
+reach; a \`lose\` observes the value a losing run ends at (\`lives <= 0\`), not \`changes\`.
+\`presentation\` claims carry no observe because the visual stage owns them, and that stage
+is not implemented yet.
 The block needs at least one \`control\`, one \`mechanic\`, one \`win\` and one \`lose\`; cover every
 control and content count the game promises.
 
@@ -56,7 +57,7 @@ Examples (write 5 to 12 total for this game, not one of each; two per kind shown
 - mechanic: \`{ "id": "lava-hurts", "kind": "mechanic", "text": "Standing in lava costs health", "observe": { "key": "health", "expect": "<=95" } }\`
 - content: \`{ "id": "collect-every-coin", "kind": "content", "text": "The player collects every coin in level one", "observe": { "key": "collected", "expect": ">=12" } }\`
 - content: \`{ "id": "collect-every-relic", "kind": "content", "text": "The player collects all five relics", "observe": { "key": "collected", "expect": ">=5" } }\`
-- win: \`{ "id": "reach-the-summit", "kind": "win", "text": "The run ends at the summit spire", "observe": { "key": "state", "expect": "==3" } }\`
+- win: \`{ "id": "reach-the-summit", "kind": "win", "text": "The run ends at the summit spire", "observe": { "key": "won", "expect": "==1" } }\`
 - win: \`{ "id": "unlock-the-gate", "kind": "win", "text": "Walking into the open gate wins the run", "observe": { "key": "won", "expect": "==1" } }\`
 - lose: \`{ "id": "out-of-lives", "kind": "lose", "text": "Losing all three lives ends the run", "observe": { "key": "lives", "expect": "<=0" } }\`
 - lose: \`{ "id": "lava-ends-the-run", "kind": "lose", "text": "Falling in lava ends the run", "observe": { "key": "state", "expect": "==4" } }\`
@@ -68,7 +69,7 @@ Examples (write 5 to 12 total for this game, not one of each; two per kind shown
   { "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } },
   { "id": "lantern-lights", "kind": "mechanic", "text": "Touching a lantern lights it", "observe": { "key": "collected", "expect": ">=1" } },
   { "id": "collect-the-coins", "kind": "content", "text": "The player collects the level's coins", "observe": { "key": "collected", "expect": ">=3" } },
-  { "id": "reach-the-summit", "kind": "win", "text": "The run ends at the summit spire", "observe": { "key": "state", "expect": "==3" } },
+  { "id": "reach-the-summit", "kind": "win", "text": "The run ends at the summit spire", "observe": { "key": "won", "expect": "==1" } },
   { "id": "out-of-lives", "kind": "lose", "text": "Losing every life ends the run", "observe": { "key": "lives", "expect": "<=0" } }
 ]
 \`\`\`
@@ -104,7 +105,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
   const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
   if (input.planFirst === false)
     return `${brief}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win/lose observes the value the run ends at (state == 3, lives <= 0), never "changes". Presentation claims carry no observe. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
 }
 
 /** The manifest a new game starts from; the creation record also reads its probe flag. */
@@ -154,9 +155,11 @@ This game started from the **${templateName}** starter template. Read TEMPLATE.m
 
 ## Design first
 
-game.json's design section decides what this turn may do, but only the server's approval record can release the build. When the design is still a draft, this is a design turn: write or update DESIGN.md only. Keep the scaffold's section headings (Pitch, Core loop, Controls, Win & lose, Content, Acceptance, Art direction, Audio, Scope, Milestones) and replace every hint with a concrete decision; do not delete, rename or merge them. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Fill Acceptance with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, plus every control and content count the game promises. Criteria carry a slug id, a kind (control, mechanic, content, win, lose or presentation), plain text and (except presentation) an observe of a GameState property the player changes after play starts. Observe what the player achieves, not a boot constant: content counts are proven with collected >= N rather than total == N, and win/lose observe the value the run ends at (state == 3, lives <= 0), never changes. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
+game.json's design section decides what this turn may do, but only the server's approval record can release the build. When the design is still a draft, this is a design turn: write or update DESIGN.md only. Keep the scaffold's section headings (Pitch, Core loop, Controls, Win & lose, Content, Acceptance, Art direction, Audio, Scope, Milestones) and replace every hint with a concrete decision; do not delete, rename or merge them. Make it one page and concrete, and ground it in the systems the starter template already has (read TEMPLATE.md); say what is reused and what is new. Fill Acceptance with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, plus every control and content count the game promises. Criteria carry a slug id, a kind (control, mechanic, content, win, lose or presentation), plain text and (except presentation) an observe of a GameState property the player changes after play starts. Observe what the player achieves, not a boot constant: content counts are proven with collected >= N rather than total == N, and a win observes the template's won flag (won == 1) while a loss observes the value a losing run ends at (lives <= 0), never changes. Do not create Blender assets, edit the Godot project, or start building while the design is a draft. End the turn by asking the creator to review it on the Design tab.
 
 When the creator has approved the design, build to its milestones one at a time. The approved revision and its acceptance bind every build: implement every criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell the creator it needs re-approval on the Design tab; staging stays locked until they approve the new revision.
+
+Chat messages stay free-form: small fixes, copy, tuning questions and reporting need no contract. But when a chat request adds or changes a mechanic, a control or a piece of scope, the approved design no longer describes the game: update DESIGN.md to describe the change and adjust its acceptance criteria to prove it (keep every existing criterion unless the request removes that feature — if it does, say so under a "Removed:" line naming the criterion id), then end your turn and ask the creator to approve the revision on the Design tab. Never build a scope change from chat alone; the server locks staging until the revision is approved, and a silent change leaves the approval record untouched. When the creator sends a change request, that turn rewrites DESIGN.md only: end the turn for review, and wait for the approval that tells you to implement it.
 
 ## Layout
 
