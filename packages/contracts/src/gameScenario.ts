@@ -170,7 +170,7 @@ export const GameScenarioObservation = Schema.Struct({
       id: Schema.String,
       frame: Schema.Int,
       /** The value sampled when the expectation first became true. */
-      value: Schema.optionalKey(GameObservedValue),
+      value: Schema.optionalKey(Schema.NullOr(GameObservedValue)),
     }),
   ),
 });
