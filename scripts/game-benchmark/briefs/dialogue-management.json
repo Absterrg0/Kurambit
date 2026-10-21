@@ -2,7 +2,7 @@
   "id": "dialogue-management",
   "title": "Night Frequency",
   "template": "blank",
-  "brief": "A dialogue management game: you are a night-shift radio operator replying to callers under a countdown. Every reply costs time, trust moves up or down, and some replies unlock only after you hear a caller out. GameState keeps time_left, trust, replies and ended. Finish the shift with trust at least three to win; ending lower is a loss.",
+  "brief": "A dialogue management game: you are a night-shift radio operator replying to callers under a countdown starting at 120 seconds. Every reply costs time, trust moves up or down, and some replies unlock only after you hear a caller out. GameState keeps time_left, trust, replies and ended. Finish the shift with trust at least three to win; ending lower is a loss.",
   "artDirection": "Warm radio-desk lamplight over a dark studio, callers as readable silhouettes, a legible countdown and trust meter, reply buttons with clear pressed states.",
   "obligations": [
     {

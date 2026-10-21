@@ -2,7 +2,7 @@
   "id": "racing",
   "title": "Ridge Circuit",
   "template": "3d-explorer",
-  "brief": "A time-trial racing game: drive three laps of a ridge circuit, crossing checkpoints in order, with a ghost of your best lap. GameState keeps lap, checkpoints, best_lap_ms and won; set won to true after crossing the finish on lap three. Hitting a barrier costs speed but does not take the lap away.",
+  "brief": "A time-trial racing game: drive three laps of a ridge circuit, crossing checkpoints in order, with a ghost of your best lap. GameState keeps lap, checkpoints, best_lap_ms and won, with lap counting up from one; set won to true after crossing the finish on lap three. Hitting a barrier costs speed but does not take the lap away.",
   "artDirection": "Sunset low-poly ridge road, clear apex markers, high-contrast car silhouette, dust and speed lines at the edges.",
   "obligations": [
     {

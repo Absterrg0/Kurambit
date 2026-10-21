@@ -2,7 +2,7 @@
   "id": "card-tactics",
   "title": "Ember Hand",
   "template": "blank",
-  "brief": "Turn-based card tactics on a 5x5 grid. Drag a card from your hand onto a tile to play it; playing a card spends mana and damages the enemy before the enemy replies. A run is seeded, so a given seed must deal the same opening hand. In GameState keep mana, cards_played, turn, enemy_hp and won; reduce enemy_hp to zero to set won.",
+  "brief": "Turn-based card tactics on a 5x5 grid. Drag a card from your hand onto a tile to play it; playing a card spends mana and damages the enemy before the enemy replies. A run is seeded, so a given seed must deal the same opening hand. In GameState keep mana, cards_played, turn, enemy_hp and won, starting with three mana against an enemy on ten hp; reduce enemy_hp to zero to set won.",
   "artDirection": "Parchment-and-ember card frames, readable hand at the bottom, a lit 5x5 board, high-contrast enemy portraits.",
   "obligations": [
     {

@@ -2,7 +2,7 @@
   "id": "tower-defense",
   "title": "Last Gate",
   "template": "blank",
-  "brief": "Top-down tower defense: click a marked pad to build a turret for 10 gold, then survive five waves of enemies walking a fixed path. GameState keeps gold, towers, wave, leaks and won. Enemies that reach the exit add a leak; ten leaks lose the run; clearing wave five sets won.",
+  "brief": "Top-down tower defense: starting with 50 gold, click a marked pad to build a turret for 10 gold, then survive five waves of enemies walking a fixed path. GameState keeps gold, towers, wave, leaks and won. Enemies that reach the exit add a leak; ten leaks lose the run; clearing wave five sets won.",
   "artDirection": "Moody stone gate at dusk, bright turret muzzles and enemy outlines, gold and leak counters legible at a glance, clear build pads.",
   "obligations": [
     {
