@@ -61,4 +61,21 @@ describe("the visual pass rule", () => {
     expect(noFinish.passed).toBe(false);
     expect(noFinish.detail).toContain("no finish frame");
   });
+
+  it("does not demand a hazard frame from a design with no lose state", () => {
+    const passed = evaluateVisualReview({
+      review: review([4, 4, 4, 4, 4, 4]),
+      frames: [frame("early"), frame("finish")],
+      hazardRequired: false,
+    });
+    expect(passed.passed).toBe(true);
+    // The finish frame is still required; only the hazard requirement drops.
+    const noFinish = evaluateVisualReview({
+      review: review([4, 4, 4, 4, 4, 4]),
+      frames: [frame("early")],
+      hazardRequired: false,
+    });
+    expect(noFinish.passed).toBe(false);
+    expect(noFinish.detail).toContain("no finish frame");
+  });
 });

@@ -71,13 +71,13 @@ describe("visual frame selection", () => {
     const selected = select({});
     expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
       ["early", "builds/playtests/run/02-level-start.png"],
-      ["interaction", "builds/playtests/run/03-pearl.png"],
       ["hazard", "builds/playtests/run/04-water.png"],
+      ["interaction", "builds/playtests/run/03-pearl.png"],
       ["later", "builds/playtests/run/05-final.png"],
       ["finish", "builds/playtests/run/06-after-steps.png"],
     ]);
     // The probe evidence travels with the frame instead of a caption claim.
-    expect(selected[1]?.evidence).toContain("collected 0→1");
+    expect(selected[2]?.evidence).toContain("collected 0→1");
   });
 
   it("ignores captions: renaming every label selects the same files", () => {
@@ -99,6 +99,113 @@ describe("visual frame selection", () => {
     const selected = select({ evidence: flat });
     expect(selected.map((frame) => frame.role)).not.toContain("interaction");
     expect(selected.map((frame) => frame.role)).not.toContain("hazard");
+  });
+
+  it("picks a frame where a lose key took damage, not only where the run was lost", () => {
+    const health = (value: number, x: number): GamePlaytestProbe => ({
+      player: player(x),
+      gameState: { health: value },
+    });
+    const damageFrames: readonly VisualEvidenceFrame[] = [
+      { label: "start", file: "01.png", probe: health(100, 0) },
+      { label: "hit", file: "02.png", probe: health(80, 10) },
+      { label: "win", file: "03.png", probe: health(80, 20) },
+    ];
+    const selected = select({
+      evidence: damageFrames,
+      runState: state(health(100, 0), health(80, 20)),
+      criteria: [
+        {
+          id: "hurt",
+          kind: "lose",
+          text: "Running out of health loses",
+          observe: { key: "health", expect: "<=0" },
+        },
+      ],
+    });
+    // The losing condition is never reached, so the hit is the hazard evidence.
+    expect(selected.find((frame) => frame.role === "hazard")?.path).toBe(
+      "builds/playtests/run/02.png",
+    );
+  });
+
+  it("keeps the damage frame for the hazard role when a lives mechanic also progresses there", () => {
+    const run = (x: number, lives: number, collected: number): GamePlaytestProbe => ({
+      player: player(x),
+      gameState: { lives, collected },
+    });
+    const selected = select({
+      evidence: [
+        { label: "start", file: "01.png", probe: run(0, 3, 0) },
+        { label: "spikes", file: "02.png", probe: run(10, 2, 0) },
+        { label: "pearl", file: "03.png", probe: run(20, 2, 1) },
+        { label: "gate", file: "04.png", probe: run(30, 2, 1) },
+      ],
+      runState: state(run(0, 3, 0), run(30, 2, 1)),
+      criteria: [
+        {
+          id: "spikes-hurt",
+          kind: "mechanic",
+          text: "Touching spikes costs a life",
+          observe: { key: "lives", expect: "<=2" },
+        },
+        {
+          id: "collect",
+          kind: "mechanic",
+          text: "Collect a pearl",
+          observe: { key: "collected", expect: ">=1" },
+        },
+        {
+          id: "out-of-lives",
+          kind: "lose",
+          text: "Losing all three lives ends the run",
+          observe: { key: "lives", expect: "<=0" },
+        },
+      ],
+    });
+    expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
+      ["early", "builds/playtests/run/01.png"],
+      ["hazard", "builds/playtests/run/02.png"],
+      ["interaction", "builds/playtests/run/03.png"],
+      ["finish", "builds/playtests/run/04.png"],
+    ]);
+  });
+
+  it("still picks the frame where the lose condition is met", () => {
+    const run = (x: number, lives: number, collected: number): GamePlaytestProbe => ({
+      player: player(x),
+      gameState: { lives, collected },
+    });
+    const loseFrames: readonly VisualEvidenceFrame[] = [
+      { label: "start", file: "01.png", probe: run(0, 3, 0) },
+      { label: "pearl", file: "02.png", probe: run(10, 3, 1) },
+      { label: "dead", file: "03.png", probe: run(20, 0, 1) },
+      { label: "game-over", file: "04.png", probe: run(20, 3, 0) },
+    ];
+    const selected = select({
+      evidence: loseFrames,
+      runState: state(run(0, 3, 0), run(20, 3, 0)),
+      criteria: [
+        {
+          id: "collect",
+          kind: "mechanic",
+          text: "Collect a pearl",
+          observe: { key: "collected", expect: ">=1" },
+        },
+        {
+          id: "lose",
+          kind: "lose",
+          text: "Losing every life ends the run",
+          observe: { key: "lives", expect: "==0" },
+        },
+      ],
+    });
+    expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
+      ["early", "builds/playtests/run/01.png"],
+      ["hazard", "builds/playtests/run/03.png"],
+      ["interaction", "builds/playtests/run/02.png"],
+      ["finish", "builds/playtests/run/04.png"],
+    ]);
   });
 
   it("treats a `changes` criterion as progress only after the baseline", () => {

@@ -104,11 +104,14 @@ export const GAME_VISUAL_PASS_SCORE = 3;
 /**
  * The whole-review verdict. Missing hazard or finish evidence can never pass:
  * an unreadable hazard the frames never showed is exactly the failure this
- * stage exists to catch.
+ * stage exists to catch. A design that declares "No lose state" has no hazard
+ * to show, so `hazardRequired: false` drops only that requirement.
  */
 export function evaluateVisualReview(input: {
   readonly review: GameVisualReview;
   readonly frames: readonly GameVisualFrame[];
+  /** Defaults to true: a design with an observed lose criterion owes a hazard frame. */
+  readonly hazardRequired?: boolean;
 }): { readonly passed: boolean; readonly detail: string } {
   const byDimension = new Map<GameVisualDimension, GameVisualScore>();
   for (const score of input.review.dimensions) byDimension.set(score.dimension, score.score);
@@ -124,9 +127,12 @@ export function evaluateVisualReview(input: {
   });
   const hazard = input.frames.some((frame) => frame.role === "hazard");
   const finish = input.frames.some((frame) => frame.role === "finish");
-  if (!hazard) low.push("no hazard frame was available to judge");
+  if (!hazard && input.hazardRequired !== false) low.push("no hazard frame was available to judge");
   if (!finish) low.push("no finish frame was available to judge");
   return low.length === 0
-    ? { passed: true, detail: "Every dimension reached the bar, with hazard and finish evidence." }
+    ? {
+        passed: true,
+        detail: "Every dimension reached the bar, with all required evidence.",
+      }
     : { passed: false, detail: low.join("; ") };
 }

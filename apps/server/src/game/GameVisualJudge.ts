@@ -22,7 +22,7 @@ import {
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { readDesignDocument } from "./GameDesignApproval.ts";
 import { readPlaytestEvidence } from "./playtestEvidence.ts";
-import { selectVisualFrames } from "./visualFrames.ts";
+import { requiresHazardFrame, selectVisualFrames } from "./visualFrames.ts";
 import { VISUAL_CANARY_ANSWER, canaryPng } from "./visualCanary.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 
@@ -218,7 +218,7 @@ ${presentation.length === 0 ? "None were approved." : presentation.map((criterio
 
 ${frameLines.join("\n")}
 
-Frame roles: early = first observed gameplay; interaction = an approved criterion progressed there; hazard = an approved lose claim was met there; later = later gameplay; finish = the run's final frame. Only these frames are evidence. A caption such as "double-jump" or "moon-pearl" is a label, not a promise that the frame shows it.
+Frame roles: early = first observed gameplay; interaction = an approved criterion progressed there; hazard = an approved lose claim moved from its baseline there (damage, or the lose condition itself); later = later gameplay; finish = the run's final frame. Only these frames are evidence. A caption such as "double-jump" or "moon-pearl" is a label, not a promise that the frame shows it.
 
 ${input.gameState === null ? "" : `The run's own summary: ${input.gameState}\n`}
 ## Rubric
@@ -351,11 +351,22 @@ const make = (stateDir: string) =>
       });
 
     /**
-     * The canary runs once per server process. Caching the value (not the error)
-     * keeps a transient provider failure from poisoning every later judgement
-     * and keeps a passing check from paying for another image.
+     * The canary runs once per server process, and only a pass is kept: a
+     * provider that could not answer yet must be retried on the next judgement
+     * instead of failing every later one for the life of the process.
      */
-    const canary = yield* Effect.cached(runVisualCanary(textGeneration));
+    let canaryPassed = false;
+    const canary = Effect.suspend(() =>
+      canaryPassed
+        ? Effect.succeed<VisualCanaryResult>({ ok: true })
+        : runVisualCanary(textGeneration).pipe(
+            Effect.tap((result) =>
+              Effect.sync(() => {
+                if (result.ok) canaryPassed = true;
+              }),
+            ),
+          ),
+    );
 
     const run: GameVisualJudge["Service"]["run"] = (root, input) =>
       Effect.gen(function* () {
@@ -502,7 +513,11 @@ const make = (stateDir: string) =>
           .filter((request) => frameIds.has(request.frame))
           .slice(0, 3);
         const dimensions: GameVisualDimensionScore[] = [...review.dimensions];
-        const verdict = evaluateVisualReview({ review, frames });
+        const verdict = evaluateVisualReview({
+          review,
+          frames,
+          hazardRequired: requiresHazardFrame(input.acceptance),
+        });
         const judgement: GameVisualJudgement = {
           status: verdict.passed ? "passed" : "failed",
           judgedAt,

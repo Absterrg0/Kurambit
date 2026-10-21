@@ -188,8 +188,10 @@ the game sources did not change.
 
 The `visual` stage is an independent judgement of the latest qualifying playtest's frames
 (`GameVisualJudge.ts`), never of the builder's prose. The frames are chosen from the persisted
-per-frame probe state: early gameplay, the frame where an approved criterion first progressed, one
-where a lose claim was met (the only probe-decidable hazard evidence), the last gameplay frame
+per-frame probe state: early gameplay, the frame where an approved criterion first progressed, the
+first frame where an observed `lose` key moved from its baseline toward the lose condition (a hit
+that cost health or a life, since a winning run never reaches a met lose criterion; a met criterion
+counts as that movement), the last gameplay frame
 before the end, and the run's final frame. Captions are carried as captions only; t29's
 `04-double-jump.png` does not show a second jump and its `04-moon-pearl.png` was still 0/5
 collected. Evidence without per-frame probes falls back to run order, which can never tag an
@@ -201,9 +203,11 @@ path (`generateImageReview`); only that operation accepts absolute image paths, 
 without image support fails rather than answering blind. A synthetic PNG (a large "7" on magenta)
 is checked once per server process before any game is judged: a provider that returns the wrong
 answer makes the stage `unavailable` with that reason, and availability is never assumed from the
-model catalog. The model returns 0–4 scores against written anchors per dimension, with `missing`
-distinct from 0 when no frame shows the dimension at all. The server computes the verdict: every
-dimension must reach 3, and a review without hazard or finish evidence fails regardless of scores.
+model catalog. Only a pass is remembered; a failure is retried on the next judgement instead of
+failing every later one. The model returns 0–4 scores against written anchors per dimension, with
+`missing` distinct from 0 when no frame shows the dimension at all. The server computes the verdict:
+every dimension must reach 3, and a review without finish evidence, or without hazard evidence when
+the approved design observes a `lose` criterion, fails regardless of scores.
 Repair requests are bounded to three and must name one of the supplied frames. The typed judgement
 lives beside the playtest evidence (`visual-review.json`) and in the qualification record, bound to
 the same source, build and approved design as the other stages, so a re-export, edit or re-approval

@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
   GAME_VISUAL_DIMENSIONS,
+  NO_LOSE_STATE_TEXT,
   TextGenerationError,
   type GameAcceptanceCriterion,
   type GamePlaytestProbe,
@@ -150,8 +151,8 @@ describe("the visual judge", () => {
           expect(run.judgement.status).toBe("passed");
           expect(run.judgement.frames.map((frame) => frame.role)).toEqual([
             "early",
-            "interaction",
             "hazard",
+            "interaction",
             "finish",
           ]);
           expect(run.judgement.roundsLeft).toBe(1);
@@ -216,6 +217,74 @@ describe("the visual judge", () => {
       },
     ),
   );
+
+  it.effect("does not require a hazard frame from a design with no lose state", () =>
+    withJudge(
+      ({ root, judge }) =>
+        Effect.gen(function* () {
+          const evidenceDirectory = yield* Effect.promise(() => writeEvidence(root));
+          const run = yield* judge.run(root, {
+            ...input(evidenceDirectory),
+            acceptance: [
+              {
+                id: "collect",
+                kind: "mechanic",
+                text: "Collect a pearl",
+                observe: { key: "collected", expect: ">=1" },
+              },
+              {
+                id: "win",
+                kind: "win",
+                text: "Reach the gate",
+                observe: { key: "won", expect: "==1" },
+              },
+              { id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT },
+            ],
+          });
+          expect(run.status).toBe("judged");
+          if (run.status !== "judged") return;
+          expect(run.judgement.frames.map((frame) => frame.role)).not.toContain("hazard");
+          expect(run.judgement.status).toBe("passed");
+        }),
+      (input) => {
+        if (input.prompt.includes("one large digit"))
+          return Effect.succeed({ digit: "7", backgroundColor: "magenta" });
+        return Effect.succeed(review(4));
+      },
+    ),
+  );
+
+  it.effect("retries a failed image canary on the next judgement", () => {
+    let canaryCalls = 0;
+    return withJudge(
+      ({ root, judge }) =>
+        Effect.gen(function* () {
+          const evidenceDirectory = yield* Effect.promise(() => writeEvidence(root));
+          const first = yield* judge.run(root, input(evidenceDirectory));
+          expect(first.status).toBe("judged");
+          if (first.status !== "judged") return;
+          expect(first.judgement.status).toBe("unavailable");
+          expect(first.judgement.detail).toContain("image delivery failed");
+          const second = yield* judge.run(root, input(evidenceDirectory));
+          expect(second.status).toBe("judged");
+          if (second.status !== "judged") return;
+          expect(second.judgement.status).toBe("passed");
+          // A cached failure would have answered the second call from memory.
+          expect(canaryCalls).toBe(2);
+        }),
+      (input) => {
+        if (input.prompt.includes("one large digit")) {
+          canaryCalls += 1;
+          return Effect.succeed(
+            canaryCalls === 1
+              ? { digit: "3", backgroundColor: "green" }
+              : { digit: "7", backgroundColor: "magenta" },
+          );
+        }
+        return Effect.succeed(review(4));
+      },
+    );
+  });
 
   it.effect("turns a malformed reply into a failure with a reason", () =>
     withJudge(

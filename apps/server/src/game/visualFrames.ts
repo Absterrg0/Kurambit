@@ -47,6 +47,35 @@ const observedCriteria = (acceptance: readonly GameAcceptanceCriterion[]) =>
     return expectation === null ? [] : [{ criterion, key: criterion.observe.key, expectation }];
   });
 
+/**
+ * Only a design whose `lose` criterion observes a GameState key has a hazard to
+ * photograph; the "No lose state" promise has no lose transition at all.
+ */
+export const requiresHazardFrame = (acceptance: readonly GameAcceptanceCriterion[]): boolean =>
+  observedCriteria(acceptance).some(({ criterion }) => criterion.kind === "lose");
+
+/**
+ * Whether a frame is on the way to the lose condition: the key moved from its
+ * baseline in the direction that ends the run. A winning playtest never reaches
+ * a met lose criterion, but the hit that cost a life is the hazard the review
+ * needs to see, and reaching the condition counts as the same movement.
+ */
+const movedTowardLose = (
+  expectation: NonNullable<Expectation>,
+  from: GamePlaytestStateValue | undefined,
+  to: GamePlaytestStateValue | undefined,
+): boolean => {
+  const start = numeric(from);
+  const next = numeric(to);
+  if (start === null || next === null || next === start) return false;
+  if (expectation.kind === "atLeast") return next > start;
+  if (expectation.kind === "atMost") return next < start;
+  if (expectation.kind === "equals")
+    return Math.abs(next - expectation.value) < Math.abs(start - expectation.value);
+  // A lose claim cannot observe `changes`; scenario grading rejects that form.
+  return false;
+};
+
 /** A bounded, factual line about what the probe showed at this frame. */
 const frameEvidence = (baseline: GamePlaytestProbe | null, probe: GamePlaytestProbe): string => {
   const parts: string[] = [];
@@ -112,10 +141,29 @@ export function selectVisualFrames(input: {
     const gameplay = indexed.filter((entry) => entry.frame.probe?.player != null);
     pick(gameplay[0], "early");
 
-    const progressed = gameplay.find((entry) => {
+    // Hazard before interaction: the pass rule requires a hazard frame, and the
+    // first damage frame is usually also the first `lives` mechanic frame.
+    const hazard = gameplay.find((entry) => {
       const probe = entry.frame.probe;
       if (probe === undefined) return false;
-      return criteria.some(({ key, expectation }) => {
+      return criteria.some(({ criterion, key, expectation }) => {
+        if (criterion.kind !== "lose") return false;
+        const baselineValue = baseline.gameState[key];
+        return (
+          baselineValue !== undefined &&
+          !satisfied(expectation, baselineValue) &&
+          movedTowardLose(expectation, baselineValue, probe.gameState[key])
+        );
+      });
+    });
+    pick(hazard, "hazard");
+
+    const progressed = gameplay.find((entry) => {
+      const probe = entry.frame.probe;
+      if (probe === undefined || chosen.has(entry.frame.file)) return false;
+      return criteria.some(({ criterion, key, expectation }) => {
+        // Lose progress belongs to the hazard role; a frame carries one role.
+        if (criterion.kind === "lose") return false;
         const baselineValue = baseline.gameState[key];
         if (baselineValue === undefined) return false;
         const value = probe.gameState[key];
@@ -127,18 +175,6 @@ export function selectVisualFrames(input: {
       });
     });
     pick(progressed, "interaction");
-
-    const hazard = gameplay.find((entry) => {
-      const probe = entry.frame.probe;
-      if (probe === undefined) return false;
-      return criteria.some(({ criterion, key, expectation }) => {
-        if (criterion.kind !== "lose") return false;
-        const baselineValue = baseline.gameState[key];
-        if (baselineValue === undefined || satisfied(expectation, baselineValue)) return false;
-        return satisfied(expectation, probe.gameState[key]);
-      });
-    });
-    pick(hazard, "hazard");
 
     const finishEntry = indexed.at(-1);
     // A later area is the last observed gameplay before the run's final frame.
