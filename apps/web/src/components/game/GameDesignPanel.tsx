@@ -96,6 +96,14 @@ export function GameDesignPanel({
   const currentHash = status.design.currentHash;
   const pendingRevision = status.design.pendingRevision;
   const revisionDiff = status.design.revisionDiff;
+  // What the acceptance set covers, by kind: the creator should be able to see
+  // the shape of the promise before approving it, not just its individual lines.
+  const coverage = (["control", "mechanic", "content", "win", "lose", "presentation"] as const)
+    .map((kind) => ({
+      kind,
+      count: acceptance.filter((criterion) => criterion.kind === kind).length,
+    }))
+    .filter((entry) => entry.count > 0);
   const canApprove =
     canOperate &&
     !turnRunning &&
@@ -422,6 +430,9 @@ export function GameDesignPanel({
               : changed && issues.length > 0
                 ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
                 : "These are the criteria in DESIGN.md. Approve the design to bind them."}
+          </p>
+          <p className="mt-1 text-2xs text-muted-foreground">
+            Coverage: {coverage.map((entry) => `${entry.count} ${entry.kind}`).join(" · ")}
           </p>
           <ul className="mt-2 space-y-1.5">
             {acceptance.map((criterion) => (

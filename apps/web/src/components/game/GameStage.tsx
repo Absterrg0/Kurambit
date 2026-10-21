@@ -285,7 +285,7 @@ export function GameStage({
         <h2 className="min-w-0 max-w-56 truncate text-sm font-semibold">
           <TruncatedText text={data.manifest.name} />
         </h2>
-        <span className="hidden shrink-0 text-xs text-muted-foreground @[44rem]/stage-header:inline">
+        <span className="hidden shrink-0 text-xs text-muted-foreground @[56rem]/stage-header:inline">
           {template?.name ?? `Godot ${data.manifest.engine.version}`}
         </span>
         <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
@@ -337,7 +337,12 @@ export function GameStage({
                 text={failureVisible.split("\n")[0] ?? failureVisible}
                 className="max-w-64"
               />
-              <Button size="xs" variant="ghost" onClick={() => askAgentToFix(failureVisible)}>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="shrink-0"
+                onClick={() => askAgentToFix(failureVisible)}
+              >
                 Ask agent to fix
               </Button>
             </span>
