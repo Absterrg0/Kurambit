@@ -180,6 +180,22 @@ describe("classifyRun", () => {
     assert.match(verdict.reason, /readability scored 2/);
   });
 
+  it("reports a failed judgement even if the stage status lags behind it", () => {
+    const failed = judgement({
+      status: "failed",
+      dimensions: GAME_VISUAL_DIMENSIONS.map((dimension) => ({
+        dimension,
+        score: dimension === "readability" ? 1 : 3,
+      })),
+    });
+    const verdict = classifyRun(
+      observe({
+        qualification: qualification({ stages: [stage("visual", "passed", { visual: failed })] }),
+      }),
+    );
+    assert.equal(verdict.outcome, "failed-visual");
+  });
+
   it("reports a missing visual stage as an evidence gap, never a pass", () => {
     const verdict = classifyRun(
       observe({ qualification: qualification({ stages: [stage("visual", "missing")] }) }),

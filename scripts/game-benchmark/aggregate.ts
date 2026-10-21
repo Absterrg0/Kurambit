@@ -170,7 +170,7 @@ export function classifyRun(observation: BenchmarkRunObservation): {
           ? "No visual stage was recorded for the current build."
           : `The visual stage is ${visual.stage.status} without usable gameplay frames.`),
     };
-  if (visual.stage?.status !== "passed")
+  if (visual.stage?.status !== "passed" || visual.judgement?.status === "failed")
     return {
       outcome: "failed-visual",
       reason:
