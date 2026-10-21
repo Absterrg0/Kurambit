@@ -724,7 +724,7 @@ const make = Effect.gen(function* () {
             ...(identity.policy.gameplayScene === null
               ? [
                   {
-                    file: "game.json",
+                    file: "verification policy",
                     message:
                       "The verification policy declares no gameplay scene, so the check ran only the main scene (the menu); gameplay initialization was not exercised.",
                   },

@@ -74,14 +74,14 @@ const StoredIntent = Schema.fromJsonString(
   }),
 );
 const decodeStoredIntent = Schema.decodeUnknownSync(StoredIntent);
-export type StoredIntentRecord = typeof StoredIntent.Type;
+type StoredIntentRecord = typeof StoredIntent.Type;
 
 /**
  * A stable identity for the exam, so a policy change invalidates evidence
  * recorded under the old one. Derived rather than stored: rewriting the same
  * policy keeps the same revision.
  */
-export const verificationPolicyRevision = (policy: GameVerificationPolicy): string =>
+const verificationPolicyRevision = (policy: GameVerificationPolicy): string =>
   NodeCrypto.createHash("sha256")
     .update(JSON.stringify([policy.testSuite, policy.gameplayScene, policy.probe]))
     .digest("hex")
@@ -92,7 +92,7 @@ export const verificationPolicyRevision = (policy: GameVerificationPolicy): stri
  * created with. The creation probe obligation wins over the manifest's mirror,
  * so a template game cannot drop it by editing game.json. This runs once.
  */
-export const deriveVerificationPolicy = (
+const deriveVerificationPolicy = (
   manifest: GameManifest,
   probeIntent: boolean | null,
 ): GameVerificationPolicy => ({
@@ -190,7 +190,7 @@ export const readDesignApprovalRecord = async (
 };
 
 /** The full server-owned creation record; null only when absent. */
-export const readStoredIntent = async (file: string): Promise<StoredIntentRecord | null> => {
+const readStoredIntent = async (file: string): Promise<StoredIntentRecord | null> => {
   const text = await readRecordText(file);
   return text === null ? null : decodeStoredIntent(text);
 };
