@@ -159,11 +159,22 @@ const readDesignSnapshot = async (root: string): Promise<DesignSnapshot> => {
   let handle: NodeFSP.FileHandle | null = null;
   try {
     handle = await NodeFSP.open(NodePath.join(root, "DESIGN.md"), "r");
-    const buffer = Buffer.alloc(DESIGN_DOCUMENT_LIMIT + 1);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    // Read one byte past the limit so a single short read cannot make a large
+    // file look complete; a regular file may return fewer bytes than asked.
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= DESIGN_DOCUMENT_LIMIT) {
+      const chunk = Buffer.alloc(DESIGN_DOCUMENT_LIMIT + 1 - total);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
     return {
-      document: buffer.subarray(0, Math.min(bytesRead, DESIGN_DOCUMENT_LIMIT)).toString("utf8"),
-      truncated: bytesRead > DESIGN_DOCUMENT_LIMIT,
+      document: Buffer.concat(chunks)
+        .subarray(0, Math.min(total, DESIGN_DOCUMENT_LIMIT))
+        .toString("utf8"),
+      truncated: total > DESIGN_DOCUMENT_LIMIT,
     };
   } catch {
     return { document: null, truncated: false };

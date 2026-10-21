@@ -234,6 +234,10 @@ export function GameDesignPanel({
                     <span className="block text-2xs text-muted-foreground">
                       {criterion.observe.key} {criterion.observe.expect}
                     </span>
+                  ) : criterion.kind === "presentation" ? (
+                    <span className="block text-2xs text-muted-foreground">
+                      Visual stage — not verified yet
+                    </span>
                   ) : null}
                 </span>
               </li>
