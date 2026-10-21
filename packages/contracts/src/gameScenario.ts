@@ -159,7 +159,20 @@ export const GameScenarioObservation = Schema.Struct({
   first: Schema.NullOr(GameObservedValue),
   last: Schema.NullOr(GameObservedValue),
   firstChangeFrame: Schema.NullOr(Schema.Int),
-  matches: Schema.Array(Schema.Struct({ id: Schema.String, frame: Schema.Int })),
+  /**
+   * The value at the gameplay baseline: the first sample at or after the
+   * route's first non-wait input where a player existed. A criterion passes
+   * only when it was false here and true at a later sample.
+   */
+  baseline: Schema.NullOr(GameObservedValue),
+  matches: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      frame: Schema.Int,
+      /** The value sampled when the expectation first became true. */
+      value: Schema.optionalKey(GameObservedValue),
+    }),
+  ),
 });
 export type GameScenarioObservation = typeof GameScenarioObservation.Type;
 export const GameScenarioEvidence = Schema.Struct({
@@ -167,6 +180,13 @@ export const GameScenarioEvidence = Schema.Struct({
   /** Physics frames the route ran, including boot and step frames. */
   frames: Schema.Int,
   durationMs: Schema.Int,
+  /** Frame of the first press/hold step, or null when the route only waited. */
+  firstInputFrame: Schema.NullOr(Schema.Int),
+  /**
+   * First sample at or after `firstInputFrame` with a node in group "player".
+   * Without it the route never started play, so nothing can be achieved.
+   */
+  baselineFrame: Schema.NullOr(Schema.Int),
   /** The player group existed and its position changed from the first sample. */
   playerMoved: Schema.Boolean,
   /** A rejected route, a crash or a script error. A run with an error never qualifies. */
@@ -183,9 +203,9 @@ export const GameScenarioCriterionStatus = Schema.Literals([
 ]);
 export type GameScenarioCriterionStatus = typeof GameScenarioCriterionStatus.Type;
 /**
- * One approved criterion checked against the run. Criteria without `observe`
- * are unverified here and belong to the visual judge; they do not fail the
- * state stage.
+ * One approved criterion checked against the run. Mechanical claims without
+ * `observe` are `missing` and block the stage; presentation claims never reach
+ * this result and are reported by the visual stage as `missing` instead.
  */
 export const GameScenarioCriterionResult = Schema.Struct({
   id: Schema.String,
@@ -196,12 +216,24 @@ export const GameScenarioCriterionResult = Schema.Struct({
   observed: Schema.String,
   /** Scenarios that satisfied this criterion. */
   scenarios: Schema.Array(Schema.String),
+  /** The first scenario and frame that proved the criterion, when it passed. */
+  provenBy: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ scenario: Schema.String, frame: Schema.Int })),
+  ),
 });
 export type GameScenarioCriterionResult = typeof GameScenarioCriterionResult.Type;
+/** One kind's coverage in the state stage. `proven` means the criterion passed. */
+export const GameScenarioKindCoverage = Schema.Struct({
+  kind: Schema.String,
+  proven: Schema.Int,
+  failed: Schema.Int,
+  missing: Schema.Int,
+});
+export type GameScenarioKindCoverage = typeof GameScenarioKindCoverage.Type;
 export const GameScenarioStageReason = Schema.Literals([
   "criteria-passed",
   "observable-failed",
-  "end-criterion-failed",
+  "win-criterion-failed",
   "no-player-movement",
   "no-acceptance",
   "legacy-unproven",
@@ -220,6 +252,8 @@ export const GameScenarioSummary = Schema.Struct({
   /** A human-readable explanation of the reason, including the failing rule. */
   detail: Schema.String,
   criteria: Schema.Array(GameScenarioCriterionResult),
+  /** Proven/failed/missing counts for every kind the state stage graded. */
+  coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
 });
 export type GameScenarioSummary = typeof GameScenarioSummary.Type;
 export const GameScenariosRunResult = Schema.Struct({

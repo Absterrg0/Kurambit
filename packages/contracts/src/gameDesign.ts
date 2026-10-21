@@ -7,10 +7,12 @@ import { ThreadId } from "./baseSchemas.ts";
  * claim against the real game instead of trusting prose.
  */
 export const GameAcceptanceCriterionKind = Schema.Literals([
+  "control",
   "mechanic",
   "content",
-  "end",
-  "control",
+  "win",
+  "lose",
+  "presentation",
 ]);
 export type GameAcceptanceCriterionKind = typeof GameAcceptanceCriterionKind.Type;
 export const GameAcceptanceObservation = Schema.Struct({
@@ -26,9 +28,33 @@ export const GameAcceptanceCriterion = Schema.Struct({
   observe: Schema.optionalKey(GameAcceptanceObservation),
 });
 export type GameAcceptanceCriterion = typeof GameAcceptanceCriterion.Type;
+/**
+ * What a record may carry. Older approvals used a single `end` kind for the
+ * win; they stay readable and are normalized to `win` on read so the current
+ * vocabulary is the only one the evaluator sees.
+ */
+export const StoredGameAcceptanceCriterion = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals(["control", "mechanic", "content", "win", "lose", "presentation", "end"]),
+  text: Schema.String,
+  observe: Schema.optionalKey(GameAcceptanceObservation),
+});
+export type StoredGameAcceptanceCriterion = typeof StoredGameAcceptanceCriterion.Type;
+
+/** Reads a persisted approval in the current vocabulary. */
+export const normalizeAcceptance = (
+  criteria: readonly StoredGameAcceptanceCriterion[],
+): readonly GameAcceptanceCriterion[] =>
+  criteria.map(({ kind, ...rest }): GameAcceptanceCriterion =>
+    kind === "end" ? { ...rest, kind: "win" } : { ...rest, kind },
+  );
 
 const GAME_ACCEPTANCE_HEADING = "Acceptance";
-const kindNames = "mechanic, content, end or control";
+const WIN_LOSE_HEADING = "Win & lose";
+/** The one phrase a design may use to declare that losing does not exist. */
+export const NO_LOSE_STATE_TEXT = "No lose state";
+const NO_LOSE_STATE_PATTERN = /\bno\s+lose\s+state\b/i;
+const kindNames = "control, mechanic, content, win, lose or presentation";
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const keyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const expectPattern = /^(?:==|>=|<=)-?\d+(?:\.\d+)?$|^changes$/;
@@ -54,20 +80,33 @@ const sectionBody = (design: string, heading: string): string | null => {
 };
 
 const criterionIssues = (value: unknown, index: number): string[] => {
-  const where = `Acceptance criterion ${index + 1}`;
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return [`${where} must be an object.`];
-  const record = value as Record<string, unknown>;
+  const record =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  // Name the criterion by its id whenever it has one: a list of numbered
+  // issues is hard to act on once the block has twelve entries.
+  const where =
+    record !== null && typeof record.id === "string"
+      ? `Acceptance criterion ${index + 1} ("${record.id}")`
+      : `Acceptance criterion ${index + 1}`;
+  if (record === null) return [`${where} must be an object.`];
   const issues: string[] = [];
   if (typeof record.id !== "string" || !idPattern.test(record.id))
     issues.push(`${where} needs a lowercase slug id such as "light-all-lanterns".`);
   if (
     typeof record.kind !== "string" ||
-    !(["mechanic", "content", "end", "control"] as const).includes(record.kind as never)
+    !(["control", "mechanic", "content", "win", "lose", "presentation"] as const).includes(
+      record.kind as never,
+    )
   )
     issues.push(`${where} has an unknown kind; use ${kindNames}.`);
   if (typeof record.text !== "string" || record.text.trim() === "")
     issues.push(`${where} needs a plain-language text.`);
+  if (record.kind === "presentation" && record.observe !== undefined)
+    issues.push(
+      `${where} is a presentation claim and cannot carry observe; presentation belongs to the visual stage.`,
+    );
   if (record.observe !== undefined) {
     const observe = record.observe;
     if (typeof observe !== "object" || observe === null || Array.isArray(observe))
@@ -198,11 +237,64 @@ export function validateDesignDocument(input: {
   const parsed = parseAcceptance(design);
   if (!parsed.ok) issues.push(...parsed.issues);
   else {
-    if (!parsed.criteria.some((criterion) => criterion.kind === "end"))
-      issues.push("The acceptance block needs at least one `end` criterion (how the game is won).");
-    if (!parsed.criteria.some((criterion) => criterion.kind === "mechanic"))
+    const winLose = sectionsOf(design).get(WIN_LOSE_HEADING) ?? "";
+    const declaresNoLoseState = NO_LOSE_STATE_PATTERN.test(winLose);
+    for (const criterion of parsed.criteria) {
+      if (criterion.kind === "presentation") continue;
+      if (criterion.observe !== undefined) {
+        if (criterion.kind === "content" && criterion.observe.key === "total")
+          issues.push(
+            `Content criterion "${criterion.id}" observes the world total "${criterion.observe.key}"; prove content with a counter the player changes, such as "collected" with ">=5".`,
+          );
+        if (
+          (criterion.kind === "win" || criterion.kind === "lose") &&
+          criterion.observe.expect === "changes"
+        )
+          issues.push(
+            `${criterion.kind === "win" ? "Win" : "Lose"} criterion "${criterion.id}" observes a change, but starting or pausing the game also changes state; observe the value the run ends at (such as "state" "==3").`,
+          );
+        continue;
+      }
+      // The single exception to the observe requirement: a game whose
+      // Win & lose section declares that it has no lose state writes that
+      // promise down instead of inventing a fake observation.
+      if (
+        criterion.kind === "lose" &&
+        criterion.text.trim() === NO_LOSE_STATE_TEXT &&
+        declaresNoLoseState
+      )
+        continue;
       issues.push(
-        "The acceptance block needs at least one `mechanic` criterion (the core thing the player does).",
+        `Acceptance criterion "${criterion.id}" is a ${criterion.kind} claim and needs an observe of a GameState property the player changes.`,
+      );
+    }
+    for (const kind of ["control", "mechanic", "win"] as const)
+      if (!parsed.criteria.some((criterion) => criterion.kind === kind))
+        issues.push(
+          `The acceptance block needs at least one \`${kind}\` criterion (${
+            kind === "control"
+              ? "the player's inputs"
+              : kind === "mechanic"
+                ? "the core thing the player does"
+                : "how the game is won"
+          }).`,
+        );
+    const lose = parsed.criteria.filter((criterion) => criterion.kind === "lose");
+    if (lose.length === 0)
+      issues.push(
+        declaresNoLoseState
+          ? `The acceptance block needs a \`lose\` criterion with the text "${NO_LOSE_STATE_TEXT}" and no observe.`
+          : "The acceptance block needs at least one `lose` criterion (how a run ends in failure).",
+      );
+    else if (
+      lose.every(
+        (criterion) =>
+          criterion.text.trim() === NO_LOSE_STATE_TEXT && criterion.observe === undefined,
+      ) &&
+      !declaresNoLoseState
+    )
+      issues.push(
+        `The lose criterion "${lose[0]!.id}" says "${NO_LOSE_STATE_TEXT}", but the "${WIN_LOSE_HEADING}" section must also say there is no lose state.`,
       );
   }
   return {
@@ -218,9 +310,17 @@ export const GameDesignState = Schema.Literals(["draft", "approved", "changed", 
 export type GameDesignState = typeof GameDesignState.Type;
 export const GameDesignRead = Schema.Struct({
   state: GameDesignState,
+  /**
+   * The DESIGN.md bytes the creator is looking at, bounded to 64 KB. This is
+   * the snapshot the Design tab renders and approves; it is not a separate
+   * file read that could race the hash.
+   */
+  document: Schema.NullOr(Schema.String),
+  /** The document was larger than the snapshot bound; it cannot be approved. */
+  documentTruncated: Schema.Boolean,
   /** The hash the creator approved, or null when no revision was approved. */
   approvedHash: Schema.NullOr(Schema.String),
-  /** The hash of DESIGN.md on disk right now. */
+  /** The hash of the exact document snapshot above, null when unreadable. */
   currentHash: Schema.NullOr(Schema.String),
   approvedAt: Schema.NullOr(Schema.String),
   /**
