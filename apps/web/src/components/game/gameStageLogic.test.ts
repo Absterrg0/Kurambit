@@ -2,9 +2,12 @@ import { expect, it } from "vite-plus/test";
 
 import {
   buildFailurePrompt,
+  countGamePreviewRemounts,
   deriveGameStagePhase,
   gamePreviewFrameKey,
+  type GamePreviewServe,
   type GameStageInput,
+  nextGamePreviewFrame,
 } from "./gameStageLogic";
 
 const BASE: GameStageInput = {
@@ -135,21 +138,44 @@ it("carries the error into the message it asks the agent to fix", () => {
   expect(buildFailurePrompt("boom")).toContain("Fix the error and rebuild the game.");
 });
 
-it("keeps the preview identity across tabs and changes it for a new build or a stop", () => {
-  const playing = {
-    previewUrl: "http://127.0.0.1:9/index.html",
-    buildId: "source:first",
-    buildUpdatedAt: "2026-10-20T04:00:00.000Z",
-  };
-  const key = gamePreviewFrameKey(playing);
-  // A tab switch re-renders the stage with the same data: no reload.
-  expect(gamePreviewFrameKey({ ...playing })).toBe(key);
-  // A new export (even with the same mtime second) is a new identity.
-  expect(gamePreviewFrameKey({ ...playing, buildId: "source:second" })).not.toBe(key);
-  // Stop clears the preview; Play again starts a fresh session.
-  expect(gamePreviewFrameKey({ ...playing, previewUrl: null })).not.toBe(key);
-  // Builds without a qualification record still reset on the artifact time.
+it("remounts the game only for a real reset, never for status churn", () => {
+  const URL = "http://127.0.0.1:9/index.html";
+  const playing: GamePreviewServe = { previewUrl: URL, servedArtifactId: "artifact:one" };
+  // First sight of a serve mounts the game.
+  expect(countGamePreviewRemounts([playing])).toBe(1);
+  // The same serve read again (another status push, a tab switch) never remounts.
+  expect(countGamePreviewRemounts([playing, playing, { ...playing }])).toBe(1);
+  // A new preview session is a reset the user chose: Stop, then Play again.
   expect(
-    gamePreviewFrameKey({ ...playing, buildId: null, buildUpdatedAt: "2026-10-20T05:00:00.000Z" }),
-  ).not.toBe(gamePreviewFrameKey({ ...playing, buildId: null }));
+    countGamePreviewRemounts([
+      playing,
+      { previewUrl: null, servedArtifactId: playing.servedArtifactId },
+    ]),
+  ).toBe(2);
+  // A replaced web artifact is the intended reset of a successful rebuild.
+  expect(
+    countGamePreviewRemounts([playing, { ...playing, servedArtifactId: "artifact:two" }]),
+  ).toBe(2);
+  // A source edit or a failed rebuild cannot replace the artifact, and a null
+  // identity means the read cannot vouch for the bytes: neither remounts, so
+  // the honest state is "what is on disk is uncertain", not a reset on screen.
+  expect(countGamePreviewRemounts([playing, { ...playing, servedArtifactId: null }])).toBe(1);
+});
+
+it("folds frame keys across reads so unrelated churn cannot change the iframe", () => {
+  const URL = "http://127.0.0.1:9/index.html";
+  const first = nextGamePreviewFrame(null, { previewUrl: URL, servedArtifactId: "a" });
+  // The fold pins the read it accepted: later null identities and repeats are
+  // absorbed, and the key only moves for a new session or a replaced artifact.
+  const absorbed = nextGamePreviewFrame(first, { previewUrl: URL, servedArtifactId: null });
+  expect(absorbed.key).toBe(first.key);
+  expect(absorbed.serve.servedArtifactId).toBe("a");
+  const replaced = nextGamePreviewFrame(first, { previewUrl: URL, servedArtifactId: "b" });
+  expect(replaced.key).not.toBe(first.key);
+  const restarted = nextGamePreviewFrame(first, { previewUrl: null, servedArtifactId: null });
+  expect(restarted.key).not.toBe(first.key);
+  // An explicit key read still exists for content that shows one serve at a
+  // time, and it carries both halves of the identity.
+  expect(gamePreviewFrameKey({ previewUrl: URL, servedArtifactId: "b" })).toBe(`${URL}#b`);
+  expect(gamePreviewFrameKey({ previewUrl: null, servedArtifactId: null })).toBe("#");
 });

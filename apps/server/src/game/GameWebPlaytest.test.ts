@@ -251,7 +251,7 @@ it.live.skipIf(!available || !templatesInstalled)(
 );
 
 it.live.skipIf(!available || !templatesInstalled)(
-  "reads the template's state probe and qualifies only a run where the player moved",
+  "reads the template's state probe and qualifies only a run that really played",
   () =>
     Effect.gen(function* () {
       const parent = yield* Effect.promise(() =>
@@ -293,8 +293,10 @@ it.live.skipIf(!available || !templatesInstalled)(
             const exported = yield* game.export(created.threadId, "Web");
             expect(exported.success, exported.message).toBe(true);
 
-            // Open the game from its menu and stand still: the scene changes, so
-            // pixels move, but no input reached the player. The probe must catch it.
+            // Open the game from its menu and stand still. The click and Enter
+            // seat a body, so the gameplay baseline has a player; what fails is
+            // everything else: no movement, and the only baseline-relative
+            // change is the run clock — the ride a stopped clock would show.
             const still = yield* game.webPlaytest(created.threadId, {
               steps: [
                 { click: "left" },
@@ -306,32 +308,39 @@ it.live.skipIf(!available || !templatesInstalled)(
             yield* Effect.log(still.message);
             expect(still.booted, still.message).toBe(true);
             expect(still.state, still.message).not.toBeNull();
-            // The boot sample is the menu: no player exists yet.
-            expect(still.state?.before?.player).toBeNull();
+            // The gameplay baseline: a probe taken after input with a body present.
+            expect(still.state?.before?.player, still.message).not.toBeNull();
             expect(still.state?.after?.gameState.state).toBe(1);
             expect(still.state?.playerMoved ?? 0).toBeLessThan(1);
-            // The run clock advances, but a clock is not gameplay.
-            expect(still.state?.changes).toEqual([]);
-            expect(still.message).toContain("player movement or a GameState change");
+            expect(still.state?.changes.every((change) => change.key === "run_seconds")).toBe(true);
+            expect(still.message).toContain("the player did not move from the gameplay baseline");
+            expect(still.message).toContain(
+              "no GameState value changed on a ride a stopped clock would not show",
+            );
             expect(playtestStage(yield* game.status(created.threadId))).toBe("failed");
 
-            // Walking forward moves the body: the same export now qualifies.
-            const walked = yield* game.webPlaytest(created.threadId, {
+            // Walking forward moves the body and jumping turns the named jumps
+            // counter the way a clock never turns: the same export now qualifies.
+            const played = yield* game.webPlaytest(created.threadId, {
               steps: [
                 { click: "left" },
                 { waitMs: 600 },
                 { key: "Enter", holdMs: 80 },
                 { waitMs: 2500 },
                 { key: "w", holdMs: 1200 },
+                { key: " ", holdMs: 80 },
                 { waitMs: 300 },
               ],
             });
-            yield* Effect.log(walked.message);
-            expect(walked.success, walked.message).toBe(true);
-            expect(walked.state?.playerMoved ?? 0).toBeGreaterThan(2);
-            expect(walked.message).toContain("player moved");
-            expect(walked.message).toContain("state: player moved");
-            expect(walked.message).not.toContain("Qualification:");
+            yield* Effect.log(played.message);
+            expect(played.success, played.message).toBe(true);
+            expect(played.state?.playerMoved ?? 0).toBeGreaterThan(2);
+            expect(played.message).toContain("jumps 0→1");
+            expect(played.message).toContain("player moved");
+            expect(played.message).not.toContain("Qualification:");
+            // The template's probe answers the stage's pause bridge.
+            expect(still.pauseConfirmed, still.message).toBe(true);
+            expect(played.pauseConfirmed, played.message).toBe(true);
             const status = yield* game.status(created.threadId);
             expect(playtestStage(status)).toBe("passed");
             expect(status.lastPlaytest?.responded).toBe(true);
@@ -344,9 +353,12 @@ it.live.skipIf(!available || !templatesInstalled)(
                 ),
               ),
             );
-            expect(evidence.state.before.player).toBeNull();
+            expect(evidence.state.before.player).not.toBeNull();
             expect(evidence.state.after.gameState.state).toBe(1);
             expect(evidence.state.playerMoved).toBeGreaterThan(2);
+            expect(
+              evidence.state.changes.some((change: { key: string }) => change.key === "jumps"),
+            ).toBe(true);
           }).pipe(Effect.provide(dependencies)),
         );
       } finally {

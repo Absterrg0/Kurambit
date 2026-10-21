@@ -84,6 +84,21 @@ const READ_PROBE = `(() => {
 })()`;
 const decodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(GamePlaytestProbe));
 
+/**
+ * The pause bridge's parked ack, the driver's window into whether the game's
+ * StudioProbe really applied a requested visibility. The probe parks the same
+ * object it postMessages to the parent document, so the driver tests the
+ * identical contract the stage's play surface runs against.
+ */
+const READ_VISIBILITY_ACK = `(() => {
+  const ack = window.__studioVisibilityAck;
+  if (ack === null || typeof ack !== "object") return null;
+  return { visible: ack.visible === true, paused: ack.paused === true, muted: ack.muted === true };
+})()`;
+
+const sendVisibility = (visible: boolean): string =>
+  `window.postMessage({ type: "studio-visibility", visible: ${visible} }, "*")`;
+
 interface BrowserHandle {
   readonly child: NodeChildProcess.ChildProcess;
   readonly wsUrl: Promise<string>;
@@ -417,6 +432,67 @@ const screenshot = async (
   };
 };
 
+/**
+ * Exercising the pause bridge like the stage's play surface: one hide, one
+ * show, decided by the probe's acks. A game that never answers — an old probe
+ * or a bridge that does not pause and mute as promised — reads as unconfirmed
+ * rather than as a crashed run; the honest tool reports what it could verify.
+ */
+const readVisibilityAck = async (
+  cdp: CdpSocket,
+  sessionId: string,
+): Promise<{ visible: boolean; paused: boolean; muted: boolean } | null> => {
+  const evaluated = await cdp
+    .send<{ result?: { value?: { visible: boolean; paused: boolean; muted: boolean } | null } }>(
+      "Runtime.evaluate",
+      { expression: READ_VISIBILITY_ACK, returnByValue: true },
+      sessionId,
+    )
+    .catch(() => null);
+  return evaluated?.result?.value ?? null;
+};
+
+const waitForVisibilityAck = async (
+  cdp: CdpSocket,
+  sessionId: string,
+  visible: boolean,
+  signal: AbortSignal | undefined,
+): Promise<{ visible: boolean; paused: boolean; muted: boolean } | null> => {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    await sleep(signal, 120);
+    const ack = await readVisibilityAck(cdp, sessionId);
+    if (ack !== null && ack.visible === visible) return ack;
+  }
+  return null;
+};
+
+const verifyPauseBridge = async (
+  cdp: CdpSocket,
+  sessionId: string,
+  signal: AbortSignal | undefined,
+): Promise<boolean> => {
+  try {
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: sendVisibility(false), returnByValue: true },
+      sessionId,
+    );
+    const hiddenAck = await waitForVisibilityAck(cdp, sessionId, false, signal);
+    if (hiddenAck === null || !hiddenAck.paused || !hiddenAck.muted) return false;
+    await cdp.send(
+      "Runtime.evaluate",
+      { expression: sendVisibility(true), returnByValue: true },
+      sessionId,
+    );
+    const shownAck = await waitForVisibilityAck(cdp, sessionId, true, signal);
+    return shownAck !== null && !shownAck.paused && !shownAck.muted;
+  } catch {
+    // A page that interrupts evaluation (a reload, a navigation) cannot confirm.
+    return false;
+  }
+};
+
 /** Drives one browser run to completion; the caller's acquire/release finalizers own cleanup. */
 const runPlaytest = async (
   handle: BrowserHandle,
@@ -528,6 +604,11 @@ const runPlaytest = async (
     const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
     let pointer: { x: number; y: number } | null = null;
     await readProbe();
+    // Games whose policy owes the probe owe its pause bridge too; run the
+    // round trip once, before any step, so the samples never span a pause.
+    let pauseConfirmed: boolean | null = null;
+    if (booted && input.probeRequired && samples.length > 0)
+      pauseConfirmed = await verifyPauseBridge(cdp, session.sessionId, signal);
 
     for (const step of input.steps) {
       signal?.throwIfAborted();
@@ -610,6 +691,9 @@ const runPlaytest = async (
       comparison.responded
         ? `the game responded (${comparison.changedPercent}% of pixels changed)`
         : `the game did not respond (${comparison.changedPercent}% of pixels changed)`,
+      ...(pauseConfirmed === null
+        ? []
+        : [pauseConfirmed ? "pauses hidden: yes" : "pauses hidden: not confirmed"]),
       `state: ${describePlaytestState(state)}`,
     ].join("; ");
     return {
@@ -622,6 +706,7 @@ const runPlaytest = async (
       consoleMessages,
       screenshots,
       state,
+      pauseConfirmed,
       qualifies: verdict.qualifies,
       blockers: [...verdict.blockers],
       interaction: verdict.interaction,

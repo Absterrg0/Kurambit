@@ -43,7 +43,12 @@ import { GameBuildsPanel } from "./GameBuildsPanel";
 import { GameDesignPanel } from "./GameDesignPanel";
 import { GameElapsed } from "./GameElapsed";
 import { GamePlaySurface } from "./GamePlaySurface";
-import { buildFailurePrompt, deriveGameStagePhase, gamePreviewFrameKey } from "./gameStageLogic";
+import {
+  buildFailurePrompt,
+  deriveGameStagePhase,
+  nextGamePreviewFrame,
+  type GamePreviewServe,
+} from "./gameStageLogic";
 
 type GameStageTab = "design" | "play" | "assets" | "builds";
 
@@ -107,6 +112,12 @@ export function GameStage({
   const [dismissedOperationAt, setDismissedOperationAt] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // The fold of what the play surface runs across status reads; state, so the
+  // render below can pin this serve without touching refs.
+  const [frameFold, setFrameFold] = useState<{
+    readonly key: string;
+    readonly serve: GamePreviewServe;
+  } | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ x: number; width: number } | null>(null);
   const refresh = query.refresh;
@@ -209,13 +220,16 @@ export function GameStage({
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const template = GAME_TEMPLATES.find((entry) => entry.id === data.manifest.template);
-  // Reload the iframe only when the served preview or the export it came from
-  // changes; a tab switch must not restart the game.
-  const frameKey = gamePreviewFrameKey({
+  // Fold the served identity across status reads: remount the game only when
+  // its preview session or served artifact really changed — a source edit and a
+  // failed rebuild leave both running untouched. Absorbed reads return the
+  // same object, so this only adjusts state when the fold advanced.
+  const frame = nextGamePreviewFrame(frameFold, {
     previewUrl: data.previewUrl,
-    buildId: data.qualification.buildId,
-    buildUpdatedAt: webBuild?.updatedAt ?? null,
+    servedArtifactId: data.qualification.servedArtifactId,
   });
+  if (frame !== frameFold) setFrameFold(frame);
+  const frameKey = frame.key;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
     if (busy !== null && stageAction !== "stop") return;
@@ -542,11 +556,11 @@ export function GameStage({
         />
       ) : null}
       {/*
-        The stage stays mounted across workspace tabs. Unmounting it recreated
-        the iframe and killed the running Godot session; hiding it instead makes
-        the browser report the document as hidden, which is what the engine's
-        web shell uses to pause and mute. It is reset only by Stop, a new build
-        (frameKey), or the preview going away.
+        The stage stays mounted across workspace tabs; hiding it keeps the
+        iframe alive and the frame key unchanged, so the game keeps its
+        progress. The engine cannot see CSS hiding (an iframe's document stays
+        visible with its parent), so GamePlaySurface tells the game over
+        postMessage to pause and mute while the tab is elsewhere.
       */}
       <div
         aria-hidden={activeTab !== "play"}
@@ -558,6 +572,7 @@ export function GameStage({
           gameName={data.manifest.name}
           previewUrl={data.previewUrl}
           frameKey={frameKey}
+          hidden={activeTab !== "play"}
           canOperate={canOperate}
           onPlay={() => void perform("preview")}
           onRebuild={() => void perform("rebuild")}

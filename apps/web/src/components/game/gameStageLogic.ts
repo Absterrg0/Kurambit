@@ -63,10 +63,58 @@ export function buildFailurePrompt(error: string): string {
  * a Stop removes the preview and a new build (or a newly served export) changes
  * the identity, which is the one intended reset.
  */
-export function gamePreviewFrameKey(input: {
+/**
+ * What the serving game decides about the iframe. The served artifact identity
+ * is separate from currentness: it changes only when the bytes under builds/web
+ * were really replaced.
+ */
+export interface GamePreviewServe {
   previewUrl: string | null;
-  buildId: string | null;
-  buildUpdatedAt: string | null;
-}): string {
-  return `${input.previewUrl ?? ""}#${input.buildId ?? input.buildUpdatedAt ?? ""}`;
+  /** Identity of the served export's files, or null when it cannot be vouched for. */
+  servedArtifactId: string | null;
+}
+
+const frameKeyOf = (serve: GamePreviewServe) =>
+  `${serve.previewUrl ?? ""}#${serve.servedArtifactId ?? ""}`;
+
+/**
+ * The iframe identity after one status read, given what it was running.
+ * Remounts happen only for real game resets: a new preview session or a
+ * replaced web artifact. A source edit and a failed rebuild leave both
+ * untouched, so the loaded game never loses its progress for them; a missing
+ * artifact identity never remounts either, because the honest state is "what
+ * is on disk is uncertain now", not "what is on screen is a new game".
+ */
+export function nextGamePreviewFrame(
+  previous: { readonly key: string; readonly serve: GamePreviewServe } | null,
+  serve: GamePreviewServe,
+): { readonly key: string; readonly serve: GamePreviewServe } {
+  const candidate = { key: frameKeyOf(serve), serve };
+  if (previous === null) return candidate;
+  const urlChanged = previous.serve.previewUrl !== serve.previewUrl;
+  const artifactReplaced =
+    serve.servedArtifactId !== null && serve.servedArtifactId !== previous.serve.servedArtifactId;
+  return urlChanged || artifactReplaced ? candidate : previous;
+}
+
+/** How many reloads a run of status reads causes, first mount included. */
+export function countGamePreviewRemounts(serves: readonly GamePreviewServe[]): number {
+  let frame = null as null | { readonly key: string; readonly serve: GamePreviewServe };
+  let remounts = 0;
+  for (const serve of serves) {
+    const next = nextGamePreviewFrame(frame, serve);
+    if (frame !== null && next.key !== frame.key) remounts++;
+    frame = next;
+  }
+  if (frame !== null) remounts++;
+  return remounts;
+}
+
+/**
+ * The iframe's identity from a full status read. Content must call
+ * {@link nextGamePreviewFrame} repeatedly (the stage folds it across renders)
+ * so unrelated status churn can never change the key.
+ */
+export function gamePreviewFrameKey(serve: GamePreviewServe): string {
+  return frameKeyOf(serve);
 }

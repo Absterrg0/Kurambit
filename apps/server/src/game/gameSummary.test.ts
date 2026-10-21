@@ -61,12 +61,14 @@ describe("gameCoverFrame", () => {
   it("falls back to the after-steps frame when no frame proved gameplay", () => {
     expect(
       gameCoverFrame(
-        labelled([
-          { label: "booted", path: "builds/playtests/run/01-booted.png" },
-          { label: "menu", path: "builds/playtests/run/02-menu.png" },
-          { label: "after-steps", path: "builds/playtests/run/03-after-steps.png" },
-        ]),
-        { coverFrame: null },
+        labelled(
+          [
+            { label: "booted", path: "builds/playtests/run/01-booted.png" },
+            { label: "menu", path: "builds/playtests/run/02-menu.png" },
+            { label: "after-steps", path: "builds/playtests/run/03-after-steps.png" },
+          ],
+          { coverFrame: null },
+        ),
       )?.path,
     ).toBe("builds/playtests/run/03-after-steps.png");
   });

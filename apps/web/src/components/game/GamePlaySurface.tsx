@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Gamepad2Icon,
   PlayIcon,
@@ -22,12 +22,28 @@ const frameStyle = (viewport: GameViewport) => ({
   width: `min(100cqw, calc(100cqh * ${viewport.width} / ${viewport.height}))`,
 });
 
+/**
+ * The one bridge message the app sends the game. The Godot side's StudioProbe
+ * listens for it, pauses the SceneTree and mutes the master bus while hidden,
+ * restores them when shown again, and answers with `studio-visibility-ack`.
+ */
+const visibilityMessage = (visible: boolean) => ({ type: "studio-visibility" as const, visible });
+
+/** The game's answer, so the stage knows whether hidden playback really stopped. */
+interface VisibilityAck {
+  readonly type: "studio-visibility-ack";
+  readonly visible: boolean;
+  readonly paused: boolean;
+  readonly muted: boolean;
+}
+
 export function GamePlaySurface({
   phase,
   viewport,
   gameName,
   previewUrl,
   frameKey,
+  hidden,
   canOperate,
   onPlay,
   onRebuild,
@@ -41,6 +57,8 @@ export function GamePlaySurface({
   previewUrl: string | null;
   /** Changes when a new web build appears, which reloads a playing game. */
   frameKey: string;
+  /** The play tab is not open, so the game should pause and mute itself. */
+  hidden: boolean;
   canOperate: boolean;
   onPlay: () => void;
   onRebuild: () => void;
@@ -50,7 +68,40 @@ export function GamePlaySurface({
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameFocused, setFrameFocused] = useState(false);
+  // Track the hide request the game never answered: without StudioProbe or when
+  // a hidden page is too throttled to pump the engine, the pause/mute request is
+  // lost and the game may quietly keep running behind the Design tab.
+  const pendingAck = useRef(false);
   const playing = phase.kind === "playing" && previewUrl !== null;
+  const visible = !hidden;
+  // The hint is exactly "an unconfirmed pause is outstanding".
+  const [unacknowledged, setUnacknowledged] = useState(false);
+
+  useEffect(() => {
+    const onAck = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const ack = event.data as Partial<VisibilityAck> | null;
+      if (ack?.type !== "studio-visibility-ack") return;
+      // Any settled answer dissolves the hint: the game demonstrated the bridge.
+      pendingAck.current = false;
+      setUnacknowledged(false);
+    };
+    window.addEventListener("message", onAck);
+    return () => window.removeEventListener("message", onAck);
+  }, []);
+
+  useEffect(() => {
+    // The outstanding-hide accounting IS the hint: a hide request is in flight
+    // until the game answers either way, and only a stop or an ack retires it.
+    pendingAck.current = playing && (pendingAck.current || !visible);
+    setUnacknowledged(pendingAck.current);
+    if (playing) {
+      frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
+    }
+    // A remount does not need a repost here: onLoad restates the current state
+    // to the fresh document.
+  }, [playing, visible]);
+
   const focusFrame = () => {
     frameRef.current?.focus();
     frameRef.current?.contentWindow?.focus();
@@ -80,10 +131,21 @@ export function GamePlaySurface({
               // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-same-origin is this iframe's own loopback origin, not the app's.
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
               className="size-full border-0 bg-black"
-              onLoad={() => setFrameFocused(false)}
+              onLoad={() => {
+                setFrameFocused(false);
+                // The game's listener may have come up after the last message;
+                // a fresh document needs the current state restated.
+                frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
+              }}
               onFocus={() => setFrameFocused(true)}
               onBlur={() => setFrameFocused(false)}
             />
+            {unacknowledged ? (
+              <div className="pointer-events-none absolute bottom-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs text-stage-muted ring-1 ring-white/10">
+                <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+                Game may still be running
+              </div>
+            ) : null}
             {frameFocused ? null : (
               <button
                 type="button"

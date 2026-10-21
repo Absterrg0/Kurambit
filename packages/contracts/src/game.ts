@@ -619,6 +619,12 @@ export const GameWebPlaytestResult = Schema.Struct({
   blockers: Schema.optionalKey(Schema.Array(Schema.String)),
   /** What changed from the run's gameplay baseline, human readable. */
   interaction: Schema.optionalKey(Schema.String),
+  /**
+   * The stage's pause/mute bridge, exercised once by the driver like the play
+   * surface does. Null when the check did not run; otherwise true only when
+   * both ends of the postMessage confirmed the hidden pause.
+   */
+  pauseConfirmed: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   /** The project's base viewport the frames were scaled up from. */
   baseViewport: Schema.optionalKey(GameViewport),
   /** The integer multiple of the base viewport the frames were captured at. */

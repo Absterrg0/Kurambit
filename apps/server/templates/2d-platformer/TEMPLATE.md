@@ -68,6 +68,11 @@ loaded streams when real audio exists and nothing else has to change.
 `window.__studioProbe()`, which returns JSON with GameState's public primitive members and the
 player's world position. `game_web_playtest` reads it after boot, between steps and at the end,
 and will not qualify a run in which the player neither moved nor changed a GameState value.
+The same probe carries the stage's visibility bridge: `studio-visibility` postMessages from the
+app pause the SceneTree and mute the master bus while the stage tab is closed, and answer with
+`studio-visibility-ack` plus the observed state. The generated harness sends it once before the
+steps, so the pause must be answered there — never delete the bridge while keeping the snapshot
+half.
 
 Keep the probe and its autoload line: removing them does not make the check stricter, it only
 falls back to the weaker pixel-only rule. Add new observable values to `GameState` as public
