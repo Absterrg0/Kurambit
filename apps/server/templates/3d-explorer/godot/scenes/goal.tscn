@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/goal.gd" id="1_goal"]
 [ext_resource type="Material" path="res://materials/gate_locked.tres" id="2_locked"]
