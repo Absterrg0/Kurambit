@@ -17,7 +17,6 @@ import {
   type GameDesignRead,
   type GameDesignState,
   type GamePendingRevision,
-  type GameAcceptanceDiff,
   GameVerificationPolicy,
   type GameManifest,
   type GameVerificationPolicyRead,

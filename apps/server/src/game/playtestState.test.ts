@@ -8,7 +8,6 @@ import type {
 import {
   describePlaytestState,
   evaluatePlaytestRun,
-  MIN_PLAYER_MOVEMENT,
   satisfiedObservations,
   selectPlaytestCoverFrame,
   summarizePlaytestSamples,

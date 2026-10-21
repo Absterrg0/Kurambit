@@ -68,7 +68,7 @@ import {
 } from "./gameScenarios.ts";
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
-import { describePlaytestState, satisfiedObservations } from "./playtestState.ts";
+import { satisfiedObservations } from "./playtestState.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
