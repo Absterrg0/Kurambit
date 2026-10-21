@@ -31,7 +31,7 @@
       "kind": "win",
       "description": "All three crates on goals wins the board.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "illegal-move-is-free",

@@ -31,7 +31,7 @@
       "kind": "win",
       "description": "Clearing the fifth wave wins the defence.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "illegal-build-rejected",

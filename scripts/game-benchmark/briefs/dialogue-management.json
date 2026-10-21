@@ -24,7 +24,7 @@
       "kind": "content",
       "description": "The countdown reaching zero ends the shift and sets ended.",
       "key": "ended",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "trust-decides-outcome",

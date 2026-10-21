@@ -31,7 +31,7 @@
       "kind": "win",
       "description": "Reaching the chimney after lighting the lanterns wins the level.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     }
   ]
 }

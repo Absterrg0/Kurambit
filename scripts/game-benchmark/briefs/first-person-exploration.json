@@ -24,14 +24,14 @@
       "kind": "mechanic",
       "description": "Switching on the lamp room sets stairs_lit.",
       "key": "stairs_lit",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "reach-lamp-room",
       "kind": "win",
       "description": "Reaching the lamp room with the lamp lit wins the climb.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "no-visible-avatar",

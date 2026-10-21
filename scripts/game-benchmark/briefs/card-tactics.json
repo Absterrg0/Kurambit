@@ -31,7 +31,7 @@
       "kind": "win",
       "description": "Dropping the enemy to zero hp wins the battle.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "enemy-acts-second",

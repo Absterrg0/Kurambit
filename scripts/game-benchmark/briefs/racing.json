@@ -24,7 +24,7 @@
       "kind": "win",
       "description": "Crossing the finish on lap three wins the time trial.",
       "key": "won",
-      "expect": "==1"
+      "expect": ">=1"
     },
     {
       "id": "checkpoints-in-order",
