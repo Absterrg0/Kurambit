@@ -32,6 +32,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import { approvalRecordFile, designIntentFile } from "./GameDesignApproval.ts";
 import { qualificationRecordPath } from "./GameQualification.ts";
+import { visualJudgeTestLayer } from "./gameTestLayers.ts";
 
 const manifest: GameManifest = {
   schemaVersion: 1,
@@ -247,6 +248,7 @@ it.effect("a real root and an alias thread share one operation lock", () =>
         Layer.provideMerge(GameProjectService.layer),
         Layer.provideMerge(GameOperations.layer),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
+        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({

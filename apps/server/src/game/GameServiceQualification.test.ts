@@ -24,7 +24,11 @@ import { approvalRecordFile, designDocumentHash, designIntentFile } from "./Game
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
-import { designApprovalTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
+import {
+  designApprovalTestLayer,
+  previewBrowserTestLayer,
+  visualJudgeTestLayer,
+} from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("qualification-rules-test");
 const manifest = (overrides: Partial<GameManifest> = {}): GameManifest => ({
@@ -204,6 +208,7 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(previewBrowserTestLayer(executable)),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
+        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provide(NodeServices.layer),
       );

@@ -28,6 +28,8 @@ export interface Request<S extends Schema.Top> {
   readonly outputSchema: S;
   readonly modelSelection: ModelSelection;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** Absolute image paths a review must actually see, not attachable chat files. */
+  readonly imagePaths?: ReadonlyArray<string> | undefined;
   /**
    * Set when the model must investigate `cwd` before answering: it may read files and run
    * read-only commands there, over as many turns as it needs, and must change nothing. A
@@ -73,7 +75,11 @@ export const decodeJsonReply = <S extends Schema.Top>(
   );
 };
 
-export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
+export function fromRunner(
+  name: string,
+  run: Runner,
+  capabilities: { readonly images?: boolean } = {},
+): ProviderTextGeneration {
   const generateCommitMessage: ProviderTextGeneration["generateCommitMessage"] = Effect.fn(
     `${name}.generateCommitMessage`,
   )(function* (input) {
@@ -168,11 +174,29 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     });
   });
 
+  const generateImageReview: ProviderTextGeneration["generateImageReview"] = (input) =>
+    capabilities.images === true
+      ? run({
+          operation: "generateImageReview",
+          cwd: input.cwd,
+          prompt: input.prompt,
+          outputSchema: input.outputSchema,
+          modelSelection: input.modelSelection,
+          imagePaths: input.imagePaths,
+        })
+      : Effect.fail(
+          new TextGenerationError({
+            operation: "generateImageReview",
+            detail: `${name} cannot attach images to a review. Use a provider instance with image support, such as codex.`,
+          }),
+        );
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateReviewGuide,
+    generateImageReview,
   } satisfies ProviderTextGeneration;
 }

@@ -20,6 +20,7 @@ import {
   projectTestLayer,
   designApprovalTestLayer,
   qualificationTestLayer,
+  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const workspaceRoot = (() => {
@@ -125,6 +126,7 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provide(projectTestLayer()),
       Layer.provide(previewBrowserTestLayer(browserExecutable!)),
       Layer.provideMerge(qualificationTestLayer(NodePath.join(parent, ".test-state"))),
+      Layer.provideMerge(visualJudgeTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provideMerge(designApprovalTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),

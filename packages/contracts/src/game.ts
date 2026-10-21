@@ -4,6 +4,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
 import { GameScenarioCriterionResult, GameScenarioKindCoverage } from "./gameScenario.ts";
+import { GameVisualJudgement } from "./gameVisual.ts";
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -331,8 +332,8 @@ export const GameLastPlaytest = Schema.Struct({
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**
  * One qualification stage. `design` is the creator's approval of the current
- * DESIGN.md; `state` and `visual` are declared now so the read is stable, but
- * their checks arrive in later work and never report passed yet.
+ * DESIGN.md; `state` grades the approved behaviour criteria; `visual` is the
+ * independent judge's verdict on the latest qualifying playtest evidence.
  */
 export const GameQualificationStage = Schema.Literals([
   "design",
@@ -366,6 +367,8 @@ export const GameQualificationStageRead = Schema.Struct({
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   /** Why the state stage passed or failed, including legacy rules. */
   detail: Schema.optionalKey(Schema.String),
+  /** The independent visual judge's typed result, for the visual stage. */
+  visual: Schema.optionalKey(GameVisualJudgement),
 });
 export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
 /**
@@ -376,6 +379,12 @@ export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
  */
 export const GameQualificationRead = Schema.Struct({
   state: Schema.Literals(["qualified", "unqualified", "unknown"]),
+  /**
+   * Every mechanical stage and the design passed; only the visual stage is in
+   * question. The UI and harness need the two apart: a game whose behaviour
+   * works but whose look failed is not the same as one that does not work.
+   */
+  mechanicsQualified: Schema.Boolean,
   /** The game's current source snapshot, or null when it is unknown. */
   sourceId: Schema.NullOr(Schema.String),
   /** The current qualified web build, when one exists. */
@@ -635,6 +644,12 @@ export const GameWebPlaytestResult = Schema.Struct({
   blockers: Schema.optionalKey(Schema.Array(Schema.String)),
   /** What changed from the run's gameplay baseline, human readable. */
   interaction: Schema.optionalKey(Schema.String),
+  /**
+   * The independent visual judgement this run received, when it qualified
+   * mechanically and the stage ran. Absent when mechanics failed, so the
+   * caller can tell "not judged" from "judged and failed".
+   */
+  visual: Schema.optionalKey(GameVisualJudgement),
   /**
    * The stage's pause/mute bridge, exercised once by the driver like the play
    * surface does. Null when the check did not run; otherwise true only when

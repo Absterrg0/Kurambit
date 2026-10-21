@@ -342,11 +342,14 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
   });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
+  const generateImageReview: ProviderTextGeneration["generateImageReview"] = () =>
+    Effect.fail(investigationUnsupported("generateImageReview", "Muse Code"));
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateReviewGuide,
+    generateImageReview,
   } satisfies ProviderTextGeneration;
 });

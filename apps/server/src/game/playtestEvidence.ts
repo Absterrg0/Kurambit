@@ -181,6 +181,30 @@ const publicFrames = (name: string, stored: StoredPlaytest) =>
     ...(frame.probe === undefined ? {} : { probe: frame.probe }),
   }));
 
+/**
+ * One persisted run, with the per-frame probe state the visual judge selects
+ * from. `null` means missing or malformed evidence, never an empty run.
+ */
+export interface PlaytestEvidenceRun {
+  readonly frames: ReadonlyArray<{
+    readonly label: string;
+    readonly file: string;
+    readonly probe?: GamePlaytestProbe;
+  }>;
+  readonly state: GamePlaytestState | null;
+}
+
+/** Reads one evidence folder by its game-relative `builds/playtests/<run>` path. */
+export const readPlaytestEvidence = async (
+  root: string,
+  directory: string,
+): Promise<PlaytestEvidenceRun | null> => {
+  if (NodePath.dirname(directory) !== PLAYTEST_DIRECTORY) return null;
+  const parent = NodePath.join(root, PLAYTEST_DIRECTORY);
+  const stored = await readStoredRun(parent, NodePath.basename(directory));
+  return stored === null ? null : { frames: stored.frames, state: stored.state ?? null };
+};
+
 /** Reads the newest run; malformed evidence counts as no evidence. */
 export const readLastPlaytest = async (
   root: string,

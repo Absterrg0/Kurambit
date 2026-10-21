@@ -27,6 +27,7 @@ import {
   GameBlenderResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
+  type GameAcceptanceCriterion,
   type GameOperationEvent,
   type GameProcessResult,
   type ThreadId,
@@ -69,6 +70,8 @@ import {
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
 import { satisfiedObservations } from "./playtestState.ts";
+import * as GameVisualJudge from "./GameVisualJudge.ts";
+import { formatVisualReport } from "./visualReport.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
@@ -165,6 +168,7 @@ const make = Effect.gen(function* () {
   const qualification = yield* GameQualification.GameQualification;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
+  const visualJudge = yield* GameVisualJudge.GameVisualJudge;
   const operations = yield* GameOperations.GameOperations;
   const active = new Map<
     string,
@@ -340,7 +344,7 @@ const make = Effect.gen(function* () {
    */
   const ownStage = <A>(
     root: string,
-    stage: GameQualification.RecordedQualificationStage,
+    stage: GameQualification.StoredQualificationStage,
     operation: string,
     work: Effect.Effect<{ readonly value: A; readonly record: StageOutcome }, GameOperationError>,
   ): Effect.Effect<A, GameOperationError> =>
@@ -356,6 +360,65 @@ const make = Effect.gen(function* () {
       );
       return completed.value;
     });
+  /**
+   * Judges a qualifying playtest's persisted frames. The visual stage is bound
+   * to the exact source, build and approved design it graded, and an
+   * unavailable judge records an unknown attempt, never a pass.
+   */
+  const judgeVisualStage = (input: {
+    readonly root: string;
+    readonly sourceId: string;
+    readonly buildId: string;
+    readonly designHash: string | null;
+    readonly evidenceDirectory: string;
+    readonly acceptance: readonly GameAcceptanceCriterion[];
+  }) =>
+    ownStage(
+      input.root,
+      "visual",
+      "Visual judge",
+      visualJudge.run(input.root, input).pipe(
+        Effect.map(
+          (
+            run,
+          ): {
+            readonly value: GameVisualJudge.GameVisualJudgeRun;
+            readonly record: StageOutcome;
+          } => {
+            if (run.status === "exhausted")
+              return {
+                value: run,
+                record: {
+                  outcome: "failed",
+                  sourceId: input.sourceId,
+                  buildId: input.buildId,
+                  evidenceDirectory: input.evidenceDirectory,
+                  designHash: input.designHash,
+                  detail: "No visual repair rounds are left for this approved design revision.",
+                },
+              };
+            const judgement = run.judgement;
+            return {
+              value: run,
+              record: {
+                outcome:
+                  judgement.status === "passed"
+                    ? "passed"
+                    : judgement.status === "unavailable"
+                      ? "unknown"
+                      : "failed",
+                sourceId: input.sourceId,
+                buildId: input.buildId,
+                evidenceDirectory: input.evidenceDirectory,
+                designHash: input.designHash,
+                visual: judgement,
+                detail: judgement.detail ?? `Visual judge: ${judgement.status}.`,
+              },
+            };
+          },
+        ),
+      ),
+    );
   const response = (
     process: GameProcessResult,
     outputPath: string | null = null,
@@ -631,12 +694,36 @@ const make = Effect.gen(function* () {
             : ` Qualification: this run does not count as honest gameplay evidence${
                 blockers.length === 0 ? "" : `: ${blockers.join("; ")}`
               }.${missingProbe ? ` ${probesMissing}.` : ""}`;
+          // Only a qualifying mechanics run reaches the visual stage: there is
+          // no point grading the look of a run that did not prove gameplay.
+          const visualRun =
+            qualifies &&
+            build?.status === "passed" &&
+            build.sourceId !== null &&
+            build.buildId !== null
+              ? yield* judgeVisualStage({
+                  root,
+                  sourceId: build.sourceId,
+                  buildId: build.buildId,
+                  designHash: approval?.designHash ?? null,
+                  evidenceDirectory: evidence.directory,
+                  acceptance: approval?.acceptance ?? [],
+                })
+              : null;
+          const visual = visualRun?.status === "judged" ? visualRun.judgement : null;
+          const visualNote =
+            visual !== null
+              ? `\n${formatVisualReport(visual)}`
+              : visualRun?.status === "exhausted"
+                ? "\nVisual judge: no repair rounds left for this approved design revision — visual failed, report it and stop."
+                : "";
           return {
             value: {
               ...enriched,
               screenshots: budgeted.kept,
-              message: `${result.message}${qualificationNote}${observationNote}${framesNote}`,
+              message: `${result.message}${qualificationNote}${observationNote}${framesNote}${visualNote}`,
               evidenceDirectory: evidence.directory,
+              ...(visual === null ? {} : { visual }),
             },
             record: {
               outcome: qualifies ? ("passed" as const) : ("failed" as const),

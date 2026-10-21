@@ -157,6 +157,7 @@ function createTextGeneration(
         title: "Update workflow",
       }),
     generateReviewGuide: () => Effect.succeed({ stops: [] }),
+    generateImageReview: () => Effect.die("generateImageReview is not used by git actions"),
     ...overrides,
   };
 
@@ -206,6 +207,7 @@ function createTextGeneration(
         ),
       ),
     generateReviewGuide: (input) => implementation.generateReviewGuide(input),
+    generateImageReview: (input) => implementation.generateImageReview(input),
   };
 }
 

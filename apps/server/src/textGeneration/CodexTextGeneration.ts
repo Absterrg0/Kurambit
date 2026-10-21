@@ -225,13 +225,17 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     outputSchema: outputSchemaJson,
     modelSelection,
     attachments,
+    imagePaths,
     investigate,
   }: TextGenerationOperations.Request<S>): Effect.fn.Return<
     S["Type"],
     TextGenerationError,
     S["DecodingServices"]
   > {
-    const imagePaths = yield* materializeImageAttachments(attachments);
+    const attachmentPaths = yield* materializeImageAttachments(attachments);
+    // Evidence frames are already files the server owns; chat attachments need
+    // resolving through the attachment store first.
+    const images = [...attachmentPaths, ...(imagePaths ?? [])];
     const schemaJson = yield* encodeJsonForOperation(
       operation,
       toJsonSchemaObject(outputSchemaJson),
@@ -307,7 +311,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           schemaPath,
           "--output-last-message",
           outputPath,
-          ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
+          ...images.flatMap((imagePath) => ["--image", imagePath]),
           "-",
         ],
         { env: effectiveEnvironment },
@@ -401,5 +405,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }).pipe(Effect.ensuring(cleanup));
   });
 
-  return TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson);
+  return TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson, {
+    images: true,
+  });
 });

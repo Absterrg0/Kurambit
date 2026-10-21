@@ -12,6 +12,9 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameQualification from "./GameQualification.ts";
+import * as GameVisualJudge from "./GameVisualJudge.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { TextGenerationError } from "@t3tools/contracts";
 
 /**
  * A qualification store inside the calling fixture's temporary directory. The
@@ -24,6 +27,42 @@ export function qualificationTestLayer(stateDir: string) {
 /** A design approval store inside the calling fixture's temporary directory. */
 export function designApprovalTestLayer(stateDir: string) {
   return GameDesignApproval.layer({ stateDir });
+}
+
+/**
+ * Text generation for game tests. Only the visual judge calls it, so the other
+ * operations are deliberately unusable rather than silently fake.
+ */
+export function textGenerationTestLayer(
+  generateImageReview: TextGeneration.TextGeneration["Service"]["generateImageReview"] = () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateImageReview",
+        detail: "No image review is configured in this test.",
+      }),
+    ),
+) {
+  return Layer.succeed(
+    TextGeneration.TextGeneration,
+    TextGeneration.TextGeneration.of({
+      generateCommitMessage: () => Effect.die("generateCommitMessage is not used in game tests"),
+      generatePrContent: () => Effect.die("generatePrContent is not used in game tests"),
+      generateBranchName: () => Effect.die("generateBranchName is not used in game tests"),
+      generateThreadTitle: () => Effect.die("generateThreadTitle is not used in game tests"),
+      generateReviewGuide: () => Effect.die("generateReviewGuide is not used in game tests"),
+      generateImageReview,
+    }),
+  );
+}
+
+/** The visual judge with its own budget records, for a game test's temp directory. */
+export function visualJudgeTestLayer(
+  stateDir: string,
+  generateImageReview?: TextGeneration.TextGeneration["Service"]["generateImageReview"],
+) {
+  return GameVisualJudge.layer({ stateDir }).pipe(
+    Layer.provide(textGenerationTestLayer(generateImageReview)),
+  );
 }
 export function previewBrowserTestLayer(
   executable?: string,

@@ -14,7 +14,11 @@ import * as GameService from "./GameService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameQualification from "./GameQualification.ts";
-import { designApprovalTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
+import {
+  designApprovalTestLayer,
+  previewBrowserTestLayer,
+  visualJudgeTestLayer,
+} from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("outcome-test");
 const manifest = (): GameManifest => ({
@@ -92,6 +96,7 @@ const withFixture = <A, E, R>(
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
+        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provide(NodeServices.layer),
       );

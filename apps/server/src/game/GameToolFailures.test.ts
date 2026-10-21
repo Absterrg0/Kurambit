@@ -30,6 +30,7 @@ import {
   designApprovalTestLayer,
   previewBrowserTestLayer,
   qualificationTestLayer,
+  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("tool-failures");
@@ -115,6 +116,7 @@ const withFixture = <A, E, R>(
         Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
+        Layer.provideMerge(visualJudgeTestLayer(NodePath.join(root, ".test-state"))),
         Layer.provideMerge(designApprovalTestLayer(NodePath.join(root, ".test-state"))),
       );
       return yield* run(root, executable).pipe(

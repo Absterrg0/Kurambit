@@ -17,6 +17,7 @@ import {
   type GameQualificationStage,
   type GameQualificationStageRead,
   type GameQualificationSummary,
+  GameVisualJudgement,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 import { webArtifactIdentity, webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
@@ -27,6 +28,8 @@ const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest", "s
 export type RecordedQualificationStage = (typeof RECORDED_QUALIFICATION_STAGES)[number];
 /** The stages the read always reports, including the ones later work will own. */
 const ALL_STAGES = ["design", "check", "test", "export", "playtest", "state", "visual"] as const;
+/** Stages a record can hold; `design` is the approval record, never written here. */
+export type StoredQualificationStage = Exclude<(typeof ALL_STAGES)[number], "design">;
 
 /**
  * `unknown` means the attempt could not tie its result to known sources.
@@ -67,11 +70,13 @@ export interface QualificationStageRecord {
   readonly policyRevision?: string | null;
   /** Whether the playtest owed a StudioProbe reading. */
   readonly probeRequired?: boolean | null;
+  /** The independent visual judge's typed result, for the visual stage. */
+  readonly visual?: GameVisualJudgement;
 }
 export interface QualificationRecord {
   readonly schemaVersion: 1;
   readonly game: string;
-  readonly stages: Partial<Record<RecordedQualificationStage, QualificationStageRecord>>;
+  readonly stages: Partial<Record<StoredQualificationStage, QualificationStageRecord>>;
 }
 const StoredArtifact = Schema.Struct({
   path: Schema.String,
@@ -91,6 +96,7 @@ const StoredStage = Schema.Struct({
   artifacts: Schema.optionalKey(Schema.Array(StoredArtifact)),
   policyRevision: Schema.optionalKey(Schema.NullOr(Schema.String)),
   probeRequired: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  visual: Schema.optionalKey(GameVisualJudgement),
 });
 const StoredRecord = Schema.fromJsonString(
   Schema.Struct({
@@ -101,8 +107,8 @@ const StoredRecord = Schema.fromJsonString(
 );
 const decodeStoredRecord = Schema.decodeUnknownSync(StoredRecord);
 
-const isRecordedStage = (key: string): key is RecordedQualificationStage =>
-  (RECORDED_QUALIFICATION_STAGES as readonly string[]).includes(key);
+const isStoredStage = (key: string): key is StoredQualificationStage =>
+  (ALL_STAGES as readonly string[]).includes(key) && key !== "design";
 
 const recordPath = (stateDir: string, root: string) =>
   gameRecordFile(stateDir, "game-qualification", root);
@@ -119,9 +125,9 @@ const qualificationLocation = async (stateDir: string, root: string) => {
 const readRecord = async (file: string): Promise<QualificationRecord | null> => {
   try {
     const stored = decodeStoredRecord(await NodeFSP.readFile(file, "utf8"));
-    const stages: Partial<Record<RecordedQualificationStage, QualificationStageRecord>> = {};
+    const stages: Partial<Record<StoredQualificationStage, QualificationStageRecord>> = {};
     for (const [key, value] of Object.entries(stored.stages))
-      if (isRecordedStage(key)) stages[key] = value;
+      if (isStoredStage(key)) stages[key] = value;
     return { schemaVersion: 1, game: stored.game, stages };
   } catch {
     // A missing or unreadable record simply proves nothing; it must never
@@ -174,6 +180,7 @@ const deriveQualification = (input: {
   if (input.source.kind === "unknown")
     return {
       state: "unknown",
+      mechanicsQualified: false,
       sourceId: null,
       buildId: null,
       servedArtifactId,
@@ -202,9 +209,8 @@ const deriveQualification = (input: {
     buildId: null,
     finishedAt: null,
   });
-  // Only the four stages with real operations can pass today. `state` and
-  // `visual` are listed as missing and deliberately do not block qualification
-  // yet; when their checks land they join this set and must pass too.
+  // `state` grades behaviour; `visual` is the independent judge's verdict on the
+  // latest qualifying playtest. Neither is optional in the overall verdict.
   for (const stage of RECORDED_QUALIFICATION_STAGES) {
     const recorded = input.record?.stages[stage];
     const read = (status: GameQualificationStageRead["status"]): GameQualificationStageRead => ({
@@ -269,33 +275,70 @@ const deriveQualification = (input: {
       });
     else stageReads.set(stage, read("passed"));
   }
-  // The visual stage does not exist yet (task 34). Its claims are listed as
-  // missing so approval coverage is visible, never as passed or "unverified ok".
+  const exportRead = stageReads.get("export")!;
+  const recordedVisual = input.record?.stages.visual;
+  const visualRead = (
+    status: GameQualificationStageRead["status"],
+  ): GameQualificationStageRead => ({
+    stage: "visual",
+    status,
+    sourceId: recordedVisual?.sourceId ?? null,
+    buildId: recordedVisual?.buildId ?? null,
+    finishedAt: recordedVisual?.finishedAt ?? null,
+    ...(recordedVisual?.detail === undefined ? {} : { detail: recordedVisual.detail }),
+    ...(recordedVisual?.visual === undefined ? {} : { visual: recordedVisual.visual }),
+  });
+  // The judgement is evidence about exact bytes and an exact design revision:
+  // a newer build, a new source or a re-approved design makes it stale, like
+  // every other stage.
+  if (recordedVisual === undefined) stageReads.set("visual", visualRead("missing"));
+  else if (recordedVisual.outcome === "failed") stageReads.set("visual", visualRead("failed"));
+  else if (recordedVisual.outcome === "cancelled") stageReads.set("visual", visualRead("failed"));
+  else if (recordedVisual.outcome === "unknown") stageReads.set("visual", visualRead("unknown"));
+  else if (recordedVisual.sourceId === null) stageReads.set("visual", visualRead("unknown"));
+  else if (recordedVisual.sourceId !== currentSourceId)
+    stageReads.set("visual", visualRead("stale"));
+  else if ((recordedVisual.designHash ?? null) !== input.designHash)
+    stageReads.set("visual", visualRead("stale"));
+  else if (
+    exportRead.status !== "passed" ||
+    exportRecord?.buildId == null ||
+    recordedVisual.buildId !== exportRecord.buildId
+  )
+    stageReads.set("visual", visualRead("stale"));
+  else stageReads.set("visual", visualRead("passed"));
+  const visual = stageReads.get("visual")!;
+  // Presentation claims are exactly what the visual stage grades, so their
+  // result follows its verdict rather than a second, independent check.
   const presentation = input.acceptance
     .filter((criterion) => criterion.kind === "presentation")
     .map((criterion) => ({
       id: criterion.id,
       kind: criterion.kind,
       text: criterion.text,
-      status: "missing" as const,
-      observed: "The visual stage is not implemented yet; this claim is not verified.",
+      status:
+        visual.status === "passed"
+          ? ("passed" as const)
+          : visual.status === "failed"
+            ? ("failed" as const)
+            : visual.status === "unknown"
+              ? ("unverified" as const)
+              : ("missing" as const),
+      observed:
+        visual.visual?.detail ??
+        visual.detail ??
+        (visual.status === "missing"
+          ? "No visual review has graded this design revision yet."
+          : "This claim is not verified by a current visual review."),
       scenarios: [],
       provenBy: null,
     }));
-  stageReads.set("visual", {
-    stage: "visual",
-    status: "missing",
-    sourceId: null,
-    buildId: null,
-    finishedAt: null,
-    ...(presentation.length === 0 ? {} : { criteria: presentation }),
-  });
+  if (presentation.length > 0) stageReads.set("visual", { ...visual, criteria: presentation });
 
   // A playtest proves nothing about a build it did not play, so it also has to
   // name the export that is current right now. The record was already read once
   // at the top of this derivation.
   const playtest = stageReads.get("playtest")!;
-  const exportRead = stageReads.get("export")!;
   if (
     playtest.status === "passed" &&
     (exportRead.status !== "passed" ||
@@ -305,11 +348,13 @@ const deriveQualification = (input: {
     stageReads.set("playtest", { ...playtest, status: "stale" });
 
   const stages = ALL_STAGES.map((stage) => stageReads.get(stage)!);
-  const qualified =
+  const mechanicsQualified =
     stageReads.get("design")!.status === "passed" &&
     RECORDED_QUALIFICATION_STAGES.every((stage) => stageReads.get(stage)!.status === "passed");
+  const qualified = mechanicsQualified && stageReads.get("visual")!.status === "passed";
   return {
     state: qualified ? "qualified" : "unqualified",
+    mechanicsQualified,
     sourceId: currentSourceId,
     buildId: exportRead.status === "passed" ? (exportRecord?.buildId ?? null) : null,
     servedArtifactId,
@@ -328,7 +373,9 @@ const deriveQualificationSummary = (
   designHash: string | null,
   identity: QualificationIdentity | null,
 ): GameQualificationSummary => {
-  const stages = RECORDED_QUALIFICATION_STAGES.map((stage) => record?.stages[stage]);
+  const stages = [...RECORDED_QUALIFICATION_STAGES, "visual" as const].map(
+    (stage) => record?.stages[stage],
+  );
   const finished = stages
     .flatMap((stage) => (stage === undefined ? [] : [stage.finishedAt]))
     .sort()
@@ -338,11 +385,17 @@ const deriveQualificationSummary = (
     (stage) => record.stages[stage]?.outcome === "passed",
   );
   const sourceIds = new Set(
-    RECORDED_QUALIFICATION_STAGES.map((stage) => record.stages[stage]?.sourceId ?? null),
+    [...RECORDED_QUALIFICATION_STAGES, "visual" as const].map(
+      (stage) => record.stages[stage]?.sourceId ?? null,
+    ),
   );
   const exportBuild = record.stages.export?.buildId ?? null;
   const playtestBuild = record.stages.playtest?.buildId ?? null;
-  const designBound = (record.stages.state?.designHash ?? null) === designHash;
+  const visualBuild = record.stages.visual?.buildId ?? null;
+  const designBound =
+    (record.stages.state?.designHash ?? null) === designHash &&
+    (record.stages.visual?.designHash ?? null) === designHash;
+  const visualPassed = record.stages.visual?.outcome === "passed";
   // A state record from before the baseline exam has no proving frame; the
   // library must not advertise it until the scenario stage is rerun.
   const stateExamCurrent = (record.stages.state?.criteria ?? []).every(
@@ -358,10 +411,12 @@ const deriveQualificationSummary = (
       (record.stages.playtest?.probeRequired ?? null) === identity.probeRequired);
   const qualified =
     passed &&
+    visualPassed &&
     sourceIds.size === 1 &&
     !sourceIds.has(null) &&
     exportBuild !== null &&
     playtestBuild === exportBuild &&
+    visualBuild === exportBuild &&
     designBound &&
     stateExamCurrent &&
     policyBound;
@@ -369,7 +424,7 @@ const deriveQualificationSummary = (
 };
 
 export interface QualificationRecordInput {
-  readonly stage: RecordedQualificationStage;
+  readonly stage: StoredQualificationStage;
   readonly outcome: QualificationOutcome;
   readonly sourceId: string | null;
   readonly buildId: string | null;
@@ -381,6 +436,7 @@ export interface QualificationRecordInput {
   readonly artifacts?: readonly WebArtifactFile[];
   readonly policyRevision?: string | null;
   readonly probeRequired?: boolean | null;
+  readonly visual?: GameVisualJudgement;
 }
 
 export class GameQualification extends Context.Service<
@@ -420,7 +476,7 @@ export class GameQualification extends Context.Service<
      */
     readonly begin: (
       root: string,
-      stage: RecordedQualificationStage,
+      stage: StoredQualificationStage,
     ) => Effect.Effect<void, GameOperationError>;
   }
 >()("t3/game/GameQualification") {}
@@ -511,6 +567,7 @@ export const layer = (options: {
                       ...(input.probeRequired === undefined
                         ? {}
                         : { probeRequired: input.probeRequired }),
+                      ...(input.visual === undefined ? {} : { visual: input.visual }),
                     },
                   },
                 };

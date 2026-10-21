@@ -26,7 +26,7 @@ import type * as GameServiceModule from "./GameService.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
-import { previewBrowserTestLayer } from "./gameTestLayers.ts";
+import { previewBrowserTestLayer, visualJudgeTestLayer } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("provenance-test");
 /** Test-local gates; the tests in this file run sequentially. */
@@ -172,6 +172,7 @@ const withGame = <A, E>(
         ),
         Layer.provide(previewBrowserTestLayer(executable)),
         Layer.provideMerge(qualificationLayer),
+        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
         Layer.provide(NodeServices.layer),
       );

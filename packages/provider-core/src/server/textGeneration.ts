@@ -6,6 +6,7 @@ import type {
   TextGenerationError,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
+import type * as Schema from "effect/Schema";
 
 import type { TextGenerationPolicy } from "./textGenerationPolicy.ts";
 
@@ -93,6 +94,20 @@ export type ReviewGuideGenerationResult = Omit<
   "headSha" | "generatedAt" | "modelSelection"
 >;
 
+export interface ImageReviewGenerationInput<S extends Schema.Top> {
+  cwd: string;
+  /** The whole question, including what each image shows and how to score it. */
+  prompt: string;
+  /**
+   * Absolute paths to the images the answer must be based on. A runner that
+   * cannot attach images must fail instead of answering blind: a review
+   * written from the prompt alone would pass games nobody looked at.
+   */
+  imagePaths: ReadonlyArray<string>;
+  outputSchema: S;
+  modelSelection: ModelSelection;
+}
+
 export interface ProviderTextGeneration {
   readonly generateCommitMessage: (
     input: CommitMessageGenerationInput,
@@ -113,4 +128,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateImageReview: <S extends Schema.Top>(
+    input: ImageReviewGenerationInput<S>,
+  ) => Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]>;
 }
