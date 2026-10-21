@@ -28,13 +28,19 @@ const acceptance: readonly GameAcceptanceCriterion[] = [
     id: "hurt",
     kind: "lose",
     text: "The tide hurts",
-    observe: { key: "health", expect: "<=95" },
+    observe: { key: "health", expect: "<=0" },
+  },
+  {
+    id: "win",
+    kind: "win",
+    text: "Reach the gate",
+    observe: { key: "won", expect: "==1" },
   },
 ];
 
-const probe = (x: number, collected = 0, health = 100): GamePlaytestProbe => ({
+const probe = (x: number, collected = 0, health = 100, won = false): GamePlaytestProbe => ({
   player: { x, y: 0, z: 0 },
-  gameState: { collected, health, won: false },
+  gameState: { collected, health, won },
 });
 
 const frames = [
@@ -101,6 +107,43 @@ const writeEvidence = async (root: string) => {
   return "builds/playtests/run-1";
 };
 
+/** A run that captured only its end screen, the way t38's playtests did. */
+const writePanelEvidence = async (root: string) => {
+  const directory = "builds/playtests/run-panel";
+  await NodeFSP.mkdir(NodePath.join(root, directory), { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(root, directory, "after-steps.png"), Buffer.from("png"));
+  await NodeFSP.writeFile(
+    NodePath.join(root, directory, "result.json"),
+    JSON.stringify({
+      at: "2026-10-21T00:00:00.000Z",
+      success: true,
+      booted: true,
+      bootMs: 500,
+      responded: true,
+      changedPercent: 20,
+      message: "Playtest succeeded",
+      steps: [],
+      consoleMessages: [],
+      frames: [
+        {
+          label: "after-steps",
+          file: "after-steps.png",
+          width: 960,
+          height: 540,
+          probe: probe(20, 1, 90, true),
+        },
+      ],
+      state: { before: probe(0), after: probe(20, 1, 90, true), playerMoved: 20, changes: [] },
+      qualifies: true,
+    }),
+  );
+  await NodeFSP.writeFile(
+    NodePath.join(root, "DESIGN.md"),
+    "# Game\n\n## Art direction\n\nBackground #101018, hazard #e04050, goal #ffe08a.\n",
+  );
+  return directory;
+};
+
 const withJudge = <A, E>(
   run: (input: {
     readonly root: string;
@@ -131,9 +174,13 @@ const withJudge = <A, E>(
     }),
   );
 
-const input = (evidenceDirectory: string, designHash: string | null = "design-1") => ({
+const input = (
+  evidenceDirectory: string,
+  designHash: string | null = "design-1",
+  buildId = "source-1:build-1",
+) => ({
   sourceId: "source-1",
-  buildId: "source-1:build-1",
+  buildId,
   designHash,
   evidenceDirectory,
   acceptance,
@@ -305,28 +352,87 @@ describe("the visual judge", () => {
     ),
   );
 
-  it.effect("spends one repair round and refuses a third judgement", () =>
+  it.effect("spends one repair round per changed build and refuses a third", () =>
     withJudge(
       ({ root, judge }) =>
         Effect.gen(function* () {
           const evidenceDirectory = yield* Effect.promise(() => writeEvidence(root));
           expect((yield* judge.run(root, input(evidenceDirectory))).status).toBe("judged");
-          const second = yield* judge.run(root, input(evidenceDirectory));
+          const second = yield* judge.run(root, input(evidenceDirectory, "design-1", "build-2"));
           expect(second.status).toBe("judged");
           if (second.status === "judged") expect(second.judgement.roundsLeft).toBe(0);
-          expect((yield* judge.run(root, input(evidenceDirectory))).status).toBe("exhausted");
+          expect(
+            (yield* judge.run(root, input(evidenceDirectory, "design-1", "build-3"))).status,
+          ).toBe("exhausted");
           expect(yield* judge.remaining(root, "design-1")).toBe(0);
           // A new approved design revision starts a fresh pair of judgements.
           expect(yield* judge.remaining(root, "design-2")).toBe(2);
-          expect((yield* judge.run(root, input(evidenceDirectory, "design-2"))).status).toBe(
-            "judged",
-          );
+          expect(
+            (yield* judge.run(root, input(evidenceDirectory, "design-2", "build-4"))).status,
+          ).toBe("judged");
         }),
       (input) => {
         if (input.prompt.includes("one large digit"))
           return Effect.succeed({ digit: "7", backgroundColor: "magenta" });
         return Effect.succeed(review(2));
       },
+    ),
+  );
+
+  it.effect("reuses the verdict of an unchanged build without spending a round", () => {
+    let reviews = 0;
+    return withJudge(
+      ({ root, judge }) =>
+        Effect.gen(function* () {
+          const evidenceDirectory = yield* Effect.promise(() => writeEvidence(root));
+          const first = yield* judge.run(root, input(evidenceDirectory));
+          expect(first.status).toBe("judged");
+          if (first.status !== "judged") return;
+          expect(first.reused).toBe(false);
+          expect(first.judgement.roundsLeft).toBe(1);
+          // A second playtest of the same source, build and design — the t38 loss
+          // and win tests — must not buy a second judgement.
+          const second = yield* judge.run(root, input(evidenceDirectory));
+          expect(second.status).toBe("judged");
+          if (second.status !== "judged") return;
+          expect(second.reused).toBe(true);
+          expect(second.judgement.repairRequests).toEqual(first.judgement.repairRequests);
+          expect(second.judgement.roundsLeft).toBe(1);
+          expect(reviews).toBe(1);
+          expect(yield* judge.remaining(root, "design-1")).toBe(1);
+          // A changed build is a new look and earns a new judgement.
+          const changed = yield* judge.run(root, input(evidenceDirectory, "design-1", "build-2"));
+          expect(changed.status).toBe("judged");
+          if (changed.status === "judged") expect(changed.reused).toBe(false);
+          expect(reviews).toBe(2);
+        }),
+      (input) => {
+        if (input.prompt.includes("one large digit"))
+          return Effect.succeed({ digit: "7", backgroundColor: "magenta" });
+        reviews += 1;
+        return Effect.succeed(review(4));
+      },
+    );
+  });
+
+  it.effect("does not call the judge or spend a round on result screens alone", () =>
+    withJudge(({ root, judge }) =>
+      Effect.gen(function* () {
+        const evidenceDirectory = yield* Effect.promise(() => writePanelEvidence(root));
+        const run = yield* judge.run(root, input(evidenceDirectory));
+        expect(run.status).toBe("judged");
+        if (run.status !== "judged") return;
+        expect(run.judgement.status).toBe("failed");
+        expect(run.judgement.detail).toContain("Not enough gameplay evidence");
+        // The message names the screenshot steps the next run needs.
+        expect(run.judgement.detail).toContain("mid-run");
+        expect(run.judgement.detail).toContain("hazard hit");
+        expect(run.judgement.detail).toContain("approach to the goal");
+        expect(run.judgement.frames.map((frame) => frame.role)).toEqual(["result"]);
+        expect(run.judgement.roundsLeft).toBe(2);
+        // No round was spent, so a better-captured run can still be judged.
+        expect(yield* judge.remaining(root, "design-1")).toBe(2);
+      }),
     ),
   );
 

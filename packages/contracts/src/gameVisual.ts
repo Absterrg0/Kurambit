@@ -49,13 +49,19 @@ export const GameVisualReview = Schema.Struct({
 });
 export type GameVisualReview = typeof GameVisualReview.Type;
 
-/** Why a frame was selected; only these roles carry gameplay evidence. */
+/**
+ * Why a frame was selected. Only the gameplay roles carry evidence of play;
+ * `result` is the screen the run ended on (an approved win or lose claim was
+ * met there), which the judge may read for feedback but never for the look of
+ * the game itself.
+ */
 export const GameVisualFrameRole = Schema.Literals([
   "early",
   "interaction",
   "hazard",
   "later",
   "finish",
+  "result",
 ]);
 export type GameVisualFrameRole = typeof GameVisualFrameRole.Type;
 

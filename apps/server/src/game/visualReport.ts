@@ -46,11 +46,14 @@ export function formatVisualReport(judgement: GameVisualJudgement): string {
     );
   if (judgement.status !== "passed") {
     if (judgement.detail !== undefined) lines.push(`Why: ${judgement.detail}.`);
-    lines.push(
-      judgement.roundsLeft > 0
-        ? "One repair round left: fix only these requests through the palette/kit or camera, re-run export and playtest once, then stop."
-        : "No rounds left — visual failed, report it to the creator and stop.",
-    );
+    // A judgement that never happened has no repair requests to act on; its
+    // detail already says which screenshot steps are missing.
+    if (judgement.dimensions.length > 0)
+      lines.push(
+        judgement.roundsLeft > 0
+          ? "One repair round left: fix only these requests through the palette/kit or camera, re-run export and playtest once, then stop."
+          : "No rounds left — visual failed, report it to the creator and stop.",
+      );
   }
   return lines.join("\n");
 }

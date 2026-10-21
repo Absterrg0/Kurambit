@@ -4,7 +4,11 @@ import type {
   GamePlaytestProbe,
   GamePlaytestState,
 } from "@t3tools/contracts";
-import { selectVisualFrames, type VisualEvidenceFrame } from "./visualFrames.ts";
+import {
+  missingVisualEvidence,
+  selectVisualFrames,
+  type VisualEvidenceFrame,
+} from "./visualFrames.ts";
 
 const player = (x: number): GamePlaytestProbe["player"] => ({ x, y: 0, z: 0 });
 
@@ -36,7 +40,7 @@ const acceptance: readonly GameAcceptanceCriterion[] = [
     text: "Collect a pearl",
     observe: { key: "collected", expect: ">=1" },
   },
-  { id: "hurt", kind: "lose", text: "The tide hurts", observe: { key: "health", expect: "<=95" } },
+  { id: "hurt", kind: "lose", text: "The tide hurts", observe: { key: "health", expect: "<=0" } },
   { id: "win", kind: "win", text: "Reach the gate", observe: { key: "won", expect: "==1" } },
   { id: "glow", kind: "presentation", text: "The gate glows" },
 ];
@@ -171,7 +175,7 @@ describe("visual frame selection", () => {
     ]);
   });
 
-  it("still picks the frame where the lose condition is met", () => {
+  it("treats a met lose claim as the run's end, not as a hazard", () => {
     const run = (x: number, lives: number, collected: number): GamePlaytestProbe => ({
       player: player(x),
       gameState: { lives, collected },
@@ -180,11 +184,12 @@ describe("visual frame selection", () => {
       { label: "start", file: "01.png", probe: run(0, 3, 0) },
       { label: "pearl", file: "02.png", probe: run(10, 3, 1) },
       { label: "dead", file: "03.png", probe: run(20, 0, 1) },
-      { label: "game-over", file: "04.png", probe: run(20, 3, 0) },
+      { label: "panel", file: "04.png", probe: run(20, 0, 1) },
+      { label: "retry", file: "05.png", probe: run(0, 3, 0) },
     ];
     const selected = select({
       evidence: loseFrames,
-      runState: state(run(0, 3, 0), run(20, 3, 0)),
+      runState: state(run(0, 3, 0), run(0, 3, 0)),
       criteria: [
         {
           id: "collect",
@@ -202,9 +207,35 @@ describe("visual frame selection", () => {
     });
     expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
       ["early", "builds/playtests/run/01.png"],
-      ["hazard", "builds/playtests/run/03.png"],
       ["interaction", "builds/playtests/run/02.png"],
+      ["finish", "builds/playtests/run/05.png"],
+      ["result", "builds/playtests/run/03.png"],
+    ]);
+    // With no hit short of the loss, the design owes a hazard the run never took.
+    expect(missingVisualEvidence({ frames: selected, hazardRequired: true })).toEqual(["hazard"]);
+  });
+
+  it("never lets a result panel fill a gameplay role, even with the player in frame", () => {
+    const panelRun: readonly VisualEvidenceFrame[] = [
+      { label: "booted", file: "01.png" },
+      { label: "spawn", file: "02.png", probe: probe({ x: 0 }) },
+      { label: "lantern", file: "03.png", probe: probe({ x: 20, collected: 1 }) },
+      { label: "approach", file: "04.png", probe: probe({ x: 40, collected: 1 }) },
+      { label: "win-moment", file: "05.png", probe: probe({ x: 50, collected: 1, won: true }) },
+      { label: "win-panel", file: "06.png", probe: probe({ x: 50, collected: 1, won: true }) },
+    ];
+    const selected = select({
+      evidence: panelRun,
+      runState: state(probe({ x: 0 }), probe({ x: 50, collected: 1, won: true })),
+    });
+    // The win frames still carry a player body behind the panel; only the
+    // pixels before the win may be judged as gameplay, and the finish is the
+    // last of them, not the panel or the winning frame after it.
+    expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
+      ["early", "builds/playtests/run/02.png"],
+      ["interaction", "builds/playtests/run/03.png"],
       ["finish", "builds/playtests/run/04.png"],
+      ["result", "builds/playtests/run/05.png"],
     ]);
   });
 
@@ -233,16 +264,14 @@ describe("visual frame selection", () => {
     expect(interaction?.path).toBe("builds/playtests/run/04-water.png");
   });
 
-  it("falls back to run order when the evidence has no probe state", () => {
+  it("selects nothing when the evidence has no probe state", () => {
     const selected = select({
       evidence: frames.map(({ label, file }) => ({ label, file })),
       runState: null,
     });
-    expect(selected.map((frame) => [frame.role, frame.path])).toEqual([
-      ["early", "builds/playtests/run/02-level-start.png"],
-      ["later", "builds/playtests/run/05-final.png"],
-      ["finish", "builds/playtests/run/06-after-steps.png"],
-    ]);
+    // Run order cannot prove a frame is gameplay, and guessing is how a result
+    // screen became the review's only evidence in t38.
+    expect(selected).toEqual([]);
   });
 
   it("caps the review at six frames", () => {

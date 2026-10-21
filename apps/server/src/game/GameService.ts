@@ -376,7 +376,11 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // An exhausted budget must not open a stage it will refuse: `begin`
       // deletes the previous verdict and the refusal would leave it missing.
-      if ((yield* visualJudge.remaining(input.root, input.designHash)) <= 0) return null;
+      if (
+        (yield* visualJudge.previous(input.root, input)) === null &&
+        (yield* visualJudge.remaining(input.root, input.designHash)) <= 0
+      )
+        return null;
       return yield* ownStage(
         input.root,
         "visual",
@@ -413,7 +417,8 @@ const make = Effect.gen(function* () {
                         : "failed",
                   sourceId: input.sourceId,
                   buildId: input.buildId,
-                  evidenceDirectory: input.evidenceDirectory,
+                  // A reused verdict names the run whose frames it was read from.
+                  evidenceDirectory: judgement.evidenceDirectory,
                   designHash: input.designHash,
                   visual: judgement,
                   detail: judgement.detail ?? `Visual judge: ${judgement.status}.`,
@@ -718,7 +723,11 @@ const make = Effect.gen(function* () {
           const visual = visualAttempt?.status === "judged" ? visualAttempt.judgement : null;
           const visualNote =
             visual !== null
-              ? `\n${formatVisualReport(visual)}`
+              ? `${
+                  visualAttempt?.status === "judged" && visualAttempt.reused
+                    ? `\nVisual judge: this source, build and design already have a verdict from ${visual.evidenceDirectory}; it is reused and no round was spent.`
+                    : ""
+                }\n${formatVisualReport(visual)}`
               : visualAttempt === null
                 ? "\nVisual judge: no rounds left — visual failed, report it and stop."
                 : "";

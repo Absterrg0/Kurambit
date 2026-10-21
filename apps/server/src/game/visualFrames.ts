@@ -19,6 +19,10 @@ export interface VisualEvidenceFrame {
   readonly probe?: GamePlaytestProbe;
 }
 
+/** A gameplay frame: the probe found the player body in it. */
+const isGameplay = (probe: GamePlaytestProbe | undefined): probe is GamePlaytestProbe =>
+  probe !== undefined && probe.player !== null;
+
 const numeric = (value: GamePlaytestStateValue | undefined): number | null =>
   typeof value === "boolean" ? (value ? 1 : 0) : typeof value === "number" ? value : null;
 
@@ -56,9 +60,8 @@ export const requiresHazardFrame = (acceptance: readonly GameAcceptanceCriterion
 
 /**
  * Whether a frame is on the way to the lose condition: the key moved from its
- * baseline in the direction that ends the run. A winning playtest never reaches
- * a met lose criterion, but the hit that cost a life is the hazard the review
- * needs to see, and reaching the condition counts as the same movement.
+ * baseline in the direction that ends the run. The frame where the claim is met
+ * is the run's end, not a hazard, so callers exclude it.
  */
 const movedTowardLose = (
   expectation: NonNullable<Expectation>,
@@ -100,11 +103,32 @@ const frameEvidence = (baseline: GamePlaytestProbe | null, probe: GamePlaytestPr
 };
 
 /**
+ * Whether an approved `win` or `lose` claim is met in this frame: the run ended
+ * there, so the frame is a result screen, never gameplay evidence. A `changes`
+ * claim is relative to the baseline and would mark every later frame an end,
+ * so it cannot decide the end of a run (approval rejects that form anyway).
+ */
+const isEndFrame = (
+  criteria: ReturnType<typeof observedCriteria>,
+  probe: GamePlaytestProbe,
+): boolean =>
+  criteria.some(
+    ({ criterion, key, expectation }) =>
+      (criterion.kind === "win" || criterion.kind === "lose") &&
+      expectation.kind !== "changes" &&
+      satisfied(expectation, probe.gameState[key]),
+  );
+
+/**
  * Picks at most six frames that carry evidence of the states a visual review
  * needs: early gameplay, a real core interaction, a hazard moment, a later
- * area and the finish. The probe decides; a run whose evidence has no probe
- * state falls back to run order, because those frames cannot prove gameplay
- * and the positional fallback must not pretend a caption did.
+ * area, the approach to the goal and the run's result screen. The probe
+ * decides; a run whose evidence has no probed frame selects nothing, because
+ * run order cannot prove a frame is gameplay.
+ *
+ * A frame where an approved win or lose claim is already met is the end of the
+ * run. It may fill only `result`: t38's reviews judged the end-of-run panel as
+ * "early gameplay" and scored a game they had never seen.
  */
 export function selectVisualFrames(input: {
   readonly frames: readonly VisualEvidenceFrame[];
@@ -117,9 +141,12 @@ export function selectVisualFrames(input: {
   if (frames.length === 0) return [];
   const indexed = frames.map((frame, index) => ({ frame, index }));
   const baseline =
-    input.state?.before ?? frames.find((frame) => frame.probe?.player != null)?.probe ?? null;
+    input.state?.before ?? frames.find((frame) => isGameplay(frame.probe))?.probe ?? null;
+  if (baseline === null) return [];
   const criteria = observedCriteria(input.acceptance);
-  const hasProbeState = frames.some((frame) => frame.probe !== undefined) && baseline !== null;
+  const running = indexed.filter(
+    (entry) => isGameplay(entry.frame.probe) && !isEndFrame(criteria, entry.frame.probe),
+  );
 
   const chosen = new Map<string, GameVisualFrame>();
   const pick = (entry: (typeof indexed)[number] | undefined, role: GameVisualFrame["role"]) => {
@@ -137,59 +164,87 @@ export function selectVisualFrames(input: {
     });
   };
 
-  if (hasProbeState) {
-    const gameplay = indexed.filter((entry) => entry.frame.probe?.player != null);
-    pick(gameplay[0], "early");
+  pick(running[0], "early");
 
-    // Hazard before interaction: the pass rule requires a hazard frame, and the
-    // first damage frame is usually also the first `lives` mechanic frame.
-    const hazard = gameplay.find((entry) => {
-      const probe = entry.frame.probe;
-      if (probe === undefined) return false;
-      return criteria.some(({ criterion, key, expectation }) => {
-        if (criterion.kind !== "lose") return false;
-        const baselineValue = baseline.gameState[key];
-        return (
-          baselineValue !== undefined &&
-          !satisfied(expectation, baselineValue) &&
-          movedTowardLose(expectation, baselineValue, probe.gameState[key])
-        );
-      });
+  // Hazard before interaction: the pass rule requires a hazard frame, and the
+  // first damage frame is usually also the first `lives` mechanic frame. Only a
+  // hit that stopped short of the lose condition is a hazard; the frame where
+  // the claim is met is the run's end.
+  const hazard = running.find((entry) => {
+    const probe = entry.frame.probe;
+    if (probe === undefined) return false;
+    return criteria.some(({ criterion, key, expectation }) => {
+      if (criterion.kind !== "lose") return false;
+      const baselineValue = baseline.gameState[key];
+      return (
+        baselineValue !== undefined &&
+        !satisfied(expectation, baselineValue) &&
+        !satisfied(expectation, probe.gameState[key]) &&
+        movedTowardLose(expectation, baselineValue, probe.gameState[key])
+      );
     });
-    pick(hazard, "hazard");
+  });
+  pick(hazard, "hazard");
 
-    const progressed = gameplay.find((entry) => {
-      const probe = entry.frame.probe;
-      if (probe === undefined || chosen.has(entry.frame.file)) return false;
-      return criteria.some(({ criterion, key, expectation }) => {
-        // Lose progress belongs to the hazard role; a frame carries one role.
-        if (criterion.kind === "lose") return false;
-        const baselineValue = baseline.gameState[key];
-        if (baselineValue === undefined) return false;
-        const value = probe.gameState[key];
-        // A `changes` claim is relative to the baseline, not something the
-        // baseline can already satisfy.
-        if (expectation.kind === "changes") return value !== undefined && value !== baselineValue;
-        if (satisfied(expectation, baselineValue)) return false;
-        return satisfied(expectation, value);
-      });
+  const progressed = running.find((entry) => {
+    const probe = entry.frame.probe;
+    if (probe === undefined || chosen.has(entry.frame.file)) return false;
+    return criteria.some(({ criterion, key, expectation }) => {
+      // Lose progress belongs to the hazard role; a frame carries one role.
+      if (criterion.kind === "lose") return false;
+      const baselineValue = baseline.gameState[key];
+      if (baselineValue === undefined) return false;
+      const value = probe.gameState[key];
+      // A `changes` claim is relative to the baseline, not something the
+      // baseline can already satisfy.
+      if (expectation.kind === "changes") return value !== undefined && value !== baselineValue;
+      if (satisfied(expectation, baselineValue)) return false;
+      return satisfied(expectation, value);
     });
-    pick(progressed, "interaction");
+  });
+  pick(progressed, "interaction");
 
-    const finishEntry = indexed.at(-1);
-    // A later area is the last observed gameplay before the run's final frame.
-    const later = gameplay.findLast((entry) => entry.index < (finishEntry?.index ?? Infinity));
-    pick(later, "later");
-    pick(finishEntry, "finish");
-    return [...chosen.values()].slice(0, 6);
-  }
+  // The finish is the last gameplay frame the run reached before it ended: the
+  // approach to the goal. A run whose final gameplay frames all filled another
+  // role has no separate approach, so it selects no finish and is not judged.
+  const finish = running.findLast((entry) => !chosen.has(entry.frame.file));
+  const later =
+    finish === undefined
+      ? undefined
+      : running.findLast((entry) => entry.index < finish.index && !chosen.has(entry.frame.file));
+  pick(later, "later");
+  pick(finish, "finish");
 
-  // No probe state: run order only. The first frame is the boot screen, and the
-  // last is the run's final capture; nothing here can claim an interaction.
-  const ordered = indexed.slice(1);
-  const usable = ordered.length > 0 ? ordered : indexed;
-  pick(usable[0], "early");
-  if (usable.length >= 3) pick(usable[usable.length - 2], "later");
-  pick(usable.at(-1), "finish");
-  return [...chosen.values()];
+  const result = indexed.find(
+    (entry) => entry.frame.probe !== undefined && isEndFrame(criteria, entry.frame.probe),
+  );
+  pick(result, "result");
+  return [...chosen.values()].slice(0, 6);
 }
+
+/**
+ * The gameplay evidence a review cannot work without. A result screen shows the
+ * player behind a panel, so a run that only captured end screens must not spend
+ * a judgement: the agent needs screenshot steps that show the game.
+ */
+export const missingVisualEvidence = (input: {
+  readonly frames: readonly GameVisualFrame[];
+  readonly hazardRequired: boolean;
+}): readonly GameVisualFrame["role"][] => {
+  const roles = new Set(input.frames.map((frame) => frame.role));
+  const missing: GameVisualFrame["role"][] = [];
+  if (!roles.has("early")) missing.push("early");
+  if (!roles.has("finish")) missing.push("finish");
+  if (input.hazardRequired && !roles.has("hazard")) missing.push("hazard");
+  return missing;
+};
+
+/** What the agent must capture to fill a missing role, in the playtest's own vocabulary. */
+export const VISUAL_EVIDENCE_STEP: Record<GameVisualFrame["role"], string> = {
+  early: "a mid-run frame after play has started",
+  interaction: "the core interaction as it happens",
+  hazard: "one hazard hit that costs health or a life without ending the run",
+  later: "a later area",
+  finish: "the approach to the goal, before the result screen",
+  result: "the result screen",
+};

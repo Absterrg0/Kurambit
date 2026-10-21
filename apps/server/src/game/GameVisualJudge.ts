@@ -22,7 +22,12 @@ import {
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { readDesignDocument } from "./GameDesignApproval.ts";
 import { readPlaytestEvidence } from "./playtestEvidence.ts";
-import { requiresHazardFrame, selectVisualFrames } from "./visualFrames.ts";
+import {
+  VISUAL_EVIDENCE_STEP,
+  missingVisualEvidence,
+  requiresHazardFrame,
+  selectVisualFrames,
+} from "./visualFrames.ts";
 import { VISUAL_CANARY_ANSWER, canaryPng } from "./visualCanary.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 
@@ -59,7 +64,8 @@ export interface GameVisualJudgeInput {
 }
 
 export type GameVisualJudgeRun =
-  | { readonly status: "judged"; readonly judgement: GameVisualJudgement }
+  /** `reused` means this build already had a verdict, so no round was spent. */
+  | { readonly status: "judged"; readonly judgement: GameVisualJudgement; readonly reused: boolean }
   /** The approved design revision already spent its two judgements. */
   | { readonly status: "exhausted" };
 
@@ -74,6 +80,15 @@ export class GameVisualJudge extends Context.Service<
       root: string,
       input: GameVisualJudgeInput,
     ) => Effect.Effect<GameVisualJudgeRun, GameOperationError>;
+    /**
+     * The verdict this exact source, build and approved design already earned,
+     * if any. Callers check it before refusing an exhausted budget: the same
+     * build is never judged twice.
+     */
+    readonly previous: (
+      root: string,
+      input: Pick<GameVisualJudgeInput, "sourceId" | "buildId" | "designHash">,
+    ) => Effect.Effect<GameVisualJudgement | null, GameOperationError>;
     /**
      * Judgements left for this approved design revision. Callers check this
      * before opening a visual attempt so an exhausted budget cannot erase the
@@ -158,6 +173,23 @@ const StoredBudget = Schema.fromJsonString(
 );
 const decodeStoredBudget = Schema.decodeUnknownSync(StoredBudget);
 const encodeStoredBudget = Schema.encodeSync(StoredBudget);
+
+/**
+ * The last real judgement for one game root. Reusing it is how a second playtest
+ * of an unchanged build avoids spending a repair round on the same verdict.
+ */
+const StoredVerdict = Schema.fromJsonString(
+  Schema.Struct({
+    schemaVersion: Schema.Literal(1),
+    sourceId: Schema.String,
+    buildId: Schema.String,
+    designHash: Schema.NullOr(Schema.String),
+    judgement: GameVisualJudgement,
+  }),
+);
+const decodeStoredVerdict = Schema.decodeUnknownSync(StoredVerdict);
+const encodeStoredVerdict = Schema.encodeSync(StoredVerdict);
+
 const encodeJudgement = Schema.encodeSync(Schema.fromJsonString(GameVisualJudgement));
 const encodeRawValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeRawReply = (value: unknown): string => encodeRawValue(value).slice(0, RAW_REPLY_LIMIT);
@@ -218,7 +250,7 @@ ${presentation.length === 0 ? "None were approved." : presentation.map((criterio
 
 ${frameLines.join("\n")}
 
-Frame roles: early = first observed gameplay; interaction = an approved criterion progressed there; hazard = an approved lose claim moved from its baseline there (damage, or the lose condition itself); later = later gameplay; finish = the run's final frame. Only these frames are evidence. A caption such as "double-jump" or "moon-pearl" is a label, not a promise that the frame shows it.
+Frame roles: early = first observed gameplay; interaction = an approved criterion progressed there; hazard = an approved lose claim moved toward its limit there without reaching it (damage); later = later gameplay; finish = the last gameplay frame before the run ended (the approach to the goal); result = the frame the run ended on, where an approved win or lose claim was met. Only these frames are evidence. A caption such as "double-jump" or "moon-pearl" is a label, not a promise that the frame shows it.
 
 ${input.gameState === null ? "" : `The run's own summary: ${input.gameState}\n`}
 ## Rubric
@@ -230,6 +262,8 @@ ${DIMENSION_ANCHORS}
 ## Rules
 
 - Do not raise a score because a caption or the frame order claims a state; only pixels count.
+- The result frame is an end screen, not gameplay. Read it only for feedback — what the panel says about the run. Never judge readability, value separation, camera/framing or design compliance from it, and never treat its interface as part of the game's style.
+- When a supplied frame's subject is covered, mark that dimension "missing", never 0: a result panel over the scene, the player or goal out of frame, or a frame that cannot show the thing at all. 0 means the frames show it and it fails.
 - A still frame cannot judge variable jump height, invulnerability duration, timing or audio. Do not score those; if a dimension depends on them, score only the visual part the frames can show.
 - Return at most three repair requests. Each names one supplied frame id (F1…Fn) and one concrete fix through the palette roles, the shared kit or the camera — never "make it better", never a redesign of the game.
 - If every applicable dimension is at least 3, return no repair requests.
@@ -350,6 +384,53 @@ const make = (stateDir: string) =>
           new GameOperationError({ operation: "visual-judge", path: root, reason: "io", cause }),
       });
 
+    const verdictPath = (root: string) =>
+      gameRecordFile(stateDir, "game-visual-verdict", root, ".json");
+    /**
+     * The verdict a build already earned. An unreadable record counts as none:
+     * judging again costs a round, but a corrupt file must not block the stage.
+     */
+    const readVerdict = async (root: string): Promise<GameVisualJudgement | null> => {
+      try {
+        return decodeStoredVerdict(await NodeFSP.readFile(verdictPath(root), "utf8")).judgement;
+      } catch {
+        return null;
+      }
+    };
+    const sameIdentity = (
+      judgement: GameVisualJudgement,
+      input: Pick<GameVisualJudgeInput, "sourceId" | "buildId" | "designHash">,
+    ): boolean =>
+      judgement.sourceId === input.sourceId &&
+      judgement.buildId === input.buildId &&
+      judgement.designHash === input.designHash;
+    const writeVerdict = (
+      root: string,
+      input: GameVisualJudgeInput,
+      judgement: GameVisualJudgement,
+    ) =>
+      Effect.tryPromise({
+        try: () =>
+          serialized(root, async () => {
+            const file = verdictPath(root);
+            await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+            const temporary = `${file}.${process.pid}.tmp`;
+            await NodeFSP.writeFile(
+              temporary,
+              encodeStoredVerdict({
+                schemaVersion: 1,
+                sourceId: input.sourceId,
+                buildId: input.buildId,
+                designHash: input.designHash,
+                judgement,
+              }),
+            );
+            await NodeFSP.rename(temporary, file);
+          }),
+        catch: (cause) =>
+          new GameOperationError({ operation: "visual-judge", path: root, reason: "io", cause }),
+      });
+
     /**
      * The canary runs once per server process, and only a pass is kept: a
      * provider that could not answer yet must be retried on the next judgement
@@ -409,28 +490,63 @@ const make = (stateDir: string) =>
           detail,
         });
 
+        const used = yield* Effect.promise(() => readBudget(budgetRoot, input.designHash));
+        // A playtest of an unchanged build cannot change the verdict, so it must
+        // not cost a round: t38 spent both judgements on one build and graded
+        // only the result panels.
+        const stored = yield* Effect.promise(() => readVerdict(budgetRoot));
+        if (stored !== null && sameIdentity(stored, input))
+          return {
+            status: "judged" as const,
+            reused: true,
+            judgement: { ...stored, roundsLeft: Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used) },
+          };
+
         if (frames.length === 0)
           return {
             status: "judged" as const,
+            reused: false,
             judgement: unavailable(
               "No playtest frames are available to judge.",
-              MAX_JUDGEMENTS_PER_DESIGN -
-                (yield* Effect.promise(() => readBudget(budgetRoot, input.designHash))),
+              MAX_JUDGEMENTS_PER_DESIGN - used,
             ),
           };
+
+        if (used >= MAX_JUDGEMENTS_PER_DESIGN) return { status: "exhausted" as const };
+
+        // A result screen is not gameplay: without early, finish and the design's
+        // hazard frame the judge has nothing to look at, so it is never asked and
+        // no round is spent.
+        const missing = missingVisualEvidence({
+          frames,
+          hazardRequired: requiresHazardFrame(input.acceptance),
+        });
+        if (missing.length > 0)
+          return {
+            status: "judged" as const,
+            reused: false,
+            judgement: {
+              ...unavailable(
+                `Not enough gameplay evidence: no ${missing.join(", ")} frame. Add screenshot steps for ${missing
+                  .map((role) => VISUAL_EVIDENCE_STEP[role])
+                  .join(", ")}, then run the playtest again. No visual round was spent.`,
+                MAX_JUDGEMENTS_PER_DESIGN - used,
+              ),
+              status: "failed",
+            },
+          };
+
         const checked = yield* canary;
         if (!checked.ok)
           return {
             status: "judged" as const,
+            reused: false,
             judgement: unavailable(
               `The visual judge is unavailable: image delivery failed (${checked.reason}). Retry the playtest before trusting a visual pass.`,
-              MAX_JUDGEMENTS_PER_DESIGN -
-                (yield* Effect.promise(() => readBudget(budgetRoot, input.designHash))),
+              MAX_JUDGEMENTS_PER_DESIGN - used,
             ),
           };
 
-        const used = yield* Effect.promise(() => readBudget(budgetRoot, input.designHash));
-        if (used >= MAX_JUDGEMENTS_PER_DESIGN) return { status: "exhausted" as const };
         // A budget write is bookkeeping, not the judgement: a failed write must
         // not discard a real review or fail the mechanics run that earned it.
         yield* writeBudget(budgetRoot, input.designHash, used + 1).pipe(
@@ -482,6 +598,7 @@ const make = (stateDir: string) =>
           );
           return {
             status: "judged" as const,
+            reused: false,
             judgement: unavailable(
               "The visual judge is unavailable: the provider call failed. Retry the playtest before trusting a visual pass.",
               Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used),
@@ -506,7 +623,7 @@ const make = (stateDir: string) =>
               ).catch(() => undefined),
             catch: () => undefined,
           }).pipe(Effect.orElseSucceed(() => undefined));
-          return { status: "judged" as const, judgement };
+          return { status: "judged" as const, reused: false, judgement };
         }
         const frameIds = new Set(frames.map((frame) => frame.id));
         const repairRequests: GameVisualRepairRequest[] = review.repairRequests
@@ -542,7 +659,26 @@ const make = (stateDir: string) =>
             ),
           catch: () => undefined,
         }).pipe(Effect.orElseSucceed(() => undefined));
-        return { status: "judged" as const, judgement };
+        // Only a scored review is worth reusing. A malformed reply is a provider
+        // defect, not a verdict about the build, so it never locks the build in.
+        if (dimensions.length > 0)
+          yield* writeVerdict(budgetRoot, input, judgement).pipe(
+            Effect.catchTags({
+              GameOperationError: (error) =>
+                Effect.logWarning("Could not record the visual verdict.", {
+                  operation: error.operation,
+                  reason: error.reason,
+                }),
+            }),
+          );
+        return { status: "judged" as const, reused: false, judgement };
+      });
+
+    const previous: GameVisualJudge["Service"]["previous"] = (root, input) =>
+      Effect.gen(function* () {
+        const budgetRoot = yield* Effect.promise(() => NodeFSP.realpath(root).catch(() => root));
+        const stored = yield* Effect.promise(() => readVerdict(budgetRoot));
+        return stored !== null && sameIdentity(stored, input) ? stored : null;
       });
 
     const remaining: GameVisualJudge["Service"]["remaining"] = (root, designHash) =>
@@ -552,7 +688,7 @@ const make = (stateDir: string) =>
         return Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used);
       });
 
-    return GameVisualJudge.of({ run, remaining });
+    return GameVisualJudge.of({ run, previous, remaining });
   });
 
 export const layer = (options: { readonly stateDir: string }) =>
