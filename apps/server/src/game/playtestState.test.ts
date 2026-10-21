@@ -112,7 +112,7 @@ describe("satisfiedObservations", () => {
       text: "two",
       observe: { key: "collected", expect: ">=2" },
     },
-    { id: "won", kind: "end" as const, text: "won", observe: { key: "won", expect: "==1" } },
+    { id: "won", kind: "win" as const, text: "won", observe: { key: "won", expect: "==1" } },
     { id: "few", kind: "mechanic" as const, text: "few", observe: { key: "lives", expect: "<=3" } },
     {
       id: "changed",

@@ -23,6 +23,9 @@ var _boot_frames := 30
 var _frame := 0
 var _held := {}
 var _stats := {}
+var _first_input_frame := -1
+var _baseline_frame := -1
+var _baseline_values := {}
 var _player: Variant = null
 var _player_first: Variant = null
 var _player_last: Variant = null
@@ -112,8 +115,15 @@ func _run_step(step: Dictionary) -> String:
 		return ""
 	return "unknown step kind"
 
+func _mark_input() -> void:
+	# The first non-wait step is where play could start. Everything sampled
+	# before it is boot, and a value that was already true there proves nothing.
+	if _first_input_frame < 0:
+		_first_input_frame = _frame
+
 func _run_press(action: String) -> String:
 	_release_all()
+	_mark_input()
 	var has_key := false
 	for event in InputMap.action_get_events(action):
 		var key := event as InputEventKey
@@ -151,6 +161,7 @@ func _run_press(action: String) -> String:
 	return ""
 
 func _run_hold(actions: Array, frames: int) -> String:
+	_mark_input()
 	for action in _held.keys():
 		if not actions.has(action):
 			Input.action_release(action)
@@ -245,6 +256,35 @@ func _value(key: String) -> Variant:
 	return state.get(key)
 
 func _sample() -> void:
+	# A hold or press can rebuild the scene; look the player up again every sample.
+	var players := get_nodes_in_group("player")
+	if players.size() > 0:
+		var body := players[0] as Node
+		if body is Node2D:
+			_player = (body as Node2D).global_position
+		elif body is Node3D:
+			_player = (body as Node3D).global_position
+		else:
+			_player = null
+	else:
+		_player = null
+	if _player != null:
+		_player_seen = true
+		if _player_first == null:
+			_player_first = _player
+		elif _player != _player_first:
+			_player_moved = true
+		_player_last = _player
+	# The gameplay baseline is the first sample after real input in which the
+	# player exists. Boot samples do not count: a menu, a spawn counter or a
+	# world total that is already true there is not something the player did.
+	var has_baseline := _baseline_frame >= 0
+	if not has_baseline and _first_input_frame >= 0 and players.size() > 0:
+		_baseline_frame = _frame
+		has_baseline = true
+		for observation in _observations:
+			var key := str(observation["key"])
+			_baseline_values[key] = _value(key)
 	var state := _game_state()
 	if state != null:
 		for observation in _observations:
@@ -270,34 +310,28 @@ func _sample() -> void:
 					stats["max"] = value
 			if stats["firstChangeFrame"] == null and value != stats["first"]:
 				stats["firstChangeFrame"] = _frame
-			if not stats["matches"].has(id) and _matches(str(observation.get("expect", "")), value, stats):
-				stats["matches"][id] = _frame
-	# A hold or press can rebuild the scene; look the player up again every sample.
-	var players := get_nodes_in_group("player")
-	if players.size() > 0:
-		var body := players[0] as Node
-		if body is Node2D:
-			_player = (body as Node2D).global_position
-		elif body is Node3D:
-			_player = (body as Node3D).global_position
-		else:
-			_player = null
-	else:
-		_player = null
-	if _player != null:
-		_player_seen = true
-		if _player_first == null:
-			_player_first = _player
-		elif _player != _player_first:
-			_player_moved = true
-		_player_last = _player
+			# Only samples strictly after the baseline can prove a transition.
+			# The baseline value itself is recorded separately and is checked by
+			# the evaluator for "already true when play started".
+			if (
+				has_baseline
+				and _frame > _baseline_frame
+				and not stats["matches"].has(id)
+				and _matches(
+					str(observation.get("expect", "")),
+					value,
+					_baseline_values.get(key),
+				)
+			):
+				stats["matches"][id] = {"frame": _frame, "value": value}
 
 func _is_number(value: Variant) -> bool:
 	return typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT
 
-func _matches(expect: String, value: Variant, stats: Dictionary) -> bool:
+func _matches(expect: String, value: Variant, baseline: Variant) -> bool:
 	if expect == "changes":
-		return stats["firstChangeFrame"] != null
+		# Change is measured from the gameplay baseline, not from boot.
+		return value != baseline
 	if expect.length() < 3:
 		return false
 	var operator := expect.substr(0, 2)
@@ -325,7 +359,12 @@ func _write_result() -> void:
 		var stats: Dictionary = _stats[key]
 		var matches: Array = []
 		for id in stats["matches"].keys():
-			matches.append({"id": id, "frame": int(stats["matches"][id])})
+			var match: Dictionary = stats["matches"][id]
+			matches.append({
+				"id": id,
+				"frame": int(match["frame"]),
+				"value": match["value"],
+			})
 		observations.append({
 			"key": stats["key"],
 			"min": stats["min"],
@@ -333,6 +372,7 @@ func _write_result() -> void:
 			"first": stats["first"],
 			"last": stats["last"],
 			"firstChangeFrame": stats["firstChangeFrame"],
+			"baseline": _baseline_values.get(key),
 			"matches": matches,
 		})
 	var file := FileAccess.open(_result_path, FileAccess.WRITE)
@@ -342,6 +382,8 @@ func _write_result() -> void:
 		"id": str(_scenario.get("id", "")),
 		"frames": _frame,
 		"durationMs": Time.get_ticks_msec() - _started_ms,
+		"firstInputFrame": null if _first_input_frame < 0 else _first_input_frame,
+		"baselineFrame": null if _baseline_frame < 0 else _baseline_frame,
 		"playerMoved": _player_seen and _player_moved,
 		"error": null if _error.is_empty() else _error,
 		"invalidActions": _invalid_actions,

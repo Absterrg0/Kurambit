@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   GameScenarioCriterionResult,
+  type GameAcceptanceCriterion,
   type GameDesignState,
   type GameQualificationRead,
   type GameQualificationStage,
@@ -151,6 +152,8 @@ const deriveQualification = (input: {
   readonly artifactsCurrent: boolean;
   /** The current exam, when the caller knows it. */
   readonly identity: QualificationIdentity | null;
+  /** The approved acceptance, so presentation claims can be listed as missing. */
+  readonly acceptance: readonly GameAcceptanceCriterion[];
 }): GameQualificationRead => {
   if (input.source.kind === "unknown")
     return {
@@ -236,14 +239,27 @@ const deriveQualification = (input: {
       stageReads.set(stage, read("stale"));
     else stageReads.set(stage, read("passed"));
   }
-  for (const stage of ["visual"] as const)
-    stageReads.set(stage, {
-      stage,
-      status: "missing",
-      sourceId: null,
-      buildId: null,
-      finishedAt: null,
-    });
+  // The visual stage does not exist yet (task 34). Its claims are listed as
+  // missing so approval coverage is visible, never as passed or "unverified ok".
+  const presentation = input.acceptance
+    .filter((criterion) => criterion.kind === "presentation")
+    .map((criterion) => ({
+      id: criterion.id,
+      kind: criterion.kind,
+      text: criterion.text,
+      status: "missing" as const,
+      observed: "The visual stage is not implemented yet; this claim is not verified.",
+      scenarios: [],
+      provenBy: null,
+    }));
+  stageReads.set("visual", {
+    stage: "visual",
+    status: "missing",
+    sourceId: null,
+    buildId: null,
+    finishedAt: null,
+    ...(presentation.length === 0 ? {} : { criteria: presentation }),
+  });
 
   // A playtest proves nothing about a build it did not play, so it also has to
   // name the export that is current right now.
@@ -343,6 +359,7 @@ export class GameQualification extends Context.Service<
       designState?: GameDesignState,
       designHash?: string | null,
       identity?: QualificationIdentity | null,
+      acceptance?: readonly GameAcceptanceCriterion[],
     ) => Effect.Effect<GameQualificationRead>;
     /**
      * The record-only verdict for a library row. Cheap by construction: it reads
@@ -395,7 +412,7 @@ export const layer = (options: {
           const record = await readRecord(location.file);
           return deriveQualificationSummary(record, designHash, identity ?? null);
         }),
-      read: (root, godotProject, designState, designHash, identity) =>
+      read: (root, godotProject, designState, designHash, identity, acceptance) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>
             snapshotSource(root, godotProject, {
@@ -416,6 +433,7 @@ export const layer = (options: {
             designHash: designHash ?? null,
             artifactsCurrent,
             identity: identity ?? null,
+            acceptance: acceptance ?? [],
           });
         }),
       record: (root, input) =>

@@ -11,6 +11,8 @@ import {
   DEFAULT_GAME_TEST_SUITE,
   GameAcceptanceCriterion,
   GameOperationError,
+  StoredGameAcceptanceCriterion,
+  normalizeAcceptance,
   type GameDesignRead,
   type GameDesignState,
   GameVerificationPolicy,
@@ -117,7 +119,9 @@ const StoredRecord = Schema.fromJsonString(
     approvalId: Schema.String,
     designHash: Schema.String,
     approvedAt: Schema.String,
-    acceptance: Schema.Array(GameAcceptanceCriterion),
+    // Persisted approvals may still use the old `end` kind; normalizeAcceptance
+    // below maps it to `win` so the runtime only sees current kinds.
+    acceptance: Schema.Array(StoredGameAcceptanceCriterion),
     buildDispatch: Schema.optionalKey(
       Schema.Struct({
         commandId: Schema.String,
@@ -139,6 +143,32 @@ export const readDesignDocument = async (root: string): Promise<string | null> =
     return await NodeFSP.readFile(NodePath.join(root, "DESIGN.md"), "utf8");
   } catch {
     return null;
+  }
+};
+
+/**
+ * The largest document the Design tab shows. One page is far below this; the
+ * bound exists so a status read cannot ship an unbounded file to the client.
+ */
+export const DESIGN_DOCUMENT_LIMIT = 64 * 1024;
+interface DesignSnapshot {
+  readonly document: string | null;
+  readonly truncated: boolean;
+}
+const readDesignSnapshot = async (root: string): Promise<DesignSnapshot> => {
+  let handle: NodeFSP.FileHandle | null = null;
+  try {
+    handle = await NodeFSP.open(NodePath.join(root, "DESIGN.md"), "r");
+    const buffer = Buffer.alloc(DESIGN_DOCUMENT_LIMIT + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return {
+      document: buffer.subarray(0, Math.min(bytesRead, DESIGN_DOCUMENT_LIMIT)).toString("utf8"),
+      truncated: bytesRead > DESIGN_DOCUMENT_LIMIT,
+    };
+  } catch {
+    return { document: null, truncated: false };
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 };
 
@@ -186,7 +216,9 @@ export const readDesignApprovalRecord = async (
   const text = await readRecordText(file);
   // A missing record proves nothing; a record that exists but cannot be decoded
   // throws, so the caller can refuse rather than downgrade the game.
-  return text === null ? null : decodeStoredRecord(text);
+  if (text === null) return null;
+  const stored = decodeStoredRecord(text);
+  return { ...stored, acceptance: normalizeAcceptance(stored.acceptance) };
 };
 
 /** The full server-owned creation record; null only when absent. */
@@ -275,8 +307,12 @@ const designRead = async (
   ]);
   const record = await readDesignApprovalRecord(approvalLocation.file);
   const intent = await readDesignIntent(intentLocation.file);
-  const design = await readDesignDocument(root);
-  const currentHash = design === null ? null : designDocumentHash(design);
+  // One read is the snapshot: the text, its hash and the parsed acceptance all
+  // come from these bytes, so the Design tab cannot show one revision and
+  // approve another.
+  const snapshot = await readDesignSnapshot(root);
+  const design = snapshot.document;
+  const currentHash = design === null || snapshot.truncated ? null : designDocumentHash(design);
   const exists = design === null ? await designDocumentExists(root) : true;
   const state = deriveDesignState({
     record,
@@ -285,8 +321,14 @@ const designRead = async (
     manifestDesign: manifest.design,
     documentExists: exists,
   });
-  const validation =
-    state === "approved" || state === "legacy"
+  const validation = snapshot.truncated
+    ? {
+        issues: [
+          `DESIGN.md is larger than ${DESIGN_DOCUMENT_LIMIT / 1024} KB, so the Design tab cannot show all of it; shorten it before approving.`,
+        ],
+        acceptance: [],
+      }
+    : state === "approved" || state === "legacy"
       ? { issues: [], acceptance: [] }
       : validateDesignDocument({
           design,
@@ -298,6 +340,8 @@ const designRead = async (
   const currentAcceptance = validation.acceptance;
   return {
     state,
+    document: design,
+    documentTruncated: snapshot.truncated,
     approvedHash: record?.designHash ?? null,
     currentHash,
     approvedAt: record?.approvedAt ?? null,

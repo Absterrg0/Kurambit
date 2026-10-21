@@ -460,7 +460,7 @@ it.live("an approved design's observe criteria are reported without gating", () 
         },
         {
           id: "win-the-run",
-          kind: "end",
+          kind: "win",
           text: "Reach the gate",
           observe: { key: "won", expect: "==1" },
         },

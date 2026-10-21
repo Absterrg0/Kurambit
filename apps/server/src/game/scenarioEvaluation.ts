@@ -1,11 +1,14 @@
 import type {
   GameAcceptanceCriterion,
+  GameObservedValue,
   GameScenarioCriterionResult,
   GameScenarioEvidence,
+  GameScenarioKindCoverage,
   GameScenarioObservation,
   GameScenarioStageReason,
   GameScenarioSummary,
 } from "@t3tools/contracts";
+import { NO_LOSE_STATE_TEXT } from "@t3tools/contracts";
 
 /** Legacy games prove the game started by observing this synthetic promise. */
 export const LEGACY_PLAYING_MATCH_ID = "legacy-playing";
@@ -28,63 +31,127 @@ export function parseScenarioExpectation(text: string): ScenarioExpectation | nu
   return { kind: "atMost", value };
 }
 
-const numeric = (value: GameScenarioObservation["first"]): number | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;
-
-const matchesCriterion = (
-  observation: GameScenarioObservation | undefined,
-  criterionId: string,
-  expectation: ScenarioExpectation,
-): { readonly matched: boolean; readonly frame: number | null } => {
-  if (observation === undefined) return { matched: false, frame: null };
-  const recorded = observation.matches.find((match) => match.id === criterionId);
-  if (recorded !== undefined) return { matched: true, frame: recorded.frame };
-  // Older results (and hand-written fixtures) may not carry matches. Fall back to
-  // the statistics: min/max are exact for the numeric bounds, while equality has
-  // no safe fallback and stays unmatched.
-  if (expectation.kind === "changes")
-    return { matched: observation.firstChangeFrame !== null, frame: null };
-  const min = numeric(observation.min);
-  const max = numeric(observation.max);
-  if (min === null || max === null) return { matched: false, frame: null };
-  if (expectation.kind === "atLeast") return { matched: max >= expectation.value, frame: null };
-  if (expectation.kind === "atMost") return { matched: min <= expectation.value, frame: null };
-  return { matched: false, frame: null };
+const numeric = (value: GameObservedValue | null): number | null => {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 };
 
-const observedLine = (
-  runs: readonly GameScenarioEvidence[],
-  criterionId: string,
-  observationFor: (run: GameScenarioEvidence) => GameScenarioObservation | undefined,
-): string => {
-  if (runs.length === 0) return "No scenario ran.";
-  const parts = runs.map((run) => {
-    if (run.error !== null) return `${run.id}: ${run.error}`;
-    const observation = observationFor(run);
-    if (observation === undefined) return `${run.id}: not sampled`;
-    const min = observation.min === null ? "?" : String(observation.min);
-    const max = observation.max === null ? "?" : String(observation.max);
-    return `${run.id}: ${min}..${max} (first ${String(observation.first)}, last ${String(observation.last)})`;
-  });
-  const text = parts.join("; ");
-  return text.length <= 240 ? text : `${text.slice(0, 237)}...`;
+/** Whether a single sampled value already satisfies the expectation. */
+const satisfiedBy = (
+  expectation: ScenarioExpectation,
+  value: GameObservedValue | null,
+): boolean => {
+  // "changes" needs two samples, so one value can never satisfy it.
+  if (expectation.kind === "changes") return false;
+  const number = numeric(value);
+  if (number === null) return false;
+  if (expectation.kind === "equals") return Math.abs(number - expectation.value) < 1e-9;
+  if (expectation.kind === "atLeast") return number >= expectation.value;
+  return number <= expectation.value;
 };
 
 const observationFor = (run: GameScenarioEvidence, key: string) =>
   run.observations.find((observation) => observation.key === key);
+
+const valueText = (value: GameObservedValue | null): string => {
+  if (value === null) return "missing";
+  if (typeof value === "string") return JSON.stringify(value.slice(0, 40));
+  return String(value);
+};
+
+interface ProvingMatch {
+  readonly run: GameScenarioEvidence;
+  readonly frame: number;
+}
+
+/**
+ * One sampled observation can prove the criterion in several routes. The first
+ * route whose baseline was false and whose later sample matched wins; a route
+ * that already had the value at its baseline cannot prove anything.
+ */
+const provingMatch = (
+  runs: readonly GameScenarioEvidence[],
+  criterionId: string,
+  key: string,
+  expectation: ScenarioExpectation,
+  requireFinal: boolean,
+): { readonly match: ProvingMatch | null; readonly alreadyTrue: ProvingMatch | null } => {
+  let alreadyTrue: ProvingMatch | null = null;
+  for (const run of runs) {
+    if (run.error !== null) continue;
+    const observation = observationFor(run, key);
+    if (observation === undefined || run.baselineFrame === null) continue;
+    const baseline = observation.baseline ?? null;
+    if (satisfiedBy(expectation, baseline)) {
+      alreadyTrue ??= { run, frame: run.baselineFrame };
+      continue;
+    }
+    const recorded = observation.matches.find((match) => match.id === criterionId);
+    if (recorded === undefined) continue;
+    if (recorded.frame <= run.baselineFrame) continue;
+    // A win or lose claim must describe the state the run ended in. A value
+    // that flashed once and then returned to play is not a finished run.
+    if (requireFinal && !satisfiedBy(expectation, observation.last ?? null)) continue;
+    return { match: { run, frame: recorded.frame }, alreadyTrue };
+  }
+  return { match: null, alreadyTrue };
+};
+
+const coverageOf = (
+  criteria: readonly GameScenarioCriterionResult[],
+  kinds: readonly string[],
+): readonly GameScenarioKindCoverage[] =>
+  kinds.map((kind) => {
+    const ofKind = criteria.filter((criterion) => criterion.kind === kind);
+    return {
+      kind,
+      proven: ofKind.filter((criterion) => criterion.status === "passed").length,
+      failed: ofKind.filter((criterion) => criterion.status === "failed").length,
+      missing: ofKind.filter(
+        (criterion) => criterion.status === "missing" || criterion.status === "unverified",
+      ).length,
+    };
+  });
+
+/** Mechanical kinds the state stage grades; presentation belongs to visual. */
+const MECHANICAL_KINDS = ["control", "mechanic", "content", "win", "lose"] as const;
+
+/** The declared "no lose state" promise is the one mechanical exception. */
+export const isNoLoseStateCriterion = (criterion: GameAcceptanceCriterion): boolean =>
+  criterion.kind === "lose" &&
+  criterion.observe === undefined &&
+  criterion.text.trim() === NO_LOSE_STATE_TEXT;
 
 const criterionResult = (
   runs: readonly GameScenarioEvidence[],
   criterion: GameAcceptanceCriterion,
 ): GameScenarioCriterionResult => {
   const base = { id: criterion.id, kind: criterion.kind, text: criterion.text };
-  if (criterion.observe === undefined)
+  if (criterion.kind === "presentation")
     return {
       ...base,
-      status: "unverified",
-      observed: "This criterion has no observe key; the visual judge owns it.",
+      status: "missing",
+      observed: "Presentation is graded by the visual stage, which is not implemented yet.",
       scenarios: [],
+      provenBy: null,
     };
+  if (criterion.observe === undefined) {
+    if (isNoLoseStateCriterion(criterion))
+      return {
+        ...base,
+        status: "missing",
+        observed: `The design declares "${NO_LOSE_STATE_TEXT}"; there is no lose transition to prove.`,
+        scenarios: [],
+        provenBy: null,
+      };
+    return {
+      ...base,
+      status: "missing",
+      observed: `This ${criterion.kind} claim has no observe; mechanical claims must name a GameState property the player changes.`,
+      scenarios: [],
+      provenBy: null,
+    };
+  }
   const expectation = parseScenarioExpectation(criterion.observe.expect);
   if (expectation === null)
     return {
@@ -92,35 +159,75 @@ const criterionResult = (
       status: "failed",
       observed: `Unreadable expectation ${criterion.observe.expect}.`,
       scenarios: [],
+      provenBy: null,
     };
-  const sampled = runs.some(
-    (run) => run.error === null && observationFor(run, criterion.observe!.key) !== undefined,
+  const terminal = criterion.kind === "win" || criterion.kind === "lose";
+  if (terminal && expectation.kind === "changes")
+    return {
+      ...base,
+      status: "failed",
+      observed: `A ${criterion.kind} claim must observe the value the run ends at, not a change; starting or pausing the game also changes state.`,
+      scenarios: [],
+      provenBy: null,
+    };
+  const key = criterion.observe.key;
+  const sampled = runs.filter(
+    (run) => run.error === null && observationFor(run, key) !== undefined,
   );
-  if (!sampled)
+  if (sampled.length === 0)
     return {
       ...base,
       status: "missing",
-      observed: `GameState has no "${criterion.observe.key}" property to observe.`,
+      observed: `GameState has no "${key}" property to observe.`,
       scenarios: [],
+      provenBy: null,
     };
-  const scenarios: string[] = [];
-  for (const run of runs) {
-    if (run.error !== null) continue;
-    const match = matchesCriterion(
-      observationFor(run, criterion.observe.key),
-      criterion.id,
-      expectation,
-    );
-    if (match.matched) scenarios.push(run.id);
+  const { match, alreadyTrue } = provingMatch(runs, criterion.id, key, expectation, terminal);
+  if (match !== null) {
+    const observation = observationFor(match.run, key)!;
+    return {
+      ...base,
+      status: "passed",
+      observed: `${match.run.id}: ${key} ${valueText(observation.baseline ?? null)} → ${valueText(observation.last)} at frame ${match.frame}.`,
+      scenarios: [match.run.id],
+      provenBy: { scenario: match.run.id, frame: match.frame },
+    };
   }
+  if (alreadyTrue !== null) {
+    const observation = observationFor(alreadyTrue.run, key)!;
+    return {
+      ...base,
+      status: "failed",
+      observed: `Already true when play started — observe something the player achieves (${key} was ${valueText(observation.baseline ?? null)} at frame ${alreadyTrue.frame} of ${alreadyTrue.run.id}).`,
+      scenarios: [],
+      provenBy: null,
+    };
+  }
+  const withoutBaseline = sampled.filter((run) => run.baselineFrame === null);
+  if (withoutBaseline.length === sampled.length)
+    return {
+      ...base,
+      status: "failed",
+      observed: `${sampled.map((run) => run.id).join(", ")} pressed no controls, so play never started; a waiting route proves nothing.`,
+      scenarios: [],
+      provenBy: null,
+    };
+  const first = sampled.find((run) => run.baselineFrame !== null)!;
+  const observation = observationFor(first, key)!;
   return {
     ...base,
-    status: scenarios.length > 0 ? "passed" : "failed",
-    observed: observedLine(runs, criterion.id, (run) =>
-      observationFor(run, criterion.observe!.key),
-    ),
-    scenarios,
+    status: "failed",
+    observed: `${first.id}: ${key} stayed at ${valueText(observation.last)} (${valueText(observation.min)}..${valueText(observation.max)}); it never became ${expectationText(expectation)} after play started.`,
+    scenarios: [],
+    provenBy: null,
   };
+};
+
+const expectationText = (expectation: ScenarioExpectation): string => {
+  if (expectation.kind === "changes") return "a different value";
+  const operator =
+    expectation.kind === "equals" ? "==" : expectation.kind === "atLeast" ? ">=" : "<=";
+  return `${operator}${expectation.value}`;
 };
 
 export interface ScenarioEvaluationInput {
@@ -136,8 +243,8 @@ export interface ScenarioEvaluationInput {
 
 /**
  * The server's state-stage verdict. Pure so the unit tests can pin every rule:
- * a route that only animates, a pickup behind a wall and an unreachable finish
- * all fail because the approved observation never becomes true.
+ * a route that only waits, a pick-up behind a wall, a boot constant and an
+ * unreachable finish all fail because nothing changed after play started.
  */
 export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioSummary {
   const runs = input.runs;
@@ -150,16 +257,17 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
       detail:
         "The design has not been approved, so scenarios cannot be graded against its acceptance.",
       criteria: [],
+      coverage: [],
     };
   if (input.mode === "legacy") {
     const moved = runs.some((run) => run.error === null && run.playerMoved);
     const playing = runs.some((run) => {
-      if (run.error !== null) return false;
+      if (run.error !== null || run.baselineFrame === null) return false;
       const state = observationFor(run, "state");
       if (state === undefined) return false;
-      return state.matches.some(
-        (match) => match.id === LEGACY_PLAYING_MATCH_ID || match.id === "legacy-playing",
-      );
+      // The baseline is the first sample after the menu input. Reaching the
+      // playing state by then is exactly what the menu is supposed to do.
+      return numeric(state.baseline ?? null) === 1;
     });
     const passed = moved && playing && runs.length > 0 && failedRun === undefined;
     let reason: GameScenarioStageReason = "legacy-passed";
@@ -177,41 +285,50 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
       reason = "legacy-unproven";
       detail = "No scenario reached GameState's playing state through the game's own menu.";
     }
-    return { mode: "legacy", passed, reason, detail, criteria: [] };
+    return { mode: "legacy", passed, reason, detail, criteria: [], coverage: [] };
   }
 
-  const criteria = input.criteria.map((criterion) => criterionResult(runs, criterion));
-  const observable = criteria.filter((criterion) => {
+  const graded = input.criteria.filter((criterion) => criterion.kind !== "presentation");
+  const criteria = graded.map((criterion) => criterionResult(runs, criterion));
+  const blocking = criteria.filter((criterion) => {
     const approved = input.criteria.find((entry) => entry.id === criterion.id);
-    return approved?.observe !== undefined;
+    return approved === undefined || !isNoLoseStateCriterion(approved);
   });
-  const observablePassed = observable.every((criterion) => criterion.status === "passed");
-  const endPassed = criteria.some((criterion) => {
-    const approved = input.criteria.find((entry) => entry.id === criterion.id);
-    return (
-      approved?.kind === "end" && approved.observe !== undefined && criterion.status === "passed"
-    );
-  });
+  const everyPassed = blocking.every((criterion) => criterion.status === "passed");
+  const winPassed = criteria.some(
+    (criterion) => criterion.kind === "win" && criterion.status === "passed",
+  );
   const moved = runs.some((run) => run.error === null && run.playerMoved);
-  const passed = failedRun === undefined && observablePassed && endPassed && moved;
+  const passed = failedRun === undefined && everyPassed && winPassed && moved;
   let reason: GameScenarioStageReason = "criteria-passed";
   let detail =
-    "Every observable criterion passed, including an end criterion, and a scenario moved the player.";
+    "Every graded criterion changed after play started, including a win, and a scenario moved the player.";
   if (failedRun !== undefined) {
     reason = "scenario-failed";
     detail = `Scenario "${failedRun.id}" failed: ${failedRun.error}`;
-  } else if (!observablePassed) {
-    const failed = observable.filter((criterion) => criterion.status !== "passed");
+  } else if (!everyPassed) {
+    const failed = blocking.filter((criterion) => criterion.status !== "passed");
     reason = "observable-failed";
-    detail = `${failed.length} observable criterion/criteria did not pass: ${failed
-      .map((criterion) => criterion.id)
+    detail = `${failed.length} acceptance criterion/criteria did not pass: ${failed
+      .map((criterion) => `${criterion.id} (${criterion.status})`)
       .join(", ")}.`;
-  } else if (!endPassed) {
-    reason = "end-criterion-failed";
-    detail = "No end criterion with an observe passed; reaching the win state is required.";
+  } else if (!winPassed) {
+    reason = "win-criterion-failed";
+    detail =
+      "No `win` criterion with an observe passed; reaching the win state after play starts is required.";
   } else if (!moved) {
     reason = "no-player-movement";
     detail = "No scenario moved the player; a still frame is not gameplay.";
   }
-  return { mode: "criteria", passed, reason, detail, criteria };
+  return {
+    mode: "criteria",
+    passed,
+    reason,
+    detail,
+    criteria,
+    coverage: coverageOf(
+      criteria,
+      MECHANICAL_KINDS.filter((kind) => criteria.some((criterion) => criterion.kind === kind)),
+    ),
+  };
 }

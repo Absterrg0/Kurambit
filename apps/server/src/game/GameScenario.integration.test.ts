@@ -255,7 +255,7 @@ it.live.skipIf(!available)(
               },
               {
                 id: "win",
-                kind: "end",
+                kind: "win",
                 text: "Finish the run",
                 observe: { key: "state", expect: "==3" },
               },
@@ -331,7 +331,7 @@ it.live.skipIf(!available)(
           },
           {
             id: "win",
-            kind: "end",
+            kind: "win",
             text: "Reach the end",
             observe: { key: "state", expect: "==3" },
           },
@@ -381,7 +381,7 @@ func _physics_process(_delta: float) -> void:
           },
           {
             id: "win",
-            kind: "end",
+            kind: "win",
             text: "Reach the end",
             observe: { key: "state", expect: "==3" },
           },
@@ -419,7 +419,7 @@ it.live.skipIf(!available)(
         criteria: [
           {
             id: "win",
-            kind: "end",
+            kind: "win",
             text: "Reach the end",
             observe: { key: "state", expect: "==3" },
           },

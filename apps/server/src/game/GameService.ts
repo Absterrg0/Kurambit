@@ -921,6 +921,8 @@ const make = Effect.gen(function* () {
             id: file.scenario.id,
             frames: reported?.frames ?? 0,
             durationMs: reported?.durationMs ?? elapsedMs,
+            firstInputFrame: reported?.firstInputFrame ?? null,
+            baselineFrame: reported?.baselineFrame ?? null,
             playerMoved: reported?.playerMoved ?? false,
             error,
             invalidActions: reported?.invalidActions ?? [],
@@ -1141,6 +1143,7 @@ const make = Effect.gen(function* () {
         design.state,
         approval?.designHash ?? null,
         { policyRevision: policy.revision, probeRequired: policy.policy.probe },
+        approval?.acceptance ?? design.acceptance,
       );
       const inventory = yield* projects.inventory(root, qualificationRead.sourceId);
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
