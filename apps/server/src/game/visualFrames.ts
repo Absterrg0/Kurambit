@@ -234,8 +234,8 @@ export const missingVisualEvidence = (input: {
   const roles = new Set(input.frames.map((frame) => frame.role));
   const missing: GameVisualFrame["role"][] = [];
   if (!roles.has("early")) missing.push("early");
-  if (!roles.has("finish")) missing.push("finish");
   if (input.hazardRequired && !roles.has("hazard")) missing.push("hazard");
+  if (!roles.has("finish")) missing.push("finish");
   return missing;
 };
 

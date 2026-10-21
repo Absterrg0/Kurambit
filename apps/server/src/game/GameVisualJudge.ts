@@ -529,7 +529,7 @@ const make = (stateDir: string) =>
               ...unavailable(
                 `Not enough gameplay evidence: no ${missing.join(", ")} frame. Add screenshot steps for ${missing
                   .map((role) => VISUAL_EVIDENCE_STEP[role])
-                  .join(", ")}, then run the playtest again. No visual round was spent.`,
+                  .join(", ")}, then run the playtest again. No visual round was spent`,
                 MAX_JUDGEMENTS_PER_DESIGN - used,
               ),
               status: "failed",
