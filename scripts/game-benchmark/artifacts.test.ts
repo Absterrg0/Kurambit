@@ -4,6 +4,11 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import type {
+  GameVisualDimension,
+  GameVisualJudgement,
+  GameVisualScore,
+} from "../../packages/contracts/src/index.ts";
 import {
   checksumOfBytes,
   decodeGameBenchmarkBrief,
@@ -14,6 +19,8 @@ import {
   loadGameBenchmarkBriefs,
   parseExpectation,
   readObligations,
+  readVisualJudgements,
+  visualRepairDelta,
   type GameBenchmarkBrief,
 } from "./artifacts.ts";
 
@@ -238,6 +245,86 @@ describe("run summaries", () => {
   it("treats a truncated or foreign summary as unreadable", () => {
     assert.equal(decodeRunSummary('{"schemaVersion":1}'), null);
     assert.equal(decodeRunSummary("not json"), null);
+  });
+});
+
+const judgement = (
+  judgedAt: string,
+  dimensions: ReadonlyArray<readonly [GameVisualDimension, GameVisualScore]>,
+): GameVisualJudgement => ({
+  status: "failed",
+  judgedAt,
+  model: "judge/model",
+  sourceId: "source",
+  buildId: "build",
+  designHash: "design",
+  evidenceDirectory: "builds/playtests/run",
+  frames: [],
+  dimensions: dimensions.map(([dimension, score]) => ({ dimension, score })),
+  repairRequests: [],
+  roundsLeft: 0,
+});
+
+describe("visual judgements", () => {
+  it("records every judgement in time order and skips what is not a verdict", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "judgements-"));
+    const write = async (run: string, body: unknown) => {
+      const evidence = NodePath.join(directory, "builds", "playtests", run);
+      await NodeFSP.mkdir(evidence, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(evidence, "visual-review.json"), JSON.stringify(body));
+    };
+    try {
+      await write("second", judgement("2026-10-21T00:10:00.000Z", [["readability", 2]]));
+      await write("first", judgement("2026-10-21T00:00:00.000Z", [["readability", 1]]));
+      await write("broken", { status: "failed" });
+      await NodeFSP.mkdir(NodePath.join(directory, "builds", "playtests", "unjudged"), {
+        recursive: true,
+      });
+      // A game that never reached its first judgement has no evidence to read.
+      assert.deepEqual(await readVisualJudgements(NodePath.join(directory, "missing")), []);
+      const found = await readVisualJudgements(directory);
+      assert.deepEqual(
+        found.map((entry) => entry.judgedAt),
+        ["2026-10-21T00:00:00.000Z", "2026-10-21T00:10:00.000Z"],
+      );
+      assert.deepEqual(
+        found[0]?.dimensions.map((score) => score.score),
+        [1],
+      );
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the score change from the first judgement to the last", () => {
+    assert.equal(visualRepairDelta([]), null);
+    assert.equal(
+      visualRepairDelta([judgement("2026-10-21T00:00:00.000Z", [["feedback", 2]])]),
+      null,
+    );
+    assert.equal(
+      visualRepairDelta([
+        judgement("2026-10-21T00:00:00.000Z", [
+          ["readability", 1],
+          ["valueSeparation", 2],
+          ["feedback", 3],
+        ]),
+        judgement("2026-10-21T00:10:00.000Z", [
+          ["readability", 3],
+          ["valueSeparation", 2],
+          ["feedback", 4],
+        ]),
+      ]),
+      3,
+    );
+    // `missing` means no frame showed evidence; it cannot be differenced.
+    assert.equal(
+      visualRepairDelta([
+        judgement("2026-10-21T00:00:00.000Z", [["readability", 2]]),
+        judgement("2026-10-21T00:10:00.000Z", [["readability", "missing"]]),
+      ]),
+      null,
+    );
   });
 });
 

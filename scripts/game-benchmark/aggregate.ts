@@ -1,11 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The benchmark CLI aggregates files it wrote next to the run logs.
-import type { GameVisualDimensionScore } from "../../packages/contracts/src/index.ts";
+import type {
+  GameVisualDimension,
+  GameVisualDimensionScore,
+  GameVisualJudgement,
+} from "../../packages/contracts/src/index.ts";
 import type {
   GameBenchmarkBrief,
   GameBenchmarkObligationRead,
   GameE2eRunSummary,
   GameE2eTurnRead,
 } from "./artifacts.ts";
+import { visualRepairDelta } from "./artifacts.ts";
 
 export const BENCHMARK_OUTCOMES = [
   "passed",
@@ -42,16 +47,18 @@ export interface BenchmarkBriefResult {
   readonly obligations: ReadonlyArray<GameBenchmarkObligationRead>;
   readonly visual: {
     readonly status: "passed" | "failed" | "unavailable" | null;
+    /** The recorded (last) judgement's scores, kept for the review table. */
     readonly dimensions: ReadonlyArray<GameVisualDimensionScore>;
+    /** Every judgement the run earned, oldest first; a repair adds one. */
+    readonly judgements: ReadonlyArray<GameVisualJudgement>;
     readonly frames: ReadonlyArray<{ readonly id: string; readonly role: string }>;
     readonly detail: string | null;
   };
   /**
-   * Score change from the first to the second judgement. This command runs one
-   * generation per brief with no repair turn, so it stays null here; the field
-   * exists so a repaired run can report the same table.
+   * Summed dimension-score change from the first judgement to the last. `null`
+   * when the run judged fewer than twice.
    */
-  readonly repairDelta: null;
+  readonly repairDelta: number | null;
   readonly playtest: {
     readonly frames: number;
     readonly responded: boolean;
@@ -213,6 +220,7 @@ export function readBenchmarkResult(input: {
   const summary = input.observation.summary;
   const verdict = classifyRun(input.observation);
   const visual = summary === null ? null : visualReading(summary);
+  const judgements = summary?.visualJudgements ?? [];
   return {
     schemaVersion: 1,
     harnessCommit: input.harnessCommit,
@@ -233,10 +241,11 @@ export function readBenchmarkResult(input: {
     visual: {
       status: visual?.judgement?.status ?? null,
       dimensions: visual?.dimensions ?? [],
+      judgements,
       frames: visual?.frames ?? [],
       detail: visual?.judgement?.detail ?? null,
     },
-    repairDelta: null,
+    repairDelta: visualRepairDelta(judgements),
     playtest:
       summary?.lastPlaytest === null || summary?.lastPlaytest === undefined
         ? null
@@ -305,6 +314,35 @@ const DIMENSION_HEADERS = [
   "designCompliance",
 ] as const;
 
+/** Initials keep one judgement's six scores on one line in the report. */
+const DIMENSION_KEYS: Record<GameVisualDimension, string> = {
+  readability: "r",
+  valueSeparation: "v",
+  cameraFraming: "c",
+  styleConsistency: "s",
+  feedback: "f",
+  designCompliance: "d",
+};
+
+const signed = (value: number) => (value > 0 ? `+${value}` : String(value));
+
+/** `first→last` when the run judged twice, the single score otherwise. */
+const dimensionCell = (
+  result: BenchmarkBriefResult,
+  dimension: GameVisualDimension,
+  last: string,
+): string => {
+  const first = result.visual.judgements[0]?.dimensions.find(
+    (score) => score.dimension === dimension,
+  )?.score;
+  return result.visual.judgements.length > 1 && first !== undefined ? `${first}→${last}` : last;
+};
+
+const judgementLine = (judgement: GameVisualJudgement): string =>
+  `${judgement.judgedAt} ${judgement.status} ${judgement.dimensions
+    .map((score) => `${DIMENSION_KEYS[score.dimension]}=${score.score}`)
+    .join(" ")}`;
+
 /** A row is only reused when it measures the same harness commit and fixture bytes. */
 export function shouldResume(
   existing: { readonly harnessCommit: string; readonly fixtureChecksum: string } | null,
@@ -363,7 +401,7 @@ export function renderResultsMarkdown(input: {
           : result.outcome === "evidence-gap"
             ? `evidence gap (${result.visual.status})`
             : result.visual.status;
-      return `| ${result.fixtureId} | ${result.outcome} | ${proven}/${failed}/${unsupported} | ${visual} | — | ${result.judgeCalls} | ${turnCell(result.turns)} |`;
+      return `| ${result.fixtureId} | ${result.outcome} | ${proven}/${failed}/${unsupported} | ${visual} | ${result.repairDelta === null ? "—" : signed(result.repairDelta)} | ${result.judgeCalls} | ${turnCell(result.turns)} |`;
     }),
     "",
     "## Visual dimensions",
@@ -375,9 +413,22 @@ export function renderResultsMarkdown(input: {
         result.visual.dimensions.map((dimension) => [dimension.dimension, dimension.score]),
       );
       return `| ${result.fixtureId} | ${DIMENSION_HEADERS.map((dimension) =>
-        String(byDimension.get(dimension) ?? "—"),
+        dimensionCell(result, dimension, String(byDimension.get(dimension) ?? "—")),
       ).join(" | ")} |`;
     }),
+    "",
+    "## Judgements",
+    "",
+    ...input.results.flatMap((result) =>
+      result.visual.judgements.length === 0
+        ? []
+        : [
+            `- **${result.fixtureId}**: ${result.visual.judgements
+              .map((judgement, index) => `#${index + 1} ${judgementLine(judgement)}`)
+              .join("; ")}`,
+          ],
+    ),
+    ...(input.results.every((result) => result.visual.judgements.length === 0) ? ["- None."] : []),
     "",
     "## Failures and gaps",
     "",
@@ -405,8 +456,9 @@ export function renderResultsMarkdown(input: {
       ? ["- None."]
       : []),
     "",
-    "> Repair Δ stays — because this command runs one generation per brief with no repair",
-    "> turn. Judgement 1 is the recorded visual verdict; a second judgement needs a repair run.",
+    "> Repair Δ sums the dimension-score change from the first judgement to the last;",
+    "> a repair round inside the build turn adds a second judgement. Scores are 0–4, `missing`",
+    "> means the frames showed no evidence, and scores are compared per dimension, never averaged.",
     "",
   ];
   return lines.join("\n");

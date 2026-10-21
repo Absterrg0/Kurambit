@@ -96,6 +96,7 @@ const summary = (
     readonly phase?: string;
     readonly timedOut?: boolean;
     readonly lastPlaytest?: GameLastPlaytest | null;
+    readonly visualJudgements?: ReadonlyArray<GameVisualJudgement>;
   } = {},
 ): GameE2eRunSummary => ({
   schemaVersion: 1,
@@ -110,6 +111,7 @@ const summary = (
   qualification: input.qualification === undefined ? qualification() : input.qualification,
   lastPlaytest: input.lastPlaytest ?? null,
   obligations: input.obligations ?? [obligation("count-move", "proven")],
+  visualJudgements: input.visualJudgements ?? [],
   error: input.error ?? null,
 });
 
@@ -317,12 +319,51 @@ describe("benchmark results", () => {
     assert.match(markdown, /illegal-move — No invariance check\./);
   });
 
-  it("renders per-dimension scores and leaves repair delta empty without a repair run", () => {
+  it("renders per-dimension scores and rates a run that judged once as no repair", () => {
     const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: [passed] });
     assert.match(markdown, /\| readability \| valueSeparation \|/);
     assert.match(markdown, /\| sokoban \| 3 \| 3 \| 3 \| 3 \| 3 \| 3 \|/);
-    assert.match(markdown, /Repair Δ stays —/);
+    assert.match(markdown, /Repair Δ sums the dimension-score change/);
     assert.match(markdown, /design 12s/);
+  });
+
+  it("records every judgement and shows the first-to-last score change", () => {
+    const first = judgement({
+      judgedAt: "2026-10-21T00:00:00.000Z",
+      status: "failed",
+      roundsLeft: 1,
+      dimensions: GAME_VISUAL_DIMENSIONS.map((dimension) => ({
+        dimension,
+        score: dimension === "readability" ? 0 : 3,
+      })),
+    });
+    const last = judgement({
+      judgedAt: "2026-10-21T00:10:00.000Z",
+      status: "failed",
+      roundsLeft: 0,
+      dimensions: GAME_VISUAL_DIMENSIONS.map((dimension) => ({
+        dimension,
+        score: dimension === "readability" ? 2 : 3,
+      })),
+    });
+    const result = readBenchmarkResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-21T00:00:00.000Z",
+      durationMs: 60_000,
+      observation: observe({
+        visualJudgements: [first, last],
+        qualification: qualification({ stages: [stage("visual", "failed", { visual: last })] }),
+      }),
+    });
+    assert.equal(result.visual.judgements.length, 2);
+    assert.equal(result.repairDelta, 2);
+    const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: [result] });
+    assert.match(markdown, /\| sokoban \| failed-visual \|.*\| \+2 \|/);
+    assert.match(markdown, /\| sokoban \| 0→2 \| 3→3 \| 3→3 \| 3→3 \| 3→3 \| 3→3 \|/);
+    assert.match(markdown, /#1 2026-10-21T00:00:00.000Z failed r=0 v=3 c=3 s=3 f=3 d=3/);
+    assert.match(markdown, /#2 2026-10-21T00:10:00.000Z failed r=2 v=3 c=3 s=3 f=3 d=3/);
   });
 });
 

@@ -41,6 +41,7 @@ import {
   encodeRunSummary,
   loadGameBenchmarkBrief,
   readObligations,
+  readVisualJudgements,
   type GameBenchmarkObligationRead,
   type GameE2eRunSummary,
   type GameE2eTurnRead,
@@ -153,6 +154,9 @@ const writeSummary = async () => {
     qualification,
     lastPlaytest,
     obligations,
+    // The qualification record keeps only the last verdict; the repair round's
+    // first judgement is still on disk next to its evidence.
+    visualJudgements: await readVisualJudgements(gameRoot),
     error: summaryError,
   };
   await NodeFSP.writeFile(path, encodeRunSummary(summary));

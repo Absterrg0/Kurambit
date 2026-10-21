@@ -8,6 +8,7 @@ import {
   GameLastPlaytest,
   GameQualificationRead,
   GameTemplateId,
+  GameVisualJudgement,
   type GameAcceptanceCriterion,
   type GameScenarioCriterionResult,
 } from "../../packages/contracts/src/index.ts";
@@ -240,6 +241,13 @@ export const GameE2eRunSummary = Schema.Struct({
   qualification: Schema.NullOr(GameQualificationRead),
   lastPlaytest: Schema.NullOr(GameLastPlaytest),
   obligations: Schema.Array(GameBenchmarkObligationRead),
+  /**
+   * Every visual judgement the run's game earned, oldest first. The repair
+   * round runs inside the build turn and leaves one review per playtest
+   * evidence folder, so the qualification record's last judgement is not the
+   * whole story.
+   */
+  visualJudgements: Schema.optionalKey(Schema.Array(GameVisualJudgement)),
   error: Schema.NullOr(Schema.String),
 });
 export type GameE2eRunSummary = typeof GameE2eRunSummary.Type;
@@ -258,3 +266,52 @@ export const decodeRunSummary = (text: string): GameE2eRunSummary | null => {
     return null;
   }
 };
+
+const decodeJudgement = Schema.decodeUnknownSync(Schema.fromJsonString(GameVisualJudgement));
+
+/**
+ * Every visual judgement under the run's game, oldest first. A judgement is
+ * written into the playtest evidence folder it judged; a repair round inside
+ * the build turn adds another folder and another review.
+ */
+export async function readVisualJudgements(
+  root: string | undefined,
+): Promise<ReadonlyArray<GameVisualJudgement>> {
+  if (root === undefined) return [];
+  const directory = NodePath.join(root, "builds", "playtests");
+  const entries = await NodeFSP.readdir(directory, { withFileTypes: true }).catch(() => []);
+  const judgements: GameVisualJudgement[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const text = await NodeFSP.readFile(
+      NodePath.join(directory, entry.name, "visual-review.json"),
+      "utf8",
+    ).catch(() => null);
+    if (text === null) continue;
+    try {
+      judgements.push(decodeJudgement(text));
+    } catch {
+      // An unreadable evidence copy is not a verdict; the record still has the last one.
+    }
+  }
+  return judgements.sort((left, right) => left.judgedAt.localeCompare(right.judgedAt));
+}
+
+/**
+ * The summed per-dimension score change from the first judgement to the last.
+ * Dimensions either review scored `missing` cannot be compared, so they are
+ * left out; `null` means the run judged fewer than twice.
+ */
+export function visualRepairDelta(judgements: ReadonlyArray<GameVisualJudgement>): number | null {
+  const first = judgements[0];
+  const last = judgements[judgements.length - 1];
+  if (judgements.length < 2 || first === undefined || last === undefined) return null;
+  const before = new Map(first.dimensions.map((score) => [score.dimension, score.score]));
+  let delta: number | null = null;
+  for (const score of last.dimensions) {
+    const previous = before.get(score.dimension);
+    if (typeof previous !== "number" || typeof score.score !== "number") continue;
+    delta = (delta ?? 0) + score.score - previous;
+  }
+  return delta;
+}
