@@ -101,6 +101,31 @@ describe("visual frame selection", () => {
     expect(selected.map((frame) => frame.role)).not.toContain("hazard");
   });
 
+  it("treats a `changes` criterion as progress only after the baseline", () => {
+    const withState = (base: GamePlaytestProbe, value: number): GamePlaytestProbe => ({
+      ...base,
+      gameState: { ...base.gameState, state: value },
+    });
+    const changed = frames.map((frame, index) => ({
+      ...frame,
+      ...(frame.probe === undefined ? {} : { probe: withState(frame.probe, index >= 3 ? 1 : 0) }),
+    }));
+    const selected = select({
+      evidence: changed,
+      runState: state(withState(probe({ x: 0 }), 0), withState(probe({ x: 30 }), 1)),
+      criteria: [
+        {
+          id: "enter-play",
+          kind: "mechanic",
+          text: "Play starts",
+          observe: { key: "state", expect: "changes" },
+        },
+      ],
+    });
+    const interaction = selected.find((frame) => frame.role === "interaction");
+    expect(interaction?.path).toBe("builds/playtests/run/04-water.png");
+  });
+
   it("falls back to run order when the evidence has no probe state", () => {
     const selected = select({
       evidence: frames.map(({ label, file }) => ({ label, file })),

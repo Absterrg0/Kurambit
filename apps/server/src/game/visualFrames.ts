@@ -118,9 +118,11 @@ export function selectVisualFrames(input: {
       return criteria.some(({ key, expectation }) => {
         const baselineValue = baseline.gameState[key];
         if (baselineValue === undefined) return false;
-        if (satisfied(expectation, baselineValue)) return false;
         const value = probe.gameState[key];
+        // A `changes` claim is relative to the baseline, not something the
+        // baseline can already satisfy.
         if (expectation.kind === "changes") return value !== undefined && value !== baselineValue;
+        if (satisfied(expectation, baselineValue)) return false;
         return satisfied(expectation, value);
       });
     });
