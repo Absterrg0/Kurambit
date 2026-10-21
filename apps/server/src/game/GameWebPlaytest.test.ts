@@ -321,13 +321,16 @@ it.live.skipIf(!available || !templatesInstalled)(
 
             // Walking forward moves the body and jumping turns the named jumps
             // counter the way a clock never turns: the same export now qualifies.
+            // The walk lasts 1.8s and a slow swiftshader frame run measured
+            // ~1.84 units over 1.2s, so the hold keeps the moved distance far
+            // above the 2-unit line the assertions below read.
             const played = yield* game.webPlaytest(created.threadId, {
               steps: [
                 { click: "left" },
                 { waitMs: 600 },
                 { key: "Enter", holdMs: 80 },
                 { waitMs: 2500 },
-                { key: "w", holdMs: 1200 },
+                { key: "w", holdMs: 1800 },
                 { key: " ", holdMs: 80 },
                 { waitMs: 300 },
               ],
@@ -358,6 +361,14 @@ it.live.skipIf(!available || !templatesInstalled)(
             expect(evidence.state.playerMoved).toBeGreaterThan(2);
             expect(
               evidence.state.changes.some((change: { key: string }) => change.key === "jumps"),
+            ).toBe(true);
+            // Each screenshot also carries the probe read nearest it, the
+            // per-frame state the cover picker reads back from this same file.
+            expect(
+              evidence.frames.some(
+                (frame: { probe?: { gameState?: { jumps?: number } } | null }) =>
+                  typeof frame.probe?.gameState?.jumps === "number",
+              ),
             ).toBe(true);
           }).pipe(Effect.provide(dependencies)),
         );
