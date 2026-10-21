@@ -112,6 +112,9 @@ const runBrief = async (
 ): Promise<BenchmarkRunObservation> => {
   const summaryPath = NodePath.join(directory, "run.json");
   const logPath = NodePath.join(directory, "run.log");
+  // A previous attempt's summary must not be read as this run's facts if this
+  // run dies before writing one.
+  await NodeFSP.rm(summaryPath, { force: true });
   const log = await NodeFSP.open(logPath, "w");
   const args = [
     runnerPath,

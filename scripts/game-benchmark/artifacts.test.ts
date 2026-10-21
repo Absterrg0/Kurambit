@@ -7,6 +7,8 @@ import * as NodeURL from "node:url";
 import {
   checksumOfBytes,
   decodeGameBenchmarkBrief,
+  decodeRunSummary,
+  encodeRunSummary,
   expectationCovers,
   loadGameBenchmarkBrief,
   loadGameBenchmarkBriefs,
@@ -189,6 +191,53 @@ describe("brief fixtures", () => {
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("run summaries", () => {
+  it("round-trips the facts game-e2e writes and the benchmark reads", () => {
+    const text = encodeRunSummary({
+      schemaVersion: 1,
+      harnessCommit: "commit",
+      startedAt: "2026-10-21T00:00:00.000Z",
+      durationMs: 12_000,
+      phase: "done",
+      timedOut: false,
+      fixture: { id: "sokoban", checksum: "checksum" },
+      game: { name: "Crate Dock", root: "/games/crate-dock", threadId: "thread:1" },
+      turns: [{ name: "design", status: "completed", durationMs: 1_000 }],
+      qualification: {
+        state: "qualified",
+        mechanicsQualified: true,
+        sourceId: "source",
+        buildId: "build",
+        servedArtifactId: "build",
+        stages: [],
+      },
+      lastPlaytest: null,
+      obligations: [
+        {
+          id: "count-move",
+          kind: "control",
+          description: "A move.",
+          key: "moves",
+          expect: ">=1",
+          status: "proven",
+          detail: "Passed.",
+          criteria: ["moves-count"],
+        },
+      ],
+      error: null,
+    });
+    const decoded = decodeRunSummary(text);
+    assert.equal(decoded?.turns[0]?.name, "design");
+    assert.equal(decoded?.obligations[0]?.status, "proven");
+    assert.equal(decoded?.fixture?.checksum, "checksum");
+  });
+
+  it("treats a truncated or foreign summary as unreadable", () => {
+    assert.equal(decodeRunSummary('{"schemaVersion":1}'), null);
+    assert.equal(decodeRunSummary("not json"), null);
   });
 });
 

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- The benchmark CLI aggregates files it wrote next to the run logs.
+// @effect-diagnostics nodeBuiltinImport:off -- The benchmark CLI aggregates files it wrote next to the run logs.
 import type { GameVisualDimensionScore } from "../../packages/contracts/src/index.ts";
 import type {
   GameBenchmarkBrief,
@@ -24,13 +24,6 @@ export interface BenchmarkRunObservation {
   readonly exitCode: number | null;
   readonly signal: string | null;
   readonly summary: GameE2eRunSummary | null;
-}
-
-export interface BenchmarkBriefMeta {
-  readonly id: string;
-  readonly title: string;
-  readonly template: string;
-  readonly checksum: string;
 }
 
 export interface BenchmarkBriefResult {
