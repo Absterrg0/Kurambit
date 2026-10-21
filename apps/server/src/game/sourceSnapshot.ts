@@ -26,8 +26,8 @@ export type SourceSnapshot =
  *
  * Symlinks fail closed: following a linked script would let its content change
  * without changing the identity of the tree Godot loaded. Size and mtime are
- * deliberately not content hashes; a same-size edit inside one mtime tick is
- * the remaining gap, and the engine reads the file directly in that case.
+ * deliberately not content hashes; a same-size edit within one mtime tick is
+ * the known limit.
  */
 export const snapshotSource = async (
   root: string,
@@ -48,7 +48,7 @@ export const snapshotSource = async (
         const path = NodePath.join(directory, entry.name);
         const relative = NodePath.relative(engineRoot, path).split(NodePath.sep).join("/");
         if (entry.isSymbolicLink())
-          return { kind: "unknown", reason: "symlink", detail: `godot/${relative}` };
+          return { kind: "unknown", reason: "symlink", detail: `${godotProject}/${relative}` };
         if (entry.isDirectory()) {
           if (entry.name !== ".godot") stack.push(path);
           continue;
