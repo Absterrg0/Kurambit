@@ -173,8 +173,9 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
             kind: "win",
             text: "The run ends at the goal",
             status: "passed",
-            observed: "full-run: state 1..3",
+            observed: "full-run: state 1..3 at frame 880.",
             scenarios: ["full-run"],
+            provenBy: { scenario: "full-run", frame: 880 },
           },
         ],
         coverage: [{ kind: "win", proven: 1, failed: 0, missing: 0 }],
@@ -208,6 +209,37 @@ it.effect("lists presentation criteria under the visual stage as missing", () =>
       ]);
       const state = read.stages.find((entry) => entry.stage === "state");
       expect(state?.criteria).toBeUndefined();
+    }),
+  ),
+);
+
+it.effect("a state pass recorded before the play-start baseline is stale", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "state",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: "builds/logs/scenarios-old",
+        criteria: [
+          {
+            id: "five-pearls",
+            kind: "content",
+            text: "Five pearls exist",
+            status: "passed",
+            observed: "total 5..5",
+            scenarios: ["full-run"],
+          },
+        ],
+        detail: "Passed against boot constants.",
+      });
+      const read = yield* qualification.read(root, "godot", "approved");
+      const state = read.stages.find((entry) => entry.stage === "state");
+      expect(state?.status).toBe("stale");
+      expect(state?.detail).toContain("run game_scenarios_run again");
+      expect(read.state).toBe("unqualified");
     }),
   ),
 );

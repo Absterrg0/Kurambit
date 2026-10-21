@@ -242,6 +242,18 @@ const deriveQualification = (input: {
       // A new approved design binds new acceptance; an old route result cannot
       // silently grade it even when the game sources did not change.
       stageReads.set(stage, read("stale"));
+    else if (
+      stage === "state" &&
+      (recorded.criteria ?? []).some((criterion) => criterion.provenBy === undefined)
+    )
+      // State results written before the play-start baseline do not carry the
+      // proving scenario/frame; their pass may rest on boot constants, so make
+      // the game rerun the exam rather than inherit it.
+      stageReads.set(stage, {
+        ...read("stale"),
+        detail:
+          "The state exam changed after this result was recorded; run game_scenarios_run again.",
+      });
     else stageReads.set(stage, read("passed"));
   }
   // The visual stage does not exist yet (task 34). Its claims are listed as
@@ -317,6 +329,11 @@ const deriveQualificationSummary = (
   const exportBuild = record.stages.export?.buildId ?? null;
   const playtestBuild = record.stages.playtest?.buildId ?? null;
   const designBound = (record.stages.state?.designHash ?? null) === designHash;
+  // A state record from before the baseline exam has no proving frame; the
+  // library must not advertise it until the scenario stage is rerun.
+  const stateExamCurrent = (record.stages.state?.criteria ?? []).every(
+    (criterion) => criterion.provenBy !== undefined,
+  );
   const policyBound =
     identity === null ||
     (RECORDED_QUALIFICATION_STAGES.filter(
@@ -332,6 +349,7 @@ const deriveQualificationSummary = (
     exportBuild !== null &&
     playtestBuild === exportBuild &&
     designBound &&
+    stateExamCurrent &&
     policyBound;
   return { state: qualified ? "qualified" : "unqualified", asOf: finished ?? null };
 };
