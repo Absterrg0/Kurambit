@@ -3,11 +3,14 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
@@ -39,8 +42,8 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
-import { isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
-import { exportedSourceId, snapshotSource } from "./sourceSnapshot.ts";
+import { describeWebArtifacts, isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
+import { comparedSource, snapshotSource } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { blenderWrapper } from "./blenderScript.ts";
@@ -279,15 +282,11 @@ const make = Effect.gen(function* () {
   const snapshot = (root: string, godotProject: string) =>
     Effect.promise(() => snapshotSource(root, godotProject));
   /**
-   * Qualification says the export matches the sources; the artifact still has to
-   * exist. A deleted or half-cleaned build is stale even when its record is not.
+   * Qualification says the export matches the sources and its artifact files;
+   * the read verifies both, so anything else forces a rebuild.
    */
-  const webBuildIsCurrent = (root: string, read: GameQualificationRead) =>
-    Effect.promise(async () => {
-      if (!isWebBuildFresh(read)) return false;
-      const stat = await NodeFSP.stat(webBuildIndex(root)).catch(() => null);
-      return stat?.isFile() ?? false;
-    });
+  const webBuildIsCurrent = (_root: string, read: GameQualificationRead) =>
+    Effect.sync(() => isWebBuildFresh(read));
   /**
    * Qualification is a server-owned record written from actual operation
    * results. Failing to persist it must not turn a real build into a crash; the
@@ -303,6 +302,62 @@ const make = Effect.gen(function* () {
           }),
       }),
     );
+  type StageOutcome = Omit<GameQualification.QualificationRecordInput, "stage">;
+  const interruptedOutcome = (operation: string): StageOutcome => ({
+    outcome: "cancelled",
+    sourceId: null,
+    buildId: null,
+    evidenceDirectory: null,
+    detail: `The ${operation} was cancelled before it finished.`,
+  });
+  const failedOutcome = (
+    exit: Exit.Exit<unknown, GameOperationError>,
+    operation: string,
+  ): StageOutcome => {
+    if (Exit.isFailure(exit)) {
+      if (Cause.hasInterruptsOnly(exit.cause)) return interruptedOutcome(operation);
+      const error = Cause.findErrorOption(exit.cause);
+      if (Option.isSome(error))
+        return {
+          outcome: "failed",
+          sourceId: null,
+          buildId: null,
+          evidenceDirectory: null,
+          detail: error.value.message,
+        };
+    }
+    return {
+      outcome: "unknown",
+      sourceId: null,
+      buildId: null,
+      evidenceDirectory: null,
+      detail: `The ${operation} ended without a result that can be trusted.`,
+    };
+  };
+  /**
+   * Owns one qualification attempt. The stage is removed before the work runs,
+   * so an interruption, defect or failed terminal write leaves it missing
+   * instead of readable as the previous pass; every exit then records an honest
+   * outcome through finalization rather than only the returned results.
+   */
+  const ownStage = <A>(
+    root: string,
+    stage: GameQualification.RecordedQualificationStage,
+    operation: string,
+    work: Effect.Effect<{ readonly value: A; readonly record: StageOutcome }, GameOperationError>,
+  ): Effect.Effect<A, GameOperationError> =>
+    Effect.gen(function* () {
+      yield* qualification.begin(root, stage);
+      const completed = yield* work.pipe(
+        Effect.onExit((exit) =>
+          recordQualification(root, {
+            stage,
+            ...(Exit.isSuccess(exit) ? exit.value.record : failedOutcome(exit, operation)),
+          }),
+        ),
+      );
+      return completed.value;
+    });
   const response = (
     process: GameProcessResult,
     outputPath: string | null = null,
@@ -333,29 +388,20 @@ const make = Effect.gen(function* () {
       }),
     );
   });
-  const exportGame = Effect.fnUntraced(function* (root: string, target: "Web" | "Linux") {
+  const runExport = Effect.fnUntraced(function* (root: string, target: "Web" | "Linux") {
     const { godot, cwd, godotProject } = yield* engine(root);
     // Capture the inputs before the import/export pipeline touches the tree, then
     // again after: a source edit during the export would otherwise qualify a
     // mixed build. Only the web build is what players and playtests see, so only
     // it owns the export stage.
     const before = yield* snapshot(root, godotProject);
-    const recordExport = (
-      outcome: "passed" | "failed",
-      sourceId: string | null,
-      buildId: string | null,
-    ) =>
-      target === "Web"
-        ? recordQualification(root, {
-            stage: "export",
-            outcome,
-            sourceId,
-            buildId,
-            evidenceDirectory: null,
-          })
-        : Effect.void;
-    const knownSourceId = (value: typeof before) =>
-      value.kind === "known" ? value.sourceId : null;
+    const failedExport = (detail?: string): StageOutcome => ({
+      outcome: "failed",
+      sourceId: before.kind === "known" ? before.sourceId : null,
+      buildId: null,
+      evidenceDirectory: null,
+      ...(detail === undefined ? {} : { detail }),
+    });
     const toolStatus = yield* tools.status;
     const engineStatus = toolStatus.tools.find((tool) => tool.tool === "godot");
     if (!engineStatus?.ready)
@@ -366,10 +412,7 @@ const make = Effect.gen(function* () {
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
     const imported = yield* importGame(root);
-    if (!imported.success) {
-      yield* recordExport("failed", knownSourceId(before), null);
-      return imported;
-    }
+    if (!imported.success) return { value: imported, record: failedExport() };
     const output = NodePath.join(
       root,
       target === "Web" ? "builds/web/index.html" : "builds/linux/game.x86_64",
@@ -389,10 +432,7 @@ const make = Effect.gen(function* () {
       }),
       output,
     );
-    if (!result.success) {
-      yield* recordExport("failed", knownSourceId(before), null);
-      return result;
-    }
+    if (!result.success) return { value: result, record: failedExport() };
     yield* Effect.tryPromise({
       try: async () => {
         for (const file of target === "Web"
@@ -419,431 +459,497 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+    // The record names every served file, not just index.html: a deleted or
+    // replaced .pck must force a rebuild before anyone plays it.
+    const artifacts =
+      target === "Web" ? yield* Effect.promise(() => describeWebArtifacts(root)) : null;
     const after = yield* snapshot(root, godotProject);
-    const exportedSource = exportedSourceId(before, after);
+    const comparison = comparedSource(before, after, "export");
     const finishedAt = DateTime.formatIso(yield* DateTime.now);
-    yield* recordExport(
-      exportedSource === null ? "failed" : "passed",
-      exportedSource,
-      exportedSource === null ? null : `${exportedSource}:${finishedAt}`,
-    );
-    return result;
-  });
-  const webPlaytest = Effect.fnUntraced(function* (root: string, input: GameWebPlaytestInput) {
-    // Reject before exporting, serving, or launching the browser: a bad capture
-    // request must not cost a build or hold the game's operation lock.
-    const issues = playtestInputIssues(input);
-    if (issues.length > 0)
-      return yield* new GameOperationError({
-        operation: "Web playtest",
-        path: root,
-        reason: "invalid-input",
-        detail: issues.join("\n"),
-      });
-    const manifest = yield* projects.read(root);
-    const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
-    if (!(yield* webBuildIsCurrent(root, beforePlaytest))) {
-      const exported = yield* exportGame(root, "Web");
-      if (!exported.success)
-        return yield* new GameOperationError({
-          operation: "Web playtest",
-          path: NodePath.join(root, "builds/web"),
-          reason: "command-failed",
-          detail: exported.message,
-        });
-    }
-    const url = yield* preview.open(root);
-    const executable = yield* browser.executable.pipe(
-      Effect.mapError(
-        (cause) =>
-          new GameOperationError({
-            operation: "Web playtest",
-            path: root,
-            reason: "tool-missing",
-            detail: `Game Studio's preview browser is not ready. ${cause.message} Once the install finishes, retry game_web_playtest.`,
-          }),
-      ),
-    );
-    const result = yield* playtest.run({
-      executable,
-      url,
-      profileDirectory: NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`),
-      width: input.width ?? 960,
-      height: input.height ?? 540,
-      bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
-      steps: input.steps ?? [],
-    });
-    // Informational only: which approved promises this run happened to show. It
-    // never feeds qualification; the server-owned scenario runner is the gate.
-    const design = yield* designApprovals.status(root, manifest);
-    const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
-    const observations = satisfiedObservations(approval?.acceptance ?? [], result.state);
-    const hasObservable = (approval?.acceptance ?? []).some(
-      (criterion) => criterion.observe !== undefined,
-    );
-    const observationNote = hasObservable
-      ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
-      : "";
-    const budgeted = fitScreenshotsToBudget(result.screenshots);
-    const droppedFrames = budgeted.dropped.length;
-    const evidence = yield* Effect.tryPromise({
-      try: () =>
-        writePlaytestEvidence({
-          root,
-          result: { ...result, designObservations: observations },
-          steps: input.steps ?? [],
-        }),
-      catch: (cause) =>
-        new GameOperationError({
-          operation: "Web playtest evidence",
-          path: NodePath.join(root, "builds/playtests"),
-          reason: "io",
-          cause,
-        }),
-    });
-    // The playtest played whatever export was current before it ran: either the
-    // reused build or the one this call just made.
-    const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
-      (stage) => stage.stage === "export",
-    );
-    // A template game ships StudioProbe, so a run that only changed pixels (an
-    // idle animation, a menu transition, a clock) must not qualify. Games created
-    // before the probe keep the pixel rule and say so.
-    const stepsGiven = (input.steps?.length ?? 0) > 0;
-    const probe = result.state;
-    const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
-    // A template game owes the probe it was created with. The creation record is
-    // server-owned, so deleting scripts/studio_probe.gd cannot downgrade the
-    // playtest to the pixel rule without failing the stage.
-    const probeRequired = (yield* designApprovals.readProbe(root)) ?? manifest.probe === true;
-    const missingProbe = probeRequired && probe === null;
-    const gaps: string[] = [];
-    if (!stepsGiven) gaps.push("input steps");
-    if (!result.success) gaps.push("a run without console errors");
-    if (!result.responded) gaps.push("a visible response");
-    if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
-    if (missingProbe) gaps.push("the StudioProbe autoload (scripts/studio_probe.gd)");
-    const qualifies = gaps.length === 0;
-    const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
-    yield* recordQualification(root, {
-      stage: "playtest",
-      outcome: qualifies ? "passed" : "failed",
-      sourceId: build?.status === "passed" ? build.sourceId : null,
-      buildId: build?.status === "passed" ? build.buildId : null,
-      evidenceDirectory: evidence.directory,
-      detail: missingProbe
-        ? probesMissing
-        : probe === null
-          ? "No state probe in this game; the playtest was judged on input steps and a visible response."
-          : `State probe: ${describePlaytestState(probe)}.`,
-    });
-    const framesNote =
-      droppedFrames === 0
-        ? ""
-        : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidence.directory}.`;
+    if (comparison.kind !== "current")
+      return { value: result, record: failedExport(comparison.detail) };
+    if (target === "Web" && artifacts === null)
+      return {
+        value: result,
+        record: failedExport("The exported web build directory could not be read back."),
+      };
     return {
-      ...result,
-      screenshots: budgeted.kept,
-      message: `${
-        qualifies
-          ? result.message
-          : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.${missingProbe ? ` ${probesMissing}.` : ""}`
-      }${observationNote}${framesNote}`,
-      designObservations: observations,
-      evidenceDirectory: evidence.directory,
+      value: result,
+      record: {
+        outcome: "passed" as const,
+        sourceId: comparison.sourceId,
+        buildId: `${comparison.sourceId}:${finishedAt}`,
+        evidenceDirectory: null,
+        ...(target === "Web" && artifacts !== null ? { artifacts } : {}),
+      },
     };
   });
-  /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
-  const checkGame = Effect.fnUntraced(function* (root: string) {
-    const startedAt = yield* Clock.currentTimeMillis;
-    const temporary = NodePath.join(root, "builds/logs", `godot-check-${NodeCrypto.randomUUID()}`);
-    const scriptPath = NodePath.join(temporary, "check.gd");
-    const resultPath = NodePath.join(temporary, "result.json");
-    const { godot, cwd, godotProject } = yield* engine(root);
-    const manifest = yield* projects.read(root);
-    const gameplayScene = manifest.gameplayScene ?? "";
-    const imported = yield* importGame(root);
-    return yield* Effect.gen(function* () {
-      yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.mkdir(temporary, { recursive: true });
-          await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
-        },
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "godot-check",
-            path: temporary,
-            reason: "io",
-            cause,
-          }),
-      });
-      const run = yield* processes.run({
+  const exportGame = (root: string, target: "Web" | "Linux") =>
+    target === "Web"
+      ? ownStage(root, "export", "export", runExport(root, target))
+      : runExport(root, target).pipe(Effect.map((completed) => completed.value));
+
+  const webPlaytest = (root: string, input: GameWebPlaytestInput) =>
+    Effect.gen(function* () {
+      // Reject before exporting, serving, or launching the browser: a bad capture
+      // request must not cost a build or hold the game's operation lock.
+      const issues = playtestInputIssues(input);
+      if (issues.length > 0)
+        return yield* new GameOperationError({
+          operation: "Web playtest",
+          path: root,
+          reason: "invalid-input",
+          detail: issues.join("\n"),
+        });
+      return yield* ownStage(
         root,
-        executable: godot.path,
-        args: [
-          "--headless",
-          "--path",
-          cwd,
-          "--script",
-          scriptPath,
-          "--",
-          resultPath,
-          gameplayScene,
-        ],
-        operation: "godot-check",
-        timeoutMs: 120_000,
-      });
-      const resultText = yield* Effect.promise(() =>
-        NodeFSP.readFile(resultPath, "utf8").catch(() => null),
+        "playtest",
+        "playtest",
+        Effect.gen(function* () {
+          const manifest = yield* projects.read(root);
+          const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
+          if (!(yield* webBuildIsCurrent(root, beforePlaytest))) {
+            const exported = yield* exportGame(root, "Web");
+            if (!exported.success)
+              return yield* new GameOperationError({
+                operation: "Web playtest",
+                path: NodePath.join(root, "builds/web"),
+                reason: "command-failed",
+                detail: exported.message,
+              });
+          }
+          // Bind the run to the build that exists now, before it starts. A later
+          // replacement makes this build stale through the export record.
+          const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
+            (stage) => stage.stage === "export",
+          );
+          const url = yield* preview.open(root);
+          const executable = yield* browser.executable.pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "Web playtest",
+                  path: root,
+                  reason: "tool-missing",
+                  detail: `Game Studio's preview browser is not ready. ${cause.message} Once the install finishes, retry game_web_playtest.`,
+                }),
+            ),
+          );
+          const result = yield* playtest.run({
+            executable,
+            url,
+            profileDirectory: NodePath.join(
+              root,
+              "builds/logs",
+              `playtest-${NodeCrypto.randomUUID()}`,
+            ),
+            width: input.width ?? 960,
+            height: input.height ?? 540,
+            bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
+            steps: input.steps ?? [],
+          });
+          // Informational only: which approved promises this run happened to show. It
+          // never feeds qualification; the server-owned scenario runner is the gate.
+          const design = yield* designApprovals.status(root, manifest);
+          const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+          const observations = satisfiedObservations(approval?.acceptance ?? [], result.state);
+          const hasObservable = (approval?.acceptance ?? []).some(
+            (criterion) => criterion.observe !== undefined,
+          );
+          const observationNote = hasObservable
+            ? ` Design observations satisfied here: ${observations.length === 0 ? "none" : observations.join(", ")} (informational; the scenario stage gates).`
+            : "";
+          const budgeted = fitScreenshotsToBudget(result.screenshots);
+          const droppedFrames = budgeted.dropped.length;
+          const evidence = yield* Effect.tryPromise({
+            try: () =>
+              writePlaytestEvidence({
+                root,
+                result: { ...result, designObservations: observations },
+                steps: input.steps ?? [],
+              }),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "Web playtest evidence",
+                path: NodePath.join(root, "builds/playtests"),
+                reason: "io",
+                cause,
+              }),
+          });
+          // A template game ships StudioProbe, so a run that only changed pixels (an
+          // idle animation, a menu transition, a clock) must not qualify. Games created
+          // before the probe keep the pixel rule and say so.
+          const stepsGiven = (input.steps?.length ?? 0) > 0;
+          const probe = result.state;
+          const stateAdvanced = probe !== null && playtestShowsGameplay(probe);
+          // A template game owes the probe it was created with. The creation record is
+          // server-owned, so deleting scripts/studio_probe.gd cannot downgrade the
+          // playtest to the pixel rule without failing the stage.
+          const probeRequired = (yield* designApprovals.readProbe(root)) ?? manifest.probe === true;
+          const missingProbe = probeRequired && probe === null;
+          const gaps: string[] = [];
+          if (!stepsGiven) gaps.push("input steps");
+          if (!result.success) gaps.push("a run without console errors");
+          if (!result.responded) gaps.push("a visible response");
+          if (probe !== null && !stateAdvanced) gaps.push("player movement or a GameState change");
+          if (missingProbe) gaps.push("the StudioProbe autoload (scripts/studio_probe.gd)");
+          const qualifies = gaps.length === 0;
+          const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
+          const framesNote =
+            droppedFrames === 0
+              ? ""
+              : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidence.directory}.`;
+          return {
+            value: {
+              ...result,
+              screenshots: budgeted.kept,
+              message: `${
+                qualifies
+                  ? result.message
+                  : `${result.message} Qualification: a qualifying playtest needs ${gaps.join(", ")}.${missingProbe ? ` ${probesMissing}.` : ""}`
+              }${observationNote}${framesNote}`,
+              designObservations: observations,
+              evidenceDirectory: evidence.directory,
+            },
+            record: {
+              outcome: qualifies ? ("passed" as const) : ("failed" as const),
+              sourceId: build?.status === "passed" ? build.sourceId : null,
+              buildId: build?.status === "passed" ? build.buildId : null,
+              evidenceDirectory: evidence.directory,
+              detail: missingProbe
+                ? probesMissing
+                : probe === null
+                  ? "No state probe in this game; the playtest was judged on input steps and a visible response."
+                  : `State probe: ${describePlaytestState(probe)}.`,
+            },
+          };
+        }),
       );
-      const reported = decodeText(decodeCheckResult, resultText);
-      const importedOutput =
-        imported.process === null ? "" : `${imported.process.stdout}\n${imported.process.stderr}`;
-      const importedIssues = parseGodotIssues(importedOutput);
-      const parsed = [...importedIssues, ...parseGodotIssues(`${run.stdout}\n${run.stderr}`)];
-      const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
-      if (!imported.success && importedIssues.length === 0)
-        errors.unshift({
-          file: "godot/project.godot",
-          message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
-        });
-      if (reported === null)
-        errors.unshift({
-          file: "godot/project.godot",
-          message:
-            "The Godot check script did not report a result. The project may have crashed during startup.",
-        });
-      if (run.timedOut)
-        errors.unshift({
-          file: "godot/project.godot",
-          message: "The Godot check timed out before finishing its physics frames.",
-        });
-      if (run.exitCode !== 0 && errors.length === 0)
-        errors.unshift({
-          file: "godot/project.godot",
-          message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
-        });
-      // A game created before gameplay entries is checked as it always was, but
-      // the warning says what the check did not cover rather than implying it did.
-      const warnings = [
-        ...(reported?.warnings ?? []),
-        ...(manifest.gameplayScene === undefined
-          ? [
-              {
-                file: "game.json",
-                message:
-                  "No gameplayScene is declared, so the check ran only the main scene (the menu); gameplay initialization was not exercised. Add the scene play starts in to game.json.",
-              },
-            ]
-          : []),
-      ];
-      const result = {
-        ok: errors.length === 0 && reported !== null && !run.timedOut,
-        errors: limitIssues(errors),
-        warnings: limitIssues(warnings),
-        entries: reported?.entries ?? [],
-        durationMs: (yield* Clock.currentTimeMillis) - startedAt,
-      };
-      const source = yield* snapshot(root, godotProject);
-      yield* recordQualification(root, {
-        stage: "check",
-        outcome: result.ok ? "passed" : "failed",
-        sourceId: source.kind === "known" ? source.sourceId : null,
-        buildId: null,
-        evidenceDirectory: null,
-      });
-      return result;
-    }).pipe(
-      Effect.ensuring(
-        Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
-      ),
+    });
+  /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
+  const checkGame = (root: string) =>
+    ownStage(
+      root,
+      "check",
+      "check",
+      Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis;
+        const temporary = NodePath.join(
+          root,
+          "builds/logs",
+          `godot-check-${NodeCrypto.randomUUID()}`,
+        );
+        const scriptPath = NodePath.join(temporary, "check.gd");
+        const resultPath = NodePath.join(temporary, "result.json");
+        const { godot, cwd, godotProject } = yield* engine(root);
+        const manifest = yield* projects.read(root);
+        const gameplayScene = manifest.gameplayScene ?? "";
+        // The inputs must be read before Godot loads them: an edit after the run
+        // starts would otherwise attach this result to sources it never saw.
+        const before = yield* snapshot(root, godotProject);
+        const imported = yield* importGame(root);
+        return yield* Effect.gen(function* () {
+          yield* Effect.tryPromise({
+            try: async () => {
+              await NodeFSP.mkdir(temporary, { recursive: true });
+              await NodeFSP.writeFile(scriptPath, GODOT_CHECK_SCRIPT);
+            },
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "godot-check",
+                path: temporary,
+                reason: "io",
+                cause,
+              }),
+          });
+          const run = yield* processes.run({
+            root,
+            executable: godot.path,
+            args: [
+              "--headless",
+              "--path",
+              cwd,
+              "--script",
+              scriptPath,
+              "--",
+              resultPath,
+              gameplayScene,
+            ],
+            operation: "godot-check",
+            timeoutMs: 120_000,
+          });
+          const resultText = yield* Effect.promise(() =>
+            NodeFSP.readFile(resultPath, "utf8").catch(() => null),
+          );
+          const reported = decodeText(decodeCheckResult, resultText);
+          const importedOutput =
+            imported.process === null
+              ? ""
+              : `${imported.process.stdout}\n${imported.process.stderr}`;
+          const importedIssues = parseGodotIssues(importedOutput);
+          const parsed = [...importedIssues, ...parseGodotIssues(`${run.stdout}\n${run.stderr}`)];
+          const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
+          if (!imported.success && importedIssues.length === 0)
+            errors.unshift({
+              file: "godot/project.godot",
+              message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
+            });
+          if (reported === null)
+            errors.unshift({
+              file: "godot/project.godot",
+              message:
+                "The Godot check script did not report a result. The project may have crashed during startup.",
+            });
+          if (run.timedOut)
+            errors.unshift({
+              file: "godot/project.godot",
+              message: "The Godot check timed out before finishing its physics frames.",
+            });
+          if (run.exitCode !== 0 && errors.length === 0)
+            errors.unshift({
+              file: "godot/project.godot",
+              message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
+            });
+          // A game created before gameplay entries is checked as it always was, but
+          // the warning says what the check did not cover rather than implying it did.
+          const warnings = [
+            ...(reported?.warnings ?? []),
+            ...(manifest.gameplayScene === undefined
+              ? [
+                  {
+                    file: "game.json",
+                    message:
+                      "No gameplayScene is declared, so the check ran only the main scene (the menu); gameplay initialization was not exercised. Add the scene play starts in to game.json.",
+                  },
+                ]
+              : []),
+          ];
+          const after = yield* snapshot(root, godotProject);
+          const comparison = comparedSource(before, after, "check");
+          if (comparison.kind !== "current")
+            warnings.unshift({ file: "godot/project.godot", message: comparison.detail });
+          const result = {
+            ok: errors.length === 0 && reported !== null && !run.timedOut,
+            errors: limitIssues(errors),
+            warnings: limitIssues(warnings),
+            entries: reported?.entries ?? [],
+            durationMs: (yield* Clock.currentTimeMillis) - startedAt,
+          };
+          return {
+            value: result,
+            record: {
+              outcome: result.ok
+                ? comparison.kind === "current"
+                  ? ("passed" as const)
+                  : ("unknown" as const)
+                : ("failed" as const),
+              sourceId: comparison.kind === "current" ? comparison.sourceId : null,
+              buildId: null,
+              evidenceDirectory: null,
+              ...(comparison.kind === "current" ? {} : { detail: comparison.detail }),
+            },
+          };
+        }).pipe(
+          Effect.ensuring(
+            Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
+          ),
+        );
+      }),
     );
-  });
   /**
    * Runs the agent-written routes under real physics and grades them against the
    * creator's approved observations. Routes are pure input data: this method
    * supplies the exam, the game supplies the answer.
    */
-  const scenariosRun = Effect.fnUntraced(function* (root: string) {
-    const { godot, cwd, godotProject } = yield* engine(root);
-    const manifest = yield* projects.read(root);
-    const imported = yield* importGame(root);
-    const design = yield* designApprovals.status(root, manifest);
-    const approval = yield* designApprovals.read(root);
-    const mode: "criteria" | "legacy" | "none" =
-      design.state === "approved" && approval !== null
-        ? "criteria"
-        : design.state === "legacy"
-          ? "legacy"
-          : "none";
-    const criteria = mode === "criteria" && approval !== null ? approval.acceptance : [];
-    const sourceBefore = yield* snapshot(root, godotProject);
-    const evidenceDirectory = NodePath.join(
+  const scenariosRun = (root: string) =>
+    ownStage(
       root,
-      "builds/logs",
-      `scenarios-${NodeCrypto.randomUUID()}`,
-    );
-    const evidenceReference = NodePath.relative(root, evidenceDirectory);
-    const writeFailure = (errors: readonly string[]): GameScenariosRunResult => {
-      const summary = evaluateScenarios({ mode, criteria, runs: [] });
-      const failed = {
-        ...summary,
-        passed: false,
-        reason: "scenario-failed" as const,
-        detail: errors[0] ?? summary.detail,
-      };
-      return {
-        ok: false,
-        summary: failed,
-        scenarios: [],
-        errors: [...errors],
-        evidenceDirectory: null,
-      };
-    };
-    if (!imported.success) {
-      const errors = [`The Godot import failed before the scenarios ran: ${imported.message}`];
-      const failed = writeFailure(errors);
-      yield* recordQualification(root, {
-        stage: "state",
-        outcome: "failed",
-        sourceId: sourceBefore.kind === "known" ? sourceBefore.sourceId : null,
-        buildId: null,
-        evidenceDirectory: null,
-        designHash: approval?.designHash ?? null,
-        criteria: failed.summary.criteria,
-        detail: failed.summary.detail,
-      });
-      return failed;
-    }
-    const projectText = yield* Effect.promise(() =>
-      NodeFSP.readFile(NodePath.join(cwd, "project.godot"), "utf8").catch(() => ""),
-    );
-    const projectActions = parseProjectInputActions(projectText);
-    const files = yield* Effect.promise(() => readScenarioFiles(cwd));
-    const errors = [...files.errors];
-    const runnable = files.scenarios.filter((file) => {
-      const issues = scenarioActionIssues(file.scenario, projectActions);
-      if (issues.length === 0) return true;
-      errors.push(`${file.scenario.id}: ${issues.join(" ")}`);
-      return false;
-    });
-    const observations = scenarioObservations(mode, criteria);
-    const scriptPath = NodePath.join(evidenceDirectory, "scenario.gd");
-    yield* Effect.tryPromise({
-      try: async () => {
-        await NodeFSP.mkdir(evidenceDirectory, { recursive: true });
-        await NodeFSP.writeFile(scriptPath, GODOT_SCENARIO_SCRIPT);
-      },
-      catch: (cause) =>
-        new GameOperationError({
-          operation: "godot-scenarios",
-          path: evidenceDirectory,
-          reason: "io",
-          cause,
-        }),
-    });
-    const runs: GameScenarioEvidence[] = [];
-    for (const file of runnable) {
-      const planned = file.scenario.steps.reduce(
-        (total, step) => total + ("press" in step ? 2 : "hold" in step ? step.frames : step.wait),
-        0,
-      );
-      const timeoutMs = Math.min(
-        300_000,
-        Math.max(60_000, Math.ceil(((planned + 300) / 60) * 1000 * 3)),
-      );
-      const requestPath = NodePath.join(evidenceDirectory, `${file.scenario.id}.request.json`);
-      const resultPath = NodePath.join(evidenceDirectory, `${file.scenario.id}.result.json`);
-      yield* Effect.promise(() =>
-        NodeFSP.writeFile(
-          requestPath,
-          scenarioRequestJson({
-            scenarioPath: file.path,
-            observations,
-            sampleEvery: 6,
-            bootFrames: 30,
-          }),
-        ),
-      );
-      const startedAt = yield* Clock.currentTimeMillis;
-      const run = yield* processes.run({
-        root,
-        executable: godot.path,
-        args: [
-          "--headless",
-          "--fixed-fps",
-          "60",
-          "--path",
-          cwd,
-          "--script",
-          scriptPath,
-          "--",
-          requestPath,
-          resultPath,
-        ],
-        operation: "godot-scenarios",
-        timeoutMs,
-      });
-      const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt;
-      const resultText = yield* Effect.promise(() =>
-        NodeFSP.readFile(resultPath, "utf8").catch(() => null),
-      );
-      const reported = resultText === null ? null : decodeScenarioEvidence(resultText);
-      const scriptIssues = parseGodotIssues(`${run.stdout}\n${run.stderr}`);
-      let error: string | null = null;
-      if (run.timedOut) error = `The scenario timed out after ${timeoutMs} ms.`;
-      else if (reported === null)
-        error = `The runner did not report a result. The project may have crashed during startup. ${commandDetail(run)}`;
-      else if (reported.error !== null) error = reported.error;
-      else if (scriptIssues.length > 0)
-        error = `Godot reported: ${scriptIssues
-          .slice(0, 3)
-          .map((issue) => `${issue.file}${issue.line ? `:${issue.line}` : ""} ${issue.message}`)
-          .join(" | ")}`;
-      else if (scriptIssues.length === 0 && run.exitCode !== 0)
-        error = `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`;
-      runs.push({
-        id: file.scenario.id,
-        frames: reported?.frames ?? 0,
-        durationMs: reported?.durationMs ?? elapsedMs,
-        playerMoved: reported?.playerMoved ?? false,
-        error,
-        invalidActions: reported?.invalidActions ?? [],
-        observations: reported?.observations ?? [],
-      });
-    }
-    const sourceAfter = yield* snapshot(root, godotProject);
-    const sourceId = exportedSourceId(sourceBefore, sourceAfter);
-    if (sourceId === null)
-      errors.push("The game sources changed while the scenarios ran; the result is not current.");
-    const evaluated = evaluateScenarios({ mode, criteria, runs });
-    const summary =
-      errors.length > 0 && evaluated.passed
-        ? {
-            ...evaluated,
+      "state",
+      "scenarios",
+      Effect.gen(function* () {
+        const { godot, cwd, godotProject } = yield* engine(root);
+        const manifest = yield* projects.read(root);
+        // Read the sources before the import and the runs touch the tree.
+        const sourceBefore = yield* snapshot(root, godotProject);
+        const imported = yield* importGame(root);
+        const design = yield* designApprovals.status(root, manifest);
+        const approval = yield* designApprovals.read(root);
+        const mode: "criteria" | "legacy" | "none" =
+          design.state === "approved" && approval !== null
+            ? "criteria"
+            : design.state === "legacy"
+              ? "legacy"
+              : "none";
+        const criteria = mode === "criteria" && approval !== null ? approval.acceptance : [];
+        const evidenceDirectory = NodePath.join(
+          root,
+          "builds/logs",
+          `scenarios-${NodeCrypto.randomUUID()}`,
+        );
+        const evidenceReference = NodePath.relative(root, evidenceDirectory);
+        const writeFailure = (errors: readonly string[]): GameScenariosRunResult => {
+          const summary = evaluateScenarios({ mode, criteria, runs: [] });
+          const failed = {
+            ...summary,
             passed: false,
             reason: "scenario-failed" as const,
-            detail: errors[0]!,
-          }
-        : evaluated;
-    yield* recordQualification(root, {
-      stage: "state",
-      outcome: summary.passed ? "passed" : "failed",
-      sourceId,
-      buildId: null,
-      evidenceDirectory: evidenceReference,
-      designHash: approval?.designHash ?? null,
-      criteria: summary.criteria,
-      detail: summary.detail,
-    });
-    return {
-      ok: summary.passed && errors.length === 0,
-      summary,
-      scenarios: runs,
-      errors,
-      evidenceDirectory: evidenceReference,
-    };
-  });
+            detail: errors[0] ?? summary.detail,
+          };
+          return {
+            ok: false,
+            summary: failed,
+            scenarios: [],
+            errors: [...errors],
+            evidenceDirectory: null,
+          };
+        };
+        if (!imported.success) {
+          const errors = [`The Godot import failed before the scenarios ran: ${imported.message}`];
+          const failed = writeFailure(errors);
+          return {
+            value: failed,
+            record: {
+              outcome: "failed" as const,
+              sourceId: sourceBefore.kind === "known" ? sourceBefore.sourceId : null,
+              buildId: null,
+              evidenceDirectory: null,
+              designHash: approval?.designHash ?? null,
+              criteria: failed.summary.criteria,
+              detail: failed.summary.detail,
+            },
+          };
+        }
+        const projectText = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(cwd, "project.godot"), "utf8").catch(() => ""),
+        );
+        const projectActions = parseProjectInputActions(projectText);
+        const files = yield* Effect.promise(() => readScenarioFiles(cwd));
+        const errors = [...files.errors];
+        const runnable = files.scenarios.filter((file) => {
+          const issues = scenarioActionIssues(file.scenario, projectActions);
+          if (issues.length === 0) return true;
+          errors.push(`${file.scenario.id}: ${issues.join(" ")}`);
+          return false;
+        });
+        const observations = scenarioObservations(mode, criteria);
+        const scriptPath = NodePath.join(evidenceDirectory, "scenario.gd");
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(evidenceDirectory, { recursive: true });
+            await NodeFSP.writeFile(scriptPath, GODOT_SCENARIO_SCRIPT);
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "godot-scenarios",
+              path: evidenceDirectory,
+              reason: "io",
+              cause,
+            }),
+        });
+        const runs: GameScenarioEvidence[] = [];
+        for (const file of runnable) {
+          const planned = file.scenario.steps.reduce(
+            (total, step) =>
+              total + ("press" in step ? 2 : "hold" in step ? step.frames : step.wait),
+            0,
+          );
+          const timeoutMs = Math.min(
+            300_000,
+            Math.max(60_000, Math.ceil(((planned + 300) / 60) * 1000 * 3)),
+          );
+          const requestPath = NodePath.join(evidenceDirectory, `${file.scenario.id}.request.json`);
+          const resultPath = NodePath.join(evidenceDirectory, `${file.scenario.id}.result.json`);
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(
+              requestPath,
+              scenarioRequestJson({
+                scenarioPath: file.path,
+                observations,
+                sampleEvery: 6,
+                bootFrames: 30,
+              }),
+            ),
+          );
+          const startedAt = yield* Clock.currentTimeMillis;
+          const run = yield* processes.run({
+            root,
+            executable: godot.path,
+            args: [
+              "--headless",
+              "--fixed-fps",
+              "60",
+              "--path",
+              cwd,
+              "--script",
+              scriptPath,
+              "--",
+              requestPath,
+              resultPath,
+            ],
+            operation: "godot-scenarios",
+            timeoutMs,
+          });
+          const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt;
+          const resultText = yield* Effect.promise(() =>
+            NodeFSP.readFile(resultPath, "utf8").catch(() => null),
+          );
+          const reported = resultText === null ? null : decodeScenarioEvidence(resultText);
+          const scriptIssues = parseGodotIssues(`${run.stdout}\n${run.stderr}`);
+          let error: string | null = null;
+          if (run.timedOut) error = `The scenario timed out after ${timeoutMs} ms.`;
+          else if (reported === null)
+            error = `The runner did not report a result. The project may have crashed during startup. ${commandDetail(run)}`;
+          else if (reported.error !== null) error = reported.error;
+          else if (scriptIssues.length > 0)
+            error = `Godot reported: ${scriptIssues
+              .slice(0, 3)
+              .map((issue) => `${issue.file}${issue.line ? `:${issue.line}` : ""} ${issue.message}`)
+              .join(" | ")}`;
+          else if (scriptIssues.length === 0 && run.exitCode !== 0)
+            error = `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`;
+          runs.push({
+            id: file.scenario.id,
+            frames: reported?.frames ?? 0,
+            durationMs: reported?.durationMs ?? elapsedMs,
+            playerMoved: reported?.playerMoved ?? false,
+            error,
+            invalidActions: reported?.invalidActions ?? [],
+            observations: reported?.observations ?? [],
+          });
+        }
+        const sourceAfter = yield* snapshot(root, godotProject);
+        const comparison = comparedSource(sourceBefore, sourceAfter, "scenarios");
+        if (comparison.kind !== "current") errors.push(comparison.detail);
+        const evaluated = evaluateScenarios({ mode, criteria, runs });
+        const summary =
+          errors.length > 0 && evaluated.passed
+            ? {
+                ...evaluated,
+                passed: false,
+                reason: "scenario-failed" as const,
+                detail: errors[0]!,
+              }
+            : evaluated;
+        return {
+          value: {
+            ok: summary.passed && errors.length === 0,
+            summary,
+            scenarios: runs,
+            errors,
+            evidenceDirectory: evidenceReference,
+          },
+          record: {
+            outcome: summary.passed ? ("passed" as const) : ("failed" as const),
+            sourceId: comparison.kind === "current" ? comparison.sourceId : null,
+            buildId: null,
+            evidenceDirectory: evidenceReference,
+            designHash: approval?.designHash ?? null,
+            criteria: summary.criteria,
+            detail: comparison.kind === "current" ? summary.detail : comparison.detail,
+          },
+        };
+      }),
+    );
   const inspectScene = Effect.fnUntraced(function* (root: string, scenePath: string) {
     const { godot, cwd } = yield* engine(root);
     const relative = scenePath.replace(/^res:\/\//, "");
@@ -942,6 +1048,59 @@ const make = Effect.gen(function* () {
         reason: design.state === "changed" ? "design-changed" : "design-draft",
       });
     });
+  /** Runs one Godot script and returns what the test stage would record for it. */
+  const testGame = (root: string, script: string, timeoutMs: number) =>
+    Effect.gen(function* () {
+      const { godot, cwd, godotProject } = yield* engine(root);
+      const resolved = yield* Effect.try({
+        try: () => insideGame(cwd, script.replace(/^res:\/\//, "")),
+        catch: (cause) =>
+          isGameOperationError(cause)
+            ? cause
+            : new GameOperationError({
+                operation: "test",
+                path: script,
+                reason: "invalid-path",
+                cause,
+              }),
+      });
+      if (!resolved.endsWith(".gd"))
+        return yield* new GameOperationError({
+          operation: "test",
+          path: script,
+          reason: "invalid-path",
+        });
+      // The suite must have been the source Godot loaded, not a later edit.
+      const before = yield* snapshot(root, godotProject);
+      const result = response(
+        yield* processes.run({
+          root,
+          executable: godot.path,
+          args: ["--headless", "--path", cwd, "--script", resolved],
+          operation: "godot-test",
+          timeoutMs: Math.max(1_000, Math.min(timeoutMs, 300_000)),
+        }),
+      );
+      const after = yield* snapshot(root, godotProject);
+      const comparison = comparedSource(before, after, "test");
+      return {
+        value:
+          comparison.kind === "current"
+            ? result
+            : { ...result, message: `${result.message} ${comparison.detail}` },
+        record: {
+          outcome: result.success
+            ? comparison.kind === "current"
+              ? ("passed" as const)
+              : ("unknown" as const)
+            : ("failed" as const),
+          sourceId: comparison.kind === "current" ? comparison.sourceId : null,
+          buildId: null,
+          evidenceDirectory: null,
+          ...(comparison.kind === "current" ? {} : { detail: comparison.detail }),
+        },
+      };
+    });
   return GameService.of({
     events: operations.events,
     cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
@@ -1017,54 +1176,22 @@ const make = Effect.gen(function* () {
     test: (threadId, script, timeoutMs = 60_000) =>
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {
-          const { godot, cwd, godotProject } = yield* engine(root);
           const manifest = yield* projects.read(root);
           const suite = gameTestSuite(manifest);
-          const resolved = yield* Effect.try({
-            try: () => insideGame(cwd, script.replace(/^res:\/\//, "")),
-            catch: (cause) =>
-              isGameOperationError(cause)
-                ? cause
-                : new GameOperationError({
-                    operation: "test",
-                    path: script,
-                    reason: "invalid-path",
-                    cause,
-                  }),
-          });
-          if (!resolved.endsWith(".gd"))
-            return yield* new GameOperationError({
-              operation: "test",
-              path: script,
-              reason: "invalid-path",
-            });
-          const result = response(
-            yield* processes.run({
-              root,
-              executable: godot.path,
-              args: ["--headless", "--path", cwd, "--script", resolved],
-              operation: "godot-test",
-              timeoutMs: Math.max(1_000, Math.min(timeoutMs, 300_000)),
-            }),
-          );
-          // Only the game's canonical suite owns the test stage; any other script
-          // is a diagnostic run and must not make the game look qualified.
-          const ran = NodePath.relative(cwd, resolved).split(NodePath.sep).join("/");
           const canonical = suite.replace(/^res:\/\//, "").replaceAll("\\", "/");
-          if (ran !== canonical)
+          const requested = NodePath.normalize(script.replace(/^res:\/\//, ""))
+            .split(NodePath.sep)
+            .join("/");
+          // Only the game's canonical suite owns the test stage; any other script
+          // is a diagnostic run and must not change qualification.
+          if (requested !== canonical) {
+            const diagnostic = yield* testGame(root, script, timeoutMs);
             return {
-              ...result,
-              message: `${result.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
+              ...diagnostic.value,
+              message: `${diagnostic.value.message} Only the canonical suite (${suite}) records qualification, so this run did not change it.`,
             };
-          const source = yield* snapshot(root, godotProject);
-          yield* recordQualification(root, {
-            stage: "test",
-            outcome: result.success ? "passed" : "failed",
-            sourceId: source.kind === "known" ? source.sourceId : null,
-            buildId: null,
-            evidenceDirectory: null,
-          });
-          return result;
+          }
+          return yield* ownStage(root, "test", "test", testGame(root, script, timeoutMs));
         }),
       ),
     blender: (threadId, input) =>

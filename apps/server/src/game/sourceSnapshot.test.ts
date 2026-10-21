@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { exportedSourceId, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
+import { comparedSource, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
 const withTree = <A, E, R>(run: (root: string) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
@@ -100,14 +100,40 @@ it.effect("reports unknown when the tree cannot be read", () =>
   ),
 );
 
-it.effect("an export only claims sources that did not change while it ran", () =>
+it.effect("reports unknown instead of fresh when a linked input is found", () =>
+  withTree((root) =>
+    Effect.gen(function* () {
+      const linked = NodePath.join(root, "linked.gd");
+      yield* Effect.promise(() => NodeFSP.writeFile(linked, "extends Node\nvar from_link=1\n"));
+      yield* Effect.promise(() => NodeFSP.symlink(linked, NodePath.join(root, "godot/smoke.gd")));
+      const snapshot = yield* Effect.promise(() => snapshotSource(root, "godot"));
+      expect(snapshot.kind).toBe("unknown");
+      if (snapshot.kind === "unknown") {
+        expect(snapshot.reason).toBe("symlink");
+        expect(snapshot.detail).toBe("godot/smoke.gd");
+      }
+      // Following the link would hide its content: the same tree with an edited
+      // target must not look fresh.
+      yield* Effect.promise(() => NodeFSP.writeFile(linked, "extends Node\nvar from_link=2\n"));
+      const after = yield* Effect.promise(() => snapshotSource(root, "godot"));
+      expect(after.kind).toBe("unknown");
+    }),
+  ),
+);
+
+it.effect("an operation only claims sources that did not change while it ran", () =>
   Effect.sync(() => {
     const known = (sourceId: string): SourceSnapshot => ({ kind: "known", sourceId, entries: 1 });
     const unknown: SourceSnapshot = { kind: "unknown", reason: "entry-limit" };
-    expect(exportedSourceId(known("a"), known("a"))).toBe("a");
-    // A mixed build and an unreadable input can never be current.
-    expect(exportedSourceId(known("a"), known("b"))).toBeNull();
-    expect(exportedSourceId(unknown, known("a"))).toBeNull();
-    expect(exportedSourceId(known("a"), unknown)).toBeNull();
+    expect(comparedSource(known("a"), known("a"), "check")).toEqual({
+      kind: "current",
+      sourceId: "a",
+    });
+    // A mixed run and an unreadable input can never be current.
+    const changed = comparedSource(known("a"), known("b"), "check");
+    expect(changed.kind).toBe("changed");
+    if (changed.kind !== "current") expect(changed.detail).toContain("changed while the check ran");
+    expect(comparedSource(unknown, known("a"), "check").kind).toBe("unknown");
+    expect(comparedSource(known("a"), unknown, "check").kind).toBe("unknown");
   }),
 );

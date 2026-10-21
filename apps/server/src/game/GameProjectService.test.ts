@@ -31,11 +31,14 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameOperations from "./GameOperations.ts";
+import { designIntentFile } from "./GameDesignApproval.ts";
 import { scaffoldFiles } from "./scaffold.ts";
 const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" };
+/** Record stores live inside the fixture directory that the test removes. */
+const fixtureState = (fixture: string) => NodePath.join(fixture, ".test-state");
 /** Enough of the real services to resolve a game and hit the draft gate without Godot. */
-const gameServiceLayers = (options?: {
-  readonly stateDir?: string;
+const gameServiceLayers = (options: {
+  readonly stateDir: string;
   readonly onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void;
 }) =>
   GameService.layer.pipe(
@@ -44,15 +47,14 @@ const gameServiceLayers = (options?: {
     Layer.provideMerge(GameToolchain.layer),
     Layer.provideMerge(GamePreview.layer),
     Layer.provideMerge(GameProcesses.layer),
-    Layer.provide(projectTestLayer(undefined, options?.onSend)),
+    Layer.provide(projectTestLayer(undefined, options.onSend)),
     Layer.provide(previewBrowserTestLayer()),
-    Layer.provideMerge(qualificationTestLayer(options?.stateDir)),
-    Layer.provideMerge(designApprovalTestLayer(options?.stateDir)),
+    Layer.provideMerge(qualificationTestLayer(options.stateDir)),
+    Layer.provideMerge(designApprovalTestLayer(options.stateDir)),
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(NodeServices.layer),
   );
-const gameServiceLayer = gameServiceLayers();
-const gameProjectLayer = (registration = projectTestLayer(), stateDir?: string) =>
+const gameProjectLayer = (stateDir: string, registration = projectTestLayer()) =>
   GameProjectService.layer.pipe(
     Layer.provide(registration),
     Layer.provideMerge(GameProcesses.layer),
@@ -205,6 +207,7 @@ it.effect(
           }).pipe(
             Effect.provide(
               gameProjectLayer(
+                fixtureState(parent),
                 projectTestLayer((input) => {
                   if (input.initialMessage) launch = input;
                 }),
@@ -281,7 +284,7 @@ it.effect("rejects absent or invalid manifests and paths outside a game", () =>
           const invalid = yield* Effect.result(projects.read(root));
           expect(invalid._tag).toBe("Failure");
           expect(() => GameProjectService.insideGame(root, "../escape")).toThrow();
-        }).pipe(Effect.provide(gameProjectLayer())),
+        }).pipe(Effect.provide(gameProjectLayer(fixtureState(root)))),
       );
     } finally {
       yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
@@ -296,7 +299,8 @@ it.effect("reopens a registered workspace after reconstructing the game service"
       (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
     );
     const registration = projectTestLayer();
-    const freshService = () => gameProjectLayer(registration).pipe(Layer.fresh);
+    const freshService = () =>
+      gameProjectLayer(fixtureState(parent), registration).pipe(Layer.fresh);
     const created = yield* Effect.scoped(
       Effect.gen(function* () {
         const service = yield* GameProjectService.GameProjectService;
@@ -341,6 +345,7 @@ it.effect("opening an existing game resumes its newest session instead of starti
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            fixtureState(parent),
             projectTestLayer((input) => {
               launches.push(input);
             }),
@@ -379,6 +384,7 @@ it.effect("a project with no session gets one when the game is opened", () =>
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            fixtureState(parent),
             projectTestLayer(
               () => {
                 launches += 1;
@@ -423,7 +429,7 @@ it.effect("lists games with their template, design state, activity and rendered 
           NodeFSP.writeFile(NodePath.join(game.root, "art/previews/coin.png"), "png"),
         );
         return yield* service.list();
-      }).pipe(Effect.provide(gameProjectLayer())),
+      }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
     );
     expect(games).toHaveLength(1);
     expect(games[0]).toMatchObject({
@@ -459,6 +465,7 @@ it.effect("passes the chosen runtime mode to the game thread", () =>
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            fixtureState(parent),
             projectTestLayer((input) => {
               launch = input;
             }),
@@ -491,13 +498,67 @@ it.effect("creates a game from an explicitly requested starter template", () =>
           expect(yield* readFile(NodePath.join(created.root, "TEMPLATE.md"))).toContain(
             "Blank starter template",
           );
-        }).pipe(Effect.provide(gameProjectLayer())),
+        }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
       );
     } finally {
       yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
     }
   }),
 );
+it.effect("a failed creation removes the intent record it wrote", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-failed-intent-")),
+      ),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = NodePath.join(parent, ".test-state");
+    const root = NodePath.join(parent, "failed-create");
+    const services = GameProjectService.layer.pipe(
+      Layer.provide(projectTestLayer()),
+      Layer.provide(
+        Layer.mock(GameProcesses.GameProcesses)({
+          // Git is the first step after the creation intent is written.
+          run: () =>
+            Effect.succeed({
+              pid: 1,
+              exitCode: 1,
+              signal: null,
+              timedOut: false,
+              stdout: "",
+              stderr: "injected git failure",
+              logPath: NodePath.join(parent, "git.log"),
+            }),
+        }),
+      ),
+      Layer.provideMerge(designApprovalTestLayer(stateDir)),
+      Layer.provideMerge(qualificationTestLayer(stateDir)),
+      Layer.provideMerge(GameOperations.layer),
+      Layer.provide(NodeServices.layer),
+    );
+    const failure = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        return yield* Effect.result(
+          projects.create({
+            name: "Failed Create",
+            parentDirectory: parent,
+            brief: "Go",
+            modelSelection: selection,
+          }),
+        );
+      }).pipe(Effect.provide(services)),
+    );
+    expect(failure._tag).toBe("Failure");
+    if (failure._tag === "Failure") expect(failure.failure.operation).toBe("git-init");
+    // The folder and the intent this attempt wrote are both gone; no other
+    // record for this root is invented.
+    expect(yield* exists(root)).toBe(false);
+    expect(yield* exists(designIntentFile(stateDir, root))).toBe(false);
+  }),
+);
+
 it.effect("rejects an unknown starter template and removes the folder it created", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(
@@ -517,7 +578,7 @@ it.effect("rejects an unknown starter template and removes the folder it created
             modelSelection: selection,
           }),
         );
-      }).pipe(Effect.provide(gameProjectLayer())),
+      }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
     );
     expect(failure._tag).toBe("Failure");
     if (failure._tag === "Failure") {
@@ -548,7 +609,7 @@ it.effect("keeps a pre-existing folder when creation cannot adopt it", () =>
             modelSelection: selection,
           }),
         );
-      }).pipe(Effect.provide(gameProjectLayer())),
+      }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
     );
     expect(failure._tag).toBe("Failure");
     if (failure._tag === "Failure") expect(failure.failure.reason).toBe("io");
@@ -583,10 +644,10 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            stateDir,
             projectTestLayer((input) => {
               launch = input;
             }),
-            stateDir,
           ),
         ),
       ),
@@ -725,8 +786,8 @@ it.effect("approves one reviewed DESIGN.md revision and dispatches one build tur
       }).pipe(
         Effect.provide(
           gameProjectLayer(
-            projectTestLayer(undefined, (input) => sends.push(input)),
             stateDir,
+            projectTestLayer(undefined, (input) => sends.push(input)),
           ),
         ),
       ),
@@ -807,7 +868,12 @@ it.effect("refuses a missing, skeleton, unreadable or acceptance-less design", (
         yield* Effect.promise(() => NodeFSP.rmdir(designFile));
         expect(sends).toHaveLength(0);
       }).pipe(
-        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+        Effect.provide(
+          gameProjectLayer(
+            fixtureState(parent),
+            projectTestLayer(undefined, (input) => sends.push(input)),
+          ),
+        ),
       ),
     );
   }),
@@ -840,7 +906,12 @@ it.effect("two concurrent approvals write one record and dispatch one turn", () 
         );
         expect(results[0].approvalId).toBe(results[1].approvalId);
       }).pipe(
-        Effect.provide(gameProjectLayer(projectTestLayer(undefined, (input) => sends.push(input)))),
+        Effect.provide(
+          gameProjectLayer(
+            fixtureState(parent),
+            projectTestLayer(undefined, (input) => sends.push(input)),
+          ),
+        ),
       ),
     );
     expect(sends).toHaveLength(1);
@@ -882,6 +953,7 @@ it.effect("a failed dispatch rolls back only that attempt, and a retry dispatche
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            fixtureState(parent),
             projectTestLayer(undefined, (input) => sends.push(input), { sendFailures: 1 }),
           ),
         ),
@@ -922,6 +994,7 @@ it.effect("an interrupted approval leaves no record, so a retry can dispatch", (
       }).pipe(
         Effect.provide(
           gameProjectLayer(
+            fixtureState(parent),
             projectTestLayer(undefined, (input) => sends.push(input), {
               sendGate: { started, release },
             }),
@@ -1031,7 +1104,7 @@ it.effect("a raw game.json edit to approved grants nothing", () =>
         const outcome = yield* Effect.result(projects.approveDesign(created.threadId, hash));
         expect(outcome._tag).toBe("Failure");
         if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("design-invalid");
-      }).pipe(Effect.provide(gameServiceLayers())),
+      }).pipe(Effect.provide(gameServiceLayers({ stateDir: fixtureState(parent) }))),
     );
   }),
 );
@@ -1062,7 +1135,7 @@ it.effect("a skip-planning game is legacy with no acceptance", () =>
         const outcome = yield* Effect.result(projects.approveDesign(created.threadId, "any"));
         expect(outcome._tag).toBe("Failure");
         if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("design-legacy");
-      }).pipe(Effect.provide(gameServiceLayers())),
+      }).pipe(Effect.provide(gameServiceLayers({ stateDir: fixtureState(parent) }))),
     );
   }),
 );
@@ -1107,7 +1180,7 @@ it.effect("a draft design locks staging until it is approved", () =>
           yield* projects.approveDesign(created.threadId, yield* designHashOf(created.root));
           expect((yield* projects.read(created.root)).design?.status).toBe("approved");
           expect((yield* game.status(created.threadId)).design.state).toBe("approved");
-        }).pipe(Effect.provide(gameServiceLayer)),
+        }).pipe(Effect.provide(gameServiceLayers({ stateDir: fixtureState(parent) }))),
       );
     } finally {
       yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
@@ -1181,7 +1254,7 @@ it.effect("reuses the inventory until the source snapshot or manifest changes", 
         });
         const withGem = yield* service.inventory(game.root, "source-b");
         expect(withGem.assets.map((asset) => asset.id)).toEqual(["coin", "gem"]);
-      }).pipe(Effect.provide(gameProjectLayer())),
+      }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
     );
   }),
 );

@@ -130,9 +130,16 @@ The record lives under the server's `stateDir` (`game-qualification/`), never in
 each stage stores its outcome, the source snapshot it covered, and for exports and playtests the
 build identity. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
 additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
-unknown. A stage counts only while its snapshot (and, for a playtest, its build) still matches, so
+unknown. Symlinks fail closed with the linked path in the reason rather than being followed, and
+size+mtime is the identity limit: a same-size edit inside one mtime tick is not detected. A web
+export also stores every file under `builds/web` (path, size, mtime); a missing, replaced or extra
+file makes the export stale even while the source snapshot still matches. A stage counts only while
+its snapshot (and, for a playtest, the build captured before it ran) still matches, so
 an edit, a deletion, a later failure or a re-export invalidates earlier passes. `GameStatus`
 exposes the derived `qualified | unqualified | unknown` read with each stage's status.
+Each qualification attempt owns its stage: the previous result is removed before the work runs, and
+every exit (success, error, cancellation, defect) writes an outcome through finalization. A failed
+terminal record write therefore leaves the stage missing rather than the earlier pass readable.
 State acceptance is a server-owned exam: `game_scenarios_run` reads pure input routes from
 `godot/tests/scenarios/*.json` (press, hold and wait steps, never code), starts the real main scene
 under `--headless --fixed-fps 60`, injects input every physics frame and samples the GameState

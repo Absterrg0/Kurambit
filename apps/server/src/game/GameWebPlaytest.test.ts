@@ -167,7 +167,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provideMerge(qualificationTestLayer(stateDir)),
-        Layer.provideMerge(designApprovalTestLayer()),
+        Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );
@@ -260,7 +260,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provideMerge(qualificationTestLayer(stateDir)),
-        Layer.provideMerge(designApprovalTestLayer()),
+        Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

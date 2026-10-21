@@ -101,8 +101,8 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
             }),
           ),
           Layer.provide(previewBrowserTestLayer()),
-          Layer.provideMerge(qualificationTestLayer()),
-          Layer.provideMerge(designApprovalTestLayer()),
+          Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
+          Layer.provideMerge(designApprovalTestLayer(NodePath.join(root, ".test-state"))),
         );
         yield* Effect.gen(function* () {
           const game = yield* GameService.GameService;

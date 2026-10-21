@@ -280,9 +280,18 @@ const make = Effect.gen(function* () {
       const root = NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir()), slug);
       const template = input.template ?? DEFAULT_GAME_TEMPLATE;
       let created = false;
+      let intentRecorded = false;
       const removeCreatedRoot = Effect.promise(async () => {
         if (!created) return;
         await NodeFSP.rm(root, { recursive: true, force: true }).catch(() => {});
+      });
+      const rollback = Effect.gen(function* () {
+        yield* removeCreatedRoot;
+        // The intent was written by this attempt and names a root this attempt
+        // created, so it is ours to remove. Records of an existing game are
+        // never touched: creation never adopts an existing directory.
+        if (intentRecorded)
+          yield* approvals.removeIntent(root).pipe(Effect.catch(() => Effect.void));
       });
       return yield* Effect.gen(function* () {
         yield* Effect.tryPromise({
@@ -331,6 +340,7 @@ const make = Effect.gen(function* () {
           input.planFirst === false ? "skipped" : "required",
           scaffoldManifest(input).probe === true,
         );
+        intentRecorded = true;
         for (const args of [
           ["init"],
           ["add", "."],
@@ -362,8 +372,8 @@ const make = Effect.gen(function* () {
         return yield* register(root, input, initialGamePrompt(input));
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder
-        // behind; never remove a directory this call did not create.
-        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : removeCreatedRoot)),
+        // or its own intent record behind.
+        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
       );
     },
   );

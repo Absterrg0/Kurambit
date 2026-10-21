@@ -11,6 +11,7 @@ import {
   type RecordedQualificationStage,
 } from "./GameQualification.ts";
 import { snapshotSource } from "./sourceSnapshot.ts";
+import { describeWebArtifacts, type WebArtifactFile } from "./webBuild.ts";
 
 const withGame = <A, E>(
   options: { readonly maxSourceEntries?: number },
@@ -61,13 +62,26 @@ const passed = (
   stage: RecordedQualificationStage,
   buildId: string | null,
   evidenceDirectory: string | null = null,
+  artifacts?: readonly WebArtifactFile[],
 ): QualificationRecordInput => ({
   stage,
   outcome: "passed",
   sourceId: null,
   buildId,
   evidenceDirectory,
+  ...(artifacts === undefined ? {} : { artifacts }),
 });
+
+/** Writes the four files a web export produces and returns their descriptor. */
+const writeWebBuild = async (root: string): Promise<readonly WebArtifactFile[]> => {
+  const directory = NodePath.join(root, "builds/web");
+  await NodeFSP.mkdir(directory, { recursive: true });
+  for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+    await NodeFSP.writeFile(NodePath.join(directory, name), `fixture ${name}`);
+  const artifacts = await describeWebArtifacts(root);
+  if (artifacts === null) throw new Error("Fixture web build should be readable");
+  return artifacts;
+};
 
 const recordAll = (
   qualification: GameQualificationService.GameQualification["Service"],
@@ -76,10 +90,11 @@ const recordAll = (
   buildId: string,
 ) =>
   Effect.gen(function* () {
+    const artifacts = yield* Effect.promise(() => writeWebBuild(root));
     for (const input of [
       passed("check", null),
       passed("test", null),
-      passed("export", buildId),
+      passed("export", buildId, null, artifacts),
       passed("playtest", buildId, "builds/playtests/run-1"),
       passed("state", null, "builds/logs/scenarios-1"),
     ])
@@ -269,6 +284,7 @@ it.effect("a re-export on the same sources invalidates the playtest build", () =
         sourceId,
         buildId: `${sourceId}:second`,
         evidenceDirectory: null,
+        artifacts: (yield* Effect.promise(() => describeWebArtifacts(root)))!,
       });
       const read = yield* qualification.read(root, "godot", "approved");
       expect(read.buildId).toBe(`${sourceId}:second`);
@@ -360,6 +376,99 @@ it.effect("summarizes the record without reading the source tree", () =>
       );
       expect((yield* qualification.summary(root, null)).state).toBe("qualified");
       expect((yield* qualification.read(root, "godot", "approved")).state).toBe("unqualified");
+    }),
+  ),
+);
+
+it.effect("deleting an exported file makes the export stale and the game unqualified", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
+
+      yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, "builds/web/index.pck")));
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "export")?.status).toBe("stale");
+      expect(read.stages.find((entry) => entry.stage === "playtest")?.status).toBe("stale");
+      expect(read.state).toBe("unqualified");
+      expect(read.buildId).toBeNull();
+    }),
+  ),
+);
+
+it.effect("an export record without an artifact descriptor is never current", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      for (const input of [
+        passed("check", null),
+        passed("test", null),
+        // The record-level fixture the review reproduced: a passed export with
+        // no build files and no descriptor must not qualify.
+        passed("export", `${sourceId}:first`),
+        passed("playtest", `${sourceId}:first`),
+        passed("state", null),
+      ])
+        yield* qualification.record(root, { ...input, sourceId });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "export")?.status).toBe("stale");
+      expect(read.state).toBe("unqualified");
+    }),
+  ),
+);
+
+it.effect("begin removes the previous stage so a failed attempt cannot leave a pass", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "check",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: null,
+      });
+      expect(
+        (yield* qualification.read(root, "godot", "approved")).stages.find(
+          (entry) => entry.stage === "check",
+        )?.status,
+      ).toBe("passed");
+      yield* qualification.begin(root, "check");
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "check")?.status).toBe("missing");
+      expect(read.state).toBe("unqualified");
+    }),
+  ),
+);
+
+it.effect("unknown and cancelled outcomes never read as passed", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "check",
+        outcome: "unknown",
+        sourceId: null,
+        buildId: null,
+        evidenceDirectory: null,
+        detail: "The game sources changed while the check ran.",
+      });
+      yield* qualification.record(root, {
+        stage: "test",
+        outcome: "cancelled",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: null,
+        detail: "The test was cancelled before it finished.",
+      });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "check")).toMatchObject({
+        status: "unknown",
+        detail: "The game sources changed while the check ran.",
+      });
+      expect(read.stages.find((entry) => entry.stage === "test")?.status).toBe("failed");
+      expect(read.state).toBe("unqualified");
     }),
   ),
 );

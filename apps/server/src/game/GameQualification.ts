@@ -17,6 +17,7 @@ import {
   type GameQualificationSummary,
 } from "@t3tools/contracts";
 import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
+import { webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
 
 /** The stages a real service operation can record today. */
 const RECORDED_QUALIFICATION_STAGES = ["check", "test", "export", "playtest", "state"] as const;
@@ -24,8 +25,15 @@ export type RecordedQualificationStage = (typeof RECORDED_QUALIFICATION_STAGES)[
 /** The stages the read always reports, including the ones later work will own. */
 const ALL_STAGES = ["design", "check", "test", "export", "playtest", "state", "visual"] as const;
 
+/**
+ * `unknown` means the attempt could not tie its result to known sources.
+ * `cancelled` is kept distinct so an interruption is not mistaken for a real
+ * failure of the game, but neither can ever read as a pass.
+ */
+export type QualificationOutcome = "passed" | "failed" | "unknown" | "cancelled";
+
 export interface QualificationStageRecord {
-  readonly outcome: "passed" | "failed";
+  readonly outcome: QualificationOutcome;
   /** The source snapshot the operation actually covered; null when unknowable. */
   readonly sourceId: string | null;
   /** For exports, the built artifact; for playtests, the build it played. */
@@ -38,14 +46,21 @@ export interface QualificationStageRecord {
   readonly criteria?: readonly GameScenarioCriterionResult[];
   /** Why the state stage passed or failed, including legacy rules. */
   readonly detail?: string;
+  /** For web exports, the exact files the build produced. */
+  readonly artifacts?: readonly WebArtifactFile[];
 }
 export interface QualificationRecord {
   readonly schemaVersion: 1;
   readonly game: string;
   readonly stages: Partial<Record<RecordedQualificationStage, QualificationStageRecord>>;
 }
+const StoredArtifact = Schema.Struct({
+  path: Schema.String,
+  size: Schema.Number,
+  mtimeMs: Schema.Number,
+});
 const StoredStage = Schema.Struct({
-  outcome: Schema.Literals(["passed", "failed"]),
+  outcome: Schema.Literals(["passed", "failed", "unknown", "cancelled"]),
   sourceId: Schema.NullOr(Schema.String),
   buildId: Schema.NullOr(Schema.String),
   finishedAt: Schema.String,
@@ -53,6 +68,7 @@ const StoredStage = Schema.Struct({
   designHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
   detail: Schema.optionalKey(Schema.String),
+  artifacts: Schema.optionalKey(Schema.Array(StoredArtifact)),
 });
 const StoredRecord = Schema.fromJsonString(
   Schema.Struct({
@@ -86,6 +102,18 @@ const readRecord = async (file: string): Promise<QualificationRecord | null> => 
   }
 };
 
+/** Writes the whole record through a temporary file so a crash cannot tear it. */
+const writeRecordFile = async (file: string, record: QualificationRecord) => {
+  const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
+  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+  try {
+    await NodeFSP.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`);
+    await NodeFSP.rename(temporary, file);
+  } finally {
+    await NodeFSP.rm(temporary, { force: true });
+  }
+};
+
 /**
  * The server's verdict for the current sources. Only the four stages that have
  * real service operations can pass; `state` and `visual` stay missing until
@@ -96,6 +124,8 @@ const deriveQualification = (input: {
   readonly source: SourceSnapshot;
   readonly designState: GameDesignState | null;
   readonly designHash: string | null;
+  /** Whether the recorded web artifact still matches builds/web. */
+  readonly artifactsCurrent: boolean;
 }): GameQualificationRead => {
   if (input.source.kind === "unknown")
     return {
@@ -143,8 +173,17 @@ const deriveQualification = (input: {
     });
     if (recorded === undefined) stageReads.set(stage, read("missing"));
     else if (recorded.outcome === "failed") stageReads.set(stage, read("failed"));
+    else if (recorded.outcome === "cancelled") stageReads.set(stage, read("failed"));
+    else if (recorded.outcome === "unknown") stageReads.set(stage, read("unknown"));
     else if (recorded.sourceId === null) stageReads.set(stage, read("unknown"));
     else if (recorded.sourceId !== currentSourceId) stageReads.set(stage, read("stale"));
+    else if (stage === "export" && !input.artifactsCurrent)
+      // The record names a build whose files are missing or were replaced. The
+      // source ID is not enough: players and playtests load these exact bytes.
+      stageReads.set(stage, {
+        ...read("stale"),
+        detail: "The exported web build files are missing or no longer match the build record.",
+      });
     else if (stage === "state" && (recorded.designHash ?? null) !== input.designHash)
       // A new approved design binds new acceptance; an old route result cannot
       // silently grade it even when the game sources did not change.
@@ -222,13 +261,14 @@ const deriveQualificationSummary = (
 
 export interface QualificationRecordInput {
   readonly stage: RecordedQualificationStage;
-  readonly outcome: "passed" | "failed";
+  readonly outcome: QualificationOutcome;
   readonly sourceId: string | null;
   readonly buildId: string | null;
   readonly evidenceDirectory: string | null;
   readonly designHash?: string | null;
   readonly criteria?: readonly GameScenarioCriterionResult[];
   readonly detail?: string;
+  readonly artifacts?: readonly WebArtifactFile[];
 }
 
 export class GameQualification extends Context.Service<
@@ -257,6 +297,15 @@ export class GameQualification extends Context.Service<
     readonly record: (
       root: string,
       input: QualificationRecordInput,
+    ) => Effect.Effect<void, GameOperationError>;
+    /**
+     * Starts an attempt by removing the stage's previous result before the work
+     * runs. A crash, interruption or failed terminal write then leaves the stage
+     * missing rather than readable as the earlier pass.
+     */
+    readonly begin: (
+      root: string,
+      stage: RecordedQualificationStage,
     ) => Effect.Effect<void, GameOperationError>;
   }
 >()("t3/game/GameQualification") {}
@@ -295,11 +344,15 @@ export const layer = (options: {
           const record = yield* Effect.promise(() =>
             readRecord(recordPath(options.stateDir, root)),
           );
+          const artifactsCurrent = yield* Effect.promise(() =>
+            webArtifactsMatch(root, record?.stages.export?.artifacts),
+          );
           return deriveQualification({
             record,
             source,
             designState: designState ?? null,
             designHash: designHash ?? null,
+            artifactsCurrent,
           });
         }),
       record: (root, input) => {
@@ -328,17 +381,11 @@ export const layer = (options: {
                       ...(input.designHash === undefined ? {} : { designHash: input.designHash }),
                       ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
                       ...(input.detail === undefined ? {} : { detail: input.detail }),
+                      ...(input.artifacts === undefined ? {} : { artifacts: input.artifacts }),
                     },
                   },
                 };
-                const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
-                await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
-                try {
-                  await NodeFSP.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`);
-                  await NodeFSP.rename(temporary, file);
-                } finally {
-                  await NodeFSP.rm(temporary, { force: true });
-                }
+                await writeRecordFile(file, next);
               }),
             catch: (cause) =>
               new GameOperationError({
@@ -348,6 +395,27 @@ export const layer = (options: {
                 cause,
               }),
           });
+        });
+      },
+      begin: (root, stage) => {
+        const file = recordPath(options.stateDir, root);
+        const game = NodePath.resolve(root);
+        return Effect.tryPromise({
+          try: () =>
+            serialized(game, async () => {
+              const previous = await readRecord(file);
+              if (previous === null || previous.stages[stage] === undefined) return;
+              const stages = { ...previous.stages };
+              delete stages[stage];
+              await writeRecordFile(file, { ...previous, stages });
+            }),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "qualification",
+              path: file,
+              reason: "io",
+              cause,
+            }),
         });
       },
     }),

@@ -1,7 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test boundary stubs replace registration and provider execution, never game operations.
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -16,21 +13,16 @@ import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameQualification from "./GameQualification.ts";
 
 /**
- * A qualification store under the test's temporary directory. Game operations
- * in these tests never qualify, so the directory only receives a record when the
- * test exercises recording explicitly.
+ * A qualification store inside the calling fixture's temporary directory. The
+ * fixture owns the directory and its cleanup; a test layer must not allocate a
+ * record store nothing later removes.
  */
-export function qualificationTestLayer(stateDir?: string) {
-  return GameQualification.layer({
-    stateDir: stateDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-qualification-")),
-  });
+export function qualificationTestLayer(stateDir: string) {
+  return GameQualification.layer({ stateDir });
 }
-/** A design approval store under the test's temporary directory. */
-export function designApprovalTestLayer(stateDir?: string) {
-  return GameDesignApproval.layer({
-    stateDir:
-      stateDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "game-design-approval-")),
-  });
+/** A design approval store inside the calling fixture's temporary directory. */
+export function designApprovalTestLayer(stateDir: string) {
+  return GameDesignApproval.layer({ stateDir });
 }
 export function previewBrowserTestLayer(
   executable?: string,

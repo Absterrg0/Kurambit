@@ -236,6 +236,8 @@ export class GameDesignApproval extends Context.Service<
       intent: GameDesignIntent,
       probe?: boolean,
     ) => Effect.Effect<void, GameOperationError>;
+    /** Removes the intent this creation attempt wrote; never another game's record. */
+    readonly removeIntent: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The creation-time probe obligation, or null for games with no record. */
     readonly readProbe: (root: string) => Effect.Effect<boolean | null>;
     /** The server-owned lifecycle plus what still blocks approval. */
@@ -276,6 +278,19 @@ export const layer = (options: { readonly stateDir: string }) => {
         const file = intentPath(options.stateDir, root);
         return Effect.tryPromise({
           try: () => writeIntent(file, NodePath.resolve(root), intent, probe),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "create-game",
+              path: file,
+              reason: "io",
+              cause,
+            }),
+        });
+      },
+      removeIntent: (root) => {
+        const file = intentPath(options.stateDir, root);
+        return Effect.tryPromise({
+          try: () => NodeFSP.rm(file, { force: true }),
           catch: (cause) =>
             new GameOperationError({
               operation: "create-game",
