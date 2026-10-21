@@ -259,7 +259,39 @@ describe("the visual judge", () => {
     ),
   );
 
-  it.effect("reports a provider failure as unavailable, not failed and not passed", () =>
+  it.effect("accepts the rubric's own label spellings and drops extra notes", () =>
+    withJudge(
+      ({ root, judge }) =>
+        Effect.gen(function* () {
+          const evidenceDirectory = yield* Effect.promise(() => writeEvidence(root));
+          const run = yield* judge.run(root, input(evidenceDirectory));
+          expect(run.status).toBe("judged");
+          if (run.status !== "judged") return;
+          expect(run.judgement.status).toBe("passed");
+          expect(run.judgement.dimensions.map((entry) => entry.dimension)).toEqual([
+            ...GAME_VISUAL_DIMENSIONS,
+          ]);
+        }),
+      (input) => {
+        if (input.prompt.includes("one large digit"))
+          return Effect.succeed({ digit: "7", backgroundColor: "magenta" });
+        return Effect.succeed({
+          dimensions: [
+            { dimension: "Readability (player, hazards, goal)", score: 4, note: "clear" },
+            { dimension: "Value separation", score: 4, note: "clear" },
+            { dimension: "Camera and framing", score: 4, note: "clear" },
+            { dimension: "Style consistency", score: 4, note: "clear" },
+            { dimension: "Feedback", score: 4, note: "clear" },
+            { dimension: "Design compliance", score: 4, note: "clear" },
+            { dimension: "Limits", score: "missing", note: "audio was not judged" },
+          ],
+          repairRequests: [],
+        });
+      },
+    ),
+  );
+
+  it.effect("reports a review provider failure as unavailable and refunds the round", () =>
     withJudge(
       ({ root, judge }) =>
         Effect.gen(function* () {
@@ -269,14 +301,17 @@ describe("the visual judge", () => {
           if (run.status !== "judged") return;
           expect(run.judgement.status).toBe("unavailable");
           expect(run.judgement.detail).toContain("provider call failed");
+          expect(run.judgement.roundsLeft).toBe(2);
         }),
-      () =>
-        Effect.fail(
-          new TextGenerationError({
-            operation: "generateImageReview",
-            detail: "spawn failed",
-          }),
-        ),
+      (input) =>
+        input.prompt.includes("one large digit")
+          ? Effect.succeed({ digit: "7", backgroundColor: "magenta" })
+          : Effect.fail(
+              new TextGenerationError({
+                operation: "generateImageReview",
+                detail: "spawn failed",
+              }),
+            ),
     ),
   );
 });

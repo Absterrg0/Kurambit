@@ -104,23 +104,32 @@ const DIMENSION_ALIASES = new Map([
 ]);
 
 /**
- * Maps a permissive reply onto the canonical rubric. The result is still
- * decoded against the strict schema, so an unrecognised dimension, a score
+ * Maps a permissive reply onto the canonical rubric. Unknown extra entries
+ * (models like to add a "limits" note) are dropped; the result is still
+ * decoded against the strict schema, so a missing required dimension, a score
  * outside 0–4 or a caption-named repair request can never become a pass.
  */
-const normalizeDimension = (value: string): string => {
+const normalizeDimension = (value: string): string | null => {
   const key = dimensionKey(value);
   for (const [alias, dimension] of DIMENSION_ALIASES) if (key.startsWith(alias)) return dimension;
   for (const [name, dimension] of DIMENSION_NAMES) if (key.startsWith(name)) return dimension;
-  return value;
+  return null;
 };
 const normalizeReview = (raw: typeof RawReview.Type): unknown => ({
-  dimensions: raw.dimensions.map((entry) => ({
-    dimension: normalizeDimension(entry.dimension),
-    score: typeof entry.score === "number" ? entry.score : entry.score.toLowerCase().trim(),
-    note: entry.note,
-  })),
-  repairRequests: raw.repairRequests,
+  dimensions: raw.dimensions.flatMap((entry) => {
+    const dimension = normalizeDimension(entry.dimension);
+    if (dimension === null) return [];
+    return [
+      {
+        dimension,
+        score: typeof entry.score === "number" ? entry.score : entry.score.toLowerCase().trim(),
+        note: entry.note,
+      },
+    ];
+  }),
+  // The bounded repair turn keeps the first three requests even when a verbose
+  // model returns more; the persisted judgement never carries a fourth.
+  repairRequests: raw.repairRequests.slice(0, 3),
 });
 
 const RawCanary = Schema.Struct({
@@ -145,7 +154,7 @@ const encodeRawValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const encodeRawReply = (value: unknown): string => encodeRawValue(value).slice(0, RAW_REPLY_LIMIT);
 
 /** The `## Art direction` section of DESIGN.md, or null when the design omits it. */
-export const readArtDirection = (design: string | null): string | null => {
+const readArtDirection = (design: string | null): string | null => {
   if (design === null) return null;
   const lines = design.split(/\r?\n/);
   const body: string[] = [];
@@ -222,9 +231,7 @@ ${DIMENSION_ANCHORS}
 const describeReviewFailure = (issues: readonly string[]): string =>
   `The visual judge's reply was not a usable review: ${issues.join("; ")}`.slice(0, 400);
 
-export type VisualCanaryResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly reason: string };
+type VisualCanaryResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 /**
  * Proves the provider actually receives a PNG and can answer about it. Run
@@ -312,7 +319,7 @@ const make = (stateDir: string) =>
         return 0;
       }
     };
-    const spendJudgement = (root: string, designHash: string | null, used: number) =>
+    const writeBudget = (root: string, designHash: string | null, judgements: number) =>
       Effect.tryPromise({
         try: () =>
           serialized(root, async () => {
@@ -325,7 +332,7 @@ const make = (stateDir: string) =>
                 schemaVersion: 1,
                 game: root,
                 designHash,
-                judgements: used + 1,
+                judgements,
               }),
             );
             await NodeFSP.rename(temporary, file);
@@ -363,6 +370,9 @@ const make = (stateDir: string) =>
                 evidenceDirectory: input.evidenceDirectory,
               });
         const design = yield* Effect.promise(() => readDesignDocument(root));
+        // The budget belongs to the real game, so a directory-symlink alias
+        // cannot start a second pair of judgements.
+        const budgetRoot = yield* Effect.promise(() => NodeFSP.realpath(root).catch(() => root));
         const judgedAt = DateTime.formatIso(yield* DateTime.now);
         const unavailable = (detail: string, roundsLeft: number): GameVisualJudgement => ({
           status: "unavailable",
@@ -385,7 +395,7 @@ const make = (stateDir: string) =>
             judgement: unavailable(
               "No playtest frames are available to judge.",
               MAX_JUDGEMENTS_PER_DESIGN -
-                (yield* Effect.promise(() => readBudget(root, input.designHash))),
+                (yield* Effect.promise(() => readBudget(budgetRoot, input.designHash))),
             ),
           };
         const checked = yield* canary;
@@ -395,13 +405,13 @@ const make = (stateDir: string) =>
             judgement: unavailable(
               `The visual judge is unavailable: image delivery failed (${checked.reason}). Retry the playtest before trusting a visual pass.`,
               MAX_JUDGEMENTS_PER_DESIGN -
-                (yield* Effect.promise(() => readBudget(root, input.designHash))),
+                (yield* Effect.promise(() => readBudget(budgetRoot, input.designHash))),
             ),
           };
 
-        const used = yield* Effect.promise(() => readBudget(root, input.designHash));
+        const used = yield* Effect.promise(() => readBudget(budgetRoot, input.designHash));
         if (used >= MAX_JUDGEMENTS_PER_DESIGN) return { status: "exhausted" as const };
-        yield* spendJudgement(root, input.designHash, used);
+        yield* writeBudget(budgetRoot, input.designHash, used + 1);
         const roundsLeft = Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - (used + 1));
 
         const state = evidence?.state ?? null;
@@ -434,14 +444,20 @@ const make = (stateDir: string) =>
               }).pipe(Effect.as({ ok: false as const, value: null })),
             ),
           );
-        if (!raw.ok)
+        if (!raw.ok) {
+          // A provider failure is not a judgement: give the round back so a
+          // transient Codex failure does not cost the one repair attempt.
+          yield* writeBudget(budgetRoot, input.designHash, used).pipe(
+            Effect.catch(() => Effect.void),
+          );
           return {
             status: "judged" as const,
             judgement: unavailable(
               "The visual judge is unavailable: the provider call failed. Retry the playtest before trusting a visual pass.",
-              roundsLeft,
+              Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used),
             ),
           };
+        }
 
         let review: GameVisualReview;
         try {

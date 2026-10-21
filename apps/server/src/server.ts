@@ -524,7 +524,9 @@ const layerGame = GameService.layer.pipe(
     Layer.unwrap(
       Effect.gen(function* () {
         const config = yield* ServerConfig.ServerConfig;
-        return GameVisualJudge.layer({ stateDir: config.stateDir });
+        return GameVisualJudge.layer({ stateDir: config.stateDir }).pipe(
+          Layer.provide(TextGeneration.layer),
+        );
       }),
     ),
   ),
