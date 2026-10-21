@@ -32,7 +32,9 @@ import {
   type OrchestrationV2TurnItem,
   type GameStatus,
   parseAcceptance,
+  unmetRevisionObligations,
   validateDesignDocument,
+  type GameRevisionObligation,
 } from "../packages/contracts/src/index.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
@@ -386,7 +388,7 @@ const assertDesignFilled = (skeleton: string, design: string) => {
     `DESIGN.md bound only ${parsed.ok ? parsed.criteria.length : 0} acceptance criteria`,
   );
   assert(
-    parsed.ok && parsed.criteria.some((criterion) => criterion.kind === "end"),
+    parsed.ok && parsed.criteria.some((criterion) => criterion.kind === "win"),
     "DESIGN.md's acceptance has no end criterion",
   );
   assert(
@@ -544,7 +546,7 @@ const main = Effect.gen(function* () {
       `Approval bound only ${approvedStatus.design.acceptance.length} acceptance criteria`,
     );
     assert(
-      approvedStatus.design.acceptance.some((criterion) => criterion.kind === "end") &&
+      approvedStatus.design.acceptance.some((criterion) => criterion.kind === "win") &&
         approvedStatus.design.acceptance.some((criterion) => criterion.kind === "mechanic"),
       "Approved acceptance is missing an end or mechanic criterion",
     );
@@ -689,6 +691,16 @@ const main = Effect.gen(function* () {
     );
   }
   if (values.revise) {
+    // The request is a server RPC, not a chat line, and its review is data: the
+    // server keeps a pending revision record with the approved hash it amends,
+    // the Design tab reads a criteria diff against it, and only a decision
+    // through the revisions flow reaches the sources (review-r2 finding F16).
+    const reviseText = values.revise;
+    // Obligations this revision may never drop, frozen before the agent works.
+    // The double jump is only real when a mechanic criterion still observes it.
+    const reviseObligations: ReadonlyArray<GameRevisionObligation> = [
+      { kind: "mechanic", key: "air_jumps", expect: ">=1" },
+    ];
     const before = yield* promise(() => revisionSnapshot(created.root));
     // A throwaway index captures uncommitted agent work without touching the game's own index.
     const index = NodePath.join(created.root, "builds/logs/e2e-snapshot.index");
@@ -699,51 +711,85 @@ const main = Effect.gen(function* () {
         return (await exec("git", ["write-tree"], { cwd: created.root, env })).stdout.trim();
       });
     const baseline = yield* snapshotTree();
-    let reviseRun = yield* followup(values.revise);
+    const requestChangeRun = yield* waitForTurn(client, created.threadId, new Set(observedRunIds), {
+      observed: observedTurnItems,
+      observedRuns: observedRunIds,
+      onReady: () =>
+        client[WS_METHODS.gameRequestChange]({
+          threadId: created.threadId,
+          text: reviseText,
+        }),
+    });
     logTurnTools(
-      "revise",
-      yield* collectTurnTools(client, created.threadId, reviseRun.id, observedTurnItems),
+      "revise-request",
+      yield* collectTurnTools(client, created.threadId, requestChangeRun.id, observedTurnItems),
     );
     let reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
-    // A revision that changes scope must not build against the old contract: the
-    // agent rewrites DESIGN.md and asks the creator to approve the new revision,
-    // which leaves the design "changed". The harness is the creator here, so it
-    // approves the revision the agent wrote and asks for the implementation in a
-    // second turn instead of treating the correct stage move as a failure.
-    if (reviseStatus.design.state !== "approved") {
-      assert(
-        reviseStatus.design.state === "changed",
-        `Revision left the design ${reviseStatus.design.state} instead of approved or changed`,
-      );
-      const revisedHash = reviseStatus.design.currentHash;
-      assert(revisedHash !== null, "The revised design has no hash to approve");
-      const approval = yield* client[WS_METHODS.gameApproveDesign]({
-        threadId: created.threadId,
-        expectedDesignHash: revisedHash,
-      });
-      assert(approval.designHash === revisedHash, "Re-approval recorded a different design hash");
-      const approved = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
-      assert(
-        approved.design.state === "approved",
-        `Re-approval did not take (${JSON.stringify(approved.design)})`,
-      );
-      assert(
-        approved.design.acceptance.length >= 5,
-        `The revised design bound only ${approved.design.acceptance.length} acceptance criteria`,
-      );
-      timeline(`Revision design approved at ${approval.approvedAt}`);
-      // Re-approving changed scope does not dispatch a build turn: the server
-      // expects the requesting turn to continue, so the creator's follow-up asks
-      // for the implementation and the same qualification loop as a build turn.
-      reviseRun = yield* followup(
-        "The revised design is approved. Implement the revision now, then finish the build turn to AGENTS.md's Definition of done for the current sources: game_godot_check ok, game_godot_test passing, godot/tests/scenarios routes that still play every level to the win with game_scenarios_run, a fresh web export with game_export, and game_web_playtest with success and responded=true in a fresh evidence folder. Do not edit game files after the final playtest. Report the results and the game_preview URL.",
-      );
-      logTurnTools(
-        "revise-build",
-        yield* collectTurnTools(client, created.threadId, reviseRun.id, observedTurnItems),
-      );
-      reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
-    }
+    assert(
+      reviseStatus.design.state === "revision-pending",
+      `The change request left the design ${reviseStatus.design.state} instead of revision-pending`,
+    );
+    assert(
+      reviseStatus.design.pendingRevision?.text === reviseText,
+      "The pending revision did not carry the requested change",
+    );
+    assert(
+      reviseStatus.design.approvedHash !== null &&
+        reviseStatus.design.pendingRevision?.baseHash === reviseStatus.design.approvedHash,
+      "The request is not pinned to the approved revision",
+    );
+    // The document diff a reviewer reads. The agent has not asked to remove
+    // anything in this flow, but the harness shows what actually changed.
+    const revisionDiff = reviseStatus.design.revisionDiff;
+    assert(revisionDiff !== null, "The pending revision carries no criteria diff for review");
+    assert(
+      revisionDiff.added.length + revisionDiff.changed.length + revisionDiff.removed.length > 0,
+      "The revised design shows no criteria diff; the request turned into no contract change",
+    );
+    // The design stage cannot call this game buildable while the request pends.
+    assert(
+      reviseStatus.qualification.stages.find((stage) => stage.stage === "design")?.status ===
+        "failed",
+      "The change request left the design stage qualified",
+    );
+    timeline(
+      `Revision review: ${revisionDiff.added.length} added, ${revisionDiff.changed.length} changed, ${revisionDiff.removed.length} removed criteria`,
+    );
+    // Approve only a revision that kept every frozen proof.
+    const unmet = unmetRevisionObligations(reviseStatus.design.acceptance, reviseObligations);
+    assert(
+      unmet.length === 0,
+      `The revised design dropped required proof: ${JSON.stringify(unmet)}`,
+    );
+    const revisedHash = reviseStatus.design.currentHash;
+    assert(revisedHash !== null, "The revised design has no hash to approve");
+    // Approving the revision both records it and dispatches the revision's own
+    // build turn, so the harness observes that turn from subscription time.
+    const approveRevisionRun = yield* waitForTurn(
+      client,
+      created.threadId,
+      new Set(observedRunIds),
+      {
+        observed: observedTurnItems,
+        observedRuns: observedRunIds,
+        onReady: () =>
+          client[WS_METHODS.gameApproveRevision]({
+            threadId: created.threadId,
+            expectedDesignHash: revisedHash,
+          }),
+      },
+    );
+    logTurnTools(
+      "revise-build",
+      yield* collectTurnTools(client, created.threadId, approveRevisionRun.id, observedTurnItems),
+    );
+    reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    assert(reviseStatus.design.state === "approved", "The approved revision did not take");
+    assert(reviseStatus.design.pendingRevision === null, "The approved revision is still pending");
+    assert(
+      reviseStatus.design.acceptance.length >= 5,
+      `The revised design bound only ${reviseStatus.design.acceptance.length} acceptance criteria`,
+    );
     const after = yield* promise(() => revisionSnapshot(created.root));
     console.log("Revision assets before/after:", JSON.stringify({ before, after }, null, 2));
     const revised = yield* snapshotTree();
@@ -758,8 +804,14 @@ const main = Effect.gen(function* () {
     );
     console.log("Changed files:\n" + diff.stdout);
     assert(diff.stdout.trim() !== "", "Revision turn changed no files");
-    // The design mirror in game.json changes on re-approval, and DESIGN.md on a
-    // scope edit; neither is the game. The revision has to reach real sources.
+    // The contract itself is the first thing a change touches: a revision that
+    // ships bytecode without its DESIGN.md source edit is not a reviewed change.
+    assert(
+      changedPaths.includes("DESIGN.md"),
+      "Revision turn shipped changes without a DESIGN.md source diff",
+    );
+    // The design mirror in game.json changes on approval; neither is the game.
+    // The revision has to reach real sources.
     assert(
       changedPaths.some((path) => path !== "DESIGN.md" && path !== "game.json"),
       "Revision turn changed only design files, not the game",
