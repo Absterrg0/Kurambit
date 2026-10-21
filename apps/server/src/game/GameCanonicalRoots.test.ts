@@ -156,6 +156,32 @@ it.effect("an old lexical-key approval record migrates to the canonical key", ()
   ),
 );
 
+it.effect("conflicting canonical and legacy records are an error, not a guess", () =>
+  withAliasFixture(({ root, alias, stateDir }) =>
+    Effect.gen(function* () {
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      const canonicalFile = approvalRecordFile(stateDir, root);
+      const legacyFile = approvalRecordFile(stateDir, alias);
+      const record = (approvalId: string) => ({
+        schemaVersion: 1,
+        game: root,
+        approvalId,
+        designHash: GameDesignApproval.designDocumentHash(design),
+        approvedAt: "2026-10-20T00:00:00.000Z",
+        acceptance: [],
+      });
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(canonicalFile), { recursive: true });
+        await NodeFSP.writeFile(canonicalFile, JSON.stringify(record("canonical")));
+        await NodeFSP.writeFile(legacyFile, JSON.stringify(record("legacy")));
+      });
+      const result = yield* Effect.result(approvals.status(alias, manifest));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.operation).toBe("read-design");
+    }).pipe(Effect.provide(GameDesignApproval.layer({ stateDir })), Effect.scoped),
+  ),
+);
+
 it.effect("an unreadable required intent record is an error, never legacy", () =>
   withAliasFixture(({ root, stateDir }) =>
     Effect.gen(function* () {

@@ -59,7 +59,21 @@ export const migrateGameRecord = async (location: GameRecordLocation): Promise<b
       () => false,
     ),
   ]);
-  if (canonical || !legacy) return false;
+  if (!legacy) return false;
+  if (canonical) {
+    // Two keys for one game leave the authority ambiguous. Identical copies are
+    // a finished migration; different ones must be resolved by a person.
+    const [currentText, legacyText] = await Promise.all([
+      NodeFSP.readFile(location.file, "utf8"),
+      NodeFSP.readFile(location.legacyFile, "utf8"),
+    ]);
+    if (currentText !== legacyText)
+      throw new Error(
+        `Both a canonical and a legacy record exist for one game and their contents differ: ${location.file}`,
+      );
+    await NodeFSP.rm(location.legacyFile, { force: true });
+    return false;
+  }
   await NodeFSP.mkdir(NodePath.dirname(location.file), { recursive: true });
   await NodeFSP.rename(location.legacyFile, location.file);
   return true;
