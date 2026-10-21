@@ -65,6 +65,18 @@ export const gameEnvironment = {
     label: "game:approveDesign",
     tag: WS_METHODS.gameApproveDesign,
   }),
+  requestChange: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:requestChange",
+    tag: WS_METHODS.gameRequestChange,
+  }),
+  approveRevision: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:approveRevision",
+    tag: WS_METHODS.gameApproveRevision,
+  }),
+  discardRevision: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:discardRevision",
+    tag: WS_METHODS.gameDiscardRevision,
+  }),
   action: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:action",
     tag: WS_METHODS.gameAction,
