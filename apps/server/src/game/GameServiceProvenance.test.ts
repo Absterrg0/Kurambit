@@ -304,6 +304,30 @@ it.live("an interrupted check leaves no readable pass", () =>
   ),
 );
 
+it.live("a defect during the canonical test records unknown, not the earlier pass", () => {
+  let defect = false;
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "godot-test") return Effect.succeed(processOk(input.root));
+        if (!defect) return Effect.succeed(processOk(input.root));
+        return Effect.die(new Error("Injected defect."));
+      },
+    },
+    ({ root, game, qualification }) =>
+      Effect.gen(function* () {
+        yield* game.test(threadId, "tests/smoke_test.gd");
+        expect(stageOf(yield* qualification.read(root, "godot"), "test")?.status).toBe("passed");
+        defect = true;
+        const exit = yield* Effect.exit(game.test(threadId, "tests/smoke_test.gd"));
+        expect(Exit.isFailure(exit)).toBe(true);
+        const stage = stageOf(yield* qualification.read(root, "godot"), "test");
+        expect(stage?.status).toBe("unknown");
+        expect(stage?.detail).toContain("without a result that can be trusted");
+      }),
+  );
+});
+
 it.live("a failed terminal qualification write never leaves the earlier pass readable", () => {
   let failTerminal = false;
   return withGame(
