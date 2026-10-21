@@ -162,7 +162,7 @@ describe("evaluateScenarios", () => {
     expect(summary.reason).toBe("observable-failed");
     const total = summary.criteria.find((entry) => entry.id === "five-pearls");
     expect(total?.status).toBe("failed");
-    expect(total?.observed).toContain("Already true when play started");
+    expect(total?.observed).toContain("already true when play started");
     expect(total?.observed).toContain("observe something the player achieves");
   });
 

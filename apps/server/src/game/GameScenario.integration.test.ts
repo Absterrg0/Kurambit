@@ -442,7 +442,7 @@ it.live.skipIf(!available)(
           expect(result.ok).toBe(false);
           const content = result.summary.criteria.find((entry) => entry.id === "five-pearls");
           expect(content?.status).toBe("failed");
-          expect(content?.observed).toContain("Already true when play started");
+          expect(content?.observed).toContain("already true when play started");
           return result;
         }),
     ),

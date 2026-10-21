@@ -197,7 +197,7 @@ const criterionResult = (
     return {
       ...base,
       status: "failed",
-      observed: `Already true when play started — observe something the player achieves (${key} was ${valueText(observation.baseline ?? null)} at frame ${alreadyTrue.frame} of ${alreadyTrue.run.id}).`,
+      observed: `Failed: already true when play started — observe something the player achieves (${key} was ${valueText(observation.baseline ?? null)} at frame ${alreadyTrue.frame} of ${alreadyTrue.run.id}).`,
       scenarios: [],
       provenBy: null,
     };
