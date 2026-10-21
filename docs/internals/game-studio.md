@@ -22,7 +22,9 @@ says a draft turn may only write `DESIGN.md`, and the first prompt asks for it, 
 Godot work starts before the creator agrees to a design. The Design tab renders that file.
 
 Approval records a specific `DESIGN.md` revision in `<stateDir>/game-design/`, outside the game:
-the document hash, its parsed acceptance and an approval id. The game's own `game.json` design
+the document hash, its parsed acceptance and an approval id. `GameStatus` returns the DESIGN.md
+bytes (bounded to 64 KB), their hash and the parsed acceptance as one snapshot; the Design tab
+renders that snapshot and submits its hash, so it cannot approve bytes it did not display. The game's own `game.json` design
 status is only a display mirror. `GameProjectService.approveDesign` runs read, validate, record
 and dispatch as one operation serialized per game, so two approvals cannot both release a build
 turn; approving the same hash again returns the existing record, and re-approving changed scope
@@ -33,7 +35,10 @@ it dispatched or sends the same ids. A dispatch failure therefore keeps the crea
 a retry cannot create a second build message; only a failed display-mirror write, before any
 dispatch, rolls the record back. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
-block parses with at least one `end` and one `mechanic`. Creation also writes an intent record
+block parses with at least one `control`, `mechanic`, `win` and `lose`, and every mechanical
+criterion carries an `observe`. The only exception is a design whose "Win & lose" section
+declares that there is no lose state: it writes a `lose` criterion with the text "No lose
+state" and no observe. `presentation` criteria carry no observe and belong to the visual stage. Creation also writes an intent record
 beside the approval: `required` for a plan-first game, `skipped` for one created without planning.
 A skipped game is explicitly `legacy` and passes the design stage; a required game whose
 `DESIGN.md` is deleted stays a draft with a missing-document issue. Only a game with no server
@@ -164,14 +169,22 @@ State acceptance is a server-owned exam: `game_scenarios_run` reads pure input r
 `godot/tests/scenarios/*.json` (press, hold and wait steps, never code), starts the real main scene
 under `--headless --fixed-fps 60`, injects input every physics frame and samples the GameState
 autoload plus the `player` group. Routes can only press actions from the InputMap. The runner never
-calls a game function or writes a property; a route that only animates, a pickup behind a wall and
-an unreachable finish all fail the approved `observe` criteria. Criteria without an observation are
-`unverified` and belong to the visual judge; every observable criterion, an observed `end` criterion
-and real player movement are required for the `state` stage. Legacy games without acceptance pass
-only when a route moves the player and GameState reaches its playing state. The stage stores the
-approved source snapshot, the approved design hash and a per-criterion summary; a newly approved
-design revision makes the old route result stale even when the game sources did not change. `visual`
-stays declared as `missing` until its judge exists; it can never be reported passed by accident.
+calls a game function or writes a property. Each run records the frame of its first non-wait input
+and the gameplay baseline: the first sample at or after that input where a node in group `player`
+exists. A criterion passes only when it was false at that baseline and true at a later sample; an
+already-true baseline value fails with "already true when play started", and a route with no input
+has no baseline and grades every criterion failed. This is what makes content counts a collection
+(`collected >= 5`) rather than a world total (`total == 5`), and what stops a menu's playing state
+from proving a win. `win` and `lose` must observe the value the run ends at (not `changes`) and keep
+it at the final sample, so a pause cannot satisfy a win. The summary lists every mechanical
+criterion with its status, proving scenario and frame, plus proven/failed/missing counts per kind;
+the state stage passes only when every graded criterion passed and a `win` did. Legacy games without
+acceptance pass only when a route moves the player and GameState reaches its playing state at the
+baseline. The stage stores the approved source snapshot, the approved design hash and a
+per-criterion summary; a newly approved design revision makes the old route result stale even when
+the game sources did not change. `visual` stays declared as `missing` until its judge exists, and
+the approved `presentation` criteria are listed there as `missing`; none can be reported passed or
+"unverified ok".
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and

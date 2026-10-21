@@ -170,7 +170,7 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
         criteria: [
           {
             id: "reach-the-goal",
-            kind: "end",
+            kind: "win",
             text: "The run ends at the goal",
             status: "passed",
             observed: "full-run: state 1..3",
@@ -185,6 +185,27 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
         detail: "Every observable criterion passed.",
         criteria: [{ id: "reach-the-goal", status: "passed" }],
       });
+    }),
+  ),
+);
+
+it.effect("lists presentation criteria under the visual stage as missing", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const read = yield* qualification.read(root, "godot", "approved", null, null, [
+        {
+          id: "warm-glow",
+          kind: "presentation",
+          text: "Lit lanterns cast a warm glow",
+        },
+      ]);
+      const visual = read.stages.find((entry) => entry.stage === "visual");
+      expect(visual).toMatchObject({ status: "missing" });
+      expect(visual?.criteria).toEqual([
+        expect.objectContaining({ id: "warm-glow", kind: "presentation", status: "missing" }),
+      ]);
+      const state = read.stages.find((entry) => entry.stage === "state");
+      expect(state?.criteria).toBeUndefined();
     }),
   ),
 );

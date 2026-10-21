@@ -195,6 +195,7 @@ func _handle_jump(delta: float) -> void:
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	if _jump_buffer > 0.0 and _coyote > 0.0:
 		velocity.y = -jump_velocity
+		GameState.jumps += 1
 		_jump_buffer = 0.0
 		_coyote = 0.0
 		body.scale = Vector2(0.82, 1.2)

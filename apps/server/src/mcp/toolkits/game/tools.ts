@@ -79,7 +79,7 @@ const TestTool = Tool.make("game_godot_test", {
 }).annotate(Tool.Readonly, false);
 const ScenariosTool = Tool.make("game_scenarios_run", {
   description:
-    "Run every route in godot/tests/scenarios/*.json through the real game, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation and records the state qualification stage. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam.",
+    "Run every route in godot/tests/scenarios/*.json through the real game, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation from the first sample after the route's first input, so a value already true at play start fails; records the state qualification stage with proven/failed/missing coverage per kind. Also lists the scenarios' per-criterion proving scenario and frame. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam. A run must press a control and move a player in group \"player\"; a wait-only route proves nothing.",
   success: GameScenariosRunResult,
   failure,
   failureMode: "return",

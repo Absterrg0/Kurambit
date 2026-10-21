@@ -32,6 +32,9 @@ const PROGRESS_PATH := "user://progress.cfg"
 var state: State = State.MENU
 var collected := 0
 var total := 0
+## Jumps started this run; a control claim can observe a player-caused counter
+## instead of a boot constant. Reset by every start and restart.
+var jumps := 0
 var score := 0
 var lives := MAX_LIVES
 var health := MAX_HEALTH
@@ -61,6 +64,7 @@ func notify(text: String) -> void:
 func start_run(relic_total: int) -> void:
 	total = relic_total
 	collected = 0
+	jumps = 0
 	score = 0
 	lives = MAX_LIVES
 	health = MAX_HEALTH

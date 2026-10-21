@@ -39,6 +39,9 @@ var level_count := 0
 var level_name := ""
 var collected := 0
 var total := 0
+## Jumps started this run; a control claim can observe a player-caused counter
+## instead of a boot constant. Reset by every start and restart.
+var jumps := 0
 ## Coins picked up over the whole run, for the win screen.
 var run_coins := 0
 var score := 0
@@ -70,6 +73,7 @@ func start_run(levels: int) -> void:
 	level_count = levels
 	level_index = 0
 	run_coins = 0
+	jumps = 0
 	score = 0
 	lives = MAX_LIVES
 	run_seconds = 0.0

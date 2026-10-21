@@ -55,7 +55,7 @@ it.effect("offers only starter templates that exist on disk with matching metada
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("ships a completion route whose actions exist in each template", () =>
+it.effect("ships a winning and a losing route whose actions exist in each template", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -65,15 +65,24 @@ it.effect("ships a completion route whose actions exist in each template", () =>
       const actions = parseProjectInputActions(
         yield* fs.readFileString(path.join(root, "project.godot")),
       );
-      const parsed = parseGameScenario(
-        JSON.parse(yield* fs.readFileString(path.join(root, "tests/scenarios/full-run.json"))),
-      );
-      expect(parsed.ok).toBe(true);
-      if (!parsed.ok) continue;
-      expect(
-        parsed.scenario.steps.some((step) => "press" in step && step.press === "ui_accept"),
-      ).toBe(true);
-      expect(scenarioActionIssues(parsed.scenario, actions)).toEqual([]);
+      for (const name of ["full-run", "lose-run"]) {
+        const parsed = parseGameScenario(
+          JSON.parse(yield* fs.readFileString(path.join(root, `tests/scenarios/${name}.json`))),
+        );
+        expect(parsed.ok, `${template}/${name}: ${parsed.ok ? "" : parsed.issues.join(" ")}`).toBe(
+          true,
+        );
+        if (!parsed.ok) continue;
+        expect(
+          parsed.scenario.steps.some((step) => "press" in step && step.press === "ui_accept"),
+          `${template}/${name} starts at the menu`,
+        ).toBe(true);
+        expect(
+          parsed.scenario.steps.some((step) => "hold" in step),
+          `${template}/${name} uses normal input`,
+        ).toBe(true);
+        expect(scenarioActionIssues(parsed.scenario, actions)).toEqual([]);
+      }
     }
   }).pipe(Effect.provide(NodeServices.layer)),
 );

@@ -40,7 +40,7 @@ total, score)`, `health_changed(health, max_health)`, `lives_changed(lives)`,
 `run_lost(reason)`, `toast(text)`. Methods: `start_run(total)`, `collect(label)`,
 `apply_damage(amount, reason)`, `lose_life(reason)`, `reach_goal()`, `pause_game()`,
 `resume_game()`, `to_menu()`, `is_playing()`, `notify(text)`, `reason_text(reason)`,
-`time_text(seconds)`. State: `state`, `collected`, `total`, `score`, `lives`, `health`,
+`time_text(seconds)`. State: `state`, `collected`, `total`, `score`, `lives`, `health`, `jumps`,
 `run_seconds`, `best_score`, `best_seconds`, `won` (best score/time persist in
 `user://progress.cfg`).
 
@@ -166,10 +166,39 @@ alone. The harness drives the real loop — synthetic input for movement, jump a
 of failures. Extend it whenever you add a system: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
 
+## Acceptance criteria
+
+Write the DESIGN.md acceptance block against values the player changes, never against a
+boot constant. A criterion passes only when it was false at the first sample after the
+route's first input and became true later, so `total == 5` or `state == 1` proves nothing:
+`total` is the world's relic count and `state` is already PLAYING when play starts. Content
+counts are proven by collecting them (`collected >= 5`), not by the world total. A `win` or
+`lose` observes the value the run ends at, not `changes`. `presentation` claims have no
+observe and wait for the visual stage.
+
+Two examples per kind for this template (pick 5–12 total in the real design):
+
+- control: `{ "id": "move-and-jump", "kind": "control", "text": "WASD moves and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }`
+- control: `{ "id": "reach-first-relic", "kind": "control", "text": "Walking the path reaches the first relic", "observe": { "key": "collected", "expect": ">=1" } }`
+- mechanic: `{ "id": "relic-collected", "kind": "mechanic", "text": "Touching a relic collects it", "observe": { "key": "collected", "expect": ">=1" } }`
+- mechanic: `{ "id": "lava-hurts", "kind": "mechanic", "text": "Standing in lava costs health", "observe": { "key": "health", "expect": "<=95" } }`
+- content: `{ "id": "every-relic", "kind": "content", "text": "The player collects all five relics", "observe": { "key": "collected", "expect": ">=5" } }`
+- content: `{ "id": "all-relics-unlock", "kind": "content", "text": "Collecting the world's relics reaches its total", "observe": { "key": "collected", "expect": ">=5" } }`
+- win: `{ "id": "enter-the-gate", "kind": "win", "text": "Walking into the open gate wins the run", "observe": { "key": "state", "expect": "==3" } }`
+- win: `{ "id": "won-flag", "kind": "win", "text": "The win screen records a won run", "observe": { "key": "won", "expect": "==1" } }`
+- lose: `{ "id": "out-of-lives", "kind": "lose", "text": "Losing all three lives ends the run", "observe": { "key": "lives", "expect": "<=0" } }`
+- lose: `{ "id": "lava-ends-the-run", "kind": "lose", "text": "Falling in the lava ends the last life", "observe": { "key": "state", "expect": "==4" } }`
+- presentation: `{ "id": "lava-glow", "kind": "presentation", "text": "The lava pool glows warm orange" }`
+- presentation: `{ "id": "ambient-audio", "kind": "presentation", "text": "Wind and distant birds carry the mood" }`
+
 ## Acceptance scenarios
 
 `godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
-the main menu, collects all five relics, and walks into the unlocked gate. It is data, not
+the main menu, collects all five relics, and walks into the unlocked gate.
+`godot/tests/scenarios/lose-run.json` is its adverse twin: it walks and hops into the lava
+pool three times, spending all three lives through normal input. Keep both routes working
+when you change a level or the controller, and add a route rather than weakening one when
+new content needs its own playthrough. It is data, not
 code — `press`, `hold` and `wait` steps using this project's InputMap actions. Extend it
 when you add a relic, level or platform: the server runs it under real physics and grades
 the approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks
@@ -179,5 +208,6 @@ route.
 
 Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
 the failing criterion). The template route collects the Sunstone, Tideglass, Verdant Idol
-and Sky Shard on the east/north side, then crosses to Emberheart and the gate; keep the
-jump timings in step with actual physics rather than moving collectibles onto the path.
+and Sky Shard on the east/north side, then crosses to Emberheart and the gate; the lose
+route approaches the lava from the east and jumps in three times. Keep the jump timings in
+step with actual physics rather than moving collectibles onto the path.

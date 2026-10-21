@@ -47,7 +47,7 @@ reset. Signals: `state_changed(state)`, `run_started(level_count)`,
 total)`, `collect(label)`, `lose_life(reason)`, `reach_goal()`, `pause_game()`,
 `resume_game()`, `to_menu()`, `is_playing()`, `notify(text)`, `reason_text(reason)`,
 `time_text(seconds)`, `level_number()`. State: `state`, `level_index`, `level_count`,
-`level_name`, `collected`, `total`, `run_coins`, `score`, `lives`, `run_seconds`,
+`level_name`, `collected`, `total`, `run_coins`, `score`, `lives`, `jumps`, `run_seconds`,
 `best_score`, `best_seconds`, `won` (best score/time persist in `user://progress.cfg`).
 
 **Settings** (`scripts/settings.gd`) — `master_volume`, `music_volume`, `sfx_volume`,
@@ -194,10 +194,39 @@ Two rules the checks teach, and that new ones have to respect:
 Whenever you add a system, extend the harness: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
 
+## Acceptance criteria
+
+Write the DESIGN.md acceptance block against values the player changes, never against a
+boot constant. A criterion passes only when it was false at the first sample after the
+route's first input and became true later, so `total == 20` or `state == 1` proves nothing:
+`total` is the level's world count and `state` is already PLAYING when play starts. Content
+counts are proven by collecting them (`collected >= 12`), not by the world total. A `win`
+or `lose` observes the value the run ends at, not `changes`. `presentation` claims have no
+observe and wait for the visual stage.
+
+Two examples per kind for this template (pick 5–12 total in the real design):
+
+- control: `{ "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }`
+- control: `{ "id": "reach-second-level", "kind": "control", "text": "Clearing level one reaches level two", "observe": { "key": "level_index", "expect": ">=1" } }`
+- mechanic: `{ "id": "coin-collected", "kind": "mechanic", "text": "Touching a coin collects it", "observe": { "key": "collected", "expect": ">=1" } }`
+- mechanic: `{ "id": "spikes-hurt", "kind": "mechanic", "text": "Touching spikes costs a life", "observe": { "key": "lives", "expect": "<=2" } }`
+- content: `{ "id": "every-coin-level-one", "kind": "content", "text": "The player collects every coin in level one", "observe": { "key": "collected", "expect": ">=12" } }`
+- content: `{ "id": "coins-across-the-run", "kind": "content", "text": "Both levels' coins are collected in one run", "observe": { "key": "run_coins", "expect": ">=20" } }`
+- win: `{ "id": "reach-the-summit", "kind": "win", "text": "The run ends at the summit spire", "observe": { "key": "state", "expect": "==3" } }`
+- win: `{ "id": "won-flag", "kind": "win", "text": "The win screen records a won run", "observe": { "key": "won", "expect": "==1" } }`
+- lose: `{ "id": "out-of-lives", "kind": "lose", "text": "Losing all three lives ends the run", "observe": { "key": "lives", "expect": "<=0" } }`
+- lose: `{ "id": "lost-screen", "kind": "lose", "text": "The run ends on the lost screen", "observe": { "key": "state", "expect": "==4" } }`
+- presentation: `{ "id": "lantern-glow", "kind": "presentation", "text": "Lit checkpoints cast a warm glow" }`
+- presentation: `{ "id": "wind-audio", "kind": "presentation", "text": "Wind rises with the altitude" }`
+
 ## Acceptance scenarios
 
 `godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
-the main menu, plays both levels with normal input and wins. It is data, not code —
+the main menu, plays both levels with normal input and wins.
+`godot/tests/scenarios/lose-run.json` is its adverse twin: it walks and jumps into the
+first pit three times, spending all three lives through normal input. Keep both routes
+working when you change a level or the controller, and add a route rather than weakening
+one when new content needs its own playthrough. It is data, not code —
 `press`, `hold` and `wait` steps using this project's InputMap actions. Extend it when
 you add a level or change the route: the server runs it under real physics and grades the
 approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks in
@@ -205,6 +234,7 @@ the smoke harness; scenarios prove the whole game can be finished, not that a me
 works in isolation. Do not teleport, call game methods or write GameState from a route.
 
 Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
-the failing criterion). The 2D route uses the slime stomp at the first spike platform as
-a bounce, the high stone steps, and sprint jumps over the spike runs; keep those timings
-in step with actual physics rather than shortening the level for the test.
+the failing criterion). The 2D routes use the slime stomp at the first spike platform as a
+bounce, the high stone steps, and sprint jumps over the spike runs; the lose route uses the
+same early jumps and then walks into the first pit. Keep those timings in step with actual
+physics rather than shortening the level for the test.

@@ -98,11 +98,12 @@ The build is judged against these criteria.
 
 \`\`\`acceptance
 [
-  { "id": "move-and-jump", "kind": "control", "text": "A and D move the courier and Space jumps", "observe": { "key": "state", "expect": "changes" } },
+  { "id": "move-and-jump", "kind": "control", "text": "A and D move the courier and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } },
   { "id": "light-lanterns", "kind": "mechanic", "text": "Touching a lantern lights it and increments the count", "observe": { "key": "collected", "expect": ">=1" } },
-  { "id": "nine-lanterns", "kind": "content", "text": "All nine lanterns exist across the three rooftops", "observe": { "key": "total", "expect": "==9" } },
-  { "id": "chimney-opens", "kind": "mechanic", "text": "Lighting every lantern on a roof opens its chimney", "observe": { "key": "level_index", "expect": "changes" } },
-  { "id": "reach-third-roof", "kind": "end", "text": "The run ends at the third roof's chimney lantern" }
+  { "id": "nine-lanterns", "kind": "content", "text": "The courier collects all nine lanterns across the three rooftops", "observe": { "key": "collected", "expect": ">=9" } },
+  { "id": "chimney-opens", "kind": "mechanic", "text": "Lighting every lantern on a roof opens its chimney", "observe": { "key": "level_index", "expect": ">=1" } },
+  { "id": "reach-third-roof", "kind": "win", "text": "The run ends at the third roof's chimney lantern", "observe": { "key": "state", "expect": "==3" } },
+  { "id": "out-of-lives", "kind": "lose", "text": "Losing all three lives ends the run", "observe": { "key": "lives", "expect": "<=0" } }
 ]
 \`\`\`
 
@@ -775,7 +776,7 @@ it.effect("approves one reviewed DESIGN.md revision and dispatches one build tur
         );
         expect(record?.approvalId).toBe(approval.approvalId);
         expect(record?.designHash).toBe(designHash);
-        expect(record?.acceptance).toHaveLength(5);
+        expect(record?.acceptance).toHaveLength(6);
         // Retrying the same revision is a read, not another build turn.
         const again = yield* projects.approveDesign(created.threadId, designHash);
         expect(again.approvalId).toBe(approval.approvalId);
@@ -1211,7 +1212,14 @@ it.effect(
           yield* projects.approveDesign(created.threadId, firstHash);
           const approved = yield* game.status(created.threadId);
           expect(approved.design.state).toBe("approved");
-          expect(approved.design.acceptance).toHaveLength(5);
+          expect(approved.design.acceptance).toHaveLength(6);
+          // One snapshot: the text the Design tab renders hashes to the hash it
+          // submits, and a changed document cannot keep an old snapshot.
+          expect(approved.design.documentTruncated).toBe(false);
+          expect(approved.design.document).toContain("## Pitch");
+          expect(approved.design.currentHash).toBe(
+            GameDesignApproval.designDocumentHash(approved.design.document ?? ""),
+          );
           expect(approved.qualification.stages.find((s) => s.stage === "design")?.status).toBe(
             "passed",
           );

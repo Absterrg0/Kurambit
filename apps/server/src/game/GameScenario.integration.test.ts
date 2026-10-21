@@ -136,6 +136,10 @@ jump={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":32)]
 }
+pause={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":4194305)]
+}
 `,
   );
   await NodeFSP.writeFile(
@@ -212,7 +216,7 @@ var jumped := 0
 ${extra}`;
 
 it.live.skipIf(!available)(
-  "runs both template completion routes to PASS",
+  "runs both template routes (win and lose) to PASS",
   () =>
     Effect.gen(function* () {
       for (const template of ["2d-platformer", "3d-explorer"] as const) {
@@ -224,40 +228,66 @@ it.live.skipIf(!available)(
               expect(run.errors, `${template}: ${JSON.stringify(run.errors)}`).toEqual([]);
               expect(run.ok, `${template}: ${JSON.stringify(run.summary)}`).toBe(true);
               expect(run.summary).toMatchObject({ mode: "legacy", passed: true });
-              expect(run.scenarios).toHaveLength(1);
-              expect(run.scenarios[0]).toMatchObject({ id: "full-run", playerMoved: true });
-              expect(run.scenarios[0]?.frames).toBeGreaterThan(500);
-              expect(run.scenarios[0]?.error).toBeNull();
+              expect(run.scenarios.map((scenario) => scenario.id).sort()).toEqual([
+                "full-run",
+                "lose-run",
+              ]);
+              const full = run.scenarios.find((scenario) => scenario.id === "full-run");
+              const lose = run.scenarios.find((scenario) => scenario.id === "lose-run");
+              expect(full).toMatchObject({ playerMoved: true, error: null });
+              expect(full?.frames).toBeGreaterThan(500);
+              expect(lose).toMatchObject({ playerMoved: true, error: null });
+              expect(lose?.baselineFrame).not.toBeNull();
+              const lives = lose?.observations.find((entry) => entry.key === "lives");
+              expect(lives?.last).toBe(0);
               return run;
             }),
         );
       }
     }),
-  { timeout: 180_000 },
+  { timeout: 240_000 },
 );
 
 it.live.skipIf(!available)(
-  "each template route satisfies the approved observations and records them",
+  "both templates prove control, mechanic, content, win and lose across their two routes",
   () =>
     Effect.gen(function* () {
       for (const template of ["2d-platformer", "3d-explorer"] as const) {
         yield* withGame(
           {
-            name: `${template} accepted route`,
+            name: `${template} accepted routes`,
             template,
             planFirst: true,
             criteria: [
               {
+                id: "jump",
+                kind: "control",
+                text: "Space jumps",
+                observe: { key: "jumps", expect: ">=1" },
+              },
+              {
+                id: "pickup",
+                kind: "mechanic",
+                text: "Touching a pickup scores",
+                observe: { key: "score", expect: ">=100" },
+              },
+              {
                 id: "collect",
                 kind: "content",
-                text: "Collect the content",
-                observe: { key: "collected", expect: ">=5" },
+                text: "The player collects at least two pickups",
+                observe: { key: "collected", expect: ">=2" },
               },
               {
                 id: "win",
                 kind: "win",
                 text: "Finish the run",
                 observe: { key: "state", expect: "==3" },
+              },
+              {
+                id: "lose",
+                kind: "lose",
+                text: "Losing every life ends the run",
+                observe: { key: "lives", expect: "<=0" },
               },
             ],
           },
@@ -270,15 +300,31 @@ it.live.skipIf(!available)(
               expect(
                 result.summary.criteria.map((criterion) => [criterion.id, criterion.status]),
               ).toEqual([
+                ["jump", "passed"],
+                ["pickup", "passed"],
                 ["collect", "passed"],
                 ["win", "passed"],
+                ["lose", "passed"],
               ]);
+              expect(result.summary.coverage).toEqual([
+                { kind: "control", proven: 1, failed: 0, missing: 0 },
+                { kind: "mechanic", proven: 1, failed: 0, missing: 0 },
+                { kind: "content", proven: 1, failed: 0, missing: 0 },
+                { kind: "win", proven: 1, failed: 0, missing: 0 },
+                { kind: "lose", proven: 1, failed: 0, missing: 0 },
+              ]);
+              // Each moot claim names the route and frame that proved it.
+              const win = result.summary.criteria.find((criterion) => criterion.id === "win");
+              expect(win?.provenBy?.scenario).toBe("full-run");
+              expect(win?.provenBy?.frame).toBeGreaterThan(0);
+              const lose = result.summary.criteria.find((criterion) => criterion.id === "lose");
+              expect(lose?.provenBy?.scenario).toBe("lose-run");
               return result;
             }),
         );
       }
     }),
-  { timeout: 180_000 },
+  { timeout: 240_000 },
 );
 
 it.live.skipIf(!available)(
@@ -296,6 +342,143 @@ it.live.skipIf(!available)(
           const result = yield* game.scenariosRun(threadId);
           expect(result.ok).toBe(false);
           expect(result.summary.reason).toBe("no-player-movement");
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "the review's wait-only boot fixture fails instead of passing on constants",
+  () =>
+    withGame(
+      {
+        name: "wait only fixture",
+        planFirst: true,
+        mainScript: "extends Node2D\n",
+        stateScript: "extends Node\nvar state := 0\nvar total := 5\n",
+        playerScript: `extends CharacterBody2D
+
+func _physics_process(delta: float) -> void:
+\tvelocity.y += 300.0 * delta
+\tmove_and_slide()
+`,
+        scenarios: { "wait-only": { id: "wait-only", steps: [{ wait: 60 }] } },
+        criteria: [
+          { id: "jump", kind: "control", text: "The player jumps with Space" },
+          { id: "hazard", kind: "mechanic", text: "The hazard damages the player" },
+          {
+            id: "content",
+            kind: "content",
+            text: "Five pickups are reachable",
+            observe: { key: "total", expect: "==5" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "The player wins",
+            observe: { key: "state", expect: "==0" },
+          },
+          { id: "lose", kind: "lose", text: "The player can lose" },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.ok).toBe(false);
+          expect(result.summary.mode).toBe("criteria");
+          const content = result.summary.criteria.find((entry) => entry.id === "content");
+          const win = result.summary.criteria.find((entry) => entry.id === "win");
+          expect(content?.status).toBe("failed");
+          expect(win?.status).toBe("failed");
+          expect(content?.observed).toContain("pressed no controls");
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "a world total is already true when play starts and cannot prove content",
+  () =>
+    withGame(
+      {
+        name: "world total fixture",
+        planFirst: true,
+        mainScript: "extends Node2D\n",
+        stateScript: "extends Node\nvar state := 1\nvar total := 5\n",
+        scenarios: {
+          "total-run": {
+            id: "total-run",
+            steps: [{ press: "ui_accept" }, { hold: ["move_right"], frames: 60 }],
+          },
+        },
+        criteria: [
+          {
+            id: "five-pearls",
+            kind: "content",
+            text: "Five pearls exist",
+            observe: { key: "total", expect: "==5" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "Reach the end",
+            observe: { key: "state", expect: "==3" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.ok).toBe(false);
+          const content = result.summary.criteria.find((entry) => entry.id === "five-pearls");
+          expect(content?.status).toBe("failed");
+          expect(content?.observed).toContain("Already true when play started");
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "starting and pausing the game is a state change, not a win",
+  () =>
+    withGame(
+      {
+        name: "pause is not a win fixture",
+        planFirst: true,
+        mainScript: `extends Node2D
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tGameState.state = 1
+\tif Input.is_action_just_pressed("pause"):
+\t\tGameState.state = 2
+`,
+        stateScript: "extends Node\nvar state := 0\nvar lives := 3\n",
+        scenarios: {
+          "pause-run": {
+            id: "pause-run",
+            steps: [{ press: "ui_accept" }, { wait: 30 }, { press: "pause" }, { wait: 60 }],
+          },
+        },
+        criteria: [
+          {
+            id: "win",
+            kind: "win",
+            text: "The run reaches the win state",
+            observe: { key: "state", expect: "changes" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.ok).toBe(false);
+          const win = result.summary.criteria.find((entry) => entry.id === "win");
+          expect(win?.status).toBe("failed");
+          expect(win?.observed).toContain("value the run ends at");
           return result;
         }),
     ),

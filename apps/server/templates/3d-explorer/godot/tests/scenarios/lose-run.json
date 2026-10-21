@@ -1,0 +1,56 @@
+{
+  "id": "lose-run",
+  "steps": [
+    {
+      "press": "ui_accept"
+    },
+    {
+      "wait": 20
+    },
+    {
+      "hold": ["move_left", "move_forward"],
+      "frames": 110
+    },
+    {
+      "hold": ["move_left", "jump"],
+      "frames": 20
+    },
+    {
+      "hold": ["move_left", "move_forward", "jump"],
+      "frames": 20
+    },
+    {
+      "wait": 400
+    },
+    {
+      "hold": ["move_left", "move_forward"],
+      "frames": 110
+    },
+    {
+      "hold": ["move_left", "jump"],
+      "frames": 20
+    },
+    {
+      "hold": ["move_left", "move_forward", "jump"],
+      "frames": 20
+    },
+    {
+      "wait": 400
+    },
+    {
+      "hold": ["move_left", "move_forward"],
+      "frames": 110
+    },
+    {
+      "hold": ["move_left", "jump"],
+      "frames": 20
+    },
+    {
+      "hold": ["move_left", "move_forward", "jump"],
+      "frames": 20
+    },
+    {
+      "wait": 400
+    }
+  ]
+}

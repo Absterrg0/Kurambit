@@ -31,19 +31,16 @@ export function GameDesignPanel({
   turnRunning,
   canOperate,
   onApproved,
+  onRefresh,
 }: {
   threadRef: ScopedThreadRef;
   status: GameStatus;
   turnRunning: boolean;
   canOperate: boolean;
   onApproved: () => void;
+  /** Refreshes the status snapshot this panel renders and approves. */
+  onRefresh: () => void;
 }) {
-  const design = useProjectFileQuery(
-    threadRef.environmentId,
-    status.root,
-    status.designPath,
-    status.designPath !== null,
-  );
   const brief = useProjectFileQuery(
     threadRef.environmentId,
     status.root,
@@ -55,16 +52,16 @@ export function GameDesignPanel({
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshDesign = design.refresh;
   const refreshBrief = brief.refresh;
   const previousTurnRunning = useRef(turnRunning);
   useEffect(() => {
     const wasRunning = previousTurnRunning.current;
     previousTurnRunning.current = turnRunning;
     if (!wasRunning || turnRunning) return;
-    refreshDesign();
+    // The status query owns the design snapshot; the parent refreshes it when
+    // the turn settles.
     refreshBrief();
-  }, [turnRunning, refreshDesign, refreshBrief]);
+  }, [turnRunning, refreshBrief]);
 
   const designState = status.design.state;
   const draft = designState === "draft";
@@ -73,13 +70,19 @@ export function GameDesignPanel({
   const approvable = draft || changed;
   const approvedLabel = approvedOn(status.design.approvedAt ?? undefined);
   const designPath = status.designPath;
-  const contents = design.data?.contents.trim() ?? "";
+  const contents = status.design.document?.trim() ?? "";
   const briefContents = brief.data?.contents.trim() ?? "";
   const acceptance = status.design.acceptance;
   const issues = status.design.issues;
   const currentHash = status.design.currentHash;
   const canApprove =
-    canOperate && !turnRunning && !approving && currentHash !== null && issues.length === 0;
+    canOperate &&
+    !turnRunning &&
+    !approving &&
+    status.design.document !== null &&
+    !status.design.documentTruncated &&
+    currentHash !== null &&
+    issues.length === 0;
 
   const approve = async () => {
     if (!canApprove || currentHash === null) return;
@@ -162,7 +165,7 @@ export function GameDesignPanel({
             aria-label="Refresh the design"
             disabled={approving}
             onClick={() => {
-              design.refresh();
+              onRefresh();
               brief.refresh();
             }}
           >
@@ -185,22 +188,7 @@ export function GameDesignPanel({
           ) : null}
         </div>
       </div>
-      {design.isPending ? (
-        <div className="mx-auto flex w-full max-w-4xl items-center gap-2 px-6 py-8 text-sm text-muted-foreground">
-          <RefreshCwIcon
-            className="size-4 animate-spin motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-          Loading DESIGN.md…
-        </div>
-      ) : design.error ? (
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-start gap-2 px-6 py-8">
-          <p className="text-sm text-destructive">{design.error}</p>
-          <Button size="xs" variant="outline" onClick={design.refresh}>
-            Retry
-          </Button>
-        </div>
-      ) : contents ? (
+      {contents ? (
         <ChatMarkdown
           text={contents}
           cwd={status.root}
@@ -219,7 +207,7 @@ export function GameDesignPanel({
               ? "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
               : "This game has no DESIGN.md yet. Ask the agent to write one in chat."}
           </p>
-          <Button size="xs" variant="ghost" onClick={design.refresh}>
+          <Button size="xs" variant="ghost" onClick={onRefresh}>
             Refresh
           </Button>
         </div>

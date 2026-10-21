@@ -538,6 +538,7 @@ export function GameStage({
             setTab(null);
             refresh();
           }}
+          onRefresh={refresh}
         />
       ) : null}
       {/*
