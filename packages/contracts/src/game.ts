@@ -90,14 +90,11 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
-  // Games created before the canonical-suite rule have no testSuite and default
-  // to DEFAULT_GAME_TEST_SUITE.
+  // Display mirror of the server-owned verification policy. New games get it
+  // from the template; old games are the one-time source the policy is adopted
+  // from. Editing these keys never changes the exam.
   testSuite: Schema.optionalKey(Schema.String),
-  // Games created before the gameplay-entry check have no gameplayScene; their
-  // check only runs the main scene (the menu).
   gameplayScene: Schema.optionalKey(Schema.String),
-  // Games created before probe enforcement have no probe key; only the
-  // server-owned creation record can add the obligation.
   probe: Schema.optionalKey(Schema.Boolean),
   // Games created before the design step existed have no design key.
   design: Schema.optionalKey(GameDesign),
