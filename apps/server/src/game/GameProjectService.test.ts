@@ -130,6 +130,29 @@ victory phrase when the third roof lights.
 3. **Polish** — audio, pause states and the checkpoint presentation.
 `;
 
+/* A pending change request for that design: the same page rewritten by an
+ * agent turn, with the edits a revision may make. */
+const revisedDesign = () =>
+  filledDesign()
+    .replace(
+      '"id": "light-lanterns", "kind": "mechanic", "text": "Touching a lantern lights it and increments the count", "observe": { "key": "collected", "expect": ">=1" }',
+      '"id": "light-lanterns", "kind": "mechanic", "text": "Touching a lantern lights it and increments the count", "observe": { "key": "collected", "expect": ">=2" }',
+    )
+    .replace(
+      '"id": "out-of-lives"',
+      '"id": "double-jump", "kind": "mechanic", "text": "A second jump while airborne raises the courier", "observe": { "key": "air_jumps", "expect": ">=1" } },\n  { "id": "out-of-lives"',
+    );
+/** A revision that drops the nine-lanterns promise without owning the removal. */
+const removalDesign = (acknowledged = false) =>
+  filledDesign()
+    .replace(/^ {2}\{ "id": "nine-lanterns",.*\n/m, "")
+    .replace(
+      "## Content",
+      acknowledged
+        ? "## Content\n\nRemoved: nine-lanterns\n\nThe revision trimmed the rooftops to one and took the nine-lantern count with it."
+        : "## Content",
+    );
+
 const readFile = (file: string) => Effect.promise(() => NodeFSP.readFile(file, "utf8"));
 const exists = (path: string) =>
   Effect.promise(() =>
@@ -377,10 +400,11 @@ it.effect("a project with no session gets one when the game is opened", () =>
           brief: "Go",
           modelSelection: selection,
         });
-        // The mock had no session yet; opening the same project must create one.
+        // The synthetic session list is empty; opening the same project must
+        // create one, which cannot be the create-time session's thread again.
         const opened = yield* service.open({ path: game.root, modelSelection: selection });
         expect(opened.projectId).toBe(game.projectId);
-        expect(opened.threadId).toBe(game.threadId);
+        expect(opened.threadId).not.toBe(game.threadId);
         return game;
       }).pipe(
         Effect.provide(
@@ -738,6 +762,20 @@ const designHashOf = (root: string) =>
     Effect.map(GameDesignApproval.designDocumentHash),
   );
 
+/** An approved plan-first game: the state a change request amends. */
+const setUpApprovedGame = Effect.fn("approvedGame")(function* (parent: string) {
+  const projects = yield* GameProjectService.GameProjectService;
+  const created = yield* projects.create({
+    name: "Planned Quest",
+    parentDirectory: parent,
+    brief: "Collect three coins.",
+    modelSelection: selection,
+  });
+  yield* writeDesign(created.root, filledDesign());
+  yield* projects.approveDesign(created.threadId, yield* designHashOf(created.root));
+  return created;
+});
+
 it.effect("approves one reviewed DESIGN.md revision and dispatches one build turn", () =>
   Effect.gen(function* () {
     const parent = yield* Effect.acquireRelease(
@@ -813,6 +851,285 @@ it.effect("approves one reviewed DESIGN.md revision and dispatches one build tur
     expect(sends[0]?.createdBy).toBe("user");
     expect(sends[0]?.attachments).toEqual([]);
     expect(gameRoot).not.toBe("");
+  }),
+);
+
+it.effect("a pending change request locks staging, the design stage and plain approval", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-revision-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* setUpApprovedGame(parent);
+        const request = yield* projects.requestChange(
+          created.threadId,
+          "Add a double jump and make the owls slower.",
+        );
+        expect(request.revisionId).not.toBe("");
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("revision-pending");
+        expect(status.design.pendingRevision?.text).toBe(
+          "Add a double jump and make the owls slower.",
+        );
+        expect(status.design.pendingRevision?.baseHash).toBe(status.design.approvedHash);
+        // Nothing in the document diff yet: the agent has not rewritten DESIGN.md.
+        expect(status.design.revisionDiff).toEqual({ added: [], changed: [], removed: [] });
+        expect(status.design.issues).toEqual([]);
+        // The design stage and the library summary cannot stay qualified.
+        expect(status.qualification.stages.find((stage) => stage.stage === "design")?.status).toBe(
+          "failed",
+        );
+        expect(status.qualification.state).toBe("unqualified");
+        // Staging is refused with the revision's own reason.
+        for (const outcome of [
+          yield* Effect.result(game.action(created.threadId, "preview")),
+          yield* Effect.result(game.export(created.threadId, "Web")),
+        ])
+          expect(outcome._tag === "Failure" && outcome.failure.reason).toBe(
+            "design-revision-pending",
+          );
+        // One door out: while the request is open, plain approval and a second
+        // request both point back to the revision flow.
+        const hash = yield* designHashOf(created.root);
+        const plain = yield* Effect.result(projects.approveDesign(created.threadId, hash));
+        expect(plain._tag === "Failure" && plain.failure.reason).toBe("design-revision-pending");
+        const second = yield* Effect.result(
+          projects.requestChange(created.threadId, "Also add a menu hint."),
+        );
+        expect(second._tag === "Failure" && second.failure.reason).toBe("design-revision-pending");
+        // Only the approval and the user's request turn went out; refusals dispatch nothing.
+        expect(sends).toHaveLength(2);
+        expect(sends[1]?.text).toContain(
+          "Change requested: Add a double jump and make the owls slower.",
+        );
+      }).pipe(
+        Effect.provide(
+          gameServiceLayers({
+            stateDir: fixtureState(parent),
+            onSend: (input) => sends.push(input),
+          }),
+        ),
+      ),
+    );
+  }),
+);
+
+it.effect("approving a revision dispatches one build turn and resolves the request", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-revise-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = fixtureState(parent);
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* setUpApprovedGame(parent);
+        yield* projects.requestChange(created.threadId, "Add a double jump.");
+        // The agent's request turn rewrote DESIGN.md with the new promise.
+        yield* writeDesign(created.root, revisedDesign());
+        const revisedHash = yield* designHashOf(created.root);
+        const approval = yield* projects.approveRevision(created.threadId, revisedHash);
+        expect(approval.designHash).toBe(revisedHash);
+        const record = yield* Effect.promise(() =>
+          GameDesignApproval.readDesignApprovalRecord(
+            GameDesignApproval.approvalRecordFile(stateDir, created.root),
+          ),
+        );
+        expect(record?.designHash).toBe(revisedHash);
+        expect(record?.acceptance.some((criterion) => criterion.id === "double-jump")).toBe(true);
+        expect(record?.acceptance.some((criterion) => criterion.id === "out-of-lives")).toBe(true);
+        // The request is resolved: the pending record is gone from disk, and
+        // re-approving the same hash is nothing left to approve — no turn can
+        // re-dispatch now that the revision no longer pends.
+        expect(yield* exists(GameDesignApproval.pendingRevisionFile(stateDir, created.root))).toBe(
+          false,
+        );
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("approved");
+        expect(status.design.pendingRevision).toBeNull();
+        // The dispatched turn is the revision's own build turn, not the first
+        // approval's, and no earlier send disappears.
+        expect(sends.map((send) => send.text.slice(0, 30))).toEqual([
+          expect.stringContaining("The design is approved"),
+          expect.stringContaining("Change requested"),
+          expect.stringContaining("The change request is approved"),
+        ]);
+        expect(sends[2]?.text).toContain("Implement the approved revision");
+        expect(sends[2]?.text).toContain("game_scenarios_run");
+        expect(sends[2]?.createdBy).toBe("user");
+        const again = yield* Effect.result(projects.approveRevision(created.threadId, revisedHash));
+        expect(again._tag === "Failure" && again.failure.reason).toBe("revision-missing");
+        expect(sends).toHaveLength(3);
+      }).pipe(
+        Effect.provide(gameServiceLayers({ stateDir, onSend: (input) => sends.push(input) })),
+      ),
+    );
+  }),
+);
+
+it.effect("a revision may remove criteria only when DESIGN.md owns the removal", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-revise-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* setUpApprovedGame(parent);
+        yield* projects.requestChange(created.threadId, "Trim the game to one rooftop.");
+        yield* writeDesign(created.root, removalDesign(false));
+        const removalHash = yield* designHashOf(created.root);
+        // Hash discipline still holds for revisions.
+        const stale = yield* Effect.result(projects.approveRevision(created.threadId, "wrong"));
+        expect(stale._tag).toBe("Failure");
+        if (stale._tag === "Failure") expect(stale.failure.reason).toBe("design-hash-mismatch");
+        const denied = yield* Effect.result(
+          projects.approveRevision(created.threadId, removalHash),
+        );
+        expect(denied._tag).toBe("Failure");
+        if (denied._tag === "Failure") {
+          expect(denied.failure.reason).toBe("design-invalid");
+          expect(denied.failure.detail).toContain("nine-lanterns");
+          expect(denied.failure.detail).toContain("Removed:");
+        }
+        // The rejection leaves the request pending for a corrected document.
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("revision-pending");
+        yield* writeDesign(created.root, removalDesign(true));
+        const ackedHash = yield* designHashOf(created.root);
+        const approved = yield* projects.approveRevision(created.threadId, ackedHash);
+        expect(approved.designHash).toBe(ackedHash);
+        const after = yield* game.status(created.threadId);
+        expect(after.design.state).toBe("approved");
+        // The refusals dispatch nothing: only the corrected approval sends a turn.
+        expect(sends.map((send) => send.text.slice(0, 30))).toEqual([
+          expect.stringContaining("The design is approved"),
+          expect.stringContaining("Change requested"),
+          expect.stringContaining("The change request is approved"),
+        ]);
+      }).pipe(
+        Effect.provide(
+          gameServiceLayers({
+            stateDir: fixtureState(parent),
+            onSend: (input) => sends.push(input),
+          }),
+        ),
+      ),
+    );
+  }),
+);
+
+it.effect("discarding a pending request restores the approved design", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-discard-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = fixtureState(parent);
+    const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        const game = yield* GameService.GameService;
+        const created = yield* setUpApprovedGame(parent);
+        const recordBefore = yield* Effect.promise(() =>
+          GameDesignApproval.readDesignApprovalRecord(
+            GameDesignApproval.approvalRecordFile(stateDir, created.root),
+          ),
+        );
+        yield* projects.requestChange(created.threadId, "Change the palette only.");
+        yield* projects.discardRevision(created.threadId);
+        const status = yield* game.status(created.threadId);
+        expect(status.design.state).toBe("approved");
+        expect(status.design.pendingRevision).toBeNull();
+        // Nothing was approved twice: the original record stands.
+        const approved = yield* Effect.promise(() =>
+          GameDesignApproval.readDesignApprovalRecord(
+            GameDesignApproval.approvalRecordFile(stateDir, created.root),
+          ),
+        );
+        expect(approved?.approvalId).toBe(recordBefore?.approvalId);
+        expect(approved?.designHash).toBe(recordBefore?.designHash);
+        // The request is gone; discarding again reports that honestly.
+        const again = yield* Effect.result(projects.discardRevision(created.threadId));
+        expect(again._tag === "Failure" && again.failure.reason).toBe("revision-missing");
+        // A discard has no turn of its own: after the approval, only the request.
+        expect(sends).toHaveLength(2);
+        expect(sends[1]?.text).toContain("Change requested: Change the palette only.");
+      }).pipe(
+        Effect.provide(
+          gameServiceLayers({
+            stateDir: fixtureState(parent),
+            onSend: (input) => sends.push(input),
+          }),
+        ),
+      ),
+    );
+  }),
+);
+
+it.effect("change requests need an approved design to amend", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-request-"))),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    const stateDir = NodePath.join(parent, ".test-state");
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const projects = yield* GameProjectService.GameProjectService;
+        // A plan-first game whose design is still a draft: chat is the free path.
+        const draftGame = yield* projects.create({
+          name: "Planned Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          modelSelection: selection,
+        });
+        const draftRequest = yield* Effect.result(
+          projects.requestChange(draftGame.threadId, "Add a double jump."),
+        );
+        expect(draftRequest._tag === "Failure" && draftRequest.failure.reason).toBe("design-draft");
+        const approveWithNoRequest = yield* Effect.result(
+          projects.approveRevision(
+            draftGame.threadId,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+          ),
+        );
+        expect(approveWithNoRequest._tag === "Failure" && approveWithNoRequest.failure.reason).toBe(
+          "revision-missing",
+        );
+        const discardWithNoRequest = yield* Effect.result(
+          projects.discardRevision(draftGame.threadId),
+        );
+        expect(discardWithNoRequest._tag === "Failure" && discardWithNoRequest.failure.reason).toBe(
+          "revision-missing",
+        );
+        // A skip-planning game has no design contract at all.
+        const skipGame = yield* projects.create({
+          name: "Skipped Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          planFirst: false,
+          modelSelection: selection,
+        });
+        const skipRequest = yield* Effect.result(
+          projects.requestChange(skipGame.threadId, "Add a double jump."),
+        );
+        expect(skipRequest._tag === "Failure" && skipRequest.failure.reason).toBe("design-legacy");
+      }).pipe(Effect.provide(gameServiceLayers({ stateDir }))),
+    );
+    yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
   }),
 );
 

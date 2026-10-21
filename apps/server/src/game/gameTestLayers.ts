@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test boundary stubs replace registration and provider execution, never game operations.
+import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -63,6 +64,32 @@ export function projectTestLayer(
   const accepted = new Set<string>();
   let enteredGate = false;
   let project: Project | undefined;
+  // Projects key by workspace root, so a second create is another game with
+  // its own design records, not an alias of the first one. Resolution follows
+  // the requested id, not whichever project bootstrapped last.
+  const projectsByRoot = new Map<string, Project>();
+  const projectsById = new Map<Project["id"], Project>();
+  // Each launch mints its own thread bound to its own project; an id shared by
+  // two games would resolve every later operation against whichever project
+  // bootstrapped last.
+  const threadShells = new Map<string, OrchestrationV2ThreadShell>();
+  let threadSequence = 0;
+  const mintThread = (projectId: Project["id"]): OrchestrationV2ThreadShell => {
+    threadSequence += 1;
+    const shell = {
+      id: ThreadId.make(
+        threadSequence === 1 ? "game-test-thread" : `game-test-thread-${threadSequence}`,
+      ),
+      projectId,
+      title: "Game session",
+      updatedAt: DateTime.makeUnsafe("2026-10-20T00:00:00.000Z"),
+      archivedAt: null,
+      deletedAt: null,
+      worktreePath: null,
+    } as OrchestrationV2ThreadShell;
+    threadShells.set(shell.id, shell);
+    return shell;
+  };
   const defaultThread = (): OrchestrationV2ThreadShell =>
     ({
       id: ThreadId.make("game-test-thread"),
@@ -73,7 +100,9 @@ export function projectTestLayer(
       deletedAt: null,
       worktreePath: null,
     }) as OrchestrationV2ThreadShell;
-  const projectThreads = () => options?.threads?.() ?? (project ? [defaultThread()] : []);
+  const projectThreads = () =>
+    options?.threads?.() ??
+    (project ? (threadShells.size > 0 ? [...threadShells.values()] : [defaultThread()]) : []);
   return Layer.mergeAll(
     Layer.mock(ProjectService.ProjectService)({
       bootstrap: (input) => {
@@ -90,28 +119,40 @@ export function projectTestLayer(
           updatedAt: "2026-10-19T00:00:00Z",
           deletedAt: null,
         };
+        projectsByRoot.set(NodePath.resolve(input.workspaceRoot), project);
+        projectsById.set(project.id, project);
         return Effect.succeed({ project, created: true });
       },
-      getByWorkspaceRoot: () => Effect.succeed(Option.fromUndefinedOr(project)),
-      getById: () => Effect.succeed(Option.fromUndefinedOr(project)),
+      getByWorkspaceRoot: (workspaceRoot) =>
+        Effect.succeed(Option.fromUndefinedOr(projectsByRoot.get(NodePath.resolve(workspaceRoot)))),
+      getById: (projectId) =>
+        Effect.succeed(
+          Option.fromUndefinedOr(projectId === undefined ? project : projectsById.get(projectId)),
+        ),
       snapshot: Effect.sync(() => ({
-        projects: project ? [project] : [],
+        projects: projectsById.size > 0 ? [...projectsById.values()] : project ? [project] : [],
         updatedAt: "2026-10-20T00:00:00.000Z",
       })),
     }),
     Layer.mock(ThreadManagementService.ThreadManagementService)({
-      getThreadShell: () =>
+      getThreadShell: (threadId) =>
         Effect.succeed(
-          project === undefined
-            ? null
-            : ({
-                id: ThreadId.make("game-test-thread"),
-                projectId: project.id,
-                deletedAt: null,
-                worktreePath: null,
-              } as OrchestrationV2ThreadShell),
+          threadShells.get(threadId) ??
+            (project === undefined
+              ? null
+              : ({
+                  id: threadId,
+                  projectId: project.id,
+                  deletedAt: null,
+                  worktreePath: null,
+                } as OrchestrationV2ThreadShell)),
         ),
-      listProjectThreads: () => Effect.succeed(projectThreads()),
+      listProjectThreads: (query) =>
+        Effect.succeed(
+          projectThreads().filter(
+            (shell) => query?.projectId === undefined || shell.projectId === query.projectId,
+          ),
+        ),
       getShellSnapshot: () =>
         Effect.succeed({
           schemaVersion: 1,
@@ -154,9 +195,10 @@ export function projectTestLayer(
     Layer.mock(ThreadLaunchService.ThreadLaunchService)({
       launch: (input) => {
         onLaunch?.(input);
-        // Only threadId crosses this boundary; launch itself has separate integration tests.
+        // Only threadId crosses this boundary; launch itself has separate
+        // integration tests.
         return Effect.succeed({
-          threadId: ThreadId.make("game-test-thread"),
+          threadId: mintThread(input.projectId).id,
         } as ThreadLaunchService.ThreadLaunchResult);
       },
     }),
