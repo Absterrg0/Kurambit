@@ -165,31 +165,54 @@ function LastPlaytestSection({
       </section>
     );
   }
+  // `success` only says the browser run worked; the verdict says whether it
+  // did any of the play the game owes. Show both, and keep old evidence that
+  // predates the verdict on its own Passed/Failed wording.
+  const qualifies = lastPlaytest.qualifies;
+  const badge =
+    qualifies === true
+      ? {
+          label: "Qualified",
+          icon: CheckCircle2Icon,
+          className: "border-success/40 bg-secondary text-success-foreground",
+        }
+      : qualifies === false
+        ? {
+            label: "Not counted",
+            icon: TriangleAlertIcon,
+            className: "border-warning/40 bg-warning-surface text-warning-foreground",
+          }
+        : lastPlaytest.success
+          ? {
+              label: "Passed",
+              icon: CheckCircle2Icon,
+              className: "border-success/40 bg-secondary text-success-foreground",
+            }
+          : {
+              label: "Failed",
+              icon: XCircleIcon,
+              className: "border-destructive/40 bg-secondary text-destructive-foreground",
+            };
+  const BadgeIcon = badge.icon;
   return (
     <section
-      data-game-last-playtest={lastPlaytest.success ? "success" : "failed"}
+      data-game-last-playtest={
+        qualifies === false ? "unqualified" : lastPlaytest.success ? "success" : "failed"
+      }
       className="rounded-lg border border-border bg-card p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-medium">Last playtest</h3>
         <span
-          className={
-            lastPlaytest.success
-              ? "flex items-center gap-1 rounded-full border border-success/40 bg-secondary px-2 py-0.5 text-2xs text-success-foreground"
-              : "flex items-center gap-1 rounded-full border border-destructive/40 bg-secondary px-2 py-0.5 text-2xs text-destructive-foreground"
-          }
+          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs ${badge.className}`}
         >
-          {lastPlaytest.success ? (
-            <CheckCircle2Icon className="size-3" aria-hidden="true" />
-          ) : (
-            <XCircleIcon className="size-3" aria-hidden="true" />
-          )}
-          {lastPlaytest.success ? "Passed" : "Failed"}
+          <BadgeIcon className="size-3" aria-hidden="true" />
+          {badge.label}
         </span>
         {lastPlaytest.stale ? (
           <span className="flex items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground">
             <TriangleAlertIcon className="size-3" aria-hidden="true" />
-            Older than the web build
+            Not current
           </span>
         ) : null}
         <span className="ml-auto text-xs text-muted-foreground">
@@ -204,6 +227,19 @@ function LastPlaytestSection({
           ? "No console errors."
           : `${lastPlaytest.consoleErrorCount} console error(s).`}
       </p>
+      {qualifies === false ? (
+        <p className="mt-1 text-xs text-warning-foreground">
+          Not counted as gameplay evidence
+          {lastPlaytest.blockers !== undefined && lastPlaytest.blockers.length > 0
+            ? `: ${lastPlaytest.blockers.join("; ")}`
+            : "."}
+        </p>
+      ) : null}
+      {qualifies === true && lastPlaytest.interaction !== undefined ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Interaction: {lastPlaytest.interaction}.
+        </p>
+      ) : null}
       {lastPlaytest.frames.length > 0 ? (
         <ul className="mt-3 flex flex-wrap gap-2">
           {lastPlaytest.frames.map((frame) => (

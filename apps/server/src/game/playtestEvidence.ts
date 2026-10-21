@@ -155,6 +155,32 @@ const prunePlaytests = async (root: string): Promise<void> => {
     await NodeFSP.rm(NodePath.join(parent, name), { recursive: true, force: true });
 };
 
+/**
+ * Whether a stored run proved real play. Evidence written before the verdict
+ * field predates qualification; a successful run that responded is the most
+ * that evidence itself can claim (and it has no per-frame probe to pick from
+ * anyway).
+ */
+const runQualified = (stored: StoredPlaytest): boolean =>
+  stored.qualifies ?? (stored.success && stored.responded);
+
+const readStoredRun = async (parent: string, name: string): Promise<StoredPlaytest | null> => {
+  try {
+    return decodeStoredPlaytest(
+      await NodeFSP.readFile(NodePath.join(parent, name, "result.json"), "utf8"),
+    );
+  } catch {
+    return null;
+  }
+};
+
+const publicFrames = (name: string, stored: StoredPlaytest) =>
+  stored.frames.map((frame) => ({
+    label: frame.label,
+    path: `${PLAYTEST_DIRECTORY}/${name}/${frame.file}`,
+    ...(frame.probe === undefined ? {} : { probe: frame.probe }),
+  }));
+
 /** Reads the newest run; malformed evidence counts as no evidence. */
 export const readLastPlaytest = async (
   root: string,
@@ -168,29 +194,25 @@ export const readLastPlaytest = async (
   } catch {
     return null;
   }
-  const newest = entries
-    .filter((name) => DIRECTORY_NAME.test(name))
-    .sort()
-    .at(-1);
+  const runs = entries.filter((name) => DIRECTORY_NAME.test(name)).sort();
+  const newest = runs.at(-1);
   if (newest === undefined) return null;
-  let stored: StoredPlaytest;
-  try {
-    stored = decodeStoredPlaytest(
-      await NodeFSP.readFile(NodePath.join(parent, newest, "result.json"), "utf8"),
-    );
-  } catch {
-    return null;
-  }
+  const stored = await readStoredRun(parent, newest);
+  if (stored === null) return null;
   const webBuild = builds.find((build) => build.target === "Web");
   const stale = webBuild === undefined || Date.parse(stored.at) < Date.parse(webBuild.updatedAt);
-  const frames = stored.frames.map((frame) => ({
-    label: frame.label,
-    path: `${PLAYTEST_DIRECTORY}/${newest}/${frame.file}`,
-    ...(frame.probe === undefined ? {} : { probe: frame.probe }),
-  }));
-  // The cover is picked here, from the same persisted probe state the verdict
-  // was made on, so every reader (status, library) sees the same frame.
-  const cover = selectPlaytestCoverFrame(frames, stored.state ?? null, acceptance);
+  const frames = publicFrames(newest, stored);
+  // The cover comes from the latest run that proved real play, which can be
+  // older than the newest run when that run failed: a menu or a hover frame
+  // from a failed attempt must not replace the last observed play. The frame
+  // itself is picked from persisted per-frame probe state, never captions.
+  let cover: ReturnType<typeof selectPlaytestCoverFrame> = null;
+  for (const name of runs.toReversed()) {
+    const run = name === newest ? stored : await readStoredRun(parent, name);
+    if (run === null || !runQualified(run)) continue;
+    cover = selectPlaytestCoverFrame(publicFrames(name, run), run.state ?? null, acceptance);
+    break;
+  }
   return {
     at: stored.at,
     directory: `${PLAYTEST_DIRECTORY}/${newest}`,
@@ -199,7 +221,14 @@ export const readLastPlaytest = async (
     changedPercent: stored.changedPercent,
     consoleErrorCount: stored.consoleMessages.filter((message) => message.level === "error").length,
     frames,
-    coverFrame: cover === undefined || cover === null ? null : cover,
+    // A run that failed to qualify leaves no playable frame behind; callers
+    // fall back to the newest run's after-steps frame instead of a menu.
+    coverFrame: cover,
+    // Keep the verdict separate from `success`: the browser run can succeed
+    // while the exam does not, and the Builds tab must be able to say so.
+    ...(stored.qualifies === undefined ? {} : { qualifies: stored.qualifies }),
+    ...(stored.blockers === undefined ? {} : { blockers: [...stored.blockers] }),
+    ...(stored.interaction === undefined ? {} : { interaction: stored.interaction }),
     stale,
   };
 };

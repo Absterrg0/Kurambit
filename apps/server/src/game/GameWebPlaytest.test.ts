@@ -313,11 +313,17 @@ it.live.skipIf(!available || !templatesInstalled)(
             expect(still.state?.after?.gameState.state).toBe(1);
             expect(still.state?.playerMoved ?? 0).toBeLessThan(1);
             expect(still.state?.changes.every((change) => change.key === "run_seconds")).toBe(true);
-            expect(still.message).toContain("the player did not move from the gameplay baseline");
-            expect(still.message).toContain(
+            expect(still.qualifies).toBe(false);
+            expect(still.blockers).toContain("the player did not move from the gameplay baseline");
+            expect(still.blockers).toContain(
               "no GameState value changed on a ride a stopped clock would not show",
             );
-            expect(playtestStage(yield* game.status(created.threadId))).toBe("failed");
+            const stillStatus = yield* game.status(created.threadId);
+            expect(playtestStage(stillStatus)).toBe("failed");
+            // The run is fresh for the current build; it simply did not qualify,
+            // so it must not also be labelled stale on the Builds tab.
+            expect(stillStatus.lastPlaytest?.qualifies).toBe(false);
+            expect(stillStatus.lastPlaytest?.stale).toBe(false);
 
             // Walking forward moves the body and jumping turns the named jumps
             // counter the way a clock never turns: the same export now qualifies.
@@ -337,6 +343,8 @@ it.live.skipIf(!available || !templatesInstalled)(
             });
             yield* Effect.log(played.message);
             expect(played.success, played.message).toBe(true);
+            expect(played.qualifies, played.message).toBe(true);
+            expect(played.blockers).toEqual([]);
             expect(played.state?.playerMoved ?? 0).toBeGreaterThan(2);
             expect(played.message).toContain("jumps 0→1");
             expect(played.message).toContain("player moved");
@@ -347,6 +355,8 @@ it.live.skipIf(!available || !templatesInstalled)(
             const status = yield* game.status(created.threadId);
             expect(playtestStage(status)).toBe("passed");
             expect(status.lastPlaytest?.responded).toBe(true);
+            expect(status.lastPlaytest?.qualifies).toBe(true);
+            expect(status.lastPlaytest?.blockers).toEqual([]);
             // The evidence keeps the probe snapshot the verdict was made from.
             const evidence = JSON.parse(
               yield* Effect.promise(() =>

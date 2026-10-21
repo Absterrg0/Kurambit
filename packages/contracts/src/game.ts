@@ -303,14 +303,30 @@ export const GameLastPlaytest = Schema.Struct({
   changedPercent: Schema.Number,
   consoleErrorCount: Schema.Number,
   frames: Schema.Array(GamePlaytestFrame),
-  /** The web build was rebuilt after this run. */
+  /**
+   * The run no longer matches the current game: the web build was rebuilt
+   * after it, or its passing evidence no longer matches the current sources.
+   * A run that failed to qualify is not marked stale for that reason alone.
+   */
   stale: Schema.Boolean,
   /**
-   * The frame chosen to represent the game, picked from the run's persisted
-   * per-frame probe state (a real observed moment of play), or null when no
-   * frame could prove gameplay. Falls back to the after-steps frame.
+   * The frame chosen to represent the game, picked from the persisted
+   * per-frame probe state of the latest run that qualified as real play (a
+   * real observed moment of play), or null when no run proved gameplay. That
+   * run can be older than this newest run when the newest failed to qualify.
    */
   coverFrame: Schema.optionalKey(Schema.NullOr(GamePlaytestFrame)),
+  /**
+   * Whether the newest run counted as honest gameplay evidence. `success`
+   * only says the browser run booted, responded and logged no errors; a run
+   * that did none of the play it owed is still a successful tool call. Absent
+   * on evidence written before the verdict existed.
+   */
+  qualifies: Schema.optionalKey(Schema.Boolean),
+  /** Structured reasons the run did not qualify; empty when it did. */
+  blockers: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** What changed from the run's gameplay baseline, when the probe saw it. */
+  interaction: Schema.optionalKey(Schema.String),
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**

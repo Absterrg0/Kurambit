@@ -10,14 +10,18 @@ const AFTER_STEPS_FRAME = "after-steps";
 
 /**
  * The frame that represents the game: readLastPlaytest already picked a cover
- * from the run's persisted per-frame probe state (an observed moment of play),
- * so captions say nothing here. A run that left no provable gameplay frame
- * falls back to its final frame, but only when the run itself was sound.
+ * from the latest qualifying run's persisted per-frame probe state (an observed
+ * moment of play), so captions say nothing here. That frame can be older than
+ * the newest run when the newest run failed to qualify; the last real play
+ * still represents the game better than a failed attempt's menu screen. A run
+ * that left no provable gameplay frame falls back to its final frame, but only
+ * when the run itself was sound.
  */
 export const gameCoverFrame = (lastPlaytest: GameLastPlaytest | null): GamePlaytestFrame | null => {
-  if (lastPlaytest === null || !lastPlaytest.success || !lastPlaytest.responded) return null;
+  if (lastPlaytest === null) return null;
   if (lastPlaytest.coverFrame !== null && lastPlaytest.coverFrame !== undefined)
     return lastPlaytest.coverFrame;
+  if (!lastPlaytest.success || !lastPlaytest.responded) return null;
   return lastPlaytest.frames.findLast((frame) => frame.label === AFTER_STEPS_FRAME) ?? null;
 };
 

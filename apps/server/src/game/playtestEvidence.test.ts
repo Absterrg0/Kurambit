@@ -59,6 +59,9 @@ it.live("keeps the newest five playtest runs and reads the last verdict", () =>
         stale: false,
       });
       expect(last?.frames.map((frame) => frame.label)).toEqual(["booted", "after-steps"]);
+      // A run from before the verdict field still represents real play; with no
+      // per-frame probe, its own after-steps frame is the best cover it has.
+      expect(last?.coverFrame?.label).toBe("after-steps");
       for (const frame of last?.frames ?? [])
         expect(
           yield* Effect.promise(() => NodeFSP.stat(NodePath.join(root, frame.path))),
@@ -163,6 +166,103 @@ it.live("picks last run's cover from the per-frame probe state it persisted", ()
       expect(raw.frames[2]).toMatchObject({
         label: "pose",
         probe: { gameState: { collected: 1 } },
+      });
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
+    }
+  }),
+);
+
+it.live("covers from the latest qualifying run, never a newer failed attempt", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "playtest-cover-qualified-")),
+    );
+    const acceptance = [
+      {
+        id: "pickup",
+        kind: "content" as const,
+        text: "collect a pearl",
+        observe: { key: "collected", expect: ">=1" },
+      },
+    ];
+    const probe = (collected: number, x: number) => ({
+      gameState: { state: 1, collected },
+      player: { x, y: 0, z: 0 },
+    });
+    const state = (collected: number, x: number) => ({
+      before: probe(0, 0),
+      after: probe(collected, x),
+      playerMoved: x,
+      changes: collected === 0 ? [] : [{ key: "collected", before: 0, after: collected }],
+    });
+    const shots = (lastLabel: string, lastProbe: ReturnType<typeof probe>) => [
+      { label: "booted", mimeType: "image/png" as const, data: "cG5n", width: 1280, height: 720 },
+      ...(lastLabel === "pose"
+        ? [
+            {
+              label: "menu",
+              mimeType: "image/png" as const,
+              data: "cG5n",
+              width: 1280,
+              height: 720,
+              probe: probe(0, 0),
+            },
+          ]
+        : []),
+      {
+        label: lastLabel,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 1280,
+        height: 720,
+        probe: lastProbe,
+      },
+    ];
+    try {
+      const qualified = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root,
+          steps: [{ key: "d", holdMs: 200 }],
+          result: {
+            ...result("pose"),
+            screenshots: shots("pose", probe(1, 6)),
+            qualifies: true,
+            blockers: [],
+            interaction: "collected 0→1, player moved 6",
+            state: state(1, 6),
+          },
+          at: new Date(Date.UTC(2026, 9, 20, 12, 1, 0)),
+        }),
+      );
+      yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root,
+          steps: [{ key: "d", holdMs: 200 }],
+          result: {
+            ...result("hover"),
+            screenshots: shots("hover", probe(0, 9)),
+            qualifies: false,
+            blockers: ["no approved criterion achieved"],
+            interaction: "player moved 9",
+            state: state(0, 9),
+          },
+          at: new Date(Date.UTC(2026, 9, 20, 12, 2, 0)),
+        }),
+      );
+      const last = yield* Effect.promise(() => readLastPlaytest(root, [], acceptance));
+      // The newest run is reported as the last run, but its own hover frame is
+      // not evidence of play, so the cover stays on the last qualified run.
+      expect(last?.at).toBe("2026-10-20T12:02:00.000Z");
+      expect(last?.frames.map((frame) => frame.label)).toEqual(["booted", "hover"]);
+      expect(last?.coverFrame?.path).toBe(`${qualified.directory}/03-pose.png`);
+      // The run-level verdict travels with the last run, separate from its
+      // successful browser result, so the Builds tab can name the blockers.
+      expect(last).toMatchObject({
+        success: true,
+        qualifies: false,
+        blockers: ["no approved criterion achieved"],
+        interaction: "player moved 9",
       });
     } finally {
       yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));

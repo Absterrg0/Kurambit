@@ -284,6 +284,9 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
         read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
       ).toEqual(["check", "test", "export", "playtest", "state"]);
       expect(read.sourceId).not.toBe(sourceId);
+      // The source edit does not touch builds/web: the running preview still
+      // serves the recorded artifact, so its identity survives the staleness.
+      expect(read.servedArtifactId).not.toBeNull();
     }),
   ),
 );
@@ -448,6 +451,9 @@ it.effect("deleting an exported file makes the export stale and the game unquali
       expect(read.stages.find((entry) => entry.stage === "playtest")?.status).toBe("stale");
       expect(read.state).toBe("unqualified");
       expect(read.buildId).toBeNull();
+      // The descriptor no longer matches disk, so the preview cannot claim it
+      // is serving the recorded artifact; the frame key leaves the game alone.
+      expect(read.servedArtifactId).toBeNull();
     }),
   ),
 );

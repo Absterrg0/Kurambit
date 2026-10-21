@@ -1202,10 +1202,20 @@ const make = Effect.gen(function* () {
           }),
       }).pipe(
         Effect.orElseSucceed(() => null),
-        // Qualification owns freshness: the newest run is only current when its
-        // recorded source and build still match the game.
+        // Qualification owns freshness: a run that qualified is current only
+        // while its recorded source and build still match the game. A run that
+        // failed the exam already says so through `qualifies`; marking it stale
+        // too would claim its build changed, which may be false.
         Effect.map((playtest) =>
-          playtest === null ? null : { ...playtest, stale: playtestStage?.status !== "passed" },
+          playtest === null
+            ? null
+            : {
+                ...playtest,
+                stale:
+                  playtest.qualifies === false
+                    ? playtest.stale
+                    : playtestStage?.status !== "passed",
+              },
         ),
       );
       return {

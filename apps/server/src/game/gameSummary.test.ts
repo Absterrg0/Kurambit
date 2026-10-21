@@ -90,6 +90,20 @@ describe("gameCoverFrame", () => {
       gameCoverFrame(labelled([{ label: "booted", path: "boot.png" }], { responded: false })),
     ).toBeNull();
   });
+
+  it("keeps the last qualified cover when a newer run failed", () => {
+    // The reader picked this from an older qualified run; the newest run failed
+    // to qualify, so its own frames must not replace the observed play.
+    expect(
+      gameCoverFrame(
+        labelled([{ label: "hover", path: "builds/playtests/new/02-hover.png" }], {
+          success: true,
+          responded: true,
+          coverFrame: { label: "pose", path: "builds/playtests/old/03-pose.png" },
+        }),
+      )?.path,
+    ).toBe("builds/playtests/old/03-pose.png");
+  });
 });
 
 describe("gameCoverCandidates", () => {
