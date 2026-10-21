@@ -3,7 +3,10 @@
 class_name Coin
 extends Area2D
 
+const Palette := preload("res://assets/palette.tres")
+
 @onready var sprite: AnimatedSprite2D = $Sprite
+@onready var glow: Sprite2D = $Glow
 
 var _home := Vector2.ZERO
 var _taken := false
@@ -12,6 +15,7 @@ var _bob := 0.0
 func _ready() -> void:
 	_home = sprite.position
 	_bob = randf() * TAU
+	glow.modulate = Color(Palette.pickup, 0.5)
 	_start_spin()
 	body_entered.connect(_on_body_entered)
 
@@ -53,6 +57,7 @@ func reset() -> void:
 	sprite.position = _home
 	sprite.scale = Vector2.ONE
 	sprite.modulate = Color.WHITE
+	glow.modulate = Color(Palette.pickup, 0.5)
 	_start_spin()
 
 func _on_body_entered(body: Node2D) -> void:

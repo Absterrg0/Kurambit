@@ -69,6 +69,9 @@ const TILES := {
 	"bush": Vector2i(1, 2),
 	"rock": Vector2i(2, 2),
 	"mushroom": Vector2i(3, 2),
+	"soil_a": Vector2i(4, 2),
+	"soil_b": Vector2i(5, 2),
+	"bedrock": Vector2i(6, 2),
 }
 const SOLID_TILES := [
 	"grass_a",
@@ -81,6 +84,9 @@ const SOLID_TILES := [
 	"dirt_right",
 	"stone_top",
 	"stone_fill",
+	"soil_a",
+	"soil_b",
+	"bedrock",
 ]
 const ONE_WAY_TILES := ["plank_left", "plank_mid", "plank_right"]
 const HAZARD_TILES := ["spikes"]
@@ -273,6 +279,7 @@ func _write_level(definition: Dictionary) -> int:
 	var coin_scene := load("res://scenes/pickups/coin.tscn") as PackedScene
 	var slime_scene := load("res://scenes/enemies/slime.tscn") as PackedScene
 	var checkpoint_scene := load("res://scenes/checkpoint.tscn") as PackedScene
+	var signpost_scene := load("res://scenes/signpost.tscn") as PackedScene
 	for name in ["Pickups", "Enemies", "Checkpoints"]:
 		var node := Node2D.new()
 		node.name = name
@@ -296,6 +303,10 @@ func _write_level(definition: Dictionary) -> int:
 				_place(slime_scene, containers["Enemies"], Vector2(_centre_x(cell.x), float(cell.y) * TILE))
 			"f":
 				_place(checkpoint_scene, containers["Checkpoints"], Vector2(_centre_x(cell.x), float(cell.y) * TILE))
+			"t":
+				var signpost := signpost_scene.instantiate()
+				signpost.position = Vector2(_centre_x(cell.x), float(cell.y) * TILE)
+				_add(signpost)
 			"D":
 				goal.position = Vector2(_centre_x(cell.x), float(cell.y) * TILE)
 	if not spawn_placed:
@@ -354,7 +365,6 @@ func _add_background(definition: Dictionary) -> void:
 		var parallax := Parallax2D.new()
 		parallax.name = band["name"]
 		parallax.scroll_scale = Vector2(band["scroll"], 1.0)
-		parallax.repeat_size = Vector2(640.0, 0.0)
 		parallax.repeat_times = 4
 		_add(parallax)
 		var sprite := Sprite2D.new()
@@ -362,6 +372,9 @@ func _add_background(definition: Dictionary) -> void:
 		sprite.centered = false
 		sprite.texture = load("res://assets/backgrounds/%s.png" % band["texture"]) as Texture2D
 		sprite.position = Vector2(0.0, float(band["top"]))
+		# The band repeats on its own width, so a wider drawing buys more silhouette
+		# variety per screen without any extra parallax node.
+		parallax.repeat_size = Vector2(float(sprite.texture.get_width()), 0.0)
 		_add(sprite, parallax)
 
 ## Paints the terrain layer, choosing grass/dirt/stone variants from the neighbours so
@@ -405,6 +418,11 @@ func _ground_tile(terrain: Dictionary, x: int, y: int) -> Vector2i:
 		if right_empty:
 			return TILES["grass_right"]
 		return TILES["grass_a"] if variant == 0 else TILES["grass_b"]
+	# Below the surface the value drops in steps: one structured soil row, then a
+	# low-frequency mass. That caps how much brick/texture texture the camera can show
+	# under the floor line without hiding a single collidable tile.
+	if terrain.has(Vector2i(x, y - 2)):
+		return TILES["bedrock"] if terrain.has(Vector2i(x, y - 3)) else TILES["soil_a" if variant == 0 else "soil_b"]
 	if left_empty:
 		return TILES["dirt_left"]
 	if right_empty:

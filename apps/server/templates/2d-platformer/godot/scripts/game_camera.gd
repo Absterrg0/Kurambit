@@ -12,9 +12,10 @@ class_name GameCamera
 extends Camera2D
 
 @export_group("Follow")
-## How far above the player's feet the view is centred. At -72 the ground line sits at
-## 70% of a 360px viewport, which is where a platformer reads best.
-@export var height_offset := -72.0
+## How far above the player's feet the view is centred. At -96 the ground line sits at
+## 77% of a 360px viewport: enough soil to plant the hero, but the visible dirt stays
+## under a quarter of the screen instead of turning the foreground into a brick wall.
+@export var height_offset := -96.0
 ## How far ahead of the player the camera leads, in pixels, at full speed.
 @export var look_ahead := 26.0
 ## How quickly the look-ahead catches up (exponential, per second).

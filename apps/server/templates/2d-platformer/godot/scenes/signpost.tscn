@@ -1,0 +1,20 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Texture2D" path="res://assets/sprites/signpost.png" id="1_sign"]
+[ext_resource type="Texture2D" path="res://assets/sprites/glow.png" id="2_glow"]
+
+[sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_glow"]
+blend_mode = 1
+
+[node name="Signpost" type="Node2D"]
+
+[node name="Glow" type="Sprite2D" parent="."]
+modulate = Color(1, 0.824, 0.29, 0.4)
+position = Vector2(12, -16)
+scale = Vector2(0.4, 0.4)
+texture = ExtResource("2_glow")
+material = SubResource("CanvasItemMaterial_glow")
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture = ExtResource("1_sign")
+offset = Vector2(0, -16)

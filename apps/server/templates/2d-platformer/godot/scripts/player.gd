@@ -53,7 +53,10 @@ extends CharacterBody2D
 @export var step_interval := 0.26
 @export var shake_time := 0.16
 
-@onready var body: AnimatedSprite2D = $Body
+const Palette := preload("res://assets/palette.tres")
+
+@onready var body: AnimatedSprite2D = $Art/Body
+@onready var glow: Sprite2D = $Glow
 @onready var dust: CPUParticles2D = $Dust
 @onready var camera: GameCamera = $Camera2D
 
@@ -68,6 +71,7 @@ var _wall_dir := 0
 var _wall_stick := 0.0
 
 func _ready() -> void:
+	glow.modulate = Color(Palette.player_accent, 0.26)
 	body.play("idle")
 
 func _physics_process(delta: float) -> void:

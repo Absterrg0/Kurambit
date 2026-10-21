@@ -13,6 +13,8 @@ const HINT_FADE_WINDOW := 3.0
 const BANNER_IN := 0.25
 const BANNER_HOLD := 1.4
 
+const Palette := preload("res://assets/palette.tres")
+
 const HEART_FULL := preload("res://assets/sprites/heart_full.png")
 const HEART_EMPTY := preload("res://assets/sprites/heart_empty.png")
 
@@ -38,6 +40,9 @@ func _ready() -> void:
 	_on_collected(GameState.collected, GameState.total, GameState.score)
 	_on_lives(GameState.lives)
 	level_name.text = GameState.level_name
+	# The timer is the quietest label on screen: take its colour from the palette's UI
+	# accent role instead of repeating an RGB literal in the scene.
+	time_label.add_theme_color_override("font_color", Palette.ui_accent)
 
 func _process(delta: float) -> void:
 	time_label.text = GameState.time_text(GameState.run_seconds)

@@ -217,39 +217,48 @@ const shift = (colour, amount) => {
 const withAlpha = (colour, alpha) => [colour[0], colour[1], colour[2], alpha];
 
 /**
- * Dusk-palette. Warm ground against a cool background: the terrain is the brightest
- * thing on screen, which is what makes the level readable at 16px tiles.
+ * Dusk palette, arranged as value layers. Background bands stay darker and less
+ * saturated than the playfield; grass and the first soil row are the mid values; the
+ * player, hazards, coins and the goal carry the brightest, most saturated colours.
+ * Those roles are mirrored in `assets/palette.tres` (written at the bottom of this
+ * file) so runtime effects and these drawings cannot drift apart.
  */
 const palette = {
-  skyTop: hex("#171a35"),
-  skyHigh: hex("#2c2452"),
-  skyMid: hex("#553058"),
-  skyLow: hex("#8c4354"),
-  skyGlow: hex("#e07a4f"),
-  star: hex("#f4e7cf"),
+  skyTop: hex("#12132b"),
+  skyHigh: hex("#241f47"),
+  skyMid: hex("#46284f"),
+  skyLow: hex("#7b3c4d"),
+  skyGlow: hex("#d26a45"),
+  star: hex("#d9d4e8"),
 
-  ridgeFar: hex("#332a58"),
-  ridgeFarLit: hex("#4b3a72"),
-  ridgeMid: hex("#251f45"),
-  ridgeMidLit: hex("#382c5c"),
-  vegNear: hex("#151127"),
-  vegNearLit: hex("#241d3c"),
+  ridgeFar: hex("#2c2549"),
+  ridgeFarLit: hex("#3f335f"),
+  ridgeMid: hex("#211c3c"),
+  ridgeMidLit: hex("#30274f"),
+  vegNear: hex("#121022"),
+  vegNearLit: hex("#1e1934"),
 
-  grassHi: hex("#b6ea63"),
-  grass: hex("#6cbb3f"),
-  grassDark: hex("#3f8230"),
-  grassDeep: hex("#2b5c22"),
+  moonHi: hex("#fff6da"),
+  moon: hex("#f2dfb0"),
+  moonDark: hex("#d3bd91"),
+  moonGlow: hex("#f6dfae"),
 
-  dirtHi: hex("#8c5c3c"),
-  dirt: hex("#6b4229"),
-  dirtDark: hex("#4d2e1c"),
-  dirtDeep: hex("#331f12"),
-  pebble: hex("#b08a63"),
+  grassHi: hex("#a7dc74"),
+  grass: hex("#5f9a4a"),
+  grassDark: hex("#3d7236"),
+  grassDeep: hex("#295126"),
 
-  stoneHi: hex("#b6bee0"),
-  stone: hex("#7d87ad"),
-  stoneDark: hex("#525a80"),
-  stoneDeep: hex("#33385a"),
+  dirtHi: hex("#7c5338"),
+  dirt: hex("#5c3a26"),
+  dirtDark: hex("#42291b"),
+  dirtDeep: hex("#2e1d13"),
+  bedrock: hex("#241811"),
+  pebble: hex("#8b6749"),
+
+  stoneHi: hex("#99a3c6"),
+  stone: hex("#667092"),
+  stoneDark: hex("#454d6d"),
+  stoneDeep: hex("#2c314c"),
   ink: hex("#191228"),
 
   woodHi: hex("#e0a869"),
@@ -257,18 +266,23 @@ const palette = {
   woodDark: hex("#794c27"),
   woodDeep: hex("#4b2d16"),
 
-  scarfHi: hex("#ffb066"),
+  scarfHi: hex("#ffc27a"),
   scarf: hex("#f2763c"),
   scarfDark: hex("#c04b23"),
-  tunicHi: hex("#74d8cb"),
-  tunic: hex("#3fa8a0"),
-  tunicDark: hex("#276f70"),
+  tunicHi: hex("#8ff7ea"),
+  tunic: hex("#45cfc2"),
+  tunicDark: hex("#2a8a83"),
   skin: hex("#ffd3a3"),
   skinDark: hex("#dda878"),
-  hairHi: hex("#5b4f7d"),
+  hairHi: hex("#7a6aa6"),
   hair: hex("#332c4d"),
   boot: hex("#3b3358"),
-  bootHi: hex("#584c7c"),
+  bootHi: hex("#5d5288"),
+
+  hazardHi: hex("#ffd17a"),
+  hazard: hex("#ff5b3a"),
+  hazardDark: hex("#c22a20"),
+  hazardDeep: hex("#6e1512"),
 
   slimeHi: hex("#ff9bc0"),
   slime: hex("#e0568f"),
@@ -335,6 +349,9 @@ const TILES = {
   bush: [1, 2],
   rock: [2, 2],
   mushroom: [3, 2],
+  soilA: [4, 2],
+  soilB: [5, 2],
+  bedrock: [6, 2],
 };
 
 /** The grass surface, drawn once per tile: three grass rows over dithered soil. */
@@ -360,14 +377,38 @@ const drawSoil = (tile, variant) => {
   tile.rect(0, 6, TILE, 9, palette.dirt);
   for (let x = 0; x < TILE; x++) tile.pixel(x, 15, palette.dirtDark);
   // Speckles stay 2px clear of every edge, so the tile repeats with no visible grid.
-  for (let index = 0; index < 5; index++) {
+  // Only a handful per tile: a dense speckle field reads as noise and pulls the eye
+  // down, away from the playfield.
+  for (let index = 0; index < 3; index++) {
     const x = 2 + Math.floor(random() * 12);
-    const y = 7 + Math.floor(random() * 7);
+    const y = 7 + Math.floor(random() * 6);
     tile.pixel(x, y, palette.dirtDark);
-    if (random() < 0.35) tile.pixel(x, y + 1, palette.dirtDeep);
+    if (random() < 0.25) tile.pixel(x, y + 1, palette.dirtDeep);
   }
-  tile.pixel(4 + Math.floor(random() * 8), 9 + Math.floor(random() * 4), palette.pebble);
-  tile.pixel(3 + Math.floor(random() * 10), 12 + Math.floor(random() * 2), palette.dirtDeep);
+  tile.pixel(4 + Math.floor(random() * 8), 10 + Math.floor(random() * 3), palette.pebble);
+};
+
+/**
+ * Subsoil rows: the second row under the grass keeps a little structure, and the
+ * bedrock below it is almost solid colour. A player never reads individual stones
+ * down there, so the low frequency is what stops the ground from dominating the
+ * frame; depth is carried by the value step, not by detail.
+ */
+const drawSubsoil = (tile, variant) => {
+  const random = rng(variant === 0 ? 0x51c3 : 0x8e27);
+  tile.rect(0, 0, TILE, TILE, palette.dirtDark);
+  for (let x = 0; x < TILE; x++) tile.pixel(x, 0, shift(palette.dirtDark, 0.05));
+  for (let index = 0; index < 6; index++)
+    tile.pixel(1 + Math.floor(random() * 14), 2 + Math.floor(random() * 13), palette.dirtDeep);
+  tile.pixel(5 + Math.floor(random() * 6), 4 + Math.floor(random() * 8), palette.dirt);
+};
+
+const drawBedrock = (tile) => {
+  const random = rng(0x1f4c);
+  tile.rect(0, 0, TILE, TILE, palette.bedrock);
+  for (let index = 0; index < 5; index++)
+    tile.pixel(1 + Math.floor(random() * 14), 1 + Math.floor(random() * 14), palette.dirtDeep);
+  tile.pixel(7, 13, withAlpha(palette.pebble, 70));
 };
 
 /** Darkens one vertical edge of a terrain tile: the silhouette of the block. */
@@ -443,27 +484,34 @@ const drawPlank = (tile, cap) => {
 
 const SPIKE = [".hm.", ".hm.", "hmmd", "hmmd", "hmmd", "hmmd", "kkkk"];
 
+/**
+ * Spikes are the template's hazard, so they get the one reserved warning hue and the
+ * brightest rim in the level. The base plate stays dark: the contrast is between the
+ * hot blades and the ground, which is what makes a run of spikes read at a glance
+ * instead of looking like a metal grate.
+ */
 const drawSpikes = (tile) => {
   const legend = {
-    h: palette.metalHi,
-    m: palette.metal,
-    d: palette.metalDark,
+    h: palette.hazardHi,
+    m: palette.hazard,
+    d: palette.hazardDark,
     k: palette.ink,
   };
   for (const offset of [0, 4, 8, 12]) tile.matrix(offset, 3, SPIKE, legend);
-  // Floor plate the spikes are bolted to: a lit lip, a shadowed face, an ink base.
+  // Floor plate the spikes are bolted to: a shadowed channel with a warning lip.
   for (let x = 0; x < TILE; x++) {
-    tile.pixel(x, 10, palette.stoneDeep);
-    tile.pixel(x, 11, palette.metalHi);
-    tile.pixel(x, 12, palette.metal);
-    tile.pixel(x, 13, palette.metalDark);
+    tile.pixel(x, 10, palette.hazardDeep);
+    tile.pixel(x, 11, palette.hazardDark);
+    tile.pixel(x, 12, palette.hazardDeep);
+    tile.pixel(x, 13, palette.ink);
     tile.pixel(x, 14, palette.ink);
     tile.pixel(x, 15, palette.ink);
   }
   for (let x = 2; x < TILE; x += 5) {
-    tile.pixel(x, 10, palette.metal);
-    tile.pixel(x, 12, palette.metalHi);
-    tile.pixel(x, 13, palette.stoneDeep);
+    tile.pixel(x, 10, palette.hazard);
+    tile.pixel(x, 11, palette.hazardHi);
+    tile.pixel(x, 12, palette.hazard);
+    tile.pixel(x, 13, palette.hazardDeep);
   }
 };
 
@@ -654,6 +702,9 @@ const buildTiles = () => {
   place(TILES.plankMid, (tile) => drawPlank(tile, "mid"));
   place(TILES.plankRight, (tile) => drawPlank(tile, "right"));
   place(TILES.spikes, (tile) => drawSpikes(tile));
+  place(TILES.soilA, (tile) => drawSubsoil(tile, 0));
+  place(TILES.soilB, (tile) => drawSubsoil(tile, 1));
+  place(TILES.bedrock, (tile) => drawBedrock(tile));
   place(TILES.tuft, (tile) => drawTuft(tile, 0));
   place(TILES.flower, (tile) => drawFlower(tile, 0));
   place(TILES.pebble, (tile) => drawPebble(tile));
@@ -705,6 +756,7 @@ const hero = (canvas, originX, originY, pose) => {
     const height = 4 + legLift[index];
     canvas.rect(legX, legY, 3, height, palette.boot);
     canvas.pixel(legX, legY, palette.bootHi);
+    canvas.pixel(legX, legY + 1, palette.bootHi);
     canvas.pixel(legX, legY + height - 1, ink);
     canvas.pixel(legX + 2, legY + height - 1, ink);
   }
@@ -728,11 +780,14 @@ const hero = (canvas, originX, originY, pose) => {
   canvas.outline(torsoX, y + 6, 8, 2, palette.scarfDark);
   canvas.pixel(torsoX + 1, y + 7, palette.scarfDark);
 
-  // Head: ink silhouette, hair cap, face with two eyes.
+  // Head: ink silhouette, hair cap, face with two eyes. The extra hair-top highlight
+  // and lit left column are the rim light that keeps the hero readable against both
+  // the dark background and the brown ground.
   canvas.rect(torsoX + 1, headY + 1, 6, 5, palette.skin);
   canvas.rect(torsoX + 1, headY + 1, 6, 2, palette.hair);
   canvas.pixel(torsoX + 2, headY + 1, palette.hairHi);
   canvas.pixel(torsoX + 5, headY + 1, palette.hairHi);
+  canvas.pixel(torsoX + 6, headY + 0, palette.hairHi);
   canvas.pixel(torsoX + 3, headY + 2, palette.hair);
   canvas.rect(torsoX, headY + 1, 1, 5, ink);
   canvas.rect(torsoX + 7, headY + 1, 1, 5, ink);
@@ -741,6 +796,8 @@ const hero = (canvas, originX, originY, pose) => {
   canvas.pixel(torsoX + 2 + eyes, headY + 4, ink);
   canvas.pixel(torsoX + 5 + eyes, headY + 4, ink);
   canvas.pixel(torsoX + 4, headY + 5, palette.skinDark);
+  canvas.pixel(torsoX + 1, headY + 3, palette.skin);
+  canvas.pixel(torsoX + 1, headY + 4, palette.skin);
 };
 
 const HERO_POSES = {
@@ -974,13 +1031,18 @@ const buildCheckpoint = () => {
   return sheet;
 };
 
-/** Goal door: a stone arch with a glowing passage in it, two tiles wide and two tall. */
+/**
+ * Goal door: a stone arch, two tiles wide and three tall, with a glowing passage and
+ * a lantern on the keystone. The lantern is the landmark: it rises above the floor
+ * tiles and reads as a lit destination from a screen away, so the goal is not just a
+ * door-sized rectangle in the same value band as the brickwork.
+ */
 const buildDoor = () => {
-  const canvas = new Canvas(32, 32);
+  const canvas = new Canvas(32, 48);
   // Silhouette, stone frame, then the bevelled corners that read as an arch.
-  canvas.rect(1, 3, 30, 29, palette.ink);
-  canvas.rect(2, 4, 28, 28, palette.stoneDark);
-  canvas.rect(3, 5, 26, 27, palette.stone);
+  canvas.rect(1, 3, 30, 45, palette.ink);
+  canvas.rect(2, 4, 28, 44, palette.stoneDark);
+  canvas.rect(3, 5, 26, 43, palette.stone);
   canvas.rect(3, 5, 26, 2, palette.stoneHi);
   for (const [x, y] of [
     [2, 4],
@@ -989,23 +1051,29 @@ const buildDoor = () => {
     [29, 4],
     [28, 4],
     [29, 5],
-    [1, 30],
-    [30, 30],
+    [1, 46],
+    [30, 46],
   ])
     canvas.pixel(x, y, palette.ink);
-  // Keystone, so the arch reads as built rather than stamped.
-  canvas.rect(14, 2, 4, 5, palette.ink);
-  canvas.rect(15, 3, 2, 4, palette.stoneHi);
+  // Keystone and the lantern that makes the door a landmark.
+  canvas.rect(14, 1, 4, 5, palette.ink);
+  canvas.rect(15, 2, 2, 4, palette.stoneHi);
+  for (let x = 11; x < 21; x++) canvas.pixel(x, 0, withAlpha(palette.moonGlow, 70));
+  canvas.rect(13, 0, 6, 1, palette.metalDark);
+  canvas.rect(14, 1, 4, 4, palette.ink);
+  canvas.rect(15, 2, 2, 2, palette.goldHi);
+  canvas.pixel(15, 4, palette.gold);
+  canvas.pixel(16, 4, palette.gold);
   // Stone courses down the jambs.
-  for (let y = 10; y < 31; y += 7) {
+  for (let y = 11; y < 46; y += 7) {
     canvas.rect(3, y, 4, 1, palette.stoneDark);
     canvas.rect(25, y, 4, 1, palette.stoneDark);
   }
   // The passage: dark at the top, daylight spilling out at the doorstep.
-  canvas.rect(7, 8, 18, 24, palette.ink);
-  for (let y = 9; y < 31; y++)
+  canvas.rect(7, 8, 18, 38, palette.ink);
+  for (let y = 9; y < 45; y++)
     for (let x = 8; x < 24; x++) {
-      const depth = (y - 9) / 22;
+      const depth = (y - 9) / 36;
       const colour =
         depth < 0.2
           ? palette.portalDeep
@@ -1016,21 +1084,62 @@ const buildDoor = () => {
               : palette.portal;
       canvas.pixel(x, y, colour);
     }
-  for (let x = 10; x < 23; x += 5) canvas.rect(x, 9, 1, 21, withAlpha(palette.portalDark, 90));
+  for (let x = 10; x < 23; x += 5) canvas.rect(x, 9, 1, 35, withAlpha(palette.portalDark, 90));
   for (const [x, y] of [
     [11, 12],
-    [19, 17],
-    [14, 23],
-    [21, 26],
+    [19, 19],
+    [14, 27],
+    [21, 33],
+    [12, 39],
   ])
     canvas.pixel(x, y, palette.portalHi);
   // Warm light spilling onto the threshold, so the door reads as the goal.
-  for (let x = 8; x < 24; x++) canvas.pixel(x, 30, palette.portal);
-  for (let x = 9; x < 23; x++) canvas.pixel(x, 31, palette.portalMid);
+  for (let x = 8; x < 24; x++) canvas.pixel(x, 46, palette.portal);
+  for (let x = 9; x < 23; x++) canvas.pixel(x, 47, palette.portalMid);
   // Step across the threshold.
-  canvas.rect(5, 29, 22, 3, palette.ink);
-  canvas.rect(6, 29, 20, 1, palette.stoneHi);
-  canvas.rect(6, 30, 20, 2, palette.stoneDark);
+  canvas.rect(5, 44, 22, 4, palette.ink);
+  canvas.rect(6, 44, 20, 1, palette.stoneHi);
+  canvas.rect(6, 45, 20, 3, palette.stoneDark);
+  return canvas;
+};
+
+/** Trail sign: a weathered board pointing right, with a lantern so it glows at dusk. */
+const buildSignpost = () => {
+  const canvas = new Canvas(16, 32);
+  // Post.
+  canvas.rect(8, 10, 3, 22, palette.ink);
+  canvas.rect(9, 10, 1, 21, palette.woodDark);
+  canvas.rect(10, 10, 1, 21, palette.woodDeep);
+  // Board with a bright arrow, cut to a point on the right.
+  canvas.rect(1, 4, 13, 8, palette.ink);
+  canvas.rect(2, 5, 11, 6, palette.wood);
+  canvas.rect(2, 5, 11, 1, palette.woodHi);
+  canvas.rect(2, 10, 11, 1, palette.woodDark);
+  canvas.pixel(13, 6, palette.ink);
+  canvas.pixel(13, 9, palette.ink);
+  for (let x = 4; x < 11; x++) canvas.pixel(x, 7, palette.moonHi);
+  canvas.pixel(10, 6, palette.moonHi);
+  canvas.pixel(10, 8, palette.moonHi);
+  canvas.pixel(11, 7, palette.moonHi);
+  // Lantern hanging off the post.
+  canvas.rect(11, 14, 4, 5, palette.ink);
+  canvas.rect(12, 15, 2, 3, palette.goldHi);
+  canvas.pixel(12, 16, palette.gold);
+  canvas.pixel(9, 13, palette.metalDark);
+  canvas.pixel(8, 13, palette.metalDark);
+  return canvas;
+};
+
+/** Soft additive glow, used behind the hero, coins, the signpost and the goal. */
+const buildGlow = () => {
+  const canvas = new Canvas(64, 64);
+  for (let y = 0; y < 64; y++)
+    for (let x = 0; x < 64; x++) {
+      const distance = Math.hypot(x - 31.5, y - 31.5) / 31.5;
+      if (distance >= 1) continue;
+      const falloff = (1 - distance) ** 2.2;
+      canvas.pixel(x, y, [255, 240, 206, Math.round(150 * falloff)]);
+    }
   return canvas;
 };
 
@@ -1082,7 +1191,7 @@ const buildCoinIcon = () => {
 
 // ---------------------------------------------------------------- backgrounds
 
-const SKY_WIDTH = 640;
+const SKY_WIDTH = 1280;
 
 /** Smooth, seamless silhouette height: integer periods over the layer width. */
 const ridgeHeight = (x, width, waves) => {
@@ -1094,29 +1203,87 @@ const ridgeHeight = (x, width, waves) => {
 
 const TAU_ALL = (turns, phase) => (turns + phase) * Math.PI * 2;
 
+/** A localised peak, so one band can hold several mountains of different shapes. */
+const peak = (x, centre, width, height) => height * Math.exp(-(((x - centre) / width) ** 2));
+
+/**
+ * Far ridge with the moon. Two thirds of the band is a low, hazy horizon and the rest
+ * is two different mountain masses, so the layer no longer repeats as one identical
+ * silhouette. The moon is drawn with a stepped halo and a shaded lower-right limb: a
+ * hard white disc reads as a placeholder.
+ */
 const buildRidgeFar = () => {
   const height = 224;
   const canvas = new Canvas(SKY_WIDTH, height);
+  const topAt = (x) =>
+    118 +
+    ridgeHeight(x, SKY_WIDTH, [
+      [640, 18, 0.0],
+      [256, 8, 0.35],
+      [128, 3, 0.7],
+    ]) -
+    peak(x, 300, 82, 62) -
+    peak(x, 398, 44, 38) -
+    peak(x, 455, 70, 24) -
+    peak(x, 900, 90, 46) -
+    peak(x, 1020, 54, 30);
   for (let x = 0; x < SKY_WIDTH; x++) {
-    const top =
-      92 +
-      ridgeHeight(x, SKY_WIDTH, [
-        [320, 26, 0],
-        [160, 10, 0.35],
-        [80, 4, 0.7],
-      ]);
+    const top = topAt(x);
     for (let y = Math.round(top); y < height; y++) {
-      const deep = y > top + 26;
-      canvas.pixel(x, y, deep ? palette.ridgeFar : shift(palette.ridgeFar, 0.04));
+      const deep = y > top + 30;
+      canvas.pixel(x, y, deep ? palette.ridgeFar : shift(palette.ridgeFar, 0.05));
     }
     canvas.pixel(x, Math.round(top), palette.ridgeFarLit);
     if (Math.round(top) + 1 < height) canvas.pixel(x, Math.round(top) + 1, palette.ridgeFarLit);
+    // A darker seam a little below the crest reads as a fold, not a flat cutout.
+    if (Math.round(top) + 14 < height)
+      canvas.pixel(x, Math.round(top) + 14, shift(palette.ridgeFar, -0.03));
   }
+  // Moon: a wide stepped halo over the sky, then a disc whose lower-right limb is
+  // shaded. The halo is what the eye reads as light; a bare white disc reads as a
+  // placeholder pasted on the sky.
+  const moonX = 430;
+  const moonY = 44;
+  for (let ring = 34; ring > 21; ring--)
+    canvas.disc(moonX, moonY, ring, withAlpha(palette.moonGlow, 7));
+  for (let ring = 21; ring > 16; ring--)
+    canvas.disc(moonX, moonY, ring, withAlpha(palette.moonGlow, 18));
+  canvas.disc(moonX, moonY, 16, palette.moonGlow);
+  canvas.disc(moonX, moonY, 14, palette.moon);
+  // Shaded limb: a one-pixel inset crescent on the lower-right, not a second disc.
+  for (let step = 0; step < 12; step++) {
+    const angle = (step / 12) * (Math.PI / 2);
+    canvas.pixel(
+      moonX + Math.round(Math.cos(angle) * 13),
+      moonY + Math.round(Math.sin(angle) * 13),
+      palette.moonDark,
+    );
+    canvas.pixel(
+      moonX + Math.round(Math.cos(angle) * 12),
+      moonY + Math.round(Math.sin(angle) * 12),
+      palette.moonDark,
+    );
+  }
+  for (const [x, y] of [
+    [-7, -4],
+    [-6, -4],
+    [-3, 5],
+    [2, -7],
+    [5, 1],
+    [8, 6],
+  ])
+    canvas.pixel(moonX + x, moonY + y, palette.moonDark);
+  canvas.pixel(moonX - 10, moonY - 9, palette.moonHi);
+  canvas.pixel(moonX - 9, moonY - 9, palette.moonHi);
+  canvas.pixel(moonX - 8, moonY - 9, palette.moonHi);
+  // Stars, dimmer near the moon so its glow has somewhere to sit.
   const random = rng(0x51f0);
-  for (let index = 0; index < 90; index++) {
+  for (let index = 0; index < 150; index++) {
     const x = Math.floor(random() * SKY_WIDTH);
-    const y = 8 + Math.floor(random() * 70);
-    canvas.pixel(x, y, withAlpha(palette.star, 170 + Math.floor(random() * 85)));
+    const y = 8 + Math.floor(random() * 80);
+    const distance = Math.hypot(x - moonX, y - moonY);
+    if (distance < 40) continue;
+    canvas.pixel(x, y, withAlpha(palette.star, 120 + Math.floor(random() * 110)));
   }
   return canvas;
 };
@@ -1125,24 +1292,27 @@ const buildRidgeMid = () => {
   const height = 224;
   const canvas = new Canvas(SKY_WIDTH, height);
   const crest = [
-    [213.33, 20, 0.15],
-    [106.66, 8, 0.6],
+    [426.66, 22, 0.15],
+    [213.33, 9, 0.6],
+    [128, 4, 0.2],
   ];
+  const topAt = (x) =>
+    138 + ridgeHeight(x, SKY_WIDTH, crest) - peak(x, 700, 120, 26) - peak(x, 1160, 70, 20);
   for (let x = 0; x < SKY_WIDTH; x++) {
-    const top = 128 + ridgeHeight(x, SKY_WIDTH, crest);
+    const top = topAt(x);
     for (let y = Math.round(top); y < height; y++) canvas.pixel(x, y, palette.ridgeMidLit);
     canvas.pixel(x, Math.round(top), shift(palette.ridgeMidLit, 0.08));
   }
   // Canopies along the crest. They are darker than the hill behind them, which is what
   // makes a silhouette read as trees instead of as another bump in the ridge.
   const random = rng(0x2c14);
-  for (let index = 0; index < 44; index++) {
+  for (let index = 0; index < 70; index++) {
     const baseX = random() * SKY_WIDTH;
-    const groundY = Math.round(128 + ridgeHeight(baseX, SKY_WIDTH, crest)) + 3;
-    if (random() < 0.45) {
-      const trunkHeight = 16 + Math.floor(random() * 14);
+    const groundY = Math.round(topAt(baseX)) + 3;
+    if (random() < 0.4) {
+      const trunkHeight = 14 + Math.floor(random() * 16);
       for (let step = 0; step < trunkHeight; step++) {
-        const halfWidth = Math.max(1, Math.round((trunkHeight - step) * 0.56));
+        const halfWidth = Math.max(1, Math.round((trunkHeight - step) * 0.5));
         for (let dx = -halfWidth; dx <= halfWidth; dx++)
           canvas.pixelWrapped(baseX + dx, groundY - step, palette.ridgeMid);
         canvas.pixelWrapped(baseX, groundY - step, shift(palette.ridgeMid, 0.06));
@@ -1169,16 +1339,16 @@ const buildVegNear = () => {
     const top =
       74 +
       ridgeHeight(x, SKY_WIDTH, [
-        [160, 6, 0.2],
-        [80, 3, 0.5],
+        [320, 7, 0.2],
+        [160, 3, 0.5],
       ]);
     for (let y = Math.round(top); y < height; y++) canvas.pixel(x, y, palette.vegNear);
     canvas.pixel(x, Math.round(top), palette.vegNearLit);
   }
-  for (let index = 0; index < 26; index++) {
+  for (let index = 0; index < 48; index++) {
     const x = random() * SKY_WIDTH;
-    const y = 48 + random() * 30;
-    const radius = 7 + random() * 7;
+    const y = 46 + random() * 30;
+    const radius = 7 + random() * 8;
     canvas.ellipse(x, y + radius * 0.8, radius, radius * 0.8, palette.vegNear);
     for (let dx = -radius; dx <= radius; dx++) {
       const top = y + radius * 0.8 - radius * 0.8 * Math.sqrt(Math.max(0, 1 - (dx / radius) ** 2));
@@ -1187,9 +1357,9 @@ const buildVegNear = () => {
     }
   }
   // Tall blades break the horizon line so the layer does not read as a solid bar.
-  for (let index = 0; index < 70; index++) {
+  for (let index = 0; index < 150; index++) {
     const x = random() * SKY_WIDTH;
-    const bladeHeight = 5 + Math.floor(random() * 9);
+    const bladeHeight = 5 + Math.floor(random() * 10);
     for (let step = 0; step < bladeHeight; step++)
       canvas.pixelWrapped(x + Math.floor(step / 3), 74 - step, palette.vegNearLit);
   }
@@ -1203,6 +1373,46 @@ const write = (relativePath, image) => {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, encodePng(image));
   console.log(`  ${relativePath} (${image.width}x${image.height})`);
+};
+
+/**
+ * Writes the functional palette roles as a Resource the game reads at runtime. The
+ * PNGs above and these colours come from the same `palette` object, so restyling the
+ * game means changing one place; runtime effects (glows, the depth fade) take their
+ * colours from here instead of repeating literals in a script.
+ */
+const writePalette = () => {
+  const colour = (value) => {
+    const [r, g, b] = value;
+    return `Color(${(r / 255).toFixed(3)}, ${(g / 255).toFixed(3)}, ${(b / 255).toFixed(3)}, 1)`;
+  };
+  const roles = [
+    ["background_deep", palette.skyTop],
+    ["background_far", palette.ridgeFar],
+    ["playfield", palette.grass],
+    ["playfield_deep", palette.dirtDeep],
+    ["player", palette.tunicHi],
+    ["player_accent", palette.scarf],
+    ["hazard", palette.hazard],
+    ["pickup", palette.gold],
+    ["goal", palette.portal],
+    ["ui_accent", palette.stoneHi],
+    ["ink", palette.ink],
+    ["glow", palette.moonGlow],
+  ];
+  const lines = [
+    '[gd_resource type="Resource" script_class="GamePalette" load_steps=2 format=3]',
+    "",
+    '[ext_resource type="Script" path="res://scripts/palette.gd" id="1_palette"]',
+    "",
+    "[resource]",
+    'script = ExtResource("1_palette")',
+    ...roles.map(([name, value]) => `${name} = ${colour(value)}`),
+    "",
+  ];
+  const file = path.join(projectRoot, "assets/palette.tres");
+  writeFileSync(file, lines.join("\n"));
+  console.log("  assets/palette.tres");
 };
 
 const buildPreviewSheet = (images) => {
@@ -1238,6 +1448,8 @@ const main = () => {
   const coin = buildCoin();
   const checkpoint = buildCheckpoint();
   const door = buildDoor();
+  const signpost = buildSignpost();
+  const glow = buildGlow();
   const dust = buildDust();
   const heartFull = buildHeart(palette.slime, palette.slimeHi, palette.slimeDeep);
   const heartEmpty = buildHeart(
@@ -1256,6 +1468,8 @@ const main = () => {
   write("sprites/coin.png", coin);
   write("sprites/checkpoint.png", checkpoint);
   write("sprites/door.png", door);
+  write("sprites/signpost.png", signpost);
+  write("sprites/glow.png", glow);
   write("sprites/dust.png", dust);
   write("sprites/heart_full.png", heartFull);
   write("sprites/heart_empty.png", heartEmpty);
@@ -1263,6 +1477,7 @@ const main = () => {
   write("backgrounds/ridge_far.png", ridgeFar);
   write("backgrounds/ridge_mid.png", ridgeMid);
   write("backgrounds/veg_near.png", vegNear);
+  writePalette();
 
   const sheet = buildPreviewSheet([
     ["tiles", tiles],
