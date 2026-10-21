@@ -94,7 +94,7 @@ export type ReviewGuideGenerationResult = Omit<
   "headSha" | "generatedAt" | "modelSelection"
 >;
 
-export interface ImageReviewGenerationInput<S extends Schema.Top> {
+export interface ImageReviewGenerationInput {
   cwd: string;
   /** The whole question, including what each image shows and how to score it. */
   prompt: string;
@@ -104,7 +104,11 @@ export interface ImageReviewGenerationInput<S extends Schema.Top> {
    * written from the prompt alone would pass games nobody looked at.
    */
   imagePaths: ReadonlyArray<string>;
-  outputSchema: S;
+  /**
+   * Guides the provider's structured-output mode. The answer is still
+   * untrusted, so the caller decodes it strictly against its own schema.
+   */
+  outputSchema: Schema.Top;
   modelSelection: ModelSelection;
 }
 
@@ -129,7 +133,7 @@ export interface ProviderTextGeneration {
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
 
-  readonly generateImageReview: <S extends Schema.Top>(
-    input: ImageReviewGenerationInput<S>,
-  ) => Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]>;
+  readonly generateImageReview: (
+    input: ImageReviewGenerationInput,
+  ) => Effect.Effect<unknown, TextGenerationError>;
 }

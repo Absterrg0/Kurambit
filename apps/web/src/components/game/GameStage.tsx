@@ -595,6 +595,7 @@ export function GameStage({
           builds={data.builds}
           webBuildStale={data.webBuildStale}
           lastPlaytest={data.lastPlaytest}
+          qualification={data.qualification}
           canOperate={canOperate}
           onPlay={() => {
             setTab("play");

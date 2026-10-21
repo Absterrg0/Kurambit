@@ -8,7 +8,7 @@ import * as GameQualificationService from "./GameQualification.ts";
 import {
   qualificationRecordPath,
   type QualificationRecordInput,
-  type RecordedQualificationStage,
+  type StoredQualificationStage,
 } from "./GameQualification.ts";
 import { snapshotSource } from "./sourceSnapshot.ts";
 import { describeWebArtifacts, type WebArtifactFile } from "./webBuild.ts";
@@ -59,7 +59,7 @@ const sourceIdOf = async (root: string) => {
 };
 
 const passed = (
-  stage: RecordedQualificationStage,
+  stage: StoredQualificationStage,
   buildId: string | null,
   evidenceDirectory: string | null = null,
   artifacts?: readonly WebArtifactFile[],
@@ -97,6 +97,7 @@ const recordAll = (
       passed("export", buildId, null, artifacts),
       passed("playtest", buildId, "builds/playtests/run-1"),
       passed("state", null, "builds/logs/scenarios-1"),
+      { ...passed("visual", buildId, "builds/playtests/run-1"), designHash: null },
     ])
       yield* qualification.record(root, { ...input, sourceId });
   });
@@ -282,7 +283,7 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
       expect(read.state).toBe("unqualified");
       expect(
         read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
-      ).toEqual(["check", "test", "export", "playtest", "state"]);
+      ).toEqual(["check", "test", "export", "playtest", "state", "visual"]);
       expect(read.sourceId).not.toBe(sourceId);
       // The source edit does not touch builds/web: the running preview still
       // serves the recorded artifact, so its identity survives the staleness.
@@ -348,6 +349,92 @@ it.effect("a re-export on the same sources invalidates the playtest build", () =
       expect(read.buildId).toBe(`${sourceId}:second`);
       expect(read.stages.find((entry) => entry.stage === "playtest")?.status).toBe("stale");
       expect(read.state).toBe("unqualified");
+    }),
+  ),
+);
+
+it.effect("a visual verdict is bound to the source, build and approved design", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      const buildId = `${sourceId}:first`;
+      yield* recordAll(qualification, root, sourceId, buildId);
+      const presentation = [{ id: "glow", kind: "presentation" as const, text: "The gate glows" }];
+      // The recorded pass was written for no approved design revision.
+      const unbound = yield* qualification.read(
+        root,
+        "godot",
+        "approved",
+        "design-1",
+        null,
+        presentation,
+      );
+      expect(unbound.stages.find((entry) => entry.stage === "visual")?.status).toBe("stale");
+      expect(unbound.state).toBe("unqualified");
+      expect(unbound.mechanicsQualified).toBe(false);
+      expect(unbound.stages.find((entry) => entry.stage === "visual")?.criteria?.[0]?.status).toBe(
+        "missing",
+      );
+
+      yield* qualification.record(root, {
+        stage: "state",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: "builds/logs/scenarios-1",
+        designHash: "design-1",
+      });
+      yield* qualification.record(root, {
+        stage: "visual",
+        outcome: "passed",
+        sourceId,
+        buildId,
+        evidenceDirectory: "builds/playtests/run-1",
+        designHash: "design-1",
+        visual: {
+          status: "passed",
+          judgedAt: "2026-10-21T00:00:00.000Z",
+          model: "codex/gpt-6.1-sol",
+          sourceId,
+          buildId,
+          designHash: "design-1",
+          evidenceDirectory: "builds/playtests/run-1",
+          frames: [
+            { id: "F1", label: "final", path: "builds/playtests/run-1/x.png", role: "finish" },
+          ],
+          dimensions: [],
+          repairRequests: [],
+          roundsLeft: 1,
+        },
+      });
+      const bound = yield* qualification.read(
+        root,
+        "godot",
+        "approved",
+        "design-1",
+        null,
+        presentation,
+      );
+      expect(bound.stages.find((entry) => entry.stage === "visual")?.status).toBe("passed");
+      expect(bound.stages.find((entry) => entry.stage === "visual")?.criteria?.[0]?.status).toBe(
+        "passed",
+      );
+      expect(bound.state).toBe("qualified");
+
+      // A new build is new bytes: the old verdict cannot grade it.
+      yield* qualification.record(root, {
+        stage: "export",
+        outcome: "passed",
+        sourceId,
+        buildId: `${sourceId}:second`,
+        evidenceDirectory: null,
+        artifacts: (yield* Effect.promise(() => describeWebArtifacts(root)))!,
+      });
+      expect(
+        (yield* qualification.read(root, "godot", "approved", "design-1")).stages.find(
+          (entry) => entry.stage === "visual",
+        )?.status,
+      ).toBe("stale");
     }),
   ),
 );

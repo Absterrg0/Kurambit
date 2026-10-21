@@ -243,12 +243,22 @@ const logTurnTools = (label: string, calls: ReadonlyArray<TurnToolCall>) => {
 };
 const stageSummary = (status: GameStatus) =>
   status.qualification.stages.map((stage) => `${stage.stage}=${stage.status}`).join(", ");
+/** The independent judge's score table, printed so a run's PASS can be read honestly. */
+const visualTable = (status: GameStatus) => {
+  const stage = status.qualification.stages.find((entry) => entry.stage === "visual");
+  const judgement = stage?.visual;
+  if (judgement === undefined) return `${stage?.status ?? "missing"} (no judgement)`;
+  return `${judgement.status} (${stage?.status ?? "missing"}) — ${judgement.dimensions
+    .map((score) => `${score.dimension}=${score.score}`)
+    .join(", ")}`;
+};
 /** PASS follows the server's own qualification read, never an agent's summary. */
 const assertQualified = (label: string, status: GameStatus) => {
   assert(
     status.qualification.state === "qualified",
-    `${label}: the game is ${status.qualification.state} (${stageSummary(status)})`,
+    `${label}: the game is ${status.qualification.state} (${stageSummary(status)}; visual ${visualTable(status)})`,
   );
+  timeline(`${label}: visual ${visualTable(status)}`);
 };
 
 const waitForTurn = (

@@ -1,4 +1,10 @@
-import type { GameLastPlaytest, GameStatus, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  GameLastPlaytest,
+  GameQualificationRead,
+  GameQualificationStageRead,
+  GameStatus,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import {
   CheckCircle2Icon,
   DownloadIcon,
@@ -39,6 +45,7 @@ export function GameBuildsPanel({
   builds,
   webBuildStale,
   lastPlaytest,
+  qualification,
   canOperate,
   onPlay,
   onExportLinux,
@@ -47,6 +54,7 @@ export function GameBuildsPanel({
   builds: readonly BuildEntry[];
   webBuildStale: boolean;
   lastPlaytest: GameLastPlaytest | null;
+  qualification: GameQualificationRead;
   canOperate: boolean;
   onPlay: () => void;
   onExportLinux: () => void;
@@ -56,6 +64,10 @@ export function GameBuildsPanel({
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
       <LastPlaytestSection threadRef={threadRef} lastPlaytest={lastPlaytest} onReveal={reveal} />
+      <VisualReviewSection
+        visual={qualification.stages.find((stage) => stage.stage === "visual")}
+        mechanicsQualified={qualification.mechanicsQualified}
+      />
       {(["Web", "Linux"] as const).map((target) => {
         const meta = BUILD_META[target]!;
         const build = builds.find((entry) => entry.target === target);
@@ -265,6 +277,119 @@ function LastPlaytestSection({
     </section>
   );
 }
+
+function VisualReviewSection({
+  visual,
+  mechanicsQualified,
+}: {
+  visual: GameQualificationStageRead | undefined;
+  mechanicsQualified: boolean;
+}) {
+  const judgement = visual?.visual;
+  const status = visual?.status ?? "missing";
+  const badge =
+    status === "passed"
+      ? {
+          label: "Passed",
+          icon: CheckCircle2Icon,
+          className: "border-success/40 bg-secondary text-success-foreground",
+        }
+      : status === "failed"
+        ? {
+            label: judgement?.status === "unavailable" ? "Unavailable" : "Failed",
+            icon: judgement?.status === "unavailable" ? TriangleAlertIcon : XCircleIcon,
+            className:
+              judgement?.status === "unavailable"
+                ? "border-warning/40 bg-warning-surface text-warning-foreground"
+                : "border-destructive/40 bg-secondary text-destructive-foreground",
+          }
+        : status === "stale"
+          ? {
+              label: "Not current",
+              icon: TriangleAlertIcon,
+              className: "border-warning/40 bg-warning-surface text-warning-foreground",
+            }
+          : status === "unknown"
+            ? {
+                label: "Unavailable",
+                icon: TriangleAlertIcon,
+                className: "border-warning/40 bg-warning-surface text-warning-foreground",
+              }
+            : {
+                label: "Not judged",
+                icon: ScrollTextIcon,
+                className: "border-border bg-secondary text-muted-foreground",
+              };
+  const BadgeIcon = badge.icon;
+  return (
+    <section data-game-visual={status} className="rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-medium">Visual review</h3>
+        <span
+          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs ${badge.className}`}
+        >
+          <BadgeIcon className="size-3" aria-hidden="true" />
+          {badge.label}
+        </span>
+        {judgement === undefined ? null : (
+          <span className="ml-auto text-xs text-muted-foreground">
+            {new Date(judgement.judgedAt).toLocaleString()} · {judgement.model}
+          </span>
+        )}
+      </div>
+      {judgement === undefined ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {status === "stale"
+            ? "The last visual review no longer matches the game's sources, build or approved design. Run another playtest to judge the current build."
+            : "No independent visual review yet. A qualifying playtest runs one automatically."}
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {judgement.detail ?? "No verdict detail was recorded."}
+          </p>
+          {judgement.dimensions.length > 0 ? (
+            <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              {judgement.dimensions.map((score) => (
+                <li key={score.dimension} className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    {VISUAL_DIMENSION_LABELS[score.dimension] ?? score.dimension}
+                  </span>
+                  <span className="font-medium">
+                    {score.score === "missing" ? "No evidence" : `${score.score}/4`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {judgement.repairRequests.length > 0 ? (
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+              {judgement.repairRequests.map((request) => (
+                <li key={`${request.frame}-${request.fix}`}>
+                  <span className="font-mono">{request.frame}</span> — {request.fix}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+          {mechanicsQualified && status !== "passed" ? (
+            <p className="mt-2 text-xs text-warning-foreground">
+              Behaviour qualifies; the look does not.
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+const VISUAL_DIMENSION_LABELS: Record<string, string> = {
+  readability: "Readability",
+  valueSeparation: "Value separation",
+  cameraFraming: "Camera & framing",
+  styleConsistency: "Style consistency",
+  feedback: "Feedback",
+  designCompliance: "Design compliance",
+};
 
 function PlaytestFrame({
   threadRef,
