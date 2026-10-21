@@ -76,7 +76,12 @@ Examples (write 5 to 12 total for this game, not one of each; two per kind shown
 
 ## Art direction
 
-Palette, shapes, materials and camera framing.
+Six palette roles as hex values, each with a job: background, playfield, player, hazard,
+pickup, goal. Say which is darkest and which is brightest and keep that value order.
+Name the goal landmark: what it looks like, what light or shape makes it read from the
+start of the level, and how the player first sees it. Give one telegraph for every
+hazard. Say what the starter template's presentation kit already provides and what this
+game changes about it.
 
 ## Audio
 
@@ -104,8 +109,8 @@ export function initialGamePrompt(input: GameCreateInput): string {
   const templateName = GAME_TEMPLATES.find((entry) => entry.id === template)?.name ?? template;
   const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
   if (input.planFirst === false)
-    return `${brief}\n\nRead AGENTS.md. Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
+    return `${brief}\n\nRead AGENTS.md. Restyle through the template's presentation kit first (TEMPLATE.md, "Presentation kit"). Build a playable game, run a headless gameplay test, and finish with a working web preview using the Game Studio tools.`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. In Art direction, give the six palette roles as hex values with their jobs (background, playfield, player, hazard, pickup, goal), say which value is darkest and which is brightest, and name the goal landmark: how it reads from a distance and how the player first sees it. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab.`;
 }
 
 /** The manifest a new game starts from; the creation record also reads its probe flag. */
@@ -152,6 +157,10 @@ Build the game described in BRIEF.md. Use GDScript and Godot 4.7 Compatibility r
 ## Starter template
 
 This game started from the **${templateName}** starter template. Read TEMPLATE.md at the project root first: it describes the scenes, systems, conventions and tests you inherit. Extend the template's systems instead of replacing them, and keep its tests passing.
+
+## Presentation
+
+The starter template ships a tested presentation kit and a value hierarchy. Restyle through that kit first: change the palette roles and the shared material parameters, keep the value order (background darkest, playfield mid, player, hazards, pickups and goal brightest), and keep the templates' silhouettes and goal landmark. Add new art in the same roles; do not repaint the game with ad-hoc colour literals or a second look. Read the template's "Presentation kit" and "Level layout recipe" before building levels: teach a mechanic safely, vary it, then test it, and keep the goal or a signpost visible early.
 
 ## Design first
 

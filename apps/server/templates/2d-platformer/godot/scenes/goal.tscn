@@ -16,7 +16,7 @@ collision_mask = 2
 script = ExtResource("1_goal")
 
 [node name="Beacon" type="Sprite2D" parent="."]
-modulate = Color(0.388, 0.847, 0.941, 0.16)
+modulate = Color(0.388, 0.847, 0.941, 0.3)
 position = Vector2(0, -30)
 scale = Vector2(0.8, 3.4)
 texture = ExtResource("3_glow")

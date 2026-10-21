@@ -1,10 +1,11 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/camera_rig.gd" id="2_rig"]
 [ext_resource type="Material" path="res://materials/player_suit.tres" id="3_suit"]
 [ext_resource type="Material" path="res://materials/player_visor.tres" id="4_visor"]
 [ext_resource type="Material" path="res://materials/player_pack.tres" id="5_pack"]
+[ext_resource type="Material" path="res://materials/player_outline.tres" id="6_outline"]
 
 [sub_resource type="CapsuleShape3D" id="shape_body"]
 radius = 0.4
@@ -46,6 +47,12 @@ shape = SubResource("shape_body")
 
 [node name="Visual" type="Node3D" parent="."]
 
+[node name="Outline" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 0.92, 0)
+mesh = SubResource("mesh_body")
+material_override = ExtResource("6_outline")
+cast_shadow = 0
+
 [node name="Body" type="MeshInstance3D" parent="Visual"]
 position = Vector3(0, 0.92, 0)
 mesh = SubResource("mesh_body")
@@ -75,6 +82,13 @@ material_override = ExtResource("5_pack")
 position = Vector3(0, 1.78, 0.05)
 mesh = SubResource("mesh_antenna")
 material_override = ExtResource("4_visor")
+
+[node name="Halo" type="OmniLight3D" parent="Visual"]
+position = Vector3(0, 1.1, 0)
+light_color = Color(1, 0.78, 0.52, 1)
+light_energy = 0.6
+omni_range = 3.4
+shadow_enabled = false
 
 [node name="CameraRig" type="Node3D" parent="."]
 top_level = true

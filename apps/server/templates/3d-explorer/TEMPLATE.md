@@ -85,18 +85,25 @@ in any level you add, because `Level` and `Game` read them:
 - `Solid` — one `StaticBody3D` holding every block as a `MeshInstance3D` +
   `CollisionShape3D` pair (`…Shape`). This is the real collision; add new blocks the same
   way (or a `CSGBox3D` with `use_collision = true`, which builds static collision for you).
-- `WorldEnvironment` — procedural sky, sky ambient light, soft depth fog, filmic tonemap.
-- `Sun` — one shadow-casting `DirectionalLight3D`. Keep the shadow budget small: shadows
-  are the most expensive thing in the Web export.
+- `WorldEnvironment` — dusk sky, cool sky ambient, soft depth fog and ACES tonemapping.
+  The sky is deliberately darker than the playfield: the horizon band is the only warm
+  area above the ground line.
+- `Sun` — one warm, shadow-casting `DirectionalLight3D`, plus a non-shadowing cool `Fill`
+  from the opposite side. Keep the shadow budget small: shadows are the most expensive
+  thing in the Web export, so new lights should not cast them.
 - `Relics` — `collectible.tscn` instances; `label` names the relic, and their count is the
   level's goal count.
 - `Checkpoints` — `checkpoint.tscn` instances. The last one touched is where a lost life
   respawns; without one, respawns use `Spawn`.
 - `Goal` — `goal.tscn`: the gate that unlocks when every relic is collected and wins the
-  run when the player walks in.
+  run when the player walks in. A tall beacon above it is the level's landmark, visible
+  from the spawn; it turns from warm to green with the gate.
 - `Hazard` — `hazard.tscn`: a damaging volume that damages and knocks back anything that
   stays inside, `damage` and `reason` included. The lava pool is the level's only hazard.
 - `KillPlane` — an `Area3D` far below the level: falling through costs a life.
+
+The `Hazard`'s pool is a `PlaneMesh` with a liquid shader; the damaging volume is a
+separate `CollisionShape3D`, so changing the surface never changes what hurts the player.
 
 Relic positions are set so that the node origin sits **on the ground the relic floats
 over** (the crystal is 0.95 above it); the smoke test teleports the player onto those
@@ -164,6 +171,61 @@ Control scene and instance it in `scenes/game.tscn` under `UI`. `ui/theme.tres` 
 control via the project setting `gui/theme/custom`; the HUD adds a font outline through
 `theme_override_*` on its root. No font files ship with the template — drop a `.ttf` in
 `godot/assets/fonts/` and set it as the theme's `default_font` if the game needs one.
+
+## Presentation kit
+
+The explorer is a dusk diorama. The kit is deliberately small and lives in
+`materials/`, so a new prop inherits the look instead of starting a second one:
+
+- `detail.gdshader` is the shared world shader. `base_color` / `accent_color` carry the
+  material's two values, `noise_scale` controls how large the grain is in world metres,
+  and `masonry` adds staggered courses (1.6 m by 0.8 m) so a 60 m wall or path reads as
+  built stone instead of a flat box. `slope_darkening` gives every block a lit top and a
+  shadowed side in every light. `ground_grass`, `dirt`, `stone_light`, `stone_dark` and
+  `wood` are instances of it: restyle by editing their parameters, not by adding a
+  material with new colours.
+- `lava.gdshader` is the hazard surface: unshaded, self-lit, with a gentle vertex swell
+  and drifting veins. Its warm `Glow` light is what casts the hazard's colour onto the
+  bridge and the player. A new hazard should reuse the hot palette and bring its own
+  warning light.
+- `beacon.gdshader` is the goal's landmark shaft: additive-free, soft at both ends, so it
+  reads as light rather than a cone mesh. `beacon_locked` / `beacon_open` are the two
+  states, and `goal.gd` swaps them with the gate.
+- The player is readable against every ground colour through two cheap tricks:
+  `outline.gdshader` (an inverted-hull dark shell on the body) and a small warm
+  `OmniLight3D` halo. Keep both when the body becomes a Blender model; the outline is
+  what survives a pale sand or a lit path behind the hero.
+- Value order in the scene: sky and far walls darkest, stone mid, ground mid-warm, the
+  player and relics brightest, the lava the most saturated. New props should pick a value
+  from that ladder rather than a new saturation.
+- Ambient, key and fill are set once in `level_01.tscn`. If you need a mood change, change
+  the environment and the two lights together; adding a third shadow-casting light
+  flattens those shadows and costs the Web build.
+
+## Level layout recipe
+
+Each level, or each section of a level, introduces one mechanic and then earns it:
+
+1. **Teach.** A safe, low-stakes instance: a shallow gap, a lake edge with a clear
+   landing, or a relic on the path. The lava pool sits below a bridge the player can cross
+   without touching it.
+2. **Vary.** The same mechanic with one new constraint: the second gap is wider, the relic
+   is one jump above the safe path, or the route asks the player to leave the bridge.
+3. **Test.** Combine it with the level's other verbs, then open onto a checkpoint and the
+   gate. A test never introduces a second new mechanic at the same time.
+
+Keep these layout rules:
+
+- Put a safe recovery spot (flat ground, a checkpoint or a non-damaging platform)
+  immediately before every challenge; a blind drop into lava is a layout bug.
+- Keep the beacon or the gate visible from the spawn, and once per section give the player
+  something tall to aim at: a pillar, a monolith, the beacon.
+- Telegraph hazards with the reserved hot palette, the lava's own light and a visible
+  landing zone. A hazard hidden behind a wall or below the camera is not telegraphing.
+- Relics and lamps lead the eye along the intended route. Put them on the path, not in a
+  corner the player cannot see.
+- Keep the camera comfortable at ground level: the third-person arm is 5.6 m, so build
+  courtyards and sightlines at metres, not kilometres, and let the props frame the path.
 
 ## Tests
 

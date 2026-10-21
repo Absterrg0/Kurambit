@@ -1,10 +1,15 @@
-[gd_resource type="StandardMaterial3D" load_steps=2 format=3]
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
 
-[ext_resource type="Texture2D" path="res://materials/speckle.svg" id="1_speckle"]
+[ext_resource type="Shader" path="res://materials/detail.gdshader" id="1_detail"]
 
 [resource]
 resource_name = "Dirt"
-albedo_color = Color(0.5, 0.42, 0.31, 1)
-albedo_texture = ExtResource("1_speckle")
-uv1_scale = Vector3(24, 24, 1)
-roughness = 0.95
+shader = ExtResource("1_detail")
+shader_parameter/base_color = Color(0.318, 0.259, 0.192, 1)
+shader_parameter/accent_color = Color(0.416, 0.337, 0.243, 1)
+shader_parameter/noise_scale = 0.55
+shader_parameter/accent_strength = 0.45
+shader_parameter/slope_darkening = 0.3
+shader_parameter/masonry = 0.00
+shader_parameter/detail_strength = 0.18
+shader_parameter/roughness_value = 0.95

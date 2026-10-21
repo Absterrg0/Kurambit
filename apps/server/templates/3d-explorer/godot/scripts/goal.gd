@@ -1,14 +1,22 @@
-## The exit gate. It glows red while relics are missing, turns green and opens once
-## `GameState` reports every relic collected, and wins the run when the player walks in.
+## The exit gate. Its barrier glows red and its beacon burns warm while relics are
+## missing; both turn green, and the gate opens, once `GameState` reports every relic
+## collected. Walking in wins the run.
 class_name Goal
 extends Area3D
 
-const LOCKED_COLOR := Color(0.95, 0.35, 0.3)
+const LOCKED_COLOR := Color(1.0, 0.62, 0.28)
 const OPEN_COLOR := Color(0.45, 1.0, 0.72)
+const LANTERN_LOCKED := preload("res://materials/lamp_glow.tres")
+const LANTERN_OPEN := preload("res://materials/gate_open.tres")
+const BEACON_LOCKED := preload("res://materials/beacon_locked.tres")
+const BEACON_OPEN := preload("res://materials/beacon_open.tres")
 
 @onready var locked_visual: Node3D = $Locked
 @onready var open_visual: Node3D = $Open
 @onready var light: OmniLight3D = $Light
+@onready var lantern: MeshInstance3D = $Lantern
+@onready var beacon_light: OmniLight3D = $BeaconLight
+@onready var beacon: MeshInstance3D = $Beacon
 
 var unlocked := false
 
@@ -25,6 +33,11 @@ func _refresh() -> void:
 	locked_visual.visible = not unlocked
 	open_visual.visible = unlocked
 	light.light_color = OPEN_COLOR if unlocked else LOCKED_COLOR
+	# The beacon is the landmark the player aims at from across the world; its lantern
+	# keeps the gate's state colour so the same read works at any distance.
+	beacon_light.light_color = OPEN_COLOR if unlocked else LOCKED_COLOR
+	lantern.material_override = LANTERN_OPEN if unlocked else LANTERN_LOCKED
+	beacon.material_override = BEACON_OPEN if unlocked else BEACON_LOCKED
 
 func _on_all_collected() -> void:
 	if unlocked:

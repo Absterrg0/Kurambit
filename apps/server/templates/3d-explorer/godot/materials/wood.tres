@@ -1,6 +1,15 @@
-[gd_resource type="StandardMaterial3D" format=3]
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://materials/detail.gdshader" id="1_detail"]
 
 [resource]
 resource_name = "WoodPlank"
-albedo_color = Color(0.45, 0.3, 0.19, 1)
-roughness = 0.8
+shader = ExtResource("1_detail")
+shader_parameter/base_color = Color(0.29, 0.2, 0.13, 1)
+shader_parameter/accent_color = Color(0.38, 0.27, 0.175, 1)
+shader_parameter/noise_scale = 1.4
+shader_parameter/accent_strength = 0.3
+shader_parameter/slope_darkening = 0.24
+shader_parameter/masonry = 0.00
+shader_parameter/detail_strength = 0.12
+shader_parameter/roughness_value = 0.85

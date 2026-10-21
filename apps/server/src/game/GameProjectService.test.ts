@@ -247,6 +247,9 @@ it.effect(
         // Planning is the default, so the first turn asks for DESIGN.md, not a build.
         expect(launch?.initialMessage?.text).toContain("DESIGN.md");
         expect(launch?.initialMessage?.text).toContain("Keep the scaffold's section headings");
+        // The design turn has to ask for the presentation decisions the templates rely on.
+        expect(launch?.initialMessage?.text).toContain("six palette roles");
+        expect(launch?.initialMessage?.text).toContain("goal landmark");
         expect(launch?.initialMessage?.text).not.toContain("Build a playable game");
         // The design turn fills the scaffold instead of inventing its own structure;
         // both the prompt and the game's AGENTS.md have to say so.
@@ -254,9 +257,10 @@ it.effect(
         expect(design).toContain("## Pitch");
         expect(design).toContain("## Milestones");
         expect(design).toContain("Keep these headings");
-        expect(yield* readFile(NodePath.join(created.root, "AGENTS.md"))).toContain(
-          "Keep the scaffold's section headings",
-        );
+        const agents = yield* readFile(NodePath.join(created.root, "AGENTS.md"));
+        expect(agents).toContain("Keep the scaffold's section headings");
+        // Build turns restyle through the template kit before inventing a second look.
+        expect(agents).toContain("Restyle through that kit first");
         expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
           "gl_compatibility",
