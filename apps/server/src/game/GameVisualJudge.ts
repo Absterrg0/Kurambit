@@ -502,7 +502,10 @@ const make = (stateDir: string) =>
             judgement: { ...stored, roundsLeft: Math.max(0, MAX_JUDGEMENTS_PER_DESIGN - used) },
           };
 
-        if (frames.length === 0)
+        // Missing or empty evidence is not a failed game; a run whose frames
+        // simply carry no probed gameplay is, and the next branch says what to
+        // capture.
+        if (frames.length === 0 && (evidence === null || evidence.frames.length === 0))
           return {
             status: "judged" as const,
             reused: false,

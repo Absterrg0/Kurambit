@@ -66,7 +66,8 @@ const review = (score: 2 | 4 = 4): GameVisualReview => ({
         ],
 });
 
-const writeEvidence = async (root: string) => {
+const writeEvidence = async (root: string, options: { readonly probes?: boolean } = {}) => {
+  const withProbes = options.probes !== false;
   const directory = NodePath.join(root, "builds/playtests/run-1");
   await NodeFSP.mkdir(directory, { recursive: true });
   for (const frame of frames)
@@ -84,19 +85,23 @@ const writeEvidence = async (root: string) => {
       steps: [],
       consoleMessages: [],
       frames: frames.map((frame) => ({
-        ...frame,
+        label: frame.label,
+        file: frame.file,
         width: 960,
         height: 540,
+        ...(withProbes && frame.probe !== undefined ? { probe: frame.probe } : {}),
       })),
-      state: {
-        before: probe(0),
-        after: probe(20, 1, 90),
-        playerMoved: 20,
-        changes: [
-          { key: "collected", before: 0, after: 1 },
-          { key: "health", before: 100, after: 90 },
-        ],
-      },
+      state: withProbes
+        ? {
+            before: probe(0),
+            after: probe(20, 1, 90),
+            playerMoved: 20,
+            changes: [
+              { key: "collected", before: 0, after: 1 },
+              { key: "health", before: 100, after: 90 },
+            ],
+          }
+        : null,
       qualifies: true,
     }),
   );
@@ -431,6 +436,22 @@ describe("the visual judge", () => {
         expect(run.judgement.frames.map((frame) => frame.role)).toEqual(["result"]);
         expect(run.judgement.roundsLeft).toBe(2);
         // No round was spent, so a better-captured run can still be judged.
+        expect(yield* judge.remaining(root, "design-1")).toBe(2);
+      }),
+    ),
+  );
+
+  it.effect("fails a run whose frames carry no probe state as an evidence gap", () =>
+    withJudge(({ root, judge }) =>
+      Effect.gen(function* () {
+        const evidenceDirectory = yield* Effect.promise(() =>
+          writeEvidence(root, { probes: false }),
+        );
+        const run = yield* judge.run(root, input(evidenceDirectory));
+        expect(run.status).toBe("judged");
+        if (run.status !== "judged") return;
+        expect(run.judgement.status).toBe("failed");
+        expect(run.judgement.detail).toContain("not enough gameplay evidence");
         expect(yield* judge.remaining(root, "design-1")).toBe(2);
       }),
     ),
