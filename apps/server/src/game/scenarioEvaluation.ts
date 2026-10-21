@@ -79,7 +79,7 @@ const provingMatch = (
   for (const run of runs) {
     if (run.error !== null) continue;
     const observation = observationFor(run, key);
-    if (observation === undefined || run.baselineFrame === null) continue;
+    if (observation === undefined || typeof run.baselineFrame !== "number") continue;
     const baseline = observation.baseline ?? null;
     if (satisfiedBy(expectation, baseline)) {
       alreadyTrue ??= { run, frame: run.baselineFrame };
@@ -202,7 +202,7 @@ const criterionResult = (
       provenBy: null,
     };
   }
-  const withoutBaseline = sampled.filter((run) => run.baselineFrame === null);
+  const withoutBaseline = sampled.filter((run) => typeof run.baselineFrame !== "number");
   if (withoutBaseline.length === sampled.length)
     return {
       ...base,
@@ -211,7 +211,7 @@ const criterionResult = (
       scenarios: [],
       provenBy: null,
     };
-  const first = sampled.find((run) => run.baselineFrame !== null)!;
+  const first = sampled.find((run) => typeof run.baselineFrame === "number")!;
   const observation = observationFor(first, key)!;
   return {
     ...base,
@@ -261,7 +261,7 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
   if (input.mode === "legacy") {
     const moved = runs.some((run) => run.error === null && run.playerMoved);
     const playing = runs.some((run) => {
-      if (run.error !== null || run.baselineFrame === null) return false;
+      if (run.error !== null || typeof run.baselineFrame !== "number") return false;
       const state = observationFor(run, "state");
       if (state === undefined) return false;
       // The baseline is the first sample after the menu input. Reaching the
