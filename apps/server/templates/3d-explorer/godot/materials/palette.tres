@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="GamePalette" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/palette.gd" id="1_palette"]
+
+[resource]
+script = ExtResource("1_palette")
+background_deep = Color(0.063, 0.086, 0.216, 1)
+background_far = Color(0.173, 0.165, 0.271, 1)
+playfield = Color(0.196, 0.259, 0.149, 1)
+playfield_deep = Color(0.141, 0.102, 0.071, 1)
+player = Color(0.93, 0.55, 0.22, 1)
+player_accent = Color(0.25, 0.85, 1, 1)
+hazard = Color(1, 0.36, 0.23, 1)
+pickup = Color(0.36, 0.95, 1, 1)
+goal = Color(0.45, 1, 0.72, 1)
+ui_accent = Color(0.56, 0.71, 1, 1)
+ink = Color(0.078, 0.094, 0.125, 1)
+glow = Color(1, 0.77, 0.42, 1)

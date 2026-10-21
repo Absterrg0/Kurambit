@@ -5,6 +5,7 @@ class_name Hud
 extends Control
 
 const HINT_SECONDS := 15.0
+const Palette := preload("res://materials/palette.tres")
 
 @onready var relic_value: Label = $Status/Box/Relics/Value
 @onready var vitality_value: Label = $Status/Box/Vitality/Value
@@ -50,9 +51,7 @@ func _on_health(health: float, maximum: float) -> void:
 	vitality_bar.max_value = maximum
 	vitality_bar.value = health
 	vitality_value.text = "%d%%" % roundi(health / maximum * 100.0)
-	vitality_bar.modulate = (
-		Color(1.0, 0.55, 0.45) if health <= maximum * 0.34 else Color.WHITE
-	)
+	vitality_bar.modulate = Palette.hazard if health <= maximum * 0.34 else Color.WHITE
 
 func _on_lives(lives: int) -> void:
 	pips.refresh(lives, GameState.MAX_LIVES)

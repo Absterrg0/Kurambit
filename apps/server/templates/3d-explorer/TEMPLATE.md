@@ -177,6 +177,14 @@ control via the project setting `gui/theme/custom`; the HUD adds a font outline 
 The explorer is a dusk diorama. The kit is deliberately small and lives in
 `materials/`, so a new prop inherits the look instead of starting a second one:
 
+- `materials/palette.tres` (script `scripts/palette.gd`) is the functional role list:
+  `background_deep` / `background_far` (sky and far haze), `playfield` /
+  `playfield_deep` (grass and soil), `player` / `player_accent`, `hazard` (the one
+  reserved warning hue), `pickup`, `goal` (the open gate), `ui_accent`, `ink` and
+  `glow`. The gate's state light, the HUD's low-vitality colour and the life pips read
+  these roles. Restyle the UI and goal state by editing this resource; restyle the
+  world through the shader parameters below.
+
 - `detail.gdshader` is the shared world shader. `base_color` / `accent_color` carry the
   material's two values, `noise_scale` controls how large the grain is in world metres,
   and `masonry` adds staggered courses (1.6 m by 0.8 m) so a 60 m wall or path reads as

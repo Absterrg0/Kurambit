@@ -4,8 +4,7 @@
 class_name Goal
 extends Area3D
 
-const LOCKED_COLOR := Color(1.0, 0.62, 0.28)
-const OPEN_COLOR := Color(0.45, 1.0, 0.72)
+const Palette := preload("res://materials/palette.tres")
 const LANTERN_LOCKED := preload("res://materials/lamp_glow.tres")
 const LANTERN_OPEN := preload("res://materials/gate_open.tres")
 const BEACON_LOCKED := preload("res://materials/beacon_locked.tres")
@@ -32,10 +31,10 @@ func _refresh() -> void:
 	unlocked = GameState.total > 0 and GameState.collected >= GameState.total
 	locked_visual.visible = not unlocked
 	open_visual.visible = unlocked
-	light.light_color = OPEN_COLOR if unlocked else LOCKED_COLOR
+	light.light_color = Palette.goal if unlocked else Palette.hazard
 	# The beacon is the landmark the player aims at from across the world; its lantern
 	# keeps the gate's state colour so the same read works at any distance.
-	beacon_light.light_color = OPEN_COLOR if unlocked else LOCKED_COLOR
+	beacon_light.light_color = Palette.goal if unlocked else Palette.hazard
 	lantern.material_override = LANTERN_OPEN if unlocked else LANTERN_LOCKED
 	beacon.material_override = BEACON_OPEN if unlocked else BEACON_LOCKED
 
