@@ -823,3 +823,26 @@ it.live("explicit Rebuild stops the open round before publishing", () => {
       }),
   );
 });
+
+it.live("cancelling the originating turn stops the open round without touching the folder", () =>
+  withGame({ run: (input) => Effect.succeed(processOk(input.root)) }, ({ root, game, rounds }) =>
+    Effect.gen(function* () {
+      const round = yield* rounds.begin(root, {});
+      yield* Effect.promise(() =>
+        NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# repair\n"),
+      );
+      yield* game.cancelThread(threadId);
+      const state = yield* rounds.read(root);
+      const stopped = state.rounds.find((entry) => entry.id === round.id);
+      expect(stopped?.status).toBe("stopped");
+      expect(stopped?.decision).toBe("stop");
+      expect(stopped?.reason).toContain("cancelled");
+      expect(state.selected).toBeNull();
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("extends Node\n# repair\n");
+    }),
+  ),
+);
