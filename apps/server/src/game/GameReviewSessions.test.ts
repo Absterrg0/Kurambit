@@ -18,7 +18,9 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -152,6 +154,8 @@ interface Scripted {
   readonly rejectedReceipts: Set<string>;
   /** Runs that did not come from this session, e.g. a follow-up. */
   readonly extraChildRuns: Array<ScriptedChildRun>;
+  /** Runs while the child's records are read, before they are returned. */
+  childRecordsGate: (() => Effect.Effect<void>) | null;
   childThreadId: ThreadId | null;
   /** The command that created the child; its message id names its run. */
   childCommandId: string | null;
@@ -165,6 +169,7 @@ const makeScripted = (): Scripted => ({
   receipts: new Set(),
   rejectedReceipts: new Set(),
   extraChildRuns: [],
+  childRecordsGate: null,
   childThreadId: null,
   childCommandId: null,
   childStatus: "completed",
@@ -264,41 +269,44 @@ const withSession = <A, E>(
                       ? "accepted"
                       : null,
                 ),
-              getThreadRecords: (target: ThreadId) => {
-                if (target === threadId)
-                  return Effect.succeed({
-                    thread: parentThread,
-                    runs: [builderRun],
-                  } as unknown as OrchestrationV2ThreadProjection);
-                if (scripted.childThreadId !== null && target === scripted.childThreadId)
-                  return Effect.succeed({
-                    runs: [
-                      childRun(target, scripted.childStatus, {
-                        ...(scripted.childCommandId === null
-                          ? {}
-                          : {
-                              userMessageId: IdAllocator.derive.delegatedTaskMessage({
-                                commandId: CommandId.make(scripted.childCommandId),
+              getThreadRecords: (target: ThreadId) =>
+                Effect.gen(function* () {
+                  if (target === threadId)
+                    return {
+                      thread: parentThread,
+                      runs: [builderRun],
+                    } as unknown as OrchestrationV2ThreadProjection;
+                  if (scripted.childThreadId !== null && target === scripted.childThreadId) {
+                    if (scripted.childRecordsGate !== null) yield* scripted.childRecordsGate();
+                    return {
+                      runs: [
+                        childRun(target, scripted.childStatus, {
+                          ...(scripted.childCommandId === null
+                            ? {}
+                            : {
+                                userMessageId: IdAllocator.derive.delegatedTaskMessage({
+                                  commandId: CommandId.make(scripted.childCommandId),
+                                }),
                               }),
-                            }),
-                      }),
-                      ...scripted.extraChildRuns.map((extra) =>
-                        childRun(target, extra.status, {
-                          id: extra.id,
-                          ordinal: extra.ordinal,
-                          userMessageId: MessageId.make(`message:${extra.id}`),
                         }),
-                      ),
-                    ],
-                    messages: [
-                      assistantMessage(target, scripted.answer),
-                      ...scripted.extraChildRuns.map((extra) =>
-                        assistantMessage(target, extra.answer, extra.id),
-                      ),
-                    ],
-                  } as unknown as OrchestrationV2ThreadProjection);
-                return Effect.die(`unexpected thread ${target}`);
-              },
+                        ...scripted.extraChildRuns.map((extra) =>
+                          childRun(target, extra.status, {
+                            id: extra.id,
+                            ordinal: extra.ordinal,
+                            userMessageId: MessageId.make(`message:${extra.id}`),
+                          }),
+                        ),
+                      ],
+                      messages: [
+                        assistantMessage(target, scripted.answer),
+                        ...scripted.extraChildRuns.map((extra) =>
+                          assistantMessage(target, extra.answer, extra.id),
+                        ),
+                      ],
+                    } as unknown as OrchestrationV2ThreadProjection;
+                  }
+                  return yield* Effect.die(`unexpected thread ${target}`);
+                }),
               dispatch: (command: OrchestrationV2ServerCommand) => {
                 scripted.dispatches.push(command);
                 scripted.receipts.add(command.commandId);
@@ -525,6 +533,51 @@ it.live("changed evidence invalidates an otherwise valid answer", () =>
       const second = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
       expect(second.kind).toBe("invalid");
       if (second.kind === "invalid") expect(second.reason).toContain("evidence changed");
+    }),
+  ),
+);
+
+it.live("evidence is verified after the terminal answer is read", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      // Hold the terminal read open, exactly where the child could still be
+      // changing its evidence.
+      scripted.childRecordsGate = () =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        });
+      scripted.childStatus = "running";
+      const pending = yield* Effect.forkScoped(
+        service.answer({ threadId, loopId, roundId, role: "critic" }),
+      );
+      yield* Deferred.await(entered);
+      // The child tampers with a frame and finishes while the reader waits.
+      scripted.childStatus = "completed";
+      scripted.answer = criticText;
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(directory!, "frames/frame-01.png"), "tampered"),
+      );
+      yield* Deferred.succeed(release, undefined);
+      const answer = yield* Fiber.join(pending);
+      expect(answer.kind).toBe("invalid");
+      if (answer.kind === "invalid") expect(answer.reason).toContain("evidence changed");
     }),
   ),
 );

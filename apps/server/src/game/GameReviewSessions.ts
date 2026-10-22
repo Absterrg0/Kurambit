@@ -1020,10 +1020,19 @@ export const layer = (options: { readonly stateDir: string }) => {
         return startedResult(confirmed, false);
       });
 
-    const readChildAnswer = (
+    type ChildAnswerRead =
+      | { readonly kind: "pending" }
+      | { readonly kind: "invalid"; readonly reason: string; readonly raw: string | null }
+      | { readonly kind: "text"; readonly text: string };
+
+    /**
+     * Reads the bound run's terminal answer. Nothing here touches evidence:
+     * the caller verifies evidence only after this read, so a child cannot
+     * change a frame and finish between the hash and the accepted answer.
+     */
+    const readChildAnswerText = (
       record: ReviewSessionRecordType,
-      known: CriticAnswerKnownIds & { readonly itemIds: ReadonlyArray<string> },
-    ): Effect.Effect<GameReviewSessionAnswerResult, GameOperationError> =>
+    ): Effect.Effect<ChildAnswerRead, GameOperationError> =>
       Effect.gen(function* () {
         const childThreadId = ThreadIdSchema.make(record.childThreadId);
         const records = yield* threads
@@ -1073,15 +1082,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             reason: "The review child finished without an assistant answer.",
             raw: null,
           };
-        const parsed =
-          record.role === "critic"
-            ? parseCriticAnswer(answer.text, known)
-            : parseBallotAnswer(answer.text, known);
-        if (parsed.kind === "invalid")
-          return { kind: "invalid", reason: parsed.reason, raw: answer.text };
-        return record.role === "critic"
-          ? { kind: "critic", answer: parsed.answer as GameReviewCriticAnswer, raw: answer.text }
-          : { kind: "ballot", answer: parsed.answer as GameReviewBallotAnswer, raw: answer.text };
+        return { kind: "text", text: answer.text };
       });
 
     const answer: GameReviewSessions["Service"]["answer"] = (input) =>
@@ -1106,6 +1107,13 @@ export const layer = (options: { readonly stateDir: string }) => {
             reason: "A repair child reports in the game folder; it has no audit answer.",
             raw: null,
           } satisfies GameReviewSessionAnswerResult;
+        // Read the bound terminal answer first. Only then hash the evidence:
+        // a child that changes a frame and finishes in between is caught,
+        // because the accepted answer and the hash describe the same final
+        // tree.
+        const read = yield* readChildAnswerText(record);
+        if (read.kind === "pending") return { kind: "pending" };
+        if (read.kind === "invalid") return read;
         if (record.evidenceDirectory !== null && record.evidenceHash !== null) {
           const now = yield* attempt("hash game review evidence", record.evidenceDirectory, () =>
             hashEvidenceDirectory(record.evidenceDirectory!),
@@ -1119,11 +1127,20 @@ export const layer = (options: { readonly stateDir: string }) => {
             } satisfies GameReviewSessionAnswerResult;
         }
         const evidence = record.evidence ?? { frames: [], checks: [] };
-        return yield* readChildAnswer(record, {
+        const known = {
           frameIds: new Set(evidence.frames.map((frame) => frame.id)),
           checkIds: new Set(evidence.checks.map((check) => check.id)),
           itemIds: record.itemIds,
-        });
+        };
+        const parsed =
+          record.role === "critic"
+            ? parseCriticAnswer(read.text, known)
+            : parseBallotAnswer(read.text, known);
+        if (parsed.kind === "invalid")
+          return { kind: "invalid", reason: parsed.reason, raw: read.text };
+        return record.role === "critic"
+          ? { kind: "critic", answer: parsed.answer as GameReviewCriticAnswer, raw: read.text }
+          : { kind: "ballot", answer: parsed.answer as GameReviewBallotAnswer, raw: read.text };
       });
 
     const evidenceDirectory: GameReviewSessions["Service"]["evidenceDirectory"] = (input) =>
