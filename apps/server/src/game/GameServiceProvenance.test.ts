@@ -511,6 +511,19 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
           await NodeFSP.mkdir(NodePath.join(root, "assets"), { recursive: true });
           await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
         });
+        // Normalize the script's mtime to a whole millisecond before the
+        // baseline export. Restoring a timestamp later can only reproduce
+        // millisecond precision, so this makes an exact mtimeMs comparison
+        // meaningful: the test must prove the cache key itself is unchanged,
+        // not merely that its Date rendering matches.
+        const normalizedMtime = new Date(Math.floor(Date.now()));
+        yield* Effect.promise(() =>
+          NodeFSP.utimes(
+            NodePath.join(root, "godot/scripts/main.gd"),
+            normalizedMtime,
+            normalizedMtime,
+          ),
+        );
         const exported = yield* game.export(threadId, "Web");
         expect(exported.success, exported.message).toBe(true);
         expect(exports).toBe(1);
@@ -536,7 +549,6 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
         const before = yield* Effect.promise(async () => {
           const stat = await NodeFSP.stat(script);
           return {
-            mtime: stat.mtime,
             mtimeMs: stat.mtimeMs,
             size: stat.size,
             text: await NodeFSP.readFile(script, "utf8"),
@@ -547,11 +559,14 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
         yield* Effect.promise(async () => {
           await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
           await NodeFSP.writeFile(script, edited);
-          await NodeFSP.utimes(script, before.mtime, before.mtime);
+          await NodeFSP.utimes(script, new Date(before.mtimeMs), new Date(before.mtimeMs));
         });
         const after = yield* Effect.promise(() => NodeFSP.stat(script));
         expect(after.size).toBe(before.size);
-        expect(after.mtime.getTime()).toBe(before.mtime.getTime());
+        // Exact equality, not `getTime()`: the Godot cache key is the fractional
+        // mtime, and a one-character edit that changed it would be caught by the
+        // cache rather than by the byte check under test.
+        expect(after.mtimeMs).toBe(before.mtimeMs);
         expect((yield* game.status(threadId, { checkSources: true })).sourcesDifferFromPlay).toBe(
           true,
         );
@@ -736,9 +751,19 @@ it.live("a candidate changed after its export is refused by promotion", () => {
             "// edit",
           ),
         );
+        // Subscribe before the operation: the event stream does not replay.
+        const events = yield* game.events.pipe(Stream.toQueue({ capacity: 16 }));
+        yield* Effect.yieldNow;
         const refused = yield* game.promote(threadId, round.id);
         expect(refused.kind).toBe("blocked");
         if (refused.kind === "blocked") expect(refused.detail).toContain("artifact-changed");
+        // A refusal is a failed promotion, not a silent success: the stage learns
+        // why from the failed event's message, which carries the round's detail.
+        const published = yield* Queue.takeAll(events);
+        expect(published.map((event) => event.state)).toContain("failed");
+        const failedEvent = published.find((event) => event.state === "failed");
+        expect(failedEvent?.message).toContain("artifact-changed");
+        expect(published.every((event) => event.name === "Promote build")).toBe(true);
 
         const state = yield* rounds.read(root);
         expect(state.selected?.buildId).toBe(selectedBefore?.buildId);
@@ -833,8 +858,31 @@ it.live("a status read in flight cannot move Play back after a promotion", () =>
   );
 });
 
-it.live("a status read after Stop never reopens the preview", () => {
+it.live("a status read paused before Stop never reopens the preview", () => {
   const opened: string[] = [];
+  const statusStarted = Deferred.makeUnsafe<void>();
+  const statusRelease = Deferred.makeUnsafe<void>();
+  let armed = false;
+  const gatedRounds = (stateDir: string) =>
+    Layer.effect(
+      GameRoundStore.GameRoundStore,
+      Effect.gen(function* () {
+        const base = yield* GameRoundStore.GameRoundStore;
+        return GameRoundStore.GameRoundStore.of({
+          ...base,
+          // The read parks after it observed the selection and the open preview,
+          // so the Stop below lands while the read is genuinely in flight.
+          sourceId: (root) =>
+            Effect.gen(function* () {
+              if (!armed) return yield* base.sourceId(root);
+              armed = false;
+              yield* Deferred.succeed(statusStarted, undefined);
+              yield* Deferred.await(statusRelease);
+              return yield* base.sourceId(root);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(GameRoundStore.layer({ stateDir })));
   return withGame(
     {
       run: (input) => {
@@ -854,6 +902,7 @@ it.live("a status read after Stop never reopens the preview", () => {
         opened.push(directory);
         return Effect.succeed(`http://127.0.0.1:9/${opened.length}`);
       },
+      rounds: gatedRounds,
     },
     ({ root, game, rounds }) =>
       Effect.gen(function* () {
@@ -863,15 +912,21 @@ it.live("a status read after Stop never reopens the preview", () => {
         expect(played.success, played.message).toBe(true);
         expect(opened).toHaveLength(1);
 
+        armed = true;
+        const read = yield* game.status(threadId, { checkSources: true }).pipe(Effect.forkChild);
+        yield* Deferred.await(statusStarted);
         const stopped = yield* game.action(threadId, "stop");
         expect(stopped.success, stopped.message).toBe(true);
-        const selections = opened.length;
+        yield* Deferred.succeed(statusRelease, undefined);
+        const resumed = yield* Fiber.join(read);
 
-        // Stop clears the preview. Status observes; it never starts it again,
-        // with or without an explicit byte check.
+        // The read finished after Stop. Observing is all it may do: no select,
+        // no reopen, with or without the byte check it asked for.
+        expect(resumed.previewUrl).toBeNull();
+        expect(opened).toHaveLength(1);
         expect((yield* game.status(threadId)).previewUrl).toBeNull();
         expect((yield* game.status(threadId, { checkSources: true })).previewUrl).toBeNull();
-        expect(opened).toHaveLength(selections);
+        expect(opened).toHaveLength(1);
         // The selection itself survives Stop: Play is one press away.
         expect((yield* rounds.read(root)).selected).not.toBeNull();
       }),
@@ -1145,10 +1200,26 @@ it.live("a fresh import that writes sidecars still exports and never mutates the
         const sourceId = yield* rounds.sourceId(root);
         const state = yield* rounds.read(root);
         expect(state.selected?.sourceId).toBe(sourceId);
-        // The stored snapshot names source bytes only, and a later freeze of the
-        // same bytes reuses it untouched.
+        // The stored snapshot names source bytes only, and a second export of the
+        // same bytes must reuse that snapshot untouched: same directory, same
+        // manifest, no staging left behind in the store.
         const frozen = yield* rounds.freeze(root);
         expect(frozen.sourceId).toBe(sourceId);
+        const manifestText = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(frozen.directory, "manifest.json"), "utf8"),
+        );
+        const second = yield* game.export(threadId, "Web");
+        expect(second.success, second.message).toBe(true);
+        const reused = yield* rounds.freeze(root);
+        expect(reused.directory).toBe(frozen.directory);
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(reused.directory, "manifest.json"), "utf8"),
+          ),
+        ).toBe(manifestText);
+        expect(
+          yield* Effect.promise(() => NodeFSP.readdir(NodePath.dirname(frozen.directory))),
+        ).toEqual([NodePath.basename(frozen.directory)]);
         const stored = yield* Effect.promise(async () => {
           const found: string[] = [];
           const stack = [""];
@@ -1165,7 +1236,18 @@ it.live("a fresh import that writes sidecars still exports and never mutates the
         });
         expect(stored).toContain("godot/art/hero.png");
         expect(stored.filter((name) => /\.(?:import|uid)$/.test(name))).toEqual([]);
-        expect(stored.filter((name) => name.startsWith(".godot/"))).toEqual([]);
+        // The import cache lives inside the Godot project; the snapshot must not
+        // carry it. Assert the cache really exists first, or the exclusion check
+        // passes vacuously.
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.stat(NodePath.join(root, "godot/.godot/imported/hero.png-shape.ctex")).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(true);
+        expect(stored.filter((name) => name.startsWith("godot/.godot/"))).toEqual([]);
         // The import mutated the editable tree, not the stored copy.
         expect(
           yield* Effect.promise(() =>

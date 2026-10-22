@@ -214,14 +214,27 @@ const make = Effect.gen(function* () {
   });
   /**
    * Operations report failure in more than one shape: action results use
-   * `success`, the Godot check uses `ok`. The shared operation state has to see
-   * both, or a failed check announces success to the stage.
+   * `success`, the Godot check uses `ok`, and a round transition that refuses at
+   * commit returns `kind: "blocked"`. The shared operation state has to see all
+   * of them, or a refused promotion announces success to the stage.
    */
   const operationFailed = (result: unknown): boolean => {
     if (typeof result !== "object" || result === null) return false;
     if ("success" in result && result.success === false) return true;
     if ("ok" in result && result.ok === false) return true;
+    if ("kind" in result && result.kind === "blocked") return true;
     return false;
+  };
+  /**
+   * The honest message for a finished operation. A blocked round transition has
+   * no `message`; its `detail` is the only account of why it refused, and the
+   * stage must show that instead of "completed".
+   */
+  const operationMessage = (result: unknown, name: string): string => {
+    if (typeof result !== "object" || result === null) return `${name} completed.`;
+    if ("kind" in result && result.kind === "blocked")
+      return "detail" in result ? String(result.detail) : `${name} was blocked.`;
+    return "message" in result ? String(result.message) : `${name} completed.`;
   };
   const exclusive = <A>(root: string, name: string, work: Effect.Effect<A, GameOperationError>) =>
     Effect.gen(function* () {
@@ -260,10 +273,7 @@ const make = Effect.gen(function* () {
               {
                 name,
                 state: failed ? "failed" : "succeeded",
-                message:
-                  typeof result === "object" && result !== null && "message" in result
-                    ? String(result.message)
-                    : `${name} completed.`,
+                message: operationMessage(result, name),
                 at,
               },
               failed ? "failed" : "succeeded",

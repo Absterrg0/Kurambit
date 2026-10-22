@@ -429,16 +429,22 @@ it.live("an explicit restore refuses an edit made after the replaced version was
           NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
         ),
       ).toBe("extends Node2D # user edit\n");
-      // It was still preserved as the version a later restore can return to.
+      // It was still preserved as the version a later restore can return to —
+      // the repair's bytes, taken before the user edit landed, not just its path.
       const state = yield* rounds.read(root);
       const stopped = state.rounds.find((entry) => entry.id === opened.id)!;
       expect(stopped.status).toBe("stopped");
       expect(stopped.preRestoreSnapshotId).not.toBeNull();
+      const preserved = yield* snapshots.read(root, stopped.preRestoreSnapshotId!);
+      expect(preserved.manifest.files.map((file) => file.path)).toContain("godot/scripts/main.gd");
       expect(
-        (yield* snapshots.read(root, stopped.preRestoreSnapshotId!)).manifest.files.map(
-          (file) => file.path,
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(
+            NodePath.join(preserved.directory, "files/godot/scripts/main.gd"),
+            "utf8",
+          ),
         ),
-      ).toContain("godot/scripts/main.gd");
+      ).toBe("extends Node2D # repair\n");
     }),
   ),
 );
