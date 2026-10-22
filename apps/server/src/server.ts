@@ -5,6 +5,9 @@ import * as GameOperations from "./game/GameOperations.ts";
 import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
 import * as GameRoundStore from "./game/GameRoundStore.ts";
+import * as GameRepairLoop from "./game/GameRepairLoop.ts";
+import * as GameRepairReactor from "./game/GameRepairReactor.ts";
+import * as GameRepairStudio from "./game/GameRepairStudio.ts";
 import * as GameReviewSessions from "./game/GameReviewSessions.ts";
 import * as GameVisualJudge from "./game/GameVisualJudge.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -499,16 +502,35 @@ const layerCommandReadiness = HttpRouter.middleware(
 );
 
 const layerGame = Layer.mergeAll(
-  GameService.layer,
-  // Review children pick their model from the live provider catalog; the
-  // session service itself keeps no provider-specific behaviour. It shares the
-  // same GameProjectService/GameRoundStore instances GameService uses.
+  // The repair loop owns a game's review phases; the studio is its engine-facing
+  // half. Both wrap the one GameService instance below, so they share its locks,
+  // preview and round store.
   Layer.unwrap(
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
-      return GameReviewSessions.layer({ stateDir: config.stateDir });
+      return GameRepairLoop.layer({ stateDir: config.stateDir });
     }),
-  ).pipe(Layer.provideMerge(GameReviewSessions.providerCatalogLayer)),
+  ).pipe(
+    Layer.provideMerge(
+      // Review children pick their model from the live provider catalog; the
+      // session service itself keeps no provider-specific behaviour. It shares
+      // the same GameProjectService/GameRoundStore instances GameService uses.
+      Layer.unwrap(
+        Effect.gen(function* () {
+          const config = yield* ServerConfig.ServerConfig;
+          return GameReviewSessions.layer({ stateDir: config.stateDir });
+        }),
+      ).pipe(Layer.provideMerge(GameReviewSessions.providerCatalogLayer)),
+    ),
+    Layer.provideMerge(
+      Layer.unwrap(
+        Effect.gen(function* () {
+          const config = yield* ServerConfig.ServerConfig;
+          return GameRepairStudio.layer({ stateDir: config.stateDir });
+        }),
+      ).pipe(Layer.provideMerge(GameService.layer)),
+    ),
+  ),
 ).pipe(
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
@@ -560,6 +582,12 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const reactor = yield* GameRepairReactor.GameRepairReactor;
+      yield* reactor.start();
+    }),
+  ).pipe(Layer.provide(GameRepairReactor.layer)),
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),

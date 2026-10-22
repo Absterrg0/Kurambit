@@ -1,6 +1,7 @@
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameRepairLoop from "./game/GameRepairLoop.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -1141,6 +1142,14 @@ const layerWsRpc = (
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
       const gameProjects = yield* GameProjectService.GameProjectService;
+      /**
+       * A creator action that changes the game outranks a pending review. It
+       * waits for the loop's worker and children to stop before it proceeds, so
+       * a stale candidate can never promote into the action's result.
+       */
+      const repairLoop = yield* GameRepairLoop.GameRepairLoop;
+      const supersedeReview = (threadId: ThreadId, reason: string) =>
+        repairLoop.supersede(threadId, reason);
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1728,11 +1737,20 @@ const layerWsRpc = (
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
         [WS_METHODS.gameApproveDesign]: ({ threadId, expectedDesignHash }) =>
-          gameProjects.approveDesign(threadId, expectedDesignHash),
+          supersedeReview(
+            threadId,
+            "A design approval superseded the review; its candidate was not selected.",
+          ).pipe(Effect.andThen(gameProjects.approveDesign(threadId, expectedDesignHash))),
         [WS_METHODS.gameRequestChange]: ({ threadId, text }) =>
-          gameProjects.requestChange(threadId, text),
+          supersedeReview(
+            threadId,
+            "A design change request superseded the review; its candidate was not selected.",
+          ).pipe(Effect.andThen(gameProjects.requestChange(threadId, text))),
         [WS_METHODS.gameApproveRevision]: ({ threadId, expectedDesignHash }) =>
-          gameProjects.approveRevision(threadId, expectedDesignHash),
+          supersedeReview(
+            threadId,
+            "A design revision superseded the review; its candidate was not selected.",
+          ).pipe(Effect.andThen(gameProjects.approveRevision(threadId, expectedDesignHash))),
         [WS_METHODS.gameDiscardRevision]: ({ threadId }) => gameProjects.discardRevision(threadId),
         [WS_METHODS.gameUpdateVerificationPolicy]: ({
           threadId,
@@ -1745,7 +1763,14 @@ const layerWsRpc = (
             gameplayScene,
             probe,
           }),
-        [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
+        [WS_METHODS.gameAction]: ({ threadId, action }) =>
+          (action === "rebuild" || action === "stop"
+            ? supersedeReview(
+                threadId,
+                `The creator's ${action} superseded the review; its candidate was not selected.`,
+              )
+            : Effect.void
+          ).pipe(Effect.andThen(game.action(threadId, action))),
         [WS_METHODS.subscribeGameEvents]: () => game.events,
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,
@@ -1768,6 +1793,14 @@ const layerWsRpc = (
               ? { "orchestration_v2.source_thread_id": command.sourceThreadId }
               : {}),
           }).pipe(
+            Effect.andThen(
+              command.type === "message.dispatch"
+                ? supersedeReview(
+                    command.threadId,
+                    "The creator's new turn superseded the review; its candidate was not selected.",
+                  )
+                : Effect.void,
+            ),
             Effect.andThen(
               startup
                 .enqueueCommand(
@@ -2842,6 +2875,7 @@ export const layer = Layer.unwrap(
     const game = yield* GameService.GameService;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
+    const repairLoop = yield* GameRepairLoop.GameRepairLoop;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -2900,6 +2934,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameService.GameService, game)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
+              Layer.provide(Layer.succeed(GameRepairLoop.GameRepairLoop, repairLoop)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.
