@@ -28,11 +28,24 @@ export const BENCHMARK_LANES = ["harness", "raw"] as const;
 export type BenchmarkLane = (typeof BENCHMARK_LANES)[number];
 
 /**
+ * Who measured a row, and with which grader semantics. Resume may only reuse a
+ * graded row when this matches: the same commit and brief do not make a Sol
+ * verdict interchangeable with an opencode one.
+ */
+export interface BenchmarkEvaluationProfile {
+  readonly grader: { readonly provider: string; readonly model: string };
+  readonly version: number;
+}
+
+/**
  * The independent grader's row, read from `<brief>/grade/grade.json`. It is
  * deliberately small: the full grade and its frames stay next to the run.
  */
 export interface BenchmarkGrade {
   readonly build: string;
+  /** The grader that actually answered, and its semantics. */
+  readonly grader: { readonly provider: string; readonly model: string } | null;
+  readonly graderVersion: number | null;
   readonly quick: {
     readonly booted: boolean;
     readonly consoleErrors: number;
@@ -56,8 +69,16 @@ export function readGradeSummary(value: unknown): BenchmarkGrade | null {
     ? (record.obligations as ReadonlyArray<Record<string, unknown>>)
     : [];
   const control = record.control as { readonly yes?: unknown } | undefined;
+  const storedGrader = record.grader as
+    | { readonly provider?: unknown; readonly model?: unknown }
+    | undefined;
   return {
     build: build.kind,
+    grader:
+      typeof storedGrader?.provider === "string" && typeof storedGrader.model === "string"
+        ? { provider: storedGrader.provider, model: storedGrader.model }
+        : null,
+    graderVersion: typeof record.graderVersion === "number" ? record.graderVersion : null,
     quick:
       quick === null || quick === undefined
         ? null
@@ -95,6 +116,8 @@ export interface BenchmarkBriefResult {
   readonly title: string;
   readonly template: string;
   readonly fixtureChecksum: string;
+  /** Who measured this row; null when no grade was written. */
+  readonly evaluation: BenchmarkEvaluationProfile | null;
   readonly outcome: BenchmarkOutcome;
   readonly failureReason: string;
   readonly startedAt: string;
@@ -269,6 +292,14 @@ const unreadObligations = (brief: GameBenchmarkBrief): ReadonlyArray<GameBenchma
     criteria: [],
   }));
 
+/** The profile a grade was measured under, or null when nothing was graded. */
+const evaluationOf = (
+  grade: BenchmarkGrade | null | undefined,
+): BenchmarkEvaluationProfile | null =>
+  grade === null || grade === undefined || grade.grader === null || grade.graderVersion === null
+    ? null
+    : { grader: grade.grader, version: grade.graderVersion };
+
 /** Builds the row the aggregate stores for one brief, including its failures. */
 export function readBenchmarkResult(input: {
   readonly harnessCommit: string;
@@ -292,6 +323,7 @@ export function readBenchmarkResult(input: {
     title: input.brief.title,
     template: input.brief.template,
     fixtureChecksum: input.fixtureChecksum,
+    evaluation: evaluationOf(input.grade),
     outcome: verdict.outcome,
     failureReason: verdict.reason,
     startedAt: input.startedAt,
@@ -368,6 +400,7 @@ export function readRawResult(input: {
     title: input.brief.title,
     template: input.brief.template,
     fixtureChecksum: input.fixtureChecksum,
+    evaluation: evaluationOf(grade),
     outcome,
     failureReason: reason,
     startedAt: input.startedAt,
@@ -488,24 +521,50 @@ const judgementLine = (judgement: GameVisualJudgement): string =>
     .map((score) => `${DIMENSION_KEYS[score.dimension]}=${score.score}`)
     .join(" ")}`;
 
-/** A row is only reused when it measures the same commit, lane and fixture bytes. */
+/** Same grader, same model, same grader semantics. */
+export const sameEvaluationProfile = (
+  left: BenchmarkEvaluationProfile | null,
+  right: BenchmarkEvaluationProfile | null,
+): boolean =>
+  left !== null &&
+  right !== null &&
+  left.version === right.version &&
+  left.grader.provider === right.grader.provider &&
+  left.grader.model === right.grader.model;
+
+/**
+ * A row is only reused when it measures the same commit, lane and fixture bytes
+ * under the same evaluation profile. A graded row without a recorded profile is
+ * from before the profile existed, so it cannot be reused either: changing the
+ * grader must never silently inherit the old grader's votes.
+ */
 export function shouldResume(
   existing: {
     readonly harnessCommit: string;
     readonly fixtureChecksum: string;
     readonly lane?: BenchmarkLane;
+    readonly grade?: BenchmarkGrade | null;
+    readonly evaluation?: BenchmarkEvaluationProfile | null;
   } | null,
   expected: {
     readonly harnessCommit: string;
     readonly checksum: string;
     readonly lane?: BenchmarkLane;
+    readonly evaluation?: BenchmarkEvaluationProfile | null;
   },
 ): boolean {
+  if (
+    existing === null ||
+    existing.harnessCommit !== expected.harnessCommit ||
+    existing.fixtureChecksum !== expected.checksum ||
+    (existing.lane ?? "harness") !== (expected.lane ?? "harness")
+  )
+    return false;
+  // Nothing was graded, so no grader profile can differ.
+  if ((existing.grade ?? null) === null) return true;
   return (
-    existing !== null &&
-    existing.harnessCommit === expected.harnessCommit &&
-    existing.fixtureChecksum === expected.checksum &&
-    (existing.lane ?? "harness") === (expected.lane ?? "harness")
+    expected.evaluation !== undefined &&
+    sameEvaluationProfile(existing.evaluation ?? null, expected.evaluation)
   );
 }
 

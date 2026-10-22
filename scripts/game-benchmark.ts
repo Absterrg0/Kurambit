@@ -16,14 +16,21 @@ import {
   readGradeSummary,
   readRawResult,
   renderResultsMarkdown,
+  sameEvaluationProfile,
   shouldResume,
   summarizeResults,
   type BenchmarkBriefResult,
+  type BenchmarkEvaluationProfile,
   type BenchmarkGrade,
   type BenchmarkLane,
   type BenchmarkRunObservation,
 } from "./game-benchmark/aggregate.ts";
-import { defaultGodotBinary } from "./game-grade.ts";
+import {
+  CODEX_GRADER_MODEL,
+  GRADER_VERSION,
+  OPENCODE_GRADER_MODEL,
+  defaultGodotBinary,
+} from "./game-grade.ts";
 import { externalServerOrigin } from "./lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
@@ -102,6 +109,17 @@ const externalServerUrl = externalServerOrigin({
   url: values.url,
   allowExternalServer: values["allow-external-server"] === true,
 });
+// Which grader a row must be measured by before it may be resumed.
+const expectedEvaluation: BenchmarkEvaluationProfile = {
+  grader: {
+    provider: grader,
+    model:
+      grader === "opencode"
+        ? (values["grader-model"] ?? OPENCODE_GRADER_MODEL)
+        : CODEX_GRADER_MODEL,
+  },
+  version: GRADER_VERSION,
+};
 const rawTimeoutMs = Number(values["raw-timeout-ms"]);
 if (!Number.isFinite(rawTimeoutMs) || rawTimeoutMs <= 0)
   throw new Error("--raw-timeout-ms must be positive");
@@ -400,12 +418,14 @@ const findReusableRawResult = async (root: string, briefId: string): Promise<str
 
 /**
  * Copies a cached raw-lane brief instead of spending the agent's two-hour
- * budget again. The row is kept verbatim, so its `harnessCommit` still names
- * the grader that measured it, and its build comes along for a later re-grade.
+ * budget again. When the cached row was graded under another profile, only its
+ * build is reused and the copied build is regraded by the requested grader.
  */
 const reuseRawBrief = async (
   brief: LoadedGameBenchmarkBrief,
   directory: string,
+  environment: NodeJS.ProcessEnv,
+  expected: BenchmarkEvaluationProfile,
 ): Promise<BenchmarkBriefResult> => {
   const source = await findReusableRawResult(reuseRaw!, brief.id);
   if (source === null)
@@ -418,18 +438,38 @@ const reuseRawBrief = async (
   if (previous.lane !== "raw") throw new Error(`${source} is not a raw-lane result.`);
   if (previous.fixtureChecksum !== brief.checksum)
     throw new Error(`${source} was measured on different brief bytes; refusing to reuse it.`);
-  for (const entry of ["grade", "raw"]) {
+  const sameProfile = sameEvaluationProfile(previous.evaluation, expected);
+  // Nothing was graded: there is no verdict to inherit, so the row stands.
+  const regrade = previous.grade !== null && !sameProfile;
+  for (const entry of regrade ? ["raw"] : ["grade", "raw"]) {
     const from = NodePath.join(sourceDirectory, entry);
     const to = NodePath.join(directory, entry);
     if (from === to || !(await exists(from))) continue;
     await NodeFSP.cp(from, to, { recursive: true });
   }
-  for (const file of ["opencode.log", "result.json"]) {
+  for (const file of regrade ? ["opencode.log"] : ["opencode.log", "result.json"]) {
     const from = NodePath.join(sourceDirectory, file);
     if (from === NodePath.join(directory, file) || !(await exists(from))) continue;
     await NodeFSP.copyFile(from, NodePath.join(directory, file));
   }
-  return previous;
+  if (!regrade) return previous;
+  const rawRoot = NodePath.join(directory, "raw");
+  console.log(
+    `[${brief.id}] cached build was graded by ${previous.evaluation?.grader.provider ?? "an unknown grader"}/${previous.evaluation?.grader.model ?? "unknown"}; regrading with ${expected.grader.provider}/${expected.grader.model}`,
+  );
+  const grade = await gradeFinishedGame(brief, rawRoot, directory, environment);
+  const regraded = readRawResult({
+    harnessCommit,
+    brief,
+    fixtureChecksum: brief.checksum,
+    startedAt: previous.startedAt,
+    durationMs: previous.durationMs,
+    timedOut: false,
+    exitCode: null,
+    grade,
+  });
+  await writeJson(NodePath.join(directory, "result.json"), regraded);
+  return regraded;
 };
 
 const aggregate = async (results: ReadonlyArray<BenchmarkBriefResult>) => {
@@ -459,7 +499,12 @@ for (const brief of briefs) {
   );
   if (
     previous !== null &&
-    shouldResume(previous, { harnessCommit, checksum: brief.checksum, lane })
+    shouldResume(previous, {
+      harnessCommit,
+      checksum: brief.checksum,
+      lane,
+      evaluation: expectedEvaluation,
+    })
   ) {
     console.log(`[${brief.id}] resume ${previous.outcome} from ${previous.startedAt}`);
     results.push(previous);
@@ -467,7 +512,10 @@ for (const brief of briefs) {
   }
   await NodeFSP.mkdir(directory, { recursive: true });
   if (lane === "raw" && reuseRaw !== null) {
-    const reused = await reuseRawBrief(brief, directory);
+    // The display sandbox is prepared before the cached build is regraded too:
+    // the grader launches headless Chrome and must not see the operator's.
+    const sandbox = await prepareDisplaySandbox(directory);
+    const reused = await reuseRawBrief(brief, directory, sandbox.environment, expectedEvaluation);
     results.push(reused);
     await aggregate(results);
     console.log(

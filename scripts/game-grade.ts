@@ -40,6 +40,14 @@ const REVIEWER: ModelSelection = {
   model: "gpt-6.1-sol",
   options: [{ id: "reasoningEffort", value: "high" }],
 };
+/** The model the default codex grader asks for. */
+export const CODEX_GRADER_MODEL = REVIEWER.model;
+/**
+ * The grader's own semantics: rubric, frame selection and prompt. A benchmark
+ * resume key includes it, so another grader version cannot silently reuse a
+ * verdict earned under the old one. Bump when a grade stops being comparable.
+ */
+export const GRADER_VERSION = 3;
 
 const MAX_PLAYTESTER_STEPS = 15;
 const MAX_ACTIONS_PER_STEP = 3;
@@ -209,6 +217,8 @@ export interface GradeDocument {
   readonly model: string;
   /** Which model family graded this document, and which model answered. */
   readonly grader: { readonly provider: string; readonly model: string };
+  /** The grader semantics that produced this document; see GRADER_VERSION. */
+  readonly graderVersion: number;
   readonly build: GradeBuild;
   readonly quick: GradeQuick | null;
   readonly frames: ReadonlyArray<string>;
@@ -1390,6 +1400,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
     gameDir,
     model: `${grader().provider}/${grader().model}`,
     grader: grader(),
+    graderVersion: GRADER_VERSION,
   });
 
   const write = async (grade: GradeDocument): Promise<GradeDocument> => {

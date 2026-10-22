@@ -10,10 +10,12 @@ import {
 } from "../../packages/contracts/src/index.ts";
 import {
   readBenchmarkResult,
+  readGradeSummary,
   classifyRun,
   renderResultsMarkdown,
   shouldResume,
 } from "./aggregate.ts";
+import type { BenchmarkEvaluationProfile, BenchmarkGrade } from "./aggregate.ts";
 import type {
   GameBenchmarkBrief,
   GameBenchmarkObligationRead,
@@ -401,5 +403,66 @@ describe("resume", () => {
     assert.equal(shouldResume(existing, { harnessCommit: "next", checksum: "checksum" }), false);
     assert.equal(shouldResume(existing, { harnessCommit: "commit", checksum: "changed" }), false);
     assert.equal(shouldResume(null, { harnessCommit: "commit", checksum: "checksum" }), false);
+  });
+
+  it("reuses a graded row only under the same evaluation profile", () => {
+    const grade: BenchmarkGrade = {
+      build: "existing",
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 3,
+      quick: null,
+      obligationIds: [],
+      obligations: { yes: 0, total: 0 },
+      control: false,
+      void: false,
+      solCalls: 0,
+    };
+    const evaluation: BenchmarkEvaluationProfile = {
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      version: 3,
+    };
+    const existing = {
+      harnessCommit: "commit",
+      fixtureChecksum: "checksum",
+      grade,
+      evaluation,
+    };
+    const expected = { harnessCommit: "commit", checksum: "checksum", evaluation };
+    assert.equal(shouldResume(existing, expected), true);
+    assert.equal(
+      shouldResume(existing, {
+        ...expected,
+        evaluation: { ...evaluation, version: 4 },
+      }),
+      false,
+    );
+    assert.equal(
+      shouldResume(existing, {
+        ...expected,
+        evaluation: { ...evaluation, grader: { provider: "opencode", model: "minimax" } },
+      }),
+      false,
+    );
+    // A graded row from before the profile was recorded cannot be inherited.
+    assert.equal(shouldResume({ ...existing, evaluation: null }, expected), false);
+    // Nothing was graded, so the row carries no verdict a profile could change.
+    assert.equal(
+      shouldResume({ harnessCommit: "commit", fixtureChecksum: "checksum", grade: null }, expected),
+      true,
+    );
+  });
+});
+
+describe("grade summaries", () => {
+  it("carries the grader that answered and the semantics it used", () => {
+    const summary = readGradeSummary({
+      build: { kind: "existing" },
+      grader: { provider: "opencode", model: "minimax" },
+      graderVersion: 3,
+    });
+    assert.deepEqual(summary?.grader, { provider: "opencode", model: "minimax" });
+    assert.equal(summary?.graderVersion, 3);
+    // An old grade document without the profile cannot be attributed to one.
+    assert.equal(readGradeSummary({ build: { kind: "existing" } })?.graderVersion, null);
   });
 });
