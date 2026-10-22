@@ -193,13 +193,6 @@ const make = Effect.gen(function* () {
     string,
     { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
   >();
-  /**
-   * The current source's byte identity, reused while qualification's legacy
-   * Godot size/mtime snapshot is unchanged. Status polls must not rehash a
-   * game's Blender originals every two seconds; an art-only edit that does not
-   * touch the Godot project is reported once the playable tree changes.
-   */
-  const playIdentityCache = new Map<string, { read: string; sourceId: string | null }>();
   const cancel = Effect.fnUntraced(function* (root: string) {
     const operation = active.get(root);
     if (operation === undefined) return;
@@ -1656,24 +1649,17 @@ const make = Effect.gen(function* () {
         // legacy build Play would fall back to.
         (yield* webBuildIsCurrent(qualificationRead));
       // Play identity is a byte question: the selected build's own source
-      // manifest against the current bytes. An unknown tree differs because it
-      // cannot be shown to match. Hashing every file on a two-second poll would
-      // be wasteful, so reuse the byte identity while qualification's cheap
-      // size/mtime snapshot says the tree has not changed.
-      let playSourceId: string | null = null;
-      if (selected !== null) {
-        const legacySourceId = qualificationRead.sourceId;
-        const cached = legacySourceId === null ? undefined : playIdentityCache.get(root);
-        if (legacySourceId === null) playSourceId = null;
-        else if (cached !== undefined && cached.read === legacySourceId)
-          playSourceId = cached.sourceId;
-        else {
-          playSourceId = yield* rounds
-            .sourceId(root)
-            .pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
-          playIdentityCache.set(root, { read: legacySourceId, sourceId: playSourceId });
-        }
-      }
+      // manifest against the current bytes. Asked on every read, because the
+      // legacy Godot size/mtime snapshot misses art-only edits and same-size
+      // edits that restore mtime; caching it would claim the served build still
+      // matches sources nobody hashed. An unknown tree differs because it
+      // cannot be shown to match.
+      const playSourceId =
+        selected === null
+          ? null
+          : yield* rounds
+              .sourceId(root)
+              .pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () =>

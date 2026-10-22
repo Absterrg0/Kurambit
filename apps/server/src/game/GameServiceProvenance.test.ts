@@ -470,6 +470,57 @@ it.live(
   },
 );
 
+it.live("status compares Play against current bytes, not a Godot size/mtime cache", () => {
+  let exports = 0;
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(NodePath.join(NodePath.dirname(output), name), `export ${name}`);
+          return processOk(input.root);
+        });
+      },
+    },
+    ({ root, game }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.join(root, "assets"), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
+        });
+        const exported = yield* game.export(threadId, "Web");
+        expect(exported.success, exported.message).toBe(true);
+        expect(exports).toBe(1);
+        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(false);
+
+        // Art beside the Godot project is source too; the Godot size/mtime
+        // snapshot does not see it.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-two"),
+        );
+        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(true);
+
+        // A same-size script edit with the original mtime restored is invisible
+        // to size/mtime but different bytes.
+        const script = NodePath.join(root, "godot/scripts/main.gd");
+        const before = yield* Effect.promise(async () => {
+          const stat = await NodeFSP.stat(script);
+          return { mtime: stat.mtime, text: await NodeFSP.readFile(script, "utf8") };
+        });
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
+          await NodeFSP.writeFile(script, `${before.text.slice(0, -1)}X\n`);
+          await NodeFSP.utimes(script, before.mtime, before.mtime);
+        });
+        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(true);
+      }),
+  );
+});
+
 it.live("a web playtest does not stay current when its build files change mid-run", () =>
   withGame(
     {
