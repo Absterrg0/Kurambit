@@ -99,11 +99,16 @@ const builderRun = {
   contextHandoffId: null,
 } as unknown as OrchestrationV2Run;
 
-const childRun = (childThreadId: ThreadId, status: OrchestrationV2Run["status"]) =>
+const childRun = (
+  childThreadId: ThreadId,
+  status: OrchestrationV2Run["status"],
+  userMessageId: MessageId = MessageId.make("message:review-child"),
+) =>
   ({
     ...builderRun,
     id: RunId.make("run:review-child"),
     threadId: childThreadId,
+    userMessageId,
     status,
     ordinal: 1,
   }) as unknown as OrchestrationV2Run;
@@ -128,7 +133,11 @@ interface Scripted {
   /** The commands the session service dispatched, when any ran. */
   readonly dispatches: Array<OrchestrationV2ServerCommand>;
   readonly receipts: Set<string>;
+  /** Command ids the orchestrator committed as refused. */
+  readonly rejectedReceipts: Set<string>;
   childThreadId: ThreadId | null;
+  /** The command that created the child; its message id names its run. */
+  childCommandId: string | null;
   childStatus: OrchestrationV2Run["status"];
   answer: string;
   available: boolean;
@@ -137,7 +146,9 @@ interface Scripted {
 const makeScripted = (): Scripted => ({
   dispatches: [],
   receipts: new Set(),
+  rejectedReceipts: new Set(),
   childThreadId: null,
+  childCommandId: null,
   childStatus: "completed",
   answer: "",
   available: true,
@@ -227,6 +238,14 @@ const withSession = <A, E>(
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               hasReceipt: (commandId: CommandId) =>
                 Effect.succeed(scripted.receipts.has(commandId)),
+              getCommandReceiptStatus: (commandId: CommandId) =>
+                Effect.succeed(
+                  scripted.rejectedReceipts.has(commandId)
+                    ? "rejected"
+                    : scripted.receipts.has(commandId)
+                      ? "accepted"
+                      : null,
+                ),
               getThreadRecords: (target: ThreadId) => {
                 if (target === threadId)
                   return Effect.succeed({
@@ -235,7 +254,17 @@ const withSession = <A, E>(
                   } as unknown as OrchestrationV2ThreadProjection);
                 if (scripted.childThreadId !== null && target === scripted.childThreadId)
                   return Effect.succeed({
-                    runs: [childRun(target, scripted.childStatus)],
+                    runs: [
+                      childRun(
+                        target,
+                        scripted.childStatus,
+                        scripted.childCommandId === null
+                          ? undefined
+                          : IdAllocator.derive.delegatedTaskMessage({
+                              commandId: CommandId.make(scripted.childCommandId),
+                            }),
+                      ),
+                    ],
                     messages: [assistantMessage(target, scripted.answer)],
                   } as unknown as OrchestrationV2ThreadProjection);
                 return Effect.die(`unexpected thread ${target}`);
@@ -249,6 +278,7 @@ const withSession = <A, E>(
                   scripted.childThreadId = IdAllocator.derive.delegatedTaskThread({
                     commandId: command.commandId,
                   });
+                  scripted.childCommandId = command.commandId;
                 }
                 return Effect.succeed({
                   sequence: scripted.dispatches.length,
@@ -576,15 +606,23 @@ it.live("a restart reconciles a committed session without dispatching again", ()
       expect(second.childThreadId).toBe(first.childThreadId);
       expect(scripted.dispatches).toHaveLength(1);
 
-      // A crash between dispatch and the record write: the receipt alone must
-      // reconcile, and the derived child id is the one that already exists.
+      // A crash after the command committed but before its record was
+      // confirmed: the pending record must recover the same child, the
+      // original hash and enough audit data to answer, without dispatching.
       const records = (yield* Effect.promise(() => walk(stateDir))).filter((file) =>
         file.endsWith("session.json"),
       );
       expect(records).toHaveLength(1);
+      const recordPath = NodePath.join(stateDir, records[0]!);
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { commandId: string; dispatch: { state: string }; evidenceHash: string | null };
+      expect(stored.evidenceHash).toMatch(/^[0-9a-f]{64}$/);
+      stored.dispatch = { state: "pending" };
       yield* Effect.promise(() =>
-        NodeFSP.rm(NodePath.join(stateDir, records[0]!), { force: true }),
+        NodeFSP.writeFile(recordPath, `${JSON.stringify(stored, null, 2)}\n`),
       );
+      scripted.answer = criticText;
       const recovered = yield* (yield* restart()).start({
         threadId,
         loopId,
@@ -596,6 +634,80 @@ it.live("a restart reconciles a committed session without dispatching again", ()
       if (recovered.kind !== "started") return;
       expect(recovered.reconciled).toBe(true);
       expect(recovered.childThreadId).toBe(first.childThreadId);
+      expect(recovered.evidenceHash).toBe(first.evidenceHash);
+      expect(scripted.dispatches).toHaveLength(1);
+      const recoveredAnswer = yield* (yield* restart()).answer({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      expect(recoveredAnswer.kind).toBe("critic");
+
+      // The record is the audit truth. A receipt without it cannot recreate the
+      // manifest mapping or the original hash, so it is a failed start rather
+      // than a phantom success.
+      yield* Effect.promise(() => NodeFSP.rm(recordPath, { force: true }));
+      const refused = yield* (yield* restart()).start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(refused.kind).toBe("failed");
+      expect(scripted.dispatches).toHaveLength(1);
+    }),
+  ),
+);
+
+it.live("a rejected dispatch receipt fails the start instead of recovering it", () =>
+  withSession(({ stateDir, frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      const first = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(first.kind).toBe("started");
+      if (first.kind !== "started") return;
+
+      const records = (yield* Effect.promise(() => walk(stateDir))).filter((file) =>
+        file.endsWith("session.json"),
+      );
+      const recordPath = NodePath.join(stateDir, records[0]!);
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { commandId: string; dispatch: { state: string } };
+      stored.dispatch = { state: "pending" };
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(recordPath, `${JSON.stringify(stored, null, 2)}\n`),
+      );
+      // The orchestrator committed a refusal for this command id.
+      scripted.receipts.delete(stored.commandId);
+      scripted.rejectedReceipts.add(stored.commandId);
+
+      const recovered = yield* (yield* restart()).start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(recovered.kind).toBe("failed");
+      expect(scripted.dispatches).toHaveLength(1);
+
+      // The refusal is durable; a retry cannot turn it into a start later.
+      const again = yield* (yield* restart()).start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(again.kind).toBe("failed");
       expect(scripted.dispatches).toHaveLength(1);
     }),
   ),

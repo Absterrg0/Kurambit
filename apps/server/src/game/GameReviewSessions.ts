@@ -17,7 +17,7 @@ import {
   type ProviderInstanceId,
   type ProviderInteractionMode,
   ProviderOptionSelections,
-  type RunId,
+  RunId,
   type RuntimeMode,
   type ThreadId,
   ThreadId as ThreadIdSchema,
@@ -109,6 +109,8 @@ export type GameReviewSessionStartResult =
       /** True when a receipt/record already existed and nothing was dispatched. */
       readonly reconciled: boolean;
     }
+  /** The round cannot use this child; nothing was started and nothing will be. */
+  | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "unavailable"; readonly reason: string };
 
 export interface GameReviewSessionAnswerInput {
@@ -165,6 +167,29 @@ const ReviewSelectionRecord = Schema.Struct({
 });
 type ReviewSelectionRecordType = typeof ReviewSelectionRecord.Type;
 
+const ReviewDispatchRecord = Schema.Struct({
+  /**
+   * pending is written before the command is sent. confirmed means the
+   * orchestrator accepted it, rejected means it refused. A crash can leave
+   * pending behind, never a missing record.
+   */
+  state: Schema.Literals(["pending", "confirmed", "rejected"]),
+  detail: Schema.optionalKey(Schema.String),
+});
+type ReviewDispatchRecordType = typeof ReviewDispatchRecord.Type;
+
+/** Everything a pending record needs to send the same command on retry. */
+const ReviewCommandRecord = Schema.Struct({
+  task: Schema.String,
+  title: Schema.String,
+  modelSelection: ReviewSelectionRecord,
+  runtimeMode: Schema.String,
+  interactionMode: Schema.String,
+  originatingRunId: Schema.String,
+  originatingNodeId: Schema.String,
+});
+type ReviewCommandRecordType = typeof ReviewCommandRecord.Type;
+
 const ReviewSessionRecord = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   loopId: Schema.String,
@@ -180,6 +205,9 @@ const ReviewSessionRecord = Schema.Struct({
   evidence: Schema.NullOr(ReviewEvidenceRecord),
   itemIds: Schema.Array(Schema.String),
   startedAt: Schema.String,
+  /** Present from this version on; absent records predate the pending write. */
+  dispatch: Schema.optionalKey(ReviewDispatchRecord),
+  command: Schema.optionalKey(ReviewCommandRecord),
 });
 type ReviewSessionRecordType = typeof ReviewSessionRecord.Type;
 
@@ -636,43 +664,142 @@ export const layer = (options: { readonly stateDir: string }) => {
       return round;
     });
 
+    const startedResult = (
+      record: ReviewSessionRecordType,
+      reconciled: boolean,
+    ): GameReviewSessionStartResult => ({
+      kind: "started",
+      commandId: record.commandId,
+      childThreadId: ThreadIdSchema.make(record.childThreadId),
+      taskId: record.taskId === null ? null : (record.taskId as NodeId),
+      // The hash recorded when the evidence was written. Re-hashing on a
+      // restart could bless a later change as the original audit fact.
+      evidenceHash: record.evidenceHash,
+      reconciled,
+    });
+
+    /** The child run this record dispatched, never merely its newest run. */
+    const boundRunId = (record: ReviewSessionRecordType) =>
+      Effect.gen(function* () {
+        const messageId = IdAllocator.derive.delegatedTaskMessage({
+          commandId: CommandId.make(record.commandId),
+        });
+        const records = yield* threads.getThreadRecords(ThreadIdSchema.make(record.childThreadId), [
+          "runs",
+        ]);
+        return records.runs.find((run) => run.userMessageId === messageId)?.id ?? null;
+      }).pipe(
+        Effect.mapError((cause) => threadFailure("start game review", record.childThreadId, cause)),
+        Effect.orElseSucceed(() => null),
+      );
+
+    /** Re-sends exactly the command the pending record persisted. */
+    const commandFromRecord = (record: ReviewSessionRecordType, threadId: ThreadId) => {
+      const command = record.command!;
+      return {
+        type: "game-round.task.request",
+        createdBy: "system",
+        creationSource: "server",
+        commandId: CommandId.make(record.commandId),
+        originatingThreadId: threadId,
+        originatingRunId: RunId.make(command.originatingRunId),
+        originatingNodeId: command.originatingNodeId as NodeId,
+        loopId: record.loopId,
+        roundId: record.roundId,
+        role: record.role,
+        order: record.order,
+        task: command.task,
+        title: command.title,
+        modelSelection: toSelection(command.modelSelection),
+        runtimeMode: command.runtimeMode as RuntimeMode,
+        interactionMode: command.interactionMode as ProviderInteractionMode,
+        evidenceDirectory: record.evidenceDirectory,
+      } as const;
+    };
+
     /**
-     * Reconciles a committed session without dispatching. The record is the
-     * primary source; a crash between dispatch and the record write leaves the
-     * child thread id derivable from the same command id the Orchestrator used.
+     * Resolves a record left by an earlier call. A confirmed record needs no
+     * dispatch. A pending one asks the receipt store what the orchestrator
+     * committed: accepted finishes the record, rejected is a failed start and
+     * no receipt means the command never committed, so it is safe to send it
+     * again with the same idempotency key.
      */
-    const reconcile = Effect.fnUntraced(function* (
+    const reconcile = (
       root: string,
       key: SessionKey,
       commandId: CommandId,
-      existing: ReviewSessionRecordType | null,
-    ) {
-      const childThreadId =
-        existing === null
-          ? IdAllocator.derive.delegatedTaskThread({ commandId })
-          : ThreadIdSchema.make(existing.childThreadId);
-      const taskId =
-        existing === null
-          ? IdAllocator.derive.delegatedTaskNode({ commandId })
-          : existing.taskId === null
-            ? null
-            : (existing.taskId as NodeId);
-      const evidenceDirectory = existing?.evidenceDirectory ?? null;
-      const evidenceHash =
-        evidenceDirectory === null
-          ? null
-          : yield* attempt("hash game review evidence", evidenceDirectory, () =>
-              hashEvidenceDirectory(evidenceDirectory),
-            ).pipe(Effect.orElseSucceed(() => null));
-      return {
-        kind: "started",
-        commandId,
-        childThreadId,
-        taskId,
-        evidenceHash,
-        reconciled: true,
-      } satisfies GameReviewSessionStartResult;
-    });
+      record: ReviewSessionRecordType,
+      threadId: ThreadId,
+    ) =>
+      Effect.gen(function* () {
+        const state = record.dispatch?.state ?? "confirmed";
+        if (state === "rejected")
+          return {
+            kind: "failed",
+            reason: record.dispatch?.detail ?? "The review dispatch was rejected.",
+          } satisfies GameReviewSessionStartResult;
+        if (state === "confirmed") return startedResult(record, true);
+
+        const receipt = yield* threads
+          .getCommandReceiptStatus(commandId)
+          .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        if (receipt === "rejected") {
+          const detail = "The orchestration layer rejected this review dispatch.";
+          yield* writeRecord(root, key, {
+            ...record,
+            dispatch: { state: "rejected", detail },
+          });
+          return { kind: "failed", reason: detail } satisfies GameReviewSessionStartResult;
+        }
+        if (receipt === "accepted") {
+          // The command committed but the process died before confirming its
+          // record. The child exists with every audit field already written, so
+          // this is a start to finish, not a command to send again.
+          const runId = yield* boundRunId(record);
+          if (runId === null)
+            return {
+              kind: "failed",
+              reason: "The committed review child has no dispatched run.",
+            } satisfies GameReviewSessionStartResult;
+          const confirmed: ReviewSessionRecordType = {
+            ...record,
+            dispatch: { state: "confirmed" },
+          };
+          yield* writeRecord(root, key, confirmed);
+          return startedResult(confirmed, true);
+        }
+
+        const command = record.command;
+        if (command === undefined)
+          return {
+            kind: "failed",
+            reason: "The pending review record is missing the command it must send.",
+          } satisfies GameReviewSessionStartResult;
+        if (record.evidenceDirectory !== null) {
+          // The child has not read anything yet, but the audit hash must still
+          // describe the evidence it will see.
+          const now = yield* attempt("hash game review evidence", record.evidenceDirectory, () =>
+            hashEvidenceDirectory(record.evidenceDirectory!),
+          ).pipe(Effect.orElseSucceed(() => null));
+          if (now !== record.evidenceHash) {
+            const detail = "The evidence no longer matches the pending review record.";
+            yield* writeRecord(root, key, {
+              ...record,
+              dispatch: { state: "rejected", detail },
+            });
+            return { kind: "failed", reason: detail } satisfies GameReviewSessionStartResult;
+          }
+        }
+        yield* threads
+          .dispatch(commandFromRecord(record, threadId))
+          .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        const confirmed: ReviewSessionRecordType = {
+          ...record,
+          dispatch: { state: "confirmed" },
+        };
+        yield* writeRecord(root, key, confirmed);
+        return startedResult(confirmed, false);
+      });
 
     const start: GameReviewSessions["Service"]["start"] = (input) =>
       Effect.gen(function* () {
@@ -694,14 +821,21 @@ export const layer = (options: { readonly stateDir: string }) => {
         const root = yield* projects.resolve(input.threadId);
         yield* liveRound(root, input.roundId);
 
-        // Reconcile first: a committed session must never dispatch again, even
-        // after a restart, so no second model call can start. The record is the
-        // normal path; a receipt without a record is the narrow crash window
-        // between dispatch and the record write.
+        // The record is written before the command is sent, so the crash
+        // window between a committed dispatch and its audit metadata no longer
+        // exists. A record that is already there is authoritative.
         const existing = yield* readRecord(root, key);
-        if (existing !== null) return yield* reconcile(root, key, commandId, existing);
-        if (yield* threads.hasReceipt(commandId))
-          return yield* reconcile(root, key, commandId, null);
+        if (existing !== null)
+          return yield* reconcile(root, key, commandId, existing, input.threadId);
+        const orphanReceipt = yield* threads
+          .getCommandReceiptStatus(commandId)
+          .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        if (orphanReceipt !== null)
+          return {
+            kind: "failed",
+            reason:
+              "The review dispatch committed without its audit record; refusing to report a start.",
+          } satisfies GameReviewSessionStartResult;
 
         const manifest = yield* projects.read(root);
         const origin = yield* resolveOrigin(input.threadId, {
@@ -788,6 +922,12 @@ export const layer = (options: { readonly stateDir: string }) => {
                   defects: input.repair?.defects ?? [],
                   doNotRegress: input.repair?.doNotRegress ?? [],
                 });
+        const title =
+          input.role === "critic"
+            ? "Game review: critic"
+            : input.role === "ballot"
+              ? "Game review: ballot"
+              : "Game review: repair";
 
         // Freeze the round's review selection before dispatch: every later
         // review child of this round must match, whatever the thread or caller
@@ -795,36 +935,6 @@ export const layer = (options: { readonly stateDir: string }) => {
         if (input.role !== "repair" && frozen === null)
           yield* writeRoundSelection(root, input.roundId, selection);
 
-        const command = {
-          type: "game-round.task.request",
-          createdBy: "system",
-          creationSource: "server",
-          commandId,
-          originatingThreadId: input.threadId,
-          originatingRunId: origin.run.id,
-          originatingNodeId: origin.nodeId,
-          loopId: input.loopId,
-          roundId: input.roundId,
-          role: input.role,
-          order,
-          task,
-          title:
-            input.role === "critic"
-              ? "Game review: critic"
-              : input.role === "ballot"
-                ? "Game review: ballot"
-                : "Game review: repair",
-          modelSelection: selection,
-          runtimeMode: origin.thread.runtimeMode as RuntimeMode,
-          interactionMode: origin.thread.interactionMode as ProviderInteractionMode,
-          evidenceDirectory,
-        } as const;
-        yield* threads
-          .dispatch(command)
-          .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
-        // The Orchestrator derives the child ids from this command id; the same
-        // derivation here is what lets a restart find the child without a
-        // second dispatch. The delegation test pins the two derivations together.
         const childThreadId = IdAllocator.derive.delegatedTaskThread({ commandId });
         const taskId = IdAllocator.derive.delegatedTaskNode({ commandId });
         const record: ReviewSessionRecordType = {
@@ -842,16 +952,49 @@ export const layer = (options: { readonly stateDir: string }) => {
           evidence,
           itemIds: (input.items ?? []).map((item) => item.id),
           startedAt: DateTime.formatIso(yield* DateTime.now),
+          dispatch: { state: "pending" },
+          command: {
+            task,
+            title,
+            modelSelection: selectionRecord(selection),
+            runtimeMode: origin.thread.runtimeMode as RuntimeMode,
+            interactionMode: origin.thread.interactionMode as ProviderInteractionMode,
+            originatingRunId: origin.run.id,
+            originatingNodeId: origin.nodeId,
+          },
         };
+        // Persist every audit fact before the command can create anything: a
+        // restart must be able to answer from this file alone.
         yield* writeRecord(root, key, record);
-        return {
-          kind: "started",
+
+        const command = {
+          type: "game-round.task.request",
+          createdBy: "system",
+          creationSource: "server",
           commandId,
-          childThreadId: ThreadIdSchema.make(record.childThreadId),
-          taskId: record.taskId === null ? null : (record.taskId as NodeId),
-          evidenceHash,
-          reconciled: false,
-        } satisfies GameReviewSessionStartResult;
+          originatingThreadId: input.threadId,
+          originatingRunId: origin.run.id,
+          originatingNodeId: origin.nodeId,
+          loopId: input.loopId,
+          roundId: input.roundId,
+          role: input.role,
+          order,
+          task,
+          title,
+          modelSelection: selection,
+          runtimeMode: origin.thread.runtimeMode as RuntimeMode,
+          interactionMode: origin.thread.interactionMode as ProviderInteractionMode,
+          evidenceDirectory,
+        } as const;
+        yield* threads
+          .dispatch(command)
+          .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        const confirmed: ReviewSessionRecordType = {
+          ...record,
+          dispatch: { state: "confirmed" },
+        };
+        yield* writeRecord(root, key, confirmed);
+        return startedResult(confirmed, false);
       });
 
     const readChildAnswer = (

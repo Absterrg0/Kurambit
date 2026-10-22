@@ -394,6 +394,13 @@ export interface ThreadManagementServiceShape {
    * just refuse a retry the project's settings no longer allow fresh.
    */
   readonly hasReceipt: (commandId: CommandId) => Effect.Effect<boolean>;
+  /**
+   * The committed outcome of a dispatch, for a caller whose own audit record
+   * must agree with it. `null` when the command never committed.
+   */
+  readonly getCommandReceiptStatus: (
+    commandId: CommandId,
+  ) => Effect.Effect<"accepted" | "rejected" | null>;
   readonly waitForThread: (
     input: ThreadManagementWaitInput,
   ) => Effect.Effect<ThreadManagementWaitResult, ThreadManagementError>;
@@ -551,6 +558,20 @@ const make = Effect.gen(function* () {
     receipts.getByCommandId(commandId).pipe(
       Effect.orElseSucceed(() => Option.none()),
       Effect.map(Option.isSome),
+    );
+
+  const getCommandReceiptStatus: ThreadManagementServiceShape["getCommandReceiptStatus"] = (
+    commandId,
+  ) =>
+    receipts.getByCommandId(commandId).pipe(
+      Effect.orElseSucceed(() => Option.none()),
+      Effect.map((receipt) =>
+        Option.isNone(receipt)
+          ? null
+          : receipt.value.status === "rejected"
+            ? "rejected"
+            : "accepted",
+      ),
     );
 
   const ensureLegacyTranscript = Effect.fn(
@@ -1181,6 +1202,7 @@ const make = Effect.gen(function* () {
     assertProviderInstanceEnabled,
     isProviderInstanceEnabledForProject,
     hasReceipt,
+    getCommandReceiptStatus,
     waitForThread,
     settleAfterRun,
     settleThread,
