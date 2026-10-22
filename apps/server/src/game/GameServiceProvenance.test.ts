@@ -37,6 +37,9 @@ let failSpawn = false;
 let playtestRoot = "";
 const checkStarted = Deferred.makeUnsafe<void>();
 const checkRelease = Deferred.makeUnsafe<void>();
+/** Gates one status read inside the byte capture a check asks for. */
+const statusStarted = Deferred.makeUnsafe<void>();
+const statusRelease = Deferred.makeUnsafe<void>();
 const manifest = (overrides: Partial<GameManifest> = {}): GameManifest => ({
   schemaVersion: 1,
   name: "Provenance probe",
@@ -743,6 +746,134 @@ it.live("a candidate changed after its export is refused by promotion", () => {
         // Nothing switched: Play still shows the incumbent.
         expect(opened.at(-1)).toBe(incumbentDirectory);
         expect((yield* game.status(threadId)).previewUrl).toBe(incumbentUrl);
+      }),
+  );
+});
+
+it.live("a status read in flight cannot move Play back after a promotion", () => {
+  let exports = 0;
+  const opened: string[] = [];
+  // Armed by the test once setup is done, so only the status read under test
+  // parks inside the byte capture.
+  let armed = false;
+  const gatedRounds = (stateDir: string) =>
+    Layer.effect(
+      GameRoundStore.GameRoundStore,
+      Effect.gen(function* () {
+        const base = yield* GameRoundStore.GameRoundStore;
+        return GameRoundStore.GameRoundStore.of({
+          ...base,
+          // The status read parks inside the byte capture a check asks for;
+          // that is after it read the selection and before it would have
+          // touched the preview.
+          sourceId: (root) =>
+            Effect.gen(function* () {
+              if (!armed) return yield* base.sourceId(root);
+              armed = false;
+              yield* Deferred.succeed(statusStarted, undefined);
+              yield* Deferred.await(statusRelease);
+              return yield* base.sourceId(root);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(GameRoundStore.layer({ stateDir })));
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${exports} ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      preview: (directory) => {
+        opened.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${opened.length}`);
+      },
+      rounds: gatedRounds,
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const first = yield* game.action(threadId, "preview");
+        expect(first.success, first.message).toBe(true);
+        const incumbentDirectory = opened[0]!;
+        const round = yield* rounds.begin(root, {});
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# repair\n"),
+        );
+        const exported = yield* game.export(threadId, "Web");
+        expect(exported.success, exported.message).toBe(true);
+        yield* rounds.recordPostRepair(root, round.id);
+
+        armed = true;
+        const watched = yield* game.status(threadId, { checkSources: true }).pipe(Effect.forkChild);
+        yield* Deferred.await(statusStarted);
+        const promoted = yield* game.promote(threadId, round.id);
+        expect(promoted.kind).toBe("promoted");
+        const promotedDirectory = opened.at(-1)!;
+        yield* Deferred.succeed(statusRelease, undefined);
+        yield* Fiber.join(watched);
+
+        // The read finished against the older selection, but selecting is not a
+        // read's job: Play stays on the promoted build.
+        expect(opened.filter((directory) => directory === incumbentDirectory)).toHaveLength(1);
+        const state = yield* rounds.read(root);
+        expect(state.selected?.directory).toBe(promotedDirectory);
+        expect((yield* game.status(threadId)).previewUrl).toBe(
+          `http://127.0.0.1:9/${opened.length}`,
+        );
+      }),
+  );
+});
+
+it.live("a status read after Stop never reopens the preview", () => {
+  const opened: string[] = [];
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      preview: (directory) => {
+        opened.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${opened.length}`);
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const built = yield* game.export(threadId, "Web");
+        expect(built.success, built.message).toBe(true);
+        const played = yield* game.action(threadId, "preview");
+        expect(played.success, played.message).toBe(true);
+        expect(opened).toHaveLength(1);
+
+        const stopped = yield* game.action(threadId, "stop");
+        expect(stopped.success, stopped.message).toBe(true);
+        const selections = opened.length;
+
+        // Stop clears the preview. Status observes; it never starts it again,
+        // with or without an explicit byte check.
+        expect((yield* game.status(threadId)).previewUrl).toBeNull();
+        expect((yield* game.status(threadId, { checkSources: true })).previewUrl).toBeNull();
+        expect(opened).toHaveLength(selections);
+        // The selection itself survives Stop: Play is one press away.
+        expect((yield* rounds.read(root)).selected).not.toBeNull();
       }),
   );
 });

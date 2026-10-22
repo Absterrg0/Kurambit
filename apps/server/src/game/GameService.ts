@@ -1709,22 +1709,10 @@ const make = Effect.gen(function* () {
               },
         ),
       );
-      // Play follows the selection. A promotion makes the selected build the one
-      // Play shows, so an open preview reloads onto it without asking the
-      // creator to press Play again. A game whose preview was never used stays
-      // quiet: status must not open a server nobody asked for.
-      const servedUrl = preview.url(root);
-      const previewUrl =
-        selected === null || selectedPresent !== true
-          ? servedUrl
-          : (preview.urlFor(root, selected.directory) ??
-            (servedUrl === null
-              ? null
-              : // A status read must not fail because the build vanished after
-                // the presence check; the previous URL stays what Play shows.
-                yield* preview
-                  .select(root, selected.directory)
-                  .pipe(Effect.catch(() => Effect.succeed(servedUrl)))));
+      // Status observes the preview; it never switches it. Promotion owns the
+      // switch (and its event), so a status read that started against an older
+      // selection cannot move Play back, and a stopped preview stays stopped.
+      const previewUrl = preview.url(root);
       return {
         root,
         ...inventory,
