@@ -382,6 +382,8 @@ export const GameQualificationStageRead = Schema.Struct({
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   /** Why the state stage passed or failed, including legacy rules. */
   detail: Schema.optionalKey(Schema.String),
+  /** For an export, the build-addressed directory its files live in. */
+  buildDirectory: Schema.optionalKey(Schema.String),
   /** The independent visual judge's typed result, for the visual stage. */
   visual: Schema.optionalKey(GameVisualJudgement),
 });
