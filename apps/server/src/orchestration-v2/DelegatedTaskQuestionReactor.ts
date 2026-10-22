@@ -141,6 +141,9 @@ const make = Effect.gen(function* () {
       ) {
         return;
       }
+      // A server-owned round task reports to its round worker. A question it
+      // asks must not start a turn on the parent builder either.
+      if (task.completionWake === "never") return;
       // A blocking delegate_task wait delivers the question itself.
       if (
         task.completionWake === "settled_only" &&
