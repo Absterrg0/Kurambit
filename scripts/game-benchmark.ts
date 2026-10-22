@@ -210,6 +210,10 @@ const runInGroup = async (input: {
     detached: true,
     stdio: ["ignore", log.fd, log.fd],
   });
+  // The child leads its own group, so an operator stopping this runner needs
+  // its PID; the file exists exactly while the command is alive.
+  if (child.pid !== undefined)
+    await NodeFSP.writeFile(`${input.logPath}.pid`, `${child.pid}\n`).catch(() => undefined);
   let timedOut = false;
   const signal = (name: NodeJS.Signals) => {
     if (child.pid === undefined) return;
@@ -229,6 +233,7 @@ const runInGroup = async (input: {
   );
   clearTimeout(timer);
   await log.close();
+  await NodeFSP.rm(`${input.logPath}.pid`, { force: true }).catch(() => undefined);
   return { timedOut, exitCode: exit.code, signal: exit.signal };
 };
 
