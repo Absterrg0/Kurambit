@@ -635,8 +635,22 @@ export class GameReviewSessions extends Context.Service<
     readonly evidenceHash: (
       input: GameReviewSessionAnswerInput,
     ) => Effect.Effect<string | null, GameOperationError>;
+    /**
+     * Every child a loop recorded, including one whose dispatch was never
+     * confirmed: the record is written before the command can create
+     * anything, so this is the durable answer to what may still be writing.
+     */
+    readonly recordedChildren: (input: {
+      readonly root: string;
+      readonly loopId: string;
+    }) => Effect.Effect<ReadonlyArray<GameReviewRecordedChild>, GameOperationError>;
   }
 >()("t3/game/GameReviewSessions") {}
+
+export interface GameReviewRecordedChild {
+  readonly childThreadId: ThreadId;
+  readonly runId: RunId | null;
+}
 
 const threadFailure = (operation: string, path: string, cause: unknown) =>
   failure(operation, path, "thread-dispatch", String(cause), cause);
@@ -1372,7 +1386,57 @@ export const layer = (options: { readonly stateDir: string }) => {
         );
       });
 
-    return GameReviewSessions.of({ start, answer, runStatus, evidenceDirectory, evidenceHash });
+    const recordedChildren: GameReviewSessions["Service"]["recordedChildren"] = (input) =>
+      Effect.gen(function* () {
+        const directory = NodePath.join(yield* reviewRoot(input.root), encodePart(input.loopId));
+        const files = yield* attempt("list game review sessions", directory, async () => {
+          const list = async (path: string) =>
+            NodeFSP.readdir(path).catch((error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOENT" || error.code === "ENOTDIR") return [] as string[];
+              throw error;
+            });
+          const found: string[] = [];
+          for (const round of await list(directory))
+            for (const session of await list(NodePath.join(directory, round)))
+              found.push(NodePath.join(directory, round, session, "session.json"));
+          return found;
+        });
+        const children: GameReviewRecordedChild[] = [];
+        for (const file of files) {
+          const value = yield* attempt("read game review session", file, () =>
+            readJson(file).catch((error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOTDIR") return null;
+              throw error;
+            }),
+          );
+          if (value === null) continue;
+          const record = yield* Effect.try({
+            try: () => decodeSessionRecord(value),
+            catch: (cause) =>
+              failure(
+                "read game review session",
+                file,
+                "io",
+                "The session record is unreadable.",
+                cause,
+              ),
+          });
+          children.push({
+            childThreadId: ThreadIdSchema.make(record.childThreadId),
+            runId: record.runId == null ? null : RunId.make(record.runId),
+          });
+        }
+        return children;
+      });
+
+    return GameReviewSessions.of({
+      start,
+      answer,
+      runStatus,
+      evidenceDirectory,
+      evidenceHash,
+      recordedChildren,
+    });
   });
   return Layer.effect(GameReviewSessions, make);
 };

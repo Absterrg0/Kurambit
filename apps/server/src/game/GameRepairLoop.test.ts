@@ -118,6 +118,8 @@ interface Scripted {
   hungRoles: ReadonlySet<string>;
   /** This role ignores interruptions entirely, so a supersession must fail closed. */
   ignoresInterruptRoles: ReadonlySet<string>;
+  /** This role's dispatch commits, then its confirmation write fails. */
+  failConfirmRoles: ReadonlySet<string>;
   /** The thread's runs; a test may append a later text-only turn. */
   readonly runs: Array<{
     readonly id: RunId;
@@ -165,6 +167,7 @@ const makeScripted = (): Scripted => ({
   completeInStart: new Set(),
   hungRoles: new Set(),
   ignoresInterruptRoles: new Set(),
+  failConfirmRoles: new Set(),
   runs: [
     {
       id: builderRunId,
@@ -283,6 +286,8 @@ interface Fixture {
     services: Services,
     child: StartedChild,
   ) => Effect.Effect<void, GameOperationError>;
+  /** A late child stops on its own, long after the loop let go of it. */
+  readonly stopLate: (child: StartedChild) => Effect.Effect<void>;
 }
 
 interface FixtureOptions {
@@ -426,6 +431,13 @@ const withLoop = <A, E>(
                 children.set(key, child);
                 scripted.starts.push(child);
                 yield* Queue.offer(startQueue, child);
+                if (scripted.failConfirmRoles.has(`${input.role}:${order}`))
+                  return yield* new GameOperationError({
+                    operation: "write game review session",
+                    path: root,
+                    reason: "io",
+                    detail: "The confirmation write failed after the dispatch committed.",
+                  });
                 if (scripted.completeInStart.has(`${input.role}:${order}`)) {
                   const factory = scripted.critic;
                   yield* finish(
@@ -480,6 +492,14 @@ const withLoop = <A, E>(
               runStatus,
               evidenceDirectory: () => Effect.succeed(null),
               evidenceHash: () => Effect.succeed(null),
+              // Every started child was recorded before its dispatch.
+              recordedChildren: () =>
+                Effect.sync(() =>
+                  [...children.values()].map((child) => ({
+                    childThreadId: child.childThreadId,
+                    runId: child.runId,
+                  })),
+                ),
             });
           }),
         );
@@ -656,6 +676,7 @@ const withLoop = <A, E>(
         drive,
         take: Queue.take(startQueue),
         complete: settle,
+        stopLate: (child) => finish(child, "completed", null),
       });
     }),
   );
@@ -926,6 +947,116 @@ it.live("a child that ignores interrupts fails the creator action closed", () =>
         expect(state.promotedRounds).toHaveLength(0);
       }),
     ),
+  ),
+);
+
+/** A later builder run that exported a fresh build and finished just now. */
+const ensureLaterBuild = (fixture: Fixture, services: Services) =>
+  Effect.gen(function* () {
+    const now = Date.now();
+    const runId = RunId.make(`run:builder-${String(now)}`);
+    const build = "c".repeat(64);
+    fixture.scripted.runs.push({
+      id: runId,
+      status: "completed",
+      rootNodeId: "node:builder-later",
+      modelSelection: builderSelection,
+      requestedAt: DateTime.makeUnsafe(now),
+      startedAt: DateTime.makeUnsafe(now),
+      completedAt: DateTime.makeUnsafe(now + 2),
+    });
+    fixture.scripted.exportBuildId = build;
+    fixture.scripted.playtestBuildId = build;
+    fixture.scripted.exportFinishedAt = new Date(now + 1).toISOString();
+    return yield* services.loop.ensure({
+      threadId,
+      runId,
+      nodeId: "node:builder-later" as never,
+    });
+  });
+
+const userAction = (services: Services, root: string) =>
+  services.admission.admit({ root, threadId, reason: "The creator sent a new turn." });
+
+it.live("a failed join keeps the game held until the child really stops", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.ignoresInterruptRoles = new Set(["repair"]);
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        yield* fixture.complete(services, yield* fixture.take);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        expect((yield* Effect.flip(userAction(services, root))).operation).toBe(
+          "supersede game review",
+        );
+        // The loop fiber is gone, but the writer is not: a retry is refused too.
+        yield* services.loop.awaitIdle(threadId);
+        expect((yield* Effect.flip(userAction(services, root))).operation).toBe(
+          "supersede game review",
+        );
+        // No new review may start over the running child either.
+        expect(yield* ensureLaterBuild(fixture, services)).toBeNull();
+        // The late writer finishes on its own; only then is the game free.
+        yield* fixture.stopLate(repair);
+        yield* userAction(services, root);
+        expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(0);
+      }),
+    ),
+  ),
+);
+
+it.live("a child whose dispatch confirmation failed still holds the game", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.failConfirmRoles = new Set(["critic:0"]);
+        scripted.ignoresInterruptRoles = new Set(["critic"]);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        // The loop failed on the confirmation write and ended; the child runs.
+        yield* services.loop.awaitIdle(threadId);
+        expect(loopRecord(yield* readLoop(services)).status).toBe("interrupted");
+        expect((yield* Effect.flip(userAction(services, root))).operation).toBe(
+          "supersede game review",
+        );
+        yield* fixture.stopLate(critic);
+        yield* userAction(services, root);
+      }),
+    ),
+  ),
+);
+
+it.live("a restart re-arms the hold from the recorded children", () =>
+  withLoop((fixture) =>
+    Effect.gen(function* () {
+      const { scripted, root } = fixture;
+      scripted.ignoresInterruptRoles = new Set(["repair"]);
+      scripted.repairs = [repairWith()];
+      scripted.critic = () => criticAnswer(1);
+      const repair = yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          yield* ensureLoop(services);
+          yield* fixture.complete(services, yield* fixture.take);
+          return yield* fixture.take;
+        }),
+      );
+      // The server died; the provider child did not.
+      yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          yield* services.loop.recover();
+          expect((yield* Effect.flip(userAction(services, root))).operation).toBe(
+            "supersede game review",
+          );
+          yield* fixture.stopLate(repair);
+          yield* userAction(services, root);
+        }),
+      );
+    }),
   ),
 );
 

@@ -893,7 +893,7 @@ it.live("an answer is bound to the run the round dispatched", () =>
 );
 
 it.live("a restart reconciles a committed session without dispatching again", () =>
-  withSession(({ stateDir, frames, scripted, service, restart }) =>
+  withSession(({ root, stateDir, frames, scripted, service, restart }) =>
     Effect.gen(function* () {
       const first = yield* service.start({
         threadId,
@@ -936,6 +936,10 @@ it.live("a restart reconciles a committed session without dispatching again", ()
       yield* Effect.promise(() =>
         NodeFSP.writeFile(recordPath, `${JSON.stringify(stored, null, 2)}\n`),
       );
+      // An unconfirmed child is still the loop's: it is listed for the hold.
+      const listed = yield* service.recordedChildren({ root, loopId });
+      expect(listed.map((child) => child.childThreadId)).toEqual([first.childThreadId]);
+      expect(yield* service.recordedChildren({ root, loopId: "loop:other" })).toEqual([]);
       scripted.answer = criticText;
       const recovered = yield* (yield* restart()).start({
         threadId,

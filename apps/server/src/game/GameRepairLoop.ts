@@ -307,9 +307,15 @@ export const layer = (options: GameRepairLoopOptions) => {
     const admission = yield* GameAdmission.GameAdmission;
     const scope = yield* Effect.scope;
 
+    /**
+     * A game this service holds. It stays held after its fiber ends until every
+     * child the loop recorded is verified terminal; a restart re-arms it with
+     * no fiber from the recorded children alone.
+     */
     interface Live {
-      readonly fiber: Fiber.Fiber<void, never>;
-      readonly owned: Ref.Ref<OwnedChild | null>;
+      readonly fiber: Fiber.Fiber<void, never> | null;
+      readonly loopId: string;
+      readonly entry: GameAdmission.GameAdmissionEntry;
     }
     const live = new Map<string, Live>();
 
@@ -432,10 +438,21 @@ export const layer = (options: GameRepairLoopOptions) => {
         return Option.isSome(joined) && !joined.value.timedOut;
       }).pipe(Effect.catchCause(() => Effect.succeed(false)));
 
-    /** Whether the child thread's bound run has actually reached a terminal status. */
-    const childIsTerminal = (child: OwnedChild): Effect.Effect<boolean, never> =>
-      threads.getThreadRecords(child.childThreadId, ["runs"]).pipe(
+    /**
+     * Whether the child thread's bound run has actually reached a terminal
+     * status. A thread that was never created wrote nothing.
+     */
+    const childIsTerminal = (
+      child: GameReviewSessions.GameReviewRecordedChild,
+    ): Effect.Effect<boolean, never> =>
+      threads.getThreadShell(child.childThreadId).pipe(
+        Effect.flatMap((shell) =>
+          shell === null
+            ? Effect.succeed(null)
+            : threads.getThreadRecords(child.childThreadId, ["runs"]),
+        ),
         Effect.map((records) => {
+          if (records === null) return true;
           const run =
             child.runId === null
               ? records.runs.at(-1)
@@ -449,6 +466,37 @@ export const layer = (options: GameRepairLoopOptions) => {
             run.status === "rolled_back"
           );
         }),
+        Effect.orElseSucceed(() => false),
+      );
+
+    /**
+     * Stops every child the loop recorded and reports whether all of them are
+     * terminal. Only this verdict releases a game: a fiber ending, a timeout or
+     * a failed confirmation write proves nothing about a child's writes.
+     */
+    const settleChildren = (
+      root: string,
+      loopId: string,
+      reason: string,
+    ): Effect.Effect<boolean, never> =>
+      Effect.gen(function* () {
+        const recorded = yield* sessions.recordedChildren({ root, loopId });
+        let settled = true;
+        for (const child of recorded) {
+          if (yield* childIsTerminal(child)) continue;
+          yield* interruptChild({ ...child, label: "settle" }, reason);
+          if (!(yield* childIsTerminal(child))) settled = false;
+        }
+        return settled;
+      }).pipe(Effect.catchCause(() => Effect.succeed(false)));
+
+    const childrenTerminal = (root: string, loopId: string): Effect.Effect<boolean, never> =>
+      sessions.recordedChildren({ root, loopId }).pipe(
+        Effect.flatMap((recorded) =>
+          Effect.forEach(recorded, childIsTerminal).pipe(
+            Effect.map((terminal) => terminal.every(Boolean)),
+          ),
+        ),
         Effect.orElseSucceed(() => false),
       );
 
@@ -1159,6 +1207,42 @@ export const layer = (options: GameRepairLoopOptions) => {
         }
       }).pipe(Effect.catchCause((cause) => logFailure("the repair loop failed", cause)));
 
+    /** Holds the game for one loop: admission stops it through `stopLive`. */
+    const hold = (root: string, loopId: string, fiber: Fiber.Fiber<void, never> | null) =>
+      Effect.gen(function* () {
+        const entry: GameAdmission.GameAdmissionEntry = {
+          interrupt: (reason) => stopLive(root, reason),
+          owns: (threadId) =>
+            sessions.recordedChildren({ root, loopId }).pipe(
+              Effect.map((children) => children.some((child) => child.childThreadId === threadId)),
+              Effect.orElseSucceed(() => false),
+            ),
+        };
+        const held: Live = { fiber, loopId, entry };
+        live.set(root, held);
+        yield* admission.register(root, entry);
+        return held;
+      });
+
+    const release = (root: string, held: Live) =>
+      Effect.gen(function* () {
+        if (live.get(root) === held) live.delete(root);
+        yield* admission.unregister(root, held.entry);
+      });
+
+    /** Releases the game once its recorded children are terminal; otherwise it stays held. */
+    const releaseWhenSettled = (root: string, held: Live, reason: string) =>
+      settleChildren(root, held.loopId, reason).pipe(
+        Effect.flatMap((settled) =>
+          settled
+            ? release(root, held)
+            : Effect.logWarning("a review child is still running; the game stays held", {
+                root,
+                loopId: held.loopId,
+              }),
+        ),
+      );
+
     const start = (root: string, record: GameRepairLoopRecord) =>
       Effect.gen(function* () {
         const task: Task = {
@@ -1167,21 +1251,11 @@ export const layer = (options: GameRepairLoopOptions) => {
           usageGaps: yield* Ref.make(false),
         };
         const fiber = yield* runLoop(record, task).pipe(Effect.forkIn(scope));
-        live.set(root, { fiber, owned: task.owned });
-        const entry: GameAdmission.GameAdmissionEntry = {
-          interrupt: (reason) => stopLive(root, reason),
-          owns: (threadId) =>
-            Ref.get(task.owned).pipe(Effect.map((child) => child?.childThreadId === threadId)),
-        };
-        yield* admission.register(root, entry);
+        const held = yield* hold(root, record.id, fiber);
+        // Whatever ended the fiber (a decision, an error, a timeout), the game
+        // is released only after the recorded children are verified stopped.
         yield* Fiber.await(fiber).pipe(
-          Effect.flatMap(() =>
-            Effect.gen(function* () {
-              const current = live.get(root);
-              if (current?.fiber === fiber) live.delete(root);
-              yield* admission.unregister(root, entry);
-            }),
-          ),
+          Effect.andThen(releaseWhenSettled(root, held, "The review ended.")),
           Effect.forkIn(scope),
         );
         return fiber;
@@ -1190,21 +1264,22 @@ export const layer = (options: GameRepairLoopOptions) => {
     /** The gate-free supersession core; `admit` calls it under the game gate. */
     const stopLive = (root: string, reason: string): Effect.Effect<void, GameOperationError> =>
       Effect.gen(function* () {
-        const entry = live.get(root);
-        if (entry !== undefined) {
+        const held = live.get(root);
+        if (held !== undefined) {
           // Interrupt and join: a user action must not race a check, a child or
-          // a promotion. The fiber's finalizers stop its owned child.
-          yield* Fiber.interrupt(entry.fiber);
-          const child = yield* Ref.get(entry.owned);
-          // The Ref is a hint: verify the bound run is really terminal before
-          // admitting a creator action over it. A timeout must fail closed.
-          if (child !== null && !(yield* childIsTerminal(child))) {
+          // a promotion. The fiber's finalizers stop its current child; every
+          // recorded child is then verified, since a child whose dispatch was
+          // never confirmed is not the fiber's to stop.
+          if (held.fiber !== null) yield* Fiber.interrupt(held.fiber);
+          if (!(yield* settleChildren(root, held.loopId, "The review was superseded."))) {
             yield* finish({
               root,
               decision: "interrupt",
               reason:
                 "supersede-failed: the review child did not stop in time; the action was refused so it cannot race the review.",
             });
+            // The game stays held: a retry is refused the same way until the
+            // child is terminal.
             return yield* new GameOperationError({
               operation: "supersede game review",
               path: root,
@@ -1213,7 +1288,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                 "The review child did not stop in time; the action was refused so it cannot race the review.",
             });
           }
-          live.delete(root);
+          yield* release(root, held);
         }
         yield* finish({ root, decision: "stop", reason });
       });
@@ -1310,6 +1385,8 @@ export const layer = (options: GameRepairLoopOptions) => {
           Effect.gen(function* () {
             const settled = yield* current();
             if (settled !== null) return settled;
+            // An earlier loop's child may still be writing: the game stays held.
+            if (live.has(root)) return null;
             const latest = yield* admission.stamp(root);
             // An action took the game while the reads above ran; it owns it now.
             if (latest.generation !== stamp.generation) return null;
@@ -1357,7 +1434,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         const root = yield* projects.resolve(threadId).pipe(Effect.orElseSucceed(() => null));
         if (root === null) return;
         const current = live.get(root);
-        if (current === undefined) return;
+        if (current === undefined || current.fiber === null) return;
         yield* Fiber.await(current.fiber).pipe(Effect.asVoid);
       });
 
@@ -1402,6 +1479,18 @@ export const layer = (options: GameRepairLoopOptions) => {
                 : "The server restarted before this review finished; the incumbent stays selected.",
             }).pipe(Effect.orElseSucceed(() => loop));
             interruptedRoots.push(loop.root);
+          }
+          // Only the newest loop can own a child: no loop starts while one is
+          // held. Re-arm the hold from its recorded children before any turn
+          // can be admitted, then let a background settle release it.
+          const latest = loops?.[0];
+          if (latest !== undefined && !(yield* childrenTerminal(latest.root, latest.id))) {
+            const held = yield* hold(latest.root, latest.id, null);
+            yield* releaseWhenSettled(
+              latest.root,
+              held,
+              "The server restarted before this review finished.",
+            ).pipe(Effect.forkIn(scope));
           }
         }
         return interruptedRoots;
