@@ -104,7 +104,7 @@ const PreviewTool = Tool.make("game_preview", {
 }).annotate(Tool.Readonly, false);
 const NativeTool = Tool.make("game_run_native", {
   description:
-    "Import and launch this thread's Godot game natively with a tracked PID and output log. This opens a native game window on the local desktop. Use game_stop to stop it; unrelated processes are never terminated.",
+    "Import and launch this thread's Godot game natively with a tracked PID and output log. The agent's run is headless: it opens no window and inherits no display; only the creator's own Play action may open a window. Use game_stop to stop it; unrelated processes are never terminated.",
   success: GameActionResult,
   failure,
   failureMode: "return",
