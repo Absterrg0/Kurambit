@@ -995,13 +995,6 @@ const make = Effect.gen(function* () {
     function* (threadId: ThreadId, policy: GameVerificationPolicy) {
       const target = yield* resolveTarget(threadId);
       const root = target.root;
-      // Changing the exam while a review is mid-check would judge a candidate
-      // under rules it was never checked by; the review is superseded instead.
-      yield* admission.admit({
-        root,
-        threadId,
-        reason: "A verification policy change superseded the review; its checks no longer apply.",
-      });
       const testSuite = engineResourcePath(policy.testSuite, ".gd");
       const gameplayScene =
         policy.gameplayScene === null ? null : engineResourcePath(policy.gameplayScene, ".tscn");
@@ -1013,6 +1006,13 @@ const make = Effect.gen(function* () {
           detail:
             "The test suite must be a res:// .gd path and the gameplay scene a res:// .tscn path inside the game project.",
         });
+      // Changing the exam while a review is mid-check would judge a candidate
+      // under rules it was never checked by; the review is superseded instead.
+      yield* admission.admit({
+        root,
+        threadId,
+        reason: "A verification policy change superseded the review; its checks no longer apply.",
+      });
       const manifest = yield* read(root);
       return yield* approvals.exclusive(
         root,
