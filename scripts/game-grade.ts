@@ -49,7 +49,14 @@ const VOTES_PER_ITEM = 2;
 /** Independent YES/NO questions in flight at once; more only competes for quota. */
 const VOTE_CONCURRENCY = 6;
 const QUICK_BOOT_TIMEOUT_MS = 20_000;
-const MAX_HOLD_MS = 3_000;
+/**
+ * The longest a single key press or wait may last. A game that asks for a long
+ * hold (the dialogue game needs three seconds of held L) never sees the action
+ * when the cap is under the game's own threshold: the game accumulates frame
+ * time while the key is down, so the wall-clock hold has to be comfortably
+ * longer than the seconds the game counts.
+ */
+const MAX_HOLD_MS = 8_000;
 
 /** The absurd item every brief gets: a yes here means the grader imagines things. */
 export const CONTROL_DESCRIPTION =
@@ -435,6 +442,8 @@ export function chooseFrames(
     readonly path: string;
     readonly note: string;
     readonly actions: ReadonlyArray<string>;
+    /** The step number, when the frames come from a saved run. */
+    readonly step?: number;
   }>,
 ): ReadonlyArray<GradeFrame> {
   const budget = MAX_VERDICT_FRAMES - (boot === null ? 0 : 1);
@@ -457,7 +466,9 @@ export function chooseFrames(
     const step = steps[index]!;
     frames.push({
       path: step.path,
-      label: `after step ${index + 1}: ${step.actions.join(", ")}${step.note === "" ? "" : ` — ${step.note}`}`,
+      label: `after step ${step.step ?? index + 1}: ${step.actions.join(", ")}${
+        step.note === "" ? "" : ` — ${step.note}`
+      }`,
     });
   }
   return frames.map((frame, index) => ({ id: `F${index + 1}`, ...frame }));
@@ -635,7 +646,7 @@ ${input.brief.obligations.map((obligation) => `- ${obligation.description}`).joi
 
 ## What you can do
 Reply with 1–3 actions and a one-sentence note.
-- keys: hold a key for holdMs milliseconds. Use the game's controls ("w", "ArrowUp", "Space", "Shift", "e", …).
+- keys: hold a key for holdMs milliseconds, up to ${MAX_HOLD_MS} ms (8 seconds). Use the game's controls ("w", "ArrowUp", "Space", "Shift", "e", …). Some games only register a long hold — three seconds or more — so when the screen asks you to hold, hold it for the full time instead of tapping it.
 - clicks: a left click at pixel (x,y) of the attached frame. The frame is the 960×540 game viewport, so (480,270) is its centre. Click the actual button or card you can see.
 - drags: press at (x1,y1), move to (x2,y2) and release, in the same 960×540 pixels. Use it to drag cards or sliders and to turn a mouse-look camera.
 - waitMs: wait that long after the actions.
@@ -646,6 +657,7 @@ Choose actions that make a promise visible: move toward the goal, shoot, pick th
 ${input.history.length === 0 ? "Nothing yet; this is the boot frame." : input.history.map((entry, index) => `${index + 1}. ${entry.actions.join(", ")} — ${entry.note}`).join("\n")}
 
 ## Rules
+- Judge fundamentals, not a playthrough. First try every visible control and on-screen option at least once; if an action shows no effect after two tries, move on to another.
 - One frame, one short note: say what the frame shows and what you will try next.
 - Answer with the requested JSON only.`;
 
@@ -707,6 +719,13 @@ const keyEvent = (key: string, type: "keyDown" | "keyUp"): PlayKeyEvent => {
 };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * How long one key press really lasts. The cap has to clear the longest hold
+ * any game asks for, because the game counts the frames it saw the key down.
+ */
+export const clampHoldMs = (ms: number): number =>
+  Math.max(50, Math.min(MAX_HOLD_MS, Math.round(ms)));
 
 interface BrowserHandle {
   readonly child: NodeChildProcess.ChildProcess;
@@ -992,7 +1011,7 @@ const applyActions = async (
   if (reply.reload) return [(await session.reload()) ? "reload" : "reload (did not boot)"];
   const planned: Array<{ label: string; run: () => Promise<void> }> = [];
   for (const key of reply.keys) {
-    const holdMs = Math.max(50, Math.min(MAX_HOLD_MS, Math.round(key.holdMs)));
+    const holdMs = clampHoldMs(key.holdMs);
     planned.push({ label: `hold ${key.key} ${holdMs}ms`, run: () => session.key(key.key, holdMs) });
   }
   for (const click of reply.clicks) {
@@ -1158,21 +1177,7 @@ interface SavedGrade {
   readonly build: GradeBuild;
   readonly quick: GradeQuick | null;
   readonly actions: GradeDocument["actions"];
-  readonly frames: ReadonlyArray<{ readonly relative: string; readonly label: string }>;
 }
-
-/** Rebuilds the label the playtester frame had when it was chosen. */
-const frameLabel = (relative: string, actions: GradeDocument["actions"]): string => {
-  const name = NodePath.basename(relative);
-  if (name === "boot.png") return "boot, no input";
-  const step = /^step-(\d+)\.png$/.exec(name);
-  const action =
-    step === null ? undefined : actions.find((entry) => entry.step === Number(step[1]));
-  if (action === undefined) return name.replace(/\.png$/, "");
-  return `after step ${action.step}: ${action.actions.join(", ")}${
-    action.note === "" ? "" : ` — ${action.note}`
-  }`;
-};
 
 const readSavedGrade = async (gradeDir: string): Promise<SavedGrade> => {
   const text = await NodeFSP.readFile(NodePath.join(gradeDir, "grade.json"), "utf8").catch(
@@ -1193,23 +1198,77 @@ const readSavedGrade = async (gradeDir: string): Promise<SavedGrade> => {
     build: parsed.build,
     quick: parsed.quick ?? null,
     actions,
-    frames: stored.map((relative) => ({ relative, label: frameLabel(relative, actions) })),
   };
 };
 
-/** Copies the saved frames into the new grade so it stays readable on its own. */
+/** Every screenshot a previous grade saved, with the actions that produced it. */
+interface SavedFrames {
+  readonly boot: GradeFrame | null;
+  readonly steps: ReadonlyArray<{
+    readonly step: number;
+    readonly path: string;
+    readonly actions: ReadonlyArray<string>;
+    readonly note: string;
+  }>;
+}
+
+/**
+ * The frames a previous grade saved, read from its frames directory rather
+ * than from its grade document: the document lists only the frames that grade
+ * voted over, while the directory holds every screenshot of the run. The
+ * choice is made again over the whole directory, because a claim is usually
+ * about a screen the old choice skipped — the win screen right before a reload
+ * is the picture of what the run achieved, and the reload erases it.
+ */
+const readSavedFrames = async (gradeDir: string, saved: SavedGrade): Promise<SavedFrames> => {
+  const directory = NodePath.join(gradeDir, "frames");
+  const names = await NodeFSP.readdir(directory).catch(() => [] as ReadonlyArray<string>);
+  const actionByStep = new Map(saved.actions.map((action) => [action.step, action]));
+  const steps: Array<SavedFrames["steps"][number]> = [];
+  let boot: GradeFrame | null = null;
+  for (const name of names) {
+    if (name === "boot.png") {
+      boot = { id: "F1", path: NodePath.join(directory, name), label: "boot, no input" };
+      continue;
+    }
+    const match = /^step-(\d+)\.png$/.exec(name);
+    if (match === null) continue;
+    const step = Number(match[1]);
+    const action = actionByStep.get(step);
+    steps.push({
+      step,
+      path: NodePath.join(directory, name),
+      actions: action?.actions ?? [],
+      note: action?.note ?? "",
+    });
+  }
+  if (boot === null && steps.length === 0)
+    throw new Error(`No frames under ${directory} to vote over.`);
+  steps.sort((left, right) => left.step - right.step);
+  return { boot, steps };
+};
+
+/**
+ * Copies the saved frames into the new grade so it stays readable on its own.
+ * Every screenshot comes along as evidence; the returned frames are the ones
+ * the votes were about.
+ */
 const copySavedFrames = async (
-  gradeDir: string,
-  saved: SavedGrade,
+  saved: SavedFrames,
+  chosen: ReadonlyArray<GradeFrame>,
   framesDirectory: string,
 ): Promise<ReadonlyArray<GradeFrame>> => {
-  const frames: GradeFrame[] = [];
-  for (const [index, frame] of saved.frames.entries()) {
-    const path = NodePath.join(framesDirectory, NodePath.basename(frame.relative));
-    await NodeFSP.copyFile(NodePath.resolve(gradeDir, frame.relative), path);
-    frames.push({ id: `F${index + 1}`, path, label: frame.label });
-  }
-  return frames;
+  const evidence = [
+    ...(saved.boot === null ? [] : [saved.boot.path]),
+    ...saved.steps.map((step) => step.path),
+  ];
+  for (const path of evidence)
+    await NodeFSP.copyFile(path, NodePath.join(framesDirectory, NodePath.basename(path)));
+  return chosen.map((frame) => ({
+    id: frame.id,
+    path: NodePath.join(framesDirectory, NodePath.basename(frame.path)),
+    label: frame.label,
+  }));
 };
 
 export interface GradeOptions {
@@ -1289,7 +1348,11 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       console.warn(
         `The brief fixture changed since ${reuseDirectory}/grade.json; voting the saved frames against the current claims.`,
       );
-    const frames = await copySavedFrames(reuseDirectory!, saved, framesDirectory);
+    const savedFrames = await readSavedFrames(reuseDirectory!, saved);
+    // The choice is made again over every screenshot the old run saved, not
+    // over the frames that run happened to vote on.
+    const chosen = chooseFrames(savedFrames.boot, savedFrames.steps);
+    const frames = await copySavedFrames(savedFrames, chosen, framesDirectory);
     const judged = await judgeObligations({
       brief: options.brief,
       frames,
@@ -1483,8 +1546,9 @@ const main = async () => {
         "       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
         "",
         "Grades any folder holding a Godot project from its served pixels and console only.",
-        "--reuse-frames skips the build and the playtest: it votes over that grade's saved",
-        "frames and notes, which is the cheap way to re-read an old run.",
+        "--reuse-frames skips the build and the playtest: it re-chooses the frames from",
+        "every screenshot that grade saved and votes over them with that grade's notes,",
+        "which is the cheap way to re-read an old run.",
         "--grader codex|opencode picks the model family: codex is Sol, opencode is the CLI",
         "model in --grader-model (default " + OPENCODE_GRADER_MODEL + ").",
         "Optional: --godot <godot-binary> --browser <chrome-headless-shell> --max-steps <n>",

@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import type { LoadedGameBenchmarkBrief } from "./game-benchmark/artifacts.ts";
 import {
   chooseFrames,
+  clampHoldMs,
   CONTROL_DESCRIPTION,
   gradeGame,
   judgeObligations,
@@ -50,6 +51,20 @@ const scripted = (replies: ReadonlyArray<"YES" | "NO">) => {
   };
   return { review, calls: () => calls };
 };
+
+describe("clampHoldMs", () => {
+  it("keeps a long hold long enough for a game that counts three seconds", () => {
+    // The dialogue game needs LISTEN_SECONDS := 3.0 of held L, and it counts
+    // the frames it saw the key down, so the wall-clock hold has to be longer.
+    assert.equal(clampHoldMs(3_000), 3_000);
+    assert.equal(clampHoldMs(5_000), 5_000);
+  });
+
+  it("caps a hold at eight seconds and never sends a tap", () => {
+    assert.equal(clampHoldMs(20_000), 8_000);
+    assert.equal(clampHoldMs(0), 50);
+  });
+});
 
 describe("chooseFrames", () => {
   const boot = { id: "F1", path: "/frames/boot.png", label: "boot, no input" };
@@ -408,6 +423,83 @@ describe("gradeGame", () => {
         written.obligations.every((obligation) => !obligation.yes),
         true,
       );
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("re-chooses the frames over every screenshot the saved grade kept", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const savedDir = NodePath.join(directory, "saved");
+      await NodeFSP.mkdir(NodePath.join(savedDir, "frames"), { recursive: true });
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const actions = Array.from({ length: 15 }, (_, index) => ({
+        step: index + 1,
+        actions: index + 1 === 6 || index + 1 === 12 ? ["reload"] : ["drag (10,10)→(20,20)"],
+        note: `note ${index + 1}`,
+      }));
+      for (const name of [
+        "boot.png",
+        ...actions.map((action) => `step-${String(action.step).padStart(2, "0")}.png`),
+      ])
+        await NodeFSP.writeFile(NodePath.join(savedDir, "frames", name), png);
+      await NodeFSP.writeFile(
+        NodePath.join(savedDir, "grade.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          brief: { id: brief.id, title: brief.title, checksum: brief.checksum },
+          gameDir: "/games/fixture",
+          model: "codex/gpt-6.1-sol",
+          build: { kind: "existing", detail: null },
+          quick: {
+            booted: true,
+            bootMs: 500,
+            consoleErrors: 0,
+            consoleErrorLines: [],
+            responded: true,
+            changedPercent: 10,
+          },
+          // The old grade voted over eight frames and never saw the win screen
+          // that sits right before a reload.
+          frames: ["frames/boot.png", "frames/step-01.png", "frames/step-03.png"],
+          actions,
+          obligations: [],
+          control: { description: CONTROL_DESCRIPTION, yes: false, votes: [] },
+          void: false,
+          solCalls: 0,
+        }),
+      );
+      const prompts: string[] = [];
+      const out = NodePath.join(directory, "out");
+      const grade = await gradeGame({
+        brief,
+        out,
+        reuseFrames: savedDir,
+        deps: {
+          review: async (request) => {
+            prompts.push(request.prompt);
+            return reply("NO");
+          },
+          playtest: async () => {
+            throw new Error("a vote-only re-grade must not playtest");
+          },
+          exportBuild: async () => {
+            throw new Error("a vote-only re-grade must not build");
+          },
+        },
+      });
+      // The frame before each reload is the only picture of the win.
+      assert.include(grade.frames, "frames/step-05.png");
+      assert.include(grade.frames, "frames/step-11.png");
+      assert.isAtMost(grade.frames.length, 10);
+      assert.match(prompts[0]!, /after step 5: drag \(10,10\)→\(20,20\) — note 5/);
+      assert.match(prompts[0]!, /after step 11: drag \(10,10\)→\(20,20\) — note 11/);
+      // Every screenshot comes along as evidence.
+      assert.equal((await NodeFSP.readdir(NodePath.join(out, "frames"))).length, 16);
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }
