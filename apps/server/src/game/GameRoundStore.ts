@@ -26,7 +26,7 @@ import {
   readRecordText,
   type GameRecordLocation,
 } from "./gameRecord.ts";
-import { candidateBuildId } from "./webBuild.ts";
+import { candidateBuildId, hashWebBuild } from "./webBuild.ts";
 
 const StoredState = Schema.Struct({
   schemaVersion: Schema.Literal(1),
@@ -93,6 +93,15 @@ const validatedArtifact = (artifact: GameReviewArtifact): GameReviewArtifact => 
 export interface GameRoundBeginInput {
   readonly threadId?: ThreadId | undefined;
   readonly budget?: GameReviewBudget | undefined;
+}
+
+export interface GamePromoteOptions {
+  /**
+   * Runs after the new selection is written, still under the per-root lock, so
+   * a preview switch cannot interleave with another selection change. The
+   * selection is already committed when it runs; it must not fail.
+   */
+  readonly serve?: ((selected: GameSelectedBuild) => Effect.Effect<void>) | undefined;
 }
 
 export type GamePromotion =
@@ -200,10 +209,11 @@ export class GameRoundStore extends Context.Service<
       root: string,
       artifact: GameReviewArtifact,
     ) => Effect.Effect<GameSelectedBuild, GameOperationError>;
-    /** Switches the selected build to the round's candidate. */
+    /** Switches the selected build to the round's candidate, if its bytes still match. */
     readonly promote: (
       root: string,
       roundId: string,
+      options?: GamePromoteOptions,
     ) => Effect.Effect<GamePromotion, GameOperationError>;
     /** Restores the pre-repair snapshot and drops an unreferenced candidate build. */
     readonly reject: (
@@ -537,7 +547,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               return selected;
             }),
           ),
-        promote: (root, roundId) =>
+        promote: (root, roundId, promoteOptions) =>
           withLock(root, "promote game review build", (found) =>
             Effect.gen(function* () {
               const state = yield* readStateEffect(found.file);
@@ -552,6 +562,16 @@ export const layer = (options: { readonly stateDir: string }) => {
               if (round.status !== "running" || round.candidate === null)
                 return yield* blocked("That round has no running candidate build to promote.");
               const candidate = validatedArtifact(round.candidate);
+              // The directory name is the hash of the candidate's bytes. Re-derive
+              // it the way explicit Play does: a file changed after the export
+              // must not become the build Play serves.
+              const hashed = yield* Effect.tryPromise(() =>
+                hashWebBuild(root, candidate.directory),
+              ).pipe(Effect.orElseSucceed(() => null));
+              if (hashed === null || hashed.buildId !== candidate.buildId)
+                return yield* blocked(
+                  "artifact-changed: the candidate build's files are no longer the bytes it was exported as; the candidate was not promoted.",
+                );
               // A folder that cannot be read is a failed precondition, not a
               // crash: the round stops with the reason instead of staying
               // running against sources nobody could check.
@@ -589,6 +609,9 @@ export const layer = (options: { readonly stateDir: string }) => {
                 ...replaceRound(state, record),
                 selected,
               });
+              // Inside the lock: the preview follows this selection before any
+              // other transition can move it.
+              if (promoteOptions?.serve !== undefined) yield* promoteOptions.serve(selected);
               return { kind: "promoted", selected };
             }),
           ),

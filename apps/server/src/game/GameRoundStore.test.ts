@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Rounds keep their store on a temporary native game tree.
 import { expect, it } from "@effect/vitest";
-import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -10,7 +9,7 @@ import * as Layer from "effect/Layer";
 import type { GameReviewArtifact } from "@t3tools/contracts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameSnapshots from "./GameSnapshots.ts";
-import { candidateBuildDirectory } from "./webBuild.ts";
+import { candidateBuildDirectory, hashWebBuildDirectory } from "./webBuild.ts";
 
 const withGame = <A, E>(
   body: (input: {
@@ -48,14 +47,36 @@ const withGame = <A, E>(
 const edit = (root: string, contents: string) =>
   Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), contents));
 
-/** A candidate directory the store can name; promotion does not read its bytes. */
-const candidate = async (root: string, sourceId: string): Promise<GameReviewArtifact> => {
-  const buildId = NodeCrypto.createHash("sha256").update(sourceId).digest("hex");
-  const directory = candidateBuildDirectory(buildId);
-  await NodeFSP.mkdir(NodePath.join(root, directory), { recursive: true });
-  await NodeFSP.writeFile(NodePath.join(root, directory, "index.html"), "<html>candidate</html>");
+let candidateBuilds = 0;
+/**
+ * A candidate build whose directory name is the hash of its bytes, the way an
+ * export seals one. `contents` lets a test ask for the same bytes twice, which
+ * is how a no-op repair addresses the selected build.
+ */
+const candidate = async (
+  root: string,
+  sourceId: string,
+  contents?: string,
+): Promise<GameReviewArtifact> => {
+  candidateBuilds += 1;
+  const staging = NodePath.join(root, "builds/candidates", `.staging-${candidateBuilds}`);
+  await NodeFSP.mkdir(staging, { recursive: true });
+  await NodeFSP.writeFile(
+    NodePath.join(staging, "index.html"),
+    contents ?? `<html>candidate ${candidateBuilds}</html>`,
+  );
+  const hashed = await hashWebBuildDirectory(staging);
+  if (hashed === null) throw new Error("The test candidate build did not hash.");
+  const directory = candidateBuildDirectory(hashed.buildId);
+  const final = NodePath.join(root, directory);
+  const existing = await NodeFSP.stat(NodePath.join(final, "index.html")).then(
+    () => true,
+    () => false,
+  );
+  if (existing) await NodeFSP.rm(staging, { recursive: true, force: true });
+  else await NodeFSP.rename(staging, final);
   return {
-    buildId,
+    buildId: hashed.buildId,
     directory,
     sourceId,
     engine: "godot",
@@ -96,7 +117,15 @@ it.live(
         const second = yield* rounds.begin(root, {});
         yield* edit(root, "extends Node2D # worse\n");
         yield* rounds.recordPostRepair(root, second.id);
-        const worse = yield* Effect.promise(() => candidate(root, second.incumbentSnapshotId));
+        // Same bytes as the selected build: content addressing makes this a
+        // no-op repair naming the directory Play already serves.
+        const worse = yield* Effect.promise(async () =>
+          candidate(
+            root,
+            second.incumbentSnapshotId,
+            await NodeFSP.readFile(NodePath.join(root, build.directory, "index.html"), "utf8"),
+          ),
+        );
         expect(worse.directory).toBe(build.directory);
         yield* rounds.recordCandidate(root, second.id, worse);
         const rejected = yield* rounds.reject(root, second.id);
@@ -235,6 +264,49 @@ it.live("a promotion blocked by a source change stops the round and keeps the ca
   ),
 );
 
+it.live("a candidate whose bytes changed after export is not promoted", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const first = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repaired\n");
+      yield* rounds.recordPostRepair(root, first.id);
+      const repaired = yield* snapshots.capture(root);
+      const incumbent = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+      yield* rounds.recordCandidate(root, first.id, incumbent);
+      expect((yield* rounds.promote(root, first.id)).kind).toBe("promoted");
+
+      const second = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # contender\n");
+      yield* rounds.recordPostRepair(root, second.id);
+      const contenderSource = yield* snapshots.capture(root);
+      const contender = yield* Effect.promise(() => candidate(root, contenderSource.sourceId));
+      yield* rounds.recordCandidate(root, second.id, contender);
+      // The candidate was sealed by its export, then a file changed on disk.
+      // Its directory no longer hashes to its name, so it is not the build the
+      // export produced and must not become Play's.
+      yield* Effect.promise(() =>
+        NodeFSP.appendFile(
+          NodePath.join(root, contender.directory, "index.html"),
+          "<!-- edited after export -->",
+        ),
+      );
+
+      const blocked = yield* rounds.promote(root, second.id);
+      expect(blocked.kind).toBe("blocked");
+      if (blocked.kind !== "blocked") return;
+      expect(blocked.round.status).toBe("stopped");
+      expect(blocked.round.decision).toBe("stop");
+      expect(blocked.round.reason).toContain("artifact-changed");
+      // Selection stayed on the incumbent and the candidate record is kept.
+      const state = yield* rounds.read(root);
+      expect(state.selected?.buildId).toBe(incumbent.buildId);
+      expect(state.rounds.find((entry) => entry.id === second.id)?.candidate?.buildId).toBe(
+        contender.buildId,
+      );
+    }),
+  ),
+);
+
 it.live("an identical candidate is never deleted out from under the selected build", () =>
   withGame(({ root, rounds, snapshots }) =>
     Effect.gen(function* () {
@@ -250,7 +322,13 @@ it.live("an identical candidate is never deleted out from under the selected bui
       yield* edit(root, "extends Node2D # no-op repair\n");
       yield* rounds.recordPostRepair(root, second.id);
       // Content addressing makes this the selected directory: a no-op repair.
-      const identical = yield* Effect.promise(() => candidate(root, build.sourceId!));
+      const identical = yield* Effect.promise(async () =>
+        candidate(
+          root,
+          build.sourceId!,
+          await NodeFSP.readFile(NodePath.join(root, build.directory, "index.html"), "utf8"),
+        ),
+      );
       expect(identical.directory).toBe(build.directory);
       yield* rounds.recordCandidate(root, second.id, identical);
       const rejected = yield* rounds.reject(root, second.id);

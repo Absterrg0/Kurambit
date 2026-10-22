@@ -89,6 +89,15 @@ export class GameService extends Context.Service<
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
     readonly status: (threadId: ThreadId) => Effect.Effect<GameStatus, GameOperationError>;
+    /**
+     * Makes a round's candidate the build Play serves, once its bytes and
+     * sources still match what was exported. An already-open preview follows,
+     * and the operation event refreshes every open stage.
+     */
+    readonly promote: (
+      threadId: ThreadId,
+      roundId: string,
+    ) => Effect.Effect<GameRoundStore.GamePromotion, GameOperationError>;
     /** Operation pushes for every game this server runs. */
     readonly events: Stream.Stream<GameOperationEvent>;
     readonly action: (
@@ -1733,6 +1742,21 @@ const make = Effect.gen(function* () {
         operation: operations.current(root),
       };
     }),
+    promote: (threadId, roundId) =>
+      withRoot(threadId, "Promote build", (root) =>
+        rounds.promote(root, roundId, {
+          serve: (selected) =>
+            Effect.gen(function* () {
+              // Only an already-open preview follows the promotion. A game whose
+              // preview was never used stays quiet: opening a server is Play's
+              // decision, not a promotion's, and a stopped one stays stopped.
+              if (preview.url(root) === null) return;
+              // The selection is committed. A preview that cannot open is not a
+              // failed promotion; the next Play call reports that honestly.
+              yield* preview.select(root, selected.directory).pipe(Effect.ignore);
+            }),
+        }),
+      ),
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target, options) =>
       withRoot(threadId, `Export ${target}`, (root) =>

@@ -9,6 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import {
   GameOperationError,
   ThreadId,
@@ -92,17 +94,19 @@ interface FixtureOptions {
   }) => Effect.Effect<{ readonly pid: number; readonly logPath: string }, GameOperationError>;
   /** Replace the qualification store, e.g. to make terminal writes fail. */
   readonly qualification?: (stateDir: string) => Layer.Layer<GameQualification.GameQualification>;
+  /** Replace the round store, e.g. to gate a byte capture a status read asks for. */
+  readonly rounds?: (stateDir: string) => Layer.Layer<GameRoundStore.GameRoundStore>;
   readonly manifest?: Partial<GameManifest>;
 }
 
-const withGame = <A, E>(
+const withGame = <A, E, R = never>(
   options: FixtureOptions,
   body: (input: {
     readonly root: string;
     readonly game: GameServiceModule.GameService["Service"];
     readonly qualification: QualificationService;
     readonly rounds: GameRoundStore.GameRoundStore["Service"];
-  }) => Effect.Effect<A, E>,
+  }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -157,6 +161,7 @@ const withGame = <A, E>(
                 ? Effect.die("This test provides no native launch.")
                 : options.start({ root, display: input.display, args: input.args }),
             list: () => [],
+            stop: () => Effect.void,
           }),
         ),
         Layer.provide(
@@ -197,7 +202,11 @@ const withGame = <A, E>(
                   }),
                 ),
               ),
-            stop: () => Effect.void,
+            stop: () =>
+              Effect.sync(() => {
+                selectedPreviewUrl = null;
+                selectedPreviewDirectory = null;
+              }),
             url: () => selectedPreviewUrl,
             urlFor: (_root, directory) =>
               directory === selectedPreviewDirectory ? selectedPreviewUrl : null,
@@ -206,7 +215,7 @@ const withGame = <A, E>(
         ),
         Layer.provide(previewBrowserTestLayer(executable)),
         Layer.provideMerge(qualificationLayer),
-        Layer.provideMerge(GameRoundStore.layer({ stateDir })),
+        Layer.provideMerge(options.rounds?.(stateDir) ?? GameRoundStore.layer({ stateDir })),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
         Layer.provide(NodeServices.layer),
@@ -618,18 +627,98 @@ it.live("a round's candidate export leaves Play on the incumbent until promotion
         expect(selectedBefore.selected?.buildId).toBe(NodePath.basename(incumbentDirectory));
         expect(candidate.path).toContain("builds/candidates/");
 
-        const promoted = yield* rounds.promote(root, round.id);
+        // Subscribe before the promotion: a push stream does not replay.
+        const queue = yield* game.events.pipe(Stream.toQueue({ capacity: 16 }));
+        yield* Effect.yieldNow;
+        const promoted = yield* game.promote(threadId, round.id);
         expect(promoted.kind).toBe("promoted");
-        // Status follows the promotion: Play now serves the promoted build, so
-        // the open preview reloads onto it without another Play call.
-        const after = yield* game.status(threadId);
-        expect(after.previewUrl).not.toBeNull();
-        expect(after.previewUrl).not.toBe(incumbentUrl);
+        // Promotion itself switches the open preview. No status read and no
+        // second Play call are needed for Play to follow the selected build.
         expect(opened).toHaveLength(3);
         expect(opened.at(-1)).toContain("builds/candidates/");
-        expect(after.selectedBuildId).toBe(opened.at(-1)?.split("/").at(-1));
+        const promotedDirectory = opened.at(-1)!;
+
+        // The cheap read reports the URL the promotion selected; it must not
+        // switch anything (a stale in-flight read is allowed to be stale, not
+        // to move Play).
+        const after = yield* game.status(threadId);
+        expect(after.previewUrl).toBe("http://127.0.0.1:9/3");
+        expect(after.previewUrl).not.toBe(incumbentUrl);
+        expect(after.selectedBuildId).toBe(NodePath.basename(promotedDirectory));
+        expect(opened).toHaveLength(3);
+
+        // The promotion published the stage's refresh event.
+        const events = yield* Queue.takeAll(queue);
+        expect(events.map((event) => `${event.name}:${event.state}`)).toEqual([
+          "Promote build:running",
+          "Promote build:succeeded",
+        ]);
+
         const state = yield* rounds.read(root);
-        expect(state.selected?.buildId).toBe(opened.at(-1)?.split("/").at(-1));
+        expect(state.selected?.buildId).toBe(NodePath.basename(promotedDirectory));
+      }),
+  );
+});
+
+it.live("a candidate changed after its export is refused by promotion", () => {
+  let exports = 0;
+  const opened: string[] = [];
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${exports} ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      preview: (directory) => {
+        opened.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${opened.length}`);
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const first = yield* game.action(threadId, "preview");
+        expect(first.success, first.message).toBe(true);
+        const incumbentDirectory = opened[0]!;
+        const incumbentUrl = first.url;
+
+        const round = yield* rounds.begin(root, {});
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# repair\n"),
+        );
+        const exported = yield* game.export(threadId, "Web");
+        expect(exported.success, exported.message).toBe(true);
+        yield* rounds.recordPostRepair(root, round.id);
+        const selectedBefore = (yield* rounds.read(root)).selected;
+
+        // The export sealed the artifact; then a served file changed. Explicit
+        // Play refuses those bytes through the same hash check, so promotion
+        // must refuse them too rather than make them Play's build.
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(
+            NodePath.join(NodePath.dirname(exported.path!), "index.js"),
+            "// edit",
+          ),
+        );
+        const refused = yield* game.promote(threadId, round.id);
+        expect(refused.kind).toBe("blocked");
+        if (refused.kind === "blocked") expect(refused.detail).toContain("artifact-changed");
+
+        const state = yield* rounds.read(root);
+        expect(state.selected?.buildId).toBe(selectedBefore?.buildId);
+        expect(state.rounds.find((entry) => entry.id === round.id)?.status).toBe("stopped");
+        // Nothing switched: Play still shows the incumbent.
+        expect(opened.at(-1)).toBe(incumbentDirectory);
+        expect((yield* game.status(threadId)).previewUrl).toBe(incumbentUrl);
       }),
   );
 });
