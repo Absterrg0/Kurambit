@@ -11,10 +11,10 @@ import { forkParked } from "../serverActivation.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 
 /**
- * Starts the repair loop after the builder turn that produced a playable
- * export ends, and wakes a parked loop when its child reaches a terminal
- * status. The reactor only translates committed events; the loop's own worker
- * owns every phase and decision.
+ * Starts the repair loop after the builder turn that produced the current
+ * playable export ends, and lets a committed top-level turn supersede a review.
+ * The loop's own fiber owns every phase and decision; this reactor never wakes
+ * a parked loop because the loop never parks.
  */
 export class GameRepairReactor extends Context.Service<
   GameRepairReactor,
@@ -33,13 +33,14 @@ const make = Effect.gen(function* () {
     if (event.type === "run.created") {
       // A new top-level turn on a game supersedes any review, including one
       // started through MCP where the websocket pre-dispatch hook does not see
-      // it. A round child's own run is skipped by its lineage below.
+      // it. The loop service takes the game gate itself, so this cannot race a
+      // loop start. A round child's own run is skipped by its lineage below.
       return Effect.gen(function* () {
         const shell = yield* threads
           .getThreadShell(event.threadId)
           .pipe(Effect.orElseSucceed(() => null));
         if (shell === null || shell.lineage.relationshipToParent === "subagent") return;
-        yield* loop.supersede(
+        yield* loop.interrupt(
           event.threadId,
           "A new turn on this game superseded the review; its candidate was not selected.",
         );
@@ -47,30 +48,20 @@ const make = Effect.gen(function* () {
     }
     if (event.type !== "run.updated") return Effect.void;
     const run = event.payload;
-    const terminal =
-      run.status === "completed" ||
-      run.status === "failed" ||
-      run.status === "cancelled" ||
-      run.status === "interrupted" ||
-      run.status === "rolled_back";
-    if (!terminal) return Effect.void;
+    if (run.status !== "completed" || run.rootNodeId === null) return Effect.void;
+    const nodeId = run.rootNodeId;
     return Effect.gen(function* () {
-      // A round child completing is what the parked worker is waiting for. The
-      // loop matches the child id it recorded, so an unrelated subagent run
-      // cannot advance it.
-      yield* loop.noteChildTerminal(event.threadId).pipe(Effect.forkDetach);
-      if (run.status !== "completed" || run.rootNodeId === null) return;
       const shell = yield* threads
         .getThreadShell(event.threadId)
         .pipe(Effect.orElseSucceed(() => null));
-      // A repair child completes on the same game project; only a top-level
-      // game thread may start a new loop.
+      // A review child completes on the same game project; only a top-level
+      // game thread may start a loop.
       if (shell === null || shell.lineage.relationshipToParent === "subagent") return;
       yield* loop
         .ensure({
           threadId: event.threadId,
           runId: run.id,
-          nodeId: run.rootNodeId,
+          nodeId,
         })
         .pipe(
           Effect.catchCause((cause) =>
@@ -87,8 +78,8 @@ const make = Effect.gen(function* () {
 
   const start: GameRepairReactor["Service"]["start"] = () =>
     Effect.gen(function* () {
-      // Restart reconciliation runs before any event can start a worker: a
-      // loop interrupted by the restart stays paused until Resume.
+      // Restart reconciliation runs before any event can start a worker: a loop
+      // the restart cut is interrupted, never resumed.
       yield* loop
         .recover()
         .pipe(

@@ -256,6 +256,9 @@ export const readLastPlaytest = async (
     ...(stored.blockers === undefined ? {} : { blockers: [...stored.blockers] }),
     ...(stored.interaction === undefined ? {} : { interaction: stored.interaction }),
     ...(steps._tag === "Some" ? { steps: [...steps.value] } : {}),
+    ...(stored.baseWidth === undefined || stored.baseHeight === undefined
+      ? {}
+      : { viewport: { width: stored.baseWidth, height: stored.baseHeight } }),
     stale,
   };
 };

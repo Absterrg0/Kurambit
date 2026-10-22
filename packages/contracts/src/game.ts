@@ -375,6 +375,12 @@ export const GameLastPlaytest = Schema.Struct({
    * both builds, so it is not chosen again after the fact.
    */
   steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
+  /**
+   * The base viewport the route was recorded at, when the evidence kept it.
+   * A review replays the route in the same frame, so a different window size
+   * cannot be mistaken for a gameplay difference.
+   */
+  viewport: Schema.optionalKey(GameViewport),
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**

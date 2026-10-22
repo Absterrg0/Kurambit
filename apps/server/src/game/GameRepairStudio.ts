@@ -5,8 +5,8 @@ import * as NodePath from "node:path";
 
 import {
   type GameOperationError,
-  type GamePlaytestStep,
   type GameReviewCheck,
+  type GameReviewFrozenInputs,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -31,13 +31,17 @@ export interface GameRepairStudioCheckInput {
   readonly root: string;
   /** Which build the playtest should show. The service picks it itself. */
   readonly target: "incumbent" | "candidate";
+  /**
+   * The loop's frozen route and viewport. They were captured when the loop
+   * opened and are replayed for every check, so a repair child's own playtest
+   * can never substitute an easier route for the one it is judged on.
+   */
+  readonly inputs: GameReviewFrozenInputs;
 }
 
 export interface GameRepairStudioCheckResult {
   readonly checks: ReadonlyArray<GameReviewCheck>;
   readonly frames: ReadonlyArray<GameRepairStudioFrame>;
-  /** The route both builds were played with, frozen away from the builder. */
-  readonly steps: ReadonlyArray<GamePlaytestStep>;
 }
 
 /** The export stage as the loop needs it to tell "no output" from "failed". */
@@ -48,6 +52,20 @@ export interface GameRepairStudioExportState {
   readonly detail: string | null;
 }
 
+/**
+ * The playable bytes and where they came from. A review may only start for the
+ * run that produced them, so the loop persists the build id and requires the
+ * playtest to have played the same artifact.
+ */
+export interface GameRepairStudioProvenance {
+  readonly playable: boolean;
+  /** The build the export stage produced, when it recorded one. */
+  readonly exportBuildId: string | null;
+  readonly exportFinishedAt: string | null;
+  /** The build the qualifying playtest played, when it recorded one. */
+  readonly playtestBuildId: string | null;
+}
+
 export type GameRepairStudioPromotion =
   | { readonly kind: "promoted" }
   | { readonly kind: "blocked"; readonly detail: string };
@@ -55,16 +73,22 @@ export type GameRepairStudioPromotion =
 /**
  * The heavy, engine-facing half of the repair loop: playable completion, code
  * checks with captured frames, the export stage and promotion. Keeping it
- * behind one small service lets the loop's phase machine run in tests with
- * scripted outcomes and no browser, and keeps GameService out of the loop's
- * dependency graph (GameService calls the loop for supersession).
+ * behind one small service lets the loop's straight-line fiber run in tests
+ * with scripted outcomes and no browser, and keeps GameService out of the
+ * loop's dependency graph (GameService calls the loop for supersession).
  */
 export class GameRepairStudio extends Context.Service<
   GameRepairStudio,
   {
-    /** The t48 playable completion: an export and a playtest of those bytes. */
-    readonly playable: (root: string) => Effect.Effect<boolean, GameOperationError>;
-    /** Plays one build with the frozen route and normalizes its checks. */
+    /** The run's playable completion and the exact export bytes it produced. */
+    readonly exportProvenance: (
+      root: string,
+    ) => Effect.Effect<GameRepairStudioProvenance, GameOperationError>;
+    /** The builder's own inputs, captured once when a loop opens. */
+    readonly frozenInputs: (
+      root: string,
+    ) => Effect.Effect<GameReviewFrozenInputs, GameOperationError>;
+    /** Plays one build with the frozen inputs and normalizes its real verdicts. */
     readonly check: (
       input: GameRepairStudioCheckInput,
     ) => Effect.Effect<GameRepairStudioCheckResult, GameOperationError>;
@@ -78,26 +102,62 @@ export class GameRepairStudio extends Context.Service<
   }
 >()("t3/game/GameRepairStudio") {}
 
+/**
+ * The playtest service's own measured verdicts, normalized into the stable
+ * checks the loop freezes. Every check is a verdict, never a proxy: a frozen
+ * player with animated scenery changes pixels and still fails movement, and a
+ * run that does not qualify as honest gameplay fails `state` with its own
+ * blockers. A measurement the run did not take stays `unmeasured` instead of
+ * passing.
+ */
 const checkResult = (result: {
   readonly success: boolean;
   readonly booted: boolean;
-  readonly responded: boolean;
   readonly consoleMessages: ReadonlyArray<{ readonly level: string }>;
-  readonly state: unknown;
+  readonly state: {
+    readonly before: { readonly hudText?: string | undefined } | null;
+    readonly after: { readonly hudText?: string | undefined } | null;
+    readonly playerMoved: number;
+  } | null;
+  readonly qualifies?: boolean | undefined;
+  readonly blockers?: ReadonlyArray<string> | undefined;
   readonly pauseConfirmed?: boolean | null | undefined;
 }): ReadonlyArray<GameReviewCheck> => {
   const consoleErrors = result.consoleMessages.filter(
     (message) => message.level === "error",
   ).length;
-  return [
+  const state = result.state;
+  const moved = state === null ? null : state.playerMoved > 0;
+  const hud =
+    state === null
+      ? null
+      : [state.before, state.after].some((probe) => (probe?.hudText ?? "").trim().length > 0);
+  const blockers = (result.blockers ?? []).join("; ").slice(0, 1000);
+  const checks: GameReviewCheck[] = [
     { id: "boot", status: result.booted ? "passed" : "failed" },
     {
       id: "console",
       status: consoleErrors === 0 && result.success ? "passed" : "failed",
       ...(consoleErrors === 0 ? {} : { detail: `${consoleErrors} console errors` }),
     },
-    { id: "input", status: result.responded ? "passed" : "failed" },
-    { id: "state", status: result.state === null ? "unmeasured" : "passed" },
+    {
+      id: "input",
+      status: moved === null ? "unmeasured" : moved ? "passed" : "failed",
+      ...(moved === false ? { detail: "the player did not move from the gameplay baseline" } : {}),
+    },
+    {
+      id: "state",
+      status:
+        result.qualifies === undefined ? "unmeasured" : result.qualifies ? "passed" : "failed",
+      ...(result.qualifies === false
+        ? { detail: blockers === "" ? "the run did not qualify as gameplay" : blockers }
+        : {}),
+    },
+    {
+      id: "hud",
+      status: hud === null ? "unmeasured" : hud ? "passed" : "failed",
+      ...(hud === false ? { detail: "the probe saw no visible HUD text" } : {}),
+    },
     {
       id: "bridge",
       status:
@@ -108,6 +168,7 @@ const checkResult = (result: {
             : "failed",
     },
   ];
+  return checks;
 };
 
 export const layer = (options: { readonly stateDir: string }) =>
@@ -157,30 +218,48 @@ export const layer = (options: { readonly stateDir: string }) =>
           return frames;
         });
 
-      const playable = (root: string) =>
+      const exportProvenance = (root: string) =>
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
           const read = yield* qualification.read(root, manifest.godotProject);
-          return read.completion === "complete";
+          const exported = yield* qualification.stageRecord(root, "export");
+          const played = yield* qualification.stageRecord(root, "playtest");
+          return {
+            playable: read.completion === "complete",
+            exportBuildId: exported?.buildId ?? null,
+            exportFinishedAt: exported?.finishedAt ?? null,
+            playtestBuildId: played?.buildId ?? null,
+          } satisfies GameRepairStudioProvenance;
         });
 
-      const check: GameRepairStudio["Service"]["check"] = (input) =>
+      const frozenInputs = (root: string) =>
         Effect.gen(function* () {
           // The builder's own demo route is frozen evidence, not something the
           // repair child gets to choose again.
           const last = yield* Effect.promise(() =>
-            readLastPlaytest(input.root, [], null).catch(() => null),
+            readLastPlaytest(root, [], null).catch(() => null),
           );
-          const steps = last?.steps ?? [];
-          const result = yield* game.webPlaytest(
-            input.threadId,
-            steps.length === 0 ? {} : { steps: [...steps] },
-          );
+          return {
+            steps: [...(last?.steps ?? [])],
+            viewport: last?.viewport ?? null,
+            // Godot playtests are not seeded today; say so instead of inventing one.
+            seed: null,
+          } satisfies GameReviewFrozenInputs;
+        });
+
+      const check: GameRepairStudio["Service"]["check"] = (input) =>
+        Effect.gen(function* () {
+          const { inputs } = input;
+          const result = yield* game.webPlaytest(input.threadId, {
+            ...(inputs.steps.length === 0 ? {} : { steps: [...inputs.steps] }),
+            ...(inputs.viewport === null
+              ? {}
+              : { width: inputs.viewport.width, height: inputs.viewport.height }),
+          });
           const frames = yield* storeFrames(input.root, result.screenshots);
           return {
             checks: checkResult(result),
             frames,
-            steps,
           } satisfies GameRepairStudioCheckResult;
         });
 
@@ -206,6 +285,12 @@ export const layer = (options: { readonly stateDir: string }) =>
             ),
           );
 
-      return GameRepairStudio.of({ playable, check, exportState, promote });
+      return GameRepairStudio.of({
+        exportProvenance,
+        frozenInputs,
+        check,
+        exportState,
+        promote,
+      });
     }),
   );

@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { RunId, ThreadId } from "./baseSchemas.ts";
+import { GamePlaytestStep, GameViewport } from "./game.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
 /**
@@ -200,37 +201,59 @@ export const GameReviewBallotRecord = Schema.Struct({
 export type GameReviewBallotRecord = typeof GameReviewBallotRecord.Type;
 
 /**
- * One repair loop's durable state. It is created once, when a builder turn
- * that produced a playable export ends, and owns the immutable origin, both
- * frozen model selections and the spend. Rounds and their evidence live in the
- * round store; this record says which round is being worked on and why the
- * loop stopped.
+ * One repair loop's durable state. It is created once, when the builder run
+ * that produced the current playable export ends, and owns the immutable
+ * origin, both frozen selections and the spend. Everything a round learns
+ * (checks, critic answer, candidate, ballots) lives in the round store; the
+ * loop keeps only what outlives a round: where it came from, what it may spend
+ * and how it ended.
  */
-export const GAME_REPAIR_LOOP_STATUSES = ["running", "paused", "stopped"] as const;
+export const GAME_REPAIR_LOOP_STATUSES = ["running", "interrupted", "stopped"] as const;
 export const GameRepairLoopStatus = Schema.Literals(GAME_REPAIR_LOOP_STATUSES);
 export type GameRepairLoopStatus = typeof GameRepairLoopStatus.Type;
 
 /**
- * The loop's next action. `review` re-checks the incumbent and asks the critic;
- * `repair` reuses the incumbent's defects after a rejection; `candidate` and
- * `ballots` finish the round already open.
+ * The exact play inputs every candidate of this loop is checked with. They are
+ * read from the builder's own playtest once, when the loop opens, so a repair
+ * child's demonstration can never substitute an easier route for the one the
+ * incumbent is judged on.
  */
-export const GAME_REPAIR_LOOP_PHASES = ["review", "repair", "candidate", "ballots"] as const;
-export const GameRepairLoopPhase = Schema.Literals(GAME_REPAIR_LOOP_PHASES);
-export type GameRepairLoopPhase = typeof GameRepairLoopPhase.Type;
-
-/** The child the worker is parked on, so a restart can reconcile it. */
-export const GameRepairLoopWait = Schema.Struct({
-  role: Schema.Literals(["critic", "ballot", "repair"]),
-  order: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
-  roundId: Schema.String,
-  commandId: Schema.String,
-  childThreadId: Schema.String,
-  runId: Schema.NullOr(Schema.String),
+export const GameReviewFrozenInputs = Schema.Struct({
+  /** The ordinary-input route the builder played. */
+  steps: Schema.Array(GamePlaytestStep),
+  /** The viewport the route was recorded at, when the evidence had one. */
+  viewport: Schema.NullOr(GameViewport),
+  /**
+   * The seed the route was recorded with, when the evidence had one. Godot
+   * playtests are not seeded today, so this is null and honest.
+   */
+  seed: Schema.NullOr(Schema.Number),
 });
-export type GameRepairLoopWait = typeof GameRepairLoopWait.Type;
+export type GameReviewFrozenInputs = typeof GameReviewFrozenInputs.Type;
 
-/** One captured frame the loop keeps for the next ballot, outside the game. */
+/**
+ * What this loop spent. `measured` only when every child it started reported
+ * provider-turn usage; a child that did not makes the whole loop `unknown`
+ * rather than under-reporting as zero.
+ */
+export const GameReviewUsage = Schema.Struct({
+  status: Schema.Literals(["measured", "unknown"]),
+  providerTurns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  usedTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type GameReviewUsage = typeof GameReviewUsage.Type;
+
+export const EMPTY_GAME_REVIEW_USAGE: GameReviewUsage = {
+  status: "unknown",
+  providerTurns: 0,
+  usedTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
+
+/** One captured frame a review child is shown, stored outside the game. */
 export const GameRepairFrame = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
@@ -240,46 +263,34 @@ export const GameRepairFrame = Schema.Struct({
 export type GameRepairFrame = typeof GameRepairFrame.Type;
 
 export const GameRepairLoop = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(2),
   id: Schema.String,
   /** Canonical game root; the record is keyed by its digest. */
   root: Schema.String,
   threadId: ThreadId,
   originatingRunId: RunId,
   originatingNodeId: Schema.String,
+  /** The build the originating run exported; the loop repairs these bytes. */
+  exportBuildId: Schema.String,
   status: GameRepairLoopStatus,
-  phase: GameRepairLoopPhase,
-  /** The round currently being worked, or the last one decided. */
-  roundId: Schema.NullOr(Schema.String),
-  /** Attempted repairs, including ones that produced no candidate. */
+  /** Attempted repairs, counted when a repair starts. */
   repairsUsed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   budget: GameReviewBudget,
   builderSelection: ModelSelection,
   reviewSelection: ModelSelection,
+  inputs: GameReviewFrozenInputs,
+  /**
+   * The admission generation at creation. A user action bumps it, so a loop
+   * that lost its game never dispatches or promotes afterwards.
+   */
+  generation: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   startedAt: Schema.String,
   updatedAt: Schema.String,
   finishedAt: Schema.NullOr(Schema.String),
-  /** The incumbent defects the next repair fixes. */
-  defects: Schema.Array(GameReviewDefect),
-  doNotRegress: Schema.Array(GameReviewDoNotRegress),
-  /** The incumbent's frozen check results, for the mechanical veto. */
-  incumbentChecks: Schema.Array(GameReviewCheck),
-  /** The frames the critic and ballots use for the incumbent. */
-  incumbentFrames: Schema.Array(GameRepairFrame),
-  /** The challenger's frames, once its checks ran. */
-  candidateFrames: Schema.Array(GameRepairFrame),
-  /** The incumbent checks ran for this review pass. */
-  checksDone: Schema.Boolean,
-  /** The critic answered for this review pass. */
-  criticDone: Schema.Boolean,
-  /** Why the previous attempt was rejected, carried into the next repair. */
-  lastRejection: Schema.NullOr(Schema.String),
-  wait: Schema.NullOr(GameRepairLoopWait),
-  /** True after a restart until an explicit Resume. */
-  resumeRequired: Schema.Boolean,
   promotedRounds: Schema.Array(Schema.String),
   decision: Schema.NullOr(Schema.Literals(["promote", "stop", "interrupt"])),
   reason: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000))),
+  usage: GameReviewUsage,
 });
 export type GameRepairLoop = typeof GameRepairLoop.Type;
 
