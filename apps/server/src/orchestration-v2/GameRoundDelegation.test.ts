@@ -335,3 +335,154 @@ it.effect("a round task refuses an unfinished origin or a node outside it", () =
     }
   }).pipe(Effect.provide(layerTest)),
 );
+
+// Completes a child run as a provider turn would and returns once the parent
+// has committed the task's terminal update, which carries any delivery.
+const completeChildRun = (input: {
+  readonly childThreadId: ThreadId;
+  readonly taskId: NodeId;
+  readonly run: OrchestrationV2Run;
+  readonly now: DateTime.Utc;
+}) =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const before = yield* sink.latestSequence();
+    const terminal = yield* sink.stream({ afterSequence: before }).pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "subagent.updated" &&
+          stored.event.payload.id === input.taskId &&
+          stored.event.payload.status === "completed",
+      ),
+      Stream.take(1),
+      Stream.runDrain,
+      Effect.forkScoped,
+    );
+    yield* sink.write({
+      commandId: CommandId.make(`complete-${input.run.id}`),
+      events: [
+        {
+          id: EventId.make(`complete-${input.run.id}`),
+          type: "run.updated" as const,
+          threadId: input.childThreadId,
+          occurredAt: input.now,
+          payload: {
+            ...input.run,
+            status: "completed" as const,
+            startedAt: input.run.startedAt ?? input.now,
+            completedAt: input.now,
+          },
+        },
+      ],
+    });
+    yield* Fiber.join(terminal);
+  });
+
+// Sends a user follow-up to a finished child, completes it, and reports how
+// the parent changed across that completion.
+const followUpAndComplete = (input: {
+  readonly parentThreadId: ThreadId;
+  readonly childThreadId: ThreadId;
+  readonly now: DateTime.Utc;
+}) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const messageId = MessageId.make(`message:follow-up-${input.childThreadId}`);
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`follow-up-${input.childThreadId}`),
+      threadId: input.childThreadId,
+      messageId,
+      text: "Look again.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const child = yield* projections.getThreadProjection(input.childThreadId);
+    const run = child.runs.find((candidate) => candidate.userMessageId === messageId)!;
+    const taskId = run.delegatedTaskId!;
+    const before = yield* projections.getThreadProjection(input.parentThreadId);
+    yield* completeChildRun({ childThreadId: input.childThreadId, taskId, run, now: input.now });
+    const after = yield* projections.getThreadProjection(input.parentThreadId);
+    return { taskId, before, after };
+  });
+
+it.effect("a follow-up to a finished round child still never wakes the builder", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:game-round-follow-up");
+    const seeded = yield* seedParent(threadId, ProjectId.make("project:game-round-follow-up"));
+    yield* completeRun({ threadId, now: seeded.now, run: seeded.run });
+    yield* seeded.orchestrator.dispatch(
+      gameRoundCommand({
+        commandId: "game-round-follow-up-critic",
+        threadId,
+        runId: seeded.run.id,
+        nodeId: seeded.rootNodeId,
+        role: "critic",
+        evidenceDirectory: "/state/game-review/evidence/follow-up-critic",
+      }),
+    );
+    const original = (yield* seeded.projections.getThreadProjection(threadId)).subagents[0]!;
+    const child = yield* seeded.projections.getThreadProjection(original.childThreadId!);
+    yield* completeChildRun({
+      childThreadId: child.thread.id,
+      taskId: original.id,
+      run: child.runs[0]!,
+      now: seeded.now,
+    });
+
+    const { taskId, after } = yield* followUpAndComplete({
+      parentThreadId: threadId,
+      childThreadId: child.thread.id,
+      now: seeded.now,
+    });
+    const followUp = after.subagents.find((task) => task.id === taskId)!;
+    assert.equal(followUp.completionWake, "never");
+    assert.isUndefined(followUp.completionDelivery);
+    assert.isUndefined(after.runs[0]!.delegatedCompletion);
+    assert.lengthOf(after.runs, 1);
+    assert.lengthOf(after.messages, 1);
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);
+
+it.effect("a follow-up to a finished delegated task still delivers to its parent", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:delegated-follow-up");
+    const seeded = yield* seedParent(threadId, ProjectId.make("project:delegated-follow-up"));
+    yield* seeded.orchestrator.dispatch({
+      type: "delegated_task.request",
+      createdBy: "agent",
+      creationSource: "mcp",
+      commandId: CommandId.make("delegate-follow-up-original"),
+      parentThreadId: threadId,
+      parentRunId: seeded.run.id,
+      parentNodeId: seeded.rootNodeId,
+      task: "Review the build.",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+    });
+    const original = (yield* seeded.projections.getThreadProjection(threadId)).subagents[0]!;
+    const child = yield* seeded.projections.getThreadProjection(original.childThreadId!);
+    yield* completeChildRun({
+      childThreadId: child.thread.id,
+      taskId: original.id,
+      run: child.runs[0]!,
+      now: seeded.now,
+    });
+    yield* completeRun({ threadId, now: seeded.now, run: seeded.run });
+
+    const { taskId, before, after } = yield* followUpAndComplete({
+      parentThreadId: threadId,
+      childThreadId: child.thread.id,
+      now: seeded.now,
+    });
+    assert.equal(after.subagents.find((task) => task.id === taskId)!.completionWake, "always");
+    assert.isUndefined(before.runs[0]!.delegatedCompletion);
+    assert.include(after.runs[0]!.delegatedCompletion?.delivery?.taskIds ?? [], taskId);
+    // The continuation that carries the result is reserved with the delivery.
+    assert.isDefined(after.runs[0]!.delegatedCompletion?.delivery?.messageId);
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);

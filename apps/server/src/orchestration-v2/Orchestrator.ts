@@ -6547,8 +6547,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection: run.modelSelection,
       prompt: command.text,
       title: child.title,
-      completionWake: "always",
-      completionDelivery: { state: "pending", observedByRunId: null },
+      // A round child reports to its round worker; a follow-up must not turn
+      // it into a task that wakes the builder or joins a delivery cohort.
+      ...(original.completionWake === "never"
+        ? { completionWake: "never" as const }
+        : {
+            completionWake: "always" as const,
+            completionDelivery: { state: "pending" as const, observedByRunId: null },
+          }),
       status: run.status === "queued" ? "pending" : "running",
       progress: undefined,
       result: null,
