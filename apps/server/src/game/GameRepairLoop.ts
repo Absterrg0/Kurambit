@@ -799,6 +799,16 @@ export const layer = (options: GameRepairLoopOptions) => {
       record: GameRepairLoopRecord,
     ): Effect.Effect<RoundOutcome, GameOperationError> =>
       Effect.gen(function* () {
+        // A user action between rounds ends the loop before it opens a round.
+        const stamp = yield* admission.stamp(task.root);
+        if (stamp.generation !== record.generation)
+          return {
+            record,
+            done: yield* stop(
+              task.root,
+              "superseded: a user action took the game before a new round started.",
+            ),
+          };
         const remaining = remainingBudget(record, nowMs());
         const round = yield* rounds.begin(task.root, {
           threadId: record.threadId,
@@ -1219,8 +1229,7 @@ export const layer = (options: GameRepairLoopOptions) => {
     const ensure: GameRepairLoop["Service"]["ensure"] = (input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(input.threadId);
-        return yield* admission.withGate(
-          root,
+        const current = () =>
           Effect.gen(function* () {
             const existing = yield* readRecord(root);
             // The same origin is never reviewed twice; a live loop is not
@@ -1234,60 +1243,76 @@ export const layer = (options: GameRepairLoopOptions) => {
             )
               return existing;
             if (existing?.status === "running") return existing;
-            const stamp = yield* admission.stamp(root);
-            const records = yield* threads.getThreadRecords(input.threadId, ["runs"]).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "ensure game review",
-                    path: root,
-                    reason: "thread-dispatch",
-                    detail: String(cause),
-                    cause,
-                  }),
-              ),
-            );
-            const run = records.runs.find((candidate) => candidate.id === input.runId);
-            if (
-              run === undefined ||
-              run.status !== "completed" ||
-              run.rootNodeId === null ||
-              run.rootNodeId !== input.nodeId
-            )
-              return null;
-            // A newer requested turn owns the game: this run's export is no
-            // longer the current work, so a text-only follow-up cannot start a
-            // fresh review budget.
-            const newest = records.runs.reduce((latest, candidate) =>
-              DateTime.toEpochMillis(candidate.requestedAt) >
-              DateTime.toEpochMillis(latest.requestedAt)
-                ? candidate
-                : latest,
-            );
-            if (newest.id !== run.id) return null;
-            const provenance = yield* studio.exportProvenance(root);
-            if (!provenance.playable || provenance.exportBuildId === null) return null;
-            // The export must have been produced inside this run.
-            const startedAt = run.startedAt === null ? null : DateTime.toEpochMillis(run.startedAt);
-            const completedAt =
-              run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-            const exportedAt =
-              provenance.exportFinishedAt === null ? null : Date.parse(provenance.exportFinishedAt);
-            if (startedAt === null || exportedAt === null) return null;
-            if (exportedAt < startedAt) return null;
-            if (completedAt !== null && exportedAt > completedAt) return null;
-            // The playtest that made it playable must have played those bytes.
-            if (provenance.playtestBuildId !== provenance.exportBuildId) return null;
-            const inputs = yield* studio.frozenInputs(root);
-            if (inputs.steps.length === 0) return null;
-            // A creator action admitted after this run finished supersedes it,
-            // even when that action's own run has not been created yet.
-            if (
-              stamp.admittedAt !== null &&
-              completedAt !== null &&
-              Date.parse(stamp.admittedAt) >= completedAt
-            )
-              return null;
+            return null;
+          });
+        const already = yield* current();
+        if (already !== null) return already;
+
+        // Everything below reads state, sources and playtest evidence; none of
+        // it holds the game gate, so a creator action never waits for an engine
+        // read. The gate is taken only to recheck and commit.
+        const records = yield* threads.getThreadRecords(input.threadId, ["runs"]).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "ensure game review",
+                path: root,
+                reason: "thread-dispatch",
+                detail: String(cause),
+                cause,
+              }),
+          ),
+        );
+        const run = records.runs.find((candidate) => candidate.id === input.runId);
+        if (
+          run === undefined ||
+          run.status !== "completed" ||
+          run.rootNodeId === null ||
+          run.rootNodeId !== input.nodeId
+        )
+          return null;
+        // A newer requested turn owns the game: this run's export is no longer
+        // the current work, so a text-only follow-up cannot start a new budget.
+        const newest = records.runs.reduce((latest, candidate) =>
+          DateTime.toEpochMillis(candidate.requestedAt) > DateTime.toEpochMillis(latest.requestedAt)
+            ? candidate
+            : latest,
+        );
+        if (newest.id !== run.id) return null;
+        const provenance = yield* studio.exportProvenance(root);
+        if (!provenance.playable || provenance.exportBuildId === null) return null;
+        const exportBuildId = provenance.exportBuildId;
+        // The export must have been produced inside this run.
+        const startedAt = run.startedAt === null ? null : DateTime.toEpochMillis(run.startedAt);
+        const completedAt =
+          run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
+        const exportedAt =
+          provenance.exportFinishedAt === null ? null : Date.parse(provenance.exportFinishedAt);
+        if (startedAt === null || exportedAt === null) return null;
+        if (exportedAt < startedAt) return null;
+        if (completedAt !== null && exportedAt > completedAt) return null;
+        // The playtest that made it playable must have played those bytes.
+        if (provenance.playtestBuildId !== provenance.exportBuildId) return null;
+        const inputs = yield* studio.frozenInputs(root);
+        if (inputs.steps.length === 0) return null;
+        const stamp = yield* admission.stamp(root);
+        // A creator action admitted after this run finished supersedes it, even
+        // when that action's own run has not been created yet.
+        if (
+          stamp.admittedAt !== null &&
+          completedAt !== null &&
+          Date.parse(stamp.admittedAt) >= completedAt
+        )
+          return null;
+
+        return yield* admission.withGate(
+          root,
+          Effect.gen(function* () {
+            const settled = yield* current();
+            if (settled !== null) return settled;
+            const latest = yield* admission.stamp(root);
+            // An action took the game while the reads above ran; it owns it now.
+            if (latest.generation !== stamp.generation) return null;
             const builderSelection = run.modelSelection ?? records.thread.modelSelection;
             const reviewSelection = input.reviewSelection ?? builderSelection;
             const at = nowIso();
@@ -1298,14 +1323,14 @@ export const layer = (options: GameRepairLoopOptions) => {
               threadId: input.threadId,
               originatingRunId: input.runId,
               originatingNodeId: input.nodeId,
-              exportBuildId: provenance.exportBuildId,
+              exportBuildId,
               status: "running",
               repairsUsed: 0,
               budget,
               builderSelection,
               reviewSelection,
               inputs,
-              generation: stamp.generation,
+              generation: latest.generation,
               startedAt: at,
               updatedAt: at,
               finishedAt: null,
