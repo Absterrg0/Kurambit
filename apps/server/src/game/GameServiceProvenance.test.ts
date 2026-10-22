@@ -918,7 +918,10 @@ it.live("a status read paused before Stop never reopens the preview", () => {
         const resumed = yield* Fiber.join(read);
 
         // The read finished after Stop. Observing is all it may do: no select,
-        // no reopen, with or without the byte check it asked for.
+        // no reopen, with or without the byte check it asked for. (The read-side
+        // select mutant is pinned by the in-flight promotion test above; through
+        // this fixture the pre-fix read also saw a closed preview here, so this
+        // test covers the ordering, not that mutant.)
         expect(resumed.previewUrl).toBeNull();
         expect(opened).toHaveLength(1);
         expect((yield* game.status(threadId)).previewUrl).toBeNull();
