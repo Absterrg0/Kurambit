@@ -220,6 +220,44 @@ it.live("an honest run passes movement, qualification and HUD from the real verd
   ),
 );
 
+it.live("a candidate that keeps a title but hides its score fails state-on-screen", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const check = (notOnScreen: ReadonlyArray<string> | undefined) =>
+        Effect.gen(function* () {
+          harness.results = {
+            ...baseResult(),
+            state: {
+              before: probe("Lantern Run"),
+              after: probe("Lantern Run"),
+              playerMoved: 48,
+              changes: [{ key: "score", before: 0, after: 10 }],
+              ...(notOnScreen === undefined ? {} : { notOnScreen: [...notOnScreen] }),
+            },
+            qualifies: true,
+            blockers: [],
+            pauseConfirmed: true,
+          };
+          const checked = yield* studio.check({
+            threadId,
+            root: harness.root,
+            target: "candidate",
+            inputs: { steps: [{ key: "ArrowRight", holdMs: 120 }], viewport: null, seed: null },
+          });
+          return new Map(checked.checks.map((entry) => [entry.id, entry]));
+        });
+      const hiding = yield* check(["score"]);
+      // Any HUD text still passes `hud`; the state check is independent of it.
+      expect(hiding.get("hud")?.status).toBe("passed");
+      expect(hiding.get("state-on-screen")?.status).toBe("failed");
+      expect(hiding.get("state-on-screen")?.detail).toContain("score");
+      expect((yield* check([])).get("state-on-screen")?.status).toBe("passed");
+      expect((yield* check(undefined)).get("state-on-screen")?.status).toBe("unmeasured");
+    }),
+  ),
+);
+
 it.live("a probe-less run leaves movement and state unmeasured instead of passing", () =>
   withStudio((harness) =>
     Effect.gen(function* () {

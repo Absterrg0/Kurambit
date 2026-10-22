@@ -122,6 +122,7 @@ const checkResult = (result: {
     readonly before: { readonly hudText?: string | undefined } | null;
     readonly after: { readonly hudText?: string | undefined } | null;
     readonly playerMoved: number;
+    readonly notOnScreen?: ReadonlyArray<string> | undefined;
   } | null;
   readonly qualifies?: boolean | undefined;
   readonly blockers?: ReadonlyArray<string> | undefined;
@@ -136,6 +137,10 @@ const checkResult = (result: {
     state === null
       ? null
       : [state.before, state.after].some((probe) => (probe?.hudText ?? "").trim().length > 0);
+  // Some HUD text proves nothing about the game's state: a candidate can keep
+  // its title and hide the score. This judges whether every GameState value
+  // the probe read is shown on screen, and is unmeasured without screen text.
+  const hidden = state?.notOnScreen;
   const blockers = (result.blockers ?? []).join("; ").slice(0, 1000);
   const checks: GameReviewCheck[] = [
     { id: "boot", status: result.booted ? "passed" : "failed" },
@@ -161,6 +166,13 @@ const checkResult = (result: {
       id: "hud",
       status: hud === null ? "unmeasured" : hud ? "passed" : "failed",
       ...(hud === false ? { detail: "the probe saw no visible HUD text" } : {}),
+    },
+    {
+      id: "state-on-screen",
+      status: hidden === undefined ? "unmeasured" : hidden.length === 0 ? "passed" : "failed",
+      ...(hidden !== undefined && hidden.length > 0
+        ? { detail: `not on screen: ${hidden.join(", ")}`.slice(0, 1000) }
+        : {}),
     },
     {
       id: "bridge",
