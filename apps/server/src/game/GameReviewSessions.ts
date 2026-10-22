@@ -167,6 +167,25 @@ const ReviewSelectionRecord = Schema.Struct({
 });
 type ReviewSelectionRecordType = typeof ReviewSelectionRecord.Type;
 
+/**
+ * A round freezes two selections, not one: who reviews (the first review
+ * child's choice or override) and who repairs (the builder run's own model).
+ * Changing the composer after critique cannot change either.
+ */
+const RoundSelectionRecord = Schema.Struct({
+  schemaVersion: Schema.Literal(2),
+  review: Schema.optionalKey(ReviewSelectionRecord),
+  builder: ReviewSelectionRecord,
+  originatingRunId: Schema.optionalKey(Schema.String),
+  originatingNodeId: Schema.optionalKey(Schema.String),
+});
+type RoundSelectionRecordType = typeof RoundSelectionRecord.Type;
+
+interface FrozenRoundSelection {
+  readonly review: ModelSelection | null;
+  readonly builder: ModelSelection | null;
+}
+
 const ReviewDispatchRecord = Schema.Struct({
   /**
    * pending is written before the command is sent. confirmed means the
@@ -215,6 +234,16 @@ type ReviewSessionRecordType = typeof ReviewSessionRecord.Type;
 
 const decodeSessionRecord = Schema.decodeUnknownSync(ReviewSessionRecord);
 const decodeSelectionRecord = Schema.decodeUnknownSync(ReviewSelectionRecord);
+const isRoundSelectionRecord = Schema.is(RoundSelectionRecord);
+
+/** Reads v2 rounds and the v1 review-only file a previous build wrote. */
+const decodeRoundSelection = (value: unknown): FrozenRoundSelection =>
+  isRoundSelectionRecord(value)
+    ? {
+        review: value.review === undefined ? null : toSelection(value.review),
+        builder: toSelection(value.builder),
+      }
+    : { review: toSelection(decodeSelectionRecord(value)), builder: null };
 
 const isGameOperationError = Schema.is(GameOperationError);
 
@@ -584,13 +613,13 @@ export const layer = (options: { readonly stateDir: string }) => {
       const value = yield* attempt("read game review selection", file, () => readJson(file));
       if (value === null) return null;
       return yield* Effect.try({
-        try: () => toSelection(decodeSelectionRecord(value)),
+        try: () => decodeRoundSelection(value),
         catch: (cause) =>
           failure(
             "read game review selection",
             file,
             "io",
-            "The frozen review selection is unreadable.",
+            "The frozen round selection is unreadable.",
             cause,
           ),
       });
@@ -599,12 +628,26 @@ export const layer = (options: { readonly stateDir: string }) => {
     const writeRoundSelection = Effect.fnUntraced(function* (
       root: string,
       roundId: string,
-      selection: ModelSelection,
+      selection: {
+        readonly review?: ModelSelection;
+        readonly builder: ModelSelection;
+        readonly originatingRunId?: string;
+        readonly originatingNodeId?: string;
+      },
     ) {
       const file = yield* roundSelectionFile(root, roundId);
-      yield* attempt("write game review selection", file, () =>
-        writeJsonAtomic(file, selectionRecord(selection)),
-      );
+      const record: RoundSelectionRecordType = {
+        schemaVersion: 2,
+        ...(selection.review === undefined ? {} : { review: selectionRecord(selection.review) }),
+        builder: selectionRecord(selection.builder),
+        ...(selection.originatingRunId === undefined
+          ? {}
+          : { originatingRunId: selection.originatingRunId }),
+        ...(selection.originatingNodeId === undefined
+          ? {}
+          : { originatingNodeId: selection.originatingNodeId }),
+      };
+      yield* attempt("write game review selection", file, () => writeJsonAtomic(file, record));
     });
 
     /**
@@ -862,14 +905,17 @@ export const layer = (options: { readonly stateDir: string }) => {
           ...(input.runId === undefined ? {} : { runId: input.runId }),
           ...(input.nodeId === undefined ? {} : { nodeId: input.nodeId }),
         });
-        const builderSelection: ModelSelection = origin.thread.modelSelection;
         const frozen = yield* readRoundSelection(root, input.roundId);
+        // The run's own selection is the model and options the builder used,
+        // not whatever the composer shows after it finished.
+        const builderSelection: ModelSelection =
+          frozen?.builder ?? origin.run.modelSelection ?? origin.thread.modelSelection;
         const selection =
           input.role === "repair"
-            ? // Repairs keep the builder's selection; a review override never
-              // changes who repairs.
+            ? // Repairs keep the frozen builder selection; a review override
+              // never changes who repairs.
               builderSelection
-            : (frozen ?? input.selection ?? builderSelection);
+            : (frozen?.review ?? input.selection ?? builderSelection);
         if (!(yield* catalog.available(selection)))
           return {
             kind: "unavailable",
@@ -949,11 +995,20 @@ export const layer = (options: { readonly stateDir: string }) => {
               ? "Game review: ballot"
               : "Game review: repair";
 
-        // Freeze the round's review selection before dispatch: every later
-        // review child of this round must match, whatever the thread or caller
-        // does meanwhile.
-        if (input.role !== "repair" && frozen === null)
-          yield* writeRoundSelection(root, input.roundId, selection);
+        // Freeze both selections before dispatch: every later child of this
+        // round must match, whatever the thread or caller does meanwhile.
+        const frozenReview = frozen?.review ?? (input.role === "repair" ? undefined : selection);
+        if (
+          frozen === null ||
+          frozen.builder === null ||
+          (input.role !== "repair" && frozen.review === null)
+        )
+          yield* writeRoundSelection(root, input.roundId, {
+            ...(frozenReview === undefined ? {} : { review: frozenReview }),
+            builder: builderSelection,
+            originatingRunId: origin.run.id,
+            originatingNodeId: origin.nodeId,
+          });
 
         const childThreadId = IdAllocator.derive.delegatedTaskThread({ commandId });
         const taskId = IdAllocator.derive.delegatedTaskNode({ commandId });

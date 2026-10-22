@@ -156,6 +156,14 @@ interface Scripted {
   readonly extraChildRuns: Array<ScriptedChildRun>;
   /** Runs while the child's records are read, before they are returned. */
   childRecordsGate: (() => Effect.Effect<void>) | null;
+  /** The thread's composer selection; tests change it mid-round. */
+  parentSelection: {
+    readonly instanceId: ProviderInstanceId;
+    readonly model: string;
+    readonly options?: ReadonlyArray<{ readonly id: string; readonly value: string }>;
+  };
+  /** "instance/model" keys the catalog does not offer. */
+  readonly unavailable: Set<string>;
   childThreadId: ThreadId | null;
   /** The command that created the child; its message id names its run. */
   childCommandId: string | null;
@@ -170,6 +178,8 @@ const makeScripted = (): Scripted => ({
   rejectedReceipts: new Set(),
   extraChildRuns: [],
   childRecordsGate: null,
+  parentSelection: builderSelection,
+  unavailable: new Set(),
   childThreadId: null,
   childCommandId: null,
   childStatus: "completed",
@@ -254,7 +264,11 @@ const withSession = <A, E>(
           ),
           Layer.provide(
             Layer.mock(GameReviewSessions.GameReviewProviderCatalog)({
-              available: () => Effect.succeed(scripted.available),
+              available: (selection) =>
+                Effect.succeed(
+                  scripted.available &&
+                    !scripted.unavailable.has(`${selection.instanceId}/${selection.model}`),
+                ),
             }),
           ),
           Layer.provide(
@@ -273,7 +287,7 @@ const withSession = <A, E>(
                 Effect.gen(function* () {
                   if (target === threadId)
                     return {
-                      thread: parentThread,
+                      thread: { ...parentThread, modelSelection: scripted.parentSelection },
                       runs: [builderRun],
                     } as unknown as OrchestrationV2ThreadProjection;
                   if (scripted.childThreadId !== null && target === scripted.childThreadId) {
@@ -484,6 +498,44 @@ it.live("a review override applies to review roles only and freezes per round", 
       const ballotCommand = scripted.dispatches.at(-1)!;
       if (ballotCommand.type !== "game-round.task.request") return;
       expect(ballotCommand.modelSelection).toEqual(overrideSelection);
+    }),
+  ),
+);
+
+it.live("a repair uses the builder selection frozen at round start", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+        selection: overrideSelection,
+      });
+      expect(critic.kind).toBe("started");
+
+      // The composer moves on after critique, and the new model is not even
+      // available any more. The repair must still use the original builder.
+      scripted.parentSelection = laterOverrideSelection;
+      scripted.unavailable.add(
+        `${laterOverrideSelection.instanceId}/${laterOverrideSelection.model}`,
+      );
+      const repair = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        repair: {
+          remainingBudget: "2 repairs and 11 minutes left",
+          defects: [],
+          doNotRegress: [],
+        },
+      });
+      expect(repair.kind).toBe("started");
+      const repairCommand = scripted.dispatches.at(-1)!;
+      if (repairCommand.type !== "game-round.task.request") return;
+      expect(repairCommand.modelSelection).toEqual(builderSelection);
     }),
   ),
 );
