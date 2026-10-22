@@ -32,6 +32,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
+import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { designIntentFile } from "./GameDesignApproval.ts";
@@ -43,6 +44,8 @@ const fixtureState = (fixture: string) => NodePath.join(fixture, ".test-state");
 const gameServiceLayers = (options: {
   readonly stateDir: string;
   readonly onSend?: (input: ThreadManagementService.ThreadManagementSendInput) => void;
+  /** Records each admitted action's reason instead of the pass-through gate. */
+  readonly admitted?: Array<string>;
 }) =>
   GameService.layer.pipe(
     Layer.provideMerge(GameProjectService.layer),
@@ -57,8 +60,24 @@ const gameServiceLayers = (options: {
     Layer.provideMerge(designApprovalTestLayer(options.stateDir)),
     Layer.provideMerge(roundStoreTestLayer(options.stateDir)),
     Layer.provide(ServerSettings.layerTest()),
-    Layer.provideMerge(admissionTestLayer),
+    Layer.provideMerge(
+      options.admitted === undefined ? admissionTestLayer : recordingAdmission(options.admitted),
+    ),
     Layer.provide(NodeServices.layer),
+  );
+const recordingAdmission = (admitted: Array<string>) =>
+  Layer.succeed(
+    GameAdmission.GameAdmission,
+    GameAdmission.GameAdmission.of({
+      withGate: (_root, effect) => effect,
+      stamp: () => Effect.succeed({ generation: admitted.length, admittedAt: null }),
+      admit: ({ reason }) =>
+        Effect.sync(() => {
+          admitted.push(reason);
+        }),
+      register: () => Effect.void,
+      unregister: () => Effect.void,
+    }),
   );
 const gameProjectLayer = (stateDir: string, registration = projectTestLayer()) =>
   GameProjectService.layer.pipe(
@@ -1057,6 +1076,7 @@ it.effect("discarding a pending request restores the approved design", () =>
     );
     const stateDir = fixtureState(parent);
     const sends: ThreadManagementService.ThreadManagementSendInput[] = [];
+    const admitted: Array<string> = [];
     yield* Effect.scoped(
       Effect.gen(function* () {
         const projects = yield* GameProjectService.GameProjectService;
@@ -1068,7 +1088,12 @@ it.effect("discarding a pending request restores the approved design", () =>
           ),
         );
         yield* projects.requestChange(created.threadId, "Change the palette only.");
+        const admittedBefore = admitted.length;
         yield* projects.discardRevision(created.threadId);
+        // Discarding changes the contract a live review judges, so it takes the game.
+        expect(admitted.slice(admittedBefore)).toEqual([
+          "A discarded design revision superseded the review; its candidate was not selected.",
+        ]);
         const status = yield* game.status(created.threadId);
         expect(status.design.state).toBe("approved");
         expect(status.design.pendingRevision).toBeNull();
@@ -1091,6 +1116,7 @@ it.effect("discarding a pending request restores the approved design", () =>
           gameServiceLayers({
             stateDir: fixtureState(parent),
             onSend: (input) => sends.push(input),
+            admitted,
           }),
         ),
       ),

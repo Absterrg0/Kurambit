@@ -1771,28 +1771,6 @@ const layerWsRpc = (
               : {}),
           }).pipe(
             Effect.andThen(
-              command.type === "message.dispatch"
-                ? gameProjects
-                    .admit(
-                      command.threadId,
-                      "The creator's new turn superseded the review; its candidate was not selected.",
-                    )
-                    .pipe(
-                      Effect.mapError(
-                        (cause) =>
-                          new OrchestrationV2DispatchCommandError({
-                            commandId: command.commandId,
-                            commandType: command.type,
-                            message:
-                              "The review could not be stopped, so the turn was not admitted.",
-                            detail: `${cause.operation}: ${cause.detail ?? cause.reason}`,
-                            cause,
-                          }),
-                      ),
-                    )
-                : Effect.void,
-            ),
-            Effect.andThen(
               startup
                 .enqueueCommand(
                   (command.type === "prepared-run.retry"

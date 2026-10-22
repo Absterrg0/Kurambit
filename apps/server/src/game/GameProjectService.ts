@@ -96,12 +96,6 @@ export class GameProjectService extends Context.Service<
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
-    /**
-     * Takes the game for a creator action: the admission barrier joins a live
-     * review before the action touches the game. Every entry point routes
-     * through this rather than superseding in a transport handler.
-     */
-    readonly admit: (threadId: ThreadId, reason: string) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
      * The creator's approval of one specific DESIGN.md revision. It validates
@@ -527,13 +521,6 @@ const make = Effect.gen(function* () {
   });
   const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
     return (yield* resolveTarget(threadId)).root;
-  });
-  const admit = Effect.fn("GameProjectService.admit")(function* (
-    threadId: ThreadId,
-    reason: string,
-  ) {
-    const root = yield* resolve(threadId);
-    yield* admission.admit({ root, threadId, reason });
   });
   // Name the qualification loop every build turn must run. A blunt model otherwise
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
@@ -976,6 +963,13 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const target = yield* resolveTarget(threadId);
+    // Dropping the pending contract changes what a running review judges, so a
+    // live review is stopped and joined first, like every other design action.
+    yield* admission.admit({
+      root: target.root,
+      threadId,
+      reason: "A discarded design revision superseded the review; its candidate was not selected.",
+    });
     return yield* approvals.exclusive(
       target.root,
       Effect.gen(function* () {
@@ -1043,7 +1037,6 @@ const make = Effect.gen(function* () {
   );
   return GameProjectService.of({
     create,
-    admit,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
         [

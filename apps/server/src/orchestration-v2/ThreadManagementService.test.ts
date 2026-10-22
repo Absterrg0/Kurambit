@@ -38,6 +38,7 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as TurnAdmission from "./TurnAdmission.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { DispatchModeLimit, type DispatchModeRefusal } from "./DispatchModeLimit.ts";
 
@@ -425,6 +426,89 @@ it.effect(
       expect(dispatched).toEqual([]);
     }).pipe(Effect.provide(layerTest));
   },
+);
+
+const chokepointMessage = (commandId: CommandId) =>
+  ({
+    type: "message.dispatch",
+    commandId,
+    threadId: ThreadId.make("thread:thread-management:chokepoint"),
+    messageId: MessageId.make(`message:${commandId}`),
+    text: "Make the jump higher.",
+    attachments: [],
+    dispatchMode: { type: "start_immediately" },
+    createdBy: "user",
+    creationSource: "mcp",
+  }) as const;
+
+const enabledChokepointSettings = ServerSettings.layerTest({
+  providerInstances: {
+    [ProviderInstanceId.make("codex_work")]: { driver: "codex", enabled: true },
+  },
+});
+
+it.effect("a message turn waits for turn admission and never commits when it is refused", () =>
+  Effect.gen(function* () {
+    const dispatched: Array<string> = [];
+    const admitting = yield* Deferred.make<void>();
+    const verdict = yield* Deferred.make<boolean>();
+    const layerTest = layerDispatchChokepointTest(enabledChokepointSettings)(dispatched).pipe(
+      Layer.provide(
+        Layer.succeed(TurnAdmission.TurnAdmission, {
+          admit: () =>
+            Deferred.succeed(admitting, undefined).pipe(
+              Effect.andThen(Deferred.await(verdict)),
+              Effect.flatMap((admitted) =>
+                admitted
+                  ? Effect.void
+                  : Effect.fail(
+                      new TurnAdmission.TurnAdmissionRejectedError({
+                        detail: "The review could not be stopped.",
+                      }),
+                    ),
+              ),
+            ),
+        }),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const refused = yield* Effect.forkChild(
+        Effect.flip(
+          threads.dispatch(chokepointMessage(CommandId.make("command:chokepoint:refused"))),
+        ),
+      );
+      yield* Deferred.await(admitting);
+      expect(dispatched).toEqual([]);
+      yield* Deferred.succeed(verdict, false);
+      const error = yield* Fiber.join(refused);
+      expect(error).toBeInstanceOf(Orchestrator.OrchestratorCommandRejectedError);
+      expect(dispatched).toEqual([]);
+    }).pipe(Effect.provide(layerTest));
+  }),
+);
+
+it.effect("an admitted message turn commits after admission", () =>
+  Effect.gen(function* () {
+    const dispatched: Array<string> = [];
+    const admitted: Array<string> = [];
+    const layerTest = layerDispatchChokepointTest(enabledChokepointSettings)(dispatched).pipe(
+      Layer.provide(
+        Layer.succeed(TurnAdmission.TurnAdmission, {
+          admit: (thread) =>
+            Effect.sync(() => {
+              admitted.push(String(thread.id));
+            }),
+        }),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      yield* threads.dispatch(chokepointMessage(CommandId.make("command:chokepoint:admitted")));
+      expect(admitted).toEqual(["thread:thread-management:chokepoint"]);
+      expect(dispatched).toEqual(["message.dispatch"]);
+    }).pipe(Effect.provide(layerTest));
+  }),
 );
 
 it.effect(
