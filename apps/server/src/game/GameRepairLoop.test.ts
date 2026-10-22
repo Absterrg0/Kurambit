@@ -11,7 +11,7 @@ import {
   type GameReviewBudget,
   type GameReviewCheck,
   type GameManifest,
-  type GameOperationError,
+  GameOperationError,
   type GameRepairLoop as GameRepairLoopRecord,
   type GameReviewRound,
   type ModelSelection,
@@ -19,6 +19,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -970,7 +971,7 @@ it.live("a child that ignores interrupts fails the creator action closed", () =>
 /** A later builder run that exported a fresh build and finished just now. */
 const ensureLaterBuild = (fixture: Fixture, services: Services) =>
   Effect.gen(function* () {
-    const now = Date.now();
+    const now = yield* Clock.currentTimeMillis;
     const runId = RunId.make(`run:builder-${String(now)}`);
     const build = "c".repeat(64);
     fixture.scripted.runs.push({
@@ -985,7 +986,7 @@ const ensureLaterBuild = (fixture: Fixture, services: Services) =>
     fixture.scripted.exportBuildId = build;
     fixture.scripted.exportRunId = String(runId);
     fixture.scripted.playtestBuildId = build;
-    fixture.scripted.exportFinishedAt = new Date(now + 1).toISOString();
+    fixture.scripted.exportFinishedAt = DateTime.formatIso(DateTime.makeUnsafe(now + 1));
     return yield* services.loop.ensure({
       threadId,
       runId,
@@ -1135,7 +1136,7 @@ it.live("a deadline that passes during the selection commit blocks the promotion
           expect((yield* services.rounds.read(root)).selected).toBeNull();
         }),
       ),
-    { now: () => Date.now() + skewMs },
+    { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
   ),
 );
 
