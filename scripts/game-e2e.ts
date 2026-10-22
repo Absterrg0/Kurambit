@@ -59,6 +59,9 @@ const { values } = NodeUtil.parseArgs({
     template: { type: "string" },
     // `--plan-first false` skips the design turn for harness debugging; the product default is on.
     "plan-first": { type: "string", default: "true" },
+    // `--review-design true` waits for the approval RPC between the design and
+    // build turns (the developer opt-in); by default one turn designs and builds.
+    "review-design": { type: "string", default: "false" },
     brief: { type: "string" },
     "art-direction": { type: "string" },
     // A frozen brief fixture carries the brief, art direction, template and obligations.
@@ -78,7 +81,7 @@ const { values } = NodeUtil.parseArgs({
 });
 if (values.help || (!values.brief && !values.fixture)) {
   console.log(
-    'Usage: node scripts/game-e2e.ts (--brief "<game brief>" | --fixture scripts/game-benchmark/briefs/<id>.json) [--summary FILE] [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
+    'Usage: node scripts/game-e2e.ts (--brief "<game brief>" | --fixture scripts/game-benchmark/briefs/<id>.json) [--summary FILE] [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--review-design false|true] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
   );
   process.exit(values.help ? 0 : 1);
 }
@@ -98,6 +101,11 @@ process.env = (
 if (values["plan-first"] !== "true" && values["plan-first"] !== "false")
   throw new Error("--plan-first must be true or false");
 const planFirst = values["plan-first"] === "true";
+if (values["review-design"] !== "true" && values["review-design"] !== "false")
+  throw new Error("--review-design must be true or false");
+const reviewDesign = planFirst && values["review-design"] === "true";
+if (values.revise && !reviewDesign)
+  throw new Error("--revise exercises the reviewed design flow; pass --review-design true");
 let extraPlaytestSteps: ReadonlyArray<Record<string, unknown>> | undefined;
 if (values["extra-playtest-steps"]) {
   const raw = JSON.parse(
@@ -550,6 +558,7 @@ const main = Effect.gen(function* () {
     brief: briefText,
     artDirection,
     planFirst,
+    ...(reviewDesign ? { reviewDesign: true } : {}),
     modelSelection: {
       instanceId: ProviderInstanceId.make(values.provider),
       model: values.model,
@@ -570,7 +579,7 @@ const main = Effect.gen(function* () {
   });
   gameRoot = created.root;
   gameInfo = { name: gameName, root: created.root, threadId: created.threadId };
-  summaryPhase = planFirst ? "design" : "build";
+  summaryPhase = reviewDesign ? "design" : "build";
   console.log(`Game root: ${created.root}`);
   console.log(`Thread: ${created.threadId}`);
   // The live projection only keeps a bounded recent window; keep every item the
@@ -584,7 +593,7 @@ const main = Effect.gen(function* () {
   );
   // The create commit holds the untouched skeleton; read it before the design
   // turn can edit or commit over the file it has to replace.
-  const designSkeleton = planFirst
+  const designSkeleton = reviewDesign
     ? yield* promise(async () => {
         try {
           return (await exec("git", ["show", "HEAD:DESIGN.md"], { cwd: created.root })).stdout;
@@ -594,7 +603,7 @@ const main = Effect.gen(function* () {
       })
     : "";
   let buildRun: OrchestrationV2Run;
-  if (planFirst) {
+  if (reviewDesign) {
     const designRun = yield* timedTurn(
       "design",
       waitForTurn(client, created.threadId, new Set(), {
@@ -685,6 +694,17 @@ const main = Effect.gen(function* () {
         observed: observedTurnItems,
         observedRuns: observedRunIds,
       }),
+    );
+  }
+  if (planFirst && !reviewDesign) {
+    // Without review the design is evidence, never a gate: report what the
+    // server recorded and let the run go on whatever DESIGN.md holds.
+    const designStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
+    const design = designStatus.design;
+    timeline(
+      `Design: ${design.state}, revision ${design.autoRevision ?? 0}, ${design.acceptance.length} criteria${
+        design.issues.length === 0 ? "" : `; issues: ${design.issues.join(" | ")}`
+      }${(design.warnings ?? []).length === 0 ? "" : `; warnings: ${(design.warnings ?? []).join(" | ")}`}`,
     );
   }
   const buildCalls = yield* collectTurnTools(
