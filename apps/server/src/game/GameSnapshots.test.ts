@@ -294,6 +294,27 @@ it.effect("empty directories the repair created are removed before restoring fil
   ),
 );
 
+it.effect("a directory the repair deleted is recreated before the snapshot file is written", () =>
+  withTree(({ root, snapshots }) =>
+    Effect.gen(function* () {
+      const stored = yield* snapshots.store(root);
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(root, "godot/scripts"), { recursive: true, force: true }),
+      );
+      const changed = yield* snapshots.capture(root);
+      const restored = yield* snapshots.restore(root, stored.manifest, {
+        expectSourceId: changed.sourceId,
+      });
+      expect(restored.kind).toBe("restored");
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("extends Node\n");
+    }),
+  ),
+);
+
 it.effect(
   "a parent replaced by a symlink blocks the write and leaves the outside file alone",
   () => {

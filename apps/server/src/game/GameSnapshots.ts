@@ -651,65 +651,71 @@ export const layer = (options: {
       if (existing?.sha256 === file.sha256 && existing.size === file.size) continue;
       await restoreOptions?.beforePath?.("restore", relative);
       const target = NodePath.join(canonical, relative);
-      const state = await lstatOrNull(target);
-      if (state !== null) {
-        if (state.isSymbolicLink())
-          return {
-            kind: "blocked",
-            sourceId: current.sourceId,
-            detail: `${relative} became a symlink after the game folder was read; nothing was restored.`,
-          };
-        if (state.isDirectory()) {
-          const entries = await NodeFSP.readdir(target);
-          if (entries.length > 0)
-            return {
-              kind: "blocked",
-              sourceId: current.sourceId,
-              detail: `${relative} is a directory holding files the snapshot does not; nothing was restored.`,
-            };
-          await NodeFSP.rmdir(target);
-        } else if (state.isFile()) {
-          const hashed = await hashFileBounded(
-            target,
-            limits.maxBytes,
-            limits.maxBytes,
-            "restore game snapshot",
-            canonical,
-          );
-          if (
-            existing === undefined ||
-            hashed.size !== existing.size ||
-            hashed.sha256 !== existing.sha256
-          )
-            return {
-              kind: "blocked",
-              sourceId: current.sourceId,
-              detail: `${relative} changed after the game folder was read; nothing was restored.`,
-            };
-        } else
-          return {
-            kind: "blocked",
-            sourceId: current.sourceId,
-            detail: `${relative} is not a file the snapshot can replace; nothing was restored.`,
-          };
-      } else if (existing !== undefined)
-        return {
-          kind: "blocked",
-          sourceId: current.sourceId,
-          detail: `${relative} disappeared after the game folder was read; nothing was restored.`,
-        };
-      const parentMismatch = await ensureParents(canonical, relative);
-      if (parentMismatch !== null)
-        return { kind: "blocked", sourceId: current.sourceId, detail: parentMismatch };
       const source = NodePath.join(stored.directory, "files", relative);
       const temporary = `${target}.${NodeCrypto.randomUUID()}.tmp`;
       try {
+        // Creating the parents comes first because the temporary copy lives
+        // here; the file's own identity is re-checked after the copy, right
+        // before the replacing rename.
+        const parentMismatch = await ensureParents(canonical, relative);
+        if (parentMismatch !== null)
+          return { kind: "blocked", sourceId: current.sourceId, detail: parentMismatch };
         await NodeFSP.copyFile(source, temporary);
         const mode = await NodeFSP.stat(source).then(
           (stat) => stat.mode & 0o777,
           () => null,
         );
         if (mode !== null) await NodeFSP.chmod(temporary, mode);
+        const state = await lstatOrNull(target);
+        if (state !== null) {
+          if (state.isSymbolicLink())
+            return {
+              kind: "blocked",
+              sourceId: current.sourceId,
+              detail: `${relative} became a symlink after the game folder was read; nothing was restored.`,
+            };
+          if (state.isDirectory()) {
+            const entries = await NodeFSP.readdir(target);
+            if (entries.length > 0)
+              return {
+                kind: "blocked",
+                sourceId: current.sourceId,
+                detail: `${relative} is a directory holding files the snapshot does not; nothing was restored.`,
+              };
+            await NodeFSP.rmdir(target);
+          } else if (state.isFile()) {
+            const hashed = await hashFileBounded(
+              target,
+              limits.maxBytes,
+              limits.maxBytes,
+              "restore game snapshot",
+              canonical,
+            );
+            if (
+              existing === undefined ||
+              hashed.size !== existing.size ||
+              hashed.sha256 !== existing.sha256
+            )
+              return {
+                kind: "blocked",
+                sourceId: current.sourceId,
+                detail: `${relative} changed after the game folder was read; nothing was restored.`,
+              };
+          } else
+            return {
+              kind: "blocked",
+              sourceId: current.sourceId,
+              detail: `${relative} is not a file the snapshot can replace; nothing was restored.`,
+            };
+        } else if (existing !== undefined)
+          return {
+            kind: "blocked",
+            sourceId: current.sourceId,
+            detail: `${relative} disappeared after the game folder was read; nothing was restored.`,
+          };
+        // shortcut: a file edited by another program between verification and
+        // write can be overwritten; rounds own the folder and in-app actions
+        // stop the round first; upgrade if external-editor workflows matter.
         await NodeFSP.rename(temporary, target);
       } finally {
         await NodeFSP.rm(temporary, { force: true });
