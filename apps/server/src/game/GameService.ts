@@ -397,12 +397,15 @@ const make = Effect.gen(function* () {
                 return {
                   value: run,
                   record: {
-                    outcome: "failed",
+                    // An exhausted certification budget is not a failed look:
+                    // it leaves the visual stage uncertified for this revision.
+                    outcome: "unknown",
                     sourceId: input.sourceId,
                     buildId: input.buildId,
                     evidenceDirectory: input.evidenceDirectory,
                     designHash: input.designHash,
-                    detail: "No visual repair rounds are left for this approved design revision.",
+                    detail:
+                      "The visual review budget for this approved design revision is spent; the look is uncertified, not failed.",
                   },
                 };
               const judgement = run.judgement;
@@ -729,7 +732,7 @@ const make = Effect.gen(function* () {
                     : ""
                 }\n${formatVisualReport(visual)}`
               : visualAttempt === null
-                ? "\nVisual judge: no rounds left — visual failed, report it and stop."
+                ? "\nVisual judge: the review budget for this design revision is spent. The look is uncertified, not failed; keep the playable build and its playtest current."
                 : "";
           return {
             value: {

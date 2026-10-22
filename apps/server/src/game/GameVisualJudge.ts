@@ -44,7 +44,11 @@ const REVIEWER: ModelSelection = {
 };
 const REVIEWER_LABEL = `${REVIEWER.instanceId}/${REVIEWER.model}`;
 
-/** One initial judgement and one after the single bounded repair turn. */
+/**
+ * One initial judgement and one after the single bounded repair turn. The
+ * budget is certification, not completion: a later source edit leaves the look
+ * uncertified and never makes a playable game incomplete.
+ */
 const MAX_JUDGEMENTS_PER_DESIGN = 2;
 
 const VISUAL_DIRECTORY = "visual-review.json";

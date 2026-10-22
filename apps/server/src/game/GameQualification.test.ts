@@ -193,6 +193,35 @@ it.effect("separates playable completion from optional certification", () =>
   ),
 );
 
+it.effect("a spent visual budget leaves the look uncertified, not the game incomplete", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceA = yield* Effect.promise(() => sourceIdOf(root));
+      yield* recordAll(qualification, root, sourceA, `${sourceA}:a`);
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
+      // The design revision spent both judgements. A later edit invalidates the
+      // old verdict but can never obtain a new one; the game must still be able
+      // to complete by exporting and playtesting the new sources.
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "extends Node\n# edited\n"),
+      );
+      const sourceB = yield* Effect.promise(() => sourceIdOf(root));
+      const buildB = `${sourceB}:b`;
+      const artifacts = yield* Effect.promise(() => writeWebBuild(root));
+      for (const input of [
+        passed("check", null),
+        passed("export", buildB, null, artifacts),
+        passed("playtest", buildB, "builds/playtests/run-2"),
+      ])
+        yield* qualification.record(root, { ...input, sourceId: sourceB });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((stage) => stage.stage === "visual")?.status).toBe("stale");
+      expect(read.completion).toBe("complete");
+      expect(read.state).toBe("unqualified");
+    }),
+  ),
+);
+
 it.effect("keeps the state stage's per-criterion summary with its record", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
