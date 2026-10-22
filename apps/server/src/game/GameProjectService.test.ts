@@ -16,6 +16,7 @@ import {
   type GameTemplateId,
 } from "@t3tools/contracts";
 import {
+  admissionTestLayer,
   designApprovalTestLayer,
   roundStoreTestLayer,
   previewBrowserTestLayer,
@@ -56,6 +57,7 @@ const gameServiceLayers = (options: {
     Layer.provideMerge(designApprovalTestLayer(options.stateDir)),
     Layer.provideMerge(roundStoreTestLayer(options.stateDir)),
     Layer.provide(ServerSettings.layerTest()),
+    Layer.provideMerge(admissionTestLayer),
     Layer.provide(NodeServices.layer),
   );
 const gameProjectLayer = (stateDir: string, registration = projectTestLayer()) =>
@@ -66,6 +68,7 @@ const gameProjectLayer = (stateDir: string, registration = projectTestLayer()) =
     Layer.provideMerge(qualificationTestLayer(stateDir)),
     Layer.provideMerge(visualJudgeTestLayer(stateDir)),
     Layer.provideMerge(GameOperations.layer),
+    Layer.provideMerge(admissionTestLayer),
     Layer.provide(NodeServices.layer),
   );
 /** A design that clears every scaffold heading and binds acceptance. */
@@ -583,6 +586,7 @@ it.effect("a failed creation removes the intent record it wrote", () =>
       Layer.provideMerge(qualificationTestLayer(stateDir)),
       Layer.provideMerge(visualJudgeTestLayer(stateDir)),
       Layer.provideMerge(GameOperations.layer),
+      Layer.provideMerge(admissionTestLayer),
       Layer.provide(NodeServices.layer),
     );
     const failure = yield* Effect.scoped(

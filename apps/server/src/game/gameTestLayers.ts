@@ -10,6 +10,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as GameAdmission from "./GameAdmission.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
@@ -29,6 +30,20 @@ export function qualificationTestLayer(stateDir: string) {
 export function designApprovalTestLayer(stateDir: string) {
   return GameDesignApproval.layer({ stateDir });
 }
+/**
+ * Admission for suites that never start a review: every entry point passes
+ * through, nothing is recorded. The loop's own tests use the real layer.
+ */
+export const admissionTestLayer = Layer.succeed(
+  GameAdmission.GameAdmission,
+  GameAdmission.GameAdmission.of({
+    withGate: (_root, effect) => effect,
+    stamp: () => Effect.succeed({ generation: 0, admittedAt: null }),
+    admit: () => Effect.void,
+    register: () => Effect.void,
+    unregister: () => Effect.void,
+  }),
+);
 /** The round/selected-build store inside the calling fixture's temporary directory. */
 export function roundStoreTestLayer(stateDir: string) {
   return GameRoundStore.layer({ stateDir });

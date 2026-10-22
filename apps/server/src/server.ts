@@ -5,6 +5,7 @@ import * as GameOperations from "./game/GameOperations.ts";
 import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
 import * as GameRoundStore from "./game/GameRoundStore.ts";
+import * as GameAdmission from "./game/GameAdmission.ts";
 import * as GameRepairLoop from "./game/GameRepairLoop.ts";
 import * as GameRepairReactor from "./game/GameRepairReactor.ts";
 import * as GameRepairStudio from "./game/GameRepairStudio.ts";
@@ -570,6 +571,18 @@ const layerGame = Layer.mergeAll(
         return GameVisualJudge.layer({ stateDir: config.stateDir }).pipe(
           Layer.provide(TextGeneration.layer),
         );
+      }),
+    ),
+  ),
+  // Every game entry point (user turns, Rebuild, Stop, design actions, MCP
+  // turns and loop start) takes this one per-root gate, so a creator action and
+  // a review can never interleave. It is provided last so every other layer
+  // above can require it.
+  Layer.provideMerge(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        return GameAdmission.layer({ stateDir: config.stateDir });
       }),
     ),
   ),

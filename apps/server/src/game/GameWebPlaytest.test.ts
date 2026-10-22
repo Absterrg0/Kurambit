@@ -20,6 +20,7 @@ import { snapshotSource } from "./sourceSnapshot.ts";
 import { describeWebArtifacts } from "./webBuild.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
+  admissionTestLayer,
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
@@ -177,6 +178,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
+        Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
       try {
@@ -275,6 +277,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
+        Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
       const playtestStage = (status: { qualification: GameQualificationRead }) =>

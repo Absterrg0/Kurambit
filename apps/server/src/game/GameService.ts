@@ -37,6 +37,7 @@ import {
   PLAYTEST_DEFAULT_CAPTURE,
   playtestInputIssues,
 } from "@t3tools/contracts";
+import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -197,6 +198,7 @@ const make = Effect.gen(function* () {
   const browser = yield* PreviewBrowser.PreviewBrowser;
   const qualification = yield* GameQualification.GameQualification;
   const rounds = yield* GameRoundStore.GameRoundStore;
+  const admission = yield* GameAdmission.GameAdmission;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
   const visualJudge = yield* GameVisualJudge.GameVisualJudge;
@@ -1963,6 +1965,18 @@ const make = Effect.gen(function* () {
       ),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
+      // Rebuild and Stop are creator decisions that outrank a live review. The
+      // admission barrier joins the loop before this action touches the game,
+      // and lives here so the websocket and MCP paths cannot diverge.
+      if (action === "rebuild" || action === "stop")
+        yield* admission.admit({
+          root,
+          threadId,
+          reason:
+            action === "rebuild"
+              ? "An explicit Rebuild superseded the review; its candidate was not selected."
+              : "The creator stopped the game, so the review was superseded.",
+        });
       if (action === "stop") {
         yield* cancel(root);
         yield* processes.stop(root);

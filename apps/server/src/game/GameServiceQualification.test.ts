@@ -25,6 +25,7 @@ import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import {
+  admissionTestLayer,
   designApprovalTestLayer,
   roundStoreTestLayer,
   previewBrowserTestLayer,
@@ -214,6 +215,7 @@ const withFixture = <A, E, R>(
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
+        Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
       return yield* run({ root }).pipe(Effect.provide(services));

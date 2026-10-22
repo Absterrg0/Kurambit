@@ -18,6 +18,7 @@ import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
+  admissionTestLayer,
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
@@ -82,6 +83,7 @@ const withGame = <A>(
       Layer.provideMerge(designApprovalTestLayer(designStateDir)),
       Layer.provideMerge(roundStoreTestLayer(designStateDir)),
       Layer.provide(ServerSettings.layerTest()),
+      Layer.provideMerge(admissionTestLayer),
       Layer.provide(NodeServices.layer),
     );
     const cleanup = Effect.promise(() =>

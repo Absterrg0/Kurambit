@@ -17,6 +17,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
+  admissionTestLayer,
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
@@ -48,6 +49,7 @@ it.live.skipIf(!available)(
         Layer.provideMerge(designApprovalTestLayer(NodePath.join(parent, ".test-state"))),
         Layer.provideMerge(roundStoreTestLayer(NodePath.join(parent, ".test-state"))),
         Layer.provide(ServerSettings.layerTest()),
+        Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
       try {

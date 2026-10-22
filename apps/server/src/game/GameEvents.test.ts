@@ -19,6 +19,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameQualification from "./GameQualification.ts";
 import {
+  admissionTestLayer,
   designApprovalTestLayer,
   roundStoreTestLayer,
   previewBrowserTestLayer,
@@ -108,6 +109,7 @@ exit 0
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
+        Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
       return yield* Effect.gen(function* () {

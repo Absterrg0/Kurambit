@@ -44,6 +44,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameAdmission from "./GameAdmission.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
@@ -95,6 +96,12 @@ export class GameProjectService extends Context.Service<
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /**
+     * Takes the game for a creator action: the admission barrier joins a live
+     * review before the action touches the game. Every entry point routes
+     * through this rather than superseding in a transport handler.
+     */
+    readonly admit: (threadId: ThreadId, reason: string) => Effect.Effect<void, GameOperationError>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
      * The creator's approval of one specific DESIGN.md revision. It validates
@@ -186,6 +193,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
   const processes = yield* GameProcesses.GameProcesses;
+  const admission = yield* GameAdmission.GameAdmission;
   const approvals = yield* GameDesignApproval.GameDesignApproval;
   const qualification = yield* GameQualification.GameQualification;
   const operations = yield* GameOperations.GameOperations;
@@ -520,6 +528,13 @@ const make = Effect.gen(function* () {
   const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
     return (yield* resolveTarget(threadId)).root;
   });
+  const admit = Effect.fn("GameProjectService.admit")(function* (
+    threadId: ThreadId,
+    reason: string,
+  ) {
+    const root = yield* resolve(threadId);
+    yield* admission.admit({ root, threadId, reason });
+  });
   // Name the qualification loop every build turn must run. A blunt model otherwise
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
   // the recorded verdicts the Game panel and the harness depend on.
@@ -608,6 +623,11 @@ const make = Effect.gen(function* () {
   ) {
     const target = yield* resolveTarget(threadId);
     const root = target.root;
+    yield* admission.admit({
+      root,
+      threadId,
+      reason: "A design approval superseded the review; its candidate was not selected.",
+    });
     const designPath = NodePath.join(root, "DESIGN.md");
     const fail = (
       reason:
@@ -747,6 +767,11 @@ const make = Effect.gen(function* () {
   ) {
     const target = yield* resolveTarget(threadId);
     const root = target.root;
+    yield* admission.admit({
+      root,
+      threadId,
+      reason: "A design change request superseded the review; its candidate was not selected.",
+    });
     return yield* approvals.exclusive(
       root,
       Effect.gen(function* () {
@@ -834,6 +859,11 @@ const make = Effect.gen(function* () {
   ) {
     const target = yield* resolveTarget(threadId);
     const root = target.root;
+    yield* admission.admit({
+      root,
+      threadId,
+      reason: "A design revision superseded the review; its candidate was not selected.",
+    });
     const designPath = NodePath.join(root, "DESIGN.md");
     const fail = (
       reason: "design-missing" | "design-invalid" | "design-hash-mismatch" | "revision-missing",
@@ -965,6 +995,13 @@ const make = Effect.gen(function* () {
     function* (threadId: ThreadId, policy: GameVerificationPolicy) {
       const target = yield* resolveTarget(threadId);
       const root = target.root;
+      // Changing the exam while a review is mid-check would judge a candidate
+      // under rules it was never checked by; the review is superseded instead.
+      yield* admission.admit({
+        root,
+        threadId,
+        reason: "A verification policy change superseded the review; its checks no longer apply.",
+      });
       const testSuite = engineResourcePath(policy.testSuite, ".gd");
       const gameplayScene =
         policy.gameplayScene === null ? null : engineResourcePath(policy.gameplayScene, ".tscn");
@@ -1006,6 +1043,7 @@ const make = Effect.gen(function* () {
   );
   return GameProjectService.of({
     create,
+    admit,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
         [
