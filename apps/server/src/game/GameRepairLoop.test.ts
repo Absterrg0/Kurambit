@@ -34,6 +34,7 @@ import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { gameRecordLocation } from "./gameRecord.ts";
 import { hashWebBuildDirectory } from "./webBuild.ts";
 
 const threadId = ThreadId.make("thread:repair-game");
@@ -110,6 +111,8 @@ interface Scripted {
   critic: AnswerFactory | null;
   ballots: ReadonlyArray<AnswerFactory>;
   promoteKind: "promoted" | "blocked";
+  /** Runs inside the promotion, after validation and before the commit. */
+  beforeCommit: Effect.Effect<void> | null;
   /** Per repair attempt; the last entry repeats. */
   repairs: ReadonlyArray<RepairHook | null>;
   /** Complete this role as soon as it is dispatched, before the loop waits. */
@@ -163,6 +166,7 @@ const makeScripted = (): Scripted => ({
   critic: null,
   ballots: [],
   promoteKind: "promoted",
+  beforeCommit: null,
   repairs: [],
   completeInStart: new Set(),
   hungRoles: new Set(),
@@ -293,6 +297,7 @@ interface Fixture {
 interface FixtureOptions {
   readonly budget?: GameReviewBudget | undefined;
   readonly childJoinTimeoutMs?: number | undefined;
+  readonly now?: (() => number) | undefined;
 }
 
 const withLoop = <A, E>(
@@ -522,11 +527,12 @@ const withLoop = <A, E>(
             const promote: GameRepairStudio.GameRepairStudio["Service"]["promote"] = (
               _thread,
               roundId,
+              guard,
             ) =>
               scripted.promoteKind === "blocked"
                 ? Effect.succeed({ kind: "blocked" as const, detail: "selection changed" })
-                : rounds
-                    .promote(root, roundId)
+                : (scripted.beforeCommit ?? Effect.void)
+                    .pipe(Effect.andThen(rounds.promote(root, roundId, { guard })))
                     .pipe(
                       Effect.map((promotion) =>
                         promotion.kind === "promoted"
@@ -635,6 +641,7 @@ const withLoop = <A, E>(
           stateDir,
           ...(options.budget === undefined ? {} : { budget: options.budget }),
           childJoinTimeoutMs: options.childJoinTimeoutMs ?? 40,
+          now: options.now,
         }).pipe(
           Layer.provideMerge(
             Layer.mergeAll(studio, sessions).pipe(
@@ -1057,6 +1064,67 @@ it.live("a restart re-arms the hold from the recorded children", () =>
         }),
       );
     }),
+  ),
+);
+
+const promotingRound = (scripted: Scripted) => {
+  scripted.repairs = [repairWith()];
+  let reviews = 0;
+  scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+  scripted.ballots = [
+    ({ plan }) => ballotAnswer(plan, "promote"),
+    ({ plan }) => ballotAnswer(plan, "promote"),
+  ];
+};
+
+it.live("a generation bump that lands during the selection commit blocks the promotion", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root, stateDir } = fixture;
+        promotingRound(scripted);
+        // An admission's bump landing after validation, while the slow commit
+        // hashes and snapshots the candidate.
+        scripted.beforeCommit = Effect.promise(async () => {
+          const found = await gameRecordLocation(stateDir, "game-admission", root);
+          await NodeFSP.mkdir(NodePath.dirname(found.file), { recursive: true });
+          await NodeFSP.writeFile(
+            found.file,
+            `${JSON.stringify({ schemaVersion: 1, generation: 99, admittedAt: null })}\n`,
+          );
+        });
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toHaveLength(0);
+        expect(state.reason).toContain("superseded");
+        expect((yield* services.rounds.read(root)).selected).toBeNull();
+      }),
+    ),
+  ),
+);
+
+let skewMs = 0;
+it.live("a deadline that passes during the selection commit blocks the promotion", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          promotingRound(scripted);
+          skewMs = 0;
+          // The whole-loop timeout cannot interrupt the uninterruptible commit;
+          // the budget runs out while it hashes the candidate.
+          scripted.beforeCommit = Effect.sync(() => {
+            skewMs = 21 * 60_000;
+          });
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.promotedRounds).toHaveLength(0);
+          expect(state.reason).toContain("deadline");
+          expect((yield* services.rounds.read(root)).selected).toBeNull();
+        }),
+      ),
+    { now: () => Date.now() + skewMs },
   ),
 );
 

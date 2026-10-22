@@ -292,11 +292,14 @@ export interface GameRepairLoopOptions {
   readonly budget?: typeof DEFAULT_GAME_REVIEW_BUDGET | undefined;
   /** Test seam: how long a supersession waits for its child to stop. */
   readonly childJoinTimeoutMs?: number | undefined;
+  /** Test seam: the wall clock the budget is judged against, in epoch ms. */
+  readonly now?: (() => number) | undefined;
 }
 
 export const layer = (options: GameRepairLoopOptions) => {
   const budget = options.budget ?? DEFAULT_GAME_REVIEW_BUDGET;
   const childJoinTimeoutMs = options.childJoinTimeoutMs ?? DEFAULT_CHILD_JOIN_TIMEOUT_MS;
+  const now = options.now ?? nowMs;
 
   const make = Effect.gen(function* () {
     const projects = yield* GameProjectService.GameProjectService;
@@ -584,7 +587,7 @@ export const layer = (options: GameRepairLoopOptions) => {
       },
     ): Effect.Effect<ChildOutcome, GameOperationError> =>
       Effect.gen(function* () {
-        const remaining = remainingBudget(record, nowMs()).elapsedMs;
+        const remaining = remainingBudget(record, now()).elapsedMs;
         if (remaining <= 0) return { kind: "expired", child: yield* Ref.get(task.owned) } as const;
         // Starting the child and recording ownership is one uninterruptible
         // step: an interrupt between the dispatch commit and the Ref write
@@ -817,14 +820,41 @@ export const layer = (options: GameRepairLoopOptions) => {
         );
         if (veto !== null)
           return yield* rejectRound(record, round.id, `mechanical-veto: ${vetoReason(veto)}`);
-        const stamp = yield* admission.stamp(record.root);
-        if (stamp.generation !== record.generation)
+        // Validation and the selection commit hold the admission gate, so a
+        // user action either lands first (and this fiber is interrupted while
+        // it waits) or after the selection; it can never bump the generation
+        // between this check and the commit.
+        const promoted = yield* admission.withGate(
+          record.root,
+          Effect.gen(function* () {
+            const stamp = yield* admission.stamp(record.root);
+            if (stamp.generation !== record.generation) return { kind: "superseded" } as const;
+            return yield* studio.promote(
+              record.threadId,
+              round.id,
+              // The whole-loop timeout cannot interrupt the commit, so the
+              // deadline and the generation are judged again at the commit.
+              Effect.gen(function* () {
+                if (remainingBudget(record, now()).elapsedMs <= 0)
+                  return "deadline: the review budget ran out before the selection was written.";
+                const committing = yield* admission.stamp(record.root);
+                return committing.generation === record.generation
+                  ? null
+                  : "superseded: a user action took the game before the selection was written.";
+              }).pipe(
+                Effect.catchCause(() =>
+                  Effect.succeed("The game admission record could not be read at the commit."),
+                ),
+              ),
+            );
+          }),
+        );
+        if (promoted.kind === "superseded")
           return yield* rejectRound(
             record,
             round.id,
             "superseded: a user action took the game before the challenger was selected.",
           );
-        const promoted = yield* studio.promote(record.threadId, round.id);
         if (promoted.kind === "blocked") {
           const stopped = yield* finish({
             root: record.root,
@@ -857,7 +887,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               "superseded: a user action took the game before a new round started.",
             ),
           };
-        const remaining = remainingBudget(record, nowMs());
+        const remaining = remainingBudget(record, now());
         const round = yield* rounds.begin(task.root, {
           threadId: record.threadId,
           budget: {
@@ -966,7 +996,7 @@ export const layer = (options: GameRepairLoopOptions) => {
       Effect.gen(function* () {
         // Budget is checked only before a new dispatch, so a started repair
         // (including the third) is always judged.
-        const at = nowMs();
+        const at = now();
         const remaining = remainingBudget(record, at);
         if (remaining.repairs <= 0 || remaining.elapsedMs <= 0)
           return {
@@ -1171,7 +1201,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         for (;;) {
           const latest = yield* readRecord(task.root).pipe(Effect.orElseSucceed(() => null));
           if (latest === null || latest.status !== "running") return;
-          const remaining = remainingBudget(latest, nowMs());
+          const remaining = remainingBudget(latest, now());
           if (remaining.elapsedMs <= 0) {
             yield* interrupted(task.root, "deadline: the review budget ran out.");
             return;
@@ -1192,7 +1222,7 @@ export const layer = (options: GameRepairLoopOptions) => {
 
     const runLoop = (initial: GameRepairLoopRecord, task: Task): Effect.Effect<void, never> =>
       Effect.gen(function* () {
-        const deadline = Math.max(1, remainingBudget(initial, nowMs()).elapsedMs);
+        const deadline = Math.max(1, remainingBudget(initial, now()).elapsedMs);
         const completed = yield* runRounds(task, initial).pipe(
           Effect.timeoutOption(Duration.millis(deadline)),
         );

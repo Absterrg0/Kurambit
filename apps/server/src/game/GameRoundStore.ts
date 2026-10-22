@@ -125,6 +125,12 @@ export interface GamePromoteOptions {
    * selection is already committed when it runs; it must not fail.
    */
   readonly serve?: ((selected: GameSelectedBuild) => Effect.Effect<void>) | undefined;
+  /**
+   * Runs under the per-root lock immediately before the selection is written,
+   * after the slow hashing and snapshotting. A reason blocks the promotion, so
+   * a caller's deadline is judged at the commit, not before the slow part.
+   */
+  readonly guard?: Effect.Effect<string | null> | undefined;
 }
 
 export type GamePromotion =
@@ -669,6 +675,9 @@ export const layer = (options: { readonly stateDir: string }) => {
                 return yield* blocked(
                   "The selected build changed after this round opened; the older candidate was not promoted.",
                 );
+              const refused =
+                promoteOptions?.guard === undefined ? null : yield* promoteOptions.guard;
+              if (refused !== null) return yield* blocked(refused);
               const selected: GameSelectedBuild = {
                 ...candidate,
                 promotedAt: at,

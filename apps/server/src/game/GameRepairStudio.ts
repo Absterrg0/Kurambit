@@ -95,9 +95,11 @@ export class GameRepairStudio extends Context.Service<
     readonly exportState: (
       root: string,
     ) => Effect.Effect<GameRepairStudioExportState, GameOperationError>;
+    /** `guard` runs at the selection commit; a reason blocks the promotion. */
     readonly promote: (
       threadId: ThreadId,
       roundId: string,
+      guard?: Effect.Effect<string | null>,
     ) => Effect.Effect<GameRepairStudioPromotion, GameOperationError>;
   }
 >()("t3/game/GameRepairStudio") {}
@@ -274,9 +276,9 @@ export const layer = (options: { readonly stateDir: string }) =>
           } satisfies GameRepairStudioExportState;
         });
 
-      const promote: GameRepairStudio["Service"]["promote"] = (threadId, roundId) =>
+      const promote: GameRepairStudio["Service"]["promote"] = (threadId, roundId, guard) =>
         game
-          .promote(threadId, roundId)
+          .promote(threadId, roundId, { guard })
           .pipe(
             Effect.map((promotion) =>
               promotion.kind === "promoted"

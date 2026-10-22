@@ -101,6 +101,7 @@ export class GameService extends Context.Service<
     readonly promote: (
       threadId: ThreadId,
       roundId: string,
+      options?: { readonly guard?: Effect.Effect<string | null> | undefined },
     ) => Effect.Effect<GameRoundStore.GamePromotion, GameOperationError>;
     /** Operation pushes for every game this server runs. */
     readonly events: Stream.Stream<GameOperationEvent>;
@@ -1749,9 +1750,10 @@ const make = Effect.gen(function* () {
         operation: operations.current(root),
       };
     }),
-    promote: (threadId, roundId) =>
+    promote: (threadId, roundId, options) =>
       withRoot(threadId, "Promote build", (root) =>
         rounds.promote(root, roundId, {
+          guard: options?.guard,
           serve: (selected) =>
             Effect.gen(function* () {
               // Only an already-open preview follows the promotion. A game whose
