@@ -864,6 +864,17 @@ export const layer = (options: { readonly stateDir: string }) => {
             `invalid-ballot: ${invalid.reason ?? "the ballot answer was unusable."}`,
           );
         const plans = round.ballots ?? [];
+        if (
+          plans.length !== 2 ||
+          !plans.some((plan) => plan.order === 0) ||
+          !plans.some((plan) => plan.order === 1)
+        )
+          return yield* rejectRound(
+            root,
+            record,
+            round.id,
+            "invalid-ballot: both opposite-order pairwise sessions are required.",
+          );
         for (const plan of plans) {
           const entry = answers.find((answer) => answer.order === plan.order);
           if (entry?.answer === undefined)
@@ -928,6 +939,17 @@ export const layer = (options: { readonly stateDir: string }) => {
           return false;
         }
         const plans = round.ballots ?? [];
+        if (
+          plans.length !== 2 ||
+          !plans.some((plan) => plan.order === 0) ||
+          !plans.some((plan) => plan.order === 1)
+        )
+          return yield* rejectRound(
+            root,
+            record,
+            round.id,
+            "invalid-ballot: both opposite-order pairwise sessions are required.",
+          );
         for (const plan of plans) {
           if ((round.ballotAnswers ?? []).some((answer) => answer.order === plan.order)) continue;
           if (record.candidateFrames.length === 0) {
