@@ -23,6 +23,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -128,6 +129,8 @@ interface Scripted {
   ignoresInterruptRoles: ReadonlySet<string>;
   /** This role's dispatch commits, then its confirmation write fails. */
   failConfirmRoles: ReadonlySet<string>;
+  /** While set, every child status read waits for it. */
+  shellGate: Deferred.Deferred<void> | null;
   /** The thread's runs; a test may append a later text-only turn. */
   readonly runs: Array<{
     readonly id: RunId;
@@ -180,6 +183,7 @@ const makeScripted = (): Scripted => ({
   hungRoles: new Set(),
   ignoresInterruptRoles: new Set(),
   failConfirmRoles: new Set(),
+  shellGate: null,
   runs: [
     {
       id: builderRunId,
@@ -610,10 +614,12 @@ const withLoop = <A, E>(
               } as never;
             }),
           getThreadShell: () =>
-            Effect.succeed({
-              projectId: "project:repair",
-              lineage: { relationshipToParent: "subagent", parentThreadId: null },
-            }) as never,
+            (scripted.shellGate === null ? Effect.void : Deferred.await(scripted.shellGate)).pipe(
+              Effect.as({
+                projectId: "project:repair",
+                lineage: { relationshipToParent: "subagent", parentThreadId: null },
+              } as never),
+            ),
           interruptThread: (input) => {
             scripted.interrupts.push({
               threadId: input.threadId,
@@ -1137,6 +1143,38 @@ it.live("a deadline that passes during the selection commit blocks the promotion
         }),
       ),
     { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
+  ),
+);
+
+it.live("a restart re-arms the hold before reading whether any child looks done", () =>
+  withLoop((fixture) =>
+    Effect.gen(function* () {
+      const { scripted, root } = fixture;
+      scripted.repairs = [repairWith()];
+      scripted.critic = () => criticAnswer(1);
+      yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          yield* ensureLoop(services);
+          yield* fixture.complete(services, yield* fixture.take);
+          yield* fixture.take;
+        }),
+      );
+      // The restart's child status reads stall; recovery must not depend on them.
+      const gate = yield* Deferred.make<void>();
+      scripted.shellGate = gate;
+      yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const recovered = yield* services.loop
+            .recover()
+            .pipe(Effect.timeoutOption(Duration.seconds(5)));
+          expect(Option.isSome(recovered)).toBe(true);
+          // Held: the action waits for the settle's verdict, then is admitted.
+          const action = yield* Effect.forkChild(userAction(services, root));
+          yield* Deferred.succeed(gate, undefined);
+          yield* Fiber.join(action);
+        }),
+      );
+    }),
   ),
 );
 

@@ -501,16 +501,6 @@ export const layer = (options: GameRepairLoopOptions) => {
         return settled;
       }).pipe(Effect.catchCause(() => Effect.succeed(false)));
 
-    const childrenTerminal = (root: string, loopId: string): Effect.Effect<boolean, never> =>
-      sessions.recordedChildren({ root, loopId }).pipe(
-        Effect.flatMap((recorded) =>
-          Effect.forEach(recorded, childIsTerminal).pipe(
-            Effect.map((terminal) => terminal.every(Boolean)),
-          ),
-        ),
-        Effect.orElseSucceed(() => false),
-      );
-
     /** Provider-turn usage of one child, or null when it did not report any. */
     const usageOf = (
       child: OwnedChild,
@@ -1534,10 +1524,11 @@ export const layer = (options: GameRepairLoopOptions) => {
             interruptedRoots.push(loop.root);
           }
           // Only the newest loop can own a child: no loop starts while one is
-          // held. Re-arm the hold from its recorded children before any turn
-          // can be admitted, then let a background settle release it.
+          // held. Re-arm the hold over all its recorded children before any
+          // turn can be admitted, without first reading whether they look
+          // done; only the background settle's verdict releases it.
           const latest = loops?.[0];
-          if (latest !== undefined && !(yield* childrenTerminal(latest.root, latest.id))) {
+          if (latest !== undefined) {
             const held = yield* hold(latest.root, latest.id, null);
             yield* releaseWhenSettled(
               latest.root,
