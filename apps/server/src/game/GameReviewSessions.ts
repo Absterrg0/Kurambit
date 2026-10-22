@@ -74,6 +74,8 @@ export interface GameReviewRepairInput {
   readonly remainingBudget: string;
   readonly defects: ReadonlyArray<GameReviewDefect>;
   readonly doNotRegress: ReadonlyArray<GameReviewDoNotRegress>;
+  /** Why the previous attempt was rejected, so the next repair does not repeat it. */
+  readonly previousRejection?: string | undefined;
 }
 
 export type GameReviewTaskRole = "critic" | "ballot" | "repair";
@@ -105,6 +107,8 @@ export type GameReviewSessionStartResult =
       readonly commandId: string;
       readonly childThreadId: ThreadId;
       readonly taskId: NodeId | null;
+      /** The child run this session is bound to, once its dispatch is known. */
+      readonly runId: RunId | null;
       readonly evidenceHash: string | null;
       /** True when a receipt/record already existed and nothing was dispatched. */
       readonly reconciled: boolean;
@@ -120,6 +124,16 @@ export interface GameReviewSessionAnswerInput {
   readonly role: GameReviewTaskRole;
   readonly order?: number;
 }
+
+export type GameReviewChildRunStatus =
+  /** No session record (or no dispatched run) exists for this key. */
+  | { readonly kind: "missing" }
+  | { readonly kind: "pending"; readonly runId: RunId | null }
+  | {
+      readonly kind: "terminal";
+      readonly runId: RunId | null;
+      readonly status: "completed" | "failed" | "cancelled" | "interrupted" | "rolled_back";
+    };
 
 export type GameReviewSessionAnswerResult =
   | { readonly kind: "critic"; readonly answer: GameReviewCriticAnswer; readonly raw: string }
@@ -602,6 +616,13 @@ export class GameReviewSessions extends Context.Service<
     readonly answer: (
       input: GameReviewSessionAnswerInput,
     ) => Effect.Effect<GameReviewSessionAnswerResult, GameOperationError>;
+    /**
+     * The bound child run's status. A repair has no audited answer, so the loop
+     * needs this to know when the writable child stopped writing.
+     */
+    readonly runStatus: (
+      input: GameReviewSessionAnswerInput,
+    ) => Effect.Effect<GameReviewChildRunStatus, GameOperationError>;
     /** The evidence directory one review child runs in, when it has one. */
     readonly evidenceDirectory: (input: {
       readonly threadId: ThreadId;
@@ -782,6 +803,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       commandId: record.commandId,
       childThreadId: ThreadIdSchema.make(record.childThreadId),
       taskId: record.taskId === null ? null : (record.taskId as NodeId),
+      runId: record.runId == null ? null : RunId.make(record.runId),
       // The hash recorded when the evidence was written. Re-hashing on a
       // restart could bless a later change as the original audit fact.
       evidenceHash: record.evidenceHash,
@@ -947,7 +969,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         };
         const commandId = gameReviewCommandId(key);
         const root = yield* projects.resolve(input.threadId);
-        yield* liveRound(root, input.roundId);
+        const live = yield* liveRound(root, input.roundId);
 
         // The record is written before the command is sent, so the crash
         // window between a committed dispatch and its audit metadata no longer
@@ -972,15 +994,20 @@ export const layer = (options: { readonly stateDir: string }) => {
         });
         const frozen = yield* readRoundSelection(root, input.roundId);
         // The run's own selection is the model and options the builder used,
-        // not whatever the composer shows after it finished.
+        // not whatever the composer shows after it finished. A round opened by
+        // the loop folds both selections into its record; the session file is
+        // only the pre-loop fallback.
         const builderSelection: ModelSelection =
-          frozen?.builder ?? origin.run.modelSelection ?? origin.thread.modelSelection;
+          live.builderSelection ??
+          frozen?.builder ??
+          origin.run.modelSelection ??
+          origin.thread.modelSelection;
         const selection =
           input.role === "repair"
             ? // Repairs keep the frozen builder selection; a review override
               // never changes who repairs.
               builderSelection
-            : (frozen?.review ?? input.selection ?? builderSelection);
+            : (live.reviewSelection ?? frozen?.review ?? input.selection ?? builderSelection);
         if (!(yield* catalog.available(selection)))
           return {
             kind: "unavailable",
@@ -1052,6 +1079,9 @@ export const layer = (options: { readonly stateDir: string }) => {
                   brief,
                   defects: input.repair?.defects ?? [],
                   doNotRegress: input.repair?.doNotRegress ?? [],
+                  ...(input.repair?.previousRejection === undefined
+                    ? {}
+                    : { previousRejection: input.repair.previousRejection }),
                 });
         const title =
           input.role === "critic"
@@ -1062,11 +1092,16 @@ export const layer = (options: { readonly stateDir: string }) => {
 
         // Freeze both selections before dispatch: every later child of this
         // round must match, whatever the thread or caller does meanwhile.
-        const frozenReview = frozen?.review ?? (input.role === "repair" ? undefined : selection);
+        const frozenReview =
+          live.reviewSelection ??
+          frozen?.review ??
+          (input.role === "repair" ? undefined : selection);
         if (
-          frozen === null ||
-          frozen.builder === null ||
-          (input.role !== "repair" && frozen.review === null)
+          live.builderSelection === undefined &&
+          live.reviewSelection === undefined &&
+          (frozen === null ||
+            frozen.builder === null ||
+            (input.role !== "repair" && frozen.review === null))
         )
           yield* writeRoundSelection(root, input.roundId, {
             ...(frozenReview === undefined ? {} : { review: frozenReview }),
@@ -1205,6 +1240,46 @@ export const layer = (options: { readonly stateDir: string }) => {
         return { kind: "text", text: answer.text };
       });
 
+    const runStatus: GameReviewSessions["Service"]["runStatus"] = (input) =>
+      Effect.gen(function* () {
+        const order = input.order ?? 0;
+        const root = yield* projects.resolve(input.threadId);
+        const record = yield* readRecord(root, {
+          loopId: input.loopId,
+          roundId: input.roundId,
+          role: input.role,
+          order,
+        });
+        if (record === null) return { kind: "missing" } as const;
+        const childThreadId = ThreadIdSchema.make(record.childThreadId);
+        const records = yield* threads
+          .getThreadRecords(childThreadId, ["runs"])
+          .pipe(
+            Effect.mapError((cause) =>
+              threadFailure("read game review status", record.childThreadId, cause),
+            ),
+          );
+        const messageId = IdAllocator.derive.delegatedTaskMessage({
+          commandId: CommandId.make(record.commandId),
+        });
+        const run =
+          record.runId === undefined || record.runId === null
+            ? records.runs.find((candidate) => candidate.userMessageId === messageId)
+            : records.runs.find((candidate) => candidate.id === record.runId);
+        if (run === undefined) return { kind: "pending", runId: null } as const;
+        const terminalStatus =
+          run.status === "completed" ||
+          run.status === "failed" ||
+          run.status === "cancelled" ||
+          run.status === "interrupted" ||
+          run.status === "rolled_back"
+            ? run.status
+            : null;
+        return terminalStatus === null
+          ? ({ kind: "pending", runId: run.id } as const)
+          : ({ kind: "terminal", runId: run.id, status: terminalStatus } as const);
+      });
+
     const answer: GameReviewSessions["Service"]["answer"] = (input) =>
       Effect.gen(function* () {
         const order = input.order ?? 0;
@@ -1297,7 +1372,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         );
       });
 
-    return GameReviewSessions.of({ start, answer, evidenceDirectory, evidenceHash });
+    return GameReviewSessions.of({ start, answer, runStatus, evidenceDirectory, evidenceHash });
   });
   return Layer.effect(GameReviewSessions, make);
 };

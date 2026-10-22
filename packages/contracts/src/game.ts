@@ -304,6 +304,40 @@ export const GamePlaytestFrame = Schema.Struct({
   probe: Schema.optionalKey(GamePlaytestProbe),
 });
 export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
+export const GamePlaytestStep = Schema.Union([
+  Schema.Struct({
+    key: Schema.String.annotate({
+      description: 'Key to hold while playing, such as "ArrowUp", "w", "Space".',
+    }),
+    holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
+  }),
+  Schema.Struct({
+    keys: Schema.Array(Schema.String).annotate({
+      description:
+        'Keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"].',
+    }),
+    holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
+  }),
+  Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
+  Schema.Struct({
+    click: Schema.Literals(["left", "middle", "right"]).annotate({
+      description:
+        "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
+    }),
+  }),
+  Schema.Struct({
+    mouseMove: Schema.Struct({ dx: Schema.Number, dy: Schema.Number }).annotate({
+      description:
+        "Move the pointer by dx/dy pixels from its current position, for mouse-look and camera controls.",
+    }),
+  }),
+  Schema.Struct({
+    screenshot: Schema.String.check(Schema.isMaxLength(80)).annotate({
+      description: "Capture a frame mid-sequence and label it, for evidence between steps.",
+    }),
+  }),
+]);
+export type GamePlaytestStep = typeof GamePlaytestStep.Type;
 export const GameLastPlaytest = Schema.Struct({
   at: Schema.String,
   directory: Schema.String,
@@ -336,6 +370,11 @@ export const GameLastPlaytest = Schema.Struct({
   blockers: Schema.optionalKey(Schema.Array(Schema.String)),
   /** What changed from the run's gameplay baseline, when the probe saw it. */
   interaction: Schema.optionalKey(Schema.String),
+  /**
+   * The ordinary-input route this run used. A review replays the same route on
+   * both builds, so it is not chosen again after the fact.
+   */
+  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**
@@ -590,40 +629,6 @@ export const GameConsoleMessage = Schema.Struct({
   text: Schema.String,
 });
 export type GameConsoleMessage = typeof GameConsoleMessage.Type;
-export const GamePlaytestStep = Schema.Union([
-  Schema.Struct({
-    key: Schema.String.annotate({
-      description: 'Key to hold while playing, such as "ArrowUp", "w", "Space".',
-    }),
-    holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
-  }),
-  Schema.Struct({
-    keys: Schema.Array(Schema.String).annotate({
-      description:
-        'Keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"].',
-    }),
-    holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
-  }),
-  Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
-  Schema.Struct({
-    click: Schema.Literals(["left", "middle", "right"]).annotate({
-      description:
-        "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
-    }),
-  }),
-  Schema.Struct({
-    mouseMove: Schema.Struct({ dx: Schema.Number, dy: Schema.Number }).annotate({
-      description:
-        "Move the pointer by dx/dy pixels from its current position, for mouse-look and camera controls.",
-    }),
-  }),
-  Schema.Struct({
-    screenshot: Schema.String.check(Schema.isMaxLength(80)).annotate({
-      description: "Capture a frame mid-sequence and label it, for evidence between steps.",
-    }),
-  }),
-]);
-export type GamePlaytestStep = typeof GamePlaytestStep.Type;
 export const GamePlaytestScreenshot = Schema.Struct({
   label: Schema.String,
   mimeType: Schema.Literal("image/png"),

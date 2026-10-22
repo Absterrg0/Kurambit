@@ -69,6 +69,11 @@ export const builderFixPrompt = (input: {
   readonly brief: string;
   readonly defects: ReadonlyArray<GameReviewDefect>;
   readonly doNotRegress: ReadonlyArray<GameReviewDoNotRegress>;
+  /**
+   * The server's reason the previous attempt was rejected. The next repair
+   * must not repeat it; the instruction text above stays verbatim.
+   */
+  readonly previousRejection?: string | undefined;
 }): string => {
   const defects =
     input.defects.length === 0
@@ -98,5 +103,12 @@ DEFECTS:
 ${defects}
 
 DO_NOT_REGRESS:
-${preservation}`;
+${preservation}${
+    input.previousRejection === undefined
+      ? ""
+      : `
+
+PREVIOUS ATTEMPT (rejected; do not repeat):
+${input.previousRejection.trim()}`
+  }`;
 };

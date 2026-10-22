@@ -10,6 +10,7 @@ import {
   type GameManifest,
   type GameReviewRound,
   MessageId,
+  type ModelSelection,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
@@ -23,6 +24,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
@@ -168,6 +170,8 @@ interface Scripted {
   childThreadId: ThreadId | null;
   /** The command that created the child; its message id names its run. */
   childCommandId: string | null;
+  /** Frozen selections a loop would fold into the round record. */
+  roundSelections: { builderSelection: ModelSelection; reviewSelection: ModelSelection } | null;
   childStatus: OrchestrationV2Run["status"];
   answer: string;
   available: boolean;
@@ -183,6 +187,7 @@ const makeScripted = (): Scripted => ({
   unavailable: new Set(),
   childThreadId: null,
   childCommandId: null,
+  roundSelections: null,
   childStatus: "completed",
   answer: "",
   available: true,
@@ -213,7 +218,7 @@ const withSession = <A, E>(
     readonly service: GameReviewSessions.GameReviewSessions["Service"];
     /** A second instance over the same state, like a restarted server. */
     readonly restart: () => Effect.Effect<GameReviewSessions.GameReviewSessions["Service"], never>;
-  }) => Effect.Effect<A, E>,
+  }) => Effect.Effect<A, E, Scope.Scope>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -247,10 +252,14 @@ const withSession = <A, E>(
       const scripted = makeScripted();
 
       const makeLayer = () => {
-        const roundState = {
+        const roundState = () => ({
           selected: null,
-          rounds: [runningRound],
-        };
+          rounds: [
+            scripted.roundSelections === null
+              ? runningRound
+              : { ...runningRound, ...scripted.roundSelections },
+          ],
+        });
         const service = GameReviewSessions.layer({ stateDir }).pipe(
           Layer.provide(
             Layer.mock(GameProjectService.GameProjectService)({
@@ -260,7 +269,7 @@ const withSession = <A, E>(
           ),
           Layer.provide(
             Layer.mock(GameRoundStore.GameRoundStore)({
-              read: () => Effect.succeed(roundState),
+              read: () => Effect.succeed(roundState()),
             }),
           ),
           Layer.provide(
@@ -539,6 +548,87 @@ it.live("a repair uses the builder selection frozen at round start", () =>
       const repairCommand = scripted.dispatches.at(-1)!;
       if (repairCommand.type !== "game-round.task.request") return;
       expect(repairCommand.modelSelection).toEqual(builderSelection);
+    }),
+  ),
+);
+
+it.live("a round's own frozen selections win over the session file and the thread", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.roundSelections = {
+        builderSelection: overrideSelection,
+        reviewSelection: laterOverrideSelection,
+      };
+      // The thread composer offers yet another model; the round's record wins.
+      scripted.parentSelection = builderSelection;
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+        selection: builderSelection,
+      });
+      expect(critic.kind).toBe("started");
+      const criticCommand = scripted.dispatches.at(-1)!;
+      if (criticCommand.type !== "game-round.task.request") return;
+      expect(criticCommand.modelSelection).toEqual(laterOverrideSelection);
+
+      // Repairs always use the round's builder selection.
+      const repair = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        selection: laterOverrideSelection,
+        repair: {
+          remainingBudget: "2 repairs left",
+          defects: [],
+          doNotRegress: [],
+          previousRejection: "mechanical-veto: input failed",
+        },
+      });
+      expect(repair.kind).toBe("started");
+      const repairCommand = scripted.dispatches.at(-1)!;
+      if (repairCommand.type !== "game-round.task.request") return;
+      expect(repairCommand.modelSelection).toEqual(overrideSelection);
+      expect(repairCommand.task).toContain("PREVIOUS ATTEMPT (rejected; do not repeat):");
+      expect(repairCommand.task).toContain("mechanical-veto: input failed");
+    }),
+  ),
+);
+
+it.live("runStatus reads the bound child run, never a newer follow-up", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      expect(String(started.runId)).toBe("run:review-child");
+
+      scripted.childStatus = "running";
+      const pending = yield* service.runStatus({ threadId, loopId, roundId, role: "critic" });
+      expect(pending.kind).toBe("pending");
+
+      scripted.childStatus = "completed";
+      const terminal = yield* service.runStatus({ threadId, loopId, roundId, role: "critic" });
+      expect(terminal.kind).toBe("terminal");
+      if (terminal.kind === "terminal") expect(terminal.status).toBe("completed");
+
+      const missing = yield* service.runStatus({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        order: 1,
+      });
+      expect(missing.kind).toBe("missing");
     }),
   ),
 );

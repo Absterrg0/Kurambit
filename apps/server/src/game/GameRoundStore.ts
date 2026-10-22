@@ -14,9 +14,15 @@ import {
   GameReviewRound,
   GameSelectedBuild,
   type GameReviewArtifact,
+  type GameReviewBallotPlan,
+  type GameReviewBallotRecord,
   type GameReviewBudget,
+  type GameReviewCheck,
+  type GameReviewDefect,
+  type GameReviewDoNotRegress,
   type GameReviewRound as GameReviewRoundType,
   type GameReviewState as GameReviewStateType,
+  type ModelSelection,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as GameSnapshots from "./GameSnapshots.ts";
@@ -93,6 +99,23 @@ const validatedArtifact = (artifact: GameReviewArtifact): GameReviewArtifact => 
 export interface GameRoundBeginInput {
   readonly threadId?: ThreadId | undefined;
   readonly budget?: GameReviewBudget | undefined;
+  /** The repair loop that owns this round, when one does. */
+  readonly loopId?: string | undefined;
+  /** Frozen model selections; a later composer change cannot alter this round. */
+  readonly builderSelection?: ModelSelection | undefined;
+  readonly reviewSelection?: ModelSelection | undefined;
+  readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
+  readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
+}
+
+export interface GameRoundReviewInput {
+  readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
+  readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
+  readonly checks?: ReadonlyArray<GameReviewCheck> | undefined;
+  readonly candidateChecks?: ReadonlyArray<GameReviewCheck> | undefined;
+  readonly mechanicalVeto?: string | undefined;
+  readonly ballots?: ReadonlyArray<GameReviewBallotPlan> | undefined;
+  readonly ballotAnswers?: ReadonlyArray<GameReviewBallotRecord> | undefined;
 }
 
 export interface GamePromoteOptions {
@@ -198,6 +221,12 @@ export class GameRoundStore extends Context.Service<
       root: string,
       roundId: string,
     ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
+    /** Records what a review found and how it judged the challenger. */
+    readonly recordReview: (
+      root: string,
+      roundId: string,
+      input: GameRoundReviewInput,
+    ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
     /** Names the candidate a round's export produced. */
     readonly recordCandidate: (
       root: string,
@@ -222,6 +251,8 @@ export class GameRoundStore extends Context.Service<
       options?: {
         /** Directories a live preview still serves; they are never deleted. */
         readonly preserveDirectories?: readonly string[] | undefined;
+        /** The exact reason the round was rejected, kept as provenance. */
+        readonly reason?: string | undefined;
       },
     ) => Effect.Effect<GameRejection, GameOperationError>;
     /**
@@ -248,6 +279,19 @@ export class GameRoundStore extends Context.Service<
     readonly recover: (
       root: string,
     ) => Effect.Effect<readonly GameReviewRoundType[], GameOperationError>;
+    /**
+     * An explicit Resume reopens one interrupted round for judging. Only the
+     * folder the round recorded may be resumed; anything else stays
+     * interrupted so a user edit is never silently accepted or discarded.
+     */
+    readonly resume: (
+      root: string,
+      roundId: string,
+    ) => Effect.Effect<
+      | { readonly kind: "resumed"; readonly round: GameReviewRoundType }
+      | { readonly kind: "blocked"; readonly round: GameReviewRoundType; readonly detail: string },
+      GameOperationError
+    >;
   }
 >()("t3/game/GameRoundStore") {}
 
@@ -480,6 +524,17 @@ export const layer = (options: { readonly stateDir: string }) => {
                 incumbentBuildId: state.selected?.buildId ?? null,
                 postRepairSourceId: null,
                 candidate: null,
+                ...(input?.loopId === undefined ? {} : { loopId: input.loopId }),
+                ...(input?.builderSelection === undefined
+                  ? {}
+                  : { builderSelection: input.builderSelection }),
+                ...(input?.reviewSelection === undefined
+                  ? {}
+                  : { reviewSelection: input.reviewSelection }),
+                ...(input?.defects === undefined ? {} : { defects: [...input.defects] }),
+                ...(input?.doNotRegress === undefined
+                  ? {}
+                  : { doNotRegress: [...input.doNotRegress] }),
                 budget: input?.budget ?? DEFAULT_GAME_REVIEW_BUDGET,
               };
               yield* writeStateEffect(found.file, {
@@ -503,6 +558,40 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               const manifest = yield* snapshots.capture(root);
               const round = { ...current, postRepairSourceId: manifest.sourceId };
+              yield* writeStateEffect(found.file, replaceRound(state, round));
+              return round;
+            }),
+          ),
+        recordReview: (root, roundId, input) =>
+          withLock(root, "record game review", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const current = roundById(state, roundId, "record game review");
+              if (current.status !== "running")
+                return yield* failure(
+                  "record game review",
+                  roundId,
+                  "invalid-input",
+                  "That round is no longer running.",
+                );
+              const round: GameReviewRoundType = {
+                ...current,
+                ...(input.defects === undefined ? {} : { defects: [...input.defects] }),
+                ...(input.doNotRegress === undefined
+                  ? {}
+                  : { doNotRegress: [...input.doNotRegress] }),
+                ...(input.checks === undefined ? {} : { checks: [...input.checks] }),
+                ...(input.candidateChecks === undefined
+                  ? {}
+                  : { candidateChecks: [...input.candidateChecks] }),
+                ...(input.mechanicalVeto === undefined
+                  ? {}
+                  : { mechanicalVeto: input.mechanicalVeto }),
+                ...(input.ballots === undefined ? {} : { ballots: [...input.ballots] }),
+                ...(input.ballotAnswers === undefined
+                  ? {}
+                  : { ballotAnswers: [...input.ballotAnswers] }),
+              };
               yield* writeStateEffect(found.file, replaceRound(state, round));
               return round;
             }),
@@ -652,7 +741,8 @@ export const layer = (options: { readonly stateDir: string }) => {
                 round,
                 "rejected",
                 "reject",
-                "The round was rejected; the previous source snapshot was restored.",
+                rejectOptions?.reason ??
+                  "The round was rejected; the previous source snapshot was restored.",
                 at,
               );
               yield* writeStateEffect(found.file, replaceRound(state, rejected));
@@ -796,6 +886,44 @@ export const layer = (options: { readonly stateDir: string }) => {
             Effect.gen(function* () {
               recovered.delete(found.canonicalRoot);
               return yield* recoverLocked(found);
+            }),
+          ),
+        resume: (root, roundId) =>
+          withLock(root, "resume game review round", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const round = roundById(state, roundId, "resume game review round");
+              if (round.status === "running") return { kind: "resumed" as const, round };
+              if (round.status !== "interrupted")
+                return yield* failure(
+                  "resume game review round",
+                  roundId,
+                  "invalid-input",
+                  "Only an interrupted round can be resumed.",
+                );
+              const captured = yield* Effect.result(snapshots.capture(root));
+              const expected = round.postRepairSourceId ?? round.incumbentSnapshotId;
+              if (captured._tag === "Failure")
+                return {
+                  kind: "blocked" as const,
+                  round,
+                  detail: `The game folder could not be read to resume the round. ${captured.failure.message}`,
+                };
+              if (captured.success.sourceId !== expected)
+                return {
+                  kind: "blocked" as const,
+                  round,
+                  detail:
+                    "The game folder changed since this round was interrupted; it was not reopened.",
+                };
+              const { decision: _decision, reason: _reason, ...kept } = round;
+              const resumed: GameReviewRoundType = {
+                ...kept,
+                status: "running",
+                finishedAt: null,
+              };
+              yield* writeStateEffect(found.file, replaceRound(state, resumed));
+              return { kind: "resumed" as const, round: resumed };
             }),
           ),
       });

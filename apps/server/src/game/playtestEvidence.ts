@@ -7,9 +7,9 @@ import {
   GameConsoleMessage,
   GamePlaytestState,
   GamePlaytestProbe,
+  GamePlaytestStep,
   type GameAcceptanceCriterion,
   type GameLastPlaytest,
-  type GamePlaytestStep,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
 import { selectPlaytestCoverFrame } from "./playtestState.ts";
@@ -55,6 +55,7 @@ const StoredPlaytest = Schema.fromJsonString(
 );
 type StoredPlaytest = typeof StoredPlaytest.Type;
 const decodeStoredPlaytest = Schema.decodeUnknownSync(StoredPlaytest);
+const decodePlaytestSteps = Schema.decodeUnknownOption(Schema.Array(GamePlaytestStep));
 
 const slug = (label: string) => {
   const cleaned = label.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
@@ -225,6 +226,7 @@ export const readLastPlaytest = async (
   if (stored === null) return null;
   const webBuild = builds.find((build) => build.target === "Web");
   const stale = webBuild === undefined || Date.parse(stored.at) < Date.parse(webBuild.updatedAt);
+  const steps = decodePlaytestSteps(stored.steps);
   const frames = publicFrames(newest, stored);
   // The cover comes from the latest run that proved real play, which can be
   // older than the newest run when that run failed: a menu or a hover frame
@@ -253,6 +255,7 @@ export const readLastPlaytest = async (
     ...(stored.qualifies === undefined ? {} : { qualifies: stored.qualifies }),
     ...(stored.blockers === undefined ? {} : { blockers: [...stored.blockers] }),
     ...(stored.interaction === undefined ? {} : { interaction: stored.interaction }),
+    ...(steps._tag === "Some" ? { steps: [...steps.value] } : {}),
     stale,
   };
 };

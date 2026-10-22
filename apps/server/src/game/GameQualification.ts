@@ -509,6 +509,14 @@ export class GameQualification extends Context.Service<
       root: string,
       stage: StoredQualificationStage,
     ) => Effect.Effect<void, GameOperationError>;
+    /**
+     * One raw stage record, including the fields the derived read drops (the
+     * export's build directory and detail). Null when the stage never ran.
+     */
+    readonly stageRecord: (
+      root: string,
+      stage: StoredQualificationStage,
+    ) => Effect.Effect<QualificationStageRecord | null, GameOperationError>;
   }
 >()("t3/game/GameQualification") {}
 
@@ -644,6 +652,23 @@ export const layer = (options: {
                 cause,
               }),
           });
+        }),
+      stageRecord: (root, stage) =>
+        Effect.gen(function* () {
+          const location = yield* Effect.promise(() =>
+            qualificationLocation(options.stateDir, root),
+          );
+          const record = yield* Effect.tryPromise({
+            try: () => readRecord(location.file),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "qualification",
+                path: location.file,
+                reason: "io",
+                cause,
+              }),
+          });
+          return record?.stages[stage] ?? null;
         }),
     }),
   );

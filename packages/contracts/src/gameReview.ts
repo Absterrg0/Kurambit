@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
-import { ThreadId } from "./baseSchemas.ts";
+import { RunId, ThreadId } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 
 /**
  * The review loop's judgement vocabulary. A defect is something the critic saw
@@ -149,6 +150,139 @@ export const GameSelectedBuild = Schema.Struct({
 });
 export type GameSelectedBuild = typeof GameSelectedBuild.Type;
 
+/**
+ * One code check the loop froze from the incumbent's playtest. The id is
+ * server-owned (boot, input, state...) so a repair cannot rename or drop the
+ * checks it is judged by.
+ */
+export const GameReviewCheck = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+  status: Schema.Literals(["passed", "failed", "unmeasured"]),
+  detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+});
+export type GameReviewCheck = typeof GameReviewCheck.Type;
+
+/** Which artifact an anonymous ballot slot held. */
+export const GameRepairBallotSide = Schema.Literals(["incumbent", "challenger"]);
+export type GameRepairBallotSide = typeof GameRepairBallotSide.Type;
+
+/**
+ * One pairwise session's anonymous mapping. It is persisted before the child
+ * starts, so a ballot's A/B (and C/D control) labels can always be translated
+ * back to builds, and a restarted server cannot re-shuffle a ballot it already
+ * asked about.
+ */
+export const GameReviewBallotPlan = Schema.Struct({
+  /** 0 or 1; the two sessions see opposite A/B and independently shuffled C/D. */
+  order: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
+  main: Schema.Struct({
+    A: GameRepairBallotSide,
+    B: GameRepairBallotSide,
+  }),
+  /** Both slots are the same build; only a position-biased answer prefers one. */
+  control: Schema.Struct({
+    C: GameRepairBallotSide,
+    D: GameRepairBallotSide,
+  }),
+  /** The evidence directory hash at dispatch, when one exists. */
+  evidenceHash: Schema.NullOr(Schema.String),
+});
+export type GameReviewBallotPlan = typeof GameReviewBallotPlan.Type;
+
+/** The validated ballots (or why one was unusable) the decision was made on. */
+export const GameReviewBallotRecord = Schema.Struct({
+  order: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
+  outcome: Schema.Literals(["valid", "invalid"]),
+  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
+  answer: Schema.optionalKey(GameReviewBallotAnswer),
+  raw: Schema.optionalKey(Schema.String),
+});
+export type GameReviewBallotRecord = typeof GameReviewBallotRecord.Type;
+
+/**
+ * One repair loop's durable state. It is created once, when a builder turn
+ * that produced a playable export ends, and owns the immutable origin, both
+ * frozen model selections and the spend. Rounds and their evidence live in the
+ * round store; this record says which round is being worked on and why the
+ * loop stopped.
+ */
+export const GAME_REPAIR_LOOP_STATUSES = ["running", "paused", "stopped"] as const;
+export const GameRepairLoopStatus = Schema.Literals(GAME_REPAIR_LOOP_STATUSES);
+export type GameRepairLoopStatus = typeof GameRepairLoopStatus.Type;
+
+/**
+ * The loop's next action. `review` re-checks the incumbent and asks the critic;
+ * `repair` reuses the incumbent's defects after a rejection; `candidate` and
+ * `ballots` finish the round already open.
+ */
+export const GAME_REPAIR_LOOP_PHASES = ["review", "repair", "candidate", "ballots"] as const;
+export const GameRepairLoopPhase = Schema.Literals(GAME_REPAIR_LOOP_PHASES);
+export type GameRepairLoopPhase = typeof GameRepairLoopPhase.Type;
+
+/** The child the worker is parked on, so a restart can reconcile it. */
+export const GameRepairLoopWait = Schema.Struct({
+  role: Schema.Literals(["critic", "ballot", "repair"]),
+  order: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
+  roundId: Schema.String,
+  commandId: Schema.String,
+  childThreadId: Schema.String,
+  runId: Schema.NullOr(Schema.String),
+});
+export type GameRepairLoopWait = typeof GameRepairLoopWait.Type;
+
+/** One captured frame the loop keeps for the next ballot, outside the game. */
+export const GameRepairFrame = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  /** Absolute path in server state; never inside the game. */
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+});
+export type GameRepairFrame = typeof GameRepairFrame.Type;
+
+export const GameRepairLoop = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  id: Schema.String,
+  /** Canonical game root; the record is keyed by its digest. */
+  root: Schema.String,
+  threadId: ThreadId,
+  originatingRunId: RunId,
+  originatingNodeId: Schema.String,
+  status: GameRepairLoopStatus,
+  phase: GameRepairLoopPhase,
+  /** The round currently being worked, or the last one decided. */
+  roundId: Schema.NullOr(Schema.String),
+  /** Attempted repairs, including ones that produced no candidate. */
+  repairsUsed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  budget: GameReviewBudget,
+  builderSelection: ModelSelection,
+  reviewSelection: ModelSelection,
+  startedAt: Schema.String,
+  updatedAt: Schema.String,
+  finishedAt: Schema.NullOr(Schema.String),
+  /** The incumbent defects the next repair fixes. */
+  defects: Schema.Array(GameReviewDefect),
+  doNotRegress: Schema.Array(GameReviewDoNotRegress),
+  /** The incumbent's frozen check results, for the mechanical veto. */
+  incumbentChecks: Schema.Array(GameReviewCheck),
+  /** The frames the critic and ballots use for the incumbent. */
+  incumbentFrames: Schema.Array(GameRepairFrame),
+  /** The challenger's frames, once its checks ran. */
+  candidateFrames: Schema.Array(GameRepairFrame),
+  /** The incumbent checks ran for this review pass. */
+  checksDone: Schema.Boolean,
+  /** The critic answered for this review pass. */
+  criticDone: Schema.Boolean,
+  /** Why the previous attempt was rejected, carried into the next repair. */
+  lastRejection: Schema.NullOr(Schema.String),
+  wait: Schema.NullOr(GameRepairLoopWait),
+  /** True after a restart until an explicit Resume. */
+  resumeRequired: Schema.Boolean,
+  promotedRounds: Schema.Array(Schema.String),
+  decision: Schema.NullOr(Schema.Literals(["promote", "stop", "interrupt"])),
+  reason: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000))),
+});
+export type GameRepairLoop = typeof GameRepairLoop.Type;
+
 export const GAME_REVIEW_ROUND_STATUSES = [
   "running",
   "promoted",
@@ -192,8 +326,26 @@ export const GameReviewRound = Schema.Struct({
    */
   preRestoreSnapshotId: Schema.optionalKey(Schema.String),
   candidate: Schema.NullOr(GameReviewArtifact),
+  /** The loop this round belongs to, when a loop opened it. */
+  loopId: Schema.optionalKey(Schema.String),
+  /**
+   * The model selections frozen when the round opened. The review session
+   * reads these instead of the thread's current composer, so changing the
+   * model after the builder finished cannot change who reviews or repairs.
+   */
+  builderSelection: Schema.optionalKey(ModelSelection),
+  reviewSelection: Schema.optionalKey(ModelSelection),
   defects: Schema.optionalKey(Schema.Array(GameReviewDefect)),
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),
+  /** The frozen check run the round was reviewed against. */
+  checks: Schema.optionalKey(Schema.Array(GameReviewCheck)),
+  /** The challenger's check run and the mechanical veto reason, when it ran. */
+  candidateChecks: Schema.optionalKey(Schema.Array(GameReviewCheck)),
+  mechanicalVeto: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
+  /** Anonymous mappings persisted before either ballot was dispatched. */
+  ballots: Schema.optionalKey(Schema.Array(GameReviewBallotPlan)),
+  /** The ballots' validated answers (or invalidity) at decision time. */
+  ballotAnswers: Schema.optionalKey(Schema.Array(GameReviewBallotRecord)),
   budget: GameReviewBudget,
   decision: Schema.optionalKey(GameReviewDecision),
   /** The exact reason, never a score. */
@@ -202,6 +354,7 @@ export const GameReviewRound = Schema.Struct({
 export type GameReviewRound = typeof GameReviewRound.Type;
 
 /** What a game's record says about selection and its round history. */
+
 export const GameReviewState = Schema.Struct({
   selected: Schema.NullOr(GameSelectedBuild),
   rounds: Schema.Array(GameReviewRound),

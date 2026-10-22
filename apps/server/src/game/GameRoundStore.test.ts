@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import type { GameReviewArtifact } from "@t3tools/contracts";
+import { ProviderInstanceId, type GameReviewArtifact } from "@t3tools/contracts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameSnapshots from "./GameSnapshots.ts";
 import { candidateBuildDirectory, hashWebBuildDirectory } from "./webBuild.ts";
@@ -220,6 +220,47 @@ it.live("restart marks a running round interrupted and keeps the selected build"
           NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
         ),
       ).toBe("extends Node2D # unfinished\n");
+    }),
+  ),
+);
+
+it.live("an explicit resume reopens only the folder the interrupted round recorded", () =>
+  withGame(({ root, stateDir, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const selection = {
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "opencode-go/deepseek-v4.1-flash",
+      } as const;
+      const first = yield* rounds.begin(root, {
+        loopId: "loop-1",
+        builderSelection: selection,
+        reviewSelection: selection,
+        defects: [],
+        doNotRegress: [],
+      });
+      expect(first.loopId).toBe("loop-1");
+      expect(first.builderSelection?.model).toBe(selection.model);
+      yield* edit(root, "extends Node2D # repair\n");
+      yield* rounds.recordPostRepair(root, first.id);
+
+      const restarted = yield* GameRoundStore.GameRoundStore.pipe(
+        Effect.provide(GameRoundStore.layer({ stateDir })),
+      );
+      const state = yield* restarted.read(root);
+      expect(state.rounds.find((round) => round.id === first.id)?.status).toBe("interrupted");
+      const resumed = yield* restarted.resume(root, first.id);
+      expect(resumed.kind).toBe("resumed");
+
+      // A later edit means the resume would judge bytes the round never saw.
+      yield* edit(root, "extends Node2D # user edit\n");
+      const again = yield* GameRoundStore.GameRoundStore.pipe(
+        Effect.provide(GameRoundStore.layer({ stateDir })),
+      );
+      yield* again.read(root);
+      const blocked = yield* again.resume(root, first.id);
+      expect(blocked.kind).toBe("blocked");
+      expect((yield* again.read(root)).rounds[0]?.status).toBe("interrupted");
+      expect((yield* snapshots.capture(root)).sourceId).not.toBe(first.postRepairSourceId);
     }),
   ),
 );
