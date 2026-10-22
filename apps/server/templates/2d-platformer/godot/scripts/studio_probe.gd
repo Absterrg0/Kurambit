@@ -1,6 +1,8 @@
 ## Read-only snapshot hook for Game Studio's web playtest. The browser calls
-## `window.__studioProbe()` and gets JSON: GameState's public primitive members and
-## the world position of the first node in the `player` group.
+## `window.__studioProbe()` and gets JSON: GameState's public primitive members,
+## the world position of the first node in the `player` group, and the text the
+## visible Label, RichTextLabel and Button nodes show (so the playtest can tell
+## the agent which GameState values never reach the screen).
 ##
 ## It also carries the stage's visibility bridge. The app that hosts this game in
 ## its iframe sends `studio-visibility` postMessages, and while the stage tab is
@@ -18,6 +20,8 @@ extends Node
 ## Hard bounds so a runaway GameState cannot make the probe response expensive.
 const MAX_KEYS := 40
 const MAX_STRING_CHARS := 80
+const MAX_HUD_CHARS := 2000
+const MAX_HUD_VISITS := 4000
 
 ## Kept as a member so the JavaScript function wrapping the GDScript callback
 ## stays alive for the whole session.
@@ -61,7 +65,41 @@ func snapshot() -> Dictionary:
 	return {
 		"gameState": _game_state_values(),
 		"player": _player_position(),
+		"hudText": _hud_text(),
 	}
+
+## Visible on-screen text, one node per line, bounded like the state above.
+func _hud_text() -> String:
+	var tree := get_tree()
+	if tree == null:
+		return ""
+	var lines: PackedStringArray = []
+	var used := 0
+	var pending: Array[Node] = [tree.root]
+	var visits := 0
+	while not pending.is_empty() and visits < MAX_HUD_VISITS and used < MAX_HUD_CHARS:
+		var node: Node = pending.pop_back()
+		visits += 1
+		if node is CanvasItem and not (node as CanvasItem).is_visible_in_tree():
+			continue
+		if node is Node3D and not (node as Node3D).is_visible_in_tree():
+			continue
+		var text := ""
+		if node is RichTextLabel:
+			text = (node as RichTextLabel).get_parsed_text()
+		elif node is Label:
+			text = (node as Label).text
+		elif node is Button:
+			text = (node as Button).text
+		elif node is Label3D:
+			text = (node as Label3D).text
+		text = text.strip_edges()
+		if text != "":
+			lines.append(text.left(MAX_HUD_CHARS - used))
+			used += text.length() + 1
+		for child in node.get_children():
+			pending.append(child)
+	return "\n".join(lines)
 
 func _game_state_values() -> Dictionary:
 	var values := {}

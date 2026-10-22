@@ -258,6 +258,8 @@ export const GamePlaytestProbe = Schema.Struct({
   gameState: Schema.Record(Schema.String, GamePlaytestStateValue),
   /** World position of the first node in the `player` group, or null outside gameplay. */
   player: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number, z: Schema.Number })),
+  /** Text of the visible Label, RichTextLabel, Button and Label3D nodes; older probes omit it. */
+  hudText: Schema.optionalKey(Schema.String),
 });
 export type GamePlaytestProbe = typeof GamePlaytestProbe.Type;
 export const GamePlaytestStateChange = Schema.Struct({
@@ -283,6 +285,12 @@ export const GamePlaytestState = Schema.Struct({
    * nothing; no key names are needed).
    */
   changes: Schema.Array(GamePlaytestStateChange),
+  /**
+   * GameState keys whose last value never appears in the visible on-screen
+   * text. Feedback for the agent, not a verdict; absent when the probe reports
+   * no screen text.
+   */
+  notOnScreen: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type GamePlaytestState = typeof GamePlaytestState.Type;
 export const GamePlaytestFrame = Schema.Struct({
@@ -475,8 +483,14 @@ export const GameCreateInput = Schema.Struct({
   template: Schema.optionalKey(GameTemplateId),
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
-  /** Write and approve a design before the first build turn. Defaults to true. */
+  /** Write DESIGN.md before building. Defaults to true. */
   planFirst: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Wait for the creator to approve each DESIGN.md revision before building.
+   * Defaults to false: the server records every revision itself and the agent
+   * builds in the same turn.
+   */
+  reviewDesign: Schema.optionalKey(Schema.Boolean),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });

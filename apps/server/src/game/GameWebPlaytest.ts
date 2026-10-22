@@ -714,6 +714,13 @@ const runPlaytest = async (
         ? []
         : [pauseConfirmed ? "pauses hidden: yes" : "pauses hidden: not confirmed"]),
       `state: ${describePlaytestState(state)}`,
+      ...(state?.notOnScreen === undefined
+        ? []
+        : [
+            state.notOnScreen.length === 0
+              ? "every GameState value is on screen"
+              : `not on screen: ${state.notOnScreen.join(", ")}`,
+          ]),
     ].join("; ");
     return {
       success,

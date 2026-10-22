@@ -102,12 +102,56 @@ export function summarizePlaytestSamples(
     }
     changes.sort((left, right) => left.key.localeCompare(right.key));
   }
+  const screen = samples.findLast((sample) => sample.probe.hudText !== undefined)?.probe;
   return {
     before: baseline,
     after: last,
     playerMoved: round(playerMoved),
     changes,
+    ...(screen === undefined ? {} : { notOnScreen: keysNotOnScreen(screen) }),
   };
+}
+
+/**
+ * The renderings of a value a HUD might plausibly show: the number as is, or
+ * rounded the way a label would round it.
+ */
+const screenForms = (value: number): string[] =>
+  Number.isInteger(value)
+    ? [String(value)]
+    : [
+        String(Math.round(value)),
+        String(Math.floor(value)),
+        value.toFixed(1),
+        value.toFixed(2),
+        String(value),
+      ];
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * GameState keys whose value in this probe is not in its on-screen text. A
+ * number counts when it stands alone (not inside a longer number); a string
+ * when it appears case-insensitively. Booleans and empty strings are flags,
+ * not something a HUD prints, so they are never reported.
+ */
+export function keysNotOnScreen(probe: GamePlaytestProbe): string[] {
+  const text = probe.hudText ?? "";
+  const lower = text.toLowerCase();
+  const missing: string[] = [];
+  for (const [key, value] of Object.entries(probe.gameState)) {
+    if (typeof value === "boolean") continue;
+    if (typeof value === "string") {
+      const needle = value.trim().toLowerCase();
+      if (needle !== "" && !lower.includes(needle)) missing.push(key);
+      continue;
+    }
+    const shown = screenForms(value).some((form) =>
+      new RegExp(`(?<![\\d.])${escapeRegExp(form)}(?![\\d])`).test(text),
+    );
+    if (!shown) missing.push(key);
+  }
+  return missing.toSorted();
 }
 
 const formatValue = (value: GamePlaytestStateValue): string => {

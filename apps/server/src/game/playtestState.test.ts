@@ -378,3 +378,21 @@ describe("satisfiedObservations", () => {
     expect(satisfiedObservations(criteria, null)).toEqual([]);
   });
 });
+
+describe("HUD-state check", () => {
+  it("names the GameState values the screen never shows", () => {
+    const state = summarizePlaytestSamples([
+      played(gameplay({ score: 120, lives: 3, turn: 7, speed: 4.26, mood: "Calm", won: false })),
+      played({
+        ...gameplay({ score: 120, lives: 3, turn: 12, speed: 4.26, mood: "Calm", won: false }),
+        hudText: "SCORE 120\nLives: 3\nTurn 1\nMOOD: calm\n4.3 m/s",
+      }),
+    ]);
+    // turn 12 is not "Turn 1"; a flag is never something a HUD has to print.
+    expect(state.notOnScreen).toEqual(["turn"]);
+  });
+
+  it("says nothing when the probe reports no screen text", () => {
+    expect(summarizePlaytestSamples([played(gameplay({ score: 1 }))]).notOnScreen).toBeUndefined();
+  });
+});
