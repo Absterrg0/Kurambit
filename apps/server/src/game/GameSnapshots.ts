@@ -540,6 +540,39 @@ export const layer = (options: {
     return null;
   };
 
+  /**
+   * A deletion must not follow a parent swapped for a symlink either: unlinking
+   * through it would remove a file outside the game. Missing parents mean the
+   * path already moved, which is also a mismatch.
+   */
+  const verifyParents = async (root: string, relative: string): Promise<string | null> => {
+    const parts = safeRelativePath(relative).split("/");
+    parts.pop();
+    let current = root;
+    for (const part of parts) {
+      current = NodePath.join(current, part);
+      const stat = await lstatOrNull(current);
+      if (stat === null)
+        return `${NodePath.relative(root, current)} disappeared after the game folder was read.`;
+      if (stat.isSymbolicLink() || !stat.isDirectory())
+        return `${NodePath.relative(root, current)} is not a real directory; nothing was restored.`;
+    }
+    return null;
+  };
+
+  /** Every component of `directory`, including itself, must be a real directory. */
+  const verifyDirectoryChain = async (root: string, directory: string): Promise<string | null> => {
+    let current = root;
+    for (const part of safeRelativePath(directory).split("/")) {
+      current = NodePath.join(current, part);
+      const stat = await lstatOrNull(current);
+      if (stat === null) return null;
+      if (stat.isSymbolicLink() || !stat.isDirectory())
+        return `${NodePath.relative(root, current)} is not a real directory; nothing was restored.`;
+    }
+    return null;
+  };
+
   const ancestry = (relative: string): readonly string[] => {
     const parts = relative.split("/");
     parts.pop();
@@ -578,6 +611,9 @@ export const layer = (options: {
     for (const path of after.keys()) {
       if (before.has(path)) continue;
       await restoreOptions?.beforePath?.("delete", path);
+      const parentMismatch = await verifyParents(canonical, path);
+      if (parentMismatch !== null)
+        return { kind: "blocked", sourceId: current.sourceId, detail: parentMismatch };
       const mismatch = await verifyUnchanged(canonical, path, after.get(path)!);
       if (mismatch !== null)
         return { kind: "blocked", sourceId: current.sourceId, detail: mismatch };
@@ -596,15 +632,12 @@ export const layer = (options: {
       (left, right) => right.split("/").length - left.split("/").length,
     )) {
       if (excludedDirectory(directory.split("/"))) continue;
+      const chainMismatch = await verifyDirectoryChain(canonical, directory);
+      if (chainMismatch !== null)
+        return { kind: "blocked", sourceId: current.sourceId, detail: chainMismatch };
       const absolute = NodePath.join(canonical, safeRelativePath(directory));
       const stat = await lstatOrNull(absolute);
       if (stat === null) continue;
-      if (stat.isSymbolicLink())
-        return {
-          kind: "blocked",
-          sourceId: current.sourceId,
-          detail: `${directory} became a symlink; nothing else was restored.`,
-        };
       if (!stat.isDirectory()) continue;
       const entries = await NodeFSP.readdir(absolute);
       if (entries.length === 0) await NodeFSP.rmdir(absolute);

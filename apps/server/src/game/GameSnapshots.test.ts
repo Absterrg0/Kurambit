@@ -346,3 +346,40 @@ it.effect(
     );
   },
 );
+
+it.effect("a parent symlink blocks deleting an added file outside the game", () => {
+  let swapped = false;
+  return withTree(
+    ({ root, snapshots }) =>
+      Effect.gen(function* () {
+        const stored = yield* snapshots.store(root);
+        const outside = NodePath.join(root, "..", "outside-added");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.join(root, "godot/extra"), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(root, "godot/extra/temp.gd"), "repair\n");
+          await NodeFSP.mkdir(outside, { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(outside, "temp.gd"), "repair\n");
+        });
+        const changed = yield* snapshots.capture(root);
+        const restored = yield* snapshots.restore(root, stored.manifest, {
+          expectSourceId: changed.sourceId,
+          beforePath: async (operation, path) => {
+            if (operation !== "delete" || path !== "godot/extra/temp.gd" || swapped) return;
+            swapped = true;
+            await NodeFSP.rename(
+              NodePath.join(root, "godot/extra"),
+              NodePath.join(root, "godot/extra-real"),
+            );
+            await NodeFSP.symlink(outside, NodePath.join(root, "godot/extra"));
+          },
+        });
+        expect(restored.kind).toBe("blocked");
+        if (restored.kind === "blocked") expect(restored.detail).toContain("not a real directory");
+        // The file the symlink pointed at is untouched.
+        expect(
+          yield* Effect.promise(() => NodeFSP.readFile(NodePath.join(outside, "temp.gd"), "utf8")),
+        ).toBe("repair\n");
+      }),
+    {},
+  );
+});
