@@ -19,7 +19,7 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   template: "3d-explorer",
   designState: null,
   operation: null,
-  qualification: { state: "unqualified", asOf: null },
+  qualification: { state: "unqualified", completion: "incomplete", asOf: null },
   updatedAt,
   coverImagePath: null,
 });

@@ -179,7 +179,7 @@ Build the game in BRIEF.md with Godot 4.7 (GDScript, Compatibility renderer). Th
 - builds/ and godot/.godot/ are generated; do not edit them.
 - If a tool is missing, tell the user to install it in Settings > General > Game tools.
 
-Optional proof: game_godot_test runs tests/smoke_test.gd; game_scenarios_run replays input routes in godot/tests/scenarios/*.json against DESIGN.md's acceptance.
+Certification, not completion: game_godot_test runs tests/smoke_test.gd; game_scenarios_run replays godot/tests/scenarios/*.json. Missing reads as missing, not failed.
 `,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",

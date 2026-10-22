@@ -373,7 +373,7 @@ function VisualReviewSection({
           ) : null}
           {mechanicsQualified && status !== "passed" ? (
             <p className="mt-2 text-xs text-warning-foreground">
-              Behaviour qualifies; the look does not.
+              Playable; this visual review is not current certification.
             </p>
           ) : null}
         </>

@@ -158,6 +158,41 @@ it.effect("records real stage results and only qualifies when all stages are cur
   ),
 );
 
+it.effect("separates playable completion from optional certification", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      const buildId = `${sourceId}:playable`;
+      const artifacts = yield* Effect.promise(() => writeWebBuild(root));
+      for (const input of [
+        passed("check", null),
+        passed("export", buildId, null, artifacts),
+        passed("playtest", buildId, "builds/playtests/run-1"),
+      ])
+        yield* qualification.record(root, { ...input, sourceId });
+      const read = yield* qualification.read(root, "godot", "approved");
+      // A playable export and its playtest complete the game even though the
+      // optional test/state certification never ran.
+      expect(read.completion).toBe("complete");
+      expect(read.mechanicsQualified).toBe(false);
+      expect(
+        read.stages
+          .filter((stage) => stage.stage === "test" || stage.stage === "state")
+          .map((stage) => stage.status),
+      ).toEqual(["missing", "missing"]);
+      expect((yield* qualification.summary(root, null)).completion).toBe("complete");
+
+      // A playtest of another build proves nothing about the served bytes.
+      yield* qualification.record(root, {
+        ...passed("playtest", `${sourceId}:other`, "builds/playtests/run-2"),
+        sourceId,
+      });
+      expect((yield* qualification.read(root, "godot", "approved")).completion).toBe("incomplete");
+      expect((yield* qualification.summary(root, null)).completion).toBe("incomplete");
+    }),
+  ),
+);
+
 it.effect("keeps the state stage's per-criterion summary with its record", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
@@ -505,6 +540,7 @@ it.effect("summarizes the record without reading the source tree", () =>
     Effect.gen(function* () {
       expect(yield* qualification.summary(root, null)).toEqual({
         state: "unqualified",
+        completion: "incomplete",
         asOf: null,
       });
       const sourceId = yield* Effect.promise(() => sourceIdOf(root));

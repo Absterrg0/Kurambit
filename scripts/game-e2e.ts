@@ -359,13 +359,22 @@ const visualTable = (status: GameStatus) => {
     .map((score) => `${score.dimension}=${score.score}`)
     .join(", ")}`;
 };
-/** PASS follows the server's own qualification read, never an agent's summary. */
-const assertQualified = (label: string, status: GameStatus) => {
+/**
+ * PASS follows the server's own completion read, never an agent's summary.
+ * Test, state and visual are optional certification: a run that ships a
+ * current playable export/playtest passes even when they are missing.
+ */
+const assertComplete = (label: string, status: GameStatus) => {
+  const qualification = status.qualification;
   assert(
-    status.qualification.state === "qualified",
-    `${label}: the game is ${status.qualification.state} (${stageSummary(status)}; visual ${visualTable(status)})`,
+    qualification.completion === "complete",
+    `${label}: the game is ${qualification.completion} (${stageSummary(status)}; visual ${visualTable(status)})`,
   );
-  timeline(`${label}: visual ${visualTable(status)}`);
+  timeline(
+    `${label}: playable; certification ${
+      qualification.state === "qualified" ? "qualified" : stageSummary(status)
+    }; visual ${visualTable(status)}`,
+  );
 };
 
 const waitForTurn = (
@@ -763,7 +772,7 @@ const main = Effect.gen(function* () {
     status.builds.some((build) => build.target === "Web"),
     "No web build exists after the build turn",
   );
-  assertQualified("after the build turn", status);
+  assertComplete("after the build turn", status);
   summaryPhase = "qualified";
   timeline(`Qualification: ${stageSummary(status)}`);
   assert(status.lastPlaytest !== null, "Game status reports no playtest evidence");
@@ -1007,7 +1016,7 @@ const main = Effect.gen(function* () {
       reviseStatus.design.state === "approved",
       "Revision turn changed the approved design without re-approval",
     );
-    assertQualified("after the revision turn", reviseStatus);
+    assertComplete("after the revision turn", reviseStatus);
     timeline(
       `After revise: webBuildStale=${String(reviseStatus.webBuildStale)}, newest playtest=${
         reviseStatus.lastPlaytest?.directory ?? "none"

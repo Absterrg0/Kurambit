@@ -361,6 +361,13 @@ export const GameQualificationStageStatus = Schema.Literals([
   "unknown",
 ]);
 export type GameQualificationStageStatus = typeof GameQualificationStageStatus.Type;
+/**
+ * Playable completion is deliberately narrower than qualification: a current
+ * web export plus a playtest that played those exact bytes. Check, test, the
+ * state exam and the visual review are certification, and stay optional.
+ */
+export const GameCompletionState = Schema.Literals(["complete", "incomplete", "unknown"]);
+export type GameCompletionState = typeof GameCompletionState.Type;
 export const GameQualificationStageRead = Schema.Struct({
   stage: GameQualificationStage,
   status: GameQualificationStageStatus,
@@ -387,6 +394,12 @@ export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
  */
 export const GameQualificationRead = Schema.Struct({
   state: Schema.Literals(["qualified", "unqualified", "unknown"]),
+  /**
+   * Playable completion: the current web export and a playtest of those exact
+   * bytes. It does not require the optional certification stages, so a game
+   * that ships a playable build is complete even when test/state are missing.
+   */
+  completion: GameCompletionState,
   /**
    * Every mechanical stage and the design passed; only the visual stage is in
    * question. The UI and harness need the two apart: a game whose behaviour
@@ -474,6 +487,8 @@ export type GameOperationEvent = typeof GameOperationEvent.Type;
  */
 export const GameQualificationSummary = Schema.Struct({
   state: Schema.Literals(["qualified", "unqualified"]),
+  /** The playable build the record proves, without a source walk. */
+  completion: Schema.Literals(["complete", "incomplete"]),
   asOf: Schema.NullOr(Schema.String),
 });
 export type GameQualificationSummary = typeof GameQualificationSummary.Type;

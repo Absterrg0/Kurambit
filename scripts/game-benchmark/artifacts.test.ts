@@ -215,6 +215,7 @@ describe("run summaries", () => {
       turns: [{ name: "design", status: "completed", durationMs: 1_000 }],
       qualification: {
         state: "qualified",
+        completion: "complete",
         mechanicsQualified: true,
         sourceId: "source",
         buildId: "build",

@@ -11,7 +11,7 @@ const summary = (overrides: Partial<GameSummary> = {}): GameSummary => ({
   template: "3d-explorer",
   designState: "approved",
   operation: null,
-  qualification: { state: "unqualified", asOf: null },
+  qualification: { state: "unqualified", completion: "incomplete", asOf: null },
   updatedAt: "2026-10-20T11:00:00.000Z",
   coverImagePath: null,
   ...overrides,
@@ -44,11 +44,33 @@ describe("gameProgress", () => {
 
   it("shows the record's qualified time instead of a bare Ready", () => {
     const progress = gameProgress(
-      summary({ qualification: { state: "qualified", asOf: "2026-10-20T10:00:00.000Z" } }),
+      summary({
+        qualification: {
+          state: "qualified",
+          completion: "complete",
+          asOf: "2026-10-20T10:00:00.000Z",
+        },
+      }),
       NOW,
     );
     expect(progress.kind).toBe("qualified");
     expect(progress.label).toBe("Qualified as of 2h ago");
+  });
+
+  it("calls a playable but uncertified record Playable, not Unqualified", () => {
+    const progress = gameProgress(
+      summary({
+        qualification: {
+          state: "unqualified",
+          completion: "complete",
+          asOf: "2026-10-20T10:00:00.000Z",
+        },
+      }),
+      NOW,
+    );
+    expect(progress.kind).toBe("qualified");
+    expect(progress.label).toBe("Playable as of 2h ago");
+    expect(progress.detail).toContain("optional certification");
   });
 
   it("calls a game with no record unqualified rather than ready", () => {

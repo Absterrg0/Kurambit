@@ -46,21 +46,29 @@ export const gameProgress = (
       label: "Design changed",
       detail: "The design changed after approval. Review the new revision on the Design tab.",
     };
-  if (summary.qualification.state === "qualified") {
+  if (summary.qualification.completion === "complete") {
     const ago =
       summary.qualification.asOf === null
         ? null
         : formatGameEditedAgo(summary.qualification.asOf, now);
+    const certified = summary.qualification.state === "qualified";
     return {
       kind: "qualified",
-      label: ago === null ? "Qualified" : `Qualified as of ${ago}`,
-      detail:
-        "Check, test, export, playtest and state scenarios passed when this record was written. The Stage re-checks the current sources.",
+      label: certified
+        ? ago === null
+          ? "Qualified"
+          : `Qualified as of ${ago}`
+        : ago === null
+          ? "Playable"
+          : `Playable as of ${ago}`,
+      detail: certified
+        ? "A web export and its playtest are current, and the optional test, state and visual certification passed when this record was written."
+        : "A web export and its playtest are current. Test, state and visual are optional certification; their absence does not make the game incomplete.",
     };
   }
   return {
     kind: "unqualified",
     label: "Unqualified",
-    detail: "The current sources have not passed the studio's qualification stages yet.",
+    detail: "No current playable build exists for these sources yet.",
   };
 };

@@ -180,6 +180,7 @@ const deriveQualification = (input: {
   if (input.source.kind === "unknown")
     return {
       state: "unknown",
+      completion: "unknown",
       mechanicsQualified: false,
       sourceId: null,
       buildId: null,
@@ -352,8 +353,20 @@ const deriveQualification = (input: {
     stageReads.get("design")!.status === "passed" &&
     RECORDED_QUALIFICATION_STAGES.every((stage) => stageReads.get(stage)!.status === "passed");
   const qualified = mechanicsQualified && stageReads.get("visual")!.status === "passed";
+  // Playable completion: the exact bytes served from builds/web were played by
+  // a current, input-responsive playtest. test, state and visual are optional
+  // certification; their absence never makes a playable game incomplete.
+  const completion =
+    exportRead.status === "passed" &&
+    playtest.status === "passed" &&
+    exportRecord?.buildId !== null &&
+    exportRecord?.buildId !== undefined &&
+    input.record?.stages.playtest?.buildId === exportRecord.buildId
+      ? "complete"
+      : "incomplete";
   return {
     state: qualified ? "qualified" : "unqualified",
+    completion,
     mechanicsQualified,
     sourceId: currentSourceId,
     buildId: exportRead.status === "passed" ? (exportRecord?.buildId ?? null) : null,
@@ -380,7 +393,7 @@ const deriveQualificationSummary = (
     .flatMap((stage) => (stage === undefined ? [] : [stage.finishedAt]))
     .sort()
     .at(-1);
-  if (record === null) return { state: "unqualified", asOf: null };
+  if (record === null) return { state: "unqualified", completion: "incomplete", asOf: null };
   const passed = RECORDED_QUALIFICATION_STAGES.every(
     (stage) => record.stages[stage]?.outcome === "passed",
   );
@@ -396,6 +409,17 @@ const deriveQualificationSummary = (
     (record.stages.state?.designHash ?? null) === designHash &&
     (record.stages.visual?.designHash ?? null) === designHash;
   const visualPassed = record.stages.visual?.outcome === "passed";
+  const exportStage = record.stages.export;
+  const playtestStage = record.stages.playtest;
+  const completion =
+    exportStage?.outcome === "passed" &&
+    playtestStage?.outcome === "passed" &&
+    exportBuild !== null &&
+    playtestBuild === exportBuild &&
+    (exportStage.sourceId ?? null) !== null &&
+    exportStage.sourceId === playtestStage.sourceId
+      ? ("complete" as const)
+      : ("incomplete" as const);
   // A state record from before the baseline exam has no proving frame; the
   // library must not advertise it until the scenario stage is rerun.
   const stateExamCurrent = (record.stages.state?.criteria ?? []).every(
@@ -420,7 +444,7 @@ const deriveQualificationSummary = (
     designBound &&
     stateExamCurrent &&
     policyBound;
-  return { state: qualified ? "qualified" : "unqualified", asOf: finished ?? null };
+  return { state: qualified ? "qualified" : "unqualified", completion, asOf: finished ?? null };
 };
 
 export interface QualificationRecordInput {

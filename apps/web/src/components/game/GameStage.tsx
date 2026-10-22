@@ -186,20 +186,28 @@ export function GameStage({
   const qualificationLabel =
     qualification.state === "qualified"
       ? "Qualified"
-      : qualification.state === "unknown"
-        ? "Qualification unknown"
-        : "Unqualified";
+      : qualification.completion === "complete"
+        ? "Playable"
+        : "Incomplete";
+  const certification = qualification.stages
+    .filter(
+      (stage) => stage.stage !== "design" && stage.stage !== "export" && stage.stage !== "playtest",
+    )
+    .map((stage) => `${stage.stage}=${stage.status}`)
+    .join(", ");
   const qualificationDetail =
-    qualification.state === "qualified"
-      ? "Check, test, web export, playtest and state scenarios passed for the current sources."
-      : `${qualificationLabel} for the current sources. ${qualificationIssues.join(", ")}. Visual acceptance is not implemented yet.`;
+    qualification.completion !== "complete"
+      ? `No current playable build for the current sources. ${qualificationIssues.join(", ")}.`
+      : qualification.state === "qualified"
+        ? "Playable, and the optional test, state and visual certification passed for the current sources."
+        : `Playable: the web export and its playtest are current. Optional certification: ${certification}.`;
   const stagePhaseLabel =
     phase.kind === "playing"
-      ? qualification.state === "qualified"
+      ? qualification.completion === "complete"
         ? "Playing"
         : `Playing · ${qualificationLabel}`
       : phase.kind === "ready"
-        ? qualification.state === "qualified"
+        ? qualification.completion === "complete"
           ? "Ready to play"
           : qualificationLabel
         : phase.kind === "never-built"

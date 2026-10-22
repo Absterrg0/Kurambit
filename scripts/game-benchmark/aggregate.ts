@@ -199,7 +199,9 @@ export function classifyRun(observation: BenchmarkRunObservation): {
     };
 
   const qualification = summary.qualification;
-  if (!qualification.mechanicsQualified) {
+  // Playable completion, not optional certification: a rule-following run must
+  // not fail because test/state were left out.
+  if (qualification.completion !== "complete") {
     const detail = stateDetail(summary);
     return {
       outcome: "failed-mechanics",

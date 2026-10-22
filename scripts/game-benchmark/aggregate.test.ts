@@ -52,11 +52,13 @@ const judgement = (overrides: Partial<GameVisualJudgement> = {}): GameVisualJudg
 const qualification = (
   input: {
     readonly mechanicsQualified?: boolean;
+    readonly completion?: GameQualificationRead["completion"];
     readonly stages?: ReadonlyArray<GameQualificationStageRead>;
     readonly withVisual?: boolean;
   } = {},
 ): GameQualificationRead => ({
   state: "qualified",
+  completion: input.completion ?? "complete",
   mechanicsQualified: input.mechanicsQualified ?? true,
   sourceId: "source",
   buildId: "build",
@@ -148,14 +150,38 @@ describe("classifyRun", () => {
     const verdict = classifyRun(
       observe({
         qualification: qualification({
+          completion: "incomplete",
           mechanicsQualified: false,
-          stages: [stage("state", "failed", { detail: "moves stayed at 0." })],
+          stages: [
+            stage("export", "failed"),
+            stage("state", "failed", { detail: "moves stayed at 0." }),
+          ],
         }),
       }),
     );
     assert.equal(verdict.outcome, "failed-mechanics");
     assert.match(verdict.reason, /state=failed/);
     assert.match(verdict.reason, /moves stayed at 0/);
+  });
+
+  it("passes playable completion without the optional test/state certification", () => {
+    const verdict = classifyRun(
+      observe({
+        qualification: qualification({
+          mechanicsQualified: false,
+          stages: [
+            stage("design", "passed"),
+            stage("check", "passed"),
+            stage("test", "missing"),
+            stage("export", "passed"),
+            stage("playtest", "passed"),
+            stage("state", "missing"),
+            stage("visual", "passed", { visual: judgement() }),
+          ],
+        }),
+      }),
+    );
+    assert.equal(verdict.outcome, "passed");
   });
 
   it("reports an obligation the approved design never named as failed mechanics", () => {
@@ -299,6 +325,7 @@ describe("benchmark results", () => {
       durationMs: 90_000,
       observation: observe({
         qualification: qualification({
+          completion: "incomplete",
           mechanicsQualified: false,
           stages: [stage("state", "failed", { detail: "won never became 1." })],
         }),
