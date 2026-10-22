@@ -224,43 +224,38 @@ it.live("restart marks a running round interrupted and keeps the selected build"
   ),
 );
 
-it.live("an explicit resume reopens only the folder the interrupted round recorded", () =>
-  withGame(({ root, stateDir, rounds, snapshots }) =>
+it.live("a restart interrupts the round and keeps its frozen selections", () =>
+  withGame(({ root, stateDir, snapshots }) =>
     Effect.gen(function* () {
       const selection = {
         instanceId: ProviderInstanceId.make("opencode"),
         model: "opencode-go/deepseek-v4.1-flash",
       } as const;
-      const first = yield* rounds.begin(root, {
+      const first = yield* GameRoundStore.GameRoundStore.pipe(
+        Effect.provide(GameRoundStore.layer({ stateDir })),
+      );
+      const opened = yield* first.begin(root, {
         loopId: "loop-1",
         builderSelection: selection,
         reviewSelection: selection,
         defects: [],
         doNotRegress: [],
       });
-      expect(first.loopId).toBe("loop-1");
-      expect(first.builderSelection?.model).toBe(selection.model);
+      expect(opened.loopId).toBe("loop-1");
+      expect(opened.builderSelection?.model).toBe(selection.model);
       yield* edit(root, "extends Node2D # repair\n");
-      yield* rounds.recordPostRepair(root, first.id);
+      yield* first.recordPostRepair(root, opened.id);
 
       const restarted = yield* GameRoundStore.GameRoundStore.pipe(
         Effect.provide(GameRoundStore.layer({ stateDir })),
       );
       const state = yield* restarted.read(root);
-      expect(state.rounds.find((round) => round.id === first.id)?.status).toBe("interrupted");
-      const resumed = yield* restarted.resume(root, first.id);
-      expect(resumed.kind).toBe("resumed");
-
-      // A later edit means the resume would judge bytes the round never saw.
-      yield* edit(root, "extends Node2D # user edit\n");
-      const again = yield* GameRoundStore.GameRoundStore.pipe(
-        Effect.provide(GameRoundStore.layer({ stateDir })),
-      );
-      yield* again.read(root);
-      const blocked = yield* again.resume(root, first.id);
-      expect(blocked.kind).toBe("blocked");
-      expect((yield* again.read(root)).rounds[0]?.status).toBe("interrupted");
-      expect((yield* snapshots.capture(root)).sourceId).not.toBe(first.postRepairSourceId);
+      const round = state.rounds.find((entry) => entry.id === opened.id);
+      expect(round?.status).toBe("interrupted");
+      expect(round?.builderSelection?.model).toBe(selection.model);
+      // The restart abandons the round; there is no resume to reopen bytes the
+      // round never saw, and the user edit stays untouched.
+      expect((yield* snapshots.capture(root)).sourceId).not.toBe(opened.postRepairSourceId);
     }),
   ),
 );

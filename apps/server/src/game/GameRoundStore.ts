@@ -279,19 +279,6 @@ export class GameRoundStore extends Context.Service<
     readonly recover: (
       root: string,
     ) => Effect.Effect<readonly GameReviewRoundType[], GameOperationError>;
-    /**
-     * An explicit Resume reopens one interrupted round for judging. Only the
-     * folder the round recorded may be resumed; anything else stays
-     * interrupted so a user edit is never silently accepted or discarded.
-     */
-    readonly resume: (
-      root: string,
-      roundId: string,
-    ) => Effect.Effect<
-      | { readonly kind: "resumed"; readonly round: GameReviewRoundType }
-      | { readonly kind: "blocked"; readonly round: GameReviewRoundType; readonly detail: string },
-      GameOperationError
-    >;
   }
 >()("t3/game/GameRoundStore") {}
 
@@ -886,44 +873,6 @@ export const layer = (options: { readonly stateDir: string }) => {
             Effect.gen(function* () {
               recovered.delete(found.canonicalRoot);
               return yield* recoverLocked(found);
-            }),
-          ),
-        resume: (root, roundId) =>
-          withLock(root, "resume game review round", (found) =>
-            Effect.gen(function* () {
-              const state = yield* readStateEffect(found.file);
-              const round = roundById(state, roundId, "resume game review round");
-              if (round.status === "running") return { kind: "resumed" as const, round };
-              if (round.status !== "interrupted")
-                return yield* failure(
-                  "resume game review round",
-                  roundId,
-                  "invalid-input",
-                  "Only an interrupted round can be resumed.",
-                );
-              const captured = yield* Effect.result(snapshots.capture(root));
-              const expected = round.postRepairSourceId ?? round.incumbentSnapshotId;
-              if (captured._tag === "Failure")
-                return {
-                  kind: "blocked" as const,
-                  round,
-                  detail: `The game folder could not be read to resume the round. ${captured.failure.message}`,
-                };
-              if (captured.success.sourceId !== expected)
-                return {
-                  kind: "blocked" as const,
-                  round,
-                  detail:
-                    "The game folder changed since this round was interrupted; it was not reopened.",
-                };
-              const { decision: _decision, reason: _reason, ...kept } = round;
-              const resumed: GameReviewRoundType = {
-                ...kept,
-                status: "running",
-                finishedAt: null,
-              };
-              yield* writeStateEffect(found.file, replaceRound(state, resumed));
-              return { kind: "resumed" as const, round: resumed };
             }),
           ),
       });

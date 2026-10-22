@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The studio test writes real playtest evidence in a temporary game.
+// @effect-diagnostics globalDate:off -- Fixed evidence timestamps make the newest-run read deterministic.
 import { expect, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -36,6 +37,10 @@ const probe = (hudText: string): GamePlaytestProbe => ({
   player: { x: 12, y: 40, z: 0 },
   hudText,
 });
+
+/** Fixed evidence timestamps: reading the newest run must not depend on the clock. */
+const FIRST_EVIDENCE_AT = new Date("2026-10-01T10:00:00.000Z");
+const LATER_EVIDENCE_AT = new Date("2026-10-01T10:05:00.000Z");
 
 const baseResult = (): GameWebPlaytestResult => ({
   success: true,
@@ -105,7 +110,7 @@ it.live("captures the builder's route once and replays it for every later check"
           root: harness.root,
           steps: [{ key: "ArrowRight", holdMs: 120 }],
           result: baseResult(),
-          at: new Date("2026-10-01T10:00:00.000Z"),
+          at: FIRST_EVIDENCE_AT,
         }),
       );
       const inputs = yield* studio.frozenInputs(harness.root);
@@ -127,7 +132,7 @@ it.live("captures the builder's route once and replays it for every later check"
           root: harness.root,
           steps: [{ key: "ArrowLeft", holdMs: 20 }],
           result: baseResult(),
-          at: new Date("2026-10-01T10:05:00.000Z"),
+          at: LATER_EVIDENCE_AT,
         }),
       );
       const newer = yield* studio.frozenInputs(harness.root);

@@ -114,8 +114,10 @@ interface Scripted {
   repairs: ReadonlyArray<RepairHook | null>;
   /** Complete this role as soon as it is dispatched, before the loop waits. */
   completeInStart: ReadonlySet<string>;
-  /** This role ignores its interrupt, so the loop's finalizer times out. */
+  /** This role never finishes its wait on its own. */
   hungRoles: ReadonlySet<string>;
+  /** This role ignores interruptions entirely, so a supersession must fail closed. */
+  ignoresInterruptRoles: ReadonlySet<string>;
   /** The thread's runs; a test may append a later text-only turn. */
   readonly runs: Array<{
     readonly id: RunId;
@@ -162,6 +164,7 @@ const makeScripted = (): Scripted => ({
   repairs: [],
   completeInStart: new Set(),
   hungRoles: new Set(),
+  ignoresInterruptRoles: new Set(),
   runs: [
     {
       id: builderRunId,
@@ -545,21 +548,30 @@ const withLoop = <A, E>(
 
         const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (id: ThreadId) =>
-            Effect.succeed(
-              (id === threadId
-                ? {
-                    thread: {
-                      id: threadId,
-                      title: "Build it",
-                      deletedAt: null,
-                      modelSelection: builderSelection,
-                      runtimeMode: "full-access",
-                      interactionMode: "default",
-                    },
-                    runs: scripted.runs,
-                  }
-                : { runs: [], providerTurns: [] }) as never,
-            ),
+            Effect.gen(function* () {
+              if (id === threadId)
+                return {
+                  thread: {
+                    id: threadId,
+                    title: "Build it",
+                    deletedAt: null,
+                    modelSelection: builderSelection,
+                    runtimeMode: "full-access",
+                    interactionMode: "default",
+                  },
+                  runs: scripted.runs,
+                } as never;
+              const child = [...children.values()].find(
+                (candidate) => candidate.childThreadId === id,
+              );
+              if (child === undefined) return { runs: [], providerTurns: [] } as never;
+              const polled = yield* Deferred.poll(child.completion);
+              const status = Option.isNone(polled) ? "running" : (yield* polled.value).status;
+              return {
+                runs: [{ id: child.runId, status }],
+                providerTurns: [],
+              } as never;
+            }),
           getThreadShell: () =>
             Effect.succeed({
               projectId: "project:repair",
@@ -575,6 +587,8 @@ const withLoop = <A, E>(
               (candidate) => candidate.childThreadId === input.threadId,
             );
             if (child === undefined) return Effect.succeed({ type: "no_active_run" as const });
+            if (scripted.ignoresInterruptRoles.has(child.key.split(":")[1]!))
+              return Effect.succeed({ type: "no_active_run" as const });
             return Effect.gen(function* () {
               // A hung child still answers an interrupt; it just never finishes
               // on its own.
@@ -884,6 +898,32 @@ it.live("superseding while a repair runs joins it and promotes nothing", () =>
         const game = yield* services.rounds.read(root);
         expect(game.selected).toBeNull();
         expect(game.rounds.every((round) => round.status === "stopped")).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("a child that ignores interrupts fails the creator action closed", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.ignoresInterruptRoles = new Set(["repair"]);
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        const failed = yield* Effect.flip(
+          services.loop.interrupt(threadId, "A user action superseded the review."),
+        );
+        expect(failed.operation).toBe("supersede game review");
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("interrupted");
+        // Nothing was promoted over the action that could not be admitted.
+        expect(state.promotedRounds).toHaveLength(0);
       }),
     ),
   ),

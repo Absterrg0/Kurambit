@@ -432,6 +432,26 @@ export const layer = (options: GameRepairLoopOptions) => {
         return Option.isSome(joined) && !joined.value.timedOut;
       }).pipe(Effect.catchCause(() => Effect.succeed(false)));
 
+    /** Whether the child thread's bound run has actually reached a terminal status. */
+    const childIsTerminal = (child: OwnedChild): Effect.Effect<boolean, never> =>
+      threads.getThreadRecords(child.childThreadId, ["runs"]).pipe(
+        Effect.map((records) => {
+          const run =
+            child.runId === null
+              ? records.runs.at(-1)
+              : records.runs.find((candidate) => candidate.id === child.runId);
+          if (run === undefined) return true;
+          return (
+            run.status === "completed" ||
+            run.status === "failed" ||
+            run.status === "cancelled" ||
+            run.status === "interrupted" ||
+            run.status === "rolled_back"
+          );
+        }),
+        Effect.orElseSucceed(() => false),
+      );
+
     /** Provider-turn usage of one child, or null when it did not report any. */
     const usageOf = (
       child: OwnedChild,
@@ -518,86 +538,98 @@ export const layer = (options: GameRepairLoopOptions) => {
       Effect.gen(function* () {
         const remaining = remainingBudget(record, nowMs()).elapsedMs;
         if (remaining <= 0) return { kind: "expired", child: yield* Ref.get(task.owned) } as const;
-        const started = yield* sessions.start({
-          threadId: record.threadId,
-          loopId: record.id,
-          roundId: input.roundId,
-          role: input.role,
-          order: input.order,
-          // The immutable origin run, never whichever run is newest.
-          runId: record.originatingRunId,
-          nodeId: record.originatingNodeId as NodeId,
-          ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
-          ...(input.repair === undefined ? {} : { repair: input.repair }),
-          ...(input.items === undefined ? {} : { items: input.items }),
-        });
-        if (started.kind !== "started") return { kind: "failed", reason: started.reason } as const;
-        const child: OwnedChild = {
-          childThreadId: started.childThreadId,
-          runId: started.runId,
-          label: `${input.role}:${input.order}`,
-        };
-        yield* Ref.set(task.owned, child);
-        const shell = yield* threads
-          .getThreadShell(started.childThreadId)
-          .pipe(Effect.orElseSucceed(() => null));
-        if (shell === null) {
-          yield* Ref.set(task.owned, null);
-          return {
-            kind: "failed",
-            reason: "The review child thread vanished before it could be awaited.",
-          } as const;
-        }
-        const waited = yield* threads
-          .waitForThread({
-            projectId: shell.projectId,
-            threadId: started.childThreadId,
-            ...(started.runId === null ? {} : { runId: started.runId }),
-            timeoutMs: Math.max(1, remaining),
-          })
-          .pipe(
-            Effect.onInterrupt(() =>
-              interruptChild(child, "The review was superseded.").pipe(
-                Effect.flatMap((settled) => (settled ? Ref.set(task.owned, null) : Effect.void)),
-              ),
-            ),
-          )
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "await game review child",
-                  path: task.root,
-                  reason: "thread-dispatch",
-                  detail: String(cause),
-                  cause,
-                }),
-            ),
-          );
-        if (waited.timedOut) {
-          yield* Ref.set(task.owned, null);
-          return { kind: "expired", child } as const;
-        }
-        const status = yield* sessions.runStatus({
-          threadId: record.threadId,
-          loopId: record.id,
-          roundId: input.roundId,
-          role: input.role,
-          order: input.order,
-        });
-        yield* Ref.set(task.owned, null);
-        yield* recordUsage(task, child, !started.reconciled);
-        if (status.kind === "missing")
-          return {
-            kind: "failed",
-            reason: "The review child's session record is missing.",
-          } as const;
-        if (status.kind === "pending")
-          return {
-            kind: "failed",
-            reason: "The review child ended without a bound run.",
-          } as const;
-        return { kind: "terminal", status: status.status, child } as const;
+        // Starting the child and recording ownership is one uninterruptible
+        // step: an interrupt between the dispatch commit and the Ref write
+        // would otherwise release a child the loop no longer knew it owned.
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const started = yield* sessions.start({
+              threadId: record.threadId,
+              loopId: record.id,
+              roundId: input.roundId,
+              role: input.role,
+              order: input.order,
+              // The immutable origin run, never whichever run is newest.
+              runId: record.originatingRunId,
+              nodeId: record.originatingNodeId as NodeId,
+              ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
+              ...(input.repair === undefined ? {} : { repair: input.repair }),
+              ...(input.items === undefined ? {} : { items: input.items }),
+            });
+            if (started.kind !== "started")
+              return { kind: "failed", reason: started.reason } as const;
+            const child: OwnedChild = {
+              childThreadId: started.childThreadId,
+              runId: started.runId,
+              label: `${input.role}:${input.order}`,
+            };
+            yield* Ref.set(task.owned, child);
+            const shell = yield* threads
+              .getThreadShell(started.childThreadId)
+              .pipe(Effect.orElseSucceed(() => null));
+            if (shell === null) {
+              yield* Ref.set(task.owned, null);
+              return {
+                kind: "failed",
+                reason: "The review child thread vanished before it could be awaited.",
+              } as const;
+            }
+            const waited = yield* restore(
+              threads
+                .waitForThread({
+                  projectId: shell.projectId,
+                  threadId: started.childThreadId,
+                  ...(started.runId === null ? {} : { runId: started.runId }),
+                  timeoutMs: Math.max(1, remaining),
+                })
+                .pipe(
+                  Effect.onInterrupt(() =>
+                    interruptChild(child, "The review was superseded.").pipe(
+                      Effect.flatMap((settled) =>
+                        settled ? Ref.set(task.owned, null) : Effect.void,
+                      ),
+                    ),
+                  ),
+                )
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new GameOperationError({
+                        operation: "await game review child",
+                        path: task.root,
+                        reason: "thread-dispatch",
+                        detail: String(cause),
+                        cause,
+                      }),
+                  ),
+                ),
+            );
+            if (waited.timedOut) {
+              yield* Ref.set(task.owned, null);
+              return { kind: "expired", child } as const;
+            }
+            const status = yield* sessions.runStatus({
+              threadId: record.threadId,
+              loopId: record.id,
+              roundId: input.roundId,
+              role: input.role,
+              order: input.order,
+            });
+            yield* Ref.set(task.owned, null);
+            yield* recordUsage(task, child, !started.reconciled);
+            if (status.kind === "missing")
+              return {
+                kind: "failed",
+                reason: "The review child's session record is missing.",
+              } as const;
+            if (status.kind === "pending")
+              return {
+                kind: "failed",
+                reason: "The review child ended without a bound run.",
+              } as const;
+            return { kind: "terminal", status: status.status, child } as const;
+          }),
+        );
       });
 
     /** Writes the loop terminal record; never rewrites an already finished loop. */
@@ -1156,7 +1188,9 @@ export const layer = (options: GameRepairLoopOptions) => {
           // a promotion. The fiber's finalizers stop its owned child.
           yield* Fiber.interrupt(entry.fiber);
           const child = yield* Ref.get(entry.owned);
-          if (child !== null) {
+          // The Ref is a hint: verify the bound run is really terminal before
+          // admitting a creator action over it. A timeout must fail closed.
+          if (child !== null && !(yield* childIsTerminal(child))) {
             yield* finish({
               root,
               decision: "interrupt",
@@ -1179,7 +1213,9 @@ export const layer = (options: GameRepairLoopOptions) => {
     const interrupt: GameRepairLoop["Service"]["interrupt"] = (threadId, reason) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        yield* admission.withGate(root, stopLive(root, reason));
+        // `admit` takes the gate, advances the persisted generation and then
+        // runs the registered stop; every supersession path shares it.
+        yield* admission.admit({ root, reason, threadId });
       });
 
     const ensure: GameRepairLoop["Service"]["ensure"] = (input) =>
