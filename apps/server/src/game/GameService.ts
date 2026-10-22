@@ -519,30 +519,13 @@ const make = Effect.gen(function* () {
         reason: "templates-missing",
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
-    // Import first: Godot's import can write sidecars inside the project, so a
-    // legacy before/after snapshot is taken around the export. Web exports build
-    // from a frozen copy of the game-owned source instead, so the candidate
-    // record names the exact bytes the engine read.
+    // Import first: Godot's import writes engine-generated sidecars (*.import,
+    // *.uid and .godot/) inside the project. The source identity is taken after
+    // that import and never counts those files, so a fresh or repaired tree
+    // imports cleanly and a snapshot never carries engine output.
+    const imported = yield* importGame(root);
+    if (!imported.success) return { value: imported, record: failedExport(null) };
     const frozen = target === "Web" ? yield* rounds.freeze(root) : null;
-    const frozenProject =
-      frozen === null ? null : NodePath.join(frozen.directory, "files", godotProject);
-    const imported =
-      frozenProject === null
-        ? yield* importGame(root)
-        : response(
-            yield* processes.run({
-              root,
-              executable: godot.path,
-              args: ["--headless", "--path", frozenProject, "--editor", "--import"],
-              operation: "godot-import",
-              timeoutMs: 180_000,
-            }),
-          );
-    if (!imported.success)
-      return { value: imported, record: failedExport(frozen?.sourceId ?? null) };
-    const before = frozen === null ? yield* snapshot(root, godotProject) : null;
-    const beforeSourceId =
-      frozen?.sourceId ?? (before !== null && before.kind === "known" ? before.sourceId : null);
     // Web exports stage in a hidden directory under the candidate root, never in
     // the served tree. A partial or failed export therefore cannot change what
     // Play loads; only a complete, hashed artifact is moved into place.
@@ -550,18 +533,62 @@ const make = Effect.gen(function* () {
       target === "Web"
         ? NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY, `.staging-${NodeCrypto.randomUUID()}`)
         : null;
+    // The stored snapshot is immutable. The frozen import and export run on a
+    // private copy of it, so a reused snapshot never keeps engine sidecars.
+    const sourceStaging =
+      frozen === null
+        ? null
+        : NodePath.join(
+            root,
+            CANDIDATE_BUILDS_DIRECTORY,
+            `.staging-${NodeCrypto.randomUUID()}-source`,
+          );
+    const frozenProject =
+      sourceStaging === null ? null : NodePath.join(sourceStaging, godotProject);
     const output =
       staging === null
         ? NodePath.join(root, "builds/linux/game.x86_64")
         : NodePath.join(staging, "index.html");
     const cleanedUp = Effect.ensuring(
-      Effect.promise(() =>
-        staging === null
-          ? Promise.resolve()
-          : NodeFSP.rm(staging, { recursive: true, force: true }),
-      ),
+      Effect.promise(async () => {
+        if (staging !== null) await NodeFSP.rm(staging, { recursive: true, force: true });
+        if (sourceStaging !== null)
+          await NodeFSP.rm(sourceStaging, { recursive: true, force: true });
+      }),
     );
     return yield* Effect.gen(function* () {
+      if (frozen !== null && sourceStaging !== null) {
+        yield* Effect.tryPromise({
+          try: () =>
+            NodeFSP.cp(NodePath.join(frozen.directory, "files"), sourceStaging, {
+              recursive: true,
+            }),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "export",
+              path: sourceStaging,
+              reason: "io",
+              detail: "The frozen export copy could not be made.",
+              cause,
+            }),
+        });
+        // The copy has no import cache (.godot/ is generated and excluded), so
+        // it is imported before the export reads it.
+        const frozenImport = response(
+          yield* processes.run({
+            root,
+            executable: godot.path,
+            args: ["--headless", "--path", frozenProject!, "--editor", "--import"],
+            operation: "godot-import",
+            timeoutMs: 180_000,
+          }),
+        );
+        if (!frozenImport.success)
+          return { value: frozenImport, record: failedExport(frozen.sourceId) };
+      }
+      const before = frozen === null ? yield* snapshot(root, godotProject) : null;
+      const beforeSourceId =
+        frozen?.sourceId ?? (before !== null && before.kind === "known" ? before.sourceId : null);
       yield* Effect.tryPromise({
         try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
         catch: (cause) =>
@@ -623,7 +650,7 @@ const make = Effect.gen(function* () {
       // build no longer describes the current game.
       const afterSourceId = frozen === null ? null : yield* rounds.sourceId(root);
       const frozenSourceId =
-        frozen === null ? null : yield* rounds.frozenSourceId(frozen.directory);
+        frozen === null ? null : yield* rounds.frozenSourceId(sourceStaging!);
       const comparison =
         frozen === null
           ? comparedSource(before!, yield* snapshot(root, godotProject), "export")

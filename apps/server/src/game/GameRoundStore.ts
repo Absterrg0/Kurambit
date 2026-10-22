@@ -161,7 +161,7 @@ export class GameRoundStore extends Context.Service<
       { readonly directory: string; readonly sourceId: string },
       GameOperationError
     >;
-    /** Re-identifies a frozen copy so an export can prove its input did not move. */
+    /** Re-identifies a private export copy so an export can prove its input did not move. */
     readonly frozenSourceId: (directory: string) => Effect.Effect<string, GameOperationError>;
     /** Snapshots the source and opens a round before the repair child writes. */
     readonly begin: (
@@ -417,9 +417,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             })),
           ),
         frozenSourceId: (directory) =>
-          snapshots
-            .capture(NodePath.join(directory, "files"))
-            .pipe(Effect.map((manifest) => manifest.sourceId)),
+          snapshots.capture(directory).pipe(Effect.map((manifest) => manifest.sourceId)),
         begin: (root, input) =>
           withLock(root, "begin game review round", (found) =>
             Effect.gen(function* () {

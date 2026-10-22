@@ -786,6 +786,87 @@ it.live("an export builds from frozen bytes and refuses a source edit during the
   );
 });
 
+it.live("a fresh import that writes sidecars still exports and never mutates the snapshot", () => {
+  const imported: string[] = [];
+  let exportProject = "";
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation === "godot-import") {
+          const project = input.args[input.args.indexOf("--path") + 1]!;
+          imported.push(project);
+          return Effect.promise(async () => {
+            // Godot writes import sidecars beside the sources and a cache tree.
+            await NodeFSP.mkdir(NodePath.join(project, ".godot/imported"), { recursive: true });
+            await NodeFSP.writeFile(
+              NodePath.join(project, ".godot/imported/hero.png-shape.ctex"),
+              "cache",
+            );
+            await NodeFSP.writeFile(NodePath.join(project, "scripts/main.gd.uid"), "uid://main\n");
+            await NodeFSP.writeFile(NodePath.join(project, "art/hero.png.import"), "[remap]\n");
+            return processOk(input.root);
+          });
+        }
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        exportProject = input.args[input.args.indexOf("--path") + 1]!;
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(NodePath.join(NodePath.dirname(output), name), `export ${name}`);
+          return processOk(input.root);
+        });
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        // A fresh 3d-explorer-shaped tree: art beside the Godot project, no
+        // sidecars and no import cache yet.
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.join(root, "godot/art"), { recursive: true });
+          await NodeFSP.mkdir(NodePath.join(root, "godot/scenes"), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(root, "godot/art/hero.png"), "png-bytes");
+          await NodeFSP.writeFile(NodePath.join(root, "godot/scenes/main.tscn"), "[gd_scene]\n");
+        });
+        const exported = yield* game.export(threadId, "Web");
+        expect(exported.success, exported.message).toBe(true);
+        // The editable tree and the private frozen copy were both imported.
+        expect(imported).toHaveLength(2);
+        expect(exportProject).not.toContain(NodePath.join(root, "godot"));
+        const sourceId = yield* rounds.sourceId(root);
+        const state = yield* rounds.read(root);
+        expect(state.selected?.sourceId).toBe(sourceId);
+        // The stored snapshot names source bytes only, and a later freeze of the
+        // same bytes reuses it untouched.
+        const frozen = yield* rounds.freeze(root);
+        expect(frozen.sourceId).toBe(sourceId);
+        const stored = yield* Effect.promise(async () => {
+          const found: string[] = [];
+          const stack = [""];
+          while (stack.length > 0) {
+            const relative = stack.pop()!;
+            const absolute = NodePath.join(frozen.directory, "files", relative);
+            for (const entry of await NodeFSP.readdir(absolute, { withFileTypes: true })) {
+              const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
+              if (entry.isDirectory()) stack.push(child);
+              else found.push(child);
+            }
+          }
+          return found.sort();
+        });
+        expect(stored).toContain("godot/art/hero.png");
+        expect(stored.filter((name) => /\.(?:import|uid)$/.test(name))).toEqual([]);
+        expect(stored.filter((name) => name.startsWith(".godot/"))).toEqual([]);
+        // The import mutated the editable tree, not the stored copy.
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/art/hero.png.import"), "utf8"),
+          ),
+        ).toBe("[remap]\n");
+      }),
+  );
+});
+
 it.live("explicit Rebuild stops the open round before publishing", () => {
   let exports = 0;
   return withGame(

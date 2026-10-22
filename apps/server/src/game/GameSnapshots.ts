@@ -147,12 +147,14 @@ const safeRelativePath = (value: string): string => {
 /**
  * Generated trees stay out of the snapshot: the repository metadata, every
  * engine import cache and every build are reproducible, and including them
- * would make one source tree look different on two machines. Blender writes
- * `.blend1` backups beside the originals; those are generated too.
+ * would make one source tree look different on two machines. Godot writes
+ * `.import`/`.uid` sidecars and `.godot/`, and Blender writes `.blend1`
+ * backups beside the originals; all of those are engine output, not source.
  */
 const excludedDirectory = (parts: readonly string[]): boolean =>
   parts[0] === ".git" || parts[0] === "builds" || parts.includes(".godot");
-const excludedFile = (name: string): boolean => name.endsWith(".blend1");
+const excludedFile = (name: string): boolean =>
+  name.endsWith(".blend1") || name.endsWith(".import") || name.endsWith(".uid");
 
 interface WalkedFile {
   readonly path: string;
