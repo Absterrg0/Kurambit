@@ -398,80 +398,38 @@ export type ParsedAnswer<A> = AnswerParseSuccess<A> | AnswerParseFailure;
  * unescapes them the same way JSON.parse does, and reports the first repeat.
  */
 const duplicateJsonMember = (text: string): string | null => {
-  let index = 0;
-  const skipWhitespace = () => {
-    while (index < text.length && " \t\n\r".includes(text[index]!)) index++;
-  };
-  const parseString = (): string => {
-    const start = index;
-    index++;
-    while (index < text.length) {
-      const char = text[index]!;
-      if (char === "\\") {
-        index += 2;
-        continue;
-      }
-      index++;
-      if (char === '"') break;
-    }
-    return JSON.parse(text.slice(start, index)) as string;
-  };
-  const parseValue = (): string | null => {
-    skipWhitespace();
-    const char = text[index];
+  // One flat pass with an explicit stack: a recursive walk exhausts the call
+  // stack on deeply nested arrays that still fit the byte limit.
+  const containers: Array<Set<string> | "array"> = [];
+  let expectingName = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]!;
     if (char === "{") {
-      index++;
-      const names = new Set<string>();
-      skipWhitespace();
-      if (text[index] === "}") {
-        index++;
-        return null;
-      }
-      for (;;) {
-        skipWhitespace();
-        const name = parseString();
+      containers.push(new Set());
+      expectingName = true;
+    } else if (char === "[") {
+      containers.push("array");
+      expectingName = false;
+    } else if (char === "}" || char === "]") {
+      containers.pop();
+      expectingName = false;
+    } else if (char === ",") {
+      expectingName = containers.at(-1) instanceof Set;
+    } else if (char === ":") {
+      expectingName = false;
+    } else if (char === '"') {
+      const start = index++;
+      while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
+      const names = containers.at(-1);
+      if (expectingName && names instanceof Set) {
+        const name = JSON.parse(text.slice(start, index + 1)) as string;
         if (names.has(name)) return name;
         names.add(name);
-        skipWhitespace();
-        index++; // the colon
-        const nested = parseValue();
-        if (nested !== null) return nested;
-        skipWhitespace();
-        if (text[index] === ",") {
-          index++;
-          continue;
-        }
-        index++; // the closing brace
-        return null;
+        expectingName = false;
       }
     }
-    if (char === "[") {
-      index++;
-      skipWhitespace();
-      if (text[index] === "]") {
-        index++;
-        return null;
-      }
-      for (;;) {
-        const nested = parseValue();
-        if (nested !== null) return nested;
-        skipWhitespace();
-        if (text[index] === ",") {
-          index++;
-          continue;
-        }
-        index++; // the closing bracket
-        return null;
-      }
-    }
-    if (char === '"') {
-      parseString();
-      return null;
-    }
-    while (index < text.length && !",]} \t\n\r".includes(text[index]!)) index++;
-    return null;
-  };
-  return parseValue();
+  }
+  return null;
 };
 
 /**
@@ -486,12 +444,13 @@ const parseAnswerText = (text: string): { kind: "parsed"; value: unknown } | Ans
   const trimmed = text.trim();
   if (trimmed.length === 0) return { kind: "invalid", reason: "The answer is empty." };
   let value: unknown;
+  let duplicate: string | null;
   try {
     value = JSON.parse(trimmed) as unknown;
+    duplicate = duplicateJsonMember(trimmed);
   } catch {
     return { kind: "invalid", reason: "The answer is not one JSON object." };
   }
-  const duplicate = duplicateJsonMember(trimmed);
   if (duplicate !== null)
     return { kind: "invalid", reason: `The answer repeats the JSON member "${duplicate}".` };
   return { kind: "parsed", value };

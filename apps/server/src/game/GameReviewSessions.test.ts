@@ -688,6 +688,19 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
         { frameIds: frames, checkIds: checks },
       ).kind,
     ).toBe("invalid");
+    // Deep nesting that fits the byte limit is an invalid answer, not a stack
+    // overflow, and a repeat behind it is still found.
+    const deep = `{"defects":${"[".repeat(8_000)}${"]".repeat(8_000)},"doNotRegress":[]}`;
+    expect(Buffer.byteLength(deep, "utf8")).toBeLessThan(16 * 1024);
+    expect(
+      GameReviewSessions.parseCriticAnswer(deep, { frameIds: frames, checkIds: checks }).kind,
+    ).toBe("invalid");
+    const deepRepeat = GameReviewSessions.parseCriticAnswer(
+      `{"x":${"[".repeat(8_000)}{"a":1,"a":2}${"]".repeat(8_000)}}`,
+      { frameIds: frames, checkIds: checks },
+    );
+    expect(deepRepeat.kind).toBe("invalid");
+    if (deepRepeat.kind === "invalid") expect(deepRepeat.reason).toContain('"a"');
 
     const ballot = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
