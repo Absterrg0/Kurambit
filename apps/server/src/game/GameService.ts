@@ -612,8 +612,8 @@ const make = Effect.gen(function* () {
           );
           // The exam this run is judged against, read before the run starts so a
           // mid-run approval change cannot swap the rules under the agent's feet.
-          const design = yield* designApprovals.status(root, manifest);
-          const approval = design.state === "approved" ? yield* designApprovals.read(root) : null;
+          const designSnapshot = yield* designApprovals.snapshot(root, manifest);
+          const approval = designSnapshot.read.state === "approved" ? designSnapshot.record : null;
           // The game keeps its own pixel grid: capture a whole-number multiple of
           // the project's base viewport that fits the requested box, so a 640×360
           // game is recorded in real pixels instead of letterboxed into a box.
@@ -907,8 +907,9 @@ const make = Effect.gen(function* () {
         // Import may write sidecars inside the project; read the inputs after it
         // and before the scenario runners execute them.
         const sourceBefore = yield* snapshot(root, godotProject);
-        const design = yield* designApprovals.status(root, manifest);
-        const approval = yield* designApprovals.read(root);
+        const designSnapshot = yield* designApprovals.snapshot(root, manifest);
+        const design = designSnapshot.read;
+        const approval = designSnapshot.record;
         const mode: "criteria" | "legacy" | "none" =
           design.state === "approved" && approval !== null
             ? "criteria"
@@ -1276,8 +1277,11 @@ const make = Effect.gen(function* () {
       // key, so a status read that finds unchanged sources does no file walk
       // beyond the snapshot it already needed for freshness.
       const manifest = yield* projects.read(root);
-      const design = yield* designApprovals.status(root, manifest);
-      const approval = yield* designApprovals.read(root);
+      const snapshot = yield* designApprovals.snapshot(root, manifest);
+      const design = snapshot.read;
+      // The record this read used; a separate read could observe a newer
+      // automatic revision and bind the exam to a different design.
+      const approval = snapshot.record;
       const policy = yield* designApprovals.readPolicy(root, manifest);
       const qualificationRead = yield* qualification.read(
         root,

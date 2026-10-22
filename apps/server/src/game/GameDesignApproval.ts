@@ -379,7 +379,7 @@ const designRead = async (
   root: string,
   manifest: GameManifest,
   now: string,
-): Promise<GameDesignRead> => {
+): Promise<{ readonly read: GameDesignRead; readonly record: DesignApprovalRecord | null }> => {
   const [approvalLocation, intentLocation, revisionLocation] = await Promise.all([
     prepareLocation(stateDir, root, ".json"),
     prepareLocation(stateDir, root, ".intent.json"),
@@ -442,20 +442,25 @@ const designRead = async (
       ? diffAcceptance(record.acceptance, currentAcceptance)
       : null;
   return {
-    state,
-    document: design,
-    documentTruncated: snapshot.truncated,
-    approvedHash: record?.designHash ?? null,
-    currentHash,
-    approvedAt: record?.approvedAt ?? null,
-    acceptance: [
-      ...(currentAcceptance.length > 0 ? currentAcceptance : (record?.acceptance ?? [])),
-    ],
-    issues: [...validation.issues],
-    warnings: [...validation.warnings],
-    ...(intent === "auto" ? { autoRevision: record?.autoRevision ?? 0 } : {}),
-    pendingRevision,
-    revisionDiff,
+    read: {
+      state,
+      document: design,
+      documentTruncated: snapshot.truncated,
+      approvedHash: record?.designHash ?? null,
+      currentHash,
+      approvedAt: record?.approvedAt ?? null,
+      acceptance: [
+        ...(currentAcceptance.length > 0 ? currentAcceptance : (record?.acceptance ?? [])),
+      ],
+      issues: [...validation.issues],
+      warnings: [...validation.warnings],
+      ...(intent === "auto" ? { autoRevision: record?.autoRevision ?? 0 } : {}),
+      pendingRevision,
+      revisionDiff,
+    },
+    // The caller must use this record, not re-read the file: another automatic
+    // revision may have landed between the snapshot and that second read.
+    record,
   };
 };
 
@@ -568,6 +573,18 @@ export class GameDesignApproval extends Context.Service<
       manifest: GameManifest,
     ) => Effect.Effect<GameDesignRead, GameOperationError>;
     /**
+     * The same read, with the approval record it used. The automatic snapshot
+     * and its possible revision write share one per-root lock, so the record is
+     * the one this read observed; callers must not re-read the file after it.
+     */
+    readonly snapshot: (
+      root: string,
+      manifest: GameManifest,
+    ) => Effect.Effect<
+      { readonly read: GameDesignRead; readonly record: DesignApprovalRecord | null },
+      GameOperationError
+    >;
+    /**
      * Serializes one design operation per game. Approval has to cover read,
      * validate, write and dispatch as one unit, not just the manifest write, or
      * two creators can each dispatch a build turn.
@@ -612,6 +629,26 @@ export const layer = (options: { readonly stateDir: string }) => {
     }
     return lock;
   };
+  const snapshot = (root: string, manifest: GameManifest) =>
+    Effect.gen(function* () {
+      const location = yield* located(options.stateDir, root, ".json", "read-design");
+      const now = DateTime.formatIso(yield* DateTime.now);
+      // The automatic revision read, validation and write are one unit. Two
+      // concurrent reads of the same new acceptance otherwise both increment
+      // the old counter and publish different approvals.
+      return yield* semaphoreFor(locks, location.canonicalRoot).withPermits(1)(
+        Effect.tryPromise({
+          try: () => designRead(options.stateDir, root, manifest, now),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "read-design",
+              path: root,
+              reason: "io",
+              cause,
+            }),
+        }),
+      );
+    });
   return Layer.succeed(
     GameDesignApproval,
     GameDesignApproval.of({
@@ -799,19 +836,8 @@ export const layer = (options: { readonly stateDir: string }) => {
               }),
           });
         }),
-      status: (root, manifest) =>
-        Effect.flatMap(DateTime.now, (now) =>
-          Effect.tryPromise({
-            try: () => designRead(options.stateDir, root, manifest, DateTime.formatIso(now)),
-            catch: (cause) =>
-              new GameOperationError({
-                operation: "read-design",
-                path: root,
-                reason: "io",
-                cause,
-              }),
-          }),
-        ),
+      status: (root, manifest) => snapshot(root, manifest).pipe(Effect.map((value) => value.read)),
+      snapshot,
       exclusive: (root, effect) =>
         Effect.gen(function* () {
           // The lock is keyed by the real root, so a directory-symlink alias and
