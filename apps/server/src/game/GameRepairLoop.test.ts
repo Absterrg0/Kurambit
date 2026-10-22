@@ -1039,6 +1039,45 @@ const settleRepairAndStop = (fixture: Fixture, services: Services, repair: Start
       yield* hook({ root: fixture.root, roundId: repair.roundId, rounds: services.rounds });
   });
 
+it.live("a new builder run after a stopped loop starts a new review", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.critic = () => criticAnswer(0);
+        yield* ensureLoop(services);
+        const first = loopRecord(yield* readLoop(services));
+        yield* runToCompletion(services, fixture);
+        expect((yield* readLoop(services))?.status).toBe("stopped");
+
+        const nextRunId = RunId.make("run:builder-2");
+        const nextBuild = "b".repeat(64);
+        scripted.runs.push({
+          id: nextRunId,
+          status: "completed",
+          rootNodeId: "node:builder-root-2",
+          modelSelection: builderSelection,
+          requestedAt: DateTime.makeUnsafe("2026-10-01T10:20:00.000Z"),
+          startedAt: DateTime.makeUnsafe("2026-10-01T10:20:00.000Z"),
+          completedAt: DateTime.makeUnsafe("2026-10-01T10:30:00.000Z"),
+        });
+        scripted.exportBuildId = nextBuild;
+        scripted.playtestBuildId = nextBuild;
+        scripted.exportFinishedAt = "2026-10-01T10:25:00.000Z";
+        const created = yield* services.loop.ensure({
+          threadId,
+          runId: nextRunId,
+          nodeId: "node:builder-root-2" as never,
+        });
+        expect(created?.id).not.toBe(first.id);
+        expect(created?.status).toBe("running");
+        expect(created?.exportBuildId).toBe(nextBuild);
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
 it.live("a later text-only turn never starts a loop", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>

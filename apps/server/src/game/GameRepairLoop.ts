@@ -590,8 +590,6 @@ export const layer = (options: GameRepairLoopOptions) => {
                       ),
                     ),
                   ),
-                )
-                .pipe(
                   Effect.mapError(
                     (cause) =>
                       new GameOperationError({
@@ -1225,14 +1223,17 @@ export const layer = (options: GameRepairLoopOptions) => {
           root,
           Effect.gen(function* () {
             const existing = yield* readRecord(root);
-            // A live or interrupted loop is not reopened: restart abandons it.
-            if (existing !== null && existing.status !== "stopped") return existing;
+            // The same origin is never reviewed twice; a live loop is not
+            // restarted. A stopped or interrupted loop from an older run does
+            // not block the next builder turn's review, though: restart only
+            // abandons the work it cut, never the game's future repairs.
             if (
               existing !== null &&
               String(existing.originatingRunId) === String(input.runId) &&
               existing.originatingNodeId === input.nodeId
             )
               return existing;
+            if (existing?.status === "running") return existing;
             const stamp = yield* admission.stamp(root);
             const records = yield* threads.getThreadRecords(input.threadId, ["runs"]).pipe(
               Effect.mapError(
