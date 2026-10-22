@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Exercise real child process ownership and filesystem logs.
 import { it, expect } from "@effect/vitest";
+import { afterEach, vi } from "vite-plus/test";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -9,6 +10,9 @@ const temporary = Effect.acquireRelease(
   Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-process-"))),
   (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
 );
+afterEach(() => vi.unstubAllEnvs());
+const displayProbe =
+  "process.stdout.write(JSON.stringify({display: process.env.DISPLAY ?? null, wayland: process.env.WAYLAND_DISPLAY ?? null, xauthority: process.env.XAUTHORITY ?? null}))";
 it.effect("reports a spawn failure without leaving a tracked process", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -51,6 +55,43 @@ it.effect("captures command failure and output in a real log", () =>
       );
     }),
   ),
+);
+it.effect(
+  "strips every display route from headless children and keeps it only for a watched game",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporary;
+        vi.stubEnv("DISPLAY", ":0");
+        vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+        vi.stubEnv("XAUTHORITY", "/run/user/1000/xauth");
+        const processes = yield* GameProcesses.GameProcesses;
+        const headless = yield* processes.run({
+          root,
+          executable: process.execPath,
+          args: ["-e", displayProbe],
+          operation: "godot-check",
+        });
+        expect(JSON.parse(headless.stdout)).toEqual({
+          display: null,
+          wayland: null,
+          xauthority: null,
+        });
+        // The creator's own Play action is the only child that may see a display.
+        const watched = yield* processes.run({
+          root,
+          executable: process.execPath,
+          args: ["-e", displayProbe],
+          operation: "native",
+          display: "inherit",
+        });
+        expect(JSON.parse(watched.stdout)).toEqual({
+          display: ":0",
+          wayland: "wayland-0",
+          xauthority: "/run/user/1000/xauth",
+        });
+      }).pipe(Effect.provide(GameProcesses.layer)),
+    ),
 );
 it.effect("stops exactly the owned game's PID and closes remaining processes on scope exit", () =>
   Effect.scoped(

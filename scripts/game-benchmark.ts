@@ -24,6 +24,7 @@ import {
   type BenchmarkRunObservation,
 } from "./game-benchmark/aggregate.ts";
 import { defaultGodotBinary } from "./game-grade.ts";
+import { externalServerOrigin } from "./lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
@@ -31,6 +32,8 @@ const { values } = NodeUtil.parseArgs({
   options: {
     /** The dev server the runner authenticates against. */
     url: { type: "string" },
+    /** Reuse that server even though its children inherit the operator's environment. */
+    "allow-external-server": { type: "boolean", default: false },
     "home-dir": { type: "string", default: NodePath.join(checkout, ".t3") },
     "parent-dir": { type: "string", default: NodePath.join(checkout, ".t3/e2e-games") },
     /** Where `<commit>/<id>/result.json` and the aggregate land. */
@@ -62,20 +65,21 @@ const { values } = NodeUtil.parseArgs({
 if (values.help) {
   console.log(
     [
-      "Usage: node scripts/game-benchmark.ts [--url http://localhost:PORT] [--home-dir .t3] [--only platformer,sokoban]",
+      "Usage: node scripts/game-benchmark.ts [--url http://localhost:PORT [--allow-external-server]] [--home-dir .t3] [--only platformer,sokoban]",
       "       [--out DIR] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high]",
       "       [--timeout-ms 3600000] [--runner scripts/game-e2e.ts]",
       "       [--lane harness|raw] [--opencode opencode] [--grade-timeout-ms 2700000] [--raw-timeout-ms 7200000]",
       "       [--grader codex|opencode] [--grader-model opencode-go/minimax-m3.1-flash-free]",
       "       [--reuse-raw <benchmark-out-dir>]",
       "",
-      "Runs the frozen briefs serially through game-e2e against an already running dev server,",
-      "or (--lane raw) lets the bare agent build one in a scratch folder; either way the finished",
-      "game is graded by scripts/game-grade.ts. Results are written to",
+      "Runs the frozen briefs serially through game-e2e. Without --url each brief starts its own",
+      "private server under the display sandbox; an external server needs --allow-external-server.",
+      "The raw lane (--lane raw) lets the bare agent build one in a scratch folder; either way the",
+      "finished game is graded by scripts/game-grade.ts. Results are written to",
       "<out>/<harness-commit>/<brief>/result.json plus results.json/.md.",
-      "An existing result for the same harness commit, lane and fixture checksum is skipped.",
-      "--reuse-raw copies a cached raw-lane result per brief (build, grade and logs) instead",
-      "of spending the agent's two-hour budget again.",
+      "An existing result for the same harness commit, lane, fixture checksum and evaluation profile is skipped.",
+      "--reuse-raw copies a cached raw-lane build per brief and regrades it when the grader profile differs,",
+      "instead of spending the agent's two-hour budget again.",
     ].join("\n"),
   );
   process.exit(0);
@@ -92,6 +96,12 @@ if (!Number.isFinite(gradeTimeoutMs) || gradeTimeoutMs <= 0)
 const grader = values.grader as string;
 if (grader !== "codex" && grader !== "opencode")
   throw new Error("--grader must be codex or opencode.");
+// An external server runs game and provider children with its own environment,
+// so harness work may only use one when the operator says that is understood.
+const externalServerUrl = externalServerOrigin({
+  url: values.url,
+  allowExternalServer: values["allow-external-server"] === true,
+});
 const rawTimeoutMs = Number(values["raw-timeout-ms"]);
 if (!Number.isFinite(rawTimeoutMs) || rawTimeoutMs <= 0)
   throw new Error("--raw-timeout-ms must be positive");
@@ -109,6 +119,8 @@ const harnessDirty = (
     "scripts/game-benchmark.ts",
     "scripts/game-benchmark",
     "scripts/game-grade.ts",
+    "scripts/lib/benchmark-server.ts",
+    "scripts/lib/display-sandbox.ts",
   ])
 ).stdout.trim();
 // Resume reuses rows by commit, so an uncommitted harness would silently mix
@@ -179,7 +191,7 @@ const runBrief = async (
     values.model,
     "--reasoning-effort",
     values["reasoning-effort"],
-    ...(values.url === undefined ? [] : ["--url", values.url]),
+    ...(externalServerUrl === null ? [] : ["--url", externalServerUrl, "--allow-external-server"]),
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: checkout,

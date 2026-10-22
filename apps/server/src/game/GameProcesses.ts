@@ -18,25 +18,39 @@ interface Running {
   done: Promise<GameProcessResult>;
   stop: () => void;
 }
+/**
+ * Every way a child process can reach a display server. A headless child keeps
+ * none of them: the server may itself have been started by a desktop session,
+ * and an agent's `godot --write-movie` must not open a window on that session.
+ */
+export const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
+/** The environment headless children get: the server's, minus every display route. */
+export const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const headless: NodeJS.ProcessEnv = { ...environment };
+  for (const name of DISPLAY_VARIABLES) delete headless[name];
+  return headless;
+};
+interface ProcessInput {
+  root: string;
+  executable: string;
+  args: readonly string[];
+  operation: string;
+  timeoutMs?: number;
+  cwd?: string;
+  /**
+   * `headless` (the default) strips display variables. `inherit` is only for a
+   * game the creator launched to watch: the benchmark server has no display to
+   * inherit, so even that route stays isolated there.
+   */
+  display?: "headless" | "inherit";
+}
 export class GameProcesses extends Context.Service<
   GameProcesses,
   {
-    readonly run: (input: {
-      root: string;
-      executable: string;
-      args: readonly string[];
-      operation: string;
-      timeoutMs?: number;
-      cwd?: string;
-    }) => Effect.Effect<GameProcessResult, GameOperationError>;
-    readonly start: (input: {
-      root: string;
-      executable: string;
-      args: readonly string[];
-      operation: string;
-      timeoutMs?: number;
-      cwd?: string;
-    }) => Effect.Effect<{ pid: number; logPath: string }, GameOperationError>;
+    readonly run: (input: ProcessInput) => Effect.Effect<GameProcessResult, GameOperationError>;
+    readonly start: (
+      input: ProcessInput,
+    ) => Effect.Effect<{ pid: number; logPath: string }, GameOperationError>;
     readonly stop: (root: string) => Effect.Effect<void>;
     readonly list: (root: string) => readonly { pid: number; operation: string; logPath: string }[];
   }
@@ -63,6 +77,7 @@ const make = Effect.gen(function* () {
     });
     const child = NodeChildProcess.spawn(input.executable, [...input.args], {
       cwd: input.cwd ?? input.root,
+      env: input.display === "inherit" ? process.env : headlessEnvironment(process.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "",

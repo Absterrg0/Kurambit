@@ -1546,6 +1546,9 @@ const make = Effect.gen(function* () {
               executable: godot.path,
               args: ["--path", cwd],
               operation: "native",
+              // The creator pressed Play to watch this one; every other child
+              // the server starts is headless.
+              display: "inherit",
               timeoutMs: 24 * 60 * 60_000,
             });
             return {

@@ -48,11 +48,14 @@ import {
   type GameE2eTurnRead,
 } from "./game-benchmark/artifacts.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
+import { externalServerOrigin, startBenchmarkServer } from "./lib/benchmark-server.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const { values } = NodeUtil.parseArgs({
   options: {
     url: { type: "string" },
+    // An external server runs agents and games with the operator's environment.
+    "allow-external-server": { type: "boolean", default: false },
     "home-dir": { type: "string", default: NodePath.join(checkout, ".t3") },
     name: { type: "string" },
     "parent-dir": { type: "string", default: NodePath.join(checkout, ".t3/e2e-games") },
@@ -81,7 +84,7 @@ const { values } = NodeUtil.parseArgs({
 });
 if (values.help || (!values.brief && !values.fixture)) {
   console.log(
-    'Usage: node scripts/game-e2e.ts (--brief "<game brief>" | --fixture scripts/game-benchmark/briefs/<id>.json) [--summary FILE] [--url http://localhost:PORT] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--review-design false|true] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
+    'Usage: node scripts/game-e2e.ts (--brief "<game brief>" | --fixture scripts/game-benchmark/briefs/<id>.json) [--summary FILE] [--url http://localhost:PORT [--allow-external-server]] [--home-dir .t3] [--name NAME] [--parent-dir DIR] [--template 3d-explorer|2d-platformer|blank] [--plan-first true|false] [--review-design false|true] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high] [--art-direction TEXT] [--revise TEXT] [--cancel-test] [--timeout-ms 3600000]',
   );
   process.exit(values.help ? 0 : 1);
 }
@@ -91,13 +94,18 @@ if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms
 // using. Every child this runner spawns inherits this env; an empty private
 // XDG_RUNTIME_DIR leaves the compositor's default wayland-0 socket unfindable.
 // Headless Chrome and `godot --headless` do not need a display.
-process.env = (
-  await prepareDisplaySandbox(
-    values.summary === undefined
-      ? NodeOS.tmpdir()
-      : NodePath.dirname(NodePath.resolve(values.summary)),
-  )
-).environment;
+const displaySandbox = await prepareDisplaySandbox(
+  values.summary === undefined
+    ? NodeOS.tmpdir()
+    : NodePath.dirname(NodePath.resolve(values.summary)),
+);
+process.env = displaySandbox.environment;
+// A server this runner does not own runs its game children with the operator's
+// environment, so it can only be used when the caller says that is understood.
+const externalServerUrl = externalServerOrigin({
+  url: values.url,
+  allowExternalServer: values["allow-external-server"] === true,
+});
 if (values["plan-first"] !== "true" && values["plan-first"] !== "false")
   throw new Error("--plan-first must be true or false");
 const planFirst = values["plan-first"] === "true";
@@ -205,11 +213,11 @@ const toError = (cause: unknown) =>
   new HarnessError({ message: cause instanceof Error ? cause.message : String(cause), cause });
 const promise = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: toError });
 
-const authenticate = async () => {
+const authenticate = async (origin: string, homeDir: string) => {
   // Mint a fresh, scoped client grant. Never print the credential or pairing URL.
   const { stdout } = await exec(
     process.execPath,
-    ["apps/server/src/bin.ts", "pair", "--base-dir", NodePath.resolve(values["home-dir"])],
+    ["apps/server/src/bin.ts", "pair", "--base-dir", homeDir],
     { cwd: checkout, timeout: 30_000, maxBuffer: 1024 * 1024 },
   );
   const match = stdout.match(/Pairing URL:\s*(https?:\/\/\S+)/);
@@ -217,7 +225,6 @@ const authenticate = async () => {
   const pairing = new URL(match[1]);
   const credential = new URLSearchParams(pairing.hash.slice(1)).get("token");
   assert(credential, "pair did not return a token");
-  const origin = values.url ?? pairing.origin;
   const request = async <T>(endpoint: string, init: RequestInit): Promise<T> => {
     const response = await fetch(new URL(endpoint, origin), {
       ...init,
@@ -537,7 +544,26 @@ const filesUnder = async (directory: string): Promise<string[]> => {
 
 let gameRoot: string | undefined;
 const main = Effect.gen(function* () {
-  const url = yield* promise(authenticate);
+  // Without --url the runner owns a private server under the display sandbox.
+  // Its home is a subdirectory so an operator's live server in the same
+  // checkout is neither reused nor overwritten.
+  const serverHome = NodePath.join(NodePath.resolve(values["home-dir"]), "benchmark-server");
+  const server =
+    externalServerUrl === null
+      ? yield* promise(() =>
+          startBenchmarkServer({
+            checkout,
+            homeDir: serverHome,
+            sandbox: displaySandbox,
+            logPath: NodePath.join(serverHome, "server.log"),
+          }),
+        )
+      : null;
+  yield* Effect.addFinalizer(() => promise(async () => server?.stop()).pipe(Effect.ignore));
+  const origin = externalServerUrl ?? server!.url;
+  const pairingHome =
+    externalServerUrl === null ? serverHome : NodePath.resolve(values["home-dir"]);
+  const url = yield* promise(() => authenticate(origin, pairingHome));
   const socket = Socket.layerWebSocket(url).pipe(
     Layer.provide(Socket.layerWebSocketConstructorGlobal),
   );
