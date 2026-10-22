@@ -203,6 +203,15 @@ export class OrchestratorSubagentThreadReadOnlyError extends Schema.TaggedError<
   }
 }
 
+export class OrchestratorGameRoundChildReadOnlyError extends Schema.TaggedError<OrchestratorGameRoundChildReadOnlyError>()(
+  "OrchestratorGameRoundChildReadOnlyError",
+  { commandId: CommandId, threadId: ThreadId },
+) {
+  override get message(): string {
+    return "This game review child is read-only. Its round judges the one run it recorded, so it takes no follow-up messages.";
+  }
+}
+
 export class OrchestratorThreadAboveModeLimitError extends Schema.TaggedError<OrchestratorThreadAboveModeLimitError>()(
   "OrchestratorThreadAboveModeLimitError",
   {
@@ -267,6 +276,7 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorCommandPreviouslyRejectedError,
   OrchestratorCommandIdConflictError,
   OrchestratorSubagentThreadReadOnlyError,
+  OrchestratorGameRoundChildReadOnlyError,
   OrchestratorThreadAboveModeLimitError,
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
@@ -4078,6 +4088,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      // A game-round child is read-only once it exists: its round joins the
+      // one run it recorded, so no follow-up, continuation or async answer
+      // may start a replacement writer. Its own creation is still pending,
+      // so the committed parent does not list it yet and it passes here.
+      const parentThreadId = projection.thread.lineage.parentThreadId;
+      if (
+        projection.thread.lineage.relationshipToParent === "subagent" &&
+        parentThreadId !== null
+      ) {
+        const parent = yield* projectionStore
+          .getThreadRecords(parentThreadId, ["subagents"])
+          .pipe(mapDispatchError(command));
+        if (
+          parent.subagents.some(
+            (task) =>
+              task.childThreadId === projection.thread.id && task.completionWake === "never",
+          )
+        )
+          return yield* new OrchestratorGameRoundChildReadOnlyError({
+            commandId: command.commandId,
+            threadId: command.threadId,
+          });
+      }
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);

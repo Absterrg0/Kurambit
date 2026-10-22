@@ -409,7 +409,7 @@ const followUpAndComplete = (input: {
     return { taskId, before, after };
   });
 
-it.effect("a follow-up to a finished round child still never wakes the builder", () =>
+it.effect("a round child is read-only: a follow-up is refused and starts no replacement run", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:game-round-follow-up");
     const seeded = yield* seedParent(threadId, ProjectId.make("project:game-round-follow-up"));
@@ -433,17 +433,31 @@ it.effect("a follow-up to a finished round child still never wakes the builder",
       now: seeded.now,
     });
 
-    const { taskId, after } = yield* followUpAndComplete({
-      parentThreadId: threadId,
-      childThreadId: child.thread.id,
-      now: seeded.now,
-    });
-    const followUp = after.subagents.find((task) => task.id === taskId)!;
-    assert.equal(followUp.completionWake, "never");
-    assert.isUndefined(followUp.completionDelivery);
-    assert.isUndefined(after.runs[0]!.delegatedCompletion);
+    // Its round judges the one run it recorded; a later writer would escape
+    // that check, so user, agent and continuation messages are all refused.
+    for (const [createdBy, creationSource] of [
+      ["user", "web"],
+      ["agent", "mcp"],
+      ["agent", "server"],
+    ] as const) {
+      const refused = yield* Effect.flip(
+        seeded.orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`follow-up-${createdBy}-${creationSource}`),
+          threadId: child.thread.id,
+          messageId: MessageId.make(`message:follow-up-${createdBy}-${creationSource}`),
+          text: "Look again.",
+          attachments: [],
+          dispatchMode: { type: "start_immediately" },
+          createdBy,
+          creationSource,
+        }),
+      );
+      assert.equal(refused._tag, "OrchestratorGameRoundChildReadOnlyError");
+    }
+    const after = yield* seeded.projections.getThreadProjection(child.thread.id);
     assert.lengthOf(after.runs, 1);
-    assert.lengthOf(after.messages, 1);
+    assert.lengthOf((yield* seeded.projections.getThreadProjection(threadId)).subagents, 1);
   }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
 
