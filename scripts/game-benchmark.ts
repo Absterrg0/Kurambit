@@ -203,10 +203,12 @@ const runInGroup = async (input: {
   readonly cwd: string;
   readonly logPath: string;
   readonly timeoutMs: number;
+  readonly env?: NodeJS.ProcessEnv;
 }): Promise<{ timedOut: boolean; exitCode: number | null; signal: string | null }> => {
   const log = await NodeFSP.open(input.logPath, "w");
   const child = NodeChildProcess.spawn(input.executable, [...input.args], {
     cwd: input.cwd,
+    ...(input.env === undefined ? {} : { env: input.env }),
     detached: true,
     stdio: ["ignore", log.fd, log.fd],
   });
@@ -291,6 +293,26 @@ Art direction: ${brief.artDirection}
 
 Build this game in Godot 4.7 in ./godot. Export a web build to ./builds/web/index.html with \`${defaultGodotBinary()} --headless --path ./godot --export-release Web ./builds/web/index.html\`. Nobody will answer questions.`;
 
+/**
+ * A raw run must be its own session. An inherited OPENCODE_SESSION_ID makes the
+ * CLI resume the operator's session and work in its project instead of the
+ * scratch folder (t42 hit exactly that: the lane built into the checkout).
+ */
+const freshOpenCodeEnvironment = (): NodeJS.ProcessEnv => {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of [
+    "OPENCODE_SESSION_ID",
+    "OPENCODE",
+    "OPENCODE_TERMINAL",
+    "OPENCODE_PASSWORD",
+    "OPENCODE_CONFIG_CONTENT",
+    "AI_AGENT",
+    "T3CODE_CLI_PATH",
+  ])
+    delete environment[name];
+  return environment;
+};
+
 /** The bare-model lane: the same model and effort as the harness, no harness. */
 const runRawBrief = async (
   brief: LoadedGameBenchmarkBrief,
@@ -313,6 +335,7 @@ const runRawBrief = async (
     cwd: scratch,
     logPath: NodePath.join(directory, "opencode.log"),
     timeoutMs: rawTimeoutMs,
+    env: freshOpenCodeEnvironment(),
   });
   const grade = await gradeFinishedGame(brief, scratch, directory);
   return { timedOut: run.timedOut, exitCode: run.exitCode, grade };
