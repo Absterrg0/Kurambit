@@ -27,6 +27,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import {
   designApprovalTestLayer,
+  roundStoreTestLayer,
   previewBrowserTestLayer,
   qualificationTestLayer,
   visualJudgeTestLayer,
@@ -105,6 +106,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
           Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
           Layer.provideMerge(visualJudgeTestLayer(NodePath.join(root, ".test-state"))),
           Layer.provideMerge(designApprovalTestLayer(NodePath.join(root, ".test-state"))),
+          Layer.provideMerge(roundStoreTestLayer(NodePath.join(root, ".test-state"))),
         );
         yield* Effect.gen(function* () {
           const game = yield* GameService.GameService;

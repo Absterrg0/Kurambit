@@ -19,6 +19,7 @@ import {
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
+  roundStoreTestLayer,
   qualificationTestLayer,
   visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
@@ -128,6 +129,7 @@ const templateJourney = (journey: TemplateJourney) =>
       Layer.provideMerge(qualificationTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provideMerge(visualJudgeTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provideMerge(designApprovalTestLayer(NodePath.join(parent, ".test-state"))),
+      Layer.provideMerge(roundStoreTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );

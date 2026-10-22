@@ -21,6 +21,7 @@ import {
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
+  roundStoreTestLayer,
   qualificationTestLayer,
   visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
@@ -79,6 +80,7 @@ const withGame = <A>(
       Layer.provideMerge(qualificationTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provideMerge(visualJudgeTestLayer(NodePath.join(parent, ".test-state"))),
       Layer.provideMerge(designApprovalTestLayer(designStateDir)),
+      Layer.provideMerge(roundStoreTestLayer(designStateDir)),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(NodeServices.layer),
     );

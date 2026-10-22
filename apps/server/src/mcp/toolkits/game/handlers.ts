@@ -76,7 +76,9 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
-      return yield* game.action(scope.thread.threadId, "native");
+      // An agent's run is always headless; only the creator's own Play action
+      // may inherit the desktop display.
+      return yield* game.native(scope.thread.threadId, { display: "headless" });
     }),
   ),
   game_stop: McpToolAccess.actsAsCaller(() =>

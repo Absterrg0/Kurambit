@@ -16,6 +16,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameQualification from "./GameQualification.ts";
 import {
   designApprovalTestLayer,
+  roundStoreTestLayer,
   previewBrowserTestLayer,
   visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
@@ -98,6 +99,7 @@ const withFixture = <A, E, R>(
         Layer.provideMerge(GameQualification.layer({ stateDir })),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
+        Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(NodeServices.layer),
       );
       return yield* run({ root, stateDir }).pipe(Effect.provide(services));

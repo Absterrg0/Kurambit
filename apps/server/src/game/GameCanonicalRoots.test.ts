@@ -24,6 +24,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
+import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
@@ -250,6 +251,7 @@ it.effect("a real root and an alias thread share one operation lock", () =>
         Layer.provideMerge(GameQualification.layer({ stateDir })),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
+        Layer.provideMerge(GameRoundStore.layer({ stateDir })),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
             getById: (id) =>

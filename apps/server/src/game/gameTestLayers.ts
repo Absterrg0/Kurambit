@@ -12,6 +12,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameQualification from "./GameQualification.ts";
+import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameVisualJudge from "./GameVisualJudge.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { TextGenerationError } from "@t3tools/contracts";
@@ -27,6 +28,10 @@ export function qualificationTestLayer(stateDir: string) {
 /** A design approval store inside the calling fixture's temporary directory. */
 export function designApprovalTestLayer(stateDir: string) {
   return GameDesignApproval.layer({ stateDir });
+}
+/** The round/selected-build store inside the calling fixture's temporary directory. */
+export function roundStoreTestLayer(stateDir: string) {
+  return GameRoundStore.layer({ stateDir });
 }
 
 /**

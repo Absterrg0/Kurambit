@@ -44,10 +44,19 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
-import { describeWebArtifacts, isWebBuildFresh, webBuildIndex } from "./webBuild.ts";
+import {
+  CANDIDATE_BUILDS_DIRECTORY,
+  WEB_BUILD_DIRECTORY,
+  candidateBuildDirectory,
+  describeWebArtifacts,
+  hashWebBuild,
+  hashWebBuildDirectory,
+  isWebBuildFresh,
+} from "./webBuild.ts";
 import { comparedSource, snapshotSource } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameOperations from "./GameOperations.ts";
+import * as GameRoundStore from "./GameRoundStore.ts";
 import { blenderWrapper } from "./blenderScript.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import {
@@ -99,6 +108,14 @@ export class GameService extends Context.Service<
     readonly export: (
       threadId: ThreadId,
       target: "Web" | "Linux",
+    ) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Runs the native game. The creator's own Play may watch it on their
+     * display; an agent's tool always asks for `headless`.
+     */
+    readonly native: (
+      threadId: ThreadId,
+      options?: { readonly display?: "headless" | "inherit" | undefined },
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly webPlaytest: (
       threadId: ThreadId,
@@ -166,6 +183,7 @@ const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const browser = yield* PreviewBrowser.PreviewBrowser;
   const qualification = yield* GameQualification.GameQualification;
+  const rounds = yield* GameRoundStore.GameRoundStore;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
   const visualJudge = yield* GameVisualJudge.GameVisualJudge;
@@ -462,7 +480,20 @@ const make = Effect.gen(function* () {
       }),
     );
   });
-  const runExport = Effect.fnUntraced(function* (root: string, target: "Web" | "Linux") {
+  /**
+   * How a successful export relates to the selected build. `publish` makes it
+   * the one Play serves; `candidate` is a round's challenger and must not
+   * disturb Play while it is reviewed.
+   */
+  type ExportSelection =
+    | { readonly mode: "publish" }
+    | { readonly mode: "candidate"; readonly roundId: string };
+
+  const runExport = Effect.fnUntraced(function* (
+    root: string,
+    target: "Web" | "Linux",
+    selection: ExportSelection,
+  ) {
     const { godot, cwd, godotProject } = yield* engine(root);
     const failedExport = (sourceId: string | null, detail?: string): StageOutcome => ({
       outcome: "failed",
@@ -487,84 +518,257 @@ const make = Effect.gen(function* () {
     if (!imported.success) return { value: imported, record: failedExport(null) };
     const before = yield* snapshot(root, godotProject);
     const beforeSourceId = before.kind === "known" ? before.sourceId : null;
-    const output = NodePath.join(
-      root,
-      target === "Web" ? "builds/web/index.html" : "builds/linux/game.x86_64",
+    // Web exports stage in a hidden directory under the candidate root, never in
+    // the served tree. A partial or failed export therefore cannot change what
+    // Play loads; only a complete, hashed artifact is moved into place.
+    const staging =
+      target === "Web"
+        ? NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY, `.staging-${NodeCrypto.randomUUID()}`)
+        : null;
+    const output =
+      staging === null
+        ? NodePath.join(root, "builds/linux/game.x86_64")
+        : NodePath.join(staging, "index.html");
+    const cleanedUp = Effect.ensuring(
+      Effect.promise(() =>
+        staging === null
+          ? Promise.resolve()
+          : NodeFSP.rm(staging, { recursive: true, force: true }),
+      ),
     );
-    yield* Effect.tryPromise({
-      try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
-      catch: (cause) =>
-        new GameOperationError({ operation: "export", path: output, reason: "io", cause }),
-    });
-    const result = response(
-      yield* processes.run({
-        root,
-        executable: godot.path,
-        args: ["--headless", "--path", cwd, "--export-release", target, output],
-        operation: `export-${target.toLowerCase()}`,
-        timeoutMs: 300_000,
-      }),
-      output,
-    );
-    if (!result.success) return { value: result, record: failedExport(beforeSourceId) };
-    yield* Effect.tryPromise({
-      try: async () => {
-        for (const file of target === "Web"
-          ? [
-              output,
-              output.replace(/\.html$/, ".wasm"),
-              output.replace(/\.html$/, ".js"),
-              output.replace(/\.html$/, ".pck"),
-            ]
-          : [output]) {
-          const stat = await NodeFSP.stat(file);
-          if (!stat.isFile() || stat.size === 0) throw new Error(`Empty export: ${file}`);
-        }
-      },
-      catch: (cause) =>
-        new GameOperationError({
-          operation: "export-output",
-          path: output,
-          reason: "command-failed",
-          detail:
-            `Expected nonempty export files were missing.\n${commandDetail(result.process!)}`.slice(
-              -4096,
-            ),
-          cause,
+    return yield* Effect.gen(function* () {
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({ operation: "export", path: output, reason: "io", cause }),
+      });
+      const result = response(
+        yield* processes.run({
+          root,
+          executable: godot.path,
+          args: ["--headless", "--path", cwd, "--export-release", target, output],
+          operation: `export-${target.toLowerCase()}`,
+          timeoutMs: 300_000,
         }),
-    });
-    // The record names every served file, not just index.html: a deleted or
-    // replaced .pck must force a rebuild before anyone plays it.
-    const artifacts =
-      target === "Web" ? yield* Effect.promise(() => describeWebArtifacts(root)) : null;
-    const after = yield* snapshot(root, godotProject);
-    const comparison = comparedSource(before, after, "export");
-    const finishedAt = DateTime.formatIso(yield* DateTime.now);
-    if (comparison.kind !== "current")
-      return { value: result, record: failedExport(beforeSourceId, comparison.detail) };
-    if (target === "Web" && artifacts === null)
+        output,
+      );
+      if (!result.success) return { value: result, record: failedExport(beforeSourceId) };
+      yield* Effect.tryPromise({
+        try: async () => {
+          for (const file of target === "Web"
+            ? [
+                output,
+                output.replace(/\.html$/, ".wasm"),
+                output.replace(/\.html$/, ".js"),
+                output.replace(/\.html$/, ".pck"),
+              ]
+            : [output]) {
+            const stat = await NodeFSP.stat(file);
+            if (!stat.isFile() || stat.size === 0) throw new Error(`Empty export: ${file}`);
+          }
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "export-output",
+            path: output,
+            reason: "command-failed",
+            detail:
+              `Expected nonempty export files were missing.\n${commandDetail(result.process!)}`.slice(
+                -4096,
+              ),
+            cause,
+          }),
+      });
+      // Hash the staged artifact before it becomes visible. The hash is the
+      // directory name, so an immutable build can never be overwritten later
+      // with different bytes under the same identity.
+      const hashed =
+        staging === null ? null : yield* Effect.promise(() => hashWebBuildDirectory(staging));
+      if (target === "Web" && hashed === null)
+        return {
+          value: result,
+          record: failedExport(
+            beforeSourceId,
+            "The exported web build directory could not be read back.",
+          ),
+        };
+      // Read the source after the whole export, before the artifact becomes
+      // visible: a source edit during the export must not publish a mixed build.
+      const after = yield* snapshot(root, godotProject);
+      const comparison = comparedSource(before, after, "export");
+      const finishedAt = DateTime.formatIso(yield* DateTime.now);
+      if (comparison.kind !== "current")
+        return { value: result, record: failedExport(beforeSourceId, comparison.detail) };
+      const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
+      if (hashed !== null && directory !== null) {
+        const final = NodePath.join(root, directory);
+        const existing = yield* Effect.promise(() =>
+          NodeFSP.stat(NodePath.join(final, "index.html")).then(
+            () => true,
+            () => false,
+          ),
+        );
+        const staged = staging!;
+        const same =
+          existing &&
+          (yield* Effect.promise(() => hashWebBuildDirectory(final)))?.buildId === hashed.buildId;
+        if (same) yield* Effect.promise(() => NodeFSP.rm(staged, { recursive: true, force: true }));
+        else {
+          // A directory under our own hash that does not hash to it is
+          // corruption; replace it rather than serve bytes the id did not name.
+          if (existing)
+            yield* Effect.promise(() => NodeFSP.rm(final, { recursive: true, force: true }));
+          yield* Effect.promise(() => NodeFSP.rename(staged, final));
+        }
+      }
+      // The record names every served file, not just index.html: a deleted or
+      // replaced .pck must force a rebuild before anyone plays it. Paths stay
+      // game-relative so a legacy builds/web record reads the same way.
+      const artifacts =
+        directory === null
+          ? null
+          : yield* Effect.promise(() => describeWebArtifacts(root, directory));
+      if (target === "Web" && (artifacts === null || hashed === null || directory === null))
+        return {
+          value: result,
+          record: failedExport(
+            beforeSourceId,
+            "The exported web build directory could not be read back.",
+          ),
+        };
+      if (hashed !== null && directory !== null) {
+        // Round decisions use the byte manifest identity, not the legacy
+        // size/mtime snapshot the qualification stage records.
+        const roundSourceId = yield* rounds.sourceId(root);
+        const artifact = {
+          buildId: hashed.buildId,
+          directory,
+          sourceId: roundSourceId,
+          engine: "godot" as const,
+          target: "Web" as const,
+          entry: "index.html",
+        };
+        if (selection.mode === "candidate")
+          yield* rounds.recordCandidate(root, selection.roundId, artifact);
+        else yield* rounds.select(root, artifact);
+        return {
+          value: {
+            ...result,
+            path: NodePath.join(root, directory, "index.html"),
+            message:
+              selection.mode === "candidate"
+                ? "Web game built as a candidate; Play keeps the selected build until the round promotes it."
+                : "Web game is ready to play.",
+          },
+          record: {
+            outcome: "passed" as const,
+            sourceId: comparison.sourceId,
+            buildId: hashed.buildId,
+            evidenceDirectory: null,
+            artifacts: artifacts!,
+            buildDirectory: directory,
+          },
+        };
+      }
       return {
         value: result,
-        record: failedExport(
-          beforeSourceId,
-          "The exported web build directory could not be read back.",
-        ),
+        record: {
+          outcome: "passed" as const,
+          sourceId: comparison.sourceId,
+          buildId: `${comparison.sourceId}:${finishedAt}`,
+          evidenceDirectory: null,
+        },
       };
-    return {
-      value: result,
-      record: {
-        outcome: "passed" as const,
-        sourceId: comparison.sourceId,
-        buildId: `${comparison.sourceId}:${finishedAt}`,
-        evidenceDirectory: null,
-        ...(target === "Web" && artifacts !== null ? { artifacts } : {}),
-      },
-    };
+    }).pipe(cleanedUp);
   });
-  const exportGame = (root: string, target: "Web" | "Linux") =>
+  const exportGame = (root: string, target: "Web" | "Linux", selection: ExportSelection) =>
     target === "Web"
-      ? ownStage(root, "export", "export", runExport(root, target))
-      : runExport(root, target).pipe(Effect.map((completed) => completed.value));
+      ? ownStage(root, "export", "export", runExport(root, target, selection))
+      : runExport(root, target, selection).pipe(Effect.map((completed) => completed.value));
+
+  /** The round currently repairing this game, if any. */
+  const runningRound = (root: string) =>
+    rounds
+      .read(root)
+      .pipe(
+        Effect.map((state) => state.rounds.find((round) => round.status === "running") ?? null),
+      );
+  /**
+   * The build Play should show: the selected one while its immutable directory
+   * still hashes to its recorded id, otherwise a pre-change builds/web game, or
+   * null when the game has never been built.
+   */
+  const selectedPreview = (root: string) =>
+    Effect.gen(function* () {
+      const state = yield* rounds.read(root);
+      const selected = state.selected;
+      if (selected !== null) {
+        const hashed = yield* Effect.promise(() => hashWebBuild(root, selected.directory));
+        if (hashed !== null && hashed.buildId === selected.buildId)
+          return {
+            directory: selected.directory,
+            selected,
+            url: yield* preview.open(root, selected.directory),
+          };
+      }
+      // Only a game with no selection may fall back to a pre-change build; a
+      // broken selected record must rebuild, not silently serve something else.
+      if (selected !== null) return null;
+      const legacy = yield* Effect.promise(() =>
+        NodeFSP.stat(NodePath.join(root, WEB_BUILD_DIRECTORY, "index.html")).then(
+          () => true,
+          () => false,
+        ),
+      );
+      if (legacy)
+        return {
+          directory: WEB_BUILD_DIRECTORY,
+          selected: null,
+          url: yield* preview.open(root, WEB_BUILD_DIRECTORY),
+        };
+      return null;
+    });
+  /** Builds and publishes the current sources, then serves that build. */
+  const publishWeb = (root: string) =>
+    Effect.gen(function* () {
+      const exported = yield* exportGame(root, "Web", { mode: "publish" });
+      if (!exported.success) return exported;
+      const served = yield* selectedPreview(root);
+      return served === null
+        ? exported
+        : { ...exported, message: "Web game is ready to play.", url: served.url };
+    });
+  /**
+   * Starts the native game. `display` is the caller's claim: the creator's Play
+   * may watch it on their own desktop, while every agent-facing run is headless.
+   */
+  const nativeGame = (root: string, display: "headless" | "inherit") =>
+    Effect.gen(function* () {
+      if (processes.list(root).some((entry) => entry.operation === "native"))
+        return yield* new GameOperationError({
+          operation: "native",
+          path: root,
+          reason: "busy",
+        });
+      const { godot, cwd } = yield* engine(root);
+      const imported = yield* importGame(root);
+      if (!imported.success) return imported;
+      const launched = yield* processes.start({
+        root,
+        executable: godot.path,
+        args: ["--path", cwd],
+        operation: "native",
+        display,
+        timeoutMs: 24 * 60 * 60_000,
+      });
+      return {
+        success: true,
+        message: `Native game started with PID ${launched.pid}. Output: ${launched.logPath}`,
+        path: launched.logPath,
+        url: null,
+        process: null,
+      };
+    });
 
   const webPlaytest = (root: string, input: GameWebPlaytestInput) =>
     Effect.gen(function* () {
@@ -587,7 +791,7 @@ const make = Effect.gen(function* () {
           const identity = yield* designApprovals.readPolicy(root, manifest);
           const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
           if (!(yield* webBuildIsCurrent(beforePlaytest))) {
-            const exported = yield* exportGame(root, "Web");
+            const exported = yield* exportGame(root, "Web", { mode: "publish" });
             if (!exported.success)
               return yield* new GameOperationError({
                 operation: "Web playtest",
@@ -601,7 +805,9 @@ const make = Effect.gen(function* () {
           const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
             (stage) => stage.stage === "export",
           );
-          const url = yield* preview.open(root);
+          // Playtest the bytes the export record names, which may be a round's
+          // candidate; Play itself keeps serving the selected build.
+          const url = yield* preview.open(root, build?.buildDirectory ?? WEB_BUILD_DIRECTORY);
           const executable = yield* browser.executable.pipe(
             Effect.mapError(
               (cause) =>
@@ -1295,6 +1501,37 @@ const make = Effect.gen(function* () {
         approval?.acceptance ?? design.acceptance,
       );
       const inventory = yield* projects.inventory(root, qualificationRead.sourceId);
+      const roundState = yield* rounds.read(root);
+      const selected = roundState.selected;
+      const selectedPresent =
+        selected === null
+          ? null
+          : yield* Effect.promise(async () => {
+              // Cheap structural check for status polling: a missing or empty
+              // artifact file must read as stale. Byte identity is checked when
+              // Play actually opens the build, not on every poll.
+              for (const name of ["index.html", "index.js", "index.wasm", "index.pck"]) {
+                const stat = await NodeFSP.stat(
+                  NodePath.join(root, selected.directory, name),
+                ).catch(() => null);
+                if (stat === null || !stat.isFile() || stat.size === 0) return false;
+              }
+              return true;
+            });
+      // The inventory reports what exists under builds/, but Play follows the
+      // selected record. Name that build honestly: a stale candidate export must
+      // not make the served build look newer than it is.
+      const builds =
+        selected === null
+          ? inventory.builds
+          : [
+              ...inventory.builds.filter((build) => build.target !== "Web"),
+              {
+                target: "Web",
+                path: `${selected.directory}/${selected.entry}`,
+                updatedAt: selected.promotedAt,
+              },
+            ];
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () =>
@@ -1302,7 +1539,7 @@ const make = Effect.gen(function* () {
           // playtest stage did: unapproved drafts prove nothing.
           readLastPlaytest(
             root,
-            inventory.builds,
+            builds,
             design.state === "approved" ? (approval?.acceptance ?? design.acceptance) : null,
           ),
         catch: () =>
@@ -1332,8 +1569,13 @@ const make = Effect.gen(function* () {
       return {
         root,
         ...inventory,
+        builds,
         design,
-        webBuildStale: !(yield* webBuildIsCurrent(qualificationRead)),
+        // What Play would show, not what the last export produced: a good
+        // candidate export does not make the selected build fresh, and a source
+        // edit does not make the selected artifact unplayable.
+        webBuildStale:
+          selected !== null ? !selectedPresent : !(yield* webBuildIsCurrent(qualificationRead)),
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
@@ -1346,7 +1588,27 @@ const make = Effect.gen(function* () {
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) =>
-        Effect.andThen(refuseWhileUnapproved(root, "export"), exportGame(root, target)),
+        Effect.gen(function* () {
+          yield* refuseWhileUnapproved(root, "export");
+          // While a round runs, an export is that round's challenger: it must
+          // not replace the build Play serves. Outside a round the builder's
+          // export is the publish, so development stays immediate.
+          const active = target === "Web" ? yield* runningRound(root) : null;
+          return yield* exportGame(
+            root,
+            target,
+            active === null ? { mode: "publish" } : { mode: "candidate", roundId: active.id },
+          );
+        }),
+      ),
+    native: (threadId, options) =>
+      withRoot(threadId, "Native game", (root) =>
+        Effect.andThen(
+          refuseWhileUnapproved(root, "native"),
+          // Default to headless: a caller that did not ask to watch a window
+          // must never inherit the creator's display.
+          nativeGame(root, options?.display ?? "headless"),
+        ),
       ),
     webPlaytest: (threadId, input) =>
       withRoot(threadId, "Web playtest", (root) =>
@@ -1537,56 +1799,25 @@ const make = Effect.gen(function* () {
           // Only the toolchain check stays open during a draft; every staging
           // action here moves the game toward a playable build.
           yield* refuseWhileUnapproved(root, action);
-          if (action === "export-linux") return yield* exportGame(root, "Linux");
-          if (action === "native") {
-            if (processes.list(root).some((entry) => entry.operation === "native"))
-              return yield* new GameOperationError({
-                operation: "native",
-                path: root,
-                reason: "busy",
-              });
-            const { godot, cwd } = yield* engine(root);
-            const imported = yield* importGame(root);
-            if (!imported.success) return imported;
-            const launched = yield* processes.start({
-              root,
-              executable: godot.path,
-              args: ["--path", cwd],
-              operation: "native",
-              // The creator pressed Play to watch this one; every other child
-              // the server starts is headless.
-              display: "inherit",
-              timeoutMs: 24 * 60 * 60_000,
-            });
+          if (action === "export-linux")
+            return yield* exportGame(root, "Linux", { mode: "publish" });
+          // The creator's own Play may watch a native window; every agent-facing
+          // run goes through the headless native method instead.
+          if (action === "native") return yield* nativeGame(root, "inherit");
+          // Rebuild forces a new export and publishes it. Play otherwise serves
+          // the selected build, which may legitimately differ from the current
+          // sources while a round is open; the stage reports that difference.
+          if (action === "rebuild") return yield* publishWeb(root);
+          const served = yield* selectedPreview(root);
+          if (served !== null)
             return {
               success: true,
-              message: `Native game started with PID ${launched.pid}. Output: ${launched.logPath}`,
-              path: launched.logPath,
-              url: null,
+              message: "Loaded the selected web build.",
+              path: NodePath.join(root, served.directory, "index.html"),
+              url: served.url,
               process: null,
             };
-          }
-          // Play reuses a fresh web build; Rebuild forces a new export. Scenes
-          // and scripts can be edited by any provider outside this service, so
-          // the qualification export stage is the only thing that decides.
-          const manifest = yield* projects.read(root);
-          const needsExport =
-            action === "rebuild" ||
-            !(yield* webBuildIsCurrent(yield* qualification.read(root, manifest.godotProject)));
-          if (needsExport) {
-            const exported = yield* exportGame(root, "Web");
-            if (!exported.success) return exported;
-            const url = yield* preview.open(root);
-            return { ...exported, message: "Web game is ready to play.", url };
-          }
-          const url = yield* preview.open(root);
-          return {
-            success: true,
-            message: "Loaded the existing web build.",
-            path: webBuildIndex(root),
-            url,
-            process: null,
-          };
+          return yield* publishWeb(root);
         }),
       );
     }),

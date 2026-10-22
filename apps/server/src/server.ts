@@ -4,6 +4,7 @@ import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
+import * as GameRoundStore from "./game/GameRoundStore.ts";
 import * as GameVisualJudge from "./game/GameVisualJudge.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
@@ -509,6 +510,14 @@ const layerGame = GameService.layer.pipe(
       Effect.gen(function* () {
         const config = yield* ServerConfig.ServerConfig;
         return GameQualification.layer({ stateDir: config.stateDir });
+      }),
+    ),
+  ),
+  Layer.provideMerge(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        return GameRoundStore.layer({ stateDir: config.stateDir });
       }),
     ),
   ),

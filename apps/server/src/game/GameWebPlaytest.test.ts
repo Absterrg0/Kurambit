@@ -23,6 +23,7 @@ import {
   previewBrowserTestLayer,
   projectTestLayer,
   designApprovalTestLayer,
+  roundStoreTestLayer,
   qualificationTestLayer,
   visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
@@ -174,6 +175,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(qualificationTestLayer(stateDir)),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
+        Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );
@@ -271,6 +273,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provideMerge(qualificationTestLayer(stateDir)),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
+        Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
         Layer.provide(NodeServices.layer),
       );

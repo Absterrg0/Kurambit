@@ -57,3 +57,48 @@ it.effect(
       }
     }),
 );
+
+it.effect("serves each build-addressed directory immutably across a promotion", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-preview-")),
+    );
+    try {
+      const first = `builds/candidates/${"a".repeat(64)}`;
+      const second = `builds/candidates/${"b".repeat(64)}`;
+      yield* Effect.promise(async () => {
+        for (const [directory, text] of [
+          [first, "<html>incumbent</html>"],
+          [second, "<html>challenger</html>"],
+        ] as const) {
+          await NodeFSP.mkdir(NodePath.join(root, directory), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(root, directory, "index.html"), text);
+        }
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const preview = yield* GamePreview.GamePreview;
+          const incumbentUrl = yield* preview.open(root, first);
+          const challengerUrl = yield* preview.open(root, second);
+          expect(challengerUrl).not.toBe(incumbentUrl);
+          expect(preview.url(root)).toBe(challengerUrl);
+          // The window opened before promotion keeps loading the old bytes.
+          expect(
+            yield* Effect.promise(() => fetch(incumbentUrl).then((response) => response.text())),
+          ).toContain("incumbent");
+          expect(
+            yield* Effect.promise(() => fetch(challengerUrl).then((response) => response.text())),
+          ).toContain("challenger");
+          yield* preview.stop(root);
+          expect(preview.url(root)).toBeNull();
+          yield* Effect.promise(async () => {
+            await expect(fetch(incumbentUrl)).rejects.toThrow();
+            await expect(fetch(challengerUrl)).rejects.toThrow();
+          });
+        }).pipe(Effect.provide(GamePreview.layer)),
+      );
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
+    }
+  }),
+);
