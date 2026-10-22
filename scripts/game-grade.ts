@@ -398,8 +398,8 @@ ${input.brief.obligations.map((obligation) => `- ${obligation.description}`).joi
 ## What you can do
 Reply with 1–3 actions and a one-sentence note.
 - keys: hold a key for holdMs milliseconds. Use the game's controls ("w", "ArrowUp", "Space", "Shift", "e", …).
-- clicks: a left click at the centre of the canvas (x/y are advisory; the driver always clicks dead centre).
-- drags: move the pointer by (x2−x1, y2−y1) pixels from the canvas centre, for mouse-look, camera turns and aiming. No button is held.
+- clicks: a left click at pixel (x,y) of the attached frame. The frame is the 960×540 game viewport, so (480,270) is its centre. Click the actual button or card you can see.
+- drags: press at (x1,y1), move to (x2,y2) and release, in the same 960×540 pixels. Use it to drag cards or sliders and to turn a mouse-look camera.
 - waitMs: wait that long after the actions.
 - reload: restart the game from its first screen. This is the only way to reload the page; a game over ("WRECKED", "GAME OVER", a result panel) cannot be escaped any other way. Use it when the run is finished, then play again.
 Choose actions that make a promise visible: move toward the goal, shoot, pick things up, open things, finish or lose. Do not repeat an action the last frame already showed changing nothing. If the frame is a menu, press a key or click it first. If the game is over, reload instead of trying keys.
@@ -411,36 +411,374 @@ ${input.history.length === 0 ? "Nothing yet; this is the boot frame." : input.hi
 - One frame, one short note: say what the frame shows and what you will try next.
 - Answer with the requested JSON only.`;
 
-/** The playtester's loose action envelope as driver steps. */
-const actionSteps = (reply: ActionReply): { steps: GamePlaytestStep[]; labels: string[] } => {
-  const steps: GamePlaytestStep[] = [];
-  const labels: string[] = [];
-  for (const key of reply.keys.slice(0, MAX_ACTIONS_PER_STEP)) {
+/**
+ * Godot's HTML shell keeps #status visible while loading and hides it once the
+ * canvas takes over; the playtester waits for the same thing the quick rows do.
+ */
+const BOOT_CHECK = `(() => {
+  const canvas = document.querySelector("canvas");
+  const status = document.getElementById("status");
+  const hidden =
+    !status ||
+    status.hidden ||
+    status.style.display === "none" ||
+    getComputedStyle(status).display === "none" ||
+    getComputedStyle(status).visibility === "hidden";
+  return Boolean(canvas && canvas.width > 0 && canvas.height > 0 && hidden);
+})()`;
+
+interface PlayKeyEvent {
+  readonly type: "keyDown" | "keyUp";
+  readonly key: string;
+  readonly code: string;
+  readonly windowsVirtualKeyCode: number;
+  readonly text?: string;
+}
+
+/** The DevTools key names the playtest driver already uses. */
+const keyEvent = (key: string, type: "keyDown" | "keyUp"): PlayKeyEvent => {
+  const named: Record<string, PlayKeyEvent> = {
+    ArrowUp: { type, key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+    ArrowDown: { type, key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+    ArrowLeft: { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+    ArrowRight: { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+    Space: { type, key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+    Enter: { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+    Tab: { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+    Backspace: { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+    Escape: { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    Shift: { type, key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+    Control: { type, key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+    Alt: { type, key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
+  };
+  const held = named[key] ?? (key === " " ? named.Space : undefined);
+  if (held) return held;
+  if (key.length === 1 && /[a-z]/.test(key))
+    return {
+      type,
+      key,
+      code: `Key${key.toUpperCase()}`,
+      windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0),
+      text: key,
+    };
+  if (key.length === 1 && /[A-Z]/.test(key))
+    return { type, key, code: `Key${key}`, windowsVirtualKeyCode: key.charCodeAt(0), text: key };
+  if (key.length === 1 && /[0-9]/.test(key))
+    return { type, key, code: `Digit${key}`, windowsVirtualKeyCode: 48 + Number(key), text: key };
+  return { type, key, code: key, windowsVirtualKeyCode: 0 };
+};
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+interface BrowserHandle {
+  readonly child: NodeChildProcess.ChildProcess;
+  readonly wsUrl: Promise<string>;
+}
+
+interface CdpSocket {
+  send: <T>(method: string, params?: object, sessionId?: string) => Promise<T>;
+  onSession: (
+    sessionId: string,
+    handle: (message: { method: string; params: any }) => void,
+  ) => void;
+  close: () => void;
+}
+
+const launchBrowser = (executable: string, profileDirectory: string): BrowserHandle => {
+  const flags = [
+    "--headless=new",
+    "--remote-debugging-port=0",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--mute-audio",
+    "--hide-scrollbars",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    `--user-data-dir=${profileDirectory}`,
+    "--window-size=960,540",
+    "about:blank",
+  ];
+  if (process.env.T3CODE_SERVER_BROWSER_SANDBOX === "0") flags.unshift("--no-sandbox");
+  const child = NodeChildProcess.spawn(executable, flags, {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  const wsUrl = new Promise<string>((resolve, reject) => {
+    let pending = true;
+    const settle = (ok: boolean, detail: string) => {
+      if (!pending) return;
+      pending = false;
+      if (ok) resolve(detail);
+      else reject(new Error(detail));
+    };
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+      const match = stderr.match(/DevTools listening on (ws:\/\/\S+)/);
+      if (match) settle(true, match[1]!);
+    });
+    child.once("exit", () =>
+      settle(false, `Browser exited before opening DevTools: ${stderr.slice(-2_000)}`),
+    );
+    child.once("error", (cause) => settle(false, `Browser failed to launch: ${String(cause)}`));
+  });
+  return { child, wsUrl };
+};
+
+const closeBrowser = (handle: BrowserHandle) =>
+  new Promise<void>((resolve) => {
+    const { child } = handle;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    const escalation = setTimeout(() => child.kill("SIGKILL"), 2_000);
+    child.once("exit", () => {
+      clearEscalation();
+      resolve();
+    });
+    const clearEscalation = () => clearTimeout(escalation);
+    child.kill("SIGTERM");
+  });
+
+const connectCdp = (wsUrl: string): Promise<CdpSocket> => {
+  const socket = new WebSocket(wsUrl);
+  const pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (cause: unknown) => void; method: string }
+  >();
+  const sessions = new Map<string, (message: { method: string; params: any }) => void>();
+  const failAll = (cause: unknown) => {
+    for (const entry of pending.values()) entry.reject(cause);
+    pending.clear();
+  };
+  socket.addEventListener("close", () => failAll(new Error("DevTools socket closed")), {
+    once: true,
+  });
+  socket.addEventListener("error", () => failAll(new Error("DevTools socket failed")), {
+    once: true,
+  });
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") return;
+    let message: any;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (typeof message.id === "number") {
+      const entry = pending.get(message.id);
+      if (!entry) return;
+      pending.delete(message.id);
+      if (message.error)
+        entry.reject(new Error(`${entry.method}: ${message.error.message ?? "error"}`));
+      else entry.resolve(message.result);
+      return;
+    }
+    if (typeof message.method === "string" && typeof message.sessionId === "string")
+      sessions.get(message.sessionId)?.({ method: message.method, params: message.params ?? {} });
+  });
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => {
+      reject(new Error("DevTools socket timed out"));
+      socket.close();
+    }, 30_000);
+    socket.addEventListener(
+      "open",
+      () => {
+        clearTimeout(guard);
+        let nextId = 0;
+        resolve({
+          send: <T>(method: string, params?: object, sessionId?: string): Promise<T> =>
+            new Promise((resolveSend, rejectSend) => {
+              const id = ++nextId;
+              const timer = setTimeout(() => {
+                pending.delete(id);
+                rejectSend(new Error(`${method} timed out`));
+              }, 30_000);
+              pending.set(id, {
+                resolve: (value: unknown) => {
+                  clearTimeout(timer);
+                  resolveSend(value as T);
+                },
+                reject: (cause) => {
+                  clearTimeout(timer);
+                  rejectSend(cause);
+                },
+                method,
+              });
+              socket.send(
+                JSON.stringify({
+                  id,
+                  method,
+                  ...(sessionId ? { sessionId } : {}),
+                  ...(params ? { params } : {}),
+                }),
+              );
+            }),
+          onSession: (sessionId, handle) => {
+            sessions.set(sessionId, handle);
+          },
+          close: () => socket.close(),
+        });
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "error",
+      () => {
+        clearTimeout(guard);
+        reject(new Error("DevTools socket failed to open"));
+      },
+      { once: true },
+    );
+  });
+};
+
+/** One live page the model plays: real point clicks, real drags, real reloads. */
+export interface PlaySession {
+  screenshot: () => Promise<string>;
+  key: (key: string, holdMs: number) => Promise<void>;
+  click: (x: number, y: number) => Promise<void>;
+  drag: (x1: number, y1: number, x2: number, y2: number) => Promise<void>;
+  wait: (ms: number) => Promise<void>;
+  reload: () => Promise<boolean>;
+  close: () => Promise<void>;
+}
+
+const waitForBoot = async (cdp: CdpSocket, sessionId: string, timeoutMs: number) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const check = await cdp
+      .send<{ result?: { value?: unknown } }>(
+        "Runtime.evaluate",
+        { expression: BOOT_CHECK, returnByValue: true },
+        sessionId,
+      )
+      .catch(() => null);
+    if (check?.result?.value === true) return true;
+    await sleep(500);
+  }
+  return false;
+};
+
+export const openSession = async (input: {
+  readonly url: string;
+  readonly executable: string;
+  readonly profileDirectory: string;
+  readonly bootTimeoutMs: number;
+}): Promise<PlaySession | null> => {
+  await NodeFSP.mkdir(input.profileDirectory, { recursive: true });
+  const handle = launchBrowser(input.executable, input.profileDirectory);
+  const wsUrl = await Promise.race([
+    handle.wsUrl,
+    sleep(30_000).then(() => {
+      throw new Error("Browser did not report a DevTools endpoint");
+    }),
+  ]);
+  const cdp = await connectCdp(wsUrl);
+  const target = await cdp.send<{ targetId: string }>("Target.createTarget", {
+    url: "about:blank",
+  });
+  const attached = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
+    targetId: target.targetId,
+    flatten: true,
+  });
+  const sessionId = attached.sessionId;
+  await cdp.send("Page.enable", undefined, sessionId);
+  await cdp.send("Runtime.enable", undefined, sessionId);
+  await cdp.send("Page.navigate", { url: input.url }, sessionId);
+  const booted = await waitForBoot(cdp, sessionId, input.bootTimeoutMs);
+  if (!booted) {
+    cdp.close();
+    await closeBrowser(handle);
+    await NodeFSP.rm(input.profileDirectory, { recursive: true, force: true });
+    return null;
+  }
+  const mouse = (type: string, x: number, y: number, extra: object = {}) =>
+    cdp.send("Input.dispatchMouseEvent", { type, x, y, ...extra }, sessionId);
+  return {
+    screenshot: async () => {
+      const shot = await cdp.send<{ data: string }>(
+        "Page.captureScreenshot",
+        { format: "png" },
+        sessionId,
+      );
+      return shot.data;
+    },
+    key: async (key, holdMs) => {
+      await cdp.send(
+        "Runtime.evaluate",
+        { expression: `document.querySelector("canvas")?.focus()` },
+        sessionId,
+      );
+      await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), sessionId);
+      await sleep(holdMs);
+      await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), sessionId);
+    },
+    click: async (x, y) => {
+      await mouse("mouseMoved", x, y, { button: "none" });
+      await mouse("mousePressed", x, y, { button: "left", clickCount: 1 });
+      await sleep(60);
+      await mouse("mouseReleased", x, y, { button: "left", clickCount: 1 });
+    },
+    drag: async (x1, y1, x2, y2) => {
+      await mouse("mouseMoved", x1, y1, { button: "none" });
+      await mouse("mousePressed", x1, y1, { button: "left", clickCount: 1 });
+      for (let point = 1; point <= 6; point += 1) {
+        await sleep(16);
+        await mouse("mouseMoved", x1 + ((x2 - x1) * point) / 6, y1 + ((y2 - y1) * point) / 6, {
+          button: "left",
+        });
+      }
+      await mouse("mouseReleased", x2, y2, { button: "left", clickCount: 1 });
+    },
+    wait: (ms) => sleep(ms),
+    reload: async () => {
+      await cdp.send("Page.reload", {}, sessionId);
+      return waitForBoot(cdp, sessionId, input.bootTimeoutMs);
+    },
+    close: async () => {
+      cdp.close();
+      await closeBrowser(handle);
+      await NodeFSP.rm(input.profileDirectory, { recursive: true, force: true });
+    },
+  };
+};
+
+/** Applies the model's next actions to the live page, in order. */
+const applyActions = async (
+  session: PlaySession,
+  reply: ActionReply,
+): Promise<ReadonlyArray<string>> => {
+  if (reply.reload) return [(await session.reload()) ? "reload" : "reload (did not boot)"];
+  const planned: Array<{ label: string; run: () => Promise<void> }> = [];
+  for (const key of reply.keys) {
     const holdMs = Math.max(50, Math.min(MAX_HOLD_MS, Math.round(key.holdMs)));
-    steps.push({ key: key.key, holdMs });
-    labels.push(`hold ${key.key} ${holdMs}ms`);
+    planned.push({ label: `hold ${key.key} ${holdMs}ms`, run: () => session.key(key.key, holdMs) });
   }
   for (const click of reply.clicks) {
-    steps.push({ click: "left" });
-    labels.push(`click (${Math.round(click.x)},${Math.round(click.y)} → centre)`);
+    const x = Math.max(0, Math.min(959, Math.round(click.x)));
+    const y = Math.max(0, Math.min(539, Math.round(click.y)));
+    planned.push({ label: `click (${x},${y})`, run: () => session.click(x, y) });
   }
   for (const drag of reply.drags) {
-    steps.push({
-      mouseMove: { dx: Math.round(drag.x2 - drag.x1), dy: Math.round(drag.y2 - drag.y1) },
-    });
-    labels.push(
-      `drag (${Math.round(drag.x1)},${Math.round(drag.y1)})→(${Math.round(drag.x2)},${Math.round(drag.y2)})`,
+    const points = [drag.x1, drag.y1, drag.x2, drag.y2].map((value) =>
+      Math.max(0, Math.min(959, Math.round(value))),
     );
+    planned.push({
+      label: `drag (${points[0]},${points[1]})→(${points[2]},${points[3]})`,
+      run: () => session.drag(points[0]!, points[1]!, points[2]!, points[3]!),
+    });
   }
   const waitMs = Math.max(0, Math.min(MAX_HOLD_MS, Math.round(reply.waitMs)));
-  if (waitMs > 0) {
-    steps.push({ waitMs });
-    labels.push(`wait ${waitMs}ms`);
+  if (waitMs > 0) planned.push({ label: `wait ${waitMs}ms`, run: () => session.wait(waitMs) });
+  const labels: string[] = [];
+  for (const action of planned.slice(0, MAX_ACTIONS_PER_STEP)) {
+    await action.run();
+    labels.push(action.label);
   }
-  return {
-    steps: steps.slice(0, MAX_ACTIONS_PER_STEP),
-    labels: labels.slice(0, MAX_ACTIONS_PER_STEP),
-  };
+  return labels;
 };
 
 // ------------------------------------------------------------------------ build
@@ -689,8 +1027,8 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
     const bootPath = await writeFrame(framesDirectory, "boot", bootShot?.data);
     const bootFrame: GradeFrame = { id: "F1", path: bootPath, label: "boot, no input" };
 
-    // 3. Playtester: at most 15 model steps. Each step replays the accumulated
-    // actions on a fresh run so its frame is the real screen after them.
+    // 3. Playtester: at most 15 model steps on one live page, so the game
+    // keeps its state between them and a card hand stays reachable.
     const actions: Array<{
       step: number;
       actions: ReadonlyArray<string>;
@@ -698,64 +1036,48 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       path: string;
     }> = [];
     let calls = 0;
-    let steps: GamePlaytestStep[] = [];
     if (quickRun.booted) {
-      for (let step = 1; step <= maxSteps; step += 1) {
-        const currentFrame =
-          actions.length === 0
-            ? bootFrame.path
-            : NodePath.join(framesDirectory, `step-${String(actions.length).padStart(2, "0")}.png`);
-        let reply: ActionReply;
+      const session = await openSession({
+        url: served.url,
+        executable,
+        profileDirectory: NodePath.join(out, "profile-play"),
+        bootTimeoutMs: QUICK_BOOT_TIMEOUT_MS,
+      });
+      if (session !== null) {
         try {
-          calls += 1;
-          reply = decodeActions(
-            await review({
-              kind: "actions",
-              prompt: playtesterPrompt({
-                brief: options.brief,
-                history: actions.map((entry) => ({ actions: entry.actions, note: entry.note })),
-              }),
-              imagePaths: [currentFrame],
-            }),
-          );
-        } catch {
-          break;
+          let current = bootFrame.path;
+          for (let step = 1; step <= maxSteps; step += 1) {
+            let reply: ActionReply;
+            try {
+              calls += 1;
+              reply = decodeActions(
+                await review({
+                  kind: "actions",
+                  prompt: playtesterPrompt({
+                    brief: options.brief,
+                    history: actions.map((entry) => ({ actions: entry.actions, note: entry.note })),
+                  }),
+                  imagePaths: [current],
+                }),
+              );
+            } catch {
+              break;
+            }
+            const labels = await applyActions(session, reply);
+            if (labels.length === 0) break;
+            // Give the frame after the action a beat to render before keeping it.
+            await session.wait(250);
+            const path = await writeFrame(
+              framesDirectory,
+              `step-${String(step).padStart(2, "0")}`,
+              await session.screenshot(),
+            );
+            actions.push({ step, actions: labels, note: reply.note.slice(0, 300), path });
+            current = path;
+          }
+        } finally {
+          await session.close();
         }
-        if (reply.reload) {
-          steps = [];
-          const run = await runPlaytest({
-            url: served.url,
-            executable,
-            profileDirectory: NodePath.join(out, `profile-step-${step}`),
-            steps: [],
-            bootTimeoutMs: QUICK_BOOT_TIMEOUT_MS,
-          });
-          const shot = run.screenshots.find((entry) => entry.label === "after-steps");
-          const path = await writeFrame(
-            framesDirectory,
-            `step-${String(step).padStart(2, "0")}`,
-            shot?.data,
-          );
-          actions.push({ step, actions: ["reload"], note: reply.note.slice(0, 300), path });
-          continue;
-        }
-        const mapped = actionSteps(reply);
-        if (mapped.steps.length === 0) break;
-        steps = [...steps, ...mapped.steps];
-        const run = await runPlaytest({
-          url: served.url,
-          executable,
-          profileDirectory: NodePath.join(out, `profile-step-${step}`),
-          steps,
-          bootTimeoutMs: QUICK_BOOT_TIMEOUT_MS,
-        });
-        const shot = run.screenshots.find((entry) => entry.label === "after-steps");
-        const path = await writeFrame(
-          framesDirectory,
-          `step-${String(step).padStart(2, "0")}`,
-          shot?.data,
-        );
-        actions.push({ step, actions: mapped.labels, note: reply.note.slice(0, 300), path });
       }
     }
 
