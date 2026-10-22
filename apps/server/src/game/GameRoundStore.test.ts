@@ -327,6 +327,72 @@ it.live(
     ),
 );
 
+it.live(
+  "an explicit restore refuses an edit made after the replaced version was preserved",
+  () =>
+    withGame(({ root, rounds, snapshots }) =>
+      Effect.gen(function* () {
+        const opened = yield* rounds.begin(root, {});
+        yield* edit(root, "extends Node2D # repair\n");
+        yield* rounds.recordPostRepair(root, opened.id);
+
+        const restored = yield* rounds.restore(root, opened.id, {
+          beforeRestore: async () => {
+            // A user edit lands between preservation and the restore's read.
+            await NodeFSP.writeFile(
+              NodePath.join(root, "godot/scripts/main.gd"),
+              "extends Node2D # user edit\n",
+            );
+          },
+        });
+        expect(restored.kind).toBe("blocked");
+        if (restored.kind === "blocked") expect(restored.detail).toContain("changed");
+        // The edit was never overwritten by the older incumbent.
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("extends Node2D # user edit\n");
+        // It was still preserved as the version a later restore can return to.
+        const state = yield* rounds.read(root);
+        const stopped = state.rounds.find((entry) => entry.id === opened.id)!;
+        expect(stopped.status).toBe("stopped");
+        expect(stopped.preRestoreSnapshotId).not.toBeNull();
+        expect(
+          (yield* snapshots.read(root, stopped.preRestoreSnapshotId!)).manifest.files.map(
+            (file) => file.path,
+          ),
+        ).toContain("godot/scripts/main.gd");
+      }),
+    ),
+);
+
+it.live("an explicit restore refuses while another round is running", () =>
+  withGame(({ root, rounds }) =>
+    Effect.gen(function* () {
+      const older = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # older repair\n");
+      yield* rounds.recordPostRepair(root, older.id);
+      yield* rounds.stop(root, older.id, "The creator stepped away from this repair.");
+      const newer = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # newer repair\n");
+
+      const restored = yield* rounds.restore(root, older.id);
+      expect(restored.kind).toBe("busy");
+      if (restored.kind === "busy") expect(restored.owner.id).toBe(newer.id);
+      // The newer round still owns the folder and its bytes are untouched.
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("extends Node2D # newer repair\n");
+      const state = yield* rounds.read(root);
+      expect(state.rounds.find((entry) => entry.id === newer.id)?.status).toBe("running");
+      expect(state.rounds.find((entry) => entry.id === older.id)?.status).toBe("stopped");
+    }),
+  ),
+);
+
 it.live("concurrent promote and reject never leave a half-decided round", () =>
   withGame(({ root, rounds, snapshots }) =>
     Effect.gen(function* () {

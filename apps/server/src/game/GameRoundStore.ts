@@ -127,6 +127,16 @@ export type GameRejection =
       readonly detail: string;
     };
 
+export interface GameRoundRestoreOptions {
+  /** Directories a live preview still serves; they are never deleted. */
+  readonly preserveDirectories?: readonly string[] | undefined;
+  /**
+   * Test seam: runs after the replaced version is preserved and before the
+   * restore reads the folder, so a test can interleave an edit there.
+   */
+  readonly beforeRestore?: (() => Promise<void>) | undefined;
+}
+
 export type GameRestore =
   | {
       readonly kind: "restored";
@@ -138,9 +148,15 @@ export type GameRestore =
       readonly preservedSnapshotId: string;
     }
   | {
+      /** The folder changed after it was preserved; nothing was overwritten. */
       readonly kind: "blocked";
       readonly round: GameReviewRoundType;
       readonly detail: string;
+    }
+  | {
+      /** Another round owns the folder; nothing was rewritten. */
+      readonly kind: "busy";
+      readonly owner: GameReviewRoundType;
     };
 
 export class GameRoundStore extends Context.Service<
@@ -205,7 +221,7 @@ export class GameRoundStore extends Context.Service<
     readonly restore: (
       root: string,
       roundId: string,
-      options?: { readonly preserveDirectories?: readonly string[] | undefined },
+      options?: GameRoundRestoreOptions,
     ) => Effect.Effect<GameRestore, GameOperationError>;
     /** Ends one round without touching the folder or the selection. */
     readonly stop: (
@@ -639,6 +655,12 @@ export const layer = (options: { readonly stateDir: string }) => {
                   "invalid-input",
                   "That round is already closed; there is no repair version to return from.",
                 );
+              // Another round owns the folder. Rewriting it here would leave
+              // that repair authorized against sources it never produced.
+              const owner = state.rounds.find(
+                (entry) => entry.status === "running" && entry.id !== round.id,
+              );
+              if (owner !== undefined) return { kind: "busy", owner };
               const at = DateTime.formatIso(yield* DateTime.now);
               // Joining owned work means no round stays open while the folder is
               // rewritten; the caller's request is the newer decision.
@@ -661,8 +683,19 @@ export const layer = (options: { readonly stateDir: string }) => {
               };
               yield* writeStateEffect(found.file, replaceRound(stoppedState, preservedRound));
               const recordedState = replaceRound(stoppedState, preservedRound);
+              if (restoreOptions?.beforeRestore !== undefined)
+                yield* attempt(
+                  "restore game review version",
+                  root,
+                  restoreOptions.beforeRestore,
+                );
               const snapshot = yield* snapshots.read(root, round.incumbentSnapshotId);
-              const restored = yield* snapshots.restore(root, snapshot.manifest);
+              // The preserved version is the accepted baseline: an edit that
+              // arrived after it was taken must not become the thing this
+              // restore silently overwrites.
+              const restored = yield* snapshots.restore(root, snapshot.manifest, {
+                expectSourceId: preserved.manifest.sourceId,
+              });
               if (restored.kind === "blocked")
                 return { kind: "blocked", round: preservedRound, detail: restored.detail };
               const restoredRound = terminal(
