@@ -170,6 +170,26 @@ it.effect("a round task creates a fresh child under the completed builder run", 
     assert.notEqual(child.thread.activeProviderThreadId, parent.thread.activeProviderThreadId);
     assert.equal(task.model, modelSelection.model);
     assert.equal(task.providerInstanceId, instanceId);
+
+    // A repair is the writable role: it keeps the game folder, and it is still
+    // a child of the same completed builder run.
+    yield* seeded.orchestrator.dispatch(
+      gameRoundCommand({
+        commandId: "game-round-repair-1",
+        threadId,
+        runId: seeded.run.id,
+        nodeId: seeded.rootNodeId,
+        role: "repair",
+        evidenceDirectory: null,
+      }),
+    );
+    const afterRepair = yield* seeded.projections.getThreadProjection(threadId);
+    assert.lengthOf(afterRepair.subagents, 2);
+    const repairChild = yield* seeded.projections.getThreadProjection(
+      afterRepair.subagents[1]!.childThreadId!,
+    );
+    assert.equal(repairChild.thread.worktreePath, "/games/probe");
+    assert.equal(repairChild.thread.lineage.parentThreadId, threadId);
   }).pipe(Effect.provide(layerTest)),
 );
 

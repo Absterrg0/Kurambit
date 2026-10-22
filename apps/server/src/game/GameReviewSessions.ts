@@ -645,8 +645,8 @@ export const layer = (options: { readonly stateDir: string }) => {
       root: string,
       key: SessionKey,
       commandId: CommandId,
+      existing: ReviewSessionRecordType | null,
     ) {
-      const existing = yield* readRecord(root, key);
       const childThreadId =
         existing === null
           ? IdAllocator.derive.delegatedTaskThread({ commandId })
@@ -695,8 +695,13 @@ export const layer = (options: { readonly stateDir: string }) => {
         yield* liveRound(root, input.roundId);
 
         // Reconcile first: a committed session must never dispatch again, even
-        // after a restart, so no second model call can start.
-        if (yield* threads.hasReceipt(commandId)) return yield* reconcile(root, key, commandId);
+        // after a restart, so no second model call can start. The record is the
+        // normal path; a receipt without a record is the narrow crash window
+        // between dispatch and the record write.
+        const existing = yield* readRecord(root, key);
+        if (existing !== null) return yield* reconcile(root, key, commandId, existing);
+        if (yield* threads.hasReceipt(commandId))
+          return yield* reconcile(root, key, commandId, null);
 
         const manifest = yield* projects.read(root);
         const origin = yield* resolveOrigin(input.threadId, {
