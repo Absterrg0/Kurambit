@@ -90,6 +90,9 @@ it.effect("serves each build-addressed directory immutably across a promotion", 
           const selectedUrl = yield* preview.select(root, second);
           expect(selectedUrl).toBe(challengerUrl);
           expect(preview.url(root)).toBe(challengerUrl);
+          // A build that is served but not shown is not what Play reports.
+          expect(preview.urlFor(root, second)).toBe(challengerUrl);
+          expect(preview.urlFor(root, first)).toBeNull();
           // The window opened before promotion keeps loading the old bytes.
           expect(
             yield* Effect.promise(() => fetch(incumbentUrl).then((response) => response.text())),

@@ -1708,6 +1708,16 @@ const make = Effect.gen(function* () {
               },
         ),
       );
+      // Play follows the selection. A promotion makes the selected build the one
+      // Play shows, so an open preview reloads onto it without asking the
+      // creator to press Play again. A game whose preview was never used stays
+      // quiet: status must not open a server nobody asked for.
+      const servedUrl = preview.url(root);
+      const previewUrl =
+        selected === null || selectedPresent !== true
+          ? servedUrl
+          : (preview.urlFor(root, selected.directory) ??
+            (servedUrl === null ? null : yield* preview.select(root, selected.directory)));
       return {
         root,
         ...inventory,
@@ -1726,7 +1736,7 @@ const make = Effect.gen(function* () {
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
-        previewUrl: preview.url(root),
+        previewUrl,
         logsDirectory: NodePath.join(root, "builds/logs"),
         lastPlaytest,
         operation: operations.current(root),

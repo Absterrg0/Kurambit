@@ -36,6 +36,8 @@ export class GamePreview extends Context.Service<
     readonly stop: (root: string) => Effect.Effect<void>;
     /** The URL of the build most recently selected for Play, or null. */
     readonly url: (root: string) => string | null;
+    /** The URL Play shows if it is this directory; null when another is shown. */
+    readonly urlFor: (root: string, directory: string) => string | null;
     /** Whether this game currently serves that directory (evidence or selected). */
     readonly serving: (root: string, directory: string) => boolean;
   }
@@ -149,6 +151,10 @@ const make = Effect.gen(function* () {
     });
   return GamePreview.of({
     url: (root) => latest.get(root)?.url ?? null,
+    urlFor: (root, directory) => {
+      const current = latest.get(root);
+      return current !== undefined && current.key === keyOf(root, directory) ? current.url : null;
+    },
     serving: (root, directory) => servers.has(keyOf(root, directory)),
     stop: (root) => Effect.promise(() => closeWhere(root)),
     open: (root, directory = "builds/web") => openServer(root, directory),

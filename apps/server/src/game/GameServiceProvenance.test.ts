@@ -114,6 +114,7 @@ const withGame = <A, E>(
       const stateDir = NodePath.join(base, "state");
       const executable = NodePath.join(base, "godot");
       let selectedPreviewUrl: string | null = null;
+      let selectedPreviewDirectory: string | null = null;
       yield* Effect.promise(async () => {
         await NodeFSP.mkdir(NodePath.join(root, "godot/scripts"), { recursive: true });
         await NodeFSP.mkdir(NodePath.join(root, "godot/tests"), { recursive: true });
@@ -192,11 +193,14 @@ const withGame = <A, E>(
                 Effect.tap((url) =>
                   Effect.sync(() => {
                     selectedPreviewUrl = url;
+                    selectedPreviewDirectory = directory;
                   }),
                 ),
               ),
             stop: () => Effect.void,
             url: () => selectedPreviewUrl,
+            urlFor: (_root, directory) =>
+              directory === selectedPreviewDirectory ? selectedPreviewUrl : null,
             serving: () => false,
           }),
         ),
@@ -538,6 +542,7 @@ it.live("a round's candidate export leaves Play on the incumbent until promotion
         expect(first.success, first.message).toBe(true);
         expect(opened).toHaveLength(1);
         const incumbentDirectory = opened[0]!;
+        const incumbentUrl = first.url;
 
         const round = yield* rounds.begin(root, {});
         // The repair changes a source file, then exports one build.
@@ -561,11 +566,14 @@ it.live("a round's candidate export leaves Play on the incumbent until promotion
 
         const promoted = yield* rounds.promote(root, round.id);
         expect(promoted.kind).toBe("promoted");
-        const after = yield* game.action(threadId, "preview");
-        expect(after.success, after.message).toBe(true);
+        // Status follows the promotion: Play now serves the promoted build, so
+        // the open preview reloads onto it without another Play call.
+        const after = yield* game.status(threadId);
+        expect(after.previewUrl).not.toBeNull();
+        expect(after.previewUrl).not.toBe(incumbentUrl);
         expect(opened).toHaveLength(3);
-        expect(opened.at(-1)).not.toBe(incumbentDirectory);
         expect(opened.at(-1)).toContain("builds/candidates/");
+        expect(after.selectedBuildId).toBe(opened.at(-1)?.split("/").at(-1));
         const state = yield* rounds.read(root);
         expect(state.selected?.buildId).toBe(opened.at(-1)?.split("/").at(-1));
       }),
