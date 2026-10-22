@@ -15,9 +15,12 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
@@ -191,6 +194,76 @@ it.effect("a round task creates a fresh child under the completed builder run", 
     assert.equal(repairChild.thread.worktreePath, "/games/probe");
     assert.equal(repairChild.thread.lineage.parentThreadId, threadId);
   }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("a round task's terminal child never wakes the builder", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread:game-round-silent-child");
+      const seeded = yield* seedParent(threadId, ProjectId.make("project:game-round-silent-child"));
+      yield* completeRun({ threadId, now: seeded.now, run: seeded.run });
+      yield* seeded.orchestrator.dispatch(
+        gameRoundCommand({
+          commandId: "game-round-silent-critic",
+          threadId,
+          runId: seeded.run.id,
+          nodeId: seeded.rootNodeId,
+          role: "critic",
+          evidenceDirectory: "/state/game-review/evidence/silent-critic",
+        }),
+      );
+
+      const parent = yield* seeded.projections.getThreadProjection(threadId);
+      const task = parent.subagents[0]!;
+      // The policy is recorded on the task itself, so a restart cannot lose it.
+      assert.equal(task.completionWake, "never");
+      const child = yield* seeded.projections.getThreadProjection(task.childThreadId!);
+      const childRun = child.runs[0]!;
+      const sink = yield* EventSink.EventSinkV2;
+      // Start the committed-event watcher from a known sequence, so the
+      // terminal event is observed even if this fiber starts after the write.
+      const before = yield* sink.latestSequence();
+      const terminal = yield* sink.stream({ afterSequence: before }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "subagent.updated" &&
+            stored.event.payload.id === task.id &&
+            stored.event.payload.status === "completed",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkScoped,
+      );
+
+      // Complete the child exactly as a provider turn would.
+      yield* sink.write({
+        commandId: CommandId.make("complete-round-child"),
+        events: [
+          {
+            id: EventId.make("complete-round-child-run"),
+            type: "run.updated" as const,
+            threadId: child.thread.id,
+            occurredAt: seeded.now,
+            payload: {
+              ...childRun,
+              status: "completed" as const,
+              startedAt: childRun.startedAt ?? seeded.now,
+              completedAt: seeded.now,
+            },
+          },
+        ],
+      });
+      yield* Fiber.join(terminal);
+      const after = yield* seeded.projections.getThreadProjection(threadId);
+
+      // Completing a review child must never reserve a parent delivery, wake
+      // the builder or start another run on it.
+      assert.isUndefined(after.runs[0]!.delegatedCompletion);
+      assert.lengthOf(after.runs, 1);
+      assert.isUndefined(after.subagents[0]!.completionDelivery);
+      assert.lengthOf(after.messages, 1);
+    }).pipe(Effect.scoped),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("public delegation still requires an active parent run", () =>

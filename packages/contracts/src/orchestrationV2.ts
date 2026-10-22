@@ -686,7 +686,9 @@ export const OrchestrationV2Subagent = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
-  completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+  // "never" is internal-only: a server-owned round task's result is consumed
+  // by its round worker, so completing it must not start its builder.
+  completionWake: Schema.optional(Schema.Literals(["always", "settled_only", "never"])),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
   status: Schema.Literals([
     "idle",

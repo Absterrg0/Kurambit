@@ -1038,6 +1038,7 @@ describe("orchestration V2 contracts", () => {
     expect(decode({ ...appOwnedSubagent, completionWake: "settled_only" }).completionWake).toBe(
       "settled_only",
     );
+    expect(decode({ ...appOwnedSubagent, completionWake: "never" }).completionWake).toBe("never");
     expect(() => decode({ ...appOwnedSubagent, completionWake: "sometimes" })).toThrow();
   });
 

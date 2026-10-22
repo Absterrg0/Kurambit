@@ -6130,7 +6130,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         readonly runtimeMode: RuntimeMode;
         readonly interactionMode: ProviderInteractionMode;
         readonly workspaceStrategy?: OrchestrationV2ThreadLaunchWorkspaceStrategy;
-        readonly completionWake?: "always" | "settled_only";
+        readonly completionWake?: "always" | "settled_only" | "never";
         /** The child's cwd; unset inherits the parent's game folder. */
         readonly worktreePath?: string;
         readonly parentRunPolicy: "active" | "completed";
@@ -6466,6 +6466,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
         ...(command.evidenceDirectory === null ? {} : { worktreePath: command.evidenceDirectory }),
+        // A round worker consumes this child's result itself. Waking the
+        // builder would let a finished review start an ordinary turn on the
+        // thread that is still being repaired.
+        completionWake: "never",
         parentRunPolicy: "completed",
       },
       events,
@@ -6657,6 +6661,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandId: command.commandId,
         commandType: command.type,
         cause: `Delegated task ${command.taskId} is not an app-owned task of thread ${command.parentThreadId}.`,
+      });
+    }
+    if (task.completionWake === "never") {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Delegated task ${command.taskId} is a server-owned round task and never wakes its parent.`,
       });
     }
     if (task.completionWake === command.completionWake) {
@@ -9480,6 +9491,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // settled_only defers to a blocking delegate_task wait, which lives only as
     // long as the turn that spawned the task. Once that turn is over (a restart
     // continues it as a new run), nothing else delivers the result.
+    if ((input.task.completionWake ?? "settled_only") === "never") {
+      // A server-owned round task reports to its round worker, never to the
+      // parent: no cohort, no wake message and no continuation.
+      return {
+        task: input.updatedTask,
+        parentRun: undefined,
+        message: undefined,
+        offer: false,
+      };
+    }
     if (
       (input.task.completionWake ?? "settled_only") === "settled_only" &&
       hasLiveRun({ runs: [input.parentRun] })
