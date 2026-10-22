@@ -102,22 +102,30 @@ const builderRun = {
 const childRun = (
   childThreadId: ThreadId,
   status: OrchestrationV2Run["status"],
-  userMessageId: MessageId = MessageId.make("message:review-child"),
+  options: {
+    readonly userMessageId?: MessageId;
+    readonly id?: RunId;
+    readonly ordinal?: number;
+  } = {},
 ) =>
   ({
     ...builderRun,
-    id: RunId.make("run:review-child"),
+    id: options.id ?? RunId.make("run:review-child"),
     threadId: childThreadId,
-    userMessageId,
+    userMessageId: options.userMessageId ?? MessageId.make("message:review-child"),
     status,
-    ordinal: 1,
+    ordinal: options.ordinal ?? 1,
   }) as unknown as OrchestrationV2Run;
 
-const assistantMessage = (childThreadId: ThreadId, text: string) =>
+const assistantMessage = (
+  childThreadId: ThreadId,
+  text: string,
+  runId: RunId = RunId.make("run:review-child"),
+) =>
   ({
-    id: MessageId.make("message:review-answer"),
+    id: MessageId.make(`message:${runId}`),
     threadId: childThreadId,
-    runId: RunId.make("run:review-child"),
+    runId,
     nodeId: null,
     role: "assistant",
     text,
@@ -129,12 +137,21 @@ const assistantMessage = (childThreadId: ThreadId, text: string) =>
     creationSource: "server",
   }) as unknown as OrchestrationV2ConversationMessage;
 
+interface ScriptedChildRun {
+  readonly id: RunId;
+  readonly ordinal: number;
+  readonly status: OrchestrationV2Run["status"];
+  readonly answer: string;
+}
+
 interface Scripted {
   /** The commands the session service dispatched, when any ran. */
   readonly dispatches: Array<OrchestrationV2ServerCommand>;
   readonly receipts: Set<string>;
   /** Command ids the orchestrator committed as refused. */
   readonly rejectedReceipts: Set<string>;
+  /** Runs that did not come from this session, e.g. a follow-up. */
+  readonly extraChildRuns: Array<ScriptedChildRun>;
   childThreadId: ThreadId | null;
   /** The command that created the child; its message id names its run. */
   childCommandId: string | null;
@@ -147,6 +164,7 @@ const makeScripted = (): Scripted => ({
   dispatches: [],
   receipts: new Set(),
   rejectedReceipts: new Set(),
+  extraChildRuns: [],
   childThreadId: null,
   childCommandId: null,
   childStatus: "completed",
@@ -255,17 +273,29 @@ const withSession = <A, E>(
                 if (scripted.childThreadId !== null && target === scripted.childThreadId)
                   return Effect.succeed({
                     runs: [
-                      childRun(
-                        target,
-                        scripted.childStatus,
-                        scripted.childCommandId === null
-                          ? undefined
-                          : IdAllocator.derive.delegatedTaskMessage({
-                              commandId: CommandId.make(scripted.childCommandId),
+                      childRun(target, scripted.childStatus, {
+                        ...(scripted.childCommandId === null
+                          ? {}
+                          : {
+                              userMessageId: IdAllocator.derive.delegatedTaskMessage({
+                                commandId: CommandId.make(scripted.childCommandId),
+                              }),
                             }),
+                      }),
+                      ...scripted.extraChildRuns.map((extra) =>
+                        childRun(target, extra.status, {
+                          id: extra.id,
+                          ordinal: extra.ordinal,
+                          userMessageId: MessageId.make(`message:${extra.id}`),
+                        }),
                       ),
                     ],
-                    messages: [assistantMessage(target, scripted.answer)],
+                    messages: [
+                      assistantMessage(target, scripted.answer),
+                      ...scripted.extraChildRuns.map((extra) =>
+                        assistantMessage(target, extra.answer, extra.id),
+                      ),
+                    ],
                   } as unknown as OrchestrationV2ThreadProjection);
                 return Effect.die(`unexpected thread ${target}`);
               },
@@ -576,6 +606,39 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
       }).kind,
     ).toBe("invalid");
   }),
+);
+
+it.live("an answer is bound to the run the round dispatched", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      scripted.answer = criticText;
+      // A later, unrelated follow-up finishes with a different valid answer.
+      scripted.extraChildRuns.push({
+        id: RunId.make("run:review-followup"),
+        ordinal: 2,
+        status: "completed",
+        answer: JSON.stringify({ defects: [], doNotRegress: [] }),
+      });
+      const bound = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(bound.kind).toBe("critic");
+      if (bound.kind === "critic") expect(bound.answer.defects).toHaveLength(1);
+
+      // An interrupted original stays invalid even though the follow-up has a
+      // perfectly good answer; the follow-up never replaces it.
+      scripted.childStatus = "interrupted";
+      const interrupted = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(interrupted.kind).toBe("invalid");
+      if (interrupted.kind === "invalid") expect(interrupted.reason).toContain("interrupted");
+    }),
+  ),
 );
 
 it.live("a restart reconciles a committed session without dispatching again", () =>

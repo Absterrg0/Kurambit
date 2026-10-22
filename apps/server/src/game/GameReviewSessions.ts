@@ -13,7 +13,7 @@ import {
   type GameReviewDoNotRegress,
   type ModelSelection,
   type NodeId,
-  type OrchestrationV2Run,
+  type OrchestrationV2StoredEvent,
   type ProviderInstanceId,
   type ProviderInteractionMode,
   ProviderOptionSelections,
@@ -208,6 +208,8 @@ const ReviewSessionRecord = Schema.Struct({
   /** Present from this version on; absent records predate the pending write. */
   dispatch: Schema.optionalKey(ReviewDispatchRecord),
   command: Schema.optionalKey(ReviewCommandRecord),
+  /** The child run this session dispatched. Later runs never replace it. */
+  runId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 type ReviewSessionRecordType = typeof ReviewSessionRecord.Type;
 
@@ -693,6 +695,19 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.orElseSucceed(() => null),
       );
 
+    /** The run the just-committed child dispatch created, from its own events. */
+    const childRunIdFromDispatch = (
+      result: { readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent> },
+      childThreadId: ThreadId,
+    ) => {
+      for (const stored of result.storedEvents) {
+        const event = stored.event;
+        if (event.type !== "run.created" || event.threadId !== childThreadId) continue;
+        return event.payload.id;
+      }
+      return null;
+    };
+
     /** Re-sends exactly the command the pending record persisted. */
     const commandFromRecord = (record: ReviewSessionRecordType, threadId: ThreadId) => {
       const command = record.command!;
@@ -755,7 +770,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           // The command committed but the process died before confirming its
           // record. The child exists with every audit field already written, so
           // this is a start to finish, not a command to send again.
-          const runId = yield* boundRunId(record);
+          const runId = record.runId ?? (yield* boundRunId(record));
           if (runId === null)
             return {
               kind: "failed",
@@ -763,6 +778,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             } satisfies GameReviewSessionStartResult;
           const confirmed: ReviewSessionRecordType = {
             ...record,
+            runId,
             dispatch: { state: "confirmed" },
           };
           yield* writeRecord(root, key, confirmed);
@@ -790,11 +806,15 @@ export const layer = (options: { readonly stateDir: string }) => {
             return { kind: "failed", reason: detail } satisfies GameReviewSessionStartResult;
           }
         }
-        yield* threads
+        const dispatched = yield* threads
           .dispatch(commandFromRecord(record, threadId))
           .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        const runId =
+          childRunIdFromDispatch(dispatched, ThreadIdSchema.make(record.childThreadId)) ??
+          (yield* boundRunId(record));
         const confirmed: ReviewSessionRecordType = {
           ...record,
+          runId,
           dispatch: { state: "confirmed" },
         };
         yield* writeRecord(root, key, confirmed);
@@ -986,11 +1006,14 @@ export const layer = (options: { readonly stateDir: string }) => {
           interactionMode: origin.thread.interactionMode as ProviderInteractionMode,
           evidenceDirectory,
         } as const;
-        yield* threads
+        const dispatched = yield* threads
           .dispatch(command)
           .pipe(Effect.mapError((cause) => threadFailure("start game review", root, cause)));
+        const runId =
+          childRunIdFromDispatch(dispatched, childThreadId) ?? (yield* boundRunId(record));
         const confirmed: ReviewSessionRecordType = {
           ...record,
+          runId,
           dispatch: { state: "confirmed" },
         };
         yield* writeRecord(root, key, confirmed);
@@ -1010,13 +1033,24 @@ export const layer = (options: { readonly stateDir: string }) => {
               threadFailure("read game review answer", record.childThreadId, cause),
             ),
           );
-        const run = records.runs.reduce<OrchestrationV2Run | undefined>(
-          (newest, candidate) =>
-            newest === undefined || candidate.ordinal > newest.ordinal ? candidate : newest,
-          undefined,
-        );
+        // The run that this session dispatched, never whichever run happens to
+        // be newest: a follow-up cannot replace or hide the original result.
+        const dispatchedMessageId =
+          record.runId === undefined || record.runId === null
+            ? IdAllocator.derive.delegatedTaskMessage({
+                commandId: CommandId.make(record.commandId),
+              })
+            : null;
+        const run =
+          record.runId === undefined || record.runId === null
+            ? records.runs.find((candidate) => candidate.userMessageId === dispatchedMessageId)
+            : records.runs.find((candidate) => candidate.id === record.runId);
         if (run === undefined)
-          return { kind: "invalid", reason: "The review child never ran.", raw: null };
+          return {
+            kind: "invalid",
+            reason: "The review child's dispatched run is not in its history.",
+            raw: null,
+          };
         const terminal =
           run.status === "completed" ||
           run.status === "failed" ||
