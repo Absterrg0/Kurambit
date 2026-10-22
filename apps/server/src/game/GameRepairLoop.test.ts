@@ -6,19 +6,28 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
-  type GameManifest,
-  type GameOperationError,
   type GameReviewBallotAnswer,
   type GameReviewBallotPlan,
+  type GameReviewBudget,
+  type GameReviewCheck,
+  type GameManifest,
+  type GameOperationError,
+  type GameRepairLoop as GameRepairLoopRecord,
   type GameReviewRound,
   type ModelSelection,
   ProviderInstanceId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
@@ -34,6 +43,10 @@ const builderSelection: ModelSelection = {
   instanceId: ProviderInstanceId.make("opencode"),
   model: "opencode-go/deepseek-v4.1-flash",
 };
+const BUILDER_STARTED = "2026-10-01T10:00:00.000Z";
+const BUILDER_FINISHED = "2026-10-01T10:10:00.000Z";
+const EXPORT_FINISHED = "2026-10-01T10:05:00.000Z";
+const EXPORT_BUILD_ID = "a".repeat(64);
 
 const manifest: GameManifest = {
   schemaVersion: 1,
@@ -46,11 +59,13 @@ const manifest: GameManifest = {
 };
 
 interface CheckRun {
-  readonly checks: ReadonlyArray<{
-    readonly id: string;
-    readonly status: "passed" | "failed" | "unmeasured";
-  }>;
+  readonly checks: ReadonlyArray<GameReviewCheck>;
   readonly frames: ReadonlyArray<string>;
+}
+
+interface ChildCompletion {
+  readonly status: string;
+  readonly answer: GameReviewSessions.GameReviewSessionAnswerResult | null;
 }
 
 type AnswerFactory = (context: {
@@ -67,14 +82,24 @@ interface RepairInput {
 
 type RepairHook = (input: RepairInput) => Effect.Effect<void, GameOperationError>;
 
-interface FakeSession {
-  readonly commandId: string;
+/** One review child the loop dispatched. The test completes it itself. */
+interface StartedChild {
+  readonly key: string;
+  readonly role: GameReviewSessions.GameReviewTaskRole;
+  readonly order: number;
+  readonly roundId: string;
   readonly childThreadId: ThreadId;
   readonly runId: RunId;
+  readonly completion: Deferred.Deferred<ChildCompletion>;
+  readonly hung: boolean;
+  completed: boolean;
 }
 
 interface Scripted {
   playable: boolean;
+  exportBuildId: string;
+  exportFinishedAt: string;
+  playtestBuildId: string;
   incumbent: CheckRun;
   candidate: CheckRun;
   exportOutcome: {
@@ -84,25 +109,40 @@ interface Scripted {
   };
   critic: AnswerFactory | null;
   ballots: ReadonlyArray<AnswerFactory>;
-  /** The child for this key stays pending from its Nth start onwards. */
-  pendingAfter: Record<string, number>;
   promoteKind: "promoted" | "blocked";
   /** Per repair attempt; the last entry repeats. */
   repairs: ReadonlyArray<RepairHook | null>;
-  /** Survives a restart, exactly as the on-disk session records do. */
-  readonly sessions: Map<string, FakeSession>;
-  readonly starts: Array<{ key: string; input: GameReviewSessions.GameReviewSessionStartInput }>;
+  /** Complete this role as soon as it is dispatched, before the loop waits. */
+  completeInStart: ReadonlySet<string>;
+  /** This role ignores its interrupt, so the loop's finalizer times out. */
+  hungRoles: ReadonlySet<string>;
+  /** The thread's runs; a test may append a later text-only turn. */
+  readonly runs: Array<{
+    readonly id: RunId;
+    readonly status: string;
+    readonly rootNodeId: string | null;
+    readonly modelSelection: ModelSelection;
+    readonly requestedAt: DateTime.Utc;
+    readonly startedAt: DateTime.Utc | null;
+    readonly completedAt: DateTime.Utc | null;
+  }>;
+  readonly checks: Array<{ target: string; inputs: unknown }>;
+  readonly starts: Array<StartedChild>;
   readonly interrupts: Array<{ threadId: ThreadId; runId: string | null; reason: string }>;
-  readonly joins: Array<{ threadId: ThreadId; runId: string | null }>;
+  readonly completed: Array<{ key: string; status: string }>;
 }
 
 const makeScripted = (): Scripted => ({
   playable: true,
+  exportBuildId: EXPORT_BUILD_ID,
+  exportFinishedAt: EXPORT_FINISHED,
+  playtestBuildId: EXPORT_BUILD_ID,
   incumbent: {
     checks: [
       { id: "boot", status: "passed" },
       { id: "input", status: "passed" },
       { id: "state", status: "passed" },
+      { id: "hud", status: "passed" },
     ],
     frames: [],
   },
@@ -111,19 +151,32 @@ const makeScripted = (): Scripted => ({
       { id: "boot", status: "passed" },
       { id: "input", status: "passed" },
       { id: "state", status: "passed" },
+      { id: "hud", status: "passed" },
     ],
     frames: [],
   },
   exportOutcome: { outcome: "passed", finishedAt: null, detail: null },
   critic: null,
   ballots: [],
-  pendingAfter: {},
   promoteKind: "promoted",
   repairs: [],
-  sessions: new Map(),
+  completeInStart: new Set(),
+  hungRoles: new Set(),
+  runs: [
+    {
+      id: builderRunId,
+      status: "completed",
+      rootNodeId: builderNodeId,
+      modelSelection: builderSelection,
+      requestedAt: DateTime.makeUnsafe(BUILDER_STARTED),
+      startedAt: DateTime.makeUnsafe(BUILDER_STARTED),
+      completedAt: DateTime.makeUnsafe(BUILDER_FINISHED),
+    },
+  ],
+  checks: [],
   starts: [],
   interrupts: [],
-  joins: [],
+  completed: [],
 });
 
 const criticAnswer = (defects: number): GameReviewSessions.GameReviewSessionAnswerResult => ({
@@ -143,10 +196,7 @@ const criticAnswer = (defects: number): GameReviewSessions.GameReviewSessionAnsw
 const sideFor = (plan: GameReviewBallotPlan, artifact: "incumbent" | "challenger") =>
   plan.main.A === artifact ? "A" : plan.main.B === artifact ? "B" : "tie";
 
-/**
- * One ballot that behaves as asked: promote says the challenger is better on
- * every facet, tie says nothing improved, worse picks the incumbent.
- */
+/** One ballot that behaves as asked: promote says the challenger is better. */
 const ballotAnswer = (
   plan: GameReviewBallotPlan,
   verdict: "promote" | "tie" | "worse",
@@ -196,7 +246,7 @@ const repairWith =
       );
       const recorded = yield* input.rounds.recordPostRepair(input.root, input.roundId);
       const candidate = yield* Effect.promise(() =>
-        makeCandidate(input.root, options.build ?? "repaired-build"),
+        makeCandidate(input.root, options.build ?? `repaired-build-${input.roundId}`),
       );
       yield* input.rounds.recordCandidate(input.root, input.roundId, {
         buildId: candidate.buildId,
@@ -208,24 +258,39 @@ const repairWith =
       });
     });
 
-/** A repair that died before writing: the folder still matches the incumbent. */
-const repairWithoutWriting: RepairHook = () => Effect.void;
-
-interface HarnessInput {
-  readonly body: (input: {
-    readonly root: string;
-    readonly stateDir: string;
-    readonly scripted: Scripted;
-    readonly loop: GameRepairLoop.GameRepairLoop["Service"];
-    readonly rounds: GameRoundStore.GameRoundStore["Service"];
-    readonly restart: () => Effect.Effect<{
-      readonly loop: GameRepairLoop.GameRepairLoop["Service"];
-      readonly rounds: GameRoundStore.GameRoundStore["Service"];
-    }>;
-  }) => Effect.Effect<void, GameOperationError>;
+interface Services {
+  readonly loop: GameRepairLoop.GameRepairLoop["Service"];
+  readonly rounds: GameRoundStore.GameRoundStore["Service"];
+  readonly admission: GameAdmission.GameAdmission["Service"];
 }
 
-const withLoop = (body: HarnessInput["body"]) =>
+interface Fixture {
+  readonly root: string;
+  readonly stateDir: string;
+  readonly scripted: Scripted;
+  /** Builds a fresh service stack (a restart) inside a fresh scope. */
+  readonly withServices: <A, E>(
+    use: (services: Services) => Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E>;
+  /** Consumes every dispatched child and completes it in dispatch order. */
+  readonly drive: (services: Services) => Effect.Effect<void>;
+  /** Waits for the next dispatched child. */
+  readonly take: Effect.Effect<StartedChild>;
+  readonly complete: (
+    services: Services,
+    child: StartedChild,
+  ) => Effect.Effect<void, GameOperationError>;
+}
+
+interface FixtureOptions {
+  readonly budget?: GameReviewBudget | undefined;
+  readonly childJoinTimeoutMs?: number | undefined;
+}
+
+const withLoop = <A, E>(
+  body: (fixture: Fixture) => Effect.Effect<A, E>,
+  options: FixtureOptions = {},
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const base = yield* Effect.acquireRelease(
@@ -271,101 +336,141 @@ const withLoop = (body: HarnessInput["body"]) =>
         ],
       };
 
+      const startQueue = yield* Queue.unbounded<StartedChild>();
+      const children = new Map<string, StartedChild>();
+
+      const finish = (
+        child: StartedChild,
+        status: string,
+        answer: GameReviewSessions.GameReviewSessionAnswerResult | null,
+      ) =>
+        Effect.gen(function* () {
+          if (child.completed) return;
+          child.completed = true;
+          scripted.completed.push({ key: child.key, status });
+          yield* Deferred.succeed(child.completion, { status, answer });
+        });
+
+      const settle = (
+        services: Services,
+        child: StartedChild,
+      ): Effect.Effect<void, GameOperationError> =>
+        Effect.gen(function* () {
+          if (child.role === "repair") {
+            const attempt = scripted.starts.filter((entry) => entry.role === "repair").length;
+            const hook =
+              scripted.repairs[Math.min(attempt - 1, scripted.repairs.length - 1)] ?? null;
+            if (hook !== null)
+              yield* hook({ root, roundId: child.roundId, rounds: services.rounds });
+            yield* finish(child, "completed", null);
+            return;
+          }
+          if (child.role === "critic") {
+            const factory = scripted.critic;
+            yield* finish(
+              child,
+              "completed",
+              factory === null
+                ? null
+                : factory({ order: 0, round: null as never, plan: null as never }),
+            );
+            return;
+          }
+          const state = yield* services.rounds.read(root);
+          const round = state.rounds.find((entry) => entry.id === child.roundId);
+          const plan = round?.ballots?.find((entry) => entry.order === child.order);
+          const factory = scripted.ballots[child.order];
+          yield* finish(
+            child,
+            "completed",
+            factory === undefined || plan === undefined || round === undefined
+              ? null
+              : factory({ order: child.order, round, plan }),
+          );
+        });
+
       const makeLayer = () => {
         const sessions = Layer.effect(
           GameReviewSessions.GameReviewSessions,
           Effect.gen(function* () {
-            const rounds = yield* GameRoundStore.GameRoundStore;
-            const start: GameReviewSessions.GameReviewSessions["Service"]["start"] = (input) => {
-              const order = input.order ?? 0;
-              const roleKey = `${input.role}:${order}`;
-              const key = `${input.roundId}:${roleKey}`;
-              const existing = scripted.sessions.get(key);
-              if (existing !== undefined)
-                return Effect.succeed({
-                  kind: "started" as const,
-                  commandId: existing.commandId,
-                  childThreadId: existing.childThreadId,
-                  taskId: null,
-                  runId: existing.runId,
-                  evidenceHash: null,
-                  reconciled: true,
-                });
-              const entry: FakeSession = {
-                commandId: `command:${input.roundId}:${roleKey}`,
-                childThreadId: ThreadId.make(`thread:child:${input.roundId}:${roleKey}`),
-                runId: RunId.make(`run:child:${input.roundId}:${roleKey}`),
-              };
-              scripted.sessions.set(key, entry);
-              scripted.starts.push({ key: roleKey, input });
-              if (input.role === "repair") {
-                const attempt = scripted.starts.filter((start) => start.key === roleKey).length;
-                const hook =
-                  scripted.repairs[Math.min(attempt - 1, scripted.repairs.length - 1)] ?? null;
-                if (hook !== null)
-                  return hook({ root, roundId: input.roundId, rounds }).pipe(
-                    Effect.as({
-                      kind: "started" as const,
-                      commandId: entry.commandId,
-                      childThreadId: entry.childThreadId,
-                      taskId: null,
-                      runId: entry.runId,
-                      evidenceHash: null,
-                      reconciled: false,
-                    }),
+            const start: GameReviewSessions.GameReviewSessions["Service"]["start"] = (input) =>
+              Effect.gen(function* () {
+                const order = input.order ?? 0;
+                const key = `${input.roundId}:${input.role}:${order}`;
+                const existing = children.get(key);
+                if (existing !== undefined)
+                  return {
+                    kind: "started" as const,
+                    commandId: `command:${key}`,
+                    childThreadId: existing.childThreadId,
+                    taskId: null,
+                    runId: existing.runId,
+                    evidenceHash: null,
+                    reconciled: true,
+                  };
+                const completion = yield* Deferred.make<ChildCompletion>();
+                const child: StartedChild = {
+                  key,
+                  role: input.role,
+                  order,
+                  roundId: input.roundId,
+                  childThreadId: ThreadId.make(`thread:child:${key}`),
+                  runId: RunId.make(`run:child:${key}`),
+                  completion,
+                  hung: scripted.hungRoles.has(`${input.role}:${order}`),
+                  completed: false,
+                };
+                children.set(key, child);
+                scripted.starts.push(child);
+                yield* Queue.offer(startQueue, child);
+                if (scripted.completeInStart.has(`${input.role}:${order}`)) {
+                  const factory = scripted.critic;
+                  yield* finish(
+                    child,
+                    "completed",
+                    input.role === "critic" && factory !== null
+                      ? factory({ order, round: null as never, plan: null as never })
+                      : null,
                   );
-              }
-              return Effect.succeed({
-                kind: "started" as const,
-                commandId: entry.commandId,
-                childThreadId: entry.childThreadId,
-                taskId: null,
-                runId: entry.runId,
-                evidenceHash: null,
-                reconciled: false,
+                }
+                return {
+                  kind: "started" as const,
+                  commandId: `command:${key}`,
+                  childThreadId: child.childThreadId,
+                  taskId: null,
+                  runId: child.runId,
+                  evidenceHash: null,
+                  reconciled: false,
+                };
               });
-            };
             const answer: GameReviewSessions.GameReviewSessions["Service"]["answer"] = (input) =>
               Effect.gen(function* () {
                 const order = input.order ?? 0;
-                if (input.role === "critic") {
-                  const factory = scripted.critic;
-                  return factory === null
-                    ? ({ kind: "pending" as const } as const)
-                    : factory({
-                        order,
-                        round: null as unknown as GameReviewRound,
-                        plan: null as unknown as GameReviewBallotPlan,
-                      });
-                }
-                const state = yield* rounds.read(root);
-                const round = state.rounds.find((entry) => entry.id === input.roundId);
-                const plan = round?.ballots?.find((entry) => entry.order === order);
-                if (round === undefined || plan === undefined)
-                  return { kind: "invalid" as const, reason: "no ballot plan", raw: null };
-                const factory = scripted.ballots[order];
-                return factory === undefined
-                  ? ({ kind: "pending" as const } as const)
-                  : factory({ order, round, plan });
+                const child = children.get(`${input.roundId}:${input.role}:${order}`);
+                if (child === undefined) return { kind: "pending" as const };
+                const polled = yield* Deferred.poll(child.completion);
+                if (Option.isNone(polled)) return { kind: "pending" as const };
+                const finished = yield* polled.value;
+                if (finished.answer === null)
+                  return { kind: "invalid" as const, reason: "no answer", raw: null };
+                return finished.answer;
               });
             const runStatus: GameReviewSessions.GameReviewSessions["Service"]["runStatus"] = (
               input,
-            ) => {
-              const roleKey = `${input.role}:${input.order ?? 0}`;
-              const entry = scripted.sessions.get(`${input.roundId}:${roleKey}`);
-              if (entry === undefined) return Effect.succeed({ kind: "missing" as const });
-              const attempt = scripted.starts.filter((start) => start.key === roleKey).length;
-              const pendingAfter = scripted.pendingAfter[roleKey];
-              return Effect.succeed(
-                pendingAfter !== undefined && attempt >= pendingAfter
-                  ? ({ kind: "pending" as const, runId: entry.runId } as const)
-                  : ({
-                      kind: "terminal" as const,
-                      runId: entry.runId,
-                      status: "completed" as const,
-                    } as const),
-              );
-            };
+            ) =>
+              Effect.gen(function* () {
+                const order = input.order ?? 0;
+                const child = children.get(`${input.roundId}:${input.role}:${order}`);
+                if (child === undefined) return { kind: "missing" as const };
+                const polled = yield* Deferred.poll(child.completion);
+                if (Option.isNone(polled)) return { kind: "pending" as const, runId: child.runId };
+                const finished = yield* polled.value;
+                return {
+                  kind: "terminal" as const,
+                  runId: child.runId,
+                  status: finished.status as "completed",
+                };
+              });
             return GameReviewSessions.GameReviewSessions.of({
               start,
               answer,
@@ -381,6 +486,7 @@ const withLoop = (body: HarnessInput["body"]) =>
           Effect.gen(function* () {
             const rounds = yield* GameRoundStore.GameRoundStore;
             const check: GameRepairStudio.GameRepairStudio["Service"]["check"] = (input) => {
+              scripted.checks.push({ target: input.target, inputs: input.inputs });
               const run = input.target === "incumbent" ? scripted.incumbent : scripted.candidate;
               return Effect.succeed({
                 checks: run.checks,
@@ -388,7 +494,6 @@ const withLoop = (body: HarnessInput["body"]) =>
                   label: `frame ${String(index + 1)}`,
                   path,
                 })),
-                steps: [],
               });
             };
             const promote: GameRepairStudio.GameRepairStudio["Service"]["promote"] = (
@@ -407,7 +512,19 @@ const withLoop = (body: HarnessInput["body"]) =>
                       ),
                     );
             return GameRepairStudio.GameRepairStudio.of({
-              playable: () => Effect.succeed(scripted.playable),
+              exportProvenance: () =>
+                Effect.succeed({
+                  playable: scripted.playable,
+                  exportBuildId: scripted.exportBuildId,
+                  exportFinishedAt: scripted.exportFinishedAt,
+                  playtestBuildId: scripted.playtestBuildId,
+                }),
+              frozenInputs: () =>
+                Effect.succeed({
+                  steps: [{ key: "ArrowRight", holdMs: 120 }],
+                  viewport: { width: 1152, height: 648 },
+                  seed: null,
+                }),
               check,
               exportState: () =>
                 Effect.succeed({
@@ -427,25 +544,22 @@ const withLoop = (body: HarnessInput["body"]) =>
         });
 
         const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
-          getThreadRecords: () =>
-            Effect.succeed({
-              thread: {
-                id: threadId,
-                title: "Build it",
-                deletedAt: null,
-                modelSelection: builderSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-              },
-              runs: [
-                {
-                  id: builderRunId,
-                  status: "completed",
-                  rootNodeId: builderNodeId,
-                  modelSelection: builderSelection,
-                },
-              ],
-            }) as never,
+          getThreadRecords: (id: ThreadId) =>
+            Effect.succeed(
+              (id === threadId
+                ? {
+                    thread: {
+                      id: threadId,
+                      title: "Build it",
+                      deletedAt: null,
+                      modelSelection: builderSelection,
+                      runtimeMode: "full-access",
+                      interactionMode: "default",
+                    },
+                    runs: scripted.runs,
+                  }
+                : { runs: [], providerTurns: [] }) as never,
+            ),
           getThreadShell: () =>
             Effect.succeed({
               projectId: "project:repair",
@@ -457,445 +571,489 @@ const withLoop = (body: HarnessInput["body"]) =>
               runId: input.runId === undefined ? null : String(input.runId),
               reason: input.reason ?? "",
             });
-            return Effect.succeed({ type: "no_active_run" as const });
+            const child = [...children.values()].find(
+              (candidate) => candidate.childThreadId === input.threadId,
+            );
+            if (child === undefined) return Effect.succeed({ type: "no_active_run" as const });
+            return Effect.gen(function* () {
+              // A hung child still answers an interrupt; it just never finishes
+              // on its own.
+              yield* finish(child, "interrupted", null);
+              return { type: "no_active_run" as const };
+            });
           },
           waitForThread: (input) => {
-            scripted.joins.push({
-              threadId: input.threadId,
-              runId: input.runId === undefined ? null : String(input.runId),
-            });
-            return Effect.succeed({ threadId: input.threadId, run: null, timedOut: false });
+            const child = [...children.values()].find(
+              (candidate) => candidate.childThreadId === input.threadId,
+            );
+            if (child === undefined)
+              return Effect.succeed({ threadId: input.threadId, run: null, timedOut: true });
+            const wait = child.hung
+              ? Effect.never
+              : Deferred.await(child.completion).pipe(Effect.asVoid);
+            return wait.pipe(
+              Effect.as({ threadId: input.threadId, run: null, timedOut: false }) as never,
+            );
           },
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>);
 
-        return GameRepairLoop.layer({ stateDir }).pipe(
+        return GameRepairLoop.layer({
+          stateDir,
+          ...(options.budget === undefined ? {} : { budget: options.budget }),
+          childJoinTimeoutMs: options.childJoinTimeoutMs ?? 40,
+        }).pipe(
           Layer.provideMerge(
             Layer.mergeAll(studio, sessions).pipe(
               Layer.provideMerge(GameRoundStore.layer({ stateDir })),
             ),
           ),
+          Layer.provideMerge(GameAdmission.layer({ stateDir })),
           Layer.provide(projects),
           Layer.provide(threads),
           Layer.provide(NodeServices.layer),
         );
       };
 
-      const build = () =>
-        Effect.gen(function* () {
-          const loop = yield* GameRepairLoop.GameRepairLoop;
-          const rounds = yield* GameRoundStore.GameRoundStore;
-          return { loop, rounds };
-        }).pipe(Effect.provide(makeLayer()));
+      const withServices: Fixture["withServices"] = (use) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(makeLayer());
+            return yield* use({
+              loop: Context.get(context, GameRepairLoop.GameRepairLoop),
+              rounds: Context.get(context, GameRoundStore.GameRoundStore),
+              admission: Context.get(context, GameAdmission.GameAdmission),
+            });
+          }),
+        );
 
-      const first = yield* build();
+      const drive = (services: Services) =>
+        Effect.gen(function* () {
+          for (;;) {
+            const child = yield* Queue.take(startQueue);
+            yield* settle(services, child).pipe(Effect.orDie);
+          }
+        });
+
       return yield* body({
         root,
         stateDir,
         scripted,
-        loop: first.loop,
-        rounds: first.rounds,
-        restart: build,
+        withServices,
+        drive,
+        take: Queue.take(startQueue),
+        complete: settle,
       });
     }),
   );
 
-const ensureLoop = (loop: GameRepairLoop.GameRepairLoop["Service"]) =>
-  loop.ensure({ threadId, runId: builderRunId, nodeId: builderNodeId as never });
+const ensureLoop = (services: Services) =>
+  services.loop.ensure({ threadId, runId: builderRunId, nodeId: builderNodeId as never });
 
-const readLoop = (loop: GameRepairLoop.GameRepairLoop["Service"]) => loop.read(threadId);
+const readLoop = (services: Services) => services.loop.read(threadId);
 
-const repairStarts = (scripted: Scripted) =>
-  scripted.starts.filter((start) => start.key === "repair:0");
+/** Runs the loop to its end while completing every child as it is dispatched. */
+const runToCompletion = (services: Services, fixture: Fixture) =>
+  Effect.gen(function* () {
+    const driver = yield* fixture.drive(services).pipe(Effect.forkChild);
+    yield* ensureLoop(services);
+    yield* services.loop.awaitIdle(threadId);
+    yield* Fiber.interrupt(driver);
+  });
+
+const loopRecord = (record: GameRepairLoopRecord | null) => {
+  expect(record).not.toBeNull();
+  return record!;
+};
 
 it.live("keeps a better build, then stops when the critic finds no defects", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.promotedRounds).toHaveLength(1);
+        expect(state.repairsUsed).toBe(1);
+        expect(state.reason).toContain("zero-defects");
+        expect(state).not.toHaveProperty("phase");
+        expect(state).not.toHaveProperty("wait");
+        const game = yield* services.rounds.read(fixture.root);
+        expect(game.selected?.roundId).toBe(state.promotedRounds[0]);
+        expect(game.rounds.find((round) => round.id === state.promotedRounds[0])?.status).toBe(
+          "promoted",
+        );
+        expect("resume" in services.loop).toBe(false);
+      }),
+    ),
+  ),
+);
+
+it.live("rolls back a candidate that fails a frozen check and keeps reviewing", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.candidate = {
+          ...scripted.candidate,
+          checks: scripted.candidate.checks.map((check) =>
+            check.id === "state" ? { id: "state", status: "failed" as const } : check,
+          ),
+        };
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        const vetoed = game.rounds.find((round) => round.reason?.includes("mechanical-veto"));
+        expect(vetoed?.status).toBe("rejected");
+        expect(vetoed?.reason).toContain("check-failed: state");
+        expect(game.selected).toBeNull();
+      }),
+    ),
+  ),
+);
+
+it.live("a ballot that prefers a control build is discarded and the incumbent is kept", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote", { control: "A" }),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.rounds.some((round) => round.reason?.includes("failed-control"))).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("a tie keeps the incumbent", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "tie"),
+          ({ plan }) => ballotAnswer(plan, "tie"),
+        ];
+        yield* runToCompletion(services, fixture);
+        expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.rounds.some((round) => round.reason?.includes("tie: ballot"))).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("a ballot that did not preserve a do-not-regress item rejects the round", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote", { preservation: "unknown" }),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.rounds.some((round) => round.reason?.includes("preservation-lost"))).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("zero defects stop the loop without a repair or a selection change", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.critic = () => criticAnswer(0);
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.repairsUsed).toBe(0);
+        expect(state.reason).toContain("zero-defects");
+        expect(fixture.scripted.starts.filter((child) => child.role === "repair")).toHaveLength(0);
+      }),
+    ),
+  ),
+);
+
+it.live("the third started repair is judged before the budget stops the loop", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [
+          repairWith(),
+          repairWith({ build: "second" }),
+          repairWith({ build: "third" }),
+        ];
+        scripted.critic = () => criticAnswer(1);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "tie"),
+          ({ plan }) => ballotAnswer(plan, "tie"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(3);
+        expect(state.repairsUsed).toBe(3);
+        expect(state.reason).toContain("budget-exhausted");
+        const game = yield* services.rounds.read(root);
+        const judged = game.rounds.filter((round) => (round.candidateChecks ?? []).length > 0);
+        expect(judged).toHaveLength(3);
+        expect((judged.at(-1)?.ballotAnswers ?? []).length).toBe(2);
+      }),
+    ),
+  ),
+);
+
+it.live("a child that finished before the loop waited is never lost", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        // The critic completes inside `start`, before `waitForThread` runs.
+        scripted.completeInStart = new Set(["critic:0"]);
+        scripted.critic = () => criticAnswer(0);
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.reason).toContain("zero-defects");
+      }),
+    ),
+  ),
+);
+
+it.live("superseding while a repair runs joins it and promotes nothing", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        let repairRan = false;
+        scripted.repairs = [
+          (input) =>
+            repairWith()(input).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  repairRan = true;
+                }),
+              ),
+            ),
+        ];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        expect(critic.role).toBe("critic");
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        yield* services.loop.interrupt(threadId, "A user action superseded the review.");
+        // The child was stopped before the creator action returned.
+        expect(repairRan).toBe(false);
+        expect(scripted.completed.some((entry) => entry.status === "interrupted")).toBe(true);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected).toBeNull();
+        expect(game.rounds.every((round) => round.status === "stopped")).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("a supersede racing loop start never leaves a loop running", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.critic = () => criticAnswer(0);
+        // A creator action admitted before the loop starts: the completion that
+        // would have started it is stale, and no second loop is created later.
+        yield* services.admission.admit({
+          root: fixture.root,
+          threadId,
+          reason: "The creator sent a new turn.",
+        });
+        const created = yield* ensureLoop(services);
+        expect(created).toBeNull();
+        expect((yield* readLoop(services))?.status).not.toBe("running");
+
+        // And the concurrent order: whichever wins, nothing is left running.
+        yield* Effect.all(
+          [
+            ensureLoop(services),
+            services.admission.admit({
+              root: fixture.root,
+              threadId,
+              reason: "The creator sent a new turn.",
+            }),
+          ],
+          { concurrency: 2 },
+        );
+        yield* services.loop.awaitIdle(threadId);
+        expect((yield* readLoop(services))?.status).not.toBe("running");
+        expect(scripted.completed.filter((entry) => entry.status === "completed")).toHaveLength(0);
+      }),
+    ),
+  ),
+);
+
+it.live("the whole-loop deadline interrupts a hung child and nothing promotes", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.hungRoles = new Set(["repair:0"]);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          expect(repair.role).toBe("repair");
+          // Never complete it: the loop's own deadline must end the round.
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("interrupted");
+          expect(state.decision).toBe("interrupt");
+          expect(state.reason).toContain("deadline");
+          expect(scripted.interrupts.length).toBeGreaterThan(0);
+          const game = yield* services.rounds.read(root);
+          expect(game.selected).toBeNull();
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 150 } },
+  ),
+);
+
+it.live("a restart marks the loop interrupted, keeps the incumbent and has no Resume", () =>
+  withLoop((fixture) =>
     Effect.gen(function* () {
+      const { scripted, root } = fixture;
       scripted.repairs = [repairWith()];
-      let reviews = 0;
-      scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote"),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.status).toBe("stopped");
-      expect(state?.promotedRounds).toHaveLength(1);
-      expect(state?.repairsUsed).toBe(1);
-      expect(state?.reason).toContain("zero-defects");
-      const game = yield* rounds.read(root);
-      expect(game.selected?.roundId).toBe(state?.promotedRounds[0]);
-      // The winning round is promoted and the clean review round stopped.
-      expect(game.rounds.find((round) => round.id === state?.promotedRounds[0])?.status).toBe(
-        "promoted",
+      scripted.critic = () => criticAnswer(1);
+      yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          // The repair writes the folder, then the server dies before judging.
+          yield* settleRepairAndStop(fixture, services, repair);
+        }),
       );
-      expect(repairStarts(scripted)).toHaveLength(1);
-    }),
-  ),
-);
 
-it.live("rolls a mechanically vetoed repair back and keeps the incumbent", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [
-        repairWith({ source: "extends Node2D # broken\n" }),
-        repairWithoutWriting,
-      ];
-      scripted.pendingAfter = { "repair:0": 2 };
-      scripted.critic = () => criticAnswer(1);
-      scripted.candidate = {
-        ...scripted.candidate,
-        checks: [
-          { id: "boot", status: "passed" },
-          { id: "input", status: "failed" },
-          { id: "state", status: "passed" },
-        ],
-      };
-      const before = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+      yield* fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const interrupted = yield* services.loop.recover();
+          expect(interrupted).toContain(root);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("interrupted");
+          expect(state.decision).toBe("interrupt");
+          expect(state.reason).toContain("restore the previous version");
+          const game = yield* services.rounds.read(root);
+          expect(game.selected).toBeNull();
+          expect(game.rounds.every((round) => round.status !== "running")).toBe(true);
+          expect("resume" in services.loop).toBe(false);
+        }),
       );
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.status).toBe("running");
-      expect(state?.wait?.role).toBe("repair");
-      expect(state?.lastRejection).toContain("mechanical-veto");
-      const after = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
-      );
-      expect(after).toBe(before);
-      const game = yield* rounds.read(root);
-      const rejected = game.rounds.find((round) => round.status === "rejected");
-      expect(rejected?.mechanicalVeto).toContain("check-failed");
-      expect(repairStarts(scripted)).toHaveLength(2);
     }),
   ),
 );
 
-it.live("a rejection reason reaches the next repair with the remaining budget", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith({ source: "extends Node2D # broken\n" })];
-      scripted.critic = () => criticAnswer(1);
-      scripted.candidate = {
-        ...scripted.candidate,
-        checks: [{ id: "boot", status: "failed" }],
-      };
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.repairsUsed).toBe(3);
-      expect(state?.status).toBe("stopped");
-      expect(state?.reason).toContain("budget-exhausted");
-      const third = repairStarts(scripted)[2]!.input;
-      expect(third.repair?.previousRejection).toContain("mechanical-veto");
-      expect(third.repair?.remainingBudget).toContain("1 repair");
-      expect(state?.lastRejection).toContain("mechanical-veto");
-    }),
+/** Runs half a repair (writes + candidate) and leaves the loop before it judges. */
+const settleRepairAndStop = (fixture: Fixture, services: Services, repair: StartedChild) =>
+  Effect.gen(function* () {
+    const attempt = fixture.scripted.starts.filter((entry) => entry.role === "repair").length;
+    const hook = fixture.scripted.repairs[attempt - 1] ?? null;
+    if (hook !== null)
+      yield* hook({ root: fixture.root, roundId: repair.roundId, rounds: services.rounds });
+  });
+
+it.live("a later text-only turn never starts a loop", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        const textRunId = RunId.make("run:text-only");
+        scripted.runs.push({
+          id: textRunId,
+          status: "completed",
+          rootNodeId: "node:text-only",
+          modelSelection: builderSelection,
+          requestedAt: DateTime.makeUnsafe("2026-10-01T10:20:00.000Z"),
+          startedAt: DateTime.makeUnsafe("2026-10-01T10:20:00.000Z"),
+          completedAt: DateTime.makeUnsafe("2026-10-01T10:21:00.000Z"),
+        });
+        // The later turn exported nothing, so it starts no review.
+        expect(
+          yield* services.loop.ensure({
+            threadId,
+            runId: textRunId,
+            nodeId: "node:text-only" as never,
+          }),
+        ).toBeNull();
+        // The original builder run is no longer the newest work either.
+        expect(yield* ensureLoop(services)).toBeNull();
+        expect(yield* readLoop(services)).toBeNull();
+      }),
+    ),
   ),
 );
 
-it.live("a tie keeps the incumbent and spends the budget repairing", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "tie"),
-        ({ plan }) => ballotAnswer(plan, "tie"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.status).toBe("stopped");
-      expect(state?.reason).toContain("budget-exhausted");
-      expect(state?.promotedRounds).toHaveLength(0);
-      expect(state?.lastRejection).toContain("tie:");
-    }),
-  ),
-);
-
-it.live("position-biased reverse ballots disagree and the incumbent stays", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote"),
-        ({ plan }) => ballotAnswer(plan, "worse"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.promotedRounds).toHaveLength(0);
-      expect(state?.lastRejection).toContain("worse-build");
-    }),
-  ),
-);
-
-it.live("a failed identical-build control keeps the incumbent", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote", { control: "A" }),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.promotedRounds).toHaveLength(0);
-      expect(state?.lastRejection).toContain("failed-control");
-    }),
-  ),
-);
-
-it.live("an unknown preservation item vetoes a promotion", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote", { preservation: "unknown" }),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.promotedRounds).toHaveLength(0);
-      expect(state?.lastRejection).toContain("preservation-lost");
-    }),
-  ),
-);
-
-it.live("an invalid ballot keeps the incumbent and records why", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        () => ({ kind: "invalid", reason: "the ballot cited a missing frame", raw: "{}" }),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.promotedRounds).toHaveLength(0);
-      expect(state?.lastRejection).toContain("invalid-ballot");
-      const game = yield* rounds.read(root);
-      expect(game.selected).toBeNull();
-    }),
-  ),
-);
-
-it.live("zero defects stops before any repair child", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.critic = () => criticAnswer(0);
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.status).toBe("stopped");
-      expect(state?.reason).toContain("zero-defects");
-      expect(state?.repairsUsed).toBe(0);
-      expect(repairStarts(scripted)).toHaveLength(0);
-      const game = yield* rounds.read(root);
-      expect(game.rounds[0]?.status).toBe("stopped");
-      expect(game.rounds[0]?.decision).toBe("stop");
-    }),
-  ),
-);
-
-it.live("the budget stops after three attempted repairs", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "tie"),
-        ({ plan }) => ballotAnswer(plan, "tie"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.repairsUsed).toBe(3);
-      expect(repairStarts(scripted)).toHaveLength(3);
-      const game = yield* rounds.read(root);
-      expect(game.rounds.filter((round) => round.status === "rejected")).toHaveLength(3);
-    }),
-  ),
-);
-
-it.live("a repair that exports the incumbent's own bytes is rejected unchanged", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote"),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.promotedRounds).toHaveLength(1);
-      expect(state?.lastRejection).toContain("unchanged");
-      expect(state?.status).toBe("stopped");
-    }),
-  ),
-);
-
-it.live("a user action cancels and joins a running repair before it proceeds", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.pendingAfter = { "repair:0": 1 };
-      yield* ensureLoop(loop);
-      const parked = yield* readLoop(loop);
-      expect(parked?.status).toBe("running");
-      expect(parked?.wait?.role).toBe("repair");
-
-      yield* loop.supersede(threadId, "The creator's new turn superseded the review.");
-      expect(scripted.interrupts).toHaveLength(1);
-      expect(scripted.interrupts[0]?.runId).toBe(String(parked?.wait?.runId));
-      expect(scripted.joins).toHaveLength(1);
-      const state = yield* readLoop(loop);
-      expect(state?.status).toBe("stopped");
-      expect(state?.decision).toBe("stop");
-      const game = yield* rounds.read(root);
-      expect(game.rounds[0]?.status).toBe("stopped");
-      expect(game.selected).toBeNull();
-
-      // The child finishing after supersession cannot promote.
-      scripted.pendingAfter = {};
-      yield* loop.kick(threadId);
-      expect((yield* readLoop(loop))?.status).toBe("stopped");
-      expect((yield* rounds.read(root)).selected).toBeNull();
-    }),
-  ),
-);
-
-it.live("a restart mid-ballot reconciles and resumes without a second dispatch", () =>
-  withLoop(({ scripted, loop, restart }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "promote"),
-        ({ plan }) => ballotAnswer(plan, "promote"),
-      ];
-      scripted.pendingAfter = { "ballot:0": 1 };
-      yield* ensureLoop(loop);
-      const parked = yield* readLoop(loop);
-      expect(parked?.phase).toBe("ballots");
-      expect(scripted.starts.filter((start) => start.key === "ballot:0")).toHaveLength(1);
-
-      const second = yield* restart();
-      yield* second.loop.recover();
-      const paused = yield* second.loop.read(threadId);
-      expect(paused?.status).toBe("paused");
-      expect(paused?.resumeRequired).toBe(true);
-
-      scripted.pendingAfter = {};
-      const resumed = yield* second.loop.resume(threadId);
-      expect(resumed.resumed).toBe(true);
-      const state = yield* second.loop.read(threadId);
-      expect(state?.status).toBe("stopped");
-      expect(state?.promotedRounds).toHaveLength(1);
-      // The ballot that was already dispatched was read from its record; the
-      // restart dispatched no replacement command.
-      expect(scripted.starts.filter((start) => start.key === "ballot:0")).toHaveLength(1);
-    }),
-  ),
-);
-
-it.live("Resume continues an interrupted repair with the remaining budget", () =>
-  withLoop(({ scripted, loop, restart }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWith(), repairWithoutWriting, repairWith()];
-      scripted.critic = () => criticAnswer(1);
-      scripted.ballots = [
-        ({ plan }) => ballotAnswer(plan, "tie"),
-        ({ plan }) => ballotAnswer(plan, "tie"),
-      ];
-      scripted.pendingAfter = { "repair:0": 2 };
-      yield* ensureLoop(loop);
-      const parked = yield* readLoop(loop);
-      expect(parked?.wait?.role).toBe("repair");
-      expect(parked?.repairsUsed).toBe(2);
-
-      const second = yield* restart();
-      yield* second.loop.recover();
-      scripted.pendingAfter = {};
-      const resumed = yield* second.loop.resume(threadId);
-      expect(resumed.resumed).toBe(true);
-      const state = yield* second.loop.read(threadId);
-      expect(state?.repairsUsed).toBe(3);
-      const third = repairStarts(scripted)[2]!.input;
-      expect(third.repair?.remainingBudget).toContain("1 repair");
-      expect(third.repair?.previousRejection).toContain("interrupted");
-    }),
-  ),
-);
-
-it.live("a repair that wrote nothing but never exported is rejected as no-output", () =>
-  withLoop(({ scripted, loop, rounds, root }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWithoutWriting];
-      scripted.critic = () => criticAnswer(1);
-      scripted.pendingAfter = { "repair:0": 2 };
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.lastRejection).toContain("no-output");
-      const game = yield* rounds.read(root);
-      const rejected = game.rounds.find((round) => round.status === "rejected");
-      expect(rejected?.reason).toContain("no-output");
-    }),
-  ),
-);
-
-it.live("an export failure is recorded separately from no output", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.repairs = [repairWithoutWriting];
-      scripted.critic = () => criticAnswer(1);
-      scripted.pendingAfter = { "repair:0": 2 };
-      scripted.exportOutcome = {
-        outcome: "failed",
-        finishedAt: DateTime.formatIso(
-          DateTime.makeUnsafe(DateTime.toEpochMillis(DateTime.nowUnsafe()) + 1_000),
-        ),
-        detail: "export command failed",
-      };
-      yield* ensureLoop(loop);
-      const state = yield* readLoop(loop);
-      expect(state?.lastRejection).toContain("export-failed");
-      expect(state?.lastRejection).toContain("export command failed");
-    }),
-  ),
-);
-
-it.live("the builder is never woken; every child is a round task", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.critic = () => criticAnswer(0);
-      yield* ensureLoop(loop);
-      expect(scripted.starts.length).toBeGreaterThan(0);
-      expect(scripted.starts.every((start) => start.input.threadId === threadId)).toBe(true);
-      expect(scripted.interrupts).toHaveLength(0);
-    }),
-  ),
-);
-
-it.live("only a playable export starts a loop", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.playable = false;
-      expect(yield* ensureLoop(loop)).toBeNull();
-      expect(yield* readLoop(loop)).toBeNull();
-    }),
-  ),
-);
-
-it.live("a second completion does not create a second loop", () =>
-  withLoop(({ scripted, loop }) =>
-    Effect.gen(function* () {
-      scripted.critic = () => criticAnswer(0);
-      const first = yield* ensureLoop(loop);
-      const second = yield* ensureLoop(loop);
-      expect(second?.id).toBe(first?.id);
-    }),
+it.live("a repair playtest cannot replace the frozen route", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        // Every check, including the challenger's, used the inputs captured at
+        // start rather than anything the repair wrote.
+        expect(scripted.checks.length).toBeGreaterThanOrEqual(2);
+        for (const check of scripted.checks) {
+          expect(check.inputs).toEqual({
+            steps: [{ key: "ArrowRight", holdMs: 120 }],
+            viewport: { width: 1152, height: 648 },
+            seed: null,
+          });
+        }
+      }),
+    ),
   ),
 );
