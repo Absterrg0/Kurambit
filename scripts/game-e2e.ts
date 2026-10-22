@@ -3,6 +3,7 @@
 import * as NodeUtil from "node:util";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
@@ -46,6 +47,7 @@ import {
   type GameE2eRunSummary,
   type GameE2eTurnRead,
 } from "./game-benchmark/artifacts.ts";
+import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const { values } = NodeUtil.parseArgs({
@@ -82,6 +84,17 @@ if (values.help || (!values.brief && !values.fixture)) {
 }
 const timeoutMs = Number(values["timeout-ms"]);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
+// The harness lane must not be able to open a window on the machine the user is
+// using. Every child this runner spawns inherits this env; an empty private
+// XDG_RUNTIME_DIR leaves the compositor's default wayland-0 socket unfindable.
+// Headless Chrome and `godot --headless` do not need a display.
+process.env = (
+  await prepareDisplaySandbox(
+    values.summary === undefined
+      ? NodeOS.tmpdir()
+      : NodePath.dirname(NodePath.resolve(values.summary)),
+  )
+).environment;
 if (values["plan-first"] !== "true" && values["plan-first"] !== "false")
   throw new Error("--plan-first must be true or false");
 const planFirst = values["plan-first"] === "true";

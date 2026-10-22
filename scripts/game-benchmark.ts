@@ -24,6 +24,7 @@ import {
   type BenchmarkRunObservation,
 } from "./game-benchmark/aggregate.ts";
 import { defaultGodotBinary } from "./game-grade.ts";
+import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const { values } = NodeUtil.parseArgs({
@@ -44,6 +45,8 @@ const { values } = NodeUtil.parseArgs({
     "grade-timeout-ms": { type: "string", default: "2700000" },
     /** The raw lane's own cap: two hours of bare agent work. */
     "raw-timeout-ms": { type: "string", default: "7200000" },
+    /** Copy cached raw-lane results from this directory instead of rebuilding. */
+    "reuse-raw": { type: "string" },
     opencode: { type: "string", default: "opencode" },
     provider: { type: "string", default: "codex" },
     model: { type: "string", default: "gpt-6.1-sol" },
@@ -59,12 +62,15 @@ if (values.help) {
       "       [--out DIR] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high]",
       "       [--timeout-ms 3600000] [--runner scripts/game-e2e.ts]",
       "       [--lane harness|raw] [--opencode opencode] [--grade-timeout-ms 2700000] [--raw-timeout-ms 7200000]",
+      "       [--reuse-raw <benchmark-out-dir>]",
       "",
       "Runs the frozen briefs serially through game-e2e against an already running dev server,",
       "or (--lane raw) lets the bare agent build one in a scratch folder; either way the finished",
       "game is graded by scripts/game-grade.ts. Results are written to",
       "<out>/<harness-commit>/<brief>/result.json plus results.json/.md.",
       "An existing result for the same harness commit, lane and fixture checksum is skipped.",
+      "--reuse-raw copies a cached raw-lane result per brief (build, grade and logs) instead",
+      "of spending the agent's two-hour budget again.",
     ].join("\n"),
   );
   process.exit(0);
@@ -73,6 +79,8 @@ const timeoutMs = Number(values["timeout-ms"]);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
 const lane = values.lane as BenchmarkLane;
 if (lane !== "harness" && lane !== "raw") throw new Error("--lane must be harness or raw.");
+const reuseRaw = values["reuse-raw"] === undefined ? null : NodePath.resolve(values["reuse-raw"]);
+if (reuseRaw !== null && lane !== "raw") throw new Error("--reuse-raw only applies to --lane raw.");
 const gradeTimeoutMs = Number(values["grade-timeout-ms"]);
 if (!Number.isFinite(gradeTimeoutMs) || gradeTimeoutMs <= 0)
   throw new Error("--grade-timeout-ms must be positive");
@@ -133,6 +141,7 @@ const writeJson = (path: string, value: unknown) =>
 const runBrief = async (
   brief: LoadedGameBenchmarkBrief,
   directory: string,
+  environment: NodeJS.ProcessEnv,
 ): Promise<BenchmarkRunObservation> => {
   const summaryPath = NodePath.join(directory, "run.json");
   const logPath = NodePath.join(directory, "run.log");
@@ -166,6 +175,7 @@ const runBrief = async (
   ];
   const child = NodeChildProcess.spawn(process.execPath, args, {
     cwd: checkout,
+    env: environment,
     detached: true,
     stdio: ["ignore", log.fd, log.fd],
   });
@@ -244,6 +254,7 @@ const gradeFinishedGame = async (
   brief: LoadedGameBenchmarkBrief,
   root: string,
   directory: string,
+  environment: NodeJS.ProcessEnv,
 ): Promise<BenchmarkGrade | null> => {
   const out = NodePath.join(directory, "grade");
   await runInGroup({
@@ -257,6 +268,7 @@ const gradeFinishedGame = async (
       out,
     ],
     cwd: checkout,
+    env: environment,
     logPath: NodePath.join(directory, "grade.log"),
     timeoutMs: gradeTimeoutMs,
   });
@@ -298,8 +310,8 @@ Build this game in Godot 4.7 in ./godot. Export a web build to ./builds/web/inde
  * CLI resume the operator's session and work in its project instead of the
  * scratch folder (t42 hit exactly that: the lane built into the checkout).
  */
-const freshOpenCodeEnvironment = (): NodeJS.ProcessEnv => {
-  const environment: NodeJS.ProcessEnv = { ...process.env };
+const freshOpenCodeEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const fresh: NodeJS.ProcessEnv = { ...environment };
   for (const name of [
     "OPENCODE_SESSION_ID",
     "OPENCODE",
@@ -309,14 +321,15 @@ const freshOpenCodeEnvironment = (): NodeJS.ProcessEnv => {
     "AI_AGENT",
     "T3CODE_CLI_PATH",
   ])
-    delete environment[name];
-  return environment;
+    delete fresh[name];
+  return fresh;
 };
 
 /** The bare-model lane: the same model and effort as the harness, no harness. */
 const runRawBrief = async (
   brief: LoadedGameBenchmarkBrief,
   directory: string,
+  environment: NodeJS.ProcessEnv,
 ): Promise<{ timedOut: boolean; exitCode: number | null; grade: BenchmarkGrade | null }> => {
   const scratch = NodePath.join(directory, "raw");
   await prepareRawGame(brief, scratch);
@@ -337,10 +350,63 @@ const runRawBrief = async (
     timeoutMs: rawTimeoutMs,
     // spawn does not rewrite PWD; the CLI would resolve its project from the
     // inherited checkout path instead of the scratch folder.
-    env: { ...freshOpenCodeEnvironment(), PWD: scratch },
+    env: { ...freshOpenCodeEnvironment(environment), PWD: scratch },
   });
-  const grade = await gradeFinishedGame(brief, scratch, directory);
+  const grade = await gradeFinishedGame(brief, scratch, directory, environment);
   return { timedOut: run.timedOut, exitCode: run.exitCode, grade };
+};
+
+const exists = (path: string) =>
+  NodeFSP.access(path)
+    .then(() => true)
+    .catch(() => false);
+
+/** The cached raw row for one brief: `<dir>/<brief>` or `<dir>/<commit>/<brief>`. */
+const findReusableRawResult = async (root: string, briefId: string): Promise<string | null> => {
+  const direct = NodePath.join(root, briefId, "result.json");
+  if (await exists(direct)) return direct;
+  const entries = await NodeFSP.readdir(root, { withFileTypes: true }).catch(() => []);
+  const nested = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => NodePath.join(root, entry.name, briefId, "result.json"))
+    .sort()
+    .toReversed();
+  for (const candidate of nested) if (await exists(candidate)) return candidate;
+  return null;
+};
+
+/**
+ * Copies a cached raw-lane brief instead of spending the agent's two-hour
+ * budget again. The row is kept verbatim, so its `harnessCommit` still names
+ * the grader that measured it, and its build comes along for a later re-grade.
+ */
+const reuseRawBrief = async (
+  brief: LoadedGameBenchmarkBrief,
+  directory: string,
+): Promise<BenchmarkBriefResult> => {
+  const source = await findReusableRawResult(reuseRaw!, brief.id);
+  if (source === null)
+    throw new Error(`--reuse-raw has no cached raw result for ${brief.id} under ${reuseRaw}.`);
+  const sourceDirectory = NodePath.dirname(source);
+  const previous = decodeBenchmarkResult(
+    JSON.parse(await NodeFSP.readFile(source, "utf8")) as unknown,
+  );
+  if (previous === null) throw new Error(`${source} did not decode as a benchmark result.`);
+  if (previous.lane !== "raw") throw new Error(`${source} is not a raw-lane result.`);
+  if (previous.fixtureChecksum !== brief.checksum)
+    throw new Error(`${source} was measured on different brief bytes; refusing to reuse it.`);
+  for (const entry of ["grade", "raw"]) {
+    const from = NodePath.join(sourceDirectory, entry);
+    const to = NodePath.join(directory, entry);
+    if (from === to || !(await exists(from))) continue;
+    await NodeFSP.cp(from, to, { recursive: true });
+  }
+  for (const file of ["opencode.log", "result.json"]) {
+    const from = NodePath.join(sourceDirectory, file);
+    if (from === NodePath.join(directory, file) || !(await exists(from))) continue;
+    await NodeFSP.copyFile(from, NodePath.join(directory, file));
+  }
+  return previous;
 };
 
 const aggregate = async (results: ReadonlyArray<BenchmarkBriefResult>) => {
@@ -377,12 +443,25 @@ for (const brief of briefs) {
     continue;
   }
   await NodeFSP.mkdir(directory, { recursive: true });
+  if (lane === "raw" && reuseRaw !== null) {
+    const reused = await reuseRawBrief(brief, directory);
+    results.push(reused);
+    await aggregate(results);
+    console.log(
+      `[${brief.id}] reused raw result measured at ${reused.harnessCommit.slice(0, 8)} (${reused.outcome})`,
+    );
+    continue;
+  }
+  // Nothing this brief spawns may reach the operator's display: the raw agent
+  // and the harness runner both inherit this environment, and an empty private
+  // XDG_RUNTIME_DIR leaves the compositor's socket unfindable.
+  const sandbox = await prepareDisplaySandbox(directory);
   console.log(`[${brief.id}] running…`);
   const startedAt = new Date().toISOString();
   const started = Date.now();
   let result: BenchmarkBriefResult;
   if (lane === "raw") {
-    const observation = await runRawBrief(brief, directory);
+    const observation = await runRawBrief(brief, directory, sandbox.environment);
     result = readRawResult({
       harnessCommit,
       brief,
@@ -394,9 +473,12 @@ for (const brief of briefs) {
       grade: observation.grade,
     });
   } else {
-    const observation = await runBrief(brief, directory);
+    const observation = await runBrief(brief, directory, sandbox.environment);
     const root = observation.summary?.game?.root;
-    const grade = root === undefined ? null : await gradeFinishedGame(brief, root, directory);
+    const grade =
+      root === undefined
+        ? null
+        : await gradeFinishedGame(brief, root, directory, sandbox.environment);
     result = readBenchmarkResult({
       harnessCommit,
       brief,
