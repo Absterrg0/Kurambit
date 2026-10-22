@@ -669,7 +669,11 @@ const make = Effect.gen(function* () {
 
   // Every message surface funnels through dispatch, so admission runs before
   // the commit for all of them. A replayed command already passed admission.
-  const admitTurn = (commandId: CommandId, thread: TurnAdmission.TurnAdmissionThread) =>
+  const admitTurn = (
+    commandId: CommandId,
+    thread: TurnAdmission.TurnAdmissionThread,
+    commandType: "message.dispatch" | "runtime-request.respond" = "message.dispatch",
+  ) =>
     receipts.getByCommandId(commandId).pipe(
       Effect.orElseSucceed(() => Option.none()),
       Effect.flatMap((receipt) =>
@@ -680,7 +684,7 @@ const make = Effect.gen(function* () {
                 (cause) =>
                   new Orchestrator.OrchestratorCommandRejectedError({
                     commandId,
-                    commandType: "message.dispatch",
+                    commandType,
                     cause,
                   }),
               ),
@@ -700,6 +704,22 @@ const make = Effect.gen(function* () {
             }).pipe(Effect.andThen(admitTurn(command.commandId, projection.thread))),
           ),
         );
+      case "runtime-request.respond":
+        // An answer to a message-capable question becomes a new user message
+        // on the thread, so it is admitted like one before it commits.
+        if (command.answers === undefined) return Effect.void;
+        return orchestrator
+          .getThreadRecords(command.threadId, ["runtimeRequests"])
+          .pipe(
+            Effect.flatMap((projection) =>
+              projection.runtimeRequests.some(
+                (request) =>
+                  request.id === command.requestId && request.responseCapability.type === "message",
+              )
+                ? admitTurn(command.commandId, projection.thread, command.type)
+                : Effect.void,
+            ),
+          );
       case "delegated_task.request":
         return orchestrator.getThreadRecords(command.parentThreadId, []).pipe(
           Effect.flatMap((parent) =>

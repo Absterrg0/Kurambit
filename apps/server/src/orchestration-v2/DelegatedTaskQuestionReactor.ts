@@ -16,6 +16,7 @@ import { reportLabel } from "@t3tools/provider-core/server/notification";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as TurnAdmission from "./TurnAdmission.ts";
 
 export class DelegatedTaskQuestionReactor extends Context.Service<
   DelegatedTaskQuestionReactor,
@@ -28,6 +29,7 @@ export class DelegatedTaskQuestionReactor extends Context.Service<
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const turnAdmission = yield* TurnAdmission.TurnAdmission;
 
   const wakeParent = Effect.fnUntraced(function* (
     task: OrchestrationV2Subagent,
@@ -40,6 +42,9 @@ const make = Effect.gen(function* () {
       request.responseCapability.type === "message"
         ? `Delegated task ${task.id} asked a question and is still working.`
         : `Delegated task ${task.id} is blocked on a question and cannot continue until it is answered.`;
+    // The wake starts a turn on the parent, so it takes the same admission
+    // as any other message turn before it reaches the orchestrator.
+    yield* turnAdmission.admit(yield* projections.getThread(task.threadId));
     yield* engine.dispatch({
       type: "message.dispatch",
       commandId: CommandId.make(`server:delegated-task-question:${key}`),

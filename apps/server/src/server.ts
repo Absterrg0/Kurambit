@@ -365,13 +365,15 @@ const layerGameAdmission = Layer.unwrap(
   }),
 );
 
+// Every surface that can start a turn reads this one hook: thread dispatch and
+// the delegated-question wake, which dispatches to the orchestrator directly.
+const layerGameTurnAdmission = GameTurnAdmission.layer.pipe(
+  Layer.provide(RuntimeLayer.layerProjectService),
+  Layer.provide(layerGameAdmission),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
-  Layer.provide(
-    GameTurnAdmission.layer.pipe(
-      Layer.provide(RuntimeLayer.layerProjectService),
-      Layer.provide(layerGameAdmission),
-    ),
-  ),
+  Layer.provide(layerGameTurnAdmission),
   Layer.provide(ProviderEventIngestor.layerAnalytics),
   Layer.provide(layerCheckpointStore),
   Layer.provide(layerGitWorkflow),
@@ -439,7 +441,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       const service = yield* DelegatedTaskQuestionReactor.DelegatedTaskQuestionReactor;
       yield* service.start();
     }),
-  ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer), Layer.provide(ProjectionStoreV2.layer)),
+  ).pipe(
+    Layer.provide(DelegatedTaskQuestionReactor.layer),
+    Layer.provide(ProjectionStoreV2.layer),
+    Layer.provide(layerGameTurnAdmission),
+  ),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,

@@ -29,6 +29,7 @@ import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as TurnAdmission from "./TurnAdmission.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -920,3 +921,94 @@ it.effect("wakes the parent once when its delegated task asks a question", () =>
     });
   }).pipe(Effect.provide(DelegatedTaskQuestionReactor.layer.pipe(Layer.provideMerge(layerTest)))),
 );
+
+it.effect("a delegated question wake takes turn admission and starts nothing when refused", () => {
+  const admitted: Array<string> = [];
+  const refuse = Layer.succeed(TurnAdmission.TurnAdmission, {
+    admit: (thread) =>
+      Effect.sync(() => admitted.push(String(thread.id))).pipe(
+        Effect.andThen(
+          Effect.fail(new TurnAdmission.TurnAdmissionRejectedError({ detail: "game held" })),
+        ),
+      ),
+  });
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* DelegatedTaskQuestionReactor.DelegatedTaskQuestionReactor;
+    const parentThreadId = ThreadId.make("thread:question-admission-parent");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-question-admission-parent"),
+      threadId: parentThreadId,
+      projectId: ProjectId.make("project:question-admission"),
+      title: "Parent",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("start-question-admission-parent"),
+      threadId: parentThreadId,
+      messageId: MessageId.make("message:question-admission-parent"),
+      text: "Delegate the research",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const parentRun = (yield* projections.getThreadProjection(parentThreadId)).runs[0]!;
+    yield* orchestrator.dispatch({
+      type: "delegated_task.request",
+      commandId: CommandId.make("delegate-question-admission-task"),
+      parentThreadId,
+      parentRunId: parentRun.id,
+      parentNodeId: parentRun.rootNodeId!,
+      task: "Research the sources",
+      completionWake: "settled_only",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    const task = (yield* projections.getThreadProjection(parentThreadId)).subagents[0]!;
+    const childRun = (yield* projections.getThreadRecords(task.childThreadId!, ["runs"])).runs[0]!;
+    const now = yield* DateTime.now;
+    const asyncQuestion = {
+      id: EventId.make("event:admission-question"),
+      type: "runtime-request.updated",
+      threadId: task.childThreadId!,
+      runId: childRun.id,
+      occurredAt: now,
+      payload: {
+        id: RuntimeRequestId.make("request:admission-question"),
+        nodeId: childRun.rootNodeId!,
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "user_input",
+        status: "pending",
+        responseCapability: { type: "message" },
+        createdAt: now,
+        resolvedAt: null,
+      },
+    } satisfies OrchestrationV2DomainEvent;
+    yield* (yield* EventSink.EventSinkV2).write({ events: [asyncQuestion] });
+    yield* reactor.handle(asyncQuestion);
+    assert.deepEqual(admitted, [parentThreadId]);
+    assert.isFalse(
+      (yield* projections.getThreadProjection(parentThreadId)).messages.some(
+        (message) => message.notification !== undefined,
+      ),
+    );
+  }).pipe(
+    Effect.provide(
+      DelegatedTaskQuestionReactor.layer.pipe(Layer.provide(refuse), Layer.provideMerge(layerTest)),
+    ),
+  );
+});
