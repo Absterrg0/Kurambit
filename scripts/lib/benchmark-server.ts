@@ -38,6 +38,8 @@ export function benchmarkServerSpawn(input: {
   readonly checkout: string;
   readonly homeDir: string;
   readonly sandbox: DisplaySandbox;
+  /** Tests pin a port; the harness lets the server pick its own. */
+  readonly port?: number;
 }): BenchmarkServerSpawn {
   return {
     executable: process.execPath,
@@ -46,6 +48,7 @@ export function benchmarkServerSpawn(input: {
       "serve",
       "--base-dir",
       input.homeDir,
+      ...(input.port === undefined ? [] : ["--port", String(input.port)]),
     ],
     cwd: input.checkout,
     env: input.sandbox.environment,
@@ -72,6 +75,7 @@ export async function startBenchmarkServer(input: {
   readonly homeDir: string;
   readonly sandbox: DisplaySandbox;
   readonly logPath: string;
+  readonly port?: number;
 }): Promise<BenchmarkServer> {
   const spec = benchmarkServerSpawn(input);
   await NodeFSP.mkdir(NodePath.dirname(input.logPath), { recursive: true });
@@ -83,6 +87,8 @@ export async function startBenchmarkServer(input: {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
+  let pendingLine = "";
+  const redact = (line: string) => line.replace(/^(Pairing URL:|Token:)\s*\S+/g, "$1 <redacted>");
   const started = new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
@@ -92,8 +98,14 @@ export async function startBenchmarkServer(input: {
       );
     }, START_TIMEOUT_MS);
     const consume = (chunk: Buffer) => {
-      log.write(chunk);
-      output = (output + chunk.toString()).slice(-64_000);
+      const text = chunk.toString();
+      // The pairing URL and its token are one-time credentials; the log keeps
+      // the port and the startup narrative, never the credential.
+      output = (output + text).slice(-64_000);
+      pendingLine += text;
+      const lines = pendingLine.split("\n");
+      pendingLine = lines.pop() ?? "";
+      for (const line of lines) log.write(`${redact(line)}\n`);
       const match = output.match(PAIRING_LINE);
       if (match?.[1] === undefined) return;
       clearTimeout(timer);
