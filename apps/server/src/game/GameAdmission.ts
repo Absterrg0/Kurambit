@@ -135,14 +135,18 @@ export const layer = (options: { readonly stateDir: string }) =>
         Effect.gen(function* () {
           // Only a real game folder takes part: an ordinary T3 project must not
           // grow an admission record just because its thread received a turn.
+          const key = NodePath.resolve(root);
           const isGame = yield* Effect.tryPromise({
             try: async () => {
-              await NodeFSP.stat(NodePath.join(NodePath.resolve(root), "game.json"));
+              await NodeFSP.stat(NodePath.join(key, "game.json"));
               return true;
             },
             catch: () => false,
           }).pipe(Effect.orElseSucceed(() => false));
-          if (!isGame) return;
+          // An ordinary project has nothing to supersede. A root that still has
+          // a registered loop must always be stopped, even if its manifest was
+          // removed while the review ran.
+          if (!isGame && !entries.has(key)) return;
           yield* lockFor(root).withPermits(1)(
             Effect.gen(function* () {
               const found = yield* fileFor(root);
