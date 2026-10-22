@@ -1702,7 +1702,13 @@ const make = Effect.gen(function* () {
         selected === null || selectedPresent !== true
           ? servedUrl
           : (preview.urlFor(root, selected.directory) ??
-            (servedUrl === null ? null : yield* preview.select(root, selected.directory)));
+            (servedUrl === null
+              ? null
+              : // A status read must not fail because the build vanished after
+                // the presence check; the previous URL stays what Play shows.
+                yield* preview
+                  .select(root, selected.directory)
+                  .pipe(Effect.catch(() => Effect.succeed(servedUrl)))));
       return {
         root,
         ...inventory,
