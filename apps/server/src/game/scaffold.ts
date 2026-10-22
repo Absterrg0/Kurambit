@@ -169,7 +169,7 @@ Build the game in BRIEF.md with Godot 4.7 (GDScript, Compatibility renderer). Th
 2. **Show the state.** Every value the brief names (score, lives, turn, laps, timer...) is on-screen text that updates when it changes, and lives in GameState when the template has one. Win and lose end on a result screen with the totals.
 3. **Playtest and look.** Run game_web_playtest with steps that play the core loop, then open the screenshots it returns and look at them. It also reports GameState keys that are "not on screen".
 4. **Fix what you saw**: anything broken, unreadable, off screen or not responding, and any repair request in the playtest result. Export and playtest again.
-5. **Keep improving** feel, feedback and look (motion, sound, effects, readability), repeating steps 3 and 4 at selected checkpoints, until the time box ends (about 60 minutes by default). Then summarize, with the game_preview URL.
+5. **End your turn.** After the playable export, summarize with the game_preview URL. The studio reviews and repairs the game automatically; do not start your own improvement loop.
 
 ## Rules that prevent breakage
 
