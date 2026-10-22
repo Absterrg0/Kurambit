@@ -552,7 +552,15 @@ export const layer = (options: { readonly stateDir: string }) => {
               if (round.status !== "running" || round.candidate === null)
                 return yield* blocked("That round has no running candidate build to promote.");
               const candidate = validatedArtifact(round.candidate);
-              const current = yield* snapshots.capture(root);
+              // A folder that cannot be read is a failed precondition, not a
+              // crash: the round stops with the reason instead of staying
+              // running against sources nobody could check.
+              const captured = yield* Effect.result(snapshots.capture(root));
+              if (captured._tag === "Failure")
+                return yield* blocked(
+                  `The game folder could not be read to check the candidate, so the round was stopped. ${captured.failure.message}`,
+                );
+              const current = captured.success;
               // The candidate was built from these sources. If the folder moved
               // on, promoting would serve bytes the current game did not produce.
               if (candidate.sourceId !== null && current.sourceId !== candidate.sourceId)

@@ -393,6 +393,37 @@ it.live("an explicit restore refuses while another round is running", () =>
   ),
 );
 
+it.live("a promotion whose folder capture fails stops the round with the reason", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const opened = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repair\n");
+      yield* rounds.recordPostRepair(root, opened.id);
+      const repaired = yield* snapshots.capture(root);
+      const build = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+      yield* rounds.recordCandidate(root, opened.id, build);
+      // A symlink introduced after the candidate exists makes the folder
+      // unreadable to the byte capture.
+      yield* Effect.promise(() =>
+        NodeFSP.symlink(
+          NodePath.join(root, "game.json"),
+          NodePath.join(root, "godot/scripts/link.gd"),
+        ),
+      );
+      const promoted = yield* rounds.promote(root, opened.id);
+      expect(promoted.kind).toBe("blocked");
+      const state = yield* rounds.read(root);
+      const round = state.rounds.find((entry) => entry.id === opened.id)!;
+      expect(round.status).toBe("stopped");
+      expect(round.decision).toBe("stop");
+      expect(round.reason).toContain("symlink");
+      // The decision kept everything the round had.
+      expect(state.selected).toBeNull();
+      expect(round.candidate?.buildId).toBe(build.buildId);
+    }),
+  ),
+);
+
 it.live("concurrent promote and reject never leave a half-decided round", () =>
   withGame(({ root, rounds, snapshots }) =>
     Effect.gen(function* () {
