@@ -104,6 +104,8 @@ export function existingThreadIdsForCommand(
     case "delegated_task.completion-delivery.acknowledge":
     case "delegated_task.completion-delivery.dispose":
       return [command.parentThreadId];
+    case "game-round.task.request":
+      return [command.originatingThreadId];
     case "thread.created.record":
       return command.parentThreadId === command.targetThreadId
         ? [command.parentThreadId]
@@ -659,6 +661,16 @@ const make = Effect.gen(function* () {
           Effect.flatMap((parent) =>
             assertProviderInstanceEnabled({
               projectId: parent.thread.projectId,
+              commandId: command.commandId,
+              instanceId: command.modelSelection.instanceId,
+            }),
+          ),
+        );
+      case "game-round.task.request":
+        return orchestrator.getThreadRecords(command.originatingThreadId, []).pipe(
+          Effect.flatMap((origin) =>
+            assertProviderInstanceEnabled({
+              projectId: origin.thread.projectId,
               commandId: command.commandId,
               instanceId: command.modelSelection.instanceId,
             }),

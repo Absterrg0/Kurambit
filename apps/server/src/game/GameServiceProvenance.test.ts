@@ -4,6 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -511,18 +512,14 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
           await NodeFSP.mkdir(NodePath.join(root, "assets"), { recursive: true });
           await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
         });
-        // Normalize the script's mtime to a whole millisecond before the
-        // baseline export. Restoring a timestamp later can only reproduce
-        // millisecond precision, so this makes an exact mtimeMs comparison
+        // Normalize the script's mtime to a whole second before the baseline
+        // export. Restoring a timestamp later can only reproduce the precision
+        // the filesystem stored, so this makes an exact mtimeMs comparison
         // meaningful: the test must prove the cache key itself is unchanged,
-        // not merely that its Date rendering matches.
-        const normalizedMtime = new Date(Math.floor(Date.now()));
+        // not merely that its rendered Date matches.
+        const wholeSecond = Math.floor((yield* Clock.currentTimeMillis) / 1000);
         yield* Effect.promise(() =>
-          NodeFSP.utimes(
-            NodePath.join(root, "godot/scripts/main.gd"),
-            normalizedMtime,
-            normalizedMtime,
-          ),
+          NodeFSP.utimes(NodePath.join(root, "godot/scripts/main.gd"), wholeSecond, wholeSecond),
         );
         const exported = yield* game.export(threadId, "Web");
         expect(exported.success, exported.message).toBe(true);
@@ -559,7 +556,7 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
         yield* Effect.promise(async () => {
           await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
           await NodeFSP.writeFile(script, edited);
-          await NodeFSP.utimes(script, new Date(before.mtimeMs), new Date(before.mtimeMs));
+          await NodeFSP.utimes(script, before.mtimeMs / 1000, before.mtimeMs / 1000);
         });
         const after = yield* Effect.promise(() => NodeFSP.stat(script));
         expect(after.size).toBe(before.size);

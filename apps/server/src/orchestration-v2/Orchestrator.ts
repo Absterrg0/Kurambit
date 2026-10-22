@@ -38,6 +38,7 @@ import {
   type OrchestrationV2ThreadShellSnapshot,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2Subagent,
+  type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   latestProviderTurnForAttempt,
@@ -460,6 +461,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "delegated_task.completion-delivery.dispose":
     case "thread.created.record":
       return command.parentThreadId;
+    case "game-round.task.request":
+      return command.originatingThreadId;
     case "secret_request.record":
       return command.threadId;
     case "thread.fork":
@@ -6102,14 +6105,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       yield* Ref.update(effects, (existing) => [...existing, pendingEffect]);
     });
 
-  const dispatchDelegatedTaskRequest = Effect.fn("orchestrationV2.dispatch.delegatedTaskRequest")(
+  /**
+   * One child-creation path for app-owned tasks. Public delegation may only
+   * attach to an active parent run; the game layer's internal round task may
+   * attach to the completed builder run that produced the round, because the
+   * live round is checked before it dispatches. Both create a subagent lineage
+   * child, never a top-level thread.
+   */
+  const dispatchChildTaskRequest = Effect.fn("orchestrationV2.dispatch.childTaskRequest")(
     function* (
-      command: Extract<OrchestrationV2Command, { readonly type: "delegated_task.request" }>,
+      input: {
+        readonly command: OrchestrationV2ServerCommand & {
+          readonly commandId: CommandId;
+          readonly createdBy: OrchestrationV2AppThread["createdBy"];
+          readonly creationSource: OrchestrationV2AppThread["creationSource"];
+          readonly createdAt?: DateTime.Utc | undefined;
+        };
+        readonly parentThreadId: ThreadId;
+        readonly parentRunId: RunId;
+        readonly parentNodeId: NodeId;
+        readonly task: string;
+        readonly title?: string;
+        readonly modelSelection: ModelSelection;
+        readonly runtimeMode: RuntimeMode;
+        readonly interactionMode: ProviderInteractionMode;
+        readonly workspaceStrategy?: OrchestrationV2ThreadLaunchWorkspaceStrategy;
+        readonly completionWake?: "always" | "settled_only";
+        /** The child's cwd; unset inherits the parent's game folder. */
+        readonly worktreePath?: string;
+        readonly parentRunPolicy: "active" | "completed";
+      },
       events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
       effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
     ) {
+      const command = input.command;
       const parentProjection = yield* projectionStore
-        .getThreadRecords(command.parentThreadId, [
+        .getThreadRecords(input.parentThreadId, [
           "runs",
           "nodes",
           "subagents",
@@ -6121,30 +6152,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           Effect.mapError(
             (cause) =>
               new OrchestratorProjectionError({
-                threadId: command.parentThreadId,
+                threadId: input.parentThreadId,
                 cause,
               }),
           ),
         );
       const parentRun = parentProjection.runs.find(
-        (candidate) => candidate.id === command.parentRunId,
+        (candidate) => candidate.id === input.parentRunId,
       );
-      if (parentRun === undefined || !isBlockingRun(parentRun)) {
+      const parentRunAdmissible =
+        input.parentRunPolicy === "completed"
+          ? // The game round may attach only to the builder run that completed the
+            // work it reviews; a failed or still-active run is not an origin.
+            parentRun !== undefined && parentRun.status === "completed"
+          : parentRun !== undefined && isBlockingRun(parentRun);
+      if (parentRun === undefined || !parentRunAdmissible) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: `Parent run ${command.parentRunId} is not active.`,
+          cause:
+            input.parentRunPolicy === "completed"
+              ? `Originating run ${input.parentRunId} is not a completed run of this thread.`
+              : `Parent run ${input.parentRunId} is not active.`,
         });
       }
-      if (yield* stopReachedRun(command, command.parentThreadId, parentRun.id)) {
+      if (
+        input.parentRunPolicy === "active" &&
+        (yield* stopReachedRun(command, input.parentThreadId, parentRun.id))
+      ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: `Parent run ${command.parentRunId} is stopping.`,
+          cause: `Parent run ${input.parentRunId} is stopping.`,
         });
       }
       const parentNode = parentProjection.nodes.find(
-        (candidate) => candidate.id === command.parentNodeId,
+        (candidate) => candidate.id === input.parentNodeId,
       );
       if (
         parentNode === undefined ||
@@ -6154,16 +6197,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: `Parent node ${command.parentNodeId} is not part of active run ${parentRun.id}.`,
+          cause: `Parent node ${input.parentNodeId} is not part of run ${parentRun.id}.`,
         });
       }
 
-      const targetAdapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
+      const targetAdapter = yield* providerAdapters.get(input.modelSelection.instanceId).pipe(
         Effect.mapError(
           (cause) =>
             new OrchestratorProviderAdapterError({
               commandId: command.commandId,
-              providerInstanceId: command.modelSelection.instanceId,
+              providerInstanceId: input.modelSelection.instanceId,
               cause,
             }),
         ),
@@ -6184,8 +6227,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
       const taskTitle = subagentThreadTitle({
         parentTitle: parentProjection.thread.title,
-        prompt: command.task,
-        ...(command.title === undefined ? {} : { title: command.title }),
+        prompt: input.task,
+        ...(input.title === undefined ? {} : { title: input.title }),
         ordinal: parentProjection.subagents.length + 1,
       });
       const childThread: OrchestrationV2AppThread = {
@@ -6194,33 +6237,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           childThreadId,
           parentNodeId: taskNodeId,
           activeProviderThreadId: null,
-          providerInstanceId: command.modelSelection.instanceId,
-          modelSelection: command.modelSelection,
+          providerInstanceId: input.modelSelection.instanceId,
+          modelSelection: input.modelSelection,
           title: taskTitle,
           now,
           createdBy: command.createdBy,
           creationSource: command.creationSource,
         }),
-        runtimeMode: command.runtimeMode,
-        interactionMode: command.interactionMode,
-        ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        ...(input.workspaceStrategy === undefined
+          ? input.worktreePath === undefined
+            ? {}
+            : { branch: null, worktreePath: input.worktreePath }
+          : { branch: null, worktreePath: null }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
-        parentNodeId: command.parentNodeId,
+        parentNodeId: input.parentNodeId,
         origin: "app_owned",
         createdBy: command.createdBy,
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         providerThreadId: null,
         childThreadId,
         nativeTaskRef: null,
-        prompt: command.task,
-        title: command.title ?? null,
-        model: command.modelSelection.model,
-        ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
+        prompt: input.task,
+        title: input.title ?? null,
+        model: input.modelSelection.model,
+        ...(input.completionWake === undefined ? {} : { completionWake: input.completionWake }),
         status: "running",
         result: null,
         startedAt: now,
@@ -6229,9 +6276,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       };
       const taskNode: OrchestrationV2ExecutionNode = {
         id: taskNodeId,
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
-        parentNodeId: command.parentNodeId,
+        parentNodeId: input.parentNodeId,
         rootNodeId: parentRun.rootNodeId,
         kind: "subagent",
         status: "running",
@@ -6247,7 +6294,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const parentProviderTurn = providerTurnForRun(parentProjection, parentRun);
       const taskTurnItem: OrchestrationV2TurnItem = {
         id: taskTurnItemId,
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
         nodeId: taskNodeId,
         providerThreadId: parentRun.providerThreadId,
@@ -6256,7 +6303,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         parentItemId: null,
         ordinal: yield* nextTurnItemOrdinal(parentProjection),
         status: "running",
-        title: command.title ?? taskTitle,
+        title: input.title ?? taskTitle,
         startedAt: now,
         completedAt: null,
         updatedAt: now,
@@ -6264,9 +6311,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         subagentId: taskNodeId,
         origin: "app_owned",
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         childThreadId,
-        prompt: command.task,
+        prompt: input.task,
         result: null,
       };
       const emitEvent = emit(events, command);
@@ -6275,37 +6322,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "thread.created",
         threadId: childThreadId,
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         occurredAt: now,
         payload: childThread,
       });
       yield* emitEvent({
         type: "node.updated",
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
         nodeId: taskNodeId,
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         occurredAt: now,
         payload: taskNode,
       });
       yield* emitEvent({
         type: "subagent.updated",
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
         nodeId: taskNodeId,
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         occurredAt: now,
         payload: task,
       });
       yield* emitEvent({
         type: "turn-item.updated",
-        threadId: command.parentThreadId,
+        threadId: input.parentThreadId,
         runId: parentRun.id,
         nodeId: taskNodeId,
         driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         occurredAt: now,
         payload: taskTurnItem,
       });
@@ -6316,15 +6363,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         creationSource: command.creationSource,
         commandId: command.commandId,
         threadId: childThreadId,
-        senderThreadId: command.parentThreadId,
+        senderThreadId: input.parentThreadId,
         messageId: childMessageId,
-        text: command.task,
+        text: input.task,
         attachments: [],
-        modelSelection: command.modelSelection,
+        modelSelection: input.modelSelection,
         dispatchMode:
-          command.workspaceStrategy === undefined
+          input.workspaceStrategy === undefined
             ? { type: "start_immediately" }
-            : { type: "defer_start", workspaceStrategy: command.workspaceStrategy },
+            : { type: "defer_start", workspaceStrategy: input.workspaceStrategy },
       } satisfies Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
       yield* dispatchMessage(childMessageCommand, events, effects);
 
@@ -6339,7 +6386,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       const spawnTransferId = yield* mapDispatchError(command)(
         idAllocator.allocate.contextTransfer({
-          sourceThreadId: command.parentThreadId,
+          sourceThreadId: input.parentThreadId,
           targetThreadId: childThreadId,
           type: "subagent_spawn",
         }),
@@ -6347,7 +6394,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const spawnTransfer: OrchestrationV2ContextTransfer = {
         id: spawnTransferId,
         type: "subagent_spawn",
-        sourceThreadId: command.parentThreadId,
+        sourceThreadId: input.parentThreadId,
         targetThreadId: childThreadId,
         sourcePoint: {
           ...contextSourcePointForRun(parentProjection, parentRun),
@@ -6355,7 +6402,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         },
         basePoint: null,
         sourceProviderInstanceId: parentRun.providerInstanceId,
-        targetProviderInstanceId: command.modelSelection.instanceId,
+        targetProviderInstanceId: input.modelSelection.instanceId,
         targetRunId: childRun.id,
         status: "consumed",
         resolution: null,
@@ -6369,12 +6416,61 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "context-transfer.created",
         threadId: childThreadId,
         runId: childRun.id,
-        providerInstanceId: command.modelSelection.instanceId,
+        providerInstanceId: input.modelSelection.instanceId,
         occurredAt: now,
         payload: spawnTransfer,
       });
     },
   );
+
+  const dispatchDelegatedTaskRequest = (
+    command: Extract<OrchestrationV2Command, { readonly type: "delegated_task.request" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    dispatchChildTaskRequest(
+      {
+        command,
+        parentThreadId: command.parentThreadId,
+        parentRunId: command.parentRunId,
+        parentNodeId: command.parentNodeId,
+        task: command.task,
+        ...(command.title === undefined ? {} : { title: command.title }),
+        modelSelection: command.modelSelection,
+        runtimeMode: command.runtimeMode,
+        interactionMode: command.interactionMode,
+        ...(command.workspaceStrategy === undefined
+          ? {}
+          : { workspaceStrategy: command.workspaceStrategy }),
+        ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
+        parentRunPolicy: "active",
+      },
+      events,
+      effects,
+    );
+
+  const dispatchGameRoundTaskRequest = (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "game-round.task.request" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    dispatchChildTaskRequest(
+      {
+        command,
+        parentThreadId: command.originatingThreadId,
+        parentRunId: command.originatingRunId,
+        parentNodeId: command.originatingNodeId,
+        task: command.task,
+        ...(command.title === undefined ? {} : { title: command.title }),
+        modelSelection: command.modelSelection,
+        runtimeMode: command.runtimeMode,
+        interactionMode: command.interactionMode,
+        ...(command.evidenceDirectory === null ? {} : { worktreePath: command.evidenceDirectory }),
+        parentRunPolicy: "completed",
+      },
+      events,
+      effects,
+    );
 
   const recordSubagentFollowup = Effect.fnUntraced(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
@@ -10451,6 +10547,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "delegated_task.request":
         yield* dispatchDelegatedTaskRequest(command, events, effects);
+        break;
+      case "game-round.task.request":
+        yield* dispatchGameRoundTaskRequest(command, events, effects);
         break;
       case "delegated_task.wake-policy":
         yield* dispatchDelegatedTaskWakePolicy(command, events);

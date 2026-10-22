@@ -2977,6 +2977,35 @@ const OrchestrationV2InternalCommand = Schema.Union([
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
   }),
+  /**
+   * A review child dispatched by the game layer, never by a client. It reuses
+   * the delegated-task child-creation path but may attach to the originating
+   * builder run after that run completed: a live review round is the
+   * permission, and the server's review service checks it before dispatch.
+   * `evidenceDirectory` is the child's cwd for critic and ballot sessions,
+   * a directory outside the game holding only the brief, frames and checks;
+   * repair children keep the game folder.
+   */
+  Schema.Struct({
+    type: Schema.Literal("game-round.task.request"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    originatingThreadId: ThreadId,
+    originatingRunId: RunId,
+    originatingNodeId: NodeId,
+    loopId: TrimmedNonEmptyString,
+    roundId: TrimmedNonEmptyString,
+    role: Schema.Literals(["critic", "ballot", "repair"]),
+    /** Ballot order within the round; the critic and a repair use 0. */
+    order: NonNegativeInt,
+    task: TrimmedNonEmptyString,
+    title: Schema.optional(TrimmedNonEmptyString),
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    evidenceDirectory: Schema.NullOr(TrimmedNonEmptyString),
+    createdAt: Schema.optional(Schema.DateTimeUtc),
+  }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
 

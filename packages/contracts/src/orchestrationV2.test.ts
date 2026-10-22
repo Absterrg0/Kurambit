@@ -29,6 +29,7 @@ import {
   OrchestrationV2Command,
   OrchestrationV2LimitRecoveryUpdate,
   OrchestrationV2DomainEvent,
+  type OrchestrationV2InternalCommand,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -687,6 +688,31 @@ describe("orchestration V2 contracts", () => {
         completionWake: "sometimes",
       }),
     ).toThrow();
+  });
+
+  it("keeps game round task commands server-only", () => {
+    const command: OrchestrationV2InternalCommand = {
+      type: "game-round.task.request",
+      createdBy: "agent",
+      creationSource: "server",
+      commandId: CommandId.make("command-game-round-1"),
+      originatingThreadId: ThreadId.make("thread-game-1"),
+      originatingRunId: RunId.make("run-game-1"),
+      originatingNodeId: NodeId.make("node-game-1"),
+      loopId: "loop-1",
+      roundId: "round-1",
+      role: "critic",
+      order: 0,
+      task: "Review the build.",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      evidenceDirectory: "/state/review/evidence",
+    };
+
+    // A client can never dispatch it: the command is not part of the
+    // client-decodable union, only of the server-internal one.
+    expect(() => decodeOrchestrationV2Command(command)).toThrow();
   });
 
   it("decodes durable created-thread timeline records", () => {
