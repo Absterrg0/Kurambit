@@ -14,6 +14,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import {
   GameOperationError,
+  RunId,
   ThreadId,
   type GameManifest,
   type GameProcessResult,
@@ -147,6 +148,7 @@ const withGame = <A, E, R = never>(
         Layer.provide(
           Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
+            activeRun: () => Effect.succeed(RunId.make("run:exporter")),
             read: () => Effect.succeed(current),
             inventory: () =>
               Effect.succeed({
@@ -452,6 +454,8 @@ it.live(
           const exported = yield* game.export(threadId, "Web");
           expect(exported.success, exported.message).toBe(true);
           expect(exports).toBe(1);
+          // The export names the run whose tool call made it.
+          expect((yield* qualification.stageRecord(root, "export"))?.runId).toBe("run:exporter");
           const current = yield* game.status(threadId);
           expect(current.webBuildStale).toBe(false);
           expect(current.selectedArtifactUsable).toBe(true);

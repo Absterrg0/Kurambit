@@ -1387,15 +1387,12 @@ export const layer = (options: GameRepairLoopOptions) => {
         const provenance = yield* studio.exportProvenance(root);
         if (!provenance.playable || provenance.exportBuildId === null) return null;
         const exportBuildId = provenance.exportBuildId;
-        // The export must have been produced inside this run.
-        const startedAt = run.startedAt === null ? null : DateTime.toEpochMillis(run.startedAt);
+        // The export must name this run as its exporter. Timestamps cannot say
+        // that: another thread on the same game can export inside this run's
+        // window. A legacy export without a run id never starts a review.
+        if (provenance.exportRunId !== String(input.runId)) return null;
         const completedAt =
           run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-        const exportedAt =
-          provenance.exportFinishedAt === null ? null : Date.parse(provenance.exportFinishedAt);
-        if (startedAt === null || exportedAt === null) return null;
-        if (exportedAt < startedAt) return null;
-        if (completedAt !== null && exportedAt > completedAt) return null;
         // The playtest that made it playable must have played those bytes.
         if (provenance.playtestBuildId !== provenance.exportBuildId) return null;
         const inputs = yield* studio.frozenInputs(root);

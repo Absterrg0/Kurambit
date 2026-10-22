@@ -61,6 +61,8 @@ export interface GameRepairStudioProvenance {
   readonly playable: boolean;
   /** The build the export stage produced, when it recorded one. */
   readonly exportBuildId: string | null;
+  /** The run whose tool call exported those bytes, when it was recorded. */
+  readonly exportRunId: string | null;
   readonly exportFinishedAt: string | null;
   /** The build the qualifying playtest played, when it recorded one. */
   readonly playtestBuildId: string | null;
@@ -229,6 +231,7 @@ export const layer = (options: { readonly stateDir: string }) =>
           return {
             playable: read.completion === "complete",
             exportBuildId: exported?.buildId ?? null,
+            exportRunId: exported?.runId ?? null,
             exportFinishedAt: exported?.finishedAt ?? null,
             playtestBuildId: played?.buildId ?? null,
           } satisfies GameRepairStudioProvenance;

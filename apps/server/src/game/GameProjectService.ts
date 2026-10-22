@@ -36,6 +36,7 @@ import {
   type GameSummary,
   type GameVerificationPolicy,
   type GameVerificationPolicyRead,
+  type RunId,
 } from "@t3tools/contracts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameQualification from "./GameQualification.ts";
@@ -96,6 +97,11 @@ export class GameProjectService extends Context.Service<
      */
     readonly list: () => Effect.Effect<GameListResult, GameOperationError>;
     readonly resolve: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
+    /**
+     * The run executing on the thread right now, so a stage its tool call
+     * produced can name it; null when none is active or it cannot be read.
+     */
+    readonly activeRun: (threadId: ThreadId) => Effect.Effect<RunId | null>;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
      * The creator's approval of one specific DESIGN.md revision. It validates
@@ -522,6 +528,17 @@ const make = Effect.gen(function* () {
   const resolve = Effect.fn("GameProjectService.resolve")(function* (threadId: ThreadId) {
     return (yield* resolveTarget(threadId)).root;
   });
+  const activeRun: GameProjectService["Service"]["activeRun"] = (threadId) =>
+    threads.getThreadRecords(threadId, ["runs"]).pipe(
+      Effect.map(
+        (records) =>
+          records.runs.findLast(
+            (run) =>
+              run.status === "starting" || run.status === "running" || run.status === "waiting",
+          )?.id ?? null,
+      ),
+      Effect.catchCause(() => Effect.succeed(null)),
+    );
   // Name the qualification loop every build turn must run. A blunt model otherwise
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
   // the recorded verdicts the Game panel and the harness depend on.
@@ -1161,6 +1178,7 @@ const make = Effect.gen(function* () {
         { resume: true },
       ),
     resolve,
+    activeRun,
     read,
     approveDesign,
     requestChange,

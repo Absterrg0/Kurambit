@@ -99,6 +99,7 @@ interface StartedChild {
 interface Scripted {
   playable: boolean;
   exportBuildId: string;
+  exportRunId: string | null;
   exportFinishedAt: string;
   playtestBuildId: string;
   incumbent: CheckRun;
@@ -142,6 +143,7 @@ interface Scripted {
 const makeScripted = (): Scripted => ({
   playable: true,
   exportBuildId: EXPORT_BUILD_ID,
+  exportRunId: String(builderRunId),
   exportFinishedAt: EXPORT_FINISHED,
   playtestBuildId: EXPORT_BUILD_ID,
   incumbent: {
@@ -545,6 +547,7 @@ const withLoop = <A, E>(
                 Effect.succeed({
                   playable: scripted.playable,
                   exportBuildId: scripted.exportBuildId,
+                  exportRunId: scripted.exportRunId,
                   exportFinishedAt: scripted.exportFinishedAt,
                   playtestBuildId: scripted.playtestBuildId,
                 }),
@@ -973,6 +976,7 @@ const ensureLaterBuild = (fixture: Fixture, services: Services) =>
       completedAt: DateTime.makeUnsafe(now + 2),
     });
     fixture.scripted.exportBuildId = build;
+    fixture.scripted.exportRunId = String(runId);
     fixture.scripted.playtestBuildId = build;
     fixture.scripted.exportFinishedAt = new Date(now + 1).toISOString();
     return yield* services.loop.ensure({
@@ -1261,6 +1265,7 @@ it.live("a new builder run after a stopped loop starts a new review", () =>
           completedAt: DateTime.makeUnsafe("2026-10-01T10:30:00.000Z"),
         });
         scripted.exportBuildId = nextBuild;
+        scripted.exportRunId = String(nextRunId);
         scripted.playtestBuildId = nextBuild;
         scripted.exportFinishedAt = "2026-10-01T10:25:00.000Z";
         const created = yield* services.loop.ensure({
@@ -1303,6 +1308,24 @@ it.live("a later text-only turn never starts a loop", () =>
         // The original builder run is no longer the newest work either.
         expect(yield* ensureLoop(services)).toBeNull();
         expect(yield* readLoop(services)).toBeNull();
+      }),
+    ),
+  ),
+);
+
+it.live("an export another thread made inside this run's window never starts a loop", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        // A second thread on the same game exported while this text-only run
+        // was active; its timestamps fit this run, its exporter does not.
+        fixture.scripted.exportRunId = "run:other-thread";
+        expect(yield* ensureLoop(services)).toBeNull();
+        expect(yield* readLoop(services)).toBeNull();
+        // The run that did export it qualifies.
+        fixture.scripted.exportRunId = String(builderRunId);
+        expect((yield* ensureLoop(services))?.status).toBe("running");
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
       }),
     ),
   ),

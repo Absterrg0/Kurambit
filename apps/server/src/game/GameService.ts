@@ -787,9 +787,31 @@ const make = Effect.gen(function* () {
       };
     }).pipe(cleanedUp);
   });
-  const exportGame = (root: string, target: "Web" | "Linux", selection: ExportSelection) =>
+  /** Unknown attribution is null, never a failed export. */
+  const exporterRun = (threadId: ThreadId) =>
+    projects.activeRun(threadId).pipe(Effect.catchCause(() => Effect.succeed(null)));
+  /**
+   * `runId` is the run whose tool call exported: a review may start only for
+   * the run that produced the playable bytes, so the export names it.
+   */
+  const exportGame = (
+    root: string,
+    target: "Web" | "Linux",
+    selection: ExportSelection,
+    runId: string | null,
+  ) =>
     target === "Web"
-      ? ownStage(root, "export", "export", runExport(root, target, selection))
+      ? ownStage(
+          root,
+          "export",
+          "export",
+          runExport(root, target, selection).pipe(
+            Effect.map((completed) => ({
+              ...completed,
+              record: { ...completed.record, runId },
+            })),
+          ),
+        )
       : runExport(root, target, selection).pipe(Effect.map((completed) => completed.value));
 
   /** The round currently repairing this game, if any. */
@@ -850,7 +872,7 @@ const make = Effect.gen(function* () {
   /** Builds and publishes the current sources, then serves that build. */
   const publishWeb = (root: string) =>
     Effect.gen(function* () {
-      const exported = yield* exportGame(root, "Web", { mode: "publish" });
+      const exported = yield* exportGame(root, "Web", { mode: "publish" }, null);
       if (!exported.success) return exported;
       const served = yield* selectedPreview(root);
       return served === null
@@ -892,7 +914,7 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const webPlaytest = (root: string, input: GameWebPlaytestInput) =>
+  const webPlaytest = (root: string, input: GameWebPlaytestInput, runId: string | null) =>
     Effect.gen(function* () {
       // Reject before exporting, serving, or launching the browser: a bad capture
       // request must not cost a build or hold the game's operation lock.
@@ -913,7 +935,7 @@ const make = Effect.gen(function* () {
           const identity = yield* designApprovals.readPolicy(root, manifest);
           const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
           if (!(yield* webBuildIsCurrent(beforePlaytest))) {
-            const exported = yield* exportGame(root, "Web", yield* exportSelection(root));
+            const exported = yield* exportGame(root, "Web", yield* exportSelection(root), runId);
             if (!exported.success)
               return yield* new GameOperationError({
                 operation: "Web playtest",
@@ -1777,6 +1799,7 @@ const make = Effect.gen(function* () {
           // that names a round is telling the server which loop it belongs to;
           // an expired round must fail rather than become a direct publication.
           const active = target === "Web" ? yield* runningRound(root) : null;
+          const exporter = yield* exporterRun(threadId);
           if (options?.roundId !== undefined) {
             if (active === null || active.id !== options.roundId)
               return yield* new GameOperationError({
@@ -1786,15 +1809,18 @@ const make = Effect.gen(function* () {
                 detail:
                   "That repair round is no longer running; its export was not published or recorded.",
               });
-            return yield* exportGame(root, target, {
-              mode: "candidate",
-              roundId: active.id,
-            });
+            return yield* exportGame(
+              root,
+              target,
+              { mode: "candidate", roundId: active.id },
+              exporter,
+            );
           }
           return yield* exportGame(
             root,
             target,
             active === null ? { mode: "publish" } : { mode: "candidate", roundId: active.id },
+            exporter,
           );
         }),
       ),
@@ -1809,7 +1835,10 @@ const make = Effect.gen(function* () {
       ),
     webPlaytest: (threadId, input) =>
       withRoot(threadId, "Web playtest", (root) =>
-        Effect.andThen(refuseWhileUnapproved(root, "web-playtest"), webPlaytest(root, input)),
+        Effect.andThen(
+          refuseWhileUnapproved(root, "web-playtest"),
+          Effect.flatMap(exporterRun(threadId), (runId) => webPlaytest(root, input, runId)),
+        ),
       ),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),
@@ -2015,7 +2044,7 @@ const make = Effect.gen(function* () {
           // action here moves the game toward a playable build.
           yield* refuseWhileUnapproved(root, action);
           if (action === "export-linux")
-            return yield* exportGame(root, "Linux", { mode: "publish" });
+            return yield* exportGame(root, "Linux", { mode: "publish" }, null);
           // The creator's own Play may watch a native window; every agent-facing
           // run goes through the headless native method instead.
           if (action === "native") return yield* nativeGame(root, "inherit");

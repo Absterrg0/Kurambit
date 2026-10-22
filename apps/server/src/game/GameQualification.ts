@@ -56,6 +56,8 @@ export interface QualificationStageRecord {
   readonly buildId: string | null;
   readonly finishedAt: string;
   readonly evidenceDirectory: string | null;
+  /** The orchestration run whose tool call produced this stage, when one did. */
+  readonly runId?: string | null;
   /** The approved design revision the state stage graded, when there was one. */
   readonly designHash?: string | null;
   /** The per-criterion summary for the state stage. */
@@ -91,6 +93,8 @@ const StoredStage = Schema.Struct({
   buildId: Schema.NullOr(Schema.String),
   finishedAt: Schema.String,
   evidenceDirectory: Schema.NullOr(Schema.String),
+  /** The orchestration run whose tool call produced this stage, when one did. */
+  runId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   designHash: Schema.optionalKey(Schema.NullOr(Schema.String)),
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
@@ -459,6 +463,7 @@ export interface QualificationRecordInput {
   readonly sourceId: string | null;
   readonly buildId: string | null;
   readonly evidenceDirectory: string | null;
+  readonly runId?: string | null;
   readonly designHash?: string | null;
   readonly criteria?: readonly GameScenarioCriterionResult[];
   readonly coverage?: readonly GameScenarioKindCoverage[];
@@ -599,6 +604,7 @@ export const layer = (options: {
                       buildId: input.buildId,
                       finishedAt,
                       evidenceDirectory: input.evidenceDirectory,
+                      ...(input.runId === undefined ? {} : { runId: input.runId }),
                       ...(input.designHash === undefined ? {} : { designHash: input.designHash }),
                       ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
                       ...(input.coverage === undefined ? {} : { coverage: input.coverage }),
