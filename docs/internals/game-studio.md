@@ -39,7 +39,13 @@ block parses with at least one `control`, `mechanic`, `win` and `lose`, and ever
 criterion carries an `observe`. The only exception is a design whose "Win & lose" section
 declares that there is no lose state: it writes a `lose` criterion with the text "No lose
 state" and no observe. `presentation` criteria carry no observe and belong to the visual stage. Creation also writes an intent record
-beside the approval: `required` for a plan-first game, `skipped` for one created without planning.
+beside the approval: `auto` for a plan-first game (the default), `required` for one whose creator
+opted into review, `skipped` for one created without planning. An `auto` game never gates staging on
+the design: each status read records the current DESIGN.md as a server-owned revision once its
+acceptance parses and differs from the scaffold's example block. A revision with the same
+acceptance keeps the exam's `designHash` (only `documentHash` moves), so prose edits never stale the
+state or visual stages; a changed acceptance set is a new exam. Skeleton hint lines are warnings in
+every mode.
 A skipped game is explicitly `legacy` and passes the design stage; a required game whose
 `DESIGN.md` is deleted stays a draft with a missing-document issue. Only a game with no server
 record at all (created before the record existed) is legacy.

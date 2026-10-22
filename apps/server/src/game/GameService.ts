@@ -1173,8 +1173,8 @@ const make = Effect.gen(function* () {
     return yield* exclusive(root, name, work(root));
   });
   /**
-   * The design phase is the gate between planning and building: while the
-   * current DESIGN.md has no matching approval record the game must not export,
+   * For a reviewed design, the design phase is the gate between planning and
+   * building: while the current DESIGN.md has no matching approval record the game must not export,
    * preview, run or playtest, and must not mint Blender assets. The record is
    * authoritative, so editing game.json cannot lift the gate.
    */
@@ -1183,6 +1183,9 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
       if (manifest === null) return;
       const design = yield* designApprovals.status(root, manifest);
+      // A game without design review records revisions as they land; its
+      // design is evidence for the exam, never a gate on building.
+      if (design.autoRevision !== undefined) return;
       if (
         design.state !== "draft" &&
         design.state !== "changed" &&

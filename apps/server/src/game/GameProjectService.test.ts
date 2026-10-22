@@ -253,7 +253,8 @@ it.effect(
         // The design turn has to ask for the presentation decisions the templates rely on.
         expect(launch?.initialMessage?.text).toContain("six palette roles");
         expect(launch?.initialMessage?.text).toContain("goal landmark");
-        expect(launch?.initialMessage?.text).not.toContain("Build a playable game");
+        // Without design review the same turn goes on to build; nobody approves.
+        expect(launch?.initialMessage?.text).toContain("build the game in this same turn");
         // The design turn fills the scaffold instead of inventing its own structure;
         // both the prompt and the game's AGENTS.md have to say so.
         const design = yield* readFile(NodePath.join(created.root, "DESIGN.md"));
@@ -261,9 +262,20 @@ it.effect(
         expect(design).toContain("## Milestones");
         expect(design).toContain("Keep these headings");
         const agents = yield* readFile(NodePath.join(created.root, "AGENTS.md"));
-        expect(agents).toContain("Keep the scaffold's section headings");
-        // Build turns restyle through the template kit before inventing a second look.
-        expect(agents).toContain("Restyle through that kit first");
+        expect(agents).toContain("Keep its section headings");
+        expect(agents).toContain("nobody has to approve it");
+        // A weak model follows a short brief: five numbered steps, at most 350 words.
+        expect(agents.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
+        expect(agents).toMatch(/\n1\. [\s\S]*\n5\. /);
+        const reviewed = scaffoldFiles({
+          name: "Tiny Quest",
+          parentDirectory: parent,
+          brief: "Collect three coins.",
+          reviewDesign: true,
+          modelSelection: selection,
+        })["AGENTS.md"]!;
+        expect(reviewed).toContain("re-approve");
+        expect(reviewed.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
         expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
           "gl_compatibility",
@@ -697,7 +709,7 @@ it.effect("starts a skip-planning game approved, without a design turn", () =>
         ),
       ),
     ).toBe("skipped");
-    expect(launch?.initialMessage?.text).toContain("Build a playable game");
+    expect(launch?.initialMessage?.text).toContain("following AGENTS.md's steps");
     expect(launch?.initialMessage?.text).not.toContain("DESIGN.md");
     expect(yield* exists(NodePath.join(created.game.root, "DESIGN.md"))).toBe(false);
   }),
@@ -725,6 +737,7 @@ it.effect("deleting DESIGN.md on a plan-first game reads draft, not legacy", () 
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         expect(
@@ -777,6 +790,7 @@ const setUpApprovedGame = Effect.fn("approvedGame")(function* (parent: string) {
     name: "Planned Quest",
     parentDirectory: parent,
     brief: "Collect three coins.",
+    reviewDesign: true,
     modelSelection: selection,
   });
   yield* writeDesign(created.root, filledDesign());
@@ -805,6 +819,7 @@ it.effect("approves one reviewed DESIGN.md revision and dispatches one build tur
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         gameRoot = created.root;
@@ -843,19 +858,9 @@ it.effect("approves one reviewed DESIGN.md revision and dispatches one build tur
     expect(sends).toHaveLength(1);
     expect(sends[0]?.threadId).toBe(ThreadId.make("game-test-thread"));
     expect(sends[0]?.text).toContain("The design is approved");
-    expect(sends[0]?.text).toContain("milestone 1");
+    expect(sends[0]?.text).toContain("following AGENTS.md's steps");
     expect(sends[0]?.text).toContain("acceptance criterion");
     expect(sends[0]?.text).toContain("re-approval");
-    // The build turn runs the product's qualification loop with the recorded
-    // tools; the prompt has to name them, because a do-it-yourself agent that
-    // drives the godot CLI by hand leaves no verdicts the panel can show.
-    expect(sends[0]?.text).toContain("game_status");
-    expect(sends[0]?.text).toContain("game_godot_import");
-    expect(sends[0]?.text).toContain("game_godot_check");
-    expect(sends[0]?.text).toContain("game_godot_test");
-    expect(sends[0]?.text).toContain("game_export");
-    expect(sends[0]?.text).toContain("game_web_playtest");
-    expect(sends[0]?.text).toContain("Do not drive the godot binary");
     expect(sends[0]?.createdBy).toBe("user");
     expect(sends[0]?.attachments).toEqual([]);
     expect(gameRoot).not.toBe("");
@@ -971,7 +976,7 @@ it.effect("approving a revision dispatches one build turn and resolves the reque
           expect.stringContaining("The change request is approved"),
         ]);
         expect(sends[2]?.text).toContain("Implement the approved revision");
-        expect(sends[2]?.text).toContain("game_scenarios_run");
+        expect(sends[2]?.text).toContain("AGENTS.md's steps");
         expect(sends[2]?.createdBy).toBe("user");
         const again = yield* Effect.result(projects.approveRevision(created.threadId, revisedHash));
         expect(again._tag === "Failure" && again.failure.reason).toBe("revision-missing");
@@ -1102,6 +1107,7 @@ it.effect("change requests need an approved design to amend", () =>
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         const draftRequest = yield* Effect.result(
@@ -1128,6 +1134,7 @@ it.effect("change requests need an approved design to amend", () =>
           name: "Skipped Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           planFirst: false,
           modelSelection: selection,
         });
@@ -1155,6 +1162,7 @@ it.effect("refuses a missing, skeleton, unreadable or acceptance-less design", (
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         const designFile = NodePath.join(created.root, "DESIGN.md");
@@ -1178,8 +1186,8 @@ it.effect("refuses a missing, skeleton, unreadable or acceptance-less design", (
             return "";
           });
         // The untouched scaffold.
-        const skeletonDetail = yield* refuse("design-invalid");
-        expect(skeletonDetail).toContain("skeleton hint");
+        // Leftover hint lines only warn; the scaffold's example criteria are what block.
+        expect(yield* refuse("design-invalid")).toContain("example criteria");
         // A filled page with no acceptance block.
         const withoutAcceptance = filledDesign().replace(
           /\n## Acceptance[\s\S]*?(?=\n## Art direction)/,
@@ -1224,6 +1232,7 @@ it.effect("only an explicit service call changes the verification policy", () =>
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         const createdPolicy = yield* approvals.readPolicy(
@@ -1293,6 +1302,7 @@ it.effect("two concurrent approvals write one record and dispatch one turn", () 
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         yield* writeDesign(created.root, filledDesign());
@@ -1333,6 +1343,7 @@ it.effect("a failed dispatch keeps the approval and a retry reuses its command",
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         yield* writeDesign(created.root, filledDesign());
@@ -1384,6 +1395,7 @@ it.effect("an interrupted dispatch keeps its record and a retry does not send tw
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         yield* writeDesign(created.root, filledDesign());
@@ -1430,6 +1442,7 @@ it.effect("a crash after writing a pending approval sends once with its ids", ()
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         yield* writeDesign(created.root, filledDesign());
@@ -1483,6 +1496,7 @@ it.effect("a committed dispatch with a failed reply read is never sent twice", (
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         yield* writeDesign(created.root, filledDesign());
@@ -1530,6 +1544,7 @@ it.effect(
             name: "Planned Quest",
             parentDirectory: parent,
             brief: "Collect three coins.",
+            reviewDesign: true,
             modelSelection: selection,
           });
           yield* writeDesign(created.root, filledDesign());
@@ -1594,6 +1609,7 @@ it.effect("a raw game.json edit to approved grants nothing", () =>
           name: "Planned Quest",
           parentDirectory: parent,
           brief: "Collect three coins.",
+          reviewDesign: true,
           modelSelection: selection,
         });
         const manifestFile = NodePath.join(created.root, "game.json");
@@ -1662,6 +1678,7 @@ it.effect("a draft design locks staging until it is approved", () =>
             name: "Planned First",
             parentDirectory: parent,
             brief: "Collect three coins.",
+            reviewDesign: true,
             artDirection: "Clay",
             modelSelection: selection,
           });
@@ -1688,6 +1705,69 @@ it.effect("a draft design locks staging until it is approved", () =>
           yield* projects.approveDesign(created.threadId, yield* designHashOf(created.root));
           expect((yield* projects.read(created.root)).design?.status).toBe("approved");
           expect((yield* game.status(created.threadId)).design.state).toBe("approved");
+        }).pipe(Effect.provide(gameServiceLayers({ stateDir: fixtureState(parent) }))),
+      );
+    } finally {
+      yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
+    }
+  }),
+);
+
+it.effect("without design review the design never gates building and edits become revisions", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.promise(() =>
+      NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-auto-design-")),
+    );
+    try {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const projects = yield* GameProjectService.GameProjectService;
+          const game = yield* GameService.GameService;
+          const created = yield* projects.create({
+            name: "Planned First",
+            parentDirectory: parent,
+            brief: "Collect three coins.",
+            modelSelection: selection,
+          });
+          expect(
+            yield* Effect.promise(() =>
+              GameDesignApproval.readDesignIntent(
+                GameDesignApproval.designIntentFile(fixtureState(parent), created.root),
+              ),
+            ),
+          ).toBe("auto");
+          // The untouched skeleton is a draft, but staging is open.
+          expect((yield* game.status(created.threadId)).design.state).toBe("draft");
+          const exported = yield* Effect.result(game.export(created.threadId, "Web"));
+          if (exported._tag === "Failure")
+            expect((exported.failure as { reason?: string }).reason).not.toBe("design-draft");
+          // The first real design is recorded without anyone approving it.
+          yield* writeDesign(created.root, filledDesign("Planned First"));
+          const first = (yield* game.status(created.threadId)).design;
+          expect(first.state).toBe("approved");
+          expect(first.autoRevision).toBe(1);
+          // A prose edit, even one that leaves a skeleton hint behind, is a new
+          // revision of the same exam: it warns and voids nothing.
+          const hint = "Music, ambience and the sound effects that have to exist.";
+          yield* writeDesign(created.root, `${filledDesign("Planned First")}\n${hint}\n`);
+          const prose = (yield* game.status(created.threadId)).design;
+          expect(prose.state).toBe("approved");
+          expect(prose.autoRevision).toBe(2);
+          expect(prose.approvedHash).toBe(first.approvedHash);
+          expect(prose.issues).toEqual([]);
+          expect(prose.warnings?.some((warning) => warning.includes("skeleton hint"))).toBe(true);
+          // New acceptance is a new exam.
+          yield* writeDesign(
+            created.root,
+            filledDesign("Planned First").replace("all nine lanterns", "all ten lanterns"),
+          );
+          const rescoped = (yield* game.status(created.threadId)).design;
+          expect(rescoped.state).toBe("approved");
+          expect(rescoped.autoRevision).toBe(3);
+          expect(rescoped.approvedHash).not.toBe(first.approvedHash);
+          // Changes go through chat; there is no review queue to wait on.
+          const request = yield* Effect.result(projects.requestChange(created.threadId, "More"));
+          expect(request._tag === "Failure" && request.failure.reason).toBe("design-legacy");
         }).pipe(Effect.provide(gameServiceLayers({ stateDir: fixtureState(parent) }))),
       );
     } finally {

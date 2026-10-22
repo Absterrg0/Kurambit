@@ -86,7 +86,11 @@ export function GameDesignPanel({
   const changed = designState === "changed";
   const approved = designState === "approved";
   const revisionPending = designState === "revision-pending";
-  const approvable = draft || changed;
+  // A game created without design review records each revision itself.
+  const autoRevision = status.design.autoRevision;
+  const auto = autoRevision !== undefined;
+  const approvable = !auto && (draft || changed);
+  const warnings = status.design.warnings ?? [];
   const approvedLabel = approvedOn(status.design.approvedAt ?? undefined);
   const designPath = status.designPath;
   const contents = status.design.document?.trim() ?? "";
@@ -210,9 +214,11 @@ export function GameDesignPanel({
                 </span>
               </p>
               <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
-                {turnRunning
-                  ? "The agent is writing the design. It will keep this file current until you approve it."
-                  : "Ask for changes in chat, or edit DESIGN.md yourself. Approve it to start the build."}
+                {auto
+                  ? "The agent writes DESIGN.md and builds right away; nothing waits for approval."
+                  : turnRunning
+                    ? "The agent is writing the design. It will keep this file current until you approve it."
+                    : "Ask for changes in chat, or edit DESIGN.md yourself. Approve it to start the build."}
               </p>
             </>
           ) : changed ? (
@@ -225,6 +231,11 @@ export function GameDesignPanel({
                 and staging is locked. Review the new scope and re-approve it to continue.
               </p>
             </>
+          ) : approved && auto ? (
+            <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
+              <CheckIcon className="size-3.5 text-success" aria-hidden="true" />
+              {`Revision ${autoRevision} recorded${approvedLabel ? ` ${approvedLabel}` : ""} · edits become new revisions`}
+            </p>
           ) : approved ? (
             <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
               <CheckIcon className="size-3.5 text-success" aria-hidden="true" />
@@ -252,6 +263,16 @@ export function GameDesignPanel({
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
                 {issues.map((issue) => (
                   <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {warnings.length > 0 ? (
+            <div className="mt-2 max-w-xl rounded-md border border-border px-3 py-2">
+              <p className="text-xs font-medium">Unfinished hints (not blocking)</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
                 ))}
               </ul>
             </div>
@@ -285,7 +306,7 @@ export function GameDesignPanel({
               Edit file
             </Button>
           ) : null}
-          {approved && !revisionPending ? (
+          {approved && !auto && !revisionPending ? (
             <Button
               size="sm"
               variant="outline"
@@ -377,7 +398,9 @@ export function GameDesignPanel({
           </p>
           <p className="max-w-sm text-xs text-muted-foreground">
             {draft
-              ? "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
+              ? auto
+                ? "DESIGN.md appears here when the agent saves it."
+                : "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
               : "This game has no DESIGN.md yet. Ask the agent to write one in chat."}
           </p>
           <Button size="xs" variant="ghost" onClick={onRefresh}>
@@ -425,11 +448,13 @@ export function GameDesignPanel({
         <section className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
           <h3 className="text-sm font-medium">Acceptance</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {approved
-              ? "The approved revision binds the build to these."
-              : changed && issues.length > 0
-                ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
-                : "These are the criteria in DESIGN.md. Approve the design to bind them."}
+            {approved && auto
+              ? "The latest recorded revision's criteria."
+              : approved
+                ? "The approved revision binds the build to these."
+                : changed && issues.length > 0
+                  ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
+                  : "These are the criteria in DESIGN.md. Approve the design to bind them."}
           </p>
           <p className="mt-1 text-2xs text-muted-foreground">
             Coverage: {coverage.map((entry) => `${entry.count} ${entry.kind}`).join(" · ")}

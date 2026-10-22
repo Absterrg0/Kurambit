@@ -428,7 +428,7 @@ const make = Effect.gen(function* () {
         const creationManifest = scaffoldManifest(input);
         yield* approvals.recordIntent(
           root,
-          input.planFirst === false ? "skipped" : "required",
+          input.planFirst === false ? "skipped" : input.reviewDesign === true ? "required" : "auto",
           creationManifest.probe === true,
           {
             testSuite: gameTestSuite(creationManifest),
@@ -524,13 +524,13 @@ const make = Effect.gen(function* () {
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
   // the recorded verdicts the Game panel and the harness depend on.
   const buildAfterApproval =
-    "The design is approved. Build milestone 1 from DESIGN.md, then continue through the remaining milestones one at a time. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Do the engine work with the Game Studio tools; a build-turn report is only evidence the tools wrote: call game_status first, game_godot_import after every engine change, game_godot_check until it reports ok with zero errors, your godot/tests smoke test with game_godot_test until it passes, write godot/tests/scenarios routes that play every level to the win with normal input, plus a lose route that loses the run through normal input, and run game_scenarios_run until every control, mechanic, content, win and lose criterion passes after play starts (the assertions come from the approved design, not from you), the web build with game_export, and game_web_playtest with steps over the core loop until it reports success and responded=true (a fresh evidence folder every round). Do not drive the godot binary, exporters, or tests from the shell — raw runs are not recorded as build evidence. Finish AGENTS.md's Definition of done, then report results and the game_preview URL.";
+    "The design is approved. Build it by following AGENTS.md's steps. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Finish with the game_preview URL.";
   /** The one turn a change request sends: rewrite the contract, then stop. */
   const changeRequestMessage = (text: string) =>
     `Change requested: ${text}\n\nFirst update DESIGN.md: describe the change and add or adjust acceptance criteria that prove it. Keep every existing criterion unless the change removes that feature; if it does, say so under a "Removed:" line naming the criterion id (for example "- Removed: owl-menu-hint"), and end the turn for review. Do not build until approved.`;
   /** The turn an approved revision dispatches: implement it, then the same bar. */
   const implementChangeMessage =
-    "The change request is approved. Implement the approved revision now on the current sources, then finish the build turn to AGENTS.md's Definition of done for the current sources: game_godot_check ok, game_godot_test passing, godot/tests/scenarios routes that still play every level to the win with game_scenarios_run, a fresh web export with game_export, and game_web_playtest with success and responded=true in a fresh evidence folder. Do not edit game files after the final playtest. Report the results and the game_preview URL.";
+    "The change request is approved. Implement the approved revision now on the current sources by following AGENTS.md's steps, then report the results and the game_preview URL.";
   /**
    * Sends the approval's one build turn, reconciling the persisted attempt
    * first. The command id is the orchestration idempotency key, so after a crash
@@ -757,6 +757,14 @@ const make = Effect.gen(function* () {
             path: NodePath.join(root, "DESIGN.md"),
             reason: "design-legacy",
             detail: "This game has no approved design for a change request to amend.",
+          });
+        if (intent === "auto")
+          return yield* new GameOperationError({
+            operation: "request-change",
+            path: NodePath.join(root, "DESIGN.md"),
+            reason: "design-legacy",
+            detail:
+              "This game records each design revision as the agent writes it; ask for changes in chat.",
           });
         if (intent === null)
           return yield* new GameOperationError({

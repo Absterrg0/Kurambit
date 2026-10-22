@@ -184,6 +184,11 @@ const sectionsOf = (design: string) => {
 
 export interface DesignValidation {
   readonly issues: readonly string[];
+  /**
+   * Skeleton hint lines left in the document. They read as unfinished prose,
+   * not a broken contract, so they never block approval or a build.
+   */
+  readonly warnings: readonly string[];
   /** The parsed criteria when the document is valid; empty otherwise. */
   readonly acceptance: readonly GameAcceptanceCriterion[];
 }
@@ -199,9 +204,11 @@ export function validateDesignDocument(input: {
   readonly skeleton: string;
 }): DesignValidation {
   const { design, skeleton } = input;
-  if (design === null) return { issues: ["DESIGN.md is missing."], acceptance: [] };
-  if (design.trim() === "") return { issues: ["DESIGN.md is empty."], acceptance: [] };
+  if (design === null) return { issues: ["DESIGN.md is missing."], warnings: [], acceptance: [] };
+  if (design.trim() === "")
+    return { issues: ["DESIGN.md is empty."], warnings: [], acceptance: [] };
   const issues: string[] = [];
+  const warnings: string[] = [];
   const headings = skeleton
     .split(/\r?\n/)
     .map(headingOf)
@@ -225,17 +232,22 @@ export function validateDesignDocument(input: {
     if (paragraph === "" || paragraph.startsWith("#")) continue;
     if (/^(?:-|\d+\.)\s/.test(paragraph)) continue;
     if (normalizedDesign.includes(paragraph))
-      issues.push(`DESIGN.md still contains the skeleton hint "${paragraph.slice(0, 70)}..."`);
+      warnings.push(`DESIGN.md still contains the skeleton hint "${paragraph.slice(0, 70)}..."`);
   }
   for (const line of skeleton.split(/\r?\n/)) {
     const hint = line.match(/^(?:-|\d+\.)\s+\*\*[^*]+\*\*\s+—\s+(.+)$/)?.[1];
     if (hint !== undefined && normalizedDesign.includes(normalize(hint)))
-      issues.push(
+      warnings.push(
         `DESIGN.md still contains the skeleton hint "${normalize(hint).slice(0, 70)}..."`,
       );
   }
   const parsed = parseAcceptance(design);
+  const example = parseAcceptance(skeleton);
   if (!parsed.ok) issues.push(...parsed.issues);
+  else if (example.ok && JSON.stringify(example.criteria) === JSON.stringify(parsed.criteria))
+    issues.push(
+      "The acceptance block still holds the scaffold's example criteria; write this game's own.",
+    );
   else {
     const winLose = sectionsOf(design).get(WIN_LOSE_HEADING) ?? "";
     const declaresNoLoseState = NO_LOSE_STATE_PATTERN.test(winLose);
@@ -299,6 +311,7 @@ export function validateDesignDocument(input: {
   }
   return {
     issues: [...new Set(issues)].slice(0, 20),
+    warnings: [...new Set(warnings)].slice(0, 20),
     // Display can show the parsed criteria even while another section is still
     // unfinished; approval still requires an empty issue list.
     acceptance: parsed.ok ? parsed.criteria : [],
@@ -443,6 +456,14 @@ export const GameDesignRead = Schema.Struct({
   acceptance: Schema.Array(GameAcceptanceCriterion),
   /** What has to change before this design can be approved. */
   issues: Schema.Array(Schema.String),
+  /** Leftover skeleton hints: shown, never blocking. */
+  warnings: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
+   * How many revisions the server has recorded on its own. Present only for a
+   * game created without design review, where every DESIGN.md change is
+   * snapshotted instead of waiting for the creator.
+   */
+  autoRevision: Schema.optionalKey(Schema.Number),
   /** The open change request, when the creator asked for one and it is unresolved. */
   pendingRevision: Schema.NullOr(GamePendingRevision),
   /**

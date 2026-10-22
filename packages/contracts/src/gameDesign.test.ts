@@ -191,9 +191,20 @@ describe("validateDesignDocument", () => {
 
   it("rejects a missing document and the untouched skeleton", () => {
     expect(validateDesignDocument({ design: null, skeleton }).issues[0]).toContain("missing");
-    const issues = validateDesignDocument({ design: skeleton, skeleton }).issues;
-    expect(issues.some((issue) => issue.includes("skeleton hint"))).toBe(true);
-    expect(issues.some((issue) => issue.includes("Acceptance"))).toBe(true);
+    const untouched = validateDesignDocument({ design: skeleton, skeleton });
+    expect(untouched.warnings.some((warning) => warning.includes("skeleton hint"))).toBe(true);
+    expect(untouched.issues.some((issue) => issue.includes("Acceptance"))).toBe(true);
+  });
+
+  it("warns about a leftover hint line without blocking an otherwise valid design", () => {
+    const hint = skeleton
+      .split("\n")
+      .find((line) => line.trim() !== "" && !line.startsWith("#") && !/^(?:-|\d+\.)\s/.test(line));
+    expect(hint).toBeDefined();
+    const result = validateDesignDocument({ design: `${validDesign}\n${hint}\n`, skeleton });
+    expect(result.issues).toEqual([]);
+    expect(result.warnings.some((warning) => warning.includes("skeleton hint"))).toBe(true);
+    expect(result.acceptance).toHaveLength(5);
   });
 
   it("names a missing section and a thin page", () => {

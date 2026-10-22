@@ -127,8 +127,10 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
   const [planFirst, setPlanFirst] = useState(true);
+  const [reviewDesign, setReviewDesign] = useState(false);
   const [editingFolder, setEditingFolder] = useState(false);
   const planFirstId = useId();
+  const reviewDesignId = useId();
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +186,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             brief,
             artDirection,
             planFirst,
+            ...(planFirst && reviewDesign ? { reviewDesign: true } : {}),
             modelSelection: model,
           },
         })
@@ -367,7 +370,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="font-medium">Plan the design first</span>
                       <span className="text-xs text-muted-foreground">
-                        The agent writes a one-page design for you to approve before it builds.
+                        The agent writes a one-page design, then builds it.
                       </span>
                     </span>
                     <Switch
@@ -378,6 +381,27 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       onCheckedChange={(checked) => setPlanFirst(Boolean(checked))}
                     />
                   </label>
+                  {planFirst ? (
+                    <label
+                      htmlFor={reviewDesignId}
+                      className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-border/70 px-3 py-2.5"
+                    >
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="font-medium">Approve the design before building</span>
+                        <span className="text-xs text-muted-foreground">
+                          For developers: the build waits until you approve DESIGN.md on the Design
+                          tab.
+                        </span>
+                      </span>
+                      <Switch
+                        id={reviewDesignId}
+                        className="mt-0.5"
+                        checked={reviewDesign}
+                        disabled={busy}
+                        onCheckedChange={(checked) => setReviewDesign(Boolean(checked))}
+                      />
+                    </label>
+                  ) : null}
                   <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
                       <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />

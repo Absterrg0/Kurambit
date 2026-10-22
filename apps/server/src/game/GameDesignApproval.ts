@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -44,6 +45,14 @@ export interface DesignApprovalRecord {
   readonly approvedAt: string;
   readonly acceptance: readonly GameAcceptanceCriterion[];
   /**
+   * The DESIGN.md bytes an automatic revision last recorded, when they differ
+   * from `designHash`. A prose edit moves only this, so the exam (designHash)
+   * and every stage graded against it stay current.
+   */
+  readonly documentHash?: string;
+  /** Revisions the server recorded on its own; absent on creator approvals. */
+  readonly autoRevision?: number;
+  /**
    * The one build turn this approval owns. The ids are chosen and persisted
    * before dispatch, so a crash or a post-commit reply failure can reconcile the
    * orchestration receipt instead of sending a second message. `pending` means
@@ -58,12 +67,13 @@ export interface DesignApprovalRecord {
   };
 }
 /**
- * What the server promised at creation: a plan-first game owes a reviewable
- * DESIGN.md, a skip-planning game explicitly skips it. Written once, outside the
+ * What the server promised at creation: a plan-first game owes a DESIGN.md
+ * the creator reviews (`required`) or one the server records as each revision
+ * lands (`auto`); a skip-planning game explicitly skips it. Written once, outside the
  * workspace, so deleting DESIGN.md or editing game.json cannot turn a plan-first
  * game into a legacy one.
  */
-export type GameDesignIntent = "required" | "skipped";
+export type GameDesignIntent = "required" | "auto" | "skipped";
 /**
  * The full creation record. `probe` and `verification` are both here because an
  * agent can edit game.json, and the server's promise must outlive that edit.
@@ -72,7 +82,7 @@ const StoredIntent = Schema.fromJsonString(
   Schema.Struct({
     schemaVersion: Schema.Literal(1),
     game: Schema.String,
-    intent: Schema.Literals(["required", "skipped"]),
+    intent: Schema.Literals(["required", "auto", "skipped"]),
     probe: Schema.optionalKey(Schema.Boolean),
     verification: Schema.optionalKey(GameVerificationPolicy),
   }),
@@ -152,6 +162,8 @@ const StoredRecord = Schema.fromJsonString(
     // Persisted approvals may still use the old `end` kind; normalizeAcceptance
     // below maps it to `win` so the runtime only sees current kinds.
     acceptance: Schema.Array(StoredGameAcceptanceCriterion),
+    documentHash: Schema.optionalKey(Schema.String),
+    autoRevision: Schema.optionalKey(Schema.Number),
     buildDispatch: Schema.optionalKey(
       Schema.Struct({
         commandId: Schema.String,
@@ -347,12 +359,16 @@ const deriveDesignState = (input: {
   readonly pendingRevision: GamePendingRevision | null;
 }): GameDesignState => {
   if (input.pendingRevision !== null && input.record !== null) return "revision-pending";
+  // Without review the last recorded revision keeps binding while the agent
+  // edits, even through a document that no longer parses.
+  if (input.record !== null && input.intent === "auto") return "approved";
   if (input.record !== null)
-    return input.currentHash !== null && input.currentHash === input.record.designHash
+    return input.currentHash !== null &&
+      input.currentHash === (input.record.documentHash ?? input.record.designHash)
       ? "approved"
       : "changed";
   if (input.intent === "skipped") return "legacy";
-  if (input.intent === "required") return "draft";
+  if (input.intent === "required" || input.intent === "auto") return "draft";
   if (input.manifestDesign === undefined) return "legacy";
   if (input.manifestDesign.status === "draft") return "draft";
   return input.documentExists ? "draft" : "legacy";
@@ -362,13 +378,14 @@ const designRead = async (
   stateDir: string,
   root: string,
   manifest: GameManifest,
+  now: string,
 ): Promise<GameDesignRead> => {
   const [approvalLocation, intentLocation, revisionLocation] = await Promise.all([
     prepareLocation(stateDir, root, ".json"),
     prepareLocation(stateDir, root, ".intent.json"),
     prepareLocation(stateDir, root, ".revision.json"),
   ]);
-  const record = await readDesignApprovalRecord(approvalLocation.file);
+  let record = await readDesignApprovalRecord(approvalLocation.file);
   const intent = await readDesignIntent(intentLocation.file);
   const pendingRevision = await readPendingRevision(revisionLocation.file);
   // One read is the snapshot: the text, its hash and the parsed acceptance all
@@ -378,6 +395,16 @@ const designRead = async (
   const design = snapshot.document;
   const currentHash = design === null || snapshot.truncated ? null : designDocumentHash(design);
   const exists = design === null ? await designDocumentExists(root) : true;
+  if (intent === "auto" && design !== null && currentHash !== null)
+    record = await recordAutoRevision(
+      approvalLocation.file,
+      root,
+      manifest,
+      record,
+      design,
+      currentHash,
+      now,
+    );
   const state = deriveDesignState({
     record,
     intent,
@@ -391,10 +418,11 @@ const designRead = async (
         issues: [
           `DESIGN.md is larger than ${DESIGN_DOCUMENT_LIMIT / 1024} KB, so the Design tab cannot show all of it; shorten it before approving.`,
         ],
+        warnings: [],
         acceptance: [],
       }
-    : state === "approved" || state === "legacy"
-      ? { issues: [], acceptance: [] }
+    : (state === "approved" && intent !== "auto") || state === "legacy"
+      ? { issues: [], warnings: [], acceptance: [] }
       : validateDesignDocument({
           design,
           skeleton: designSkeleton(manifest.name),
@@ -424,9 +452,55 @@ const designRead = async (
       ...(currentAcceptance.length > 0 ? currentAcceptance : (record?.acceptance ?? [])),
     ],
     issues: [...validation.issues],
+    warnings: [...validation.warnings],
+    ...(intent === "auto" ? { autoRevision: record?.autoRevision ?? 0 } : {}),
     pendingRevision,
     revisionDiff,
   };
+};
+
+/**
+ * A game without design review records each parseable DESIGN.md as it lands,
+ * instead of waiting for a creator. A revision whose acceptance is unchanged
+ * keeps the exam's hash, so editing prose never makes graded stages stale; a
+ * changed acceptance set is a new exam. A document whose acceptance does not
+ * parse, or still holds the scaffold's example block, records nothing and the
+ * previous revision keeps binding.
+ */
+const recordAutoRevision = async (
+  file: string,
+  root: string,
+  manifest: GameManifest,
+  record: DesignApprovalRecord | null,
+  design: string,
+  currentHash: string,
+  now: string,
+): Promise<DesignApprovalRecord | null> => {
+  if (record !== null && (record.documentHash ?? record.designHash) === currentHash) return record;
+  const skeleton = designSkeleton(manifest.name);
+  const { acceptance } = validateDesignDocument({ design, skeleton });
+  if (acceptance.length === 0) return record;
+  // The scaffold ships an example block; until the agent replaces it there is
+  // no design of this game to record.
+  const example = validateDesignDocument({ design: skeleton, skeleton }).acceptance;
+  if (JSON.stringify(acceptance) === JSON.stringify(example)) return record;
+  const diff = record === null ? null : diffAcceptance(record.acceptance, acceptance);
+  const sameExam =
+    record !== null &&
+    diff !== null &&
+    diff.added.length + diff.changed.length + diff.removed.length === 0;
+  const next: DesignApprovalRecord = {
+    schemaVersion: 1,
+    game: root,
+    approvalId: sameExam ? record.approvalId : NodeCrypto.randomUUID(),
+    designHash: sameExam ? record.designHash : currentHash,
+    approvedAt: now,
+    acceptance: sameExam ? record.acceptance : acceptance,
+    ...(sameExam ? { documentHash: currentHash } : {}),
+    autoRevision: (record?.autoRevision ?? 0) + 1,
+  };
+  await writeRecord(file, next);
+  return next;
 };
 
 /** The open change request for this game; null when none is pending. */
@@ -726,16 +800,18 @@ export const layer = (options: { readonly stateDir: string }) => {
           });
         }),
       status: (root, manifest) =>
-        Effect.tryPromise({
-          try: () => designRead(options.stateDir, root, manifest),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "read-design",
-              path: root,
-              reason: "io",
-              cause,
-            }),
-        }),
+        Effect.flatMap(DateTime.now, (now) =>
+          Effect.tryPromise({
+            try: () => designRead(options.stateDir, root, manifest, DateTime.formatIso(now)),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "read-design",
+                path: root,
+                reason: "io",
+                cause,
+              }),
+          }),
+        ),
       exclusive: (root, effect) =>
         Effect.gen(function* () {
           // The lock is keyed by the real root, so a directory-symlink alias and

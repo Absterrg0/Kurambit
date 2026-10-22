@@ -38,18 +38,24 @@ direction, audio, scope and milestones. It also writes an **Acceptance** section
 counts, and how the game is won and lost. Every control, mechanic, content, win and lose criterion
 names a game value the player changes; a value that is already true when play starts does not count,
 and content counts have to be collected rather than merely exist. Presentation claims (a glow, an
-ambience) carry no observation and are listed as not yet verified. It ends that turn asking you to
-review the draft. **Plan the design first** in the New game dialog is on by default; turn it off to
-skip straight to building.
+ambience) carry no observation and are listed as not yet verified. **Plan the design first** in the
+New game dialog is on by default; turn it off to skip straight to building.
 
-The design lives on the **Design** tab, first in the stage while it is a draft. Read it and its
-acceptance checklist, then ask for changes in chat, or open **Edit file** to change `DESIGN.md`
-yourself. When it looks right, choose **Approve & build**. Approval binds that exact revision:
+By default nothing waits for you: the agent writes `DESIGN.md` and builds in the same turn, and Game
+Studio records each new version of the design as a revision. Editing prose keeps the same
+acceptance; changing the acceptance block makes the new criteria the ones the game is checked
+against. Leftover scaffold hint lines show as non-blocking warnings on the **Design** tab. Ask for
+design changes in chat.
+
+To review the design yourself, turn on **Approve the design before building** in the New game
+dialog. The agent then ends its first turn at the draft. Read it and its acceptance checklist on the
+**Design** tab, ask for changes in chat or open **Edit file** to change `DESIGN.md` yourself, and
+choose **Approve & build** when it looks right. Approval binds that exact revision:
 Game Studio stores its hash and acceptance outside the game, so editing `game.json` cannot grant
 approval, and a document that is still the scaffold, missing a section or missing the acceptance
-block cannot be approved. The agent then builds milestone 1 and continues through the milestones.
+block cannot be approved. The agent then builds it.
 
-If `DESIGN.md` changes after approval, the Design tab says **Design changed since approval** and the
+For a reviewed design, if `DESIGN.md` changes after approval, the Design tab says **Design changed since approval** and the
 game is unqualified until you review the new scope and choose **Re-approve design**. Re-approval
 updates the contract without starting another build turn; the agent is told to put scope changes in
 `DESIGN.md` and ask for that review instead of quietly dropping a criterion.
