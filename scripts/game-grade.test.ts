@@ -8,6 +8,8 @@ import {
   chooseFrames,
   clampHoldMs,
   CONTROL_DESCRIPTION,
+  decodeActions,
+  decodeVerdict,
   gradeGame,
   judgeObligations,
   makeOpenCodeReviewer,
@@ -112,6 +114,51 @@ describe("chooseFrames", () => {
       frames.map((frame) => frame.path),
       ["/frames/boot.png", "/frames/step-01.png", "/frames/step-02.png"],
     );
+  });
+});
+
+describe("the model's own replies", () => {
+  it("reads an action list that leaves the unused lists out", () => {
+    // The model spells out only the fields it uses; a missing "drags" used to
+    // end the whole playtest and the game was graded as if nothing was shown.
+    const reply = decodeActions({
+      note: "I will click the reply.",
+      clicks: [{ x: 480, y: 270 }],
+    });
+    assert.deepStrictEqual(reply.drags, []);
+    assert.deepStrictEqual(reply.keys, []);
+    assert.equal(reply.reload, false);
+    assert.equal(reply.waitMs, 0);
+    assert.equal(reply.note, "I will click the reply.");
+  });
+
+  it("reads the numbers the model wrote as text", () => {
+    const reply = decodeActions({
+      note: "",
+      reload: false,
+      keys: [{ key: "l", holdMs: "3500" }],
+      clicks: [{ x: "480", y: "270" }],
+      drags: [],
+      waitMs: "800",
+    });
+    assert.deepStrictEqual(reply.keys, [{ key: "l", holdMs: 3500 }]);
+    assert.deepStrictEqual(reply.clicks, [{ x: 480, y: 270 }]);
+    assert.equal(reply.waitMs, 800);
+  });
+
+  it("reads a verdict that leaves the frame out", () => {
+    const reply = decodeVerdict({ verdict: "NO" });
+    assert.equal(reply.verdict, "NO");
+    assert.equal(reply.frame, "");
+    assert.equal(reply.reason, "");
+  });
+
+  it("counts a verdict that cited no frame instead of failing the vote", async () => {
+    const review: ReviewFn = async () => ({ verdict: "YES" });
+    const judged = await judgeObligations({ brief, frames, notes: [], review });
+    assert.equal(judged.obligations[0]?.votes[0]?.yes, true);
+    assert.equal(judged.obligations[0]?.votes[0]?.frame, null);
+    assert.equal(judged.obligations[0]?.votes[0]?.reason, "");
   });
 });
 

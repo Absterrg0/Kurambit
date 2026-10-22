@@ -96,7 +96,7 @@ const ActionReply = Schema.Struct({
   waitMs: Schema.Number,
 });
 type ActionReply = typeof ActionReply.Type;
-const decodeActions = Schema.decodeUnknownSync(ActionReply);
+const decodeActionReply = Schema.decodeUnknownSync(ActionReply);
 
 const VerdictReply = Schema.Struct({
   verdict: Schema.String,
@@ -104,7 +104,67 @@ const VerdictReply = Schema.Struct({
   reason: Schema.String,
 });
 type VerdictReply = typeof VerdictReply.Type;
-const decodeVerdict = Schema.decodeUnknownSync(VerdictReply);
+const decodeVerdictReply = Schema.decodeUnknownSync(VerdictReply);
+
+/** The model's own JSON, as an object to read fields out of. */
+const asRecord = (raw: unknown): Record<string, unknown> =>
+  typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+
+/** A number the model wrote, whether it wrote it as a number or as text. */
+const asNumber = (raw: unknown, fallback: number): number => {
+  const value = typeof raw === "string" ? Number(raw) : raw;
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+};
+
+/** The list of objects a model wrote, dropping anything that is not one. */
+const asEntries = (raw: unknown): ReadonlyArray<Record<string, unknown>> =>
+  Array.isArray(raw)
+    ? raw.filter(
+        (item): item is Record<string, unknown> => typeof item === "object" && item !== null,
+      )
+    : [];
+
+/**
+ * Reads the model's action list. A reply that leaves a list out means "no such
+ * action", not a broken answer: the model spells out only the fields it uses,
+ * and a strict read used to end the whole playtest on a missing "drags" — the
+ * game was then graded as if nothing had been shown.
+ */
+export const decodeActions = (raw: unknown): ActionReply => {
+  const value = asRecord(raw);
+  return decodeActionReply({
+    note: typeof value.note === "string" ? value.note : "",
+    reload: value.reload === true,
+    keys: asEntries(value.keys).map((key) => ({
+      key: typeof key.key === "string" ? key.key : "",
+      holdMs: asNumber(key.holdMs, 300),
+    })),
+    clicks: asEntries(value.clicks).map((click) => ({
+      x: asNumber(click.x, 0),
+      y: asNumber(click.y, 0),
+    })),
+    drags: asEntries(value.drags).map((drag) => ({
+      x1: asNumber(drag.x1, 0),
+      y1: asNumber(drag.y1, 0),
+      x2: asNumber(drag.x2, 0),
+      y2: asNumber(drag.y2, 0),
+    })),
+    waitMs: asNumber(value.waitMs, 0),
+  });
+};
+
+/**
+ * Reads the model's verdict. A NO answer often leaves the frame out, and a
+ * missing frame must not turn into a failed vote.
+ */
+export const decodeVerdict = (raw: unknown): VerdictReply => {
+  const value = asRecord(raw);
+  return decodeVerdictReply({
+    verdict: typeof value.verdict === "string" ? value.verdict : "",
+    frame: typeof value.frame === "string" ? value.frame : "",
+    reason: typeof value.reason === "string" ? value.reason : "",
+  });
+};
 
 export interface GradeFrame {
   /** `F1`…, the name the grader cites. */
