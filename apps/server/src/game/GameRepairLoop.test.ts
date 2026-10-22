@@ -1234,6 +1234,13 @@ it.live("a restart marks the loop interrupted, keeps the incumbent and has no Re
           expect(game.selected).toBeNull();
           expect(game.rounds.every((round) => round.status !== "running")).toBe(true);
           expect("resume" in services.loop).toBe(false);
+          // The explicit restore finds the round this loop owned by its id.
+          const restored = yield* services.loop.restore(threadId);
+          expect(restored.kind).toBe("restored");
+          if (restored.kind === "restored") expect(restored.round.loopId).toBe(state.id);
+          // Nothing interrupted is left to restore from.
+          const again = yield* Effect.flip(services.loop.restore(threadId));
+          expect(again.reason).toBe("invalid-input");
         }),
       );
     }),

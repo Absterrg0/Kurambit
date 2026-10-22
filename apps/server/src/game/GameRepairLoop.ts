@@ -283,6 +283,14 @@ export class GameRepairLoop extends Context.Service<
     readonly recover: () => Effect.Effect<ReadonlyArray<string>, never>;
     /** Joins the live fiber for a game, when one is running. */
     readonly awaitIdle: (threadId: ThreadId) => Effect.Effect<void, never>;
+    /**
+     * The creator's explicit return to the version before an interrupted
+     * review. The round is the newest loop's own interrupted round, found by
+     * its loop id, never whichever round is newest. There is no Resume.
+     */
+    readonly restore: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameRoundStore.GameRestore, GameOperationError>;
   }
 >()("t3/game/GameRepairLoop") {}
 
@@ -1541,7 +1549,35 @@ export const layer = (options: GameRepairLoopOptions) => {
         return interruptedRoots;
       }).pipe(Effect.catchCause(() => Effect.succeed([] as string[])));
 
-    return GameRepairLoop.of({ ensure, read, interrupt, recover, awaitIdle });
+    const restore: GameRepairLoop["Service"]["restore"] = (threadId) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        // A restore rewrites the folder: it takes the game like any action,
+        // so it is refused while a recorded review child may still write.
+        yield* admission.admit({
+          root,
+          threadId,
+          reason: "An explicit restore superseded the review; its candidate was not selected.",
+        });
+        const loop = yield* readRecord(root);
+        const state = yield* rounds.read(root);
+        const round =
+          loop === null
+            ? undefined
+            : state.rounds.findLast(
+                (entry) => entry.loopId === loop.id && entry.status === "interrupted",
+              );
+        if (round === undefined)
+          return yield* new GameOperationError({
+            operation: "restore game review version",
+            path: root,
+            reason: "invalid-input",
+            detail: "The latest review has no interrupted round to restore from.",
+          });
+        return yield* rounds.restore(root, round.id);
+      });
+
+    return GameRepairLoop.of({ ensure, read, interrupt, recover, awaitIdle, restore });
   });
   return Layer.effect(GameRepairLoop, make);
 };
