@@ -335,7 +335,9 @@ const runRawBrief = async (
     cwd: scratch,
     logPath: NodePath.join(directory, "opencode.log"),
     timeoutMs: rawTimeoutMs,
-    env: freshOpenCodeEnvironment(),
+    // spawn does not rewrite PWD; the CLI would resolve its project from the
+    // inherited checkout path instead of the scratch folder.
+    env: { ...freshOpenCodeEnvironment(), PWD: scratch },
   });
   const grade = await gradeFinishedGame(brief, scratch, directory);
   return { timedOut: run.timedOut, exitCode: run.exitCode, grade };
