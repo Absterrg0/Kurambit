@@ -292,7 +292,7 @@ const make = Effect.gen(function* () {
   /**
    * Qualification is a server-owned record written from actual operation
    * results. Failing to persist it must not turn a real build into a crash; the
-   * missing stage keeps the game unqualified either way.
+   * missing stage leaves the game uncertified either way.
    */
   const recordQualification = (root: string, input: GameQualification.QualificationRecordInput) =>
     qualification.record(root, input).pipe(
@@ -1280,11 +1280,11 @@ const make = Effect.gen(function* () {
       // key, so a status read that finds unchanged sources does no file walk
       // beyond the snapshot it already needed for freshness.
       const manifest = yield* projects.read(root);
-      const snapshot = yield* designApprovals.snapshot(root, manifest);
-      const design = snapshot.read;
+      const designSnapshot = yield* designApprovals.snapshot(root, manifest);
+      const design = designSnapshot.read;
       // The record this read used; a separate read could observe a newer
       // automatic revision and bind the exam to a different design.
-      const approval = snapshot.record;
+      const approval = designSnapshot.record;
       const policy = yield* designApprovals.readPolicy(root, manifest);
       const qualificationRead = yield* qualification.read(
         root,

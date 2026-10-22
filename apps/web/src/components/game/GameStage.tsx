@@ -188,7 +188,9 @@ export function GameStage({
       ? "Qualified"
       : qualification.completion === "complete"
         ? "Playable"
-        : "Incomplete";
+        : qualification.completion === "unknown"
+          ? "Completion unknown"
+          : "Incomplete";
   const certification = qualification.stages
     .filter(
       (stage) => stage.stage !== "design" && stage.stage !== "export" && stage.stage !== "playtest",
