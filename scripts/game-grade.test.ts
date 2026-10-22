@@ -9,6 +9,10 @@ import {
   CONTROL_DESCRIPTION,
   gradeGame,
   judgeObligations,
+  makeOpenCodeReviewer,
+  OPENCODE_GRADER_FALLBACK_MODEL,
+  OPENCODE_GRADER_MODEL,
+  type OpenCodeRun,
   type ReviewFn,
 } from "./game-grade.ts";
 
@@ -183,6 +187,73 @@ describe("judgeObligations", () => {
   });
 });
 
+describe("makeOpenCodeReviewer", () => {
+  /** One CLI event line, the way `opencode run --format json` writes it. */
+  const cliText = (text: string) =>
+    `${JSON.stringify({ type: "text", part: { type: "text", text } })}\n`;
+
+  it("sends the frames, asks for JSON and decodes the reply", async () => {
+    const runs: OpenCodeRun[] = [];
+    const reviewer = makeOpenCodeReviewer({
+      run: async (run) => {
+        runs.push(run);
+        return {
+          output: cliText('{"verdict":"YES","frame":"F1","reason":"because"}'),
+          exitCode: 0,
+        };
+      },
+    });
+    const answer = await reviewer.review({
+      kind: "verdict",
+      prompt: "The single claim to judge",
+      imagePaths: ["/frames/f1.png"],
+    });
+    assert.deepStrictEqual(answer, { verdict: "YES", frame: "F1", reason: "because" });
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]!.model, OPENCODE_GRADER_MODEL);
+    assert.deepStrictEqual(runs[0]!.imagePaths, ["/frames/f1.png"]);
+    assert.match(runs[0]!.prompt, /Answer with one JSON object and nothing else/);
+    assert.match(runs[0]!.prompt, /"verdict":"YES or NO"/);
+  });
+
+  it("moves to the free fallback route when the model is out of quota", async () => {
+    const models: string[] = [];
+    const reviewer = makeOpenCodeReviewer({
+      run: async (run) => {
+        models.push(run.model);
+        return run.model === OPENCODE_GRADER_MODEL
+          ? { output: "Free usage limit reached", exitCode: 1 }
+          : {
+              output: cliText(
+                '{"note":"hi","reload":false,"keys":[],"clicks":[],"drags":[],"waitMs":0}',
+              ),
+              exitCode: 0,
+            };
+      },
+    });
+    const answer = await reviewer.review({
+      kind: "actions",
+      prompt: "Play the game",
+      imagePaths: [],
+    });
+    assert.deepStrictEqual(answer, {
+      note: "hi",
+      reload: false,
+      keys: [],
+      clicks: [],
+      drags: [],
+      waitMs: 0,
+    });
+    assert.deepStrictEqual(models, [OPENCODE_GRADER_MODEL, OPENCODE_GRADER_FALLBACK_MODEL]);
+    assert.equal(reviewer.usedModel(), OPENCODE_GRADER_FALLBACK_MODEL);
+    // DeepSeek builds these games; it must never grade them.
+    assert.equal(
+      models.some((model) => model.includes("deepseek")),
+      false,
+    );
+  });
+});
+
 describe("gradeGame", () => {
   it("writes a typed no-build without spending a model call", async () => {
     const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
@@ -219,6 +290,43 @@ describe("gradeGame", () => {
         await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
       ) as { build: { kind: string } };
       assert.equal(written.build.kind, "no-build");
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("records which model family graded the document", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const gameDir = NodePath.join(directory, "game");
+      await NodeFSP.mkdir(gameDir, { recursive: true });
+      const out = NodePath.join(directory, "out");
+      const grade = await gradeGame({
+        gameDir,
+        brief,
+        out,
+        grader: "opencode",
+        graderModel: OPENCODE_GRADER_MODEL,
+        deps: {
+          exportBuild: async () => ({ ok: false, detail: "no godot project" }),
+          review: async () => reply("YES"),
+          playtest: async () => {
+            throw new Error("a no-build must not playtest");
+          },
+        },
+      });
+      assert.deepStrictEqual(grade.grader, {
+        provider: "opencode",
+        model: OPENCODE_GRADER_MODEL,
+      });
+      const written = JSON.parse(
+        await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
+      ) as { grader: { provider: string; model: string }; model: string };
+      assert.deepStrictEqual(written.grader, {
+        provider: "opencode",
+        model: OPENCODE_GRADER_MODEL,
+      });
+      assert.equal(written.model, `opencode/${OPENCODE_GRADER_MODEL}`);
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }

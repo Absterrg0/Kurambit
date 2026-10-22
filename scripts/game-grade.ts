@@ -40,7 +40,6 @@ const REVIEWER: ModelSelection = {
   model: "gpt-6.1-sol",
   options: [{ id: "reasoningEffort", value: "high" }],
 };
-const REVIEWER_LABEL = `${REVIEWER.instanceId}/${REVIEWER.model}`;
 
 const MAX_PLAYTESTER_STEPS = 15;
 const MAX_ACTIONS_PER_STEP = 3;
@@ -141,6 +140,8 @@ export interface GradeDocument {
   readonly brief: { readonly id: string; readonly title: string; readonly checksum: string };
   readonly gameDir: string;
   readonly model: string;
+  /** Which model family graded this document, and which model answered. */
+  readonly grader: { readonly provider: string; readonly model: string };
   readonly build: GradeBuild;
   readonly quick: GradeQuick | null;
   readonly frames: ReadonlyArray<string>;
@@ -221,6 +222,186 @@ export const makeReviewer = (): ReviewFn => {
       }).pipe(Effect.provide(textGenerationLayer)),
     );
   };
+};
+
+/** Which model family grades: the product's Sol reviewer, or the opencode CLI. */
+export type GraderId = "codex" | "opencode";
+
+/** The model the opencode grader uses, and the free route it falls back to. */
+export const OPENCODE_GRADER_MODEL = "opencode-go/minimax-m3.1-flash-free";
+export const OPENCODE_GRADER_FALLBACK_MODEL = "openrouter/minimax/minimax-m3.1-flash:free";
+/** What the free route says when the model is out of quota. */
+const FREE_LIMIT = "Free usage limit reached";
+const OPENCODE_TIMEOUT_MS = 300_000;
+
+/**
+ * The reply shape each kind of call must have. The CLI has no structured
+ * output of its own, so the shape travels with the prompt.
+ */
+const REPLY_SHAPE: Record<ReviewRequest["kind"], string> = {
+  verdict:
+    '{"verdict":"YES or NO","frame":"the id of the frame that shows it, or an empty string","reason":"one short sentence"}',
+  actions:
+    '{"note":"one sentence","reload":false,"keys":[{"key":"w","holdMs":300}],"clicks":[{"x":480,"y":270}],"drags":[{"x1":10,"y1":10,"x2":200,"y2":200}],"waitMs":0}',
+};
+
+/** One CLI call: the model answers the prompt with the attached frames. */
+export interface OpenCodeRun {
+  readonly model: string;
+  readonly prompt: string;
+  readonly imagePaths: ReadonlyArray<string>;
+}
+
+/** What the CLI said: its output and how it ended. */
+export interface OpenCodeResult {
+  readonly output: string;
+  readonly exitCode: number | null;
+}
+
+/** The grader's only seam to the CLI; tests pass a scripted fake here. */
+export type OpenCodeRunner = (run: OpenCodeRun) => Promise<OpenCodeResult>;
+
+/**
+ * The CLI must not inherit the operator's session (it would resume this
+ * conversation), their terminal or their display.
+ */
+const openCodeEnvironment = (): NodeJS.ProcessEnv => {
+  const environment = { ...process.env };
+  for (const name of [
+    "AI_AGENT",
+    "DISPLAY",
+    "OPENCODE",
+    "OPENCODE_CONFIG_CONTENT",
+    "OPENCODE_SESSION_ID",
+    "OPENCODE_TERMINAL",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+  ])
+    delete environment[name];
+  return environment;
+};
+
+export const runOpenCode: OpenCodeRunner = async (run) => {
+  const args = ["run", "--format", "json", "--model", run.model];
+  for (const path of run.imagePaths) args.push("--file", path);
+  args.push(run.prompt);
+  // A neutral folder: the grader must not read the checkout's own instructions.
+  const cwd = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-opencode-"));
+  try {
+    return await new Promise<OpenCodeResult>((resolve, reject) => {
+      const child = NodeChildProcess.spawn("opencode", args, {
+        cwd,
+        env: openCodeEnvironment(),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let output = "";
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        output += chunk;
+      });
+      child.stderr?.on("data", (chunk: string) => {
+        output += chunk;
+      });
+      const timer = setTimeout(() => child.kill("SIGKILL"), OPENCODE_TIMEOUT_MS);
+      child.once("error", (cause) => {
+        clearTimeout(timer);
+        reject(new Error(`The opencode CLI failed to start: ${String(cause)}`));
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        resolve({ output, exitCode: code });
+      });
+    });
+  } finally {
+    await NodeFSP.rm(cwd, { recursive: true, force: true });
+  }
+};
+
+/** The model's own words, from the CLI's newline-delimited JSON events. */
+export const openCodeText = (output: string): string => {
+  const parts: string[] = [];
+  for (const line of output.split("\n")) {
+    if (line.trim() === "") continue;
+    let event: { type?: string; part?: { type?: string; text?: string } };
+    try {
+      event = JSON.parse(line) as typeof event;
+    } catch {
+      continue;
+    }
+    if (event.type === "text" && typeof event.part?.text === "string") parts.push(event.part.text);
+  }
+  return parts.join("");
+};
+
+/** The first balanced JSON object in the model's text. */
+export const parseJsonReply = (text: string): unknown => {
+  for (let start = text.indexOf("{"); start !== -1; start = text.indexOf("{", start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index]!;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (character === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) return JSON.parse(text.slice(start, index + 1));
+      }
+    }
+  }
+  throw new Error("The grader model returned no JSON object.");
+};
+
+export interface OpenCodeReviewer {
+  readonly review: ReviewFn;
+  /** The model that answered, after any free-limit fallback. */
+  readonly usedModel: () => string;
+}
+
+/**
+ * Grades through the opencode CLI: the frames go in as attached files, the
+ * model answers with the JSON the caller asked for. When the free route runs
+ * out of quota the call moves to the fallback route — never to DeepSeek, which
+ * builds these games.
+ */
+export const makeOpenCodeReviewer = (options: {
+  readonly model?: string;
+  readonly fallbackModel?: string;
+  readonly run?: OpenCodeRunner;
+}): OpenCodeReviewer => {
+  const model = options.model ?? OPENCODE_GRADER_MODEL;
+  const fallbackModel = options.fallbackModel ?? OPENCODE_GRADER_FALLBACK_MODEL;
+  const run = options.run ?? runOpenCode;
+  let used = model;
+  const review: ReviewFn = async (request) => {
+    const prompt = `${request.prompt}\n\nAnswer with one JSON object and nothing else:\n${REPLY_SHAPE[request.kind]}`;
+    const answer = (route: string) => run({ model: route, prompt, imagePaths: request.imagePaths });
+    let result = await answer(model);
+    if (result.output.includes(FREE_LIMIT) && fallbackModel !== model) {
+      used = fallbackModel;
+      result = await answer(fallbackModel);
+    }
+    const text = openCodeText(result.output);
+    if (text.trim() === "")
+      throw new Error(
+        `The opencode grader said nothing (exit ${result.exitCode ?? "none"}): ${result.output.slice(0, 400)}`,
+      );
+    return parseJsonReply(text);
+  };
+  return { review, usedModel: () => used };
 };
 
 // --------------------------------------------------------------------- frames
@@ -1043,6 +1224,10 @@ export interface GradeOptions {
    * playing. `gameDir` then comes from that grade.
    */
   readonly reuseFrames?: string;
+  /** Which model family grades: `codex` (Sol) or `opencode` (the CLI). */
+  readonly grader?: GraderId;
+  /** The model the opencode grader uses. */
+  readonly graderModel?: string;
   readonly deps?: Partial<GradeDeps>;
 }
 
@@ -1067,13 +1252,26 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
   const exportBuild =
     options.deps?.exportBuild ??
     ((directory: string) => exportWebBuild(directory, options.godot ?? defaultGodotBinary()));
-  const review = options.deps?.review ?? makeReviewer();
-  const base = {
+  const openCode =
+    options.grader === "opencode"
+      ? makeOpenCodeReviewer(
+          options.graderModel === undefined ? {} : { model: options.graderModel },
+        )
+      : null;
+  const review = options.deps?.review ?? openCode?.review ?? makeReviewer();
+  // The grader that answered may differ from the one that was asked for: the
+  // opencode route falls back when the free model runs out of quota.
+  const grader = () =>
+    openCode === null
+      ? { provider: "codex", model: REVIEWER.model }
+      : { provider: "opencode", model: openCode.usedModel() };
+  const base = () => ({
     schemaVersion: 1 as const,
     brief: { id: options.brief.id, title: options.brief.title, checksum: options.brief.checksum },
     gameDir,
-    model: REVIEWER_LABEL,
-  };
+    model: `${grader().provider}/${grader().model}`,
+    grader: grader(),
+  });
 
   const write = async (grade: GradeDocument): Promise<GradeDocument> => {
     await NodeFSP.writeFile(
@@ -1099,7 +1297,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       review,
     });
     return write({
-      ...base,
+      ...base(),
       build: saved.build,
       quick: saved.quick,
       frames: frames.map((frame) => NodePath.relative(out, frame.path)),
@@ -1113,7 +1311,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
 
   const noBuild = (detail: string | null) =>
     write({
-      ...base,
+      ...base(),
       build: { kind: "no-build", detail },
       quick: null,
       frames: [],
@@ -1250,7 +1448,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       review,
     });
     const grade: GradeDocument = {
-      ...base,
+      ...base(),
       build,
       quick,
       frames: frames.map((frame) => NodePath.relative(out, frame.path)),
@@ -1287,6 +1485,8 @@ const main = async () => {
         "Grades any folder holding a Godot project from its served pixels and console only.",
         "--reuse-frames skips the build and the playtest: it votes over that grade's saved",
         "frames and notes, which is the cheap way to re-read an old run.",
+        "--grader codex|opencode picks the model family: codex is Sol, opencode is the CLI",
+        "model in --grader-model (default " + OPENCODE_GRADER_MODEL + ").",
         "Optional: --godot <godot-binary> --browser <chrome-headless-shell> --max-steps <n>",
       ].join("\n"),
     );
@@ -1306,6 +1506,9 @@ const main = async () => {
       "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>\n       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
     );
   const brief = await loadGameBenchmarkBrief(NodePath.resolve(briefPath));
+  const graderFlag = flag("grader") ?? "codex";
+  if (graderFlag !== "codex" && graderFlag !== "opencode")
+    throw new Error("--grader must be codex or opencode.");
   const grade = await gradeGame({
     ...(gameDir === undefined ? {} : { gameDir }),
     brief,
@@ -1314,10 +1517,12 @@ const main = async () => {
     ...(flag("godot") === undefined ? {} : { godot: NodePath.resolve(flag("godot")!) }),
     ...(flag("browser") === undefined ? {} : { browser: NodePath.resolve(flag("browser")!) }),
     ...(flag("max-steps") === undefined ? {} : { maxSteps: Number(flag("max-steps")) }),
+    grader: graderFlag,
+    ...(flag("grader-model") === undefined ? {} : { graderModel: flag("grader-model")! }),
   });
   const yes = grade.obligations.filter((obligation) => obligation.yes).length;
   console.log(
-    `${brief.id}: build=${grade.build.kind} quick=${
+    `${brief.id}: grader=${grade.grader.provider}/${grade.grader.model} build=${grade.build.kind} quick=${
       grade.quick === null
         ? "—"
         : `${grade.quick.booted ? "booted" : "no-boot"}/${grade.quick.consoleErrors} errors/${

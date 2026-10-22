@@ -43,6 +43,10 @@ const { values } = NodeUtil.parseArgs({
     lane: { type: "string", default: "harness" },
     /** Cap for one independent grade, not for the build under it. */
     "grade-timeout-ms": { type: "string", default: "2700000" },
+    /** Which model family grades the finished games: codex (Sol) or opencode. */
+    grader: { type: "string", default: "codex" },
+    /** The model the opencode grader uses. */
+    "grader-model": { type: "string" },
     /** The raw lane's own cap: two hours of bare agent work. */
     "raw-timeout-ms": { type: "string", default: "7200000" },
     /** Copy cached raw-lane results from this directory instead of rebuilding. */
@@ -62,6 +66,7 @@ if (values.help) {
       "       [--out DIR] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high]",
       "       [--timeout-ms 3600000] [--runner scripts/game-e2e.ts]",
       "       [--lane harness|raw] [--opencode opencode] [--grade-timeout-ms 2700000] [--raw-timeout-ms 7200000]",
+      "       [--grader codex|opencode] [--grader-model opencode-go/minimax-m3.1-flash-free]",
       "       [--reuse-raw <benchmark-out-dir>]",
       "",
       "Runs the frozen briefs serially through game-e2e against an already running dev server,",
@@ -84,6 +89,9 @@ if (reuseRaw !== null && lane !== "raw") throw new Error("--reuse-raw only appli
 const gradeTimeoutMs = Number(values["grade-timeout-ms"]);
 if (!Number.isFinite(gradeTimeoutMs) || gradeTimeoutMs <= 0)
   throw new Error("--grade-timeout-ms must be positive");
+const grader = values.grader as string;
+if (grader !== "codex" && grader !== "opencode")
+  throw new Error("--grader must be codex or opencode.");
 const rawTimeoutMs = Number(values["raw-timeout-ms"]);
 if (!Number.isFinite(rawTimeoutMs) || rawTimeoutMs <= 0)
   throw new Error("--raw-timeout-ms must be positive");
@@ -266,6 +274,9 @@ const gradeFinishedGame = async (
       brief.path,
       "--out",
       out,
+      "--grader",
+      grader,
+      ...(values["grader-model"] === undefined ? [] : ["--grader-model", values["grader-model"]!]),
     ],
     cwd: checkout,
     env: environment,
