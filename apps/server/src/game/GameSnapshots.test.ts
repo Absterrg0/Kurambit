@@ -315,6 +315,38 @@ it.effect("a directory the repair deleted is recreated before the snapshot file 
   ),
 );
 
+it.effect("an edit during the temporary copy stops the restore before the rename", () => {
+  let edited = false;
+  return withTree(({ root, snapshots }) =>
+    Effect.gen(function* () {
+      const stored = yield* snapshots.store(root);
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "repair\n"),
+      );
+      const changed = yield* snapshots.capture(root);
+      const restored = yield* snapshots.restore(root, stored.manifest, {
+        expectSourceId: changed.sourceId,
+        // The seam runs after the temporary copy. If verification still ran
+        // before the copy, this edit would be missed and overwritten.
+        beforeVerify: async (path) => {
+          if (path !== "godot/scripts/main.gd" || edited) return;
+          edited = true;
+          await NodeFSP.writeFile(NodePath.join(root, path), "edited during the copy\n");
+        },
+      });
+      expect(edited).toBe(true);
+      expect(restored.kind).toBe("blocked");
+      if (restored.kind === "blocked")
+        expect(restored.detail).toContain("changed after the game folder was read");
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("edited during the copy\n");
+    }),
+  );
+});
+
 it.effect(
   "a parent replaced by a symlink blocks the write and leaves the outside file alone",
   () => {

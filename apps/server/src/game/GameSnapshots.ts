@@ -74,6 +74,12 @@ export interface GameSnapshotRestoreOptions {
   readonly beforePath?:
     | ((operation: "delete" | "restore", path: string) => Promise<void>)
     | undefined;
+  /**
+   * Test seam: runs after the temporary copy and before the path is verified
+   * again, so a test can edit the target inside the copy window and prove the
+   * verification sits immediately before the replacing rename.
+   */
+  readonly beforeVerify?: ((path: string) => Promise<void>) | undefined;
 }
 
 /**
@@ -661,6 +667,7 @@ export const layer = (options: {
         if (parentMismatch !== null)
           return { kind: "blocked", sourceId: current.sourceId, detail: parentMismatch };
         await NodeFSP.copyFile(source, temporary);
+        await restoreOptions?.beforeVerify?.(relative);
         const mode = await NodeFSP.stat(source).then(
           (stat) => stat.mode & 0o777,
           () => null,
