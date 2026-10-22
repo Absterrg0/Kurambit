@@ -35,6 +35,70 @@ export const GameReviewDoNotRegress = Schema.Struct({
 });
 export type GameReviewDoNotRegress = typeof GameReviewDoNotRegress.Type;
 
+/** The four pairwise facets a ballot must answer for each comparison. */
+export const GAME_REVIEW_FACETS = ["works", "look", "feel", "play"] as const;
+export const GameReviewFacet = Schema.Literals(GAME_REVIEW_FACETS);
+export type GameReviewFacet = typeof GameReviewFacet.Type;
+
+export const GAME_REVIEW_CHOICES = ["A", "B", "tie"] as const;
+export const GameReviewChoice = Schema.Literals(GAME_REVIEW_CHOICES);
+export type GameReviewChoice = typeof GameReviewChoice.Type;
+
+export const GAME_REVIEW_PRESERVATION_VERDICTS = ["preserved", "lost", "unknown"] as const;
+export const GameReviewPreservationVerdict = Schema.Literals(GAME_REVIEW_PRESERVATION_VERDICTS);
+export type GameReviewPreservationVerdict = typeof GameReviewPreservationVerdict.Type;
+
+/** Every facet is required; an omitted facet is an incomplete ballot. */
+export const GameReviewFacetVerdicts = Schema.Struct({
+  works: GameReviewChoice,
+  look: GameReviewChoice,
+  feel: GameReviewChoice,
+  play: GameReviewChoice,
+});
+export type GameReviewFacetVerdicts = typeof GameReviewFacetVerdicts.Type;
+
+/**
+ * One preservation item judged on both sides of a ballot. `frameIds` are the
+ * manifest frames the verdict cites, so a bare claim cannot pass as evidence.
+ */
+export const GameReviewPreservationEntry = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
+  A: GameReviewPreservationVerdict,
+  B: GameReviewPreservationVerdict,
+  frameIds: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
+});
+export type GameReviewPreservationEntry = typeof GameReviewPreservationEntry.Type;
+
+/**
+ * The critic's whole answer. The loop caps the lists in the prompt; the parser
+ * enforces the same caps so a model cannot hand back more than it was asked
+ * for.
+ */
+export const GameReviewCriticAnswer = Schema.Struct({
+  defects: Schema.Array(GameReviewDefect).check(Schema.isMaxLength(5)),
+  doNotRegress: Schema.Array(GameReviewDoNotRegress).check(Schema.isMaxLength(8)),
+});
+export type GameReviewCriticAnswer = typeof GameReviewCriticAnswer.Type;
+
+/**
+ * One pairwise ballot: main A/B facets, every preservation item, the
+ * identical-build control, and the evidence behind it. The reason is prose with
+ * frame IDs, never a score.
+ */
+export const GameReviewBallotAnswer = Schema.Struct({
+  main: GameReviewFacetVerdicts,
+  preservation: Schema.Array(GameReviewPreservationEntry),
+  control: GameReviewFacetVerdicts,
+  reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
+});
+export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
+
+/** One model answer is at most this many bytes of text, before parsing. */
+export const GAME_REVIEW_ANSWER_MAX_BYTES = 16 * 1024;
+
 /**
  * The loop's spend. The default is three repairs or twenty elapsed minutes,
  * whichever runs out first, and includes the checks and reviews those repairs

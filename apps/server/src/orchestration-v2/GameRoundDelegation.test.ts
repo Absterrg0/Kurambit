@@ -16,6 +16,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -147,6 +148,14 @@ it.effect("a round task creates a fresh child under the completed builder run", 
     assert.lengthOf(parent.subagents, 1);
     const task = parent.subagents[0]!;
     const child = yield* seeded.projections.getThreadProjection(task.childThreadId!);
+    // The session service derives this id from the command id so a restart can
+    // find the child without dispatching again.
+    assert.equal(
+      child.thread.id,
+      IdAllocator.derive.delegatedTaskThread({
+        commandId: CommandId.make("game-round-critic-1"),
+      }),
+    );
     // A child, never a top-level thread: it keeps the parent lineage and the
     // evidence directory is its whole workspace.
     assert.equal(child.thread.lineage.parentThreadId, threadId);

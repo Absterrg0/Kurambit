@@ -5,6 +5,7 @@ import * as GameOperations from "./game/GameOperations.ts";
 import * as GameDesignApproval from "./game/GameDesignApproval.ts";
 import * as GameQualification from "./game/GameQualification.ts";
 import * as GameRoundStore from "./game/GameRoundStore.ts";
+import * as GameReviewSessions from "./game/GameReviewSessions.ts";
 import * as GameVisualJudge from "./game/GameVisualJudge.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
@@ -497,7 +498,18 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-const layerGame = GameService.layer.pipe(
+const layerGame = Layer.mergeAll(
+  GameService.layer,
+  // Review children pick their model from the live provider catalog; the
+  // session service itself keeps no provider-specific behaviour. It shares the
+  // same GameProjectService/GameRoundStore instances GameService uses.
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      return GameReviewSessions.layer({ stateDir: config.stateDir });
+    }),
+  ).pipe(Layer.provideMerge(GameReviewSessions.providerCatalogLayer)),
+).pipe(
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
