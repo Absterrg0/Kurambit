@@ -97,7 +97,11 @@ exit 0
           }),
         ),
         Layer.provide(
-          Layer.mock(GamePreview.GamePreview)({ url: () => null, serving: () => false }),
+          Layer.mock(GamePreview.GamePreview)({
+            url: () => null,
+            urlFor: () => null,
+            serving: () => false,
+          }),
         ),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(GameQualification.layer({ stateDir })),

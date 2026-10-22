@@ -205,6 +205,7 @@ const withFixture = <A, E, R>(
             open: () => Effect.succeed("http://127.0.0.1:9/game"),
             stop: () => Effect.void,
             url: () => null,
+            urlFor: () => null,
             serving: () => false,
           }),
         ),

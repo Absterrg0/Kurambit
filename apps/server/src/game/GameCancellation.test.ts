@@ -101,6 +101,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
                   previewStopped = true;
                 }),
               url: () => null,
+              urlFor: () => null,
             }),
           ),
           Layer.provide(previewBrowserTestLayer()),

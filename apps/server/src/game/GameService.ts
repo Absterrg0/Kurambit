@@ -642,8 +642,7 @@ const make = Effect.gen(function* () {
       // editable folder is checked too: an edit during the export means the
       // build no longer describes the current game.
       const afterSourceId = frozen === null ? null : yield* rounds.sourceId(root);
-      const frozenSourceId =
-        frozen === null ? null : yield* rounds.frozenSourceId(sourceStaging!);
+      const frozenSourceId = frozen === null ? null : yield* rounds.frozenSourceId(sourceStaging!);
       const comparison =
         frozen === null
           ? comparedSource(before!, yield* snapshot(root, godotProject), "export")

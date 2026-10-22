@@ -692,11 +692,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               yield* writeStateEffect(found.file, replaceRound(stoppedState, preservedRound));
               const recordedState = replaceRound(stoppedState, preservedRound);
               if (restoreOptions?.beforeRestore !== undefined)
-                yield* attempt(
-                  "restore game review version",
-                  root,
-                  restoreOptions.beforeRestore,
-                );
+                yield* attempt("restore game review version", root, restoreOptions.beforeRestore);
               const snapshot = yield* snapshots.read(root, round.incumbentSnapshotId);
               // The preserved version is the accepted baseline: an edit that
               // arrived after it was taken must not become the thing this

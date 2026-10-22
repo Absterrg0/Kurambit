@@ -481,7 +481,10 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
           exports += 1;
           await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
           for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
-            await NodeFSP.writeFile(NodePath.join(NodePath.dirname(output), name), `export ${name}`);
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
           return processOk(input.root);
         });
       },
@@ -872,7 +875,10 @@ it.live("a fresh import that writes sidecars still exports and never mutates the
         return Effect.promise(async () => {
           await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
           for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
-            await NodeFSP.writeFile(NodePath.join(NodePath.dirname(output), name), `export ${name}`);
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
           return processOk(input.root);
         });
       },
