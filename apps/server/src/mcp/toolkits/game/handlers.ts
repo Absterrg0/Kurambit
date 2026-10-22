@@ -9,11 +9,11 @@ const caller = McpInvocationContext.McpInvocationContext.pipe(
   ),
 );
 const handlers = {
-  game_status: McpToolAccess.readsAsCaller(() =>
+  game_status: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
-      return yield* game.status(scope.thread.threadId);
+      return yield* game.status(scope.thread.threadId, { checkSources: input.checkSources });
     }),
   ),
   game_blender_run: McpToolAccess.actsAsCaller((input) =>

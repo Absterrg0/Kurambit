@@ -459,10 +459,13 @@ export const GameStatus = Schema.Struct({
    */
   selectedArtifactUsable: Schema.NullOr(Schema.Boolean),
   /**
-   * The current source bytes are not the ones the selected build was exported
-   * from. This says nothing about whether the selected build itself is usable.
+   * Whether the current source bytes are the ones the selected build was
+   * exported from. `"unknown"` is status's cheap answer: byte freshness costs
+   * a full source read, so it is only computed on an explicit check (status
+   * with `checkSources`, or a round decision). This says nothing about whether
+   * the selected build itself is usable.
    */
-  sourcesDifferFromPlay: Schema.Boolean,
+  sourcesDifferFromPlay: Schema.Union([Schema.Boolean, Schema.Literal("unknown")]),
   /** Server-owned qualification of the current sources. */
   qualification: GameQualificationRead,
   builds: Schema.Array(
@@ -556,7 +559,14 @@ export const GameSummary = Schema.Struct({
 export type GameSummary = typeof GameSummary.Type;
 export const GameListResult = Schema.Array(GameSummary);
 export type GameListResult = typeof GameListResult.Type;
-export const GameThreadInput = Schema.Struct({ threadId: ThreadId });
+export const GameThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  /**
+   * Ask the status read for the byte comparison it otherwise leaves
+   * `unknown`; the read walks and hashes every source file when set.
+   */
+  checkSources: Schema.optionalKey(Schema.Boolean),
+});
 export const GameAction = Schema.Literals([
   "verify",
   "preview",

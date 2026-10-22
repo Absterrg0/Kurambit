@@ -446,7 +446,11 @@ it.live(
           const current = yield* game.status(threadId);
           expect(current.webBuildStale).toBe(false);
           expect(current.selectedArtifactUsable).toBe(true);
-          expect(current.sourcesDifferFromPlay).toBe(false);
+          // Status is cheap: byte freshness is only answered on request.
+          expect(current.sourcesDifferFromPlay).toBe("unknown");
+          expect((yield* game.status(threadId, { checkSources: true })).sourcesDifferFromPlay).toBe(
+            false,
+          );
           expect(stageOf(current.qualification, "export")?.status).toBe("passed");
           // The export is immutable and build-addressed; the served directory is
           // named by the result, never the legacy mutable builds/web.
@@ -507,28 +511,47 @@ it.live("status compares Play against current bytes, not a Godot size/mtime cach
         const exported = yield* game.export(threadId, "Web");
         expect(exported.success, exported.message).toBe(true);
         expect(exports).toBe(1);
-        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(false);
+        // The cheap read never hashes the tree: it says so instead of guessing.
+        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe("unknown");
+        expect((yield* game.status(threadId, { checkSources: true })).sourcesDifferFromPlay).toBe(
+          false,
+        );
 
         // Art beside the Godot project is source too; the Godot size/mtime
         // snapshot does not see it.
         yield* Effect.promise(() =>
           NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-two"),
         );
-        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(true);
+        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe("unknown");
+        expect((yield* game.status(threadId, { checkSources: true })).sourcesDifferFromPlay).toBe(
+          true,
+        );
 
-        // A same-size script edit with the original mtime restored is invisible
-        // to size/mtime but different bytes.
+        // A same-length script edit with the original mtime restored is
+        // invisible to size/mtime but different bytes.
         const script = NodePath.join(root, "godot/scripts/main.gd");
         const before = yield* Effect.promise(async () => {
           const stat = await NodeFSP.stat(script);
-          return { mtime: stat.mtime, text: await NodeFSP.readFile(script, "utf8") };
+          return {
+            mtime: stat.mtime,
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            text: await NodeFSP.readFile(script, "utf8"),
+          };
         });
+        const edited = `X${before.text.slice(1)}`;
+        expect(edited.length).toBe(before.text.length);
         yield* Effect.promise(async () => {
           await NodeFSP.writeFile(NodePath.join(root, "assets/hero.png"), "art-one");
-          await NodeFSP.writeFile(script, `${before.text.slice(0, -1)}X\n`);
+          await NodeFSP.writeFile(script, edited);
           await NodeFSP.utimes(script, before.mtime, before.mtime);
         });
-        expect((yield* game.status(threadId)).sourcesDifferFromPlay).toBe(true);
+        const after = yield* Effect.promise(() => NodeFSP.stat(script));
+        expect(after.size).toBe(before.size);
+        expect(after.mtime.getTime()).toBe(before.mtime.getTime());
+        expect((yield* game.status(threadId, { checkSources: true })).sourcesDifferFromPlay).toBe(
+          true,
+        );
       }),
   );
 });
@@ -645,6 +668,7 @@ it.live("a round's candidate export leaves Play on the incumbent until promotion
         expect(after.previewUrl).toBe("http://127.0.0.1:9/3");
         expect(after.previewUrl).not.toBe(incumbentUrl);
         expect(after.selectedBuildId).toBe(NodePath.basename(promotedDirectory));
+        expect(after.sourcesDifferFromPlay).toBe("unknown");
         expect(opened).toHaveLength(3);
 
         // The promotion published the stage's refresh event.
@@ -853,7 +877,7 @@ it.live("a candidate playtest serves evidence without changing the Play URL or i
         expect(opened[1]).not.toBe(incumbentDirectory);
         expect(played.at(-1)).toBe(`http://127.0.0.1:9/2`);
 
-        const status = yield* game.status(threadId);
+        const status = yield* game.status(threadId, { checkSources: true });
         expect(status.previewUrl).toBe(incumbentUrl);
         expect(status.selectedBuildId).toBe(NodePath.basename(incumbentDirectory));
         expect(status.selectedArtifactUsable).toBe(true);

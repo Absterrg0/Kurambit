@@ -1722,7 +1722,8 @@ const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
-        [WS_METHODS.gameStatus]: ({ threadId }) => game.status(threadId),
+        [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
+          game.status(threadId, { checkSources }),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),

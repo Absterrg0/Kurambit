@@ -25,7 +25,8 @@ const dependencies = [
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Game Studio project: design status and the DESIGN.md/BRIEF.md paths, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only.",
+    "Inspect this thread's Game Studio project: design status and the DESIGN.md/BRIEF.md paths, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+  parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
   failureMode: "return",

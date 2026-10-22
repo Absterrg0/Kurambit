@@ -88,7 +88,10 @@ export class GameService extends Context.Service<
   GameService,
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
-    readonly status: (threadId: ThreadId) => Effect.Effect<GameStatus, GameOperationError>;
+    readonly status: (
+      threadId: ThreadId,
+      options?: { readonly checkSources?: boolean | undefined },
+    ) => Effect.Effect<GameStatus, GameOperationError>;
     /**
      * Makes a round's candidate the build Play serves, once its bytes and
      * sources still match what was exported. An already-open preview follows,
@@ -1594,7 +1597,7 @@ const make = Effect.gen(function* () {
         );
       }
     }),
-    status: Effect.fn("GameService.status")(function* (threadId) {
+    status: Effect.fn("GameService.status")(function* (threadId, statusOptions) {
       const root = yield* projects.resolve(threadId);
       // Qualification first: its source snapshot is also the inventory cache
       // key, so a status read that finds unchanged sources does no file walk
@@ -1656,18 +1659,22 @@ const make = Effect.gen(function* () {
         // A candidate export record is evidence about the challenger, not the
         // legacy build Play would fall back to.
         (yield* webBuildIsCurrent(qualificationRead));
-      // Play identity is a byte question: the selected build's own source
-      // manifest against the current bytes. Asked on every read, because the
-      // legacy Godot size/mtime snapshot misses art-only edits and same-size
-      // edits that restore mtime; caching it would claim the served build still
-      // matches sources nobody hashed. An unknown tree differs because it
-      // cannot be shown to match.
-      const playSourceId =
+      // Play identity is a byte question, and hashing every source (Blender
+      // originals included) is not a status read's job: polls, pushes and every
+      // MCP status call would read the whole tree. Status reports the cheap
+      // answer, `unknown`, and only an explicit check pays for the bytes. Round
+      // decisions take their own uncached capture.
+      const sourcesDifferFromPlay: boolean | "unknown" =
         selected === null
-          ? null
-          : yield* rounds
-              .sourceId(root)
-              .pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
+          ? false
+          : statusOptions?.checkSources !== true
+            ? "unknown"
+            : yield* rounds.sourceId(root).pipe(
+                Effect.map((sourceId): boolean | "unknown" => sourceId !== selected.sourceId),
+                // An unreadable tree cannot be shown to match, but it is also
+                // not proven to differ.
+                Effect.catch(() => Effect.succeed("unknown" as const)),
+              );
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () =>
@@ -1732,7 +1739,7 @@ const make = Effect.gen(function* () {
         // Usability and source freshness are separate answers: the selected
         // build can be perfectly playable while the editable sources have moved
         // on, which is the normal state during a review round.
-        sourcesDifferFromPlay: selected !== null && playSourceId !== selected.sourceId,
+        sourcesDifferFromPlay,
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
