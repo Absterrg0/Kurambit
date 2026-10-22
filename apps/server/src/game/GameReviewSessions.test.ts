@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  GAME_REVIEW_ANSWER_MAX_BYTES,
   type GameManifest,
   type GameReviewRound,
   MessageId,
@@ -671,6 +672,21 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
       }).kind,
     ).toBe("invalid");
 
+    // JSON.parse keeps the last duplicate. Accepting that would let the second
+    // member erase the reported defects, so a repeat is invalid at any depth.
+    const duplicateTopLevel = GameReviewSessions.parseCriticAnswer(
+      '{"defects":[{"severity":"visible","what":"x","frameId":"f1","fix":"y"}],"defects":[],"doNotRegress":[]}',
+      { frameIds: frames, checkIds: checks },
+    );
+    expect(duplicateTopLevel.kind).toBe("invalid");
+    if (duplicateTopLevel.kind === "invalid") expect(duplicateTopLevel.reason).toContain("repeats");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        '{"defects":[{"severity":"visible","what":"x","frameId":"f1","fix":"y","fix":"z"}],"doNotRegress":[]}',
+        { frameIds: frames, checkIds: checks },
+      ).kind,
+    ).toBe("invalid");
+
     const ballot = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
         main: { works: "A", look: "tie", feel: "B", play: "tie" },
@@ -711,6 +727,31 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
       }).kind,
     ).toBe("invalid");
   }),
+);
+
+it.live("an oversized multibyte answer is bounded and marked truncated", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      scripted.answer = "é".repeat(GAME_REVIEW_ANSWER_MAX_BYTES + 1024);
+      const answer = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(answer.kind).toBe("invalid");
+      if (answer.kind !== "invalid") return;
+      expect(answer.truncated).toBe(true);
+      expect(Buffer.byteLength(answer.raw ?? "", "utf8")).toBeLessThanOrEqual(
+        GAME_REVIEW_ANSWER_MAX_BYTES,
+      );
+      // The cut is on a byte boundary, not inside a character.
+      expect(answer.raw ?? "").not.toContain("\uFFFD");
+    }),
+  ),
 );
 
 it.live("an answer is bound to the run the round dispatched", () =>

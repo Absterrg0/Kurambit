@@ -126,7 +126,13 @@ export type GameReviewSessionAnswerResult =
   | { readonly kind: "ballot"; readonly answer: GameReviewBallotAnswer; readonly raw: string }
   /** The child has not produced a terminal answer yet. */
   | { readonly kind: "pending" }
-  | { readonly kind: "invalid"; readonly reason: string; readonly raw: string | null };
+  | {
+      readonly kind: "invalid";
+      readonly reason: string;
+      readonly raw: string | null;
+      /** True when raw was cut to the stored-output limit. */
+      readonly truncated?: boolean;
+    };
 
 interface SessionKey {
   readonly loopId: string;
@@ -390,20 +396,124 @@ interface AnswerParseSuccess<A> {
 export type ParsedAnswer<A> = AnswerParseSuccess<A> | AnswerParseFailure;
 
 /**
+ * JSON.parse silently keeps the last of two identical object members, so
+ * `{"defects":[...],"defects":[]}` would erase reported defects. The input is
+ * already known to be valid JSON; this walk only tracks object member names,
+ * unescapes them the same way JSON.parse does, and reports the first repeat.
+ */
+const duplicateJsonMember = (text: string): string | null => {
+  let index = 0;
+  const skipWhitespace = () => {
+    while (index < text.length && " \t\n\r".includes(text[index]!)) index++;
+  };
+  const parseString = (): string => {
+    const start = index;
+    index++;
+    while (index < text.length) {
+      const char = text[index]!;
+      if (char === "\\") {
+        index += 2;
+        continue;
+      }
+      index++;
+      if (char === '"') break;
+    }
+    return JSON.parse(text.slice(start, index)) as string;
+  };
+  const parseValue = (): string | null => {
+    skipWhitespace();
+    const char = text[index];
+    if (char === "{") {
+      index++;
+      const names = new Set<string>();
+      skipWhitespace();
+      if (text[index] === "}") {
+        index++;
+        return null;
+      }
+      for (;;) {
+        skipWhitespace();
+        const name = parseString();
+        if (names.has(name)) return name;
+        names.add(name);
+        skipWhitespace();
+        index++; // the colon
+        const nested = parseValue();
+        if (nested !== null) return nested;
+        skipWhitespace();
+        if (text[index] === ",") {
+          index++;
+          continue;
+        }
+        index++; // the closing brace
+        return null;
+      }
+    }
+    if (char === "[") {
+      index++;
+      skipWhitespace();
+      if (text[index] === "]") {
+        index++;
+        return null;
+      }
+      for (;;) {
+        const nested = parseValue();
+        if (nested !== null) return nested;
+        skipWhitespace();
+        if (text[index] === ",") {
+          index++;
+          continue;
+        }
+        index++; // the closing bracket
+        return null;
+      }
+    }
+    if (char === '"') {
+      parseString();
+      return null;
+    }
+    while (index < text.length && !",]} \t\n\r".includes(text[index]!)) index++;
+    return null;
+  };
+  return parseValue();
+};
+
+/**
  * One JSON object, no prose, at most 16 KiB. Excess keys are errors, not
  * ignored fields: an answer that carries extra data is not the schema the loop
- * asked for.
+ * asked for. Duplicate members are errors at every depth for the same reason:
+ * the answer must not be able to argue both sides of one key.
  */
 const parseAnswerText = (text: string): { kind: "parsed"; value: unknown } | AnswerParseFailure => {
   if (Buffer.byteLength(text, "utf8") > GAME_REVIEW_ANSWER_MAX_BYTES)
     return { kind: "invalid", reason: "The answer is larger than 16 KiB." };
   const trimmed = text.trim();
   if (trimmed.length === 0) return { kind: "invalid", reason: "The answer is empty." };
+  let value: unknown;
   try {
-    return { kind: "parsed", value: JSON.parse(trimmed) as unknown };
+    value = JSON.parse(trimmed) as unknown;
   } catch {
     return { kind: "invalid", reason: "The answer is not one JSON object." };
   }
+  const duplicate = duplicateJsonMember(trimmed);
+  if (duplicate !== null)
+    return { kind: "invalid", reason: `The answer repeats the JSON member "${duplicate}".` };
+  return { kind: "parsed", value };
+};
+
+/**
+ * Invalid output is still returned for the audit trail, but it must not let a
+ * child store an arbitrarily large answer. Cut on a UTF-8 byte boundary and
+ * drop a split trailing character, then say that it was cut.
+ */
+const boundRawAnswer = (text: string): { readonly raw: string; readonly truncated: boolean } => {
+  if (Buffer.byteLength(text, "utf8") <= GAME_REVIEW_ANSWER_MAX_BYTES)
+    return { raw: text, truncated: false };
+  const prefix = Buffer.from(text, "utf8")
+    .subarray(0, GAME_REVIEW_ANSWER_MAX_BYTES)
+    .toString("utf8")
+    .replace(/\uFFFD+$/u, "");
+  return { raw: prefix, truncated: true };
 };
 
 const decodeStrict = <S extends Schema.ConstraintDecoder<unknown>>(
@@ -1191,8 +1301,15 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.role === "critic"
             ? parseCriticAnswer(read.text, known)
             : parseBallotAnswer(read.text, known);
-        if (parsed.kind === "invalid")
-          return { kind: "invalid", reason: parsed.reason, raw: read.text };
+        if (parsed.kind === "invalid") {
+          const bounded = boundRawAnswer(read.text);
+          return {
+            kind: "invalid",
+            reason: parsed.reason,
+            raw: bounded.raw,
+            truncated: bounded.truncated,
+          };
+        }
         return record.role === "critic"
           ? { kind: "critic", answer: parsed.answer as GameReviewCriticAnswer, raw: read.text }
           : { kind: "ballot", answer: parsed.answer as GameReviewBallotAnswer, raw: read.text };
