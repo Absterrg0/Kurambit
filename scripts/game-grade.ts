@@ -44,8 +44,11 @@ const REVIEWER_LABEL = `${REVIEWER.instanceId}/${REVIEWER.model}`;
 
 const MAX_PLAYTESTER_STEPS = 15;
 const MAX_ACTIONS_PER_STEP = 3;
-const MAX_VERDICT_FRAMES = 8;
+/** Ten frames: boot, the frame before each reload, the last, then an even fill. */
+const MAX_VERDICT_FRAMES = 10;
 const VOTES_PER_ITEM = 2;
+/** Independent YES/NO questions in flight at once; more only competes for quota. */
+const VOTE_CONCURRENCY = 6;
 const QUICK_BOOT_TIMEOUT_MS = 20_000;
 const MAX_HOLD_MS = 3_000;
 
@@ -239,8 +242,11 @@ const writeFrame = async (
 };
 
 /**
- * At most eight frames for the verdict: the boot frame, an even spread of the
- * playtester's frames, and the last one. More frames only dilute attention.
+ * At most ten frames for the verdict: the boot frame, the frame before every
+ * reload, the last frame, then an even spread over what is left. The reload
+ * rule exists because the frame before a restart is the only picture of what
+ * the run achieved — a win screen is the claim most grades ask about, and the
+ * reload that follows erases it. More frames only dilute attention.
  */
 export function chooseFrames(
   boot: GradeFrame | null,
@@ -250,24 +256,45 @@ export function chooseFrames(
     readonly actions: ReadonlyArray<string>;
   }>,
 ): ReadonlyArray<GradeFrame> {
-  const chosen: Array<{ path: string; label: string }> = [];
-  if (boot !== null) chosen.push({ path: boot.path, label: "boot, no input" });
-  const budget = MAX_VERDICT_FRAMES - chosen.length;
-  const indices =
-    steps.length <= budget
-      ? steps.map((_, index) => index)
-      : Array.from({ length: budget }, (_, slot) =>
-          Math.round((slot * (steps.length - 1)) / Math.max(1, budget - 1)),
-        );
-  for (const index of [...new Set(indices)]) {
+  const budget = MAX_VERDICT_FRAMES - (boot === null ? 0 : 1);
+  const required = new Set<number>();
+  for (const [index, step] of steps.entries())
+    if (index > 0 && step.actions.some((action) => action.startsWith("reload")))
+      required.add(index - 1);
+  if (steps.length > 0) required.add(steps.length - 1);
+  const chosen = new Set(
+    spreadIndices(
+      [...required].sort((left, right) => left - right),
+      budget,
+    ),
+  );
+  const remaining = steps.map((_, index) => index).filter((index) => !chosen.has(index));
+  for (const index of spreadIndices(remaining, budget - chosen.size)) chosen.add(index);
+  const frames: Array<{ path: string; label: string }> = [];
+  if (boot !== null) frames.push({ path: boot.path, label: "boot, no input" });
+  for (const index of [...chosen].sort((left, right) => left - right)) {
     const step = steps[index]!;
-    chosen.push({
+    frames.push({
       path: step.path,
       label: `after step ${index + 1}: ${step.actions.join(", ")}${step.note === "" ? "" : ` — ${step.note}`}`,
     });
   }
-  return chosen.map((frame, index) => ({ id: `F${index + 1}`, ...frame }));
+  return frames.map((frame, index) => ({ id: `F${index + 1}`, ...frame }));
 }
+
+/** `count` indices spread evenly over `indices`, or all of them when they fit. */
+const spreadIndices = (indices: ReadonlyArray<number>, count: number): ReadonlyArray<number> => {
+  if (count <= 0) return [];
+  if (indices.length <= count) return indices;
+  return [
+    ...new Set(
+      Array.from(
+        { length: count },
+        (_, slot) => indices[Math.round((slot * (indices.length - 1)) / Math.max(1, count - 1))]!,
+      ),
+    ),
+  ];
+};
 
 // -------------------------------------------------------------------- verdicts
 
@@ -355,18 +382,29 @@ export async function judgeObligations(input: {
       };
     }
   };
-  const verdicts: GradeObligation[] = [];
-  for (const item of items) {
-    if (item.id === "control") continue;
-    const votes: GradeVote[] = [];
-    for (let index = 0; index < VOTES_PER_ITEM; index += 1)
-      votes.push(await vote(item.description));
-    // Conjunction: one NO vote is a NO.
-    verdicts.push({ ...item, yes: votes.every((entry) => entry.yes), votes });
-  }
-  const controlVotes: GradeVote[] = [];
-  for (let index = 0; index < VOTES_PER_ITEM; index += 1)
-    controlVotes.push(await vote(CONTROL_DESCRIPTION));
+  // Every question is independent and each vote is one model call, so they run
+  // together: a full grade was ~30 serial calls, and the answers do not depend
+  // on each other. The cap keeps one grade from flooding the provider.
+  const questions = items.flatMap((item, itemIndex) =>
+    Array.from({ length: VOTES_PER_ITEM }, (_, voteIndex) => ({
+      itemIndex,
+      voteIndex,
+      description: item.description,
+    })),
+  );
+  const answers = await mapLimit(questions, VOTE_CONCURRENCY, (question) =>
+    vote(question.description),
+  );
+  const votesFor = (itemIndex: number): GradeVote[] =>
+    answers.filter((_, index) => questions[index]!.itemIndex === itemIndex);
+  const verdicts: GradeObligation[] = items
+    .filter((item) => item.id !== "control")
+    .map((item, index) => {
+      const votes = votesFor(index);
+      // Conjunction: one NO vote is a NO.
+      return { ...item, yes: votes.every((entry) => entry.yes), votes };
+    });
+  const controlVotes = votesFor(items.length - 1);
   // The control is absurd by construction, so any YES is a hallucination and
   // voids the whole grade (stricter than the obligations' conjunction).
   const controlYes = controlVotes.some((entry) => entry.yes);
@@ -377,6 +415,25 @@ export async function judgeObligations(input: {
     solCalls: calls,
   };
 }
+
+/** Runs `run` over `items` with at most `limit` in flight; results keep the input order. */
+const mapLimit = async <A, B>(
+  items: ReadonlyArray<A>,
+  limit: number,
+  run: (item: A) => Promise<B>,
+): Promise<ReadonlyArray<B>> => {
+  const results: Array<B> = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await run(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+};
 
 // -------------------------------------------------------------- playtester (model)
 
@@ -913,13 +970,79 @@ const defaultBrowser = async (): Promise<string> => {
   throw new Error(`No chrome-headless-shell under ${root}; pass --browser <path>.`);
 };
 
-export interface GradeOptions {
+/** The parts of a previous grade a vote-only re-grade needs. */
+interface SavedGrade {
   readonly gameDir: string;
+  readonly brief: { readonly id: string; readonly checksum: string };
+  readonly build: GradeBuild;
+  readonly quick: GradeQuick | null;
+  readonly actions: GradeDocument["actions"];
+  readonly frames: ReadonlyArray<{ readonly relative: string; readonly label: string }>;
+}
+
+/** Rebuilds the label the playtester frame had when it was chosen. */
+const frameLabel = (relative: string, actions: GradeDocument["actions"]): string => {
+  const name = NodePath.basename(relative);
+  if (name === "boot.png") return "boot, no input";
+  const step = /^step-(\d+)\.png$/.exec(name);
+  const action =
+    step === null ? undefined : actions.find((entry) => entry.step === Number(step[1]));
+  if (action === undefined) return name.replace(/\.png$/, "");
+  return `after step ${action.step}: ${action.actions.join(", ")}${
+    action.note === "" ? "" : ` — ${action.note}`
+  }`;
+};
+
+const readSavedGrade = async (gradeDir: string): Promise<SavedGrade> => {
+  const text = await NodeFSP.readFile(NodePath.join(gradeDir, "grade.json"), "utf8").catch(
+    () => null,
+  );
+  if (text === null) throw new Error(`No grade.json under ${gradeDir}.`);
+  const parsed = JSON.parse(text) as Partial<GradeDocument>;
+  if (typeof parsed.gameDir !== "string" || parsed.build === undefined)
+    throw new Error(`${gradeDir}/grade.json is not a grade document.`);
+  const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+  const stored = Array.isArray(parsed.frames)
+    ? parsed.frames.filter((frame): frame is string => typeof frame === "string")
+    : [];
+  if (stored.length === 0) throw new Error(`${gradeDir}/grade.json has no frames to vote over.`);
+  return {
+    gameDir: parsed.gameDir,
+    brief: { id: parsed.brief?.id ?? "", checksum: parsed.brief?.checksum ?? "" },
+    build: parsed.build,
+    quick: parsed.quick ?? null,
+    actions,
+    frames: stored.map((relative) => ({ relative, label: frameLabel(relative, actions) })),
+  };
+};
+
+/** Copies the saved frames into the new grade so it stays readable on its own. */
+const copySavedFrames = async (
+  gradeDir: string,
+  saved: SavedGrade,
+  framesDirectory: string,
+): Promise<ReadonlyArray<GradeFrame>> => {
+  const frames: GradeFrame[] = [];
+  for (const [index, frame] of saved.frames.entries()) {
+    const path = NodePath.join(framesDirectory, NodePath.basename(frame.relative));
+    await NodeFSP.copyFile(NodePath.resolve(gradeDir, frame.relative), path);
+    frames.push({ id: `F${index + 1}`, path, label: frame.label });
+  }
+  return frames;
+};
+
+export interface GradeOptions {
+  readonly gameDir?: string;
   readonly brief: LoadedGameBenchmarkBrief;
   readonly out: string;
   readonly browser?: string;
   readonly godot?: string;
   readonly maxSteps?: number;
+  /**
+   * Vote over a previous grade's saved frames and notes instead of building and
+   * playing. `gameDir` then comes from that grade.
+   */
+  readonly reuseFrames?: string;
   readonly deps?: Partial<GradeDeps>;
 }
 
@@ -928,10 +1051,18 @@ export interface GradeOptions {
  * `deps` exists for the fixture tests: they fake the model, nothing else.
  */
 export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
-  const gameDir = NodePath.resolve(options.gameDir);
   const out = NodePath.resolve(options.out);
   const framesDirectory = NodePath.join(out, "frames");
   await NodeFSP.mkdir(framesDirectory, { recursive: true });
+  const reuseDirectory =
+    options.reuseFrames === undefined ? null : NodePath.resolve(options.reuseFrames);
+  const saved = reuseDirectory === null ? null : await readSavedGrade(reuseDirectory);
+  const gameDir =
+    options.gameDir !== undefined ? NodePath.resolve(options.gameDir) : (saved?.gameDir ?? null);
+  if (gameDir === null)
+    throw new Error(
+      "Pass a game directory, or --reuse-frames <gradeDir> to vote over saved frames.",
+    );
   const maxSteps = options.maxSteps ?? MAX_PLAYTESTER_STEPS;
   const exportBuild =
     options.deps?.exportBuild ??
@@ -951,6 +1082,35 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
     );
     return grade;
   };
+
+  // Vote-only: the build and the playtest already happened, so only the
+  // verdict votes run — the cheap half of a grade, and the only way to re-read
+  // old frames under a new frame choice.
+  if (saved !== null) {
+    if (saved.brief.checksum !== options.brief.checksum)
+      console.warn(
+        `The brief fixture changed since ${reuseDirectory}/grade.json; voting the saved frames against the current claims.`,
+      );
+    const frames = await copySavedFrames(reuseDirectory!, saved, framesDirectory);
+    const judged = await judgeObligations({
+      brief: options.brief,
+      frames,
+      notes: saved.actions.map((action) => action.note),
+      review,
+    });
+    return write({
+      ...base,
+      build: saved.build,
+      quick: saved.quick,
+      frames: frames.map((frame) => NodePath.relative(out, frame.path)),
+      actions: saved.actions,
+      obligations: judged.obligations,
+      control: judged.control,
+      void: judged.void,
+      solCalls: judged.solCalls,
+    });
+  }
+
   const noBuild = (detail: string | null) =>
     write({
       ...base,
@@ -1122,25 +1282,35 @@ const main = async () => {
     console.log(
       [
         "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>",
+        "       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
         "",
         "Grades any folder holding a Godot project from its served pixels and console only.",
+        "--reuse-frames skips the build and the playtest: it votes over that grade's saved",
+        "frames and notes, which is the cheap way to re-read an old run.",
         "Optional: --godot <godot-binary> --browser <chrome-headless-shell> --max-steps <n>",
       ].join("\n"),
     );
     return;
   }
-  const gameDir = process.argv[2];
+  const first = process.argv[2];
+  const gameDir = first === undefined || first.startsWith("--") ? undefined : first;
   const briefPath = flag("brief");
   const out = flag("out");
-  if (gameDir === undefined || briefPath === undefined || out === undefined)
+  const reuseFrames = flag("reuse-frames");
+  if (
+    briefPath === undefined ||
+    out === undefined ||
+    (gameDir === undefined && reuseFrames === undefined)
+  )
     throw new Error(
-      "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>",
+      "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>\n       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
     );
   const brief = await loadGameBenchmarkBrief(NodePath.resolve(briefPath));
   const grade = await gradeGame({
-    gameDir,
+    ...(gameDir === undefined ? {} : { gameDir }),
     brief,
     out,
+    ...(reuseFrames === undefined ? {} : { reuseFrames }),
     ...(flag("godot") === undefined ? {} : { godot: NodePath.resolve(flag("godot")!) }),
     ...(flag("browser") === undefined ? {} : { browser: NodePath.resolve(flag("browser")!) }),
     ...(flag("max-steps") === undefined ? {} : { maxSteps: Number(flag("max-steps")) }),
