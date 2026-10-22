@@ -295,15 +295,17 @@ const withSession = <A, E>(
                     if (scripted.childRecordsGate !== null) yield* scripted.childRecordsGate();
                     return {
                       runs: [
-                        childRun(target, scripted.childStatus, {
-                          ...(scripted.childCommandId === null
+                        childRun(
+                          target,
+                          scripted.childStatus,
+                          scripted.childCommandId === null
                             ? {}
                             : {
                                 userMessageId: IdAllocator.derive.delegatedTaskMessage({
                                   commandId: CommandId.make(scripted.childCommandId),
                                 }),
-                              }),
-                        }),
+                              },
+                        ),
                         ...scripted.extraChildRuns.map((extra) =>
                           childRun(target, extra.status, {
                             id: extra.id,
@@ -883,10 +885,12 @@ it.live("a rejected dispatch receipt fails the start instead of recovering it", 
       expect(first.kind).toBe("started");
       if (first.kind !== "started") return;
 
-      const records = (yield* Effect.promise(() => walk(stateDir))).filter((file) =>
-        file.endsWith("session.json"),
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
       );
-      const recordPath = NodePath.join(stateDir, records[0]!);
       const stored = JSON.parse(
         yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
       ) as { commandId: string; dispatch: { state: string } };

@@ -201,8 +201,6 @@ const ReviewDispatchRecord = Schema.Struct({
   state: Schema.Literals(["pending", "confirmed", "rejected"]),
   detail: Schema.optionalKey(Schema.String),
 });
-type ReviewDispatchRecordType = typeof ReviewDispatchRecord.Type;
-
 /** Everything a pending record needs to send the same command on retry. */
 const ReviewCommandRecord = Schema.Struct({
   task: Schema.String,
@@ -213,8 +211,6 @@ const ReviewCommandRecord = Schema.Struct({
   originatingRunId: Schema.String,
   originatingNodeId: Schema.String,
 });
-type ReviewCommandRecordType = typeof ReviewCommandRecord.Type;
-
 const ReviewSessionRecord = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   loopId: Schema.String,
