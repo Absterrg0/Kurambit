@@ -149,6 +149,12 @@ export const layer = (options: { readonly stateDir: string }) =>
           if (!isGame && !entries.has(key)) return;
           yield* lockFor(root).withPermits(1)(
             Effect.gen(function* () {
+              const entry = entries.get(key);
+              // A loop's own child acting inside its round is not a user
+              // action: it must neither interrupt its caller nor advance the
+              // generation the loop will check before promoting.
+              if (entry !== undefined && threadId !== undefined && (yield* entry.owns(threadId)))
+                return;
               const found = yield* fileFor(root);
               const current = yield* stamp(root);
               const record = {
@@ -175,13 +181,7 @@ export const layer = (options: { readonly stateDir: string }) =>
                     cause,
                   }),
               });
-              const entry = entries.get(NodePath.resolve(root));
               if (entry === undefined) return;
-              if (threadId !== undefined && (yield* entry.owns(threadId))) {
-                // A loop's own child doing something inside its round is not a
-                // user action; interrupting the loop would kill its caller.
-                return;
-              }
               yield* entry.interrupt(reason).pipe(
                 Effect.mapError(
                   (cause) =>

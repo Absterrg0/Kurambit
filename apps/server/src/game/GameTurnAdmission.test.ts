@@ -17,6 +17,7 @@ import * as GameTurnAdmission from "./GameTurnAdmission.ts";
 
 const projectId = ProjectId.make("project:game-turn-admission");
 const userThread = ThreadId.make("thread:game-turn-admission:user");
+const childThread = ThreadId.make("thread:game-turn-admission:child");
 
 const fixture = (options: { readonly game: boolean }) =>
   Effect.acquireRelease(
@@ -136,6 +137,32 @@ it.live("a review whose manifest vanished is still stopped by a turn", () =>
         });
         yield* admitTurn(userThread);
         expect(stopped).toBe(1);
+      }).pipe(Effect.provide(paths.layer));
+    }),
+  ),
+);
+
+it.live("an owned review child neither interrupts its loop nor advances the generation", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const paths = yield* fixture({ game: true });
+      yield* Effect.gen(function* () {
+        const admission = yield* GameAdmission.GameAdmission;
+        let stopped = 0;
+        yield* admission.register(paths.workspace, {
+          interrupt: () =>
+            Effect.sync(() => {
+              stopped += 1;
+            }),
+          owns: (threadId) => Effect.succeed(threadId === childThread),
+        });
+        yield* admission.admit({
+          root: paths.workspace,
+          threadId: childThread,
+          reason: "The child stopped its own game run.",
+        });
+        expect(stopped).toBe(0);
+        expect((yield* admission.stamp(paths.workspace)).generation).toBe(0);
       }).pipe(Effect.provide(paths.layer));
     }),
   ),
