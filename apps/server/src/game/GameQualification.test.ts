@@ -610,6 +610,32 @@ it.effect("deleting an exported file makes the export stale and the game unquali
   ),
 );
 
+it.effect("a build-addressed export record is checked against its own directory", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      const directory = `builds/candidates/${"a".repeat(64)}`;
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(root, directory), { recursive: true });
+        for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+          await NodeFSP.writeFile(NodePath.join(root, directory, name), `candidate ${name}`);
+      });
+      const artifacts = yield* Effect.promise(() => describeWebArtifacts(root, directory));
+      yield* qualification.record(root, {
+        ...passed("export", "a".repeat(64), null, artifacts!),
+        sourceId,
+        buildDirectory: directory,
+      });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "export")?.status).toBe("passed");
+      expect(read.stages.find((entry) => entry.stage === "export")?.buildDirectory).toBe(directory);
+      yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, directory, "index.pck")));
+      const stale = yield* qualification.read(root, "godot", "approved");
+      expect(stale.stages.find((entry) => entry.stage === "export")?.status).toBe("stale");
+    }),
+  ),
+);
+
 it.effect("an export record without an artifact descriptor is never current", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {

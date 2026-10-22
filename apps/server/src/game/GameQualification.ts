@@ -66,6 +66,8 @@ export interface QualificationStageRecord {
   readonly detail?: string;
   /** For web exports, the exact files the build produced. */
   readonly artifacts?: readonly WebArtifactFile[];
+  /** For web exports, the game-relative directory those files live in. */
+  readonly buildDirectory?: string;
   /** The verification-policy revision the check/test/state ran under. */
   readonly policyRevision?: string | null;
   /** Whether the playtest owed a StudioProbe reading. */
@@ -94,6 +96,7 @@ const StoredStage = Schema.Struct({
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   detail: Schema.optionalKey(Schema.String),
   artifacts: Schema.optionalKey(Schema.Array(StoredArtifact)),
+  buildDirectory: Schema.optionalKey(Schema.String),
   policyRevision: Schema.optionalKey(Schema.NullOr(Schema.String)),
   probeRequired: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   visual: Schema.optionalKey(GameVisualJudgement),
@@ -223,6 +226,9 @@ const deriveQualification = (input: {
       ...(recorded?.criteria === undefined ? {} : { criteria: recorded.criteria }),
       ...(recorded?.coverage === undefined ? {} : { coverage: recorded.coverage }),
       ...(recorded?.detail === undefined ? {} : { detail: recorded.detail }),
+      ...(recorded?.buildDirectory === undefined
+        ? {}
+        : { buildDirectory: recorded.buildDirectory }),
     });
     if (recorded === undefined) stageReads.set(stage, read("missing"));
     else if (recorded.outcome === "failed") stageReads.set(stage, read("failed"));
@@ -458,6 +464,7 @@ export interface QualificationRecordInput {
   readonly coverage?: readonly GameScenarioKindCoverage[];
   readonly detail?: string;
   readonly artifacts?: readonly WebArtifactFile[];
+  readonly buildDirectory?: string;
   readonly policyRevision?: string | null;
   readonly probeRequired?: boolean | null;
   readonly visual?: GameVisualJudgement;
@@ -542,7 +549,11 @@ export const layer = (options: {
             return readRecord(location.file);
           });
           const artifactsCurrent = yield* Effect.promise(() =>
-            webArtifactsMatch(root, record?.stages.export?.artifacts),
+            webArtifactsMatch(
+              root,
+              record?.stages.export?.artifacts,
+              record?.stages.export?.buildDirectory,
+            ),
           );
           return deriveQualification({
             record,
@@ -585,6 +596,9 @@ export const layer = (options: {
                       ...(input.coverage === undefined ? {} : { coverage: input.coverage }),
                       ...(input.detail === undefined ? {} : { detail: input.detail }),
                       ...(input.artifacts === undefined ? {} : { artifacts: input.artifacts }),
+                      ...(input.buildDirectory === undefined
+                        ? {}
+                        : { buildDirectory: input.buildDirectory }),
                       ...(input.policyRevision === undefined
                         ? {}
                         : { policyRevision: input.policyRevision }),

@@ -1221,16 +1221,54 @@ const make = Effect.gen(function* () {
         const designPresent = await present("DESIGN.md");
         const briefPresent = await present("BRIEF.md");
         const found: { target: string; path: string; updatedAt: string }[] = [];
-        for (const [target, relative] of [
-          ["Web", "builds/web/index.html"],
-          ["Linux", "builds/linux/game.x86_64"],
-        ] as const) {
-          try {
-            const stat = await NodeFSP.stat(NodePath.join(root, relative));
-            found.push({ target, path: relative, updatedAt: stat.mtime.toISOString() });
-          } catch {
-            /* A game need not have been built yet. */
-          }
+        // A Web build is either the legacy mutable directory or one immutable
+        // candidate. Report the newest artifact that exists; the stage replaces
+        // this with the selected record when one is stored.
+        const webCandidates: { relative: string; mtimeMs: number; updatedAt: string }[] = [];
+        const legacy = await NodeFSP.stat(NodePath.join(root, "builds/web/index.html")).then(
+          (stat) => stat,
+          () => null,
+        );
+        if (legacy !== null)
+          webCandidates.push({
+            relative: "builds/web/index.html",
+            mtimeMs: legacy.mtimeMs,
+            updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(legacy.mtime)),
+          });
+        const candidates = await NodeFSP.readdir(NodePath.join(root, "builds/candidates"), {
+          withFileTypes: true,
+        }).catch(() => []);
+        for (const entry of candidates) {
+          if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue;
+          const relative = `builds/candidates/${entry.name}/index.html`;
+          const stat = await NodeFSP.stat(NodePath.join(root, relative)).then(
+            (found) => found,
+            () => null,
+          );
+          if (stat !== null)
+            webCandidates.push({
+              relative,
+              mtimeMs: stat.mtimeMs,
+              updatedAt: DateTime.formatIso(DateTime.fromDateUnsafe(stat.mtime)),
+            });
+        }
+        webCandidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
+        const newestWeb = webCandidates[0];
+        if (newestWeb !== undefined)
+          found.push({
+            target: "Web",
+            path: newestWeb.relative,
+            updatedAt: newestWeb.updatedAt,
+          });
+        try {
+          const stat = await NodeFSP.stat(NodePath.join(root, "builds/linux/game.x86_64"));
+          found.push({
+            target: "Linux",
+            path: "builds/linux/game.x86_64",
+            updatedAt: stat.mtime.toISOString(),
+          });
+        } catch {
+          /* A game need not have been built yet. */
         }
         return [
           designPresent ? "DESIGN.md" : null,

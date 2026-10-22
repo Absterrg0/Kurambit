@@ -17,6 +17,7 @@ import {
 } from "@t3tools/contracts";
 import {
   designApprovalTestLayer,
+  roundStoreTestLayer,
   previewBrowserTestLayer,
   projectTestLayer,
   qualificationTestLayer,
@@ -53,6 +54,7 @@ const gameServiceLayers = (options: {
     Layer.provideMerge(qualificationTestLayer(options.stateDir)),
     Layer.provideMerge(visualJudgeTestLayer(options.stateDir)),
     Layer.provideMerge(designApprovalTestLayer(options.stateDir)),
+    Layer.provideMerge(roundStoreTestLayer(options.stateDir)),
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(NodeServices.layer),
   );
@@ -1774,6 +1776,55 @@ it.effect("without design review the design never gates building and edits becom
       yield* Effect.promise(() => NodeFSP.rm(parent, { recursive: true, force: true }));
     }
   }),
+);
+
+it.effect(
+  "reports the newest build-addressed Web build, falling back to the legacy directory",
+  () =>
+    Effect.gen(function* () {
+      const parent = yield* Effect.acquireRelease(
+        Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-buildlist-"))),
+        (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const service = yield* GameProjectService.GameProjectService;
+          const game = yield* service.create({
+            name: "Build listing",
+            parentDirectory: parent,
+            brief: "Go",
+            modelSelection: selection,
+          });
+          const legacy = NodePath.join(game.root, "builds/web/index.html");
+          yield* Effect.promise(() => NodeFSP.writeFile(legacy, "<html>legacy</html>"));
+          const old = yield* service.inventory(game.root);
+          expect(old.builds.find((build) => build.target === "Web")?.path).toBe(
+            "builds/web/index.html",
+          );
+          const buildId = "a".repeat(64);
+          const directory = `builds/candidates/${buildId}`;
+          yield* Effect.promise(async () => {
+            await NodeFSP.mkdir(NodePath.join(game.root, directory), { recursive: true });
+            await NodeFSP.writeFile(
+              NodePath.join(game.root, directory, "index.html"),
+              "<html>candidate</html>",
+            );
+            // A staging directory is not a build and must never be listed.
+            await NodeFSP.mkdir(NodePath.join(game.root, "builds/candidates/.staging-run"), {
+              recursive: true,
+            });
+            await NodeFSP.writeFile(
+              NodePath.join(game.root, "builds/candidates/.staging-run/index.html"),
+              "<html>partial</html>",
+            );
+          });
+          const fresh = yield* service.inventory(game.root);
+          expect(fresh.builds.find((build) => build.target === "Web")?.path).toBe(
+            `${directory}/index.html`,
+          );
+        }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
+      );
+    }),
 );
 
 it.effect("reuses the inventory until the source snapshot or manifest changes", () =>
