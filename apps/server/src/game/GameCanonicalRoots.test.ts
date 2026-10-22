@@ -284,6 +284,7 @@ it.effect("a real root and an alias thread share one operation lock", () =>
         Layer.provide(
           Layer.mock(GamePreview.GamePreview)({
             url: () => "http://127.0.0.1:0",
+            serving: () => false,
           }),
         ),
         Layer.provide(Layer.mock(PreviewBrowser.PreviewBrowser)({})),

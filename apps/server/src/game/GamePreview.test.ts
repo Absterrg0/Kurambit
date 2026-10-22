@@ -32,6 +32,7 @@ it.effect(
               concurrency: "unbounded",
             });
             expect(same).toBe(url);
+            expect(preview.url(root)).toBeNull();
             const html = yield* Effect.promise(() =>
               fetch(url).then((response) => response.text()),
             );
@@ -81,6 +82,13 @@ it.effect("serves each build-addressed directory immutably across a promotion", 
           const incumbentUrl = yield* preview.open(root, first);
           const challengerUrl = yield* preview.open(root, second);
           expect(challengerUrl).not.toBe(incumbentUrl);
+          // Serving evidence is not selecting it: an unreviewed challenger must
+          // never become the Play URL.
+          expect(preview.url(root)).toBeNull();
+          expect(preview.serving(root, first)).toBe(true);
+          expect(preview.serving(root, second)).toBe(true);
+          const selectedUrl = yield* preview.select(root, second);
+          expect(selectedUrl).toBe(challengerUrl);
           expect(preview.url(root)).toBe(challengerUrl);
           // The window opened before promotion keeps loading the old bytes.
           expect(

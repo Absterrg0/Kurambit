@@ -95,6 +95,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
           ),
           Layer.provide(
             Layer.mock(GamePreview.GamePreview)({
+              serving: () => false,
               stop: () =>
                 Effect.sync(() => {
                   previewStopped = true;

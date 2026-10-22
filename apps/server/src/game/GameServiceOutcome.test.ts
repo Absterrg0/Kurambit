@@ -94,7 +94,9 @@ const withFixture = <A, E, R>(
             status: Effect.succeed({ toolsDirectory: base, installing: false, tools: [] }),
           }),
         ),
-        Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
+        Layer.provide(
+          Layer.mock(GamePreview.GamePreview)({ url: () => null, serving: () => false }),
+        ),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
         Layer.provideMerge(visualJudgeTestLayer(stateDir)),

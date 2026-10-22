@@ -84,10 +84,11 @@ interface FixtureOptions {
   readonly playtest?: typeof GameWebPlaytest.playtest;
   /** Which build directory Play asks the preview to serve. */
   readonly preview?: (directory: string) => Effect.Effect<string, GameOperationError>;
-  /** The native-launch boundary; records the display mode the service asks for. */
+  /** The native-launch boundary; records the display mode and args the service asks for. */
   readonly start?: (input: {
     readonly root: string;
     readonly display: "headless" | "inherit" | undefined;
+    readonly args: readonly string[];
   }) => Effect.Effect<{ readonly pid: number; readonly logPath: string }, GameOperationError>;
   /** Replace the qualification store, e.g. to make terminal writes fail. */
   readonly qualification?: (stateDir: string) => Layer.Layer<GameQualification.GameQualification>;
@@ -112,6 +113,7 @@ const withGame = <A, E>(
       const root = NodePath.join(base, "game");
       const stateDir = NodePath.join(base, "state");
       const executable = NodePath.join(base, "godot");
+      let selectedPreviewUrl: string | null = null;
       yield* Effect.promise(async () => {
         await NodeFSP.mkdir(NodePath.join(root, "godot/scripts"), { recursive: true });
         await NodeFSP.mkdir(NodePath.join(root, "godot/tests"), { recursive: true });
@@ -152,7 +154,7 @@ const withGame = <A, E>(
             start: (input) =>
               options.start === undefined
                 ? Effect.die("This test provides no native launch.")
-                : options.start({ root, display: input.display }),
+                : options.start({ root, display: input.display, args: input.args }),
             list: () => [],
           }),
         ),
@@ -182,8 +184,20 @@ const withGame = <A, E>(
               options.preview === undefined
                 ? Effect.succeed(`http://127.0.0.1:9/${directory ?? "builds/web"}`)
                 : options.preview(directory ?? "builds/web"),
+            select: (_root, directory) =>
+              (options.preview === undefined
+                ? Effect.succeed(`http://127.0.0.1:9/${directory}`)
+                : options.preview(directory)
+              ).pipe(
+                Effect.tap((url) =>
+                  Effect.sync(() => {
+                    selectedPreviewUrl = url;
+                  }),
+                ),
+              ),
             stop: () => Effect.void,
-            url: () => null,
+            url: () => selectedPreviewUrl,
+            serving: () => false,
           }),
         ),
         Layer.provide(previewBrowserTestLayer(executable)),
@@ -390,53 +404,67 @@ it.live("a failed terminal qualification write never leaves the earlier pass rea
   );
 });
 
-it.live("deleting the .pck makes the export stale and Play rebuilds it", () => {
-  let exports = 0;
-  return withGame(
-    {
-      run: (input) => {
-        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
-        const output = input.args.at(-1)!;
-        return Effect.promise(async () => {
-          exports += 1;
-          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
-          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
-            await NodeFSP.writeFile(
-              NodePath.join(NodePath.dirname(output), name),
-              `export ${name}`,
-            );
-          return processOk(input.root);
-        });
+it.live(
+  "deleting the .pck makes the export stale and Play reports it instead of republishing",
+  () => {
+    let exports = 0;
+    return withGame(
+      {
+        run: (input) => {
+          if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+          const output = input.args.at(-1)!;
+          return Effect.promise(async () => {
+            exports += 1;
+            await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+            for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+              await NodeFSP.writeFile(
+                NodePath.join(NodePath.dirname(output), name),
+                `export ${name}`,
+              );
+            return processOk(input.root);
+          });
+        },
       },
-    },
-    ({ root, game, qualification }) =>
-      Effect.gen(function* () {
-        const exported = yield* game.export(threadId, "Web");
-        expect(exported.success, exported.message).toBe(true);
-        expect(exports).toBe(1);
-        const current = yield* game.status(threadId);
-        expect(current.webBuildStale).toBe(false);
-        expect(stageOf(current.qualification, "export")?.status).toBe("passed");
-        // The export is immutable and build-addressed; the served directory is
-        // named by the result, never the legacy mutable builds/web.
-        const buildDirectory = NodePath.dirname(exported.path!);
-        expect(buildDirectory).toContain("builds/candidates/");
-        expect(current.builds.find((build) => build.target === "Web")?.path).toBe(
-          `${NodePath.relative(root, buildDirectory)}/index.html`,
-        );
+      ({ root, game, qualification }) =>
+        Effect.gen(function* () {
+          const exported = yield* game.export(threadId, "Web");
+          expect(exported.success, exported.message).toBe(true);
+          expect(exports).toBe(1);
+          const current = yield* game.status(threadId);
+          expect(current.webBuildStale).toBe(false);
+          expect(current.selectedArtifactUsable).toBe(true);
+          expect(current.sourcesDifferFromPlay).toBe(false);
+          expect(stageOf(current.qualification, "export")?.status).toBe("passed");
+          // The export is immutable and build-addressed; the served directory is
+          // named by the result, never the legacy mutable builds/web.
+          const buildDirectory = NodePath.dirname(exported.path!);
+          expect(buildDirectory).toContain("builds/candidates/");
+          expect(current.selectedBuildId).toBe(NodePath.basename(buildDirectory));
+          expect(current.builds.find((build) => build.target === "Web")?.path).toBe(
+            `${NodePath.relative(root, buildDirectory)}/index.html`,
+          );
 
-        yield* Effect.promise(() => NodeFSP.rm(NodePath.join(buildDirectory, "index.pck")));
-        const stale = yield* game.status(threadId);
-        expect(stale.webBuildStale).toBe(true);
-        expect(stageOf(stale.qualification, "export")?.status).toBe("stale");
+          yield* Effect.promise(() => NodeFSP.rm(NodePath.join(buildDirectory, "index.pck")));
+          const stale = yield* game.status(threadId);
+          expect(stale.webBuildStale).toBe(true);
+          expect(stale.selectedArtifactUsable).toBe(false);
+          expect(stageOf(stale.qualification, "export")?.status).toBe("stale");
 
-        const played = yield* game.action(threadId, "preview");
-        expect(played.success, played.message).toBe(true);
-        expect(exports).toBe(2);
-        expect((yield* qualification.read(root, "godot")).buildId).not.toBeNull();
-      }),
-  );
-});
+          // Play must not turn an unavailable incumbent into a new publication of
+          // the current sources; only an explicit Rebuild does that.
+          const played = yield* game.action(threadId, "preview");
+          expect(played.success).toBe(false);
+          expect(played.message).toContain("selected build is unavailable");
+          expect(exports).toBe(1);
+
+          const rebuilt = yield* game.action(threadId, "rebuild");
+          expect(rebuilt.success, rebuilt.message).toBe(true);
+          expect(exports).toBe(2);
+          expect((yield* qualification.read(root, "godot")).buildId).not.toBeNull();
+        }),
+    );
+  },
+);
 
 it.live("a web playtest does not stay current when its build files change mid-run", () =>
   withGame(
@@ -546,11 +574,13 @@ it.live("a round's candidate export leaves Play on the incumbent until promotion
 
 it.live("the agent native run is headless while the creator's Play may watch", () => {
   const displays: Array<"headless" | "inherit" | undefined> = [];
+  const args: Array<readonly string[]> = [];
   return withGame(
     {
       run: (input) => Effect.succeed(processOk(input.root)),
-      start: ({ root, display }) => {
+      start: ({ root, display, args: launchArgs }) => {
         displays.push(display);
+        args.push(launchArgs);
         return Effect.succeed({ pid: 4242, logPath: NodePath.join(root, "fake-native.log") });
       },
     },
@@ -563,6 +593,11 @@ it.live("the agent native run is headless while the creator's Play may watch", (
         const creator = yield* game.action(threadId, "native");
         expect(creator.success, creator.message).toBe(true);
         expect(displays).toEqual(["headless", "headless", "inherit"]);
+        // Godot's headless display driver is an argument, not an environment
+        // omission: agent runs must pass it, and the creator's Play must not.
+        expect(args[0]).toContain("--headless");
+        expect(args[1]).toContain("--headless");
+        expect(args[2]).not.toContain("--headless");
       }),
   );
 });
@@ -614,6 +649,177 @@ it.live("a failed or partial export leaves Play on the incumbent", () => {
           NodeFSP.readdir(NodePath.join(root, "builds/candidates")),
         );
         expect(candidates.filter((name) => name.startsWith(".staging-"))).toEqual([]);
+      }),
+  );
+});
+
+it.live("a candidate playtest serves evidence without changing the Play URL or identity", () => {
+  let exports = 0;
+  const opened: string[] = [];
+  const played: string[] = [];
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${exports} ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      playtest: (input) => {
+        played.push(input.url);
+        return Effect.succeed(playtestResult);
+      },
+      preview: (directory) => {
+        opened.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${opened.length}`);
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const first = yield* game.action(threadId, "preview");
+        expect(first.success, first.message).toBe(true);
+        const incumbentDirectory = opened[0]!;
+        const incumbentUrl = first.url;
+        expect((yield* game.status(threadId)).previewUrl).toBe(incumbentUrl);
+
+        yield* rounds.begin(root, {});
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# repair\n"),
+        );
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ waitMs: 1 }] });
+        expect(playtest.success, playtest.message).toBe(true);
+        // The playtest opened the candidate's evidence URL, not the selected build.
+        expect(opened).toHaveLength(2);
+        expect(opened[1]).toContain("builds/candidates/");
+        expect(opened[1]).not.toBe(incumbentDirectory);
+        expect(played.at(-1)).toBe(`http://127.0.0.1:9/2`);
+
+        const status = yield* game.status(threadId);
+        expect(status.previewUrl).toBe(incumbentUrl);
+        expect(status.selectedBuildId).toBe(NodePath.basename(incumbentDirectory));
+        expect(status.selectedArtifactUsable).toBe(true);
+        expect(status.sourcesDifferFromPlay).toBe(true);
+        expect(status.builds.find((build) => build.target === "Web")?.path).toBe(
+          `${incumbentDirectory}/index.html`,
+        );
+        const selection = yield* rounds.read(root);
+        expect(selection.selected?.buildId).toBe(NodePath.basename(incumbentDirectory));
+      }),
+  );
+});
+
+it.live("an export naming a stopped round fails instead of publishing directly", () => {
+  let exports = 0;
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        exports += 1;
+        return Effect.succeed(processOk(input.root));
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const round = yield* rounds.begin(root, {});
+        yield* rounds.stop(root, round.id, "The review was stopped.");
+        const expired = yield* Effect.result(game.export(threadId, "Web", { roundId: round.id }));
+        expect(expired._tag).toBe("Failure");
+        if (expired._tag === "Failure") expect(expired.failure.reason).toBe("invalid-input");
+        expect(exports).toBe(0);
+        expect((yield* rounds.read(root)).selected).toBeNull();
+      }),
+  );
+});
+
+it.live("an export builds from frozen bytes and refuses a source edit during the run", () => {
+  let exports = 0;
+  let frozenScript = "";
+  let frozenPath = "";
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const pathIndex = input.args.indexOf("--path") + 1;
+        frozenPath = input.args[pathIndex]!;
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          // The export runs against the frozen copy while the creator edits the
+          // real file; the build must not be bound to the newer bytes.
+          frozenScript = await NodeFSP.readFile(
+            NodePath.join(frozenPath, "scripts/main.gd"),
+            "utf8",
+          );
+          await NodeFSP.appendFile(
+            NodePath.join(input.root, "godot/scripts/main.gd"),
+            "# edited during export\n",
+          );
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+    },
+    ({ root, game }) =>
+      Effect.gen(function* () {
+        const result = yield* game.export(threadId, "Web");
+        expect(result.success, result.message).toBe(false);
+        expect(result.message).toContain("changed during the export");
+        expect(exports).toBe(1);
+        expect(frozenScript).toBe("extends Node\n");
+        expect(frozenPath).not.toBe(NodePath.join(root, "godot"));
+        const status = yield* game.status(threadId);
+        expect(status.selectedBuildId).toBeNull();
+      }),
+  );
+});
+
+it.live("explicit Rebuild stops the open round before publishing", () => {
+  let exports = 0;
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          exports += 1;
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${exports} ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const round = yield* rounds.begin(root, {});
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# repair\n"),
+        );
+        const rebuilt = yield* game.action(threadId, "rebuild");
+        expect(rebuilt.success, rebuilt.message).toBe(true);
+        expect(exports).toBe(1);
+        const state = yield* rounds.read(root);
+        const closed = state.rounds.find((entry) => entry.id === round.id);
+        expect(closed?.status).toBe("stopped");
+        expect(closed?.decision).toBe("stop");
+        expect(closed?.reason).toContain("Rebuild");
+        expect(state.selected).not.toBeNull();
       }),
   );
 });

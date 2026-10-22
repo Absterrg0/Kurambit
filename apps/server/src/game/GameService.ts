@@ -108,6 +108,7 @@ export class GameService extends Context.Service<
     readonly export: (
       threadId: ThreadId,
       target: "Web" | "Linux",
+      options?: { readonly roundId?: string | undefined },
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * Runs the native game. The creator's own Play may watch it on their
@@ -192,6 +193,13 @@ const make = Effect.gen(function* () {
     string,
     { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
   >();
+  /**
+   * The current source's byte identity, reused while qualification's legacy
+   * Godot size/mtime snapshot is unchanged. Status polls must not rehash a
+   * game's Blender originals every two seconds; an art-only edit that does not
+   * touch the Godot project is reported once the playable tree changes.
+   */
+  const playIdentityCache = new Map<string, { read: string; sourceId: string | null }>();
   const cancel = Effect.fnUntraced(function* (root: string) {
     const operation = active.get(root);
     if (operation === undefined) return;
@@ -511,13 +519,30 @@ const make = Effect.gen(function* () {
         reason: "templates-missing",
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
-    // Import first: Godot's import can write sidecars inside the project, so the
-    // before snapshot is taken after it and before the export process runs. A
-    // source edit during the export itself still makes the build mixed.
-    const imported = yield* importGame(root);
-    if (!imported.success) return { value: imported, record: failedExport(null) };
-    const before = yield* snapshot(root, godotProject);
-    const beforeSourceId = before.kind === "known" ? before.sourceId : null;
+    // Import first: Godot's import can write sidecars inside the project, so a
+    // legacy before/after snapshot is taken around the export. Web exports build
+    // from a frozen copy of the game-owned source instead, so the candidate
+    // record names the exact bytes the engine read.
+    const frozen = target === "Web" ? yield* rounds.freeze(root) : null;
+    const frozenProject =
+      frozen === null ? null : NodePath.join(frozen.directory, "files", godotProject);
+    const imported =
+      frozenProject === null
+        ? yield* importGame(root)
+        : response(
+            yield* processes.run({
+              root,
+              executable: godot.path,
+              args: ["--headless", "--path", frozenProject, "--editor", "--import"],
+              operation: "godot-import",
+              timeoutMs: 180_000,
+            }),
+          );
+    if (!imported.success)
+      return { value: imported, record: failedExport(frozen?.sourceId ?? null) };
+    const before = frozen === null ? yield* snapshot(root, godotProject) : null;
+    const beforeSourceId =
+      frozen?.sourceId ?? (before !== null && before.kind === "known" ? before.sourceId : null);
     // Web exports stage in a hidden directory under the candidate root, never in
     // the served tree. A partial or failed export therefore cannot change what
     // Play loads; only a complete, hashed artifact is moved into place.
@@ -546,7 +571,7 @@ const make = Effect.gen(function* () {
         yield* processes.run({
           root,
           executable: godot.path,
-          args: ["--headless", "--path", cwd, "--export-release", target, output],
+          args: ["--headless", "--path", frozenProject ?? cwd, "--export-release", target, output],
           operation: `export-${target.toLowerCase()}`,
           timeoutMs: 300_000,
         }),
@@ -592,13 +617,50 @@ const make = Effect.gen(function* () {
             "The exported web build directory could not be read back.",
           ),
         };
-      // Read the source after the whole export, before the artifact becomes
-      // visible: a source edit during the export must not publish a mixed build.
-      const after = yield* snapshot(root, godotProject);
-      const comparison = comparedSource(before, after, "export");
+      // The frozen copy is the export input; prove it still hashes to the
+      // manifest the candidate will name before sealing the artifact. The
+      // editable folder is checked too: an edit during the export means the
+      // build no longer describes the current game.
+      const afterSourceId = frozen === null ? null : yield* rounds.sourceId(root);
+      const frozenSourceId =
+        frozen === null ? null : yield* rounds.frozenSourceId(frozen.directory);
+      const comparison =
+        frozen === null
+          ? comparedSource(before!, yield* snapshot(root, godotProject), "export")
+          : frozenSourceId !== frozen.sourceId
+            ? {
+                kind: "changed" as const,
+                detail:
+                  "The frozen export copy changed while the export ran; the build was not published.",
+              }
+            : afterSourceId !== frozen.sourceId
+              ? {
+                  kind: "changed" as const,
+                  detail:
+                    "The game folder changed during the export; the build was not published because it no longer describes the current sources.",
+                }
+              : { kind: "current" as const, sourceId: frozen.sourceId };
       const finishedAt = DateTime.formatIso(yield* DateTime.now);
-      if (comparison.kind !== "current")
-        return { value: result, record: failedExport(beforeSourceId, comparison.detail) };
+      if (comparison.kind !== "current") {
+        const detail = comparison.detail;
+        return {
+          value: {
+            ...result,
+            success: false,
+            message: `${detail}\n${commandDetail(result.process!)}`.slice(-4096),
+          },
+          record: failedExport(beforeSourceId, detail),
+        };
+      }
+      // Qualification still identifies sources by its legacy size/mtime
+      // snapshot; the candidate's own record carries the byte identity.
+      const legacyAfter = frozen === null ? null : yield* snapshot(root, godotProject);
+      const qualificationSourceId =
+        frozen === null
+          ? comparison.sourceId
+          : legacyAfter !== null && legacyAfter.kind === "known"
+            ? legacyAfter.sourceId
+            : null;
       const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
       if (hashed !== null && directory !== null) {
         const final = NodePath.join(root, directory);
@@ -637,9 +699,9 @@ const make = Effect.gen(function* () {
           ),
         };
       if (hashed !== null && directory !== null) {
-        // Round decisions use the byte manifest identity, not the legacy
-        // size/mtime snapshot the qualification stage records.
-        const roundSourceId = yield* rounds.sourceId(root);
+        // Round decisions use the byte manifest identity of the frozen input,
+        // not a capture taken after the artifact was sealed.
+        const roundSourceId = frozen?.sourceId ?? (yield* rounds.sourceId(root));
         const artifact = {
           buildId: hashed.buildId,
           directory,
@@ -662,7 +724,7 @@ const make = Effect.gen(function* () {
           },
           record: {
             outcome: "passed" as const,
-            sourceId: comparison.sourceId,
+            sourceId: qualificationSourceId,
             buildId: hashed.buildId,
             evidenceDirectory: null,
             artifacts: artifacts!,
@@ -694,6 +756,19 @@ const make = Effect.gen(function* () {
         Effect.map((state) => state.rounds.find((round) => round.status === "running") ?? null),
       );
   /**
+   * Every export path uses this decision. While a round is open its export is
+   * the challenger and must not replace the selected build; outside one, the
+   * creator's export is a normal publish.
+   */
+  const exportSelection = (root: string): Effect.Effect<ExportSelection, GameOperationError> =>
+    runningRound(root).pipe(
+      Effect.map((active) =>
+        active === null
+          ? ({ mode: "publish" } as const)
+          : ({ mode: "candidate", roundId: active.id } as const),
+      ),
+    );
+  /**
    * The build Play should show: the selected one while its immutable directory
    * still hashes to its recorded id, otherwise a pre-change builds/web game, or
    * null when the game has never been built.
@@ -708,7 +783,7 @@ const make = Effect.gen(function* () {
           return {
             directory: selected.directory,
             selected,
-            url: yield* preview.open(root, selected.directory),
+            url: yield* preview.select(root, selected.directory),
           };
       }
       // Only a game with no selection may fall back to a pre-change build; a
@@ -724,7 +799,7 @@ const make = Effect.gen(function* () {
         return {
           directory: WEB_BUILD_DIRECTORY,
           selected: null,
-          url: yield* preview.open(root, WEB_BUILD_DIRECTORY),
+          url: yield* preview.select(root, WEB_BUILD_DIRECTORY),
         };
       return null;
     });
@@ -756,7 +831,10 @@ const make = Effect.gen(function* () {
       const launched = yield* processes.start({
         root,
         executable: godot.path,
-        args: ["--path", cwd],
+        // Godot 4 needs the headless display driver, not merely an unset
+        // DISPLAY: without it a windowed run fails to initialize offscreen.
+        // Only the creator's own Play asks to inherit the display.
+        args: display === "headless" ? ["--headless", "--path", cwd] : ["--path", cwd],
         operation: "native",
         display,
         timeoutMs: 24 * 60 * 60_000,
@@ -791,7 +869,7 @@ const make = Effect.gen(function* () {
           const identity = yield* designApprovals.readPolicy(root, manifest);
           const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
           if (!(yield* webBuildIsCurrent(beforePlaytest))) {
-            const exported = yield* exportGame(root, "Web", { mode: "publish" });
+            const exported = yield* exportGame(root, "Web", yield* exportSelection(root));
             if (!exported.success)
               return yield* new GameOperationError({
                 operation: "Web playtest",
@@ -1478,7 +1556,15 @@ const make = Effect.gen(function* () {
               : Effect.fail(error),
         }),
       );
-      if (root !== null) yield* cancel(root);
+      if (root !== null) {
+        yield* cancel(root);
+        // A user turn that was cancelled supersedes the round it was repairing;
+        // the round is persisted terminal so a later restart cannot revive it.
+        yield* rounds.stopRunning(
+          root,
+          "The user's turn was cancelled, so the open repair round was stopped and its candidate is not selected.",
+        );
+      }
     }),
     status: Effect.fn("GameService.status")(function* (threadId) {
       const root = yield* projects.resolve(threadId);
@@ -1520,10 +1606,13 @@ const make = Effect.gen(function* () {
             });
       // The inventory reports what exists under builds/, but Play follows the
       // selected record. Name that build honestly: a stale candidate export must
-      // not make the served build look newer than it is.
+      // not make the served build look newer than it is. With nothing selected,
+      // only the legacy mutable build can be played; candidates are evidence.
       const builds =
         selected === null
-          ? inventory.builds
+          ? inventory.builds.filter(
+              (build) => build.target !== "Web" || build.path.startsWith(`${WEB_BUILD_DIRECTORY}/`),
+            )
           : [
               ...inventory.builds.filter((build) => build.target !== "Web"),
               {
@@ -1532,6 +1621,32 @@ const make = Effect.gen(function* () {
                 updatedAt: selected.promotedAt,
               },
             ];
+      const legacyExport = qualificationRead.stages.find((stage) => stage.stage === "export");
+      const legacyBuildCurrent =
+        selected === null &&
+        (legacyExport?.buildDirectory ?? WEB_BUILD_DIRECTORY) === WEB_BUILD_DIRECTORY &&
+        // A candidate export record is evidence about the challenger, not the
+        // legacy build Play would fall back to.
+        (yield* webBuildIsCurrent(qualificationRead));
+      // Play identity is a byte question: the selected build's own source
+      // manifest against the current bytes. An unknown tree differs because it
+      // cannot be shown to match. Hashing every file on a two-second poll would
+      // be wasteful, so reuse the byte identity while qualification's cheap
+      // size/mtime snapshot says the tree has not changed.
+      let playSourceId: string | null = null;
+      if (selected !== null) {
+        const legacySourceId = qualificationRead.sourceId;
+        const cached = legacySourceId === null ? undefined : playIdentityCache.get(root);
+        if (legacySourceId === null) playSourceId = null;
+        else if (cached !== undefined && cached.read === legacySourceId)
+          playSourceId = cached.sourceId;
+        else {
+          playSourceId = yield* rounds
+            .sourceId(root)
+            .pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
+          playIdentityCache.set(root, { read: legacySourceId, sourceId: playSourceId });
+        }
+      }
       const playtestStage = qualificationRead.stages.find((stage) => stage.stage === "playtest");
       const lastPlaytest = yield* Effect.tryPromise({
         try: () =>
@@ -1574,8 +1689,13 @@ const make = Effect.gen(function* () {
         // What Play would show, not what the last export produced: a good
         // candidate export does not make the selected build fresh, and a source
         // edit does not make the selected artifact unplayable.
-        webBuildStale:
-          selected !== null ? !selectedPresent : !(yield* webBuildIsCurrent(qualificationRead)),
+        webBuildStale: selected !== null ? !selectedPresent : !legacyBuildCurrent,
+        selectedBuildId: selected?.buildId ?? null,
+        selectedArtifactUsable: selectedPresent,
+        // Usability and source freshness are separate answers: the selected
+        // build can be perfectly playable while the editable sources have moved
+        // on, which is the normal state during a review round.
+        sourcesDifferFromPlay: selected !== null && playSourceId !== selected.sourceId,
         qualification: qualificationRead,
         toolchain: yield* tools.status,
         processes: processes.list(root),
@@ -1586,14 +1706,30 @@ const make = Effect.gen(function* () {
       };
     }),
     import: (threadId) => withRoot(threadId, "Import", importGame),
-    export: (threadId, target) =>
+    export: (threadId, target, options) =>
       withRoot(threadId, `Export ${target}`, (root) =>
         Effect.gen(function* () {
           yield* refuseWhileUnapproved(root, "export");
           // While a round runs, an export is that round's challenger: it must
           // not replace the build Play serves. Outside a round the builder's
-          // export is the publish, so development stays immediate.
+          // export is the publish, so development stays immediate. A caller
+          // that names a round is telling the server which loop it belongs to;
+          // an expired round must fail rather than become a direct publication.
           const active = target === "Web" ? yield* runningRound(root) : null;
+          if (options?.roundId !== undefined) {
+            if (active === null || active.id !== options.roundId)
+              return yield* new GameOperationError({
+                operation: "Export Web",
+                path: root,
+                reason: "invalid-input",
+                detail:
+                  "That repair round is no longer running; its export was not published or recorded.",
+              });
+            return yield* exportGame(root, target, {
+              mode: "candidate",
+              roundId: active.id,
+            });
+          }
           return yield* exportGame(
             root,
             target,
@@ -1774,6 +1910,12 @@ const make = Effect.gen(function* () {
         yield* cancel(root);
         yield* processes.stop(root);
         yield* preview.stop(root);
+        // Stopping the game is a user decision; a round that is repairing it
+        // must not keep owning the folder afterwards.
+        yield* rounds.stopRunning(
+          root,
+          "The creator stopped the game, so the open repair round was stopped.",
+        );
         return {
           success: true,
           message: "Stopped this game's processes and preview server.",
@@ -1804,10 +1946,17 @@ const make = Effect.gen(function* () {
           // The creator's own Play may watch a native window; every agent-facing
           // run goes through the headless native method instead.
           if (action === "native") return yield* nativeGame(root, "inherit");
-          // Rebuild forces a new export and publishes it. Play otherwise serves
-          // the selected build, which may legitimately differ from the current
-          // sources while a round is open; the stage reports that difference.
-          if (action === "rebuild") return yield* publishWeb(root);
+          // Rebuild forces a new export and publishes it. It is an explicit
+          // user decision, so it supersedes an open round rather than becoming
+          // that round's candidate.
+          if (action === "rebuild") {
+            yield* rounds.stopRunning(
+              root,
+              "An explicit Rebuild superseded the open repair round; its candidate was not selected.",
+            );
+            return yield* publishWeb(root);
+          }
+          const state = yield* rounds.read(root);
           const served = yield* selectedPreview(root);
           if (served !== null)
             return {
@@ -1815,6 +1964,27 @@ const make = Effect.gen(function* () {
               message: "Loaded the selected web build.",
               path: NodePath.join(root, served.directory, "index.html"),
               url: served.url,
+              process: null,
+            };
+          if (state.selected !== null)
+            return {
+              success: false,
+              message:
+                "The selected build is unavailable: its served files are missing or empty. Rebuild to export the current sources; Play does not publish unreviewed repair sources.",
+              path: null,
+              url: null,
+              process: null,
+            };
+          // A first build with no round open is ordinary development. While a
+          // round is open, its sources are the repair's and must be reviewed.
+          const active = yield* runningRound(root);
+          if (active !== null)
+            return {
+              success: false,
+              message:
+                "A repair round is open and there is no selected build to play. The round's candidate is not published automatically.",
+              path: null,
+              url: null,
               process: null,
             };
           return yield* publishWeb(root);

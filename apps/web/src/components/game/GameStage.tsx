@@ -236,7 +236,10 @@ export function GameStage({
   // same object, so this only adjusts state when the fold advanced.
   const frame = nextGamePreviewFrame(frameFold, {
     previewUrl: data.previewUrl,
-    servedArtifactId: data.qualification.servedArtifactId,
+    // The selected build's identity, not the last export's descriptor: a
+    // candidate export is evidence for a round and must not remount the
+    // incumbent the creator is playing.
+    servedArtifactId: data.selectedBuildId ?? data.qualification.servedArtifactId,
   });
   if (frame !== frameFold) setFrameFold(frame);
   const frameKey = frame.key;

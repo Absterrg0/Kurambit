@@ -114,7 +114,9 @@ const withFixture = <A, E, R>(
               }),
           }),
         ),
-        Layer.provide(Layer.mock(GamePreview.GamePreview)({ url: () => null })),
+        Layer.provide(
+          Layer.mock(GamePreview.GamePreview)({ url: () => null, serving: () => false }),
+        ),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
         Layer.provideMerge(visualJudgeTestLayer(NodePath.join(root, ".test-state"))),

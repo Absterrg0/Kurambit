@@ -447,6 +447,22 @@ export const GameStatus = Schema.Struct({
   viewport: GameViewport,
   /** A web build exists but game sources changed after it: play would be out of date. */
   webBuildStale: Schema.Boolean,
+  /**
+   * The selected build's identity, whether or not its files are still usable.
+   * A candidate export never changes it; only promotion or a direct publish does.
+   */
+  selectedBuildId: Schema.NullOr(Schema.String),
+  /**
+   * Whether every served file of the selected build is still present and
+   * nonempty. Null when nothing is selected. Byte identity is checked when Play
+   * opens the build, not on every status read.
+   */
+  selectedArtifactUsable: Schema.NullOr(Schema.Boolean),
+  /**
+   * The current source bytes are not the ones the selected build was exported
+   * from. This says nothing about whether the selected build itself is usable.
+   */
+  sourcesDifferFromPlay: Schema.Boolean,
   /** Server-owned qualification of the current sources. */
   qualification: GameQualificationRead,
   builds: Schema.Array(
