@@ -122,6 +122,11 @@ export const GameReviewRound = Schema.Struct({
    * so restoring would discard a user edit.
    */
   postRepairSourceId: Schema.NullOr(Schema.String),
+  /**
+   * The version an explicit restore preserved before rewriting the folder, so
+   * the user can return to the state they had when they asked for the restore.
+   */
+  preRestoreSnapshotId: Schema.optionalKey(Schema.String),
   candidate: Schema.NullOr(GameReviewArtifact),
   defects: Schema.optionalKey(Schema.Array(GameReviewDefect)),
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),

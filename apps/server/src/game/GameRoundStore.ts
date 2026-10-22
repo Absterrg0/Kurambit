@@ -6,6 +6,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_GAME_REVIEW_BUDGET,
@@ -19,7 +20,12 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as GameSnapshots from "./GameSnapshots.ts";
-import { gameRecordLocation, migrateGameRecord, readRecordText } from "./gameRecord.ts";
+import {
+  gameRecordLocation,
+  migrateGameRecord,
+  readRecordText,
+  type GameRecordLocation,
+} from "./gameRecord.ts";
 import { candidateBuildId } from "./webBuild.ts";
 
 const StoredState = Schema.Struct({
@@ -91,7 +97,15 @@ export interface GameRoundBeginInput {
 
 export type GamePromotion =
   | { readonly kind: "promoted"; readonly selected: GameSelectedBuild }
-  | { readonly kind: "blocked"; readonly detail: string };
+  | {
+      /**
+       * A precondition failed at commit. The round is terminal `stopped`; the
+       * selection, folder, snapshot and candidate stay exactly as they were.
+       */
+      readonly kind: "blocked";
+      readonly round: GameReviewRoundType;
+      readonly detail: string;
+    };
 
 export type GameRejection =
   | {
@@ -99,12 +113,31 @@ export type GameRejection =
       readonly round: GameReviewRoundType;
       readonly restored: readonly string[];
       readonly deleted: readonly string[];
+      /** The candidate directory removed because no record or preview referenced it. */
+      readonly discarded: readonly string[];
     }
   | {
       /**
        * The folder changed after the server last read it. Nothing was restored
-       * and the snapshot stays, so a user edit was never overwritten.
+       * and the snapshot and candidate stay, so a user edit was never
+       * overwritten and a later explicit restore is still possible.
        */
+      readonly kind: "blocked";
+      readonly round: GameReviewRoundType;
+      readonly detail: string;
+    };
+
+export type GameRestore =
+  | {
+      readonly kind: "restored";
+      readonly round: GameReviewRoundType;
+      readonly restored: readonly string[];
+      readonly deleted: readonly string[];
+      readonly discarded: readonly string[];
+      /** The version present before this restore, kept so it can be returned to. */
+      readonly preservedSnapshotId: string;
+    }
+  | {
       readonly kind: "blocked";
       readonly round: GameReviewRoundType;
       readonly detail: string;
@@ -117,6 +150,19 @@ export class GameRoundStore extends Context.Service<
     readonly read: (root: string) => Effect.Effect<GameReviewStateType, GameOperationError>;
     /** The byte-accurate source identity round decisions use. */
     readonly sourceId: (root: string) => Effect.Effect<string, GameOperationError>;
+    /**
+     * Copies the game's current source into the immutable store and returns
+     * that copy. An export builds from this snapshot, so its bytes are the
+     * exact input its candidate record names.
+     */
+    readonly freeze: (
+      root: string,
+    ) => Effect.Effect<
+      { readonly directory: string; readonly sourceId: string },
+      GameOperationError
+    >;
+    /** Re-identifies a frozen copy so an export can prove its input did not move. */
+    readonly frozenSourceId: (directory: string) => Effect.Effect<string, GameOperationError>;
     /** Snapshots the source and opens a round before the repair child writes. */
     readonly begin: (
       root: string,
@@ -143,11 +189,35 @@ export class GameRoundStore extends Context.Service<
       root: string,
       roundId: string,
     ) => Effect.Effect<GamePromotion, GameOperationError>;
-    /** Restores the pre-repair snapshot and drops the candidate build. */
+    /** Restores the pre-repair snapshot and drops an unreferenced candidate build. */
     readonly reject: (
       root: string,
       roundId: string,
+      options?: {
+        /** Directories a live preview still serves; they are never deleted. */
+        readonly preserveDirectories?: readonly string[] | undefined;
+      },
     ) => Effect.Effect<GameRejection, GameOperationError>;
+    /**
+     * A requested return to the pre-repair version. Stops the running round,
+     * snapshots the current version first, and then restores.
+     */
+    readonly restore: (
+      root: string,
+      roundId: string,
+      options?: { readonly preserveDirectories?: readonly string[] | undefined },
+    ) => Effect.Effect<GameRestore, GameOperationError>;
+    /** Ends one round without touching the folder or the selection. */
+    readonly stop: (
+      root: string,
+      roundId: string,
+      reason?: string,
+    ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
+    /** Ends whichever round is open; the caller is about to supersede it. */
+    readonly stopRunning: (
+      root: string,
+      reason?: string,
+    ) => Effect.Effect<readonly GameReviewRoundType[], GameOperationError>;
     /** Marks every unfinished round interrupted; the selected build is kept. */
     readonly recover: (
       root: string,
@@ -156,26 +226,17 @@ export class GameRoundStore extends Context.Service<
 >()("t3/game/GameRoundStore") {}
 
 export const layer = (options: { readonly stateDir: string }) => {
-  const writes = new Map<string, Promise<void>>();
-  const serialized = (key: string, work: () => Promise<void>) => {
-    const previous = writes.get(key) ?? Promise.resolve();
-    const next = previous.then(work, work);
-    writes.set(
-      key,
-      next.catch(() => undefined),
-    );
-    return next;
-  };
-
   return Layer.effect(
     GameRoundStore,
     Effect.gen(function* () {
       const snapshots = yield* GameSnapshots.GameSnapshots;
-      const location = async (root: string) => {
-        const found = await gameRecordLocation(options.stateDir, "game-rounds", root);
-        await migrateGameRecord(found).catch(() => false);
-        return found;
-      };
+      const location = (root: string) => gameRecordLocation(options.stateDir, "game-rounds", root);
+      const migrate = (root: string) =>
+        attempt("read game rounds", root, async () => {
+          const found = await location(root);
+          await migrateGameRecord(found).catch(() => false);
+          return found;
+        });
       const readState = async (file: string): Promise<StoredState> => {
         const text = await readRecordText(file);
         if (text === null) return { schemaVersion: 1, selected: null, rounds: [] };
@@ -201,92 +262,189 @@ export const layer = (options: { readonly stateDir: string }) => {
           await NodeFSP.rm(temporary, { force: true });
         }
       };
-      const update = async <A>(
-        root: string,
-        work: (state: StoredState) => { readonly state: StoredState; readonly value: A },
-      ): Promise<A> => {
-        const found = await location(root);
-        let value!: A;
-        await serialized(found.canonicalRoot, async () => {
-          const result = work(await readState(found.file));
-          value = result.value;
-          await writeState(found.file, result.state);
-        });
-        return value;
+      const readStateEffect = (file: string) =>
+        attempt("read game rounds", file, () => readState(file));
+      const writeStateEffect = (file: string, state: StoredState) =>
+        attempt("write game rounds", file, () => writeState(file, state));
+
+      // One semaphore per canonical root. The map is only touched
+      // synchronously, so two first calls cannot each create their own lock.
+      const locks = new Map<string, Semaphore.Semaphore>();
+      const lockFor = (key: string) => {
+        const existing = locks.get(key);
+        if (existing !== undefined) return existing;
+        const created = Semaphore.makeUnsafe(1);
+        locks.set(key, created);
+        return created;
       };
+      /**
+       * A transition is one uninterruptible section once it starts. A pending
+       * cancellation is observed before the first write; after that, the caller
+       * waits for the transition to finish instead of abandoning half of it.
+       */
+      const critical = <A, E>(effect: Effect.Effect<A, E>) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            yield* restore(Effect.yieldNow);
+            return yield* effect;
+          }),
+        );
+      const withLock = <A, E>(
+        root: string,
+        operation: string,
+        work: (found: GameRecordLocation) => Effect.Effect<A, E>,
+      ) =>
+        Effect.gen(function* () {
+          const found = yield* migrate(root);
+          const lock = lockFor(found.canonicalRoot);
+          return yield* lock.withPermits(1)(critical(work(found)));
+        });
+
       // Recovery is a startup act: a round this process opened is live, not
       // interrupted. One pass per game per server process, so a read cannot
       // interrupt the round it is observing.
       const recovered = new Set<string>();
-      const recoverOnce = async (root: string) => {
-        const found = await location(root);
-        if (recovered.has(found.canonicalRoot)) return [];
-        recovered.add(found.canonicalRoot);
-        return recover(root);
-      };
-      const recover = async (root: string): Promise<readonly GameReviewRoundType[]> => {
-        const found = await location(root);
-        let interrupted: GameReviewRoundType[] = [];
-        await serialized(found.canonicalRoot, async () => {
-          const state = await readState(found.file);
-          const at = DateTime.formatIso(DateTime.nowUnsafe());
+      const recoverLocked = (
+        found: GameRecordLocation,
+      ): Effect.Effect<readonly GameReviewRoundType[], GameOperationError> =>
+        Effect.gen(function* () {
+          const state = yield* readStateEffect(found.file);
+          if (recovered.has(found.canonicalRoot)) return [];
+          recovered.add(found.canonicalRoot);
+          const at = DateTime.formatIso(yield* DateTime.now);
+          const interrupted: GameReviewRoundType[] = [];
           const rounds = state.rounds.map((round) => {
             if (round.status !== "running") return round;
-            interrupted = [
-              ...interrupted,
-              {
-                ...round,
-                status: "interrupted",
-                finishedAt: at,
-                decision: "interrupt",
-                reason:
-                  "The server restarted before this round finished. The selected build was kept; the game folder is as the repair left it.",
-              },
-            ];
-            return interrupted.at(-1)!;
+            const stopped: GameReviewRoundType = {
+              ...round,
+              status: "interrupted",
+              finishedAt: at,
+              decision: "interrupt",
+              reason:
+                "The server restarted before this round finished. The selected build was kept; the game folder is as the repair left it.",
+            };
+            interrupted.push(stopped);
+            return stopped;
           });
-          if (interrupted.length > 0) await writeState(found.file, { ...state, rounds });
+          if (interrupted.length > 0) yield* writeStateEffect(found.file, { ...state, rounds });
+          return interrupted;
         });
-        return interrupted;
+
+      const roundById = (state: StoredState, roundId: string, operation: string) => {
+        const round = state.rounds.find((entry) => entry.id === roundId);
+        if (round === undefined)
+          throw failure(
+            operation,
+            roundId,
+            "invalid-input",
+            "That round is not in this game's record.",
+          );
+        return round;
       };
+      const terminal = (
+        round: GameReviewRoundType,
+        status: "stopped" | "rejected",
+        decision: "stop" | "reject",
+        reason: string,
+        at: string,
+        extras: Partial<GameReviewRoundType> = {},
+      ): GameReviewRoundType => ({
+        ...round,
+        ...extras,
+        status,
+        finishedAt: at,
+        decision,
+        reason,
+      });
+      const replaceRound = (state: StoredState, round: GameReviewRoundType): StoredState => ({
+        ...state,
+        rounds: state.rounds.map((entry) => (entry.id === round.id ? round : entry)),
+      });
+      const stopLocked = (
+        state: StoredState,
+        round: GameReviewRoundType,
+        reason: string,
+        at: string,
+      ): { readonly state: StoredState; readonly round: GameReviewRoundType } => {
+        if (round.status !== "running") return { state, round };
+        const stopped = terminal(round, "stopped", "stop", reason, at);
+        return { state: replaceRound(state, stopped), round: stopped };
+      };
+
+      /**
+       * A candidate directory is shared by content-addressed identity: an
+       * identical repair can name the selected directory itself. Delete only a
+       * directory nothing else still points at.
+       */
+      const discardCandidate = (
+        root: string,
+        state: StoredState,
+        candidate: GameReviewArtifact,
+        preserve: readonly string[],
+      ): Effect.Effect<readonly string[], GameOperationError> =>
+        Effect.gen(function* () {
+          const referenced = new Set<string>(preserve);
+          if (state.selected !== null) referenced.add(state.selected.directory);
+          for (const round of state.rounds) {
+            if (round.candidate === null) continue;
+            if (round.status === "rejected" || round.status === "promoted") continue;
+            referenced.add(round.candidate.directory);
+          }
+          if (referenced.has(candidate.directory)) return [];
+          const target = NodePath.join(root, candidate.directory);
+          yield* attempt("discard game candidate", target, () =>
+            NodeFSP.rm(target, { recursive: true, force: true }),
+          );
+          return [candidate.directory];
+        });
+
       return GameRoundStore.of({
         read: (root) =>
-          attempt("read game rounds", root, async () => {
-            await recoverOnce(root);
-            const found = await location(root);
-            const state = await readState(found.file);
-            return { selected: state.selected, rounds: state.rounds };
-          }),
+          withLock(root, "read game rounds", (found) =>
+            Effect.gen(function* () {
+              yield* recoverLocked(found);
+              const state = yield* readStateEffect(found.file);
+              return { selected: state.selected, rounds: state.rounds };
+            }),
+          ),
         sourceId: (root) =>
-          attempt("identity game source", root, async () => {
-            const manifest = await snapshots.capture(root).pipe(Effect.runPromise);
-            return manifest.sourceId;
-          }),
+          snapshots.capture(root).pipe(Effect.map((manifest) => manifest.sourceId)),
+        freeze: (root) =>
+          snapshots.store(root).pipe(
+            Effect.map((stored) => ({
+              directory: stored.directory,
+              sourceId: stored.manifest.sourceId,
+            })),
+          ),
+        frozenSourceId: (directory) =>
+          snapshots
+            .capture(NodePath.join(directory, "files"))
+            .pipe(Effect.map((manifest) => manifest.sourceId)),
         begin: (root, input) =>
-          attempt("begin game review round", root, async () => {
-            await recoverOnce(root);
-            const found = await location(root);
-            const before = await readState(found.file);
-            if (before.rounds.some((round) => round.status === "running"))
-              throw failure(
-                "begin game review round",
-                root,
-                "busy",
-                "Another repair round is already open for this game.",
-              );
-            const snapshot = await snapshots.store(root).pipe(Effect.runPromise);
-            let created: GameReviewRoundType | null = null;
-            await serialized(found.canonicalRoot, async () => {
-              const state = await readState(found.file);
-              if (state.rounds.some((round) => round.status === "running"))
-                throw failure(
+          withLock(root, "begin game review round", (found) =>
+            Effect.gen(function* () {
+              yield* recoverLocked(found);
+              const before = yield* readStateEffect(found.file);
+              if (before.rounds.some((round) => round.status === "running"))
+                return yield* failure(
                   "begin game review round",
                   root,
                   "busy",
                   "Another repair round is already open for this game.",
                 );
-              const at = DateTime.formatIso(DateTime.nowUnsafe());
-              created = {
+              // Snapshot inside the lock: no transition can move selection while
+              // the round's incumbent identities are being read.
+              const snapshot = yield* snapshots.store(root);
+              const state = yield* readStateEffect(found.file);
+              if (state.rounds.some((round) => round.status === "running"))
+                return yield* failure(
+                  "begin game review round",
+                  root,
+                  "busy",
+                  "Another repair round is already open for this game.",
+                );
+              const at = DateTime.formatIso(yield* DateTime.now);
+              const created: GameReviewRoundType = {
                 schemaVersion: 1,
                 id: NodeCrypto.randomUUID(),
                 threadId: input?.threadId ?? null,
@@ -300,214 +458,288 @@ export const layer = (options: { readonly stateDir: string }) => {
                 candidate: null,
                 budget: input?.budget ?? DEFAULT_GAME_REVIEW_BUDGET,
               };
-              await writeState(found.file, {
+              yield* writeStateEffect(found.file, {
                 ...state,
                 rounds: [created, ...state.rounds].slice(0, MAX_STORED_ROUNDS),
               });
-            });
-            return created!;
-          }),
+              return created;
+            }),
+          ),
         recordPostRepair: (root, roundId) =>
-          attempt("record game review repair", root, async () => {
-            const manifest = await snapshots.capture(root).pipe(Effect.runPromise);
-            return update(root, (state) => {
-              const current = state.rounds.find((round) => round.id === roundId);
-              if (current === undefined)
-                throw failure(
-                  "record game review repair",
-                  roundId,
-                  "invalid-input",
-                  "That round is not in this game's record.",
-                );
+          withLock(root, "record game review repair", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const current = roundById(state, roundId, "record game review repair");
               if (current.status !== "running")
-                throw failure(
+                return yield* failure(
                   "record game review repair",
                   roundId,
                   "invalid-input",
                   "That round is no longer running.",
                 );
+              const manifest = yield* snapshots.capture(root);
               const round = { ...current, postRepairSourceId: manifest.sourceId };
-              return {
-                state: {
-                  ...state,
-                  rounds: state.rounds.map((entry) => (entry.id === roundId ? round : entry)),
-                },
-                value: round,
-              };
-            });
-          }),
+              yield* writeStateEffect(found.file, replaceRound(state, round));
+              return round;
+            }),
+          ),
         recordCandidate: (root, roundId, artifact) =>
-          attempt("record game review candidate", root, async () => {
-            const candidate = validatedArtifact(artifact);
-            return update(root, (state) => {
-              const current = state.rounds.find((round) => round.id === roundId);
-              if (current === undefined)
-                throw failure(
-                  "record game review candidate",
-                  roundId,
-                  "invalid-input",
-                  "That round is not in this game's record.",
-                );
+          withLock(root, "record game review candidate", (found) =>
+            Effect.gen(function* () {
+              const candidate = validatedArtifact(artifact);
+              const state = yield* readStateEffect(found.file);
+              const current = roundById(state, roundId, "record game review candidate");
               if (current.status !== "running")
-                throw failure(
+                return yield* failure(
                   "record game review candidate",
                   roundId,
                   "invalid-input",
-                  "That round is no longer running.",
+                  "That round is no longer running; an expired round cannot record a candidate.",
                 );
               const round = { ...current, candidate };
-              return {
-                state: {
-                  ...state,
-                  rounds: state.rounds.map((entry) => (entry.id === roundId ? round : entry)),
-                },
-                value: round,
-              };
-            });
-          }),
+              yield* writeStateEffect(found.file, replaceRound(state, round));
+              return round;
+            }),
+          ),
         select: (root, artifact) =>
-          attempt("select game build", root, async () => {
-            const build = validatedArtifact(artifact);
-            return update(root, (state) => {
+          withLock(root, "select game build", (found) =>
+            Effect.gen(function* () {
+              const build = validatedArtifact(artifact);
+              const state = yield* readStateEffect(found.file);
+              const running = state.rounds.find((round) => round.status === "running");
+              if (running !== undefined)
+                return yield* failure(
+                  "select game build",
+                  root,
+                  "busy",
+                  "A repair round is open; a direct publish would replace the build it is reviewing.",
+                );
               const selected: GameSelectedBuild = {
                 ...build,
-                promotedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+                promotedAt: DateTime.formatIso(yield* DateTime.now),
                 roundId: null,
               };
-              return { state: { ...state, selected }, value: selected };
-            });
-          }),
+              yield* writeStateEffect(found.file, { ...state, selected });
+              return selected;
+            }),
+          ),
         promote: (root, roundId) =>
-          attempt("promote game review build", root, async () => {
-            const found = await location(root);
-            const state = await readState(found.file);
-            const round = state.rounds.find((entry) => entry.id === roundId);
-            if (round === undefined || round.status !== "running" || round.candidate === null)
-              return {
-                kind: "blocked" as const,
-                detail: "That round has no running candidate build to promote.",
-              };
-            const candidate = validatedArtifact(round.candidate);
-            const current = await snapshots.capture(root).pipe(Effect.runPromise);
-            // The candidate was built from these sources. If the folder moved on,
-            // promoting would serve bytes the current game did not produce.
-            if (candidate.sourceId !== null && current.sourceId !== candidate.sourceId)
-              return {
-                kind: "blocked" as const,
-                detail:
-                  "The game folder changed after the candidate build; the candidate was not promoted.",
-              };
-            const selected: GameSelectedBuild = {
-              ...candidate,
-              promotedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-              roundId,
-            };
-            await update(root, (latest) => ({
-              state: {
-                ...latest,
-                selected,
-                rounds: latest.rounds.map((entry) =>
-                  entry.id === roundId
-                    ? {
-                        ...entry,
-                        status: "promoted" as const,
-                        finishedAt: selected.promotedAt,
-                        decision: "promote" as const,
-                        reason: "The candidate build won the round and is now what Play serves.",
-                      }
-                    : entry,
-                ),
-              },
-              value: selected,
-            }));
-            return { kind: "promoted" as const, selected };
-          }),
-        reject: (root, roundId) =>
-          attempt("reject game review build", root, async () => {
-            const found = await location(root);
-            const state = await readState(found.file);
-            const round = state.rounds.find((entry) => entry.id === roundId);
-            if (round === undefined)
-              throw failure(
-                "reject game review build",
-                roundId,
-                "invalid-input",
-                "That round is not in this game's record.",
-              );
-            if (round.status !== "running")
-              throw failure(
-                "reject game review build",
-                roundId,
-                "invalid-input",
-                "That round is no longer running.",
-              );
-            const stopped = async (detail: string): Promise<GameRejection> => {
-              const at = DateTime.formatIso(DateTime.nowUnsafe());
-              const updated: GameReviewRoundType = {
-                ...round,
-                status: "stopped",
-                finishedAt: at,
-                decision: "stop",
-                reason: detail,
-              };
-              await update(root, (latest) => ({
-                state: {
-                  ...latest,
-                  rounds: latest.rounds.map((entry) => (entry.id === roundId ? updated : entry)),
-                },
-                value: updated,
-              }));
-              return { kind: "blocked" as const, round: updated, detail };
-            };
-            if (round.postRepairSourceId === null)
-              return stopped(
-                "The server never read the folder after the repair, so it cannot tell an edit from the repair itself; the previous version was not restored.",
-              );
-            const current = await snapshots.capture(root).pipe(Effect.runPromise);
-            if (current.sourceId !== round.postRepairSourceId)
-              return stopped(
-                "The game folder changed after the repair finished, so the previous version was not restored. The snapshot is kept.",
-              );
-            const snapshot = await snapshots
-              .read(root, round.incumbentSnapshotId)
-              .pipe(Effect.runPromise);
-            const restored = await snapshots
-              .restore(root, snapshot.manifest, {
-                expectSourceId: round.postRepairSourceId,
-              })
-              .pipe(Effect.runPromise);
-            if (restored.kind === "blocked") return stopped(restored.detail);
-            if (round.candidate !== null) {
+          withLock(root, "promote game review build", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const round = roundById(state, roundId, "promote game review build");
+              const at = DateTime.formatIso(yield* DateTime.now);
+              const blocked = (detail: string): Effect.Effect<GamePromotion, GameOperationError> =>
+                Effect.gen(function* () {
+                  const stopped = stopLocked(state, round, detail, at);
+                  if (stopped.state !== state) yield* writeStateEffect(found.file, stopped.state);
+                  return { kind: "blocked" as const, round: stopped.round, detail };
+                });
+              if (round.status !== "running" || round.candidate === null)
+                return yield* blocked("That round has no running candidate build to promote.");
               const candidate = validatedArtifact(round.candidate);
-              await NodeFSP.rm(NodePath.join(root, candidate.directory), {
-                recursive: true,
-                force: true,
+              const current = yield* snapshots.capture(root);
+              // The candidate was built from these sources. If the folder moved
+              // on, promoting would serve bytes the current game did not produce.
+              if (candidate.sourceId !== null && current.sourceId !== candidate.sourceId)
+                return yield* blocked(
+                  "source-changed: the game folder changed after the candidate build; the candidate was not promoted.",
+                );
+              // A newer publication supersedes this round's evidence. Its
+              // incumbent is the selection the round opened against.
+              if ((state.selected?.buildId ?? null) !== round.incumbentBuildId)
+                return yield* blocked(
+                  "The selected build changed after this round opened; the older candidate was not promoted.",
+                );
+              const selected: GameSelectedBuild = {
+                ...candidate,
+                promotedAt: at,
+                roundId,
+              };
+              const record: GameReviewRoundType = {
+                ...round,
+                status: "promoted",
+                finishedAt: at,
+                decision: "promote",
+                reason: "The candidate build won the round and is now what Play serves.",
+              };
+              yield* writeStateEffect(found.file, {
+                ...replaceRound(state, record),
+                selected,
               });
-            }
-            const at = DateTime.formatIso(DateTime.nowUnsafe());
-            const rejected: GameReviewRoundType = {
-              ...round,
-              status: "rejected",
-              finishedAt: at,
-              decision: "reject",
-              reason:
-                "The round was rejected; the previous source snapshot was restored and the candidate build was discarded.",
-            };
-            await update(root, (latest) => ({
-              state: {
-                ...latest,
-                rounds: latest.rounds.map((entry) => (entry.id === roundId ? rejected : entry)),
-              },
-              value: rejected,
-            }));
-            return {
-              kind: "rejected" as const,
-              round: rejected,
-              restored: restored.restored,
-              deleted: restored.deleted,
-            };
-          }),
-        recover: (root) => attempt("recover game rounds", root, () => recover(root)),
+              return { kind: "promoted", selected };
+            }),
+          ),
+        reject: (root, roundId, rejectOptions) =>
+          withLock(root, "reject game review build", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const round = roundById(state, roundId, "reject game review build");
+              const at = DateTime.formatIso(yield* DateTime.now);
+              const stopped = (detail: string): Effect.Effect<GameRejection, GameOperationError> =>
+                Effect.gen(function* () {
+                  const stoppedRound = terminal(round, "stopped", "stop", detail, at);
+                  yield* writeStateEffect(found.file, replaceRound(state, stoppedRound));
+                  return { kind: "blocked", round: stoppedRound, detail };
+                });
+              if (round.status !== "running")
+                return yield* failure(
+                  "reject game review build",
+                  roundId,
+                  "invalid-input",
+                  "That round is no longer running.",
+                );
+              if (round.postRepairSourceId === null)
+                return yield* stopped(
+                  "The server never read the folder after the repair, so it cannot tell an edit from the repair itself; the previous version was not restored.",
+                );
+              const current = yield* snapshots.capture(root);
+              if (current.sourceId !== round.postRepairSourceId)
+                return yield* stopped(
+                  "The game folder changed after the repair finished, so the previous version was not restored. The snapshot and candidate are kept.",
+                );
+              const snapshot = yield* snapshots.read(root, round.incumbentSnapshotId);
+              const restored = yield* snapshots.restore(root, snapshot.manifest, {
+                expectSourceId: round.postRepairSourceId,
+              });
+              if (restored.kind === "blocked") return yield* stopped(restored.detail);
+              const rejected = terminal(
+                round,
+                "rejected",
+                "reject",
+                "The round was rejected; the previous source snapshot was restored.",
+                at,
+              );
+              yield* writeStateEffect(found.file, replaceRound(state, rejected));
+              const discarded =
+                round.candidate === null
+                  ? []
+                  : yield* discardCandidate(
+                      root,
+                      replaceRound(state, rejected),
+                      validatedArtifact(round.candidate),
+                      rejectOptions?.preserveDirectories ?? [],
+                    );
+              return {
+                kind: "rejected",
+                round: rejected,
+                restored: restored.restored,
+                deleted: restored.deleted,
+                discarded,
+              };
+            }),
+          ),
+        restore: (root, roundId, restoreOptions) =>
+          withLock(root, "restore game review version", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const round = roundById(state, roundId, "restore game review version");
+              if (round.status === "promoted" || round.status === "rejected")
+                return yield* failure(
+                  "restore game review version",
+                  roundId,
+                  "invalid-input",
+                  "That round is already closed; there is no repair version to return from.",
+                );
+              const at = DateTime.formatIso(yield* DateTime.now);
+              // Joining owned work means no round stays open while the folder is
+              // rewritten; the caller's request is the newer decision.
+              const joined = stopLocked(
+                state,
+                round,
+                "An explicit restore superseded this round before the folder was rewritten.",
+                at,
+              );
+              let stoppedState = state;
+              if (joined.state !== state) {
+                yield* writeStateEffect(found.file, joined.state);
+                stoppedState = joined.state;
+              }
+              // Preserve the version about to be replaced before touching it.
+              const preserved = yield* snapshots.store(root);
+              const preservedRound = {
+                ...joined.round,
+                preRestoreSnapshotId: preserved.manifest.sourceId,
+              };
+              yield* writeStateEffect(found.file, replaceRound(stoppedState, preservedRound));
+              const recordedState = replaceRound(stoppedState, preservedRound);
+              const snapshot = yield* snapshots.read(root, round.incumbentSnapshotId);
+              const restored = yield* snapshots.restore(root, snapshot.manifest);
+              if (restored.kind === "blocked")
+                return { kind: "blocked", round: preservedRound, detail: restored.detail };
+              const restoredRound = terminal(
+                preservedRound,
+                "rejected",
+                "reject",
+                `The previous version was restored on request; the version it replaced is kept as snapshot ${preserved.manifest.sourceId}.`,
+                DateTime.formatIso(yield* DateTime.now),
+              );
+              yield* writeStateEffect(found.file, replaceRound(recordedState, restoredRound));
+              const discarded =
+                restoredRound.candidate === null
+                  ? []
+                  : yield* discardCandidate(
+                      root,
+                      replaceRound(recordedState, restoredRound),
+                      validatedArtifact(restoredRound.candidate),
+                      restoreOptions?.preserveDirectories ?? [],
+                    );
+              return {
+                kind: "restored",
+                round: restoredRound,
+                restored: restored.restored,
+                deleted: restored.deleted,
+                discarded,
+                preservedSnapshotId: preserved.manifest.sourceId,
+              };
+            }),
+          ),
+        stop: (root, roundId, reason) =>
+          withLock(root, "stop game review round", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const round = roundById(state, roundId, "stop game review round");
+              const at = DateTime.formatIso(yield* DateTime.now);
+              const stopped = stopLocked(
+                state,
+                round,
+                reason ?? "The round was stopped before it finished.",
+                at,
+              );
+              if (stopped.state !== state) yield* writeStateEffect(found.file, stopped.state);
+              return stopped.round;
+            }),
+          ),
+        stopRunning: (root, reason) =>
+          withLock(root, "stop game review round", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const at = DateTime.formatIso(yield* DateTime.now);
+              const stoppedRounds: GameReviewRoundType[] = [];
+              const rounds = state.rounds.map((round) => {
+                if (round.status !== "running") return round;
+                const stoppedRound = terminal(
+                  round,
+                  "stopped",
+                  "stop",
+                  reason ?? "The round was stopped before it finished.",
+                  at,
+                );
+                stoppedRounds.push(stoppedRound);
+                return stoppedRound;
+              });
+              if (stoppedRounds.length > 0)
+                yield* writeStateEffect(found.file, { ...state, rounds });
+              return stoppedRounds;
+            }),
+          ),
+        recover: (root) =>
+          withLock(root, "recover game rounds", (found) =>
+            Effect.gen(function* () {
+              recovered.delete(found.canonicalRoot);
+              return yield* recoverLocked(found);
+            }),
+          ),
       });
     }),
   ).pipe(Layer.provide(GameSnapshots.layer({ stateDir: options.stateDir })));

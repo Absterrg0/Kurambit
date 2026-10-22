@@ -5,6 +5,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import type { GameReviewArtifact } from "@t3tools/contracts";
 import * as GameRoundStore from "./GameRoundStore.ts";
@@ -89,17 +90,21 @@ it.live(
         );
 
         // A second round is rejected: the source returns to its pre-round bytes
-        // and the challenger directory is removed, while selection stays put.
+        // while selection stays put. Its challenger has the same content-addressed
+        // identity as the selected build, so rejecting it must not delete the
+        // directory Play is serving.
         const second = yield* rounds.begin(root, {});
         yield* edit(root, "extends Node2D # worse\n");
         yield* rounds.recordPostRepair(root, second.id);
         const worse = yield* Effect.promise(() => candidate(root, second.incumbentSnapshotId));
+        expect(worse.directory).toBe(build.directory);
         yield* rounds.recordCandidate(root, second.id, worse);
         const rejected = yield* rounds.reject(root, second.id);
         expect(rejected.kind).toBe("rejected");
         if (rejected.kind === "rejected") {
           expect(rejected.restored).toEqual(["godot/scripts/main.gd"]);
           expect(rejected.deleted).toEqual([]);
+          expect(rejected.discarded).toEqual([]);
         }
         expect(
           yield* Effect.promise(() =>
@@ -108,12 +113,9 @@ it.live(
         ).toBe("extends Node2D # repaired\n");
         expect(
           yield* Effect.promise(() =>
-            NodeFSP.stat(NodePath.join(root, worse.directory)).then(
-              () => true,
-              () => false,
-            ),
+            NodeFSP.readFile(NodePath.join(root, build.directory, "index.html"), "utf8"),
           ),
-        ).toBe(false);
+        ).toContain("candidate");
         const state = yield* rounds.read(root);
         expect(state.selected?.buildId).toBe(build.buildId);
         expect(state.rounds.find((round) => round.id === second.id)?.status).toBe("rejected");
@@ -191,4 +193,212 @@ it.live("restart marks a running round interrupted and keeps the selected build"
       ).toBe("extends Node2D # unfinished\n");
     }),
   ),
+);
+
+it.live("a promotion blocked by a source change stops the round and keeps the candidate", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const first = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repaired\n");
+      yield* rounds.recordPostRepair(root, first.id);
+      const repaired = yield* snapshots.capture(root);
+      const incumbent = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+      yield* rounds.recordCandidate(root, first.id, incumbent);
+      expect((yield* rounds.promote(root, first.id)).kind).toBe("promoted");
+      const selectedBefore = (yield* rounds.read(root)).selected;
+
+      const second = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # contender\n");
+      yield* rounds.recordPostRepair(root, second.id);
+      const contenderSource = yield* snapshots.capture(root);
+      const contender = yield* Effect.promise(() => candidate(root, contenderSource.sourceId));
+      yield* rounds.recordCandidate(root, second.id, contender);
+      // The creator edits the folder after the repair was recorded.
+      yield* edit(root, "extends Node2D # user edit\n");
+
+      const blocked = yield* rounds.promote(root, second.id);
+      expect(blocked.kind).toBe("blocked");
+      if (blocked.kind !== "blocked") return;
+      expect(blocked.round.status).toBe("stopped");
+      expect(blocked.round.decision).toBe("stop");
+      expect(blocked.round.reason).toContain("source-changed");
+      // Nothing was restored or discarded, and selection did not move.
+      expect(blocked.round.candidate?.buildId).toBe(contender.buildId);
+      const state = yield* rounds.read(root);
+      expect(state.selected?.buildId).toBe(selectedBefore?.buildId);
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("extends Node2D # user edit\n");
+    }),
+  ),
+);
+
+it.live("an identical candidate is never deleted out from under the selected build", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const opened = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repair\n");
+      yield* rounds.recordPostRepair(root, opened.id);
+      const repaired = yield* snapshots.capture(root);
+      const build = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+      yield* rounds.recordCandidate(root, opened.id, build);
+      expect((yield* rounds.promote(root, opened.id)).kind).toBe("promoted");
+
+      const second = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # no-op repair\n");
+      yield* rounds.recordPostRepair(root, second.id);
+      // Content addressing makes this the selected directory: a no-op repair.
+      const identical = yield* Effect.promise(() => candidate(root, build.sourceId!));
+      expect(identical.directory).toBe(build.directory);
+      yield* rounds.recordCandidate(root, second.id, identical);
+      const rejected = yield* rounds.reject(root, second.id);
+      expect(rejected.kind).toBe("rejected");
+      if (rejected.kind !== "rejected") return;
+      expect(rejected.discarded).toEqual([]);
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, build.directory, "index.html"), "utf8"),
+        ),
+      ).toContain("candidate");
+      const state = yield* rounds.read(root);
+      expect(state.selected?.directory).toBe(build.directory);
+    }),
+  ),
+);
+
+it.live("stopping a round persists a terminal record and leaves the folder alone", () =>
+  withGame(({ root, rounds }) =>
+    Effect.gen(function* () {
+      const opened = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # in flight\n");
+      const stopped = yield* rounds.stopRunning(root, "The creator superseded the round.");
+      expect(stopped.map((round) => round.id)).toEqual([opened.id]);
+      expect(stopped[0]?.status).toBe("stopped");
+      expect(stopped[0]?.decision).toBe("stop");
+      expect(stopped[0]?.reason).toBe("The creator superseded the round.");
+      const state = yield* rounds.read(root);
+      expect(state.rounds.find((round) => round.id === opened.id)?.status).toBe("stopped");
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+        ),
+      ).toBe("extends Node2D # in flight\n");
+    }),
+  ),
+);
+
+it.live(
+  "an explicit restore stops the round, keeps the replaced version, and discards only its candidate",
+  () =>
+    withGame(({ root, rounds, snapshots }) =>
+      Effect.gen(function* () {
+        const opened = yield* rounds.begin(root, {});
+        const original = yield* snapshots.capture(root);
+        yield* edit(root, "extends Node2D # repair\n");
+        yield* rounds.recordPostRepair(root, opened.id);
+        const repairedSource = yield* snapshots.capture(root);
+        const build = yield* Effect.promise(() => candidate(root, repairedSource.sourceId));
+        yield* rounds.recordCandidate(root, opened.id, build);
+
+        const restored = yield* rounds.restore(root, opened.id);
+        expect(restored.kind).toBe("restored");
+        if (restored.kind !== "restored") return;
+        // The version that was replaced is preserved for a later restore.
+        expect(restored.preservedSnapshotId).toBe(repairedSource.sourceId);
+        expect((yield* snapshots.read(root, restored.preservedSnapshotId)).manifest.sourceId).toBe(
+          repairedSource.sourceId,
+        );
+        expect(restored.restored).toEqual(["godot/scripts/main.gd"]);
+        expect(restored.discarded).toEqual([build.directory]);
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("extends Node\n");
+        const after = yield* snapshots.capture(root);
+        expect(after.sourceId).toBe(original.sourceId);
+        const state = yield* rounds.read(root);
+        expect(state.rounds.find((round) => round.id === opened.id)?.preRestoreSnapshotId).toBe(
+          repairedSource.sourceId,
+        );
+      }),
+    ),
+);
+
+it.live("concurrent promote and reject never leave a half-decided round", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const incumbent = yield* snapshots.capture(root);
+      const opened = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # contender\n");
+      yield* rounds.recordPostRepair(root, opened.id);
+      const repaired = yield* snapshots.capture(root);
+      const build = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+      yield* rounds.recordCandidate(root, opened.id, build);
+
+      yield* Effect.all(
+        [
+          Effect.result(rounds.promote(root, opened.id)),
+          Effect.result(rounds.reject(root, opened.id)),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const state = yield* rounds.read(root);
+      const round = state.rounds.find((entry) => entry.id === opened.id)!;
+      expect(["promoted", "rejected"]).toContain(round.status);
+      const current = yield* snapshots.capture(root);
+      if (round.status === "promoted") {
+        expect(state.selected?.buildId).toBe(build.buildId);
+        expect(current.sourceId).toBe(repaired.sourceId);
+      } else {
+        expect(state.selected).toBeNull();
+        expect(current.sourceId).toBe(incumbent.sourceId);
+      }
+    }),
+  ),
+);
+
+it.live(
+  "an interrupt while a round transition runs leaves one complete state, never a partial one",
+  () =>
+    withGame(({ root, rounds, snapshots }) =>
+      Effect.gen(function* () {
+        for (let index = 0; index < 40; index += 1)
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(
+              NodePath.join(root, `godot/scripts/extra_${index}.gd`),
+              "extends Node\n",
+            ),
+          );
+        const opened = yield* rounds.begin(root, {});
+        yield* Effect.promise(async () => {
+          for (let index = 0; index < 40; index += 1)
+            await NodeFSP.writeFile(
+              NodePath.join(root, `godot/scripts/extra_${index}.gd`),
+              "extends Node # repaired\n",
+            );
+        });
+        yield* rounds.recordPostRepair(root, opened.id);
+        const repaired = yield* snapshots.capture(root);
+        const build = yield* Effect.promise(() => candidate(root, repaired.sourceId));
+        yield* rounds.recordCandidate(root, opened.id, build);
+
+        // The interrupt either lands before the transition starts (folder stays
+        // as the repair left it) or waits for it to finish (incumbent restored).
+        const fiber = yield* rounds.reject(root, opened.id).pipe(Effect.forkChild);
+        yield* Fiber.interrupt(fiber);
+        const state = yield* rounds.read(root);
+        const round = state.rounds.find((entry) => entry.id === opened.id)!;
+        const current = yield* snapshots.capture(root);
+        // A running round means the cancel arrived before the transition began;
+        // the folder must still be exactly what the repair left.
+        if (round.status === "rejected") expect(current.sourceId).toBe(opened.incumbentSnapshotId);
+        else {
+          expect(round.status).toBe("running");
+          expect(current.sourceId).toBe(repaired.sourceId);
+        }
+      }),
+    ),
 );

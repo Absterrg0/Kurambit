@@ -12,7 +12,13 @@ const withTree = <A, E>(
     readonly stateDir: string;
     readonly snapshots: GameSnapshots.GameSnapshots["Service"];
   }) => Effect.Effect<A, E>,
-  options: { readonly maxBytes?: number; readonly maxEntries?: number } = {},
+  options: {
+    readonly maxBytes?: number;
+    readonly maxEntries?: number;
+    readonly beforePath?:
+      | ((operation: "delete" | "restore", path: string) => Promise<void>)
+      | undefined;
+  } = {},
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -43,6 +49,7 @@ const withTree = <A, E>(
             stateDir,
             ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
             ...(options.maxEntries === undefined ? {} : { maxEntries: options.maxEntries }),
+            ...(options.beforePath === undefined ? {} : { beforePath: options.beforePath }),
           }),
         ),
       );
@@ -174,4 +181,168 @@ it.effect("a tree past the byte bound is rejected rather than truncated", () =>
       }),
     { maxBytes: 8 },
   ),
+);
+
+it.effect("an edit between the tree read and a path's mutation blocks that path", () => {
+  let edited = false;
+  return withTree(
+    ({ root, snapshots }) =>
+      Effect.gen(function* () {
+        const stored = yield* snapshots.store(root);
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "repair\n");
+          await NodeFSP.rm(NodePath.join(root, "game.json"));
+        });
+        const changed = yield* snapshots.capture(root);
+        const restored = yield* snapshots.restore(root, stored.manifest, {
+          expectSourceId: changed.sourceId,
+          beforePath: async (operation, path) => {
+            if (operation !== "restore" || path !== "game.json" || edited) return;
+            edited = true;
+            // The entrance capture saw "repair"; this edit lands before the
+            // later file's verification, so restore must stop, not overwrite it.
+            await NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "user edit\n");
+          },
+        });
+        expect(restored.kind).toBe("blocked");
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("user edit\n");
+      }),
+    {},
+  );
+});
+
+it.effect("a file that becomes a symlink before its mutation blocks the restore", () => {
+  let swapped = false;
+  return withTree(
+    ({ root, snapshots }) =>
+      Effect.gen(function* () {
+        const stored = yield* snapshots.store(root);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "godot/scripts/extra.gd"), "repair extra\n"),
+        );
+        const changed = yield* snapshots.capture(root);
+        const restored = yield* snapshots.restore(root, stored.manifest, {
+          expectSourceId: changed.sourceId,
+          beforePath: async (operation, path) => {
+            if (operation !== "delete" || path !== "godot/scripts/extra.gd" || swapped) return;
+            swapped = true;
+            await NodeFSP.rm(NodePath.join(root, path));
+            await NodeFSP.symlink(NodePath.join(root, "game.json"), NodePath.join(root, path));
+          },
+        });
+        expect(restored.kind).toBe("blocked");
+        if (restored.kind === "blocked") expect(restored.detail).toContain("symlink");
+      }),
+    {},
+  );
+});
+
+it.effect("a file the repair turned into a directory is restored over the empty directory", () =>
+  withTree(({ root, snapshots }) =>
+    Effect.gen(function* () {
+      const stored = yield* snapshots.store(root);
+      yield* Effect.promise(async () => {
+        // game.json (a file in the snapshot) became a directory holding a new file.
+        await NodeFSP.rm(NodePath.join(root, "game.json"));
+        await NodeFSP.mkdir(NodePath.join(root, "game.json"));
+        await NodeFSP.writeFile(NodePath.join(root, "game.json/repair.txt"), "new\n");
+      });
+      const changed = yield* snapshots.capture(root);
+      const restored = yield* snapshots.restore(root, stored.manifest, {
+        expectSourceId: changed.sourceId,
+      });
+      expect(restored.kind).toBe("restored");
+      if (restored.kind === "restored") expect(restored.deleted).toEqual(["game.json/repair.txt"]);
+      expect(
+        yield* Effect.promise(() => NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")),
+      ).toBe('{"name":"probe"}\n');
+      const after = yield* snapshots.capture(root);
+      expect(after.sourceId).toBe(stored.manifest.sourceId);
+    }),
+  ),
+);
+
+it.effect("empty directories the repair created are removed before restoring files", () =>
+  withTree(({ root, snapshots }) =>
+    Effect.gen(function* () {
+      const stored = yield* snapshots.store(root);
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(root, "godot/scripts/scratch/deep"), { recursive: true });
+        await NodeFSP.writeFile(
+          NodePath.join(root, "godot/scripts/scratch/deep/temp.gd"),
+          "repair\n",
+        );
+      });
+      const changed = yield* snapshots.capture(root);
+      const restored = yield* snapshots.restore(root, stored.manifest, {
+        expectSourceId: changed.sourceId,
+      });
+      expect(restored.kind).toBe("restored");
+      expect(
+        yield* Effect.promise(() =>
+          NodeFSP.stat(NodePath.join(root, "godot/scripts/scratch")).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false);
+    }),
+  ),
+);
+
+it.effect(
+  "a parent replaced by a symlink blocks the write and leaves the outside file alone",
+  () => {
+    let swapped = false;
+    return withTree(
+      ({ root, snapshots }) =>
+        Effect.gen(function* () {
+          const stored = yield* snapshots.store(root);
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "repair\n"),
+          );
+          const changed = yield* snapshots.capture(root);
+          const outside = NodePath.join(root, "..", "outside-scripts");
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "repair\n"),
+          );
+          const restored = yield* snapshots.restore(root, stored.manifest, {
+            expectSourceId: changed.sourceId,
+            beforePath: async (operation, path) => {
+              if (operation !== "restore" || path !== "godot/scripts/main.gd" || swapped) return;
+              swapped = true;
+              // Same bytes as the current file, so content verification passes and
+              // only the parent check can stop the write.
+              await NodeFSP.mkdir(outside, { recursive: true });
+              await NodeFSP.writeFile(NodePath.join(outside, "main.gd"), "repair\n");
+              await NodeFSP.rename(
+                NodePath.join(root, "godot/scripts"),
+                NodePath.join(root, "godot/scripts-original"),
+              );
+              await NodeFSP.symlink(outside, NodePath.join(root, "godot/scripts"));
+            },
+          });
+          expect(restored.kind).toBe("blocked");
+          if (restored.kind === "blocked")
+            expect(restored.detail).toContain("not a real directory");
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(outside, "main.gd"), "utf8"),
+            ),
+          ).toBe("repair\n");
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.lstat(NodePath.join(root, "godot/scripts")).then((stat) =>
+                stat.isSymbolicLink(),
+              ),
+            ),
+          ).toBe(true);
+        }),
+      {},
+    );
+  },
 );
