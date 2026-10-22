@@ -874,9 +874,10 @@ export const layer = (options: GameRepairLoopOptions) => {
 
     const playRound = (
       task: Task,
-      record: GameRepairLoopRecord,
+      opened: GameRepairLoopRecord,
     ): Effect.Effect<RoundOutcome, GameOperationError> =>
       Effect.gen(function* () {
+        let record = opened;
         // A user action between rounds ends the loop before it opens a round.
         const stamp = yield* admission.stamp(task.root);
         if (stamp.generation !== record.generation)
@@ -906,6 +907,17 @@ export const layer = (options: GameRepairLoopOptions) => {
           target: "incumbent",
           inputs: record.inputs,
         });
+        // Legacy evidence recorded no viewport. This first incumbent run is its
+        // one recapture: the viewport it actually played at is frozen before
+        // any review, so later checks never fall back to mutable defaults.
+        if (record.inputs.viewport === null && checked.viewport !== null) {
+          const viewport = checked.viewport;
+          record = yield* patch(task.root, (entry) => ({
+            ...entry,
+            inputs: { ...entry.inputs, viewport },
+            updatedAt: nowIso(),
+          }));
+        }
         const incumbentFrames = criticFrames(
           checked.frames.map((frame) => ({ label: frame.label, path: frame.path })),
         );
@@ -1396,7 +1408,13 @@ export const layer = (options: GameRepairLoopOptions) => {
         // The playtest that made it playable must have played those bytes.
         if (provenance.playtestBuildId !== provenance.exportBuildId) return null;
         const inputs = yield* studio.frozenInputs(root);
-        if (inputs.steps.length === 0) return null;
+        // No recorded route means nothing honest to replay. The review is not
+        // run on invented input; it is recorded as skipped so the reason stays
+        // visible instead of the review silently never appearing.
+        const skipped =
+          inputs.steps.length === 0
+            ? "skipped: the builder's playtest recorded no input route, so there is nothing to replay. Playtest the game with input steps to enable review."
+            : null;
         const stamp = yield* admission.stamp(root);
         // A creator action admitted after this run finished supersedes it, even
         // when that action's own run has not been created yet.
@@ -1428,7 +1446,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               originatingRunId: input.runId,
               originatingNodeId: input.nodeId,
               exportBuildId,
-              status: "running",
+              status: skipped === null ? "running" : "stopped",
               repairsUsed: 0,
               budget,
               builderSelection,
@@ -1437,14 +1455,14 @@ export const layer = (options: GameRepairLoopOptions) => {
               generation: latest.generation,
               startedAt: at,
               updatedAt: at,
-              finishedAt: null,
+              finishedAt: skipped === null ? null : at,
               promotedRounds: [],
-              decision: null,
-              reason: null,
+              decision: skipped === null ? null : "stop",
+              reason: skipped,
               usage: EMPTY_GAME_REVIEW_USAGE,
             };
             yield* save(root, record);
-            yield* start(root, record);
+            if (skipped === null) yield* start(root, record);
             return record;
           }),
         );

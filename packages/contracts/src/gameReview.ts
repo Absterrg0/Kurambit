@@ -224,10 +224,11 @@ export const GameReviewFrozenInputs = Schema.Struct({
   /** The viewport the route was recorded at, when the evidence had one. */
   viewport: Schema.NullOr(GameViewport),
   /**
-   * The seed the route was recorded with, when the evidence had one. Godot
-   * playtests are not seeded today, so this is null and honest.
+   * The seed the route was recorded with. Godot playtests record none, so it
+   * is "unknown"; that is honest and never blocks promotion. Loops written
+   * before this field was recorded read null.
    */
-  seed: Schema.NullOr(Schema.Number),
+  seed: Schema.NullOr(Schema.Union([Schema.Number, Schema.Literal("unknown")])),
 });
 export type GameReviewFrozenInputs = typeof GameReviewFrozenInputs.Type;
 

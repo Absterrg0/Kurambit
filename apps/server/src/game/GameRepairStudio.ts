@@ -7,6 +7,7 @@ import {
   type GameOperationError,
   type GameReviewCheck,
   type GameReviewFrozenInputs,
+  type GameViewport,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -42,6 +43,8 @@ export interface GameRepairStudioCheckInput {
 export interface GameRepairStudioCheckResult {
   readonly checks: ReadonlyArray<GameReviewCheck>;
   readonly frames: ReadonlyArray<GameRepairStudioFrame>;
+  /** The viewport this run actually played at, when the playtest reported it. */
+  readonly viewport: GameViewport | null;
 }
 
 /** The export stage as the loop needs it to tell "no output" from "failed". */
@@ -260,7 +263,7 @@ export const layer = (options: { readonly stateDir: string }) =>
             steps: [...(last?.steps ?? [])],
             viewport: last?.viewport ?? null,
             // Godot playtests are not seeded today; say so instead of inventing one.
-            seed: null,
+            seed: "unknown",
           } satisfies GameReviewFrozenInputs;
         });
 
@@ -277,6 +280,7 @@ export const layer = (options: { readonly stateDir: string }) =>
           return {
             checks: checkResult(result),
             frames,
+            viewport: result.baseViewport ?? null,
           } satisfies GameRepairStudioCheckResult;
         });
 

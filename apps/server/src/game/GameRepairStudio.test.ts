@@ -116,7 +116,8 @@ it.live("captures the builder's route once and replays it for every later check"
       const inputs = yield* studio.frozenInputs(harness.root);
       expect(inputs.steps).toEqual([{ key: "ArrowRight", holdMs: 120 }]);
       expect(inputs.viewport).toEqual({ width: 1152, height: 648 });
-      expect(inputs.seed).toBeNull();
+      // The playtest records no seed; it says so rather than inventing one.
+      expect(inputs.seed).toBe("unknown");
 
       yield* studio.check({ threadId, root: harness.root, target: "incumbent", inputs });
       expect(harness.calls.at(-1)).toEqual({

@@ -112,6 +112,9 @@ interface Scripted {
   critic: AnswerFactory | null;
   ballots: ReadonlyArray<AnswerFactory>;
   promoteKind: "promoted" | "blocked";
+  /** The builder's recorded route and viewport the loop freezes. */
+  steps: Array<{ readonly key: string; readonly holdMs: number }>;
+  viewport: { readonly width: number; readonly height: number } | null;
   /** Runs inside the promotion, after validation and before the commit. */
   beforeCommit: Effect.Effect<void> | null;
   /** Per repair attempt; the last entry repeats. */
@@ -168,6 +171,8 @@ const makeScripted = (): Scripted => ({
   critic: null,
   ballots: [],
   promoteKind: "promoted",
+  steps: [{ key: "ArrowRight", holdMs: 120 }],
+  viewport: { width: 1152, height: 648 },
   beforeCommit: null,
   repairs: [],
   completeInStart: new Set(),
@@ -524,6 +529,8 @@ const withLoop = <A, E>(
                   label: `frame ${String(index + 1)}`,
                   path,
                 })),
+                // What the run actually played at; a frozen viewport wins.
+                viewport: input.inputs.viewport ?? { width: 1280, height: 720 },
               });
             };
             const promote: GameRepairStudio.GameRepairStudio["Service"]["promote"] = (
@@ -553,9 +560,9 @@ const withLoop = <A, E>(
                 }),
               frozenInputs: () =>
                 Effect.succeed({
-                  steps: [{ key: "ArrowRight", holdMs: 120 }],
-                  viewport: { width: 1152, height: 648 },
-                  seed: null,
+                  steps: scripted.steps,
+                  viewport: scripted.viewport,
+                  seed: "unknown",
                 }),
               check,
               exportState: () =>
@@ -1331,6 +1338,51 @@ it.live("an export another thread made inside this run's window never starts a l
   ),
 );
 
+it.live("an absent route skips the review with a durable reason and invents no input", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.steps = [];
+        const skipped = loopRecord(yield* ensureLoop(services));
+        expect(skipped.status).toBe("stopped");
+        expect(skipped.reason).toContain("skipped");
+        expect(loopRecord(yield* readLoop(services)).reason).toBe(skipped.reason);
+        expect(fixture.scripted.checks).toHaveLength(0);
+        expect(fixture.scripted.starts).toHaveLength(0);
+        // The same origin is not reconsidered.
+        expect((yield* ensureLoop(services))?.id).toBe(skipped.id);
+      }),
+    ),
+  ),
+);
+
+it.live("legacy evidence without a viewport is recaptured once and frozen before review", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.viewport = null;
+        promotingRound(scripted);
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.inputs.viewport).toEqual({ width: 1280, height: 720 });
+        expect(state.inputs.seed).toBe("unknown");
+        // Only the first incumbent run used the defaults; every later check
+        // replayed the frozen viewport.
+        expect(scripted.checks.length).toBeGreaterThan(2);
+        expect(
+          scripted.checks.slice(1).every((check) => {
+            const inputs = check.inputs as { readonly viewport: unknown };
+            return inputs.viewport !== null;
+          }),
+        ).toBe(true);
+        // The seed is unknown and promotion still happened.
+        expect(state.promotedRounds).toHaveLength(1);
+      }),
+    ),
+  ),
+);
+
 it.live("a repair playtest cannot replace the frozen route", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
@@ -1351,7 +1403,7 @@ it.live("a repair playtest cannot replace the frozen route", () =>
           expect(check.inputs).toEqual({
             steps: [{ key: "ArrowRight", holdMs: 120 }],
             viewport: { width: 1152, height: 648 },
-            seed: null,
+            seed: "unknown",
           });
         }
       }),
