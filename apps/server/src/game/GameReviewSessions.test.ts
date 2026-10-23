@@ -1291,3 +1291,146 @@ it.live("validates ballot coverage and evidence before recording the top-level f
     }),
   ),
 );
+
+it.live(
+  "reads the persisted tool answer from its bound interrupted run despite printed JSON and later runs",
+  () =>
+    withSession(({ frames, scripted, service, restart }) =>
+      Effect.gen(function* () {
+        scripted.childStatus = "running";
+        const started = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: frameInput(frames),
+        });
+        if (started.kind !== "started") return expect(started.kind).toBe("started");
+        const caller = {
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        };
+        const answer = { defects: [], doNotRegress: [] };
+        expect((yield* service.report(caller, "critic", answer)).accepted).toBe(true);
+        const input = { threadId, loopId, roundId, role: "critic" as const };
+        expect(yield* service.answer(input)).toEqual({ kind: "pending" });
+        scripted.childStatus = "interrupted";
+        scripted.answer = criticText;
+        scripted.extraChildRuns.push({
+          id: RunId.make("run:later"),
+          ordinal: 2,
+          status: "running",
+          answer: criticText,
+        });
+        const resumed = yield* restart();
+        expect(yield* resumed.answer(input)).toEqual({
+          kind: "critic",
+          answer,
+          raw: JSON.stringify(answer),
+        });
+      }),
+    ),
+);
+
+it.live("printed JSON is only a fallback when the session never received tools", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      scripted.childStatus = "completed";
+      scripted.answer = criticText;
+      const input = { threadId, loopId, roundId, role: "critic" as const };
+      expect((yield* service.answer(input)).kind).toBe("critic");
+      scripted.childStatus = "running";
+      expect(yield* service.toolRole(caller)).toBe("critic");
+      scripted.childStatus = "completed";
+      expect(yield* service.answer(input)).toMatchObject({
+        kind: "invalid",
+        reason: expect.stringContaining("without calling it successfully"),
+      });
+    }),
+  ),
+);
+
+it.live("rejects a tool answer if its run binding or evidence hash changed", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      expect(
+        (yield* service.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+      ).toBe(true);
+      scripted.childStatus = "interrupted";
+      const input = { threadId, loopId, roundId, role: "critic" as const };
+      const directory = yield* service.evidenceDirectory(input);
+      const file = NodePath.join(directory!, "..", "tool-answer.json");
+      const recorded = yield* Effect.promise(async () =>
+        JSON.parse(await NodeFSP.readFile(file, "utf8")),
+      );
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(file, JSON.stringify({ ...recorded, runId: "another-run" })),
+      );
+      expect(yield* service.answer(input)).toMatchObject({
+        kind: "invalid",
+        reason: expect.stringContaining("another run or evidence hash"),
+      });
+      yield* Effect.promise(() => NodeFSP.writeFile(file, JSON.stringify(recorded)));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(directory!, "frames/frame-01.png"), "changed"),
+      );
+      expect(yield* service.answer(input)).toMatchObject({
+        kind: "invalid",
+        reason: expect.stringContaining("evidence changed"),
+      });
+    }),
+  ),
+);
+
+it.live("an invalid tool attempt cannot be bypassed with a printed answer", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      yield* service.report(
+        { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+        "critic",
+        {},
+      );
+      scripted.childStatus = "completed";
+      scripted.answer = criticText;
+      expect(yield* service.answer({ threadId, loopId, roundId, role: "critic" })).toMatchObject({
+        kind: "invalid",
+        reason: expect.stringContaining("schema"),
+      });
+    }),
+  ),
+);

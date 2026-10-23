@@ -729,6 +729,15 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.map((file) => NodePath.join(NodePath.dirname(file), "tool-answer.json")),
       );
 
+    const readToolRecord = Effect.fnUntraced(function* (file: string) {
+      const value = yield* attempt("read game review tool answer", file, () => readJson(file));
+      if (value === null) return null;
+      return yield* Effect.try({
+        try: () => decodeToolRecord(value),
+        catch: (cause) => failure("read game review tool answer", file, "io", undefined, cause),
+      });
+    });
+
     const roundSelectionFile = Effect.fnUntraced(function* (root: string, roundId: string) {
       return NodePath.join(yield* reviewRoot(root), "rounds", `${encodePart(roundId)}.json`);
     });
@@ -1258,6 +1267,7 @@ export const layer = (options: { readonly stateDir: string }) => {
      */
     const readChildAnswerText = (
       record: ReviewSessionRecordType,
+      tool: typeof ReviewToolRecord.Type | null,
     ): Effect.Effect<ChildAnswerRead, GameOperationError> =>
       Effect.gen(function* () {
         const childThreadId = ThreadIdSchema.make(record.childThreadId);
@@ -1292,7 +1302,23 @@ export const layer = (options: { readonly stateDir: string }) => {
           run.status === "cancelled" ||
           run.status === "interrupted" ||
           run.status === "rolled_back";
+        if (tool !== null && (tool.runId !== run.id || tool.evidenceHash !== record.evidenceHash))
+          return {
+            kind: "invalid",
+            reason: "The tool answer belongs to another run or evidence hash.",
+            raw: null,
+          };
         if (!terminal) return { kind: "pending" };
+        if (tool !== null) {
+          if (tool.raw !== null) return { kind: "text", text: tool.raw };
+          return {
+            kind: "invalid",
+            reason:
+              tool.error ??
+              "The provider had the review tool but ended without calling it successfully.",
+            raw: null,
+          };
+        }
         if (run.status !== "completed")
           return {
             kind: "invalid",
@@ -1354,7 +1380,36 @@ export const layer = (options: { readonly stateDir: string }) => {
     });
 
     const toolRole: GameReviewSessions["Service"]["toolRole"] = (caller) =>
-      matchingCaller(caller).pipe(Effect.map((match) => match?.key.role ?? null));
+      reporting.withPermits(1)(
+        Effect.gen(function* () {
+          const match = yield* matchingCaller(caller);
+          if (match === null) return null;
+          const file = yield* toolFile(match.key.root, match.key);
+          const previous = yield* readToolRecord(file);
+          if (previous !== null) {
+            if (
+              previous.runId !== match.runId ||
+              previous.evidenceHash !== match.record.evidenceHash ||
+              previous.raw !== null ||
+              previous.attempts >= 3
+            )
+              return null;
+          } else {
+            // A successful MCP connection proves this provider can use the tool;
+            // printed JSON is a fallback only for sessions that never got tools.
+            yield* attempt("offer game review tool", file, () =>
+              writeJsonAtomic(file, {
+                runId: match.runId,
+                evidenceHash: match.record.evidenceHash,
+                attempts: 0,
+                raw: null,
+                error: null,
+              }),
+            );
+          }
+          return match.key.role;
+        }),
+      );
 
     const report: GameReviewSessions["Service"]["report"] = (caller, role, value) =>
       reporting.withPermits(1)(
@@ -1372,15 +1427,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             );
           const { key, record, runId } = match;
           const file = yield* toolFile(key.root, key);
-          const stored = yield* attempt("read game review tool answer", file, () => readJson(file));
-          const previous =
-            stored === null
-              ? null
-              : yield* Effect.try({
-                  try: () => decodeToolRecord(stored),
-                  catch: (cause) =>
-                    failure("read game review tool answer", file, "io", undefined, cause),
-                });
+          const previous = yield* readToolRecord(file);
           if (
             previous !== null &&
             (previous.runId !== runId || previous.evidenceHash !== record.evidenceHash)
@@ -1520,7 +1567,8 @@ export const layer = (options: { readonly stateDir: string }) => {
         // a child that changes a frame and finishes in between is caught,
         // because the accepted answer and the hash describe the same final
         // tree.
-        const read = yield* readChildAnswerText(record);
+        const tool = yield* readToolRecord(yield* toolFile(root, { ...input, order }));
+        const read = yield* readChildAnswerText(record, tool);
         if (read.kind === "pending") return { kind: "pending" };
         if (read.kind === "invalid") return read;
         if (record.evidenceDirectory !== null && record.evidenceHash !== null) {
