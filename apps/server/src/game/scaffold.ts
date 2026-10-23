@@ -158,25 +158,25 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     ...(planFirst ? { "DESIGN.md": designSkeleton(manifest.name) } : {}),
     "AGENTS.md": `# Game Studio project
 
-Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the engine project; game.json the studio manifest. TEMPLATE.md describes the **${templateName}** starter: reuse what fits, restyle or replace the rest.${designLine}
+Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the engine project; game.json the manifest. TEMPLATE.md describes the **${templateName}** starter: reuse what fits, restyle or replace the rest.${designLine}
 
 ## Steps
 
-1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (target Web).
-2. **Show the state.** Every brief value (score, lives, turn, laps, timer...) is on-screen text that updates, and in GameState when the template has one. Win and lose end on a result screen with totals.
+1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (Web).
+2. **Show the state.** Every brief value (score, lives, turn, laps, timer...) is visible on screen (text, icon, bar or world state) and updates, and in GameState when the template has one. Win and lose end on a result screen with totals.
 3. **Playtest and look.** Run game_web_playtest through the core loop and open its screenshots. Before game_submit, test anything uncertain with game_try_input from a fresh boot and inspect its frames.
 4. **Check core play**: report broken or unreadable behaviour honestly. Do not start a repair loop; the server runs bounded review after your turn.
 5. **Submit and end your turn.** When the loop is playable, call game_submit with a one-line note and summarize with the game_preview URL. Do not start your own improvement loop.
 
-Optional know-how: game_recipe_search and game_recipe_get return runnable references for unfamiliar mechanics. Copy the mechanism, choose presentation from BRIEF.md, tune, verify.
+Optional: game_recipe_search and game_recipe_get return runnable references for unfamiliar mechanics. Copy the mechanism, choose presentation from BRIEF.md, tune, verify.
 
 Task modes: create, feature, bugfix, polish. A focused request is not a redesign; keep the rest working. Never claim a check you did not run: say when you did not inspect frames or play it.
 
 ## Rules that prevent breakage
 
-- Use the game_* tools for engine work: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_try_input, game_submit, game_preview. Never run godot from the shell.
+- Use game_* tools for engine work: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_try_input, game_submit, game_preview. Never run godot from the shell.
 - Keep scripts/studio_probe.gd and its autoload; extend GameState, do not replace it.
-- Godot imports models as GLB under godot/assets/models/. Make them with game_blender_run; .blend sources stay in art/blender/.
+- Godot imports GLB models under godot/assets/models/. Make them with game_blender_run; .blend sources stay in art/blender/.
 - builds/ and godot/.godot/ are generated; do not edit them.
 - Missing tool: install it in Settings > General > Game tools.
 
