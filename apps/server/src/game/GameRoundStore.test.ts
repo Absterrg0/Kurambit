@@ -156,6 +156,51 @@ it.live(
     ),
 );
 
+it.live("consecutive rejections restore the selected source manifest before the next round", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const initial = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # selected\n");
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot/scripts/roof_rim.gd"), "extends Node2D\n"),
+      );
+      const incumbent = yield* snapshots.store(root);
+      yield* rounds.recordPostRepair(root, initial.id);
+      const build = yield* Effect.promise(() => candidate(root, incumbent.manifest.sourceId));
+      yield* rounds.recordCandidate(root, initial.id, build);
+      expect((yield* rounds.promote(root, initial.id)).kind).toBe("promoted");
+
+      for (const suffix of ["round 2", "round 3"]) {
+        const round = yield* rounds.begin(root, {});
+        expect(round.incumbentSnapshotId).toBe(incumbent.manifest.sourceId);
+        expect(yield* snapshots.capture(root)).toEqual(incumbent.manifest);
+        yield* edit(root, `extends Node2D # rejected ${suffix}\n`);
+        yield* Effect.promise(async () => {
+          await NodeFSP.rm(NodePath.join(root, "godot/scripts/roof_rim.gd"));
+          await NodeFSP.writeFile(NodePath.join(root, "godot/scripts/rejected.gd"), suffix);
+        });
+        const rejectedSource = yield* snapshots.store(root);
+        yield* rounds.recordPostRepair(root, round.id);
+        yield* rounds.recordCandidate(
+          root,
+          round.id,
+          yield* Effect.promise(() => candidate(root, rejectedSource.manifest.sourceId)),
+        );
+        expect((yield* rounds.reject(root, round.id)).kind).toBe("rejected");
+        expect(yield* snapshots.capture(root)).toEqual(incumbent.manifest);
+        expect((yield* rounds.read(root)).selected?.sourceId).toBe(incumbent.manifest.sourceId);
+        // Export provenance still names the repair; it is not the folder manifest.
+        expect((yield* snapshots.read(root, rejectedSource.manifest.sourceId)).manifest).toEqual(
+          rejectedSource.manifest,
+        );
+      }
+      const next = yield* rounds.begin(root, {});
+      expect(next.incumbentSnapshotId).toBe(incumbent.manifest.sourceId);
+      expect(yield* snapshots.capture(root)).toEqual(incumbent.manifest);
+    }),
+  ),
+);
+
 it.live("a user edit after the repair blocks the restore and keeps the snapshot", () =>
   withGame(({ root, rounds }) =>
     Effect.gen(function* () {
