@@ -49,6 +49,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import { gameRecordFile, realGameRoot } from "./gameRecord.ts";
 import { builderFixPrompt, criticPrompt, pairwisePrompt } from "./gameReviewPrompts.ts";
+import { playedViewport } from "./playtestEvidence.ts";
 
 /**
  * Which models a review can run on. The catalog is the provider registry
@@ -214,6 +215,8 @@ const StoredExperiment = Schema.Struct({
   steps: Schema.Array(GamePlaytestStep),
   captureEveryMs: Schema.Number,
   baseViewport: Schema.optionalKey(GameViewport),
+  /** The whole-number multiple the run played at, so the route replays there. */
+  captureScale: Schema.optionalKey(Schema.Number),
   screenshots: Schema.Array(
     Schema.Struct({
       id: Schema.String,
@@ -1299,7 +1302,10 @@ export const layer = (options: { readonly stateDir: string }) => {
         const playBinding = playBuildId === null ? null : yield* rounds.exported(root, playBuildId);
         const record: ReviewSessionRecordType = {
           playBuildId,
-          playViewport: playBinding?.playtest?.viewport ?? null,
+          playViewport: playedViewport(
+            playBinding?.playtest?.viewport,
+            playBinding?.playtest?.captureScale,
+          ),
           schemaVersion: 1,
           loopId: input.loopId,
           roundId: input.roundId,
@@ -1595,7 +1601,9 @@ export const layer = (options: { readonly stateDir: string }) => {
           const bound = yield* rounds.exported(root, buildId);
           if (bound === null)
             return yield* invalid(`Build ${buildId} has no recorded source binding.`);
-          const viewport = match?.record.playViewport ?? bound.playtest?.viewport;
+          const viewport =
+            match?.record.playViewport ??
+            playedViewport(bound.playtest?.viewport, bound.playtest?.captureScale);
           const playInput = {
             steps: input.steps,
             captureEveryMs: input.captureEveryMs ?? 1000,
@@ -1970,7 +1978,10 @@ export const layer = (options: { readonly stateDir: string }) => {
             buildId: stored.buildId,
             steps: stored.steps,
             captureEveryMs: stored.captureEveryMs,
-            viewport: stored.baseViewport ?? record.playViewport ?? null,
+            viewport:
+              playedViewport(stored.baseViewport, stored.captureScale) ??
+              record.playViewport ??
+              null,
             frames,
           });
         }

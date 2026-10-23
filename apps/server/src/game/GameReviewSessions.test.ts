@@ -181,6 +181,8 @@ interface Scripted {
   readonly tries: Array<{ threadId: ThreadId; buildId: string; input: GameWebPlaytestInput }>;
   builderStatus: OrchestrationV2Run["status"];
   viewport: { width: number; height: number };
+  /** The play's capture multiple; undefined means older evidence played at base. */
+  captureScale: number | undefined;
   tryGate: (() => Effect.Effect<void>) | null;
   /** The commands the session service dispatched, when any ran. */
   readonly dispatches: Array<OrchestrationV2ServerCommand>;
@@ -213,6 +215,7 @@ const makeScripted = (): Scripted => ({
   tries: [],
   builderStatus: "completed",
   viewport: { width: 640, height: 360 },
+  captureScale: undefined,
   tryGate: null,
   dispatches: [],
   receipts: new Set(),
@@ -310,7 +313,13 @@ const withSession = <A, E>(
                 Effect.gen(function* () {
                   scripted.tries.push({ threadId, buildId, input });
                   if (scripted.tryGate !== null) yield* scripted.tryGate();
-                  return tryResult;
+                  return scripted.captureScale === undefined
+                    ? tryResult
+                    : {
+                        ...tryResult,
+                        baseViewport: scripted.viewport,
+                        captureScale: scripted.captureScale,
+                      };
                 }),
             }),
           ),
@@ -340,6 +349,9 @@ const withSession = <A, E>(
                     consoleErrors: 0,
                     steps: [],
                     viewport: scripted.viewport,
+                    ...(scripted.captureScale === undefined
+                      ? {}
+                      : { captureScale: scripted.captureScale }),
                   },
                 }),
             }),
@@ -1808,6 +1820,46 @@ it.live("freezes the routes of the critic's cited experiments", () =>
           frameIds: ["f1"],
         }),
       ).toEqual([]);
+    }),
+  ),
+);
+
+it.live("replays a critic's scaled route in the window it was played in", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.viewport = { width: 640, height: 360 };
+      scripted.captureScale = 2;
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      yield* service.tryInput(caller, { steps: [{ click: "left", x: 640, y: 400 }] });
+      expect(scripted.tries.at(-1)?.input).toMatchObject({
+        width: 1280,
+        height: 720,
+      });
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "try1f1" }],
+      });
+      expect(accepted.accepted).toBe(true);
+      const routes = yield* service.experiments({
+        threadId,
+        loopId,
+        roundId,
+        frameIds: ["try1f1"],
+      });
+      expect(routes[0]?.viewport).toEqual({ width: 1280, height: 720 });
     }),
   ),
 );

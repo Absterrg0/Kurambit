@@ -406,6 +406,8 @@ export const GameLastPlaytest = Schema.Struct({
    * cannot be mistaken for a gameplay difference.
    */
   viewport: Schema.optionalKey(GameViewport),
+  /** The whole-number multiple the frames and pointer coordinates used. */
+  captureScale: Schema.optionalKey(Schema.Number),
 });
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**

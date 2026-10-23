@@ -37,6 +37,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
+import { playedViewport } from "./playtestEvidence.ts";
 import { admissionTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("provenance-test");
@@ -1426,7 +1427,9 @@ it.live(
           });
           expect(exports).toBe(2);
           expect(played.at(-1)).toContain(first.directory);
-          expect(checked.viewport).toEqual(bound.playtest?.viewport);
+          expect(checked.viewport).toEqual(
+            playedViewport(bound.playtest?.viewport, bound.playtest?.captureScale),
+          );
           expect(
             yield* Effect.promise(() => NodeFSP.readFile(checked.frames[0]!.path, "utf8")),
           ).toContain(first.directory);
@@ -1456,6 +1459,65 @@ it.live(
         }),
     );
   },
+);
+
+it.live("a scale-2 recorded route replays in the window it was played in", () =>
+  withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      playtest: (input) =>
+        Effect.succeed({
+          ...playtestResult,
+          executedInputSteps: input.steps.filter(
+            (step) => !("waitMs" in step) && !("screenshot" in step),
+          ).length,
+        }),
+    },
+    ({ root, game, studio, rounds }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(
+            NodePath.join(root, "game.json"),
+            `${JSON.stringify(manifest())}\n`,
+          );
+          await NodeFSP.writeFile(
+            NodePath.join(root, "godot/project.godot"),
+            "[display]\nwindow/size/viewport_width=640\nwindow/size/viewport_height=360\n",
+          );
+        });
+        yield* game.export(threadId, "Web");
+        const build = (yield* rounds.read(root)).selected!;
+        // The builder played at 2× its 640×360 base and clicked below the base
+        // height; that click is valid only in the 1280×720 window.
+        const played = yield* game.webPlaytest(threadId, {
+          steps: [{ click: "left", x: 640, y: 400 }],
+        });
+        expect(played.success, played.message).toBe(true);
+        const frozen = yield* studio.frozenInputs(root, build.buildId);
+        expect(frozen.viewport).toEqual({ width: 1280, height: 720 });
+        const checked = yield* studio.check({
+          threadId,
+          root,
+          target: "incumbent",
+          buildId: build.buildId,
+          inputs: frozen,
+        });
+        expect(checked.checks.find((check) => check.id === "input")?.status).toBe("passed");
+        expect(checked.viewport).toEqual({ width: 1280, height: 720 });
+      }),
+  ),
 );
 
 const folderBytes = async (root: string): Promise<Record<string, string>> => {

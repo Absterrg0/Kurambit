@@ -1128,6 +1128,7 @@ const make = Effect.gen(function* () {
                 .length,
               steps: input.steps ?? [],
               viewport: baseViewport,
+              captureScale: capture.scale,
             });
           const framesNote =
             droppedFrames === 0

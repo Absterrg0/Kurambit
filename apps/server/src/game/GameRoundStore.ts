@@ -55,6 +55,8 @@ const BuildPlaytest = Schema.Struct({
   consoleErrors: Schema.Int,
   steps: Schema.Array(GamePlaytestStep),
   viewport: Schema.NullOr(GameViewport),
+  /** The multiple of the base viewport this play actually used. */
+  captureScale: Schema.optionalKey(Schema.Number),
 });
 const StoredExport = Schema.Struct({
   artifact: GameReviewArtifact,

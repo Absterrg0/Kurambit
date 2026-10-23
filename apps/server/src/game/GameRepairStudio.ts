@@ -23,7 +23,7 @@ import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 import { selectInputPairFrames } from "./playtestInputPairs.ts";
-import { readPlaytestEvidence, readLastPlaytest } from "./playtestEvidence.ts";
+import { playedViewport, readPlaytestEvidence, readLastPlaytest } from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuild } from "./webBuild.ts";
 
 /** One captured frame the review may use, already written outside the game. */
@@ -383,7 +383,12 @@ export const layer = (options: { readonly stateDir: string }) =>
             const recorded = yield* rounds.exported(root, buildId);
             return {
               steps: [...(recorded?.playtest?.steps ?? [])],
-              viewport: recorded?.playtest?.viewport ?? null,
+              // Pointer coordinates are pixels in the window the route was
+              // played in, not in the game's base viewport.
+              viewport: playedViewport(
+                recorded?.playtest?.viewport,
+                recorded?.playtest?.captureScale,
+              ),
               seed: "unknown",
             } satisfies GameReviewFrozenInputs;
           }
@@ -394,7 +399,7 @@ export const layer = (options: { readonly stateDir: string }) =>
           );
           return {
             steps: [...(last?.steps ?? [])],
-            viewport: last?.viewport ?? null,
+            viewport: playedViewport(last?.viewport, last?.captureScale),
             // Godot playtests are not seeded today; say so instead of inventing one.
             seed: "unknown",
           } satisfies GameReviewFrozenInputs;
@@ -403,11 +408,13 @@ export const layer = (options: { readonly stateDir: string }) =>
       const check: GameRepairStudio["Service"]["check"] = (input) =>
         Effect.gen(function* () {
           const { inputs } = input;
+          const size =
+            inputs.viewport === null
+              ? {}
+              : { width: inputs.viewport.width, height: inputs.viewport.height };
           const result = yield* game.webPlaytestBuild(input.threadId, input.buildId, {
             steps: [...inputs.steps],
-            ...(inputs.viewport === null
-              ? {}
-              : { width: inputs.viewport.width, height: inputs.viewport.height }),
+            ...size,
           });
           // Read persisted pairs so a response byte cap cannot split the critic's evidence.
           const persisted =
@@ -436,7 +443,7 @@ export const layer = (options: { readonly stateDir: string }) =>
           return {
             checks: checkResult(result, inputs),
             frames,
-            viewport: result.baseViewport ?? null,
+            viewport: playedViewport(result.baseViewport, result.captureScale),
           } satisfies GameRepairStudioCheckResult;
         });
 

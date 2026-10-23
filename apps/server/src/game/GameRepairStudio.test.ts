@@ -162,7 +162,14 @@ const withStudio = <A, E>(
               playtest:
                 facts === null
                   ? null
-                  : { ...facts, steps: last?.steps ?? [], viewport: last?.viewport ?? null },
+                  : {
+                      ...facts,
+                      steps: last?.steps ?? [],
+                      viewport: last?.viewport ?? null,
+                      ...(last?.captureScale === undefined
+                        ? {}
+                        : { captureScale: last.captureScale }),
+                    },
             };
           }),
       });
@@ -228,6 +235,45 @@ it.live("captures the builder's route once and replays it for every later check"
         inputs,
       });
       expect(harness.calls.at(-1)?.steps).toEqual([{ key: "ArrowRight", holdMs: 120 }]);
+    }),
+  ),
+);
+
+it.live("freezes and replays the window a scaled route was played in", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const played = {
+        ...baseResult(),
+        baseViewport: { width: 640, height: 360 },
+        captureScale: 2,
+      };
+      harness.results = played;
+      yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          // A click below the base height, valid in the 1280×720 window it
+          // was actually played in.
+          steps: [{ click: "left", x: 640, y: 400 }],
+          result: played,
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      const inputs = yield* studio.frozenInputs(harness.root);
+      expect(inputs.viewport).toEqual({ width: 1280, height: 720 });
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(harness.calls.at(-1)).toEqual({
+        steps: [{ click: "left", x: 640, y: 400 }],
+        width: 1280,
+        height: 720,
+      });
+      expect(checked.viewport).toEqual({ width: 1280, height: 720 });
     }),
   ),
 );

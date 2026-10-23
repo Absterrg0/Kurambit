@@ -12,6 +12,7 @@ import {
   type GameAcceptanceCriterion,
   type GameLastPlaytest,
   type GameWebPlaytestResult,
+  type GameViewport,
 } from "@t3tools/contracts";
 import { selectPlaytestCoverFrame } from "./playtestState.ts";
 
@@ -60,6 +61,21 @@ type StoredPlaytest = typeof StoredPlaytest.Type;
 const decodeStoredPlaytest = Schema.decodeUnknownSync(StoredPlaytest);
 const isPlaytestStep = Schema.is(GamePlaytestStep);
 const decodePlaytestSteps = Schema.decodeUnknownOption(Schema.Array(GamePlaytestStep));
+
+/**
+ * The window a run actually played in: the project's base viewport multiplied
+ * by the whole-number capture scale. A route's pointer coordinates are pixels
+ * in that window, so replaying it at the base size would move every click.
+ * Older evidence recorded no scale and played at its base viewport.
+ */
+export const playedViewport = (
+  base: GameViewport | null | undefined,
+  captureScale: number | undefined,
+): GameViewport | null => {
+  if (base === null || base === undefined) return null;
+  if (captureScale === undefined) return { width: base.width, height: base.height };
+  return { width: base.width * captureScale, height: base.height * captureScale };
+};
 
 const slug = (label: string) => {
   const cleaned = label.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
@@ -314,6 +330,7 @@ export const readLastPlaytest = async (
     ...(stored.baseWidth === undefined || stored.baseHeight === undefined
       ? {}
       : { viewport: { width: stored.baseWidth, height: stored.baseHeight } }),
+    ...(stored.captureScale === undefined ? {} : { captureScale: stored.captureScale }),
     stale,
   };
 };
