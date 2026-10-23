@@ -463,9 +463,11 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       // The prompt carries the manifest, never a build id or a source path.
       expect(command.task).toContain("frames/frame-01.png (f1: before: no input)");
       expect(command.task).toContain("f2: after: held ArrowRight 1000ms");
-      expect(command.task).toContain("calling game_critic_report");
-      expect(command.task).toContain("correct that exact error and call again in this session");
-      expect(command.task).toContain("Only if your provider cannot call tools");
+      expect(command.task).toContain("Call game_critic_report");
+      expect(command.task).toContain('"fundamentals"');
+      expect(command.task).toContain("Judge input response from the before/after pairs.");
+      expect(command.task).toContain("Correct tool validation errors in this session");
+      expect(command.task).toContain("Only when tools are unavailable");
       expect(command.task).not.toContain("builds/");
 
       // Evidence only: brief, anonymous frames and normalized checks.
@@ -1352,7 +1354,9 @@ it.live("validates ballot coverage and evidence before recording the top-level f
       };
       const command = scripted.dispatches[0]!;
       if (command.type !== "game-round.task.request") return;
-      expect(command.task).toContain("calling game_ballot");
+      expect(command.task).toContain("Call game_ballot");
+      expect(command.task).toContain('"overall":"tie"');
+      expect(command.task).toContain('"overallReason"');
       expect(command.task).toContain(
         '"works":"tie","look":"tie","feel":"tie","play":"tie","preservation"',
       );

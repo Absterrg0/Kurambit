@@ -198,14 +198,20 @@ review starts, so model latency cannot delay Play. Reviews use the originating g
 provider/model by default; unavailable credentials mean unavailable review, never a substitute
 model. Critic and comparison children are fresh evidence-only sessions. Repairs write in place,
 one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
-controls reduce position bias; mechanical regressions and unknown preservation veto selection.
+controls reduce position bias. Both ballots must prefer the challenger overall, with no factual
+regression or preservation item judged lost on the challenger in both ballots. Facets inform the
+overall judgment; one ballot's preservation loss is a note, and unknown is neutral.
+The critic judges boot, input response, visible core action and state readability through typed
+fundamentals. A cited negative judgment creates a blocker. Per-input before/after pairs carry
+exact steps, sampled pixel deltas and bridge changes; up to four complete pairs replace loose
+frames. Movement, HUD text matching and scenario completion never veto this review loop.
 A pairwise improvement does not certify every presentation claim.
 
 A review has one origin: the builder's `game_submit`. The builder names the export it stands
 behind (default: the latest one), and the server checks only facts before recording the
 declaration: the build directory exists, its bytes hash to the id they are addressed by, the export
 record names that build, and the playtest recorded against those exact bytes booted, logged no
-console errors and responded to input. A refusal lists the failed checks. When the turn ends, the
+console errors and executed real input steps. A refusal lists the failed checks. When the turn ends, the
 loop starts on the submitted build. A turn with no submission falls back to its own latest export
 only when the same facts pass. The derived playable completion no longer gates review; it stays a
 status display. A repair child submits the same way, and its note (which defects it believes it
