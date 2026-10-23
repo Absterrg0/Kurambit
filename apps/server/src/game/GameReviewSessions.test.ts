@@ -423,6 +423,9 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       // The prompt carries the manifest, never a build id or a source path.
       expect(command.task).toContain("frames/frame-01.png (f1: A: boot)");
       expect(command.task).toContain("f2: A: core action");
+      expect(command.task).toContain("calling game_critic_report");
+      expect(command.task).toContain("correct that exact error and call again in this session");
+      expect(command.task).toContain("Only if your provider cannot call tools");
       expect(command.task).not.toContain("builds/");
 
       // Evidence only: brief, anonymous frames and normalized checks.
@@ -1268,6 +1271,14 @@ it.live("validates ballot coverage and evidence before recording the top-level f
         threadId: started.childThreadId,
         providerInstanceId: builderSelection.instanceId,
       };
+      const command = scripted.dispatches[0]!;
+      if (command.type !== "game-round.task.request") return;
+      expect(command.task).toContain("calling game_ballot");
+      expect(command.task).toContain(
+        '"works":"tie","look":"tie","feel":"tie","play":"tie","preservation"',
+      );
+      expect(command.task).toContain('four choices wrapped in "main"');
+      expect(command.task).toContain("unknown is neutral");
       const value = {
         works: "tie",
         look: "B",
