@@ -469,6 +469,15 @@ export const GameReviewHistory = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 export type GameReviewHistory = typeof GameReviewHistory.Type;
+export const GameSubmissionFacts = Schema.Struct({
+  buildId: Schema.NullOr(Schema.String),
+  directory: Schema.NullOr(Schema.String),
+  checks: Schema.Array(GameReviewCheck),
+  passed: Schema.Boolean,
+  reason: Schema.NullOr(Schema.String),
+});
+export type GameSubmissionFacts = typeof GameSubmissionFacts.Type;
+
 export const GameReviewStatus = Schema.Struct({
   loop: Schema.NullOr(GameRepairLoop),
   phase: Schema.String,
@@ -477,6 +486,8 @@ export const GameReviewStatus = Schema.Struct({
   timeLeftMs: Schema.Number,
   budget: GameReviewBudget,
   restoreOffered: Schema.Boolean,
+  /** Only computed when requested: hashes and checks Play's selected artifact. */
+  selectedBuildFacts: Schema.optionalKey(Schema.NullOr(GameSubmissionFacts)),
 });
 export type GameReviewStatus = typeof GameReviewStatus.Type;
 export const GameReviewRestoreResult = Schema.Struct({

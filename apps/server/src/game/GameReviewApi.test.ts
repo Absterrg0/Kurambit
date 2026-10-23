@@ -14,6 +14,7 @@ import * as GameReviewApi from "./GameReviewApi.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
+import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 
 const threadId = ThreadId.make("review-api");
@@ -75,6 +76,7 @@ function fixture(
   options: {
     loop?: LoopRecord | null;
     held?: boolean;
+    selected?: boolean;
     refuseStop?: boolean;
     /** The newest loop stopped because a user edit blocked its rejection. */
     blockedByEdit?: boolean;
@@ -82,6 +84,7 @@ function fixture(
 ) {
   let stopped = 0;
   let restored = 0;
+  const factsCalls: string[] = [];
   const stoppedByEdit = options.blockedByEdit === true;
   const rounds = stoppedByEdit
     ? [stoppedRound("three"), stoppedRound("two"), stoppedRound("one")]
@@ -94,7 +97,22 @@ function fixture(
           resolve: () => Effect.succeed("/games/api"),
         }),
         Layer.mock(GameRoundStore.GameRoundStore)({
-          read: () => Effect.succeed({ selected: null, rounds }),
+          read: () =>
+            Effect.succeed({
+              selected: options.selected
+                ? {
+                    buildId: "a".repeat(64),
+                    directory: "builds/candidates/selected",
+                    sourceId: "old-sources",
+                    engine: "godot" as const,
+                    target: "Web" as const,
+                    entry: "index.html",
+                    roundId: null,
+                    promotedAt: "2026-10-23T00:00:00Z",
+                  }
+                : null,
+              rounds,
+            }),
         }),
         Layer.mock(GameReviewSessions.GameReviewSessions)({
           describe: (input) =>
@@ -112,6 +130,19 @@ function fixture(
                   }
                 : null,
             ),
+        }),
+        Layer.mock(GameRepairStudio.GameRepairStudio)({
+          submissionFacts: (_root, buildId) =>
+            Effect.sync(() => {
+              factsCalls.push(buildId!);
+              return {
+                buildId: buildId!,
+                directory: "builds/candidates/selected",
+                checks: [{ id: "boot", status: "passed" as const }],
+                passed: true,
+                reason: null,
+              };
+            }),
         }),
         Layer.mock(GameRepairLoop.GameRepairLoop)({
           read: () => Effect.succeed(record),
@@ -145,7 +176,7 @@ function fixture(
       ),
     ),
   );
-  return { layer, calls: () => ({ stopped, restored }) };
+  return { layer, factsCalls, calls: () => ({ stopped, restored }) };
 }
 
 describe("game review API", () => {
@@ -221,4 +252,16 @@ describe("game review API", () => {
       );
     }).pipe(Effect.provide(fixture({ refuseStop: true }).layer)),
   );
+});
+
+it.effect("verifies only the selected build on explicit completion reads", () => {
+  const test = fixture({ selected: true });
+  return Effect.gen(function* () {
+    const api = yield* GameReviewApi.GameReviewApi;
+    expect((yield* api.status(threadId)).selectedBuildFacts).toBeUndefined();
+    expect(test.factsCalls).toEqual([]);
+    const read = yield* api.status(threadId, true);
+    expect(read.selectedBuildFacts).toMatchObject({ buildId: "a".repeat(64), passed: true });
+    expect(test.factsCalls).toEqual(["a".repeat(64)]);
+  }).pipe(Effect.provide(test.layer));
 });

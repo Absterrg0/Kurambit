@@ -1320,7 +1320,10 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 const gameError = Schema.Union([GameOperationError, EnvironmentAuthorizationError]);
 const WsGameReviewStatusRpc = Rpc.make(WS_METHODS.gameReviewStatus, {
-  payload: GameThreadInput,
+  payload: Schema.Struct({
+    ...GameThreadInput.fields,
+    checkSelectedBuild: Schema.optionalKey(Schema.Boolean),
+  }),
   success: GameReviewStatus,
   error: gameError,
 });

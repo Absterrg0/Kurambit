@@ -1726,7 +1726,8 @@ const layerWsRpc = (
       const handlers = ServerWsRpcGroup.of({
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
           game.status(threadId, { checkSources }),
-        [WS_METHODS.gameReviewStatus]: ({ threadId }) => gameReviews.status(threadId),
+        [WS_METHODS.gameReviewStatus]: ({ threadId, checkSelectedBuild }) =>
+          gameReviews.status(threadId, checkSelectedBuild),
         [WS_METHODS.gameReviewHistory]: (input) => gameReviews.history(input),
         [WS_METHODS.gameReviewStop]: ({ threadId }) => gameReviews.stop(threadId),
         [WS_METHODS.gameReviewRestore]: ({ threadId }) => gameReviews.restore(threadId),

@@ -16,12 +16,16 @@ import * as Layer from "effect/Layer";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
+import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 
 export class GameReviewApi extends Context.Service<
   GameReviewApi,
   {
-    readonly status: (threadId: ThreadId) => Effect.Effect<GameReviewStatus, GameOperationError>;
+    readonly status: (
+      threadId: ThreadId,
+      checkSelectedBuild?: boolean,
+    ) => Effect.Effect<GameReviewStatus, GameOperationError>;
     /**
      * The builder's declaration of the build it stands behind. The server
      * verifies facts and records it; the review starts from it when the turn ends.
@@ -45,7 +49,8 @@ const make = Effect.gen(function* () {
   const loops = yield* GameRepairLoop.GameRepairLoop;
   const rounds = yield* GameRoundStore.GameRoundStore;
   const sessions = yield* GameReviewSessions.GameReviewSessions;
-  const status: GameReviewApi["Service"]["status"] = (threadId) =>
+  const studio = yield* GameRepairStudio.GameRepairStudio;
+  const status: GameReviewApi["Service"]["status"] = (threadId, checkSelectedBuild = false) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const loop = yield* loops.read(threadId);
@@ -55,6 +60,14 @@ const make = Effect.gen(function* () {
       const end = loop?.finishedAt ?? DateTime.formatIso(yield* DateTime.now);
       const elapsed = loop === null ? 0 : Math.max(0, Date.parse(end) - Date.parse(loop.startedAt));
       return {
+        ...(checkSelectedBuild
+          ? {
+              selectedBuildFacts:
+                state.selected === null
+                  ? null
+                  : yield* studio.submissionFacts(root, state.selected.buildId),
+            }
+          : {}),
         loop,
         held: activity.held,
         phase:

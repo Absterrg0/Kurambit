@@ -48,6 +48,7 @@ import {
   type GameE2eRunSummary,
   type GameE2eTurnRead,
 } from "./game-benchmark/artifacts.ts";
+import { assertSelectedBuildComplete } from "./game-benchmark/completion.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 import { externalServerOrigin, startBenchmarkServer } from "./lib/benchmark-server.ts";
 import { summarizeRepairLoop, watchRepairLoop } from "./game-benchmark/repairLoop.ts";
@@ -355,23 +356,6 @@ const logTurnTools = (label: string, calls: ReadonlyArray<TurnToolCall>) => {
 };
 const stageSummary = (status: GameStatus) =>
   status.qualification.stages.map((stage) => `${stage.stage}=${stage.status}`).join(", ");
-/**
- * PASS follows the server's own completion read, never an agent's summary.
- * Test and state are optional certification: a run that ships a
- * current playable export/playtest passes even when they are missing.
- */
-const assertComplete = (label: string, status: GameStatus) => {
-  const qualification = status.qualification;
-  assert(
-    qualification.completion === "complete",
-    `${label}: the game is ${qualification.completion} (${stageSummary(status)})`,
-  );
-  timeline(
-    `${label}: playable; certification ${
-      qualification.state === "qualified" ? "qualified" : stageSummary(status)
-    }`,
-  );
-};
 
 const waitForTurn = (
   client: Client,
@@ -792,9 +776,10 @@ const main = Effect.gen(function* () {
       watched: buildLoop,
       selectedBuildId: status.selectedBuildId,
     });
-  review = yield* client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }).pipe(
-    Effect.orElseSucceed(() => null),
-  );
+  review = yield* client[WS_METHODS.gameReviewStatus]({
+    threadId: created.threadId,
+    checkSelectedBuild: true,
+  });
   printStatus(status);
   if (status.assets.length === 0) timeline("Build turn produced no Blender assets");
   else
@@ -806,16 +791,15 @@ const main = Effect.gen(function* () {
     status.builds.some((build) => build.target === "Web"),
     "No web build exists after the build turn",
   );
-  assertComplete("after the build turn", status);
+  assertSelectedBuildComplete("after the build turn", status, review.selectedBuildFacts);
   summaryPhase = "qualified";
   timeline(`Qualification: ${stageSummary(status)}`);
-  assert(status.lastPlaytest !== null, "Game status reports no playtest evidence");
-  assert(status.lastPlaytest.responded, "Playtest did not prove that the game responded to input");
-  timeline(
-    `Playtest evidence: ${status.lastPlaytest.directory} (${status.lastPlaytest.frames.length} frames, ${status.lastPlaytest.changedPercent.toFixed(1)}% changed${
-      status.lastPlaytest.stale ? ", stale" : ""
-    })`,
-  );
+  if (status.lastPlaytest !== null)
+    timeline(
+      `Latest folder playtest evidence: ${status.lastPlaytest.directory} (${status.lastPlaytest.frames.length} frames, ${status.lastPlaytest.changedPercent.toFixed(1)}% changed${
+        status.lastPlaytest.stale ? ", stale" : ""
+      })`,
+    );
   const preview = yield* action("preview");
   summaryPhase = "preview";
   yield* promise(async () => {
@@ -826,7 +810,9 @@ const main = Effect.gen(function* () {
       "Preview index.html has wrong content type or status",
     );
     assert((await index.text()).length > 0, "Preview HTML is empty");
-    const files = await NodeFSP.readdir(NodePath.join(created.root, "builds/web"));
+    const directory = review?.selectedBuildFacts?.directory;
+    assert(directory != null, "The selected build has no artifact directory");
+    const files = await NodeFSP.readdir(NodePath.join(created.root, directory));
     const wasmFile = files.find((file) => file.endsWith(".wasm"));
     assert(wasmFile, "Web export contains no wasm");
     const wasm = await fetch(new URL(wasmFile, preview.url), {
@@ -1056,7 +1042,11 @@ const main = Effect.gen(function* () {
       reviseStatus.design.state === "approved",
       "Revision turn changed the approved design without re-approval",
     );
-    assertComplete("after the revision turn", reviseStatus);
+    review = yield* client[WS_METHODS.gameReviewStatus]({
+      threadId: created.threadId,
+      checkSelectedBuild: true,
+    });
+    assertSelectedBuildComplete("after the revision turn", reviseStatus, review.selectedBuildFacts);
     timeline(
       `After revise: webBuildStale=${String(reviseStatus.webBuildStale)}, newest playtest=${
         reviseStatus.lastPlaytest?.directory ?? "none"
@@ -1078,9 +1068,6 @@ const main = Effect.gen(function* () {
     );
     timeline("Cancellation: no tracked processes remain");
   }
-  review = yield* client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }).pipe(
-    Effect.orElseSucceed(() => null),
-  );
   summaryPhase = "done";
   timeline("PASS");
 });

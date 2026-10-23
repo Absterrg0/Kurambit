@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import {
   type GameOperationError,
   type GameReviewCheck,
+  type GameSubmissionFacts,
   type GameReviewFrozenInputs,
   type GameViewport,
   type ThreadId,
@@ -63,16 +64,7 @@ export interface GameRepairStudioExportState {
  * the playtest record that played those exact bytes. A caller's note is never
  * evidence; it is only recorded beside these facts.
  */
-export interface GameRepairStudioSubmissionFacts {
-  /** The build that was checked, or the latest export when none was named. */
-  readonly buildId: string | null;
-  /** Game-relative directory of that build, when it resolved. */
-  readonly directory: string | null;
-  readonly checks: ReadonlyArray<GameReviewCheck>;
-  readonly passed: boolean;
-  /** The failed facts in one line, or null when every fact passed. */
-  readonly reason: string | null;
-}
+export type GameRepairStudioSubmissionFacts = GameSubmissionFacts;
 
 /**
  * The exact bytes an export produced and where they came from. Review starts
