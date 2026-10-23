@@ -177,7 +177,8 @@ describe("game review API", () => {
         held: true,
         phase: "held: waiting for a review session to stop",
         repairsLeft: 2,
-        timeLeftMs: 19 * 60_000,
+        timeLeftMs: DEFAULT_GAME_REVIEW_BUDGET.elapsedMs - 60_000,
+        budget: { repairs: 3, elapsedMs: 45 * 60_000 },
         restoreOffered: true,
         loop: { reviewSelection: { model: "reviewer" }, usage: { status: "unknown" } },
       });

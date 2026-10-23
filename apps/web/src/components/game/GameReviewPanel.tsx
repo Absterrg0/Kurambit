@@ -65,6 +65,9 @@ export function GameReviewPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       {review?.loop ? (
         <>
           <p className="text-xs text-muted-foreground">
+            Budget: {review.budget.repairs} repairs / {review.budget.elapsedMs / 60_000} minutes.
+          </p>
+          <p className="text-xs text-muted-foreground">
             {review.repairsLeft} repair rounds left · {Math.ceil(review.timeLeftMs / 60_000)}{" "}
             minutes left as of this update
           </p>

@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  DEFAULT_GAME_REVIEW_BUDGET,
   type GameReviewBallotAnswer,
   type GameReviewBallotPlan,
   type GameReviewBudget,
@@ -1230,7 +1231,7 @@ it.live("a deadline that passes during the selection commit blocks the promotion
           // The whole-loop timeout cannot interrupt the uninterruptible commit;
           // the budget runs out while it hashes the candidate.
           scripted.beforeCommit = Effect.sync(() => {
-            skewMs = 21 * 60_000;
+            skewMs = DEFAULT_GAME_REVIEW_BUDGET.elapsedMs + 60_000;
           });
           yield* runToCompletion(services, fixture);
           const state = loopRecord(yield* readLoop(services));

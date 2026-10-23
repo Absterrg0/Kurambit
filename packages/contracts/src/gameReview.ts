@@ -114,7 +114,7 @@ export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
 export const GAME_REVIEW_ANSWER_MAX_BYTES = 16 * 1024;
 
 /**
- * The loop's spend. The default is three repairs or twenty elapsed minutes,
+ * The loop's spend. The default is three repairs or forty-five elapsed minutes,
  * whichever runs out first, and includes the checks and reviews those repairs
  * caused. Zero repairs is a valid budget: it reviews once and never repairs.
  */
@@ -126,7 +126,7 @@ export type GameReviewBudget = typeof GameReviewBudget.Type;
 
 export const DEFAULT_GAME_REVIEW_BUDGET: GameReviewBudget = {
   repairs: 3,
-  elapsedMs: 20 * 60_000,
+  elapsedMs: 45 * 60_000,
 };
 
 /** Builds are engine- and target-tagged so an artifact is never played as another kind. */

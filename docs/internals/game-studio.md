@@ -197,7 +197,7 @@ Review is separate from mechanical qualification. The first playable build is se
 review starts, so model latency cannot delay Play. Reviews use the originating game's frozen
 provider/model by default; unavailable credentials mean unavailable review, never a substitute
 model. Critic and comparison children are fresh evidence-only sessions. Repairs write in place,
-one at a time, within three repairs or twenty minutes. Opposite-order ballots and identical-build
+one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
 controls reduce position bias; mechanical regressions and unknown preservation veto selection.
 A pairwise improvement does not certify every presentation claim.
 

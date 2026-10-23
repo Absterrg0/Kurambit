@@ -1318,7 +1318,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           // promoter and it is gone.
           yield* interrupted(
             task.root,
-            "deadline: the review did not finish within its twenty-minute budget.",
+            `deadline: the review did not finish within its ${initial.budget.elapsedMs / 60_000}-minute budget.`,
           );
         }
       }).pipe(Effect.catchCause((cause) => logFailure("the repair loop failed", cause)));

@@ -51,10 +51,10 @@ describe("review vocabulary", () => {
     ).toBe("check:main");
   });
 
-  it("defaults to three repairs or twenty minutes and rejects negative work", () => {
+  it("defaults to three repairs or forty-five minutes and rejects negative work", () => {
     expect(decodeBudget(DEFAULT_GAME_REVIEW_BUDGET)).toEqual({
       repairs: 3,
-      elapsedMs: 1_200_000,
+      elapsedMs: 2_700_000,
     });
     expect(() => decodeBudget({ repairs: -1, elapsedMs: 1 })).toThrow();
     expect(() => decodeBudget({ repairs: 4, elapsedMs: 1 })).toThrow();
