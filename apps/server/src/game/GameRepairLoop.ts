@@ -50,6 +50,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
+import { playtestIntervalObservation } from "./playtestEvidence.ts";
 import { gameRecordLocation, readRecordText } from "./gameRecord.ts";
 
 /**
@@ -146,11 +147,30 @@ const experimentFrames = (
   frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
   route: GameReviewExperimentRoute,
   citation: GameReviewExperimentRoute["frames"][number],
+  kind: "pair" | "observation",
 ): GameRepairFrame[] => {
   const atStep = frames.filter((frame) => frame.inputPair?.stepIndex === citation.stepIndex);
+  const observationMs =
+    citation.observationMs ?? playtestIntervalObservation(citation.label)?.elapsedMs;
+  // Capture work shifts timestamps between runs; match the nearest moment in the same step.
+  const observations =
+    kind !== "observation" || observationMs === undefined
+      ? []
+      : frames
+          .flatMap((frame) => {
+            const at = playtestIntervalObservation(frame.label);
+            return at !== null && at.stepIndex === citation.stepIndex ? [{ frame, at }] : [];
+          })
+          .sort(
+            (left, right) =>
+              Math.abs(left.at.elapsedMs - observationMs) -
+              Math.abs(right.at.elapsedMs - observationMs),
+          );
   const selected =
-    citation.stepIndex === null
-      ? frames.filter((frame) => frame.label === citation.label).slice(0, 1)
+    kind === "observation"
+      ? observationMs === undefined
+        ? frames.filter((frame) => frame.label === citation.label).slice(0, 1)
+        : observations.slice(0, 1).map((entry) => entry.frame)
       : atStep.some((frame) => frame.inputPair?.phase === "before") &&
           atStep.some((frame) => frame.inputPair?.phase === "after")
         ? atStep
@@ -971,7 +991,8 @@ export const layer = (options: GameRepairLoopOptions) => {
       Effect.gen(function* () {
         if (input.experiments.length === 0 || input.incumbentBuildId === null) return [];
         const pairs: BallotExperimentPair[] = [];
-        const seen = new Set<string>();
+        const seenPairs = new Set<string>();
+        const seenObservations = new Set<string>();
         for (const route of input.experiments) {
           const run = (buildId: string) =>
             studio.experiment({
@@ -986,22 +1007,37 @@ export const layer = (options: GameRepairLoopOptions) => {
           const candidate = yield* run(input.candidateBuildId);
           for (const citation of route.frames) {
             const stepIndex = citation.stepIndex;
-            const key =
+            const observationMs =
+              citation.observationMs ?? playtestIntervalObservation(citation.label)?.elapsedMs;
+            const kinds: ReadonlyArray<"pair" | "observation"> =
               stepIndex === null
-                ? `${route.id}:${citation.frameId}`
-                : inputRouteKey(route.steps, stepIndex, route.viewport);
-            if (seen.has(key)) continue;
-            const before = experimentFrames(incumbent.frames, route, citation);
-            const after = experimentFrames(candidate.frames, route, citation);
-            if (before.length === 0 || after.length === 0)
-              return yield* new GameOperationError({
-                operation: "replay critic experiment",
-                path: input.root,
-                reason: "invalid-input",
-                detail: `Experiment ${route.id} has no matched evidence for step ${stepIndex === null ? "boot" : stepIndex + 1}.`,
-              });
-            seen.add(key);
-            pairs.push({ key, incumbent: before, candidate: after });
+                ? ["observation"]
+                : observationMs === undefined
+                  ? ["pair"]
+                  : ["pair", "observation"];
+            for (const kind of kinds) {
+              const routeKey =
+                stepIndex === null
+                  ? `${route.id}:${citation.frameId}`
+                  : inputRouteKey(route.steps, stepIndex, route.viewport);
+              const key =
+                kind === "pair"
+                  ? routeKey
+                  : `${routeKey}:observation:${observationMs ?? citation.label}`;
+              const seen = kind === "pair" ? seenPairs : seenObservations;
+              if (seen.has(key)) continue;
+              const before = experimentFrames(incumbent.frames, route, citation, kind);
+              const after = experimentFrames(candidate.frames, route, citation, kind);
+              if (before.length === 0 || after.length === 0)
+                return yield* new GameOperationError({
+                  operation: "replay critic experiment",
+                  path: input.root,
+                  reason: "invalid-input",
+                  detail: `Experiment ${route.id} has no matched ${kind} evidence for step ${stepIndex === null ? "boot" : stepIndex + 1}.`,
+                });
+              seen.add(key);
+              pairs.push({ key, incumbent: before, candidate: after });
+            }
           }
         }
         return pairs;

@@ -62,6 +62,12 @@ const decodeStoredPlaytest = Schema.decodeUnknownSync(StoredPlaytest);
 const isPlaytestStep = Schema.is(GamePlaytestStep);
 const decodePlaytestSteps = Schema.decodeUnknownOption(Schema.Array(GamePlaytestStep));
 
+/** Interval labels retain the actual capture time within their input step. */
+export const playtestIntervalObservation = (label: string) => {
+  const match = /^step (\d+) during: (\d+)ms$/u.exec(label);
+  return match === null ? null : { stepIndex: Number(match[1]) - 1, elapsedMs: Number(match[2]) };
+};
+
 /**
  * The window a run actually played in: the project's base viewport multiplied
  * by the whole-number capture scale. A route's pointer coordinates are pixels

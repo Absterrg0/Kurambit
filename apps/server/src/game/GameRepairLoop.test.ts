@@ -189,6 +189,7 @@ interface Scripted {
   readonly starts: Array<StartedChild>;
   /** Routes the session fixture returns for the critic's cited frames. */
   criticExperiments: ReadonlyArray<GameReviewExperimentRoute>;
+  experimentObservationTimes?: ReadonlyArray<number>;
   /** Experiment replays the studio fixture was asked to run. */
   readonly experiments: Array<{
     readonly buildId: string;
@@ -719,6 +720,10 @@ const withLoop = <A, E>(
                           },
                         ],
                   ),
+                  ...(scripted.experimentObservationTimes ?? []).map((elapsedMs) => ({
+                    label: `step 1 during: ${elapsedMs + (broken ? 8 : 3)}ms`,
+                    path: NodePath.join(frameDirectory, "incumbent-action.png"),
+                  })),
                 ],
               });
             };
@@ -1164,6 +1169,89 @@ it.live("ballots see the critic's cited experiment routes replayed on both build
       ),
     { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
   ),
+);
+
+it.live(
+  "ballots retain cited interval observations and deduplicate their input pair separately",
+  () =>
+    withLoop(
+      (fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            const { scripted } = fixture;
+            scripted.repairs = [repairWith()];
+            scripted.experimentObservationTimes = [125, 250];
+            const route: GameReviewExperimentRoute = {
+              id: "try-1",
+              buildId: EXPORT_BUILD_ID,
+              steps: [{ hold: "Space", holdMs: 500 }],
+              captureEveryMs: 125,
+              viewport: { width: 640, height: 360 },
+              frames: [
+                { frameId: "try1f1", label: "input 1 before", stepIndex: 0 },
+                {
+                  frameId: "try1f2",
+                  label: "step 1 during: 125ms",
+                  stepIndex: 0,
+                  observationMs: 125,
+                },
+                {
+                  frameId: "try1f3",
+                  label: "step 1 during: 250ms",
+                  stepIndex: 0,
+                  observationMs: 250,
+                },
+                { frameId: "try1f4", label: "input 1 after", stepIndex: 0 },
+              ],
+            };
+            scripted.criticExperiments = [route, { ...route, id: "try-2" }];
+            scripted.critic = () => ({
+              kind: "critic",
+              raw: "{}",
+              answer: {
+                fundamentals,
+                defects: route.frames.map((frame) => ({
+                  severity: "visible",
+                  what: "The hit flash is obscured.",
+                  frameId: frame.frameId,
+                  fix: "Keep the flash visible.",
+                })),
+                doNotRegress: [],
+              },
+            });
+            const plans: GameReviewBallotPlan[] = [];
+            scripted.ballots = [0, 1].map(() => ({ plan }) => {
+              plans.push(plan);
+              return ballotAnswer(plan, "tie");
+            });
+            yield* runToCompletion(services, fixture);
+            expect(plans).toHaveLength(2);
+            for (const plan of plans) {
+              const frames = scripted.starts.find(
+                (child) => child.role === "ballot" && child.order === plan.order,
+              )!.evidence!.frames;
+              for (const side of ["a", "b", "c", "d"]) {
+                const evidence = frames.filter((frame) => frame.id.startsWith(side));
+                expect(evidence.filter((frame) => frame.inputPair?.stepIndex === 0)).toHaveLength(
+                  2,
+                );
+                const observations = evidence.filter((frame) => frame.label.includes("during:"));
+                expect(observations).toHaveLength(2);
+                const offset =
+                  (side === "a" && plan.main.A === "challenger") ||
+                  (side === "b" && plan.main.B === "challenger")
+                    ? 8
+                    : 3;
+                expect(observations.map((frame) => frame.label)).toEqual([
+                  expect.stringContaining(`step 1 during: ${125 + offset}ms`),
+                  expect.stringContaining(`step 1 during: ${250 + offset}ms`),
+                ]);
+              }
+            }
+          }),
+        ),
+      { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+    ),
 );
 
 it.live("t50d's cited boot, wait and jump reach ballots without duplicate click pairs", () =>

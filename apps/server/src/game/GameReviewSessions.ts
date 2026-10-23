@@ -54,7 +54,7 @@ import {
   criticPrompt,
   pairwisePrompt,
 } from "./gameReviewPrompts.ts";
-import { playedViewport } from "./playtestEvidence.ts";
+import { playedViewport, playtestIntervalObservation } from "./playtestEvidence.ts";
 
 /**
  * Which models a review can run on. The catalog is the provider registry
@@ -189,8 +189,8 @@ interface SessionKey {
 const FRAME_FILE = (index: number) => `frames/frame-${String(index + 1).padStart(2, "0")}.png`;
 const EVIDENCE_MANIFEST = "evidence.json";
 const BRIEF_FILE = "BRIEF.md";
-// Four slots, each with up to 45 cited pairs and six frozen-route frames.
-const MAX_FRAMES = 384;
+// Four slots, each with up to 45 cited pairs, their observations and six frozen-route frames.
+const MAX_FRAMES = 564;
 const MAX_CHECKS = 64;
 
 const ReviewFrameRecord = Schema.Struct({
@@ -372,17 +372,6 @@ const attempt = <A>(operation: string, path: string, run: () => Promise<A>) =>
 const encodePart = (value: string) => encodeURIComponent(value);
 
 const EXPERIMENT_FRAME_ID = /^try(\d+)f\d+$/u;
-const DURING_FRAME_STEP = /^step (\d+) during:/u;
-
-/** The step an interval frame belongs to, when its pair metadata has no index. */
-const experimentStepIndex = (frame: {
-  readonly inputPair?: { readonly stepIndex: number } | undefined;
-  readonly label: string;
-}): number | null => {
-  if (frame.inputPair !== undefined) return frame.inputPair.stepIndex;
-  const match = DURING_FRAME_STEP.exec(frame.label);
-  return match === null ? null : Number(match[1]) - 1;
-};
 
 /**
  * The command id is the idempotency key. It names the loop, round, role and
@@ -2017,11 +2006,15 @@ export const layer = (options: { readonly stateDir: string }) => {
           );
           const frames = stored.screenshots
             .filter((frame) => frameIds.has(frame.id))
-            .map((frame) => ({
-              frameId: frame.id,
-              label: frame.label,
-              stepIndex: experimentStepIndex(frame),
-            }));
+            .map((frame) => {
+              const observation = playtestIntervalObservation(frame.label);
+              return {
+                frameId: frame.id,
+                label: frame.label,
+                stepIndex: frame.inputPair?.stepIndex ?? observation?.stepIndex ?? null,
+                ...(observation === null ? {} : { observationMs: observation.elapsedMs }),
+              };
+            });
           if (frames.length === 0) continue;
           routes.push({
             id: `try-${call}`,

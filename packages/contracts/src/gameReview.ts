@@ -62,6 +62,8 @@ export const GameReviewExperimentFrame = Schema.Struct({
   frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   stepIndex: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** Elapsed within the step for a cited interval observation. */
+  observationMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
 export type GameReviewExperimentFrame = typeof GameReviewExperimentFrame.Type;
 

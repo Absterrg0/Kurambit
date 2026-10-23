@@ -178,6 +178,7 @@ const tryResult: GameWebPlaytestResult = {
   })),
 };
 interface Scripted {
+  tryScreenshots?: GameWebPlaytestResult["screenshots"];
   readonly tries: Array<{ threadId: ThreadId; buildId: string; input: GameWebPlaytestInput }>;
   builderStatus: OrchestrationV2Run["status"];
   viewport: { width: number; height: number };
@@ -313,10 +314,14 @@ const withSession = <A, E>(
                 Effect.gen(function* () {
                   scripted.tries.push({ threadId, buildId, input });
                   if (scripted.tryGate !== null) yield* scripted.tryGate();
+                  const result = {
+                    ...tryResult,
+                    screenshots: scripted.tryScreenshots ?? tryResult.screenshots,
+                  };
                   return scripted.captureScale === undefined
-                    ? tryResult
+                    ? result
                     : {
-                        ...tryResult,
+                        ...result,
                         baseViewport: scripted.viewport,
                         captureScale: scripted.captureScale,
                       };
@@ -1637,7 +1642,7 @@ it.live("accepts all cited ballot frames and bounds the evidence manifest", () =
   withSession(({ frames, service }) =>
     Effect.gen(function* () {
       const evidence = frameInput(frames);
-      const ballotFrames = Array.from({ length: 384 }, (_, index) => ({
+      const ballotFrames = Array.from({ length: 564 }, (_, index) => ({
         id: `source-${index}`,
         label: `${"ABCD"[Math.floor(index / 96)]}: action ${index % 6}`,
         sourcePath: frames[index % frames.length]!,
@@ -1652,7 +1657,7 @@ it.live("accepts all cited ballot frames and bounds the evidence manifest", () =
       expect(started.kind).toBe("started");
       expect(
         (yield* service.describe({ threadId, loopId, roundId, role: "ballot" }))?.frames,
-      ).toHaveLength(384);
+      ).toHaveLength(564);
       const tooMany = yield* service
         .start({
           threadId,
@@ -1663,7 +1668,7 @@ it.live("accepts all cited ballot frames and bounds the evidence manifest", () =
           evidence: { ...evidence, frames: [...ballotFrames, ballotFrames[0]!] },
         })
         .pipe(Effect.flip);
-      expect(tooMany.detail).toBe("At most 384 frames are evidence.");
+      expect(tooMany.detail).toBe("At most 564 frames are evidence.");
     }),
   ),
 );
@@ -1833,6 +1838,45 @@ it.live("freezes the routes of the critic's cited experiments", () =>
           frameIds: ["f1"],
         }),
       ).toEqual([]);
+    }),
+  ),
+);
+
+it.live("freezes a cited interval frame's identity and elapsed time", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      scripted.tryScreenshots = [
+        ...tryResult.screenshots,
+        {
+          label: "step 1 during: 127ms",
+          mimeType: "image/png",
+          data: "cG5n",
+          width: 640,
+          height: 360,
+        },
+      ];
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      yield* service.tryInput(
+        { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+        { steps: [{ hold: "Space", holdMs: 500 }], captureEveryMs: 125 },
+      );
+      const routes = yield* service.experiments({
+        threadId,
+        loopId,
+        roundId,
+        frameIds: ["try1f3", "try1f3"],
+      });
+      expect(routes[0]?.frames).toEqual([
+        { frameId: "try1f3", label: "step 1 during: 127ms", stepIndex: 0, observationMs: 127 },
+      ]);
     }),
   ),
 );
