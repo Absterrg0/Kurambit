@@ -531,6 +531,10 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       expect(command.task).toContain("Call game_critic_report");
       expect(command.task).toContain('"fundamentals"');
       expect(command.task).toContain("Judge input response from the before/after pairs.");
+      expect(command.task).toContain(
+        "If unsure whether something works, try it with game_try_input and cite those frames.",
+      );
+      expect(command.task).not.toContain("Do not edit, execute, browse");
       expect(command.task).toContain("Correct tool validation errors in this session");
       expect(command.task).toContain("Only when tools are unavailable");
       expect(command.task).not.toContain("builds/");

@@ -196,7 +196,11 @@ the game sources did not change.
 Review is separate from mechanical qualification. The first playable build is selected before
 review starts, so model latency cannot delay Play. Reviews use the originating game's frozen
 provider/model by default; unavailable credentials mean unavailable review, never a substitute
-model. Critic and comparison children are fresh evidence-only sessions. Repairs write in place,
+model. Critic and comparison children start with fresh evidence-only context. The critic can test
+hypotheses through bounded headless `game_try_input` calls on the frozen build and viewport.
+Server-captured frames extend its hashed round evidence and are valid citations. Comparison ballots
+remain blind and frozen-evidence-only; they cannot call `game_try_input`. Builders and repair children
+can use it before `game_submit`. Repairs write in place,
 one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
 controls reduce position bias. Both ballots must prefer the challenger overall, with no factual
 regression or preservation item judged lost on the challenger in both ballots. Facets inform the

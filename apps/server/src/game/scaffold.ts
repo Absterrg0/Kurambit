@@ -167,13 +167,13 @@ Build the game in BRIEF.md with Godot 4.7 (GDScript, Compatibility renderer). Th
 
 1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (target Web).
 2. **Show the state.** Every value the brief names (score, lives, turn, laps, timer...) is on-screen text that updates when it changes, and lives in GameState when the template has one. Win and lose end on a result screen with the totals.
-3. **Playtest and look.** Run game_web_playtest with steps that play the core loop, then open the screenshots it returns and look at them. It also reports GameState keys that are "not on screen".
+3. **Playtest and look.** Run game_web_playtest with steps that play the core loop, then open the screenshots it returns and look at them. Before your first game_submit, use game_try_input to test any uncertain gameplay from a fresh headless boot and inspect its before/after frames. It also reports GameState keys that are "not on screen".
 4. **Check core play**: report broken or unreadable behaviour honestly. Do not start an open-ended repair loop. The server owns bounded review after your turn ends.
 5. **Submit and end your turn.** When the core loop is playable, call game_submit with a one-line note on what the game is, then summarize with the game_preview URL. The studio reviews and repairs it; do not start your own improvement loop.
 
 ## Rules that prevent breakage
 
-- Do engine work with the Game Studio tools: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_submit, game_preview. Never run godot from the shell; those runs are not recorded.
+- Do engine work with the Game Studio tools: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_try_input, game_submit, game_preview. Never run godot from the shell; those runs are not recorded.
 - If the template ships scripts/studio_probe.gd, keep it and its autoload, and extend GameState instead of replacing it: the playtest reads both.
 - Godot imports models only as GLB under godot/assets/models/. Make them with game_blender_run; .blend sources stay in art/blender/, never inside godot/.
 - builds/ and godot/.godot/ are generated; do not edit them.
