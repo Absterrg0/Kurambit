@@ -34,6 +34,13 @@ const round = (id: string): GameReviewRound => ({
   decision: "interrupt",
   reason: "The server restarted.",
 });
+/** A round a user edit stopped: its fallback snapshot is still recorded. */
+const stoppedRound = (id: string): GameReviewRound => ({
+  ...round(id),
+  status: "stopped",
+  decision: "stop",
+  reason: "The game folder changed after the repair; the snapshot and candidate are kept.",
+});
 const loop: LoopRecord = {
   schemaVersion: 2,
   id: "loop",
@@ -57,9 +64,29 @@ const loop: LoopRecord = {
   reason: "The server restarted.",
   usage: { status: "unknown", providerTurns: 0, usedTokens: 0, inputTokens: 0, outputTokens: 0 },
 };
-function fixture(options: { loop?: LoopRecord | null; held?: boolean; refuseStop?: boolean } = {}) {
+/** The loop a user edit stopped before its round could be rejected. */
+const stoppedLoop: LoopRecord = {
+  ...loop,
+  status: "stopped",
+  decision: "stop",
+  reason: "reject-blocked: the game folder changed after the repair finished.",
+};
+function fixture(
+  options: {
+    loop?: LoopRecord | null;
+    held?: boolean;
+    refuseStop?: boolean;
+    /** The newest loop stopped because a user edit blocked its rejection. */
+    blockedByEdit?: boolean;
+  } = {},
+) {
   let stopped = 0;
   let restored = 0;
+  const stoppedByEdit = options.blockedByEdit === true;
+  const rounds = stoppedByEdit
+    ? [stoppedRound("three"), stoppedRound("two"), stoppedRound("one")]
+    : [round("three"), round("two"), round("one")];
+  const record = stoppedByEdit ? stoppedLoop : options.loop === undefined ? loop : options.loop;
   const layer = GameReviewApi.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -67,11 +94,7 @@ function fixture(options: { loop?: LoopRecord | null; held?: boolean; refuseStop
           resolve: () => Effect.succeed("/games/api"),
         }),
         Layer.mock(GameRoundStore.GameRoundStore)({
-          read: () =>
-            Effect.succeed({
-              selected: null,
-              rounds: [round("three"), round("two"), round("one")],
-            }),
+          read: () => Effect.succeed({ selected: null, rounds }),
         }),
         Layer.mock(GameReviewSessions.GameReviewSessions)({
           describe: (input) =>
@@ -91,7 +114,7 @@ function fixture(options: { loop?: LoopRecord | null; held?: boolean; refuseStop
             ),
         }),
         Layer.mock(GameRepairLoop.GameRepairLoop)({
-          read: () => Effect.succeed(options.loop === undefined ? loop : options.loop),
+          read: () => Effect.succeed(record),
           activity: () => Effect.succeed({ held: options.held ?? false, phase: null }),
           interrupt: () =>
             options.refuseStop
@@ -159,6 +182,16 @@ describe("game review API", () => {
         loop: { reviewSelection: { model: "reviewer" }, usage: { status: "unknown" } },
       });
     }).pipe(Effect.provide(fixture({ held: true }).layer)),
+  );
+  it.effect("a stop blocked by a user edit still offers Restore and it works", () =>
+    Effect.gen(function* () {
+      const api = yield* GameReviewApi.GameReviewApi;
+      expect(yield* api.status(threadId)).toMatchObject({
+        restoreOffered: true,
+        loop: { status: "stopped" },
+      });
+      expect(yield* api.restore(threadId)).toMatchObject({ kind: "restored" });
+    }).pipe(Effect.provide(fixture({ blockedByEdit: true }).layer)),
   );
   it.effect("existing games have no review and no fabricated win", () =>
     Effect.gen(function* () {

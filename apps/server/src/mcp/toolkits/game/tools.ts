@@ -68,7 +68,7 @@ const ReviewStopTool = Tool.make("game_review_stop", {
 }).annotate(Tool.Readonly, false);
 const ReviewRestoreTool = Tool.make("game_review_restore", {
   description:
-    "Explicitly restore the previous game-folder version from the latest interrupted review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
+    "Explicitly restore the previous game-folder version from the latest review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
   success: GameReviewRestoreResult,
   failure,
   failureMode: "return",

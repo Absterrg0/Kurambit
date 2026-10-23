@@ -197,6 +197,18 @@ export type GameRestore =
       readonly owner: GameReviewRoundType;
     };
 
+/**
+ * The one restore-eligibility rule, shared by the status that offers the
+ * restore control and the restore that acts on it. An interrupted round
+ * qualifies; so does a stopped one, because only a successful restore closes
+ * a round, and that closes it as rejected. A blocked rejection, a cancelled
+ * review and a restore that a user edit blocked all leave the round stopped
+ * with its pre-repair snapshot, so all of them stay retryable.
+ */
+export const isRestorableRound = (round: GameReviewRoundType): boolean =>
+  round.status === "interrupted" ||
+  (round.status === "stopped" && round.incumbentSnapshotId.length > 0);
+
 export class GameRoundStore extends Context.Service<
   GameRoundStore,
   {

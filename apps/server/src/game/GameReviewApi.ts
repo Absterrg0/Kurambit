@@ -56,7 +56,9 @@ const make = Effect.gen(function* () {
         budget,
         restoreOffered:
           loop !== null &&
-          state.rounds.some((round) => round.loopId === loop.id && round.status === "interrupted"),
+          state.rounds.some(
+            (round) => round.loopId === loop.id && GameRoundStore.isRestorableRound(round),
+          ),
       };
     });
   const history: GameReviewApi["Service"]["history"] = (input) =>

@@ -291,9 +291,10 @@ export class GameRepairLoop extends Context.Service<
     /** Joins the live fiber for a game, when one is running. */
     readonly awaitIdle: (threadId: ThreadId) => Effect.Effect<void, never>;
     /**
-     * The creator's explicit return to the version before an interrupted
-     * review. The round is the newest loop's own interrupted round, found by
-     * its loop id, never whichever round is newest. There is no Resume.
+     * The creator's explicit return to the version before a review. The round
+     * is the newest loop's own restorable round (see GameRoundStore
+     * `isRestorableRound`), found by its loop id, never whichever round is
+     * newest. There is no Resume.
      */
     readonly restore: (
       threadId: ThreadId,
@@ -1584,14 +1585,14 @@ export const layer = (options: GameRepairLoopOptions) => {
           loop === null
             ? undefined
             : state.rounds.findLast(
-                (entry) => entry.loopId === loop.id && entry.status === "interrupted",
+                (entry) => entry.loopId === loop.id && GameRoundStore.isRestorableRound(entry),
               );
         if (round === undefined)
           return yield* new GameOperationError({
             operation: "restore game review version",
             path: root,
             reason: "invalid-input",
-            detail: "The latest review has no interrupted round to restore from.",
+            detail: "The latest review has no restorable round to return from.",
           });
         const restored = yield* rounds.restore(root, round.id, {
           preserveDirectories: preview.directories(root),

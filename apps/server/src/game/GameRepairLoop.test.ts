@@ -34,6 +34,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
+import * as GameReviewApi from "./GameReviewApi.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -287,6 +288,7 @@ interface Services {
   readonly loop: GameRepairLoop.GameRepairLoop["Service"];
   readonly rounds: GameRoundStore.GameRoundStore["Service"];
   readonly admission: GameAdmission.GameAdmission["Service"];
+  readonly review: GameReviewApi.GameReviewApi["Service"];
 }
 
 interface Fixture {
@@ -663,7 +665,7 @@ const withLoop = <A, E>(
           },
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>);
 
-        return GameRepairLoop.layer({
+        const stack = GameRepairLoop.layer({
           stateDir,
           ...(options.budget === undefined ? {} : { budget: options.budget }),
           childJoinTimeoutMs: options.childJoinTimeoutMs ?? 40,
@@ -684,10 +686,12 @@ const withLoop = <A, E>(
               serving: () => false,
             }),
           ),
-          Layer.provide(projects),
+          Layer.provideMerge(projects),
           Layer.provide(threads),
           Layer.provide(NodeServices.layer),
         );
+        // The API reads the same loop and round services the stack built.
+        return GameReviewApi.layer.pipe(Layer.provideMerge(stack));
       };
 
       const withServices: Fixture["withServices"] = (use) =>
@@ -698,6 +702,7 @@ const withLoop = <A, E>(
               loop: Context.get(context, GameRepairLoop.GameRepairLoop),
               rounds: Context.get(context, GameRoundStore.GameRoundStore),
               admission: Context.get(context, GameAdmission.GameAdmission),
+              review: Context.get(context, GameReviewApi.GameReviewApi),
             });
           }),
         );
@@ -1313,6 +1318,144 @@ it.live("a restart marks the loop interrupted, keeps the incumbent and has no Re
         }),
       );
     }),
+  ),
+);
+
+it.live("a user edit that blocks the rejection keeps the round restorable", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        // Both seats keep the incumbent: the round's decision is a rejection.
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "worse"),
+          ({ plan }) => ballotAnswer(plan, "worse"),
+        ];
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        yield* fixture.complete(services, repair);
+        const first = yield* fixture.take;
+        expect(first.role).toBe("ballot");
+        yield* fixture.complete(services, first);
+        const second = yield* fixture.take;
+        // A user edit lands between the repair and the rejection.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(root, "godot/scripts/main.gd"),
+            "extends Node2D # user edit\n",
+          ),
+        );
+        yield* fixture.complete(services, second);
+        yield* services.loop.awaitIdle(threadId);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("reject-blocked");
+        const game = yield* services.rounds.read(root);
+        const blocked = game.rounds.find((round) => round.loopId === state.id);
+        expect(blocked?.status).toBe("stopped");
+        // The stop the edit caused still offers Restore, and it works.
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(true);
+        const restored = yield* services.review.restore(threadId);
+        expect(restored.kind).toBe("restored");
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("extends Node\n");
+        // The restored round is closed; nothing is left to restore from.
+        expect((yield* Effect.flip(services.review.restore(threadId))).reason).toBe(
+          "invalid-input",
+        );
+      }),
+    ),
+  ),
+);
+
+it.live("a restore blocked by a conflict keeps the round restorable and a retry succeeds", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        const opened = (yield* services.rounds.read(root)).rounds.at(-1);
+        expect(opened?.status).toBe("running");
+        // The explicit restore preserves the folder, a user edit lands before
+        // the rewrite is read, and the restore refuses instead of overwriting.
+        const blocked = yield* services.rounds.restore(root, opened!.id, {
+          beforeRestore: () =>
+            NodeFSP.writeFile(
+              NodePath.join(root, "godot/scripts/main.gd"),
+              "extends Node2D # user edit\n",
+            ),
+        });
+        expect(blocked.kind).toBe("blocked");
+        if (blocked.kind === "blocked") {
+          expect(blocked.round.status).toBe("stopped");
+          expect(blocked.detail).toContain("changed");
+        }
+        yield* services.admission.admit({ root, threadId, reason: "The creator acted." });
+        // A blocked restore is not the end: the round keeps its preserved
+        // snapshot and stays restorable, and a retry after the folder settled
+        // returns to the incumbent.
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(true);
+        expect(yield* services.review.restore(threadId)).toMatchObject({ kind: "restored" });
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("extends Node\n");
+        expect((yield* Effect.flip(services.review.restore(threadId))).reason).toBe(
+          "invalid-input",
+        );
+      }),
+    ),
+  ),
+);
+
+it.live("stopping the review stops the open round and leaves it restorable", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        // The creator stops the review while the repair child runs.
+        yield* services.loop.interrupt(
+          threadId,
+          "The creator stopped the review; the selected build stays playable.",
+        );
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        const cancelled = (yield* services.rounds.read(root)).rounds.find(
+          (round) => round.loopId === state.id,
+        );
+        expect(cancelled?.status).toBe("stopped");
+        // The cancellation still offers Restore, and it returns the folder to
+        // the incumbent snapshot.
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(true);
+        expect(yield* services.review.restore(threadId)).toMatchObject({ kind: "restored" });
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "godot/scripts/main.gd"), "utf8"),
+          ),
+        ).toBe("extends Node\n");
+      }),
+    ),
   ),
 );
 
