@@ -140,6 +140,7 @@ export class GameService extends Context.Service<
       buildId: string,
       input: GameWebPlaytestInput,
       experimentDirectory?: string,
+      imageResponse?: "persisted",
     ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
     readonly scenariosRun: (
@@ -875,6 +876,7 @@ const make = Effect.gen(function* () {
     runId: string | null,
     buildId?: string,
     experimentDirectory?: string,
+    imageResponse?: "persisted",
   ) =>
     Effect.gen(function* () {
       // Reject before exporting, serving, or launching the browser: a bad capture
@@ -1104,7 +1106,7 @@ const make = Effect.gen(function* () {
                 cause,
               }),
           });
-          if (input.captureAllSteps && droppedFrames > 0)
+          if (imageResponse !== "persisted" && input.captureAllSteps && droppedFrames > 0)
             return yield* new GameOperationError({
               operation: "game_try_input",
               path: root,
@@ -1142,7 +1144,7 @@ const make = Effect.gen(function* () {
           return {
             value: {
               ...enriched,
-              screenshots: budgeted.kept,
+              screenshots: imageResponse === "persisted" ? [] : budgeted.kept,
               message: `${result.message}${qualificationNote}${observationNote}${framesNote}`,
               evidenceDirectory: evidence.directory,
             },
@@ -1895,9 +1897,9 @@ const make = Effect.gen(function* () {
           Effect.flatMap(exporterRun(threadId), (runId) => webPlaytest(root, input, runId)),
         ),
       ),
-    webPlaytestBuild: (threadId, buildId, input, experimentDirectory) =>
+    webPlaytestBuild: (threadId, buildId, input, experimentDirectory, imageResponse) =>
       withRoot(threadId, "Web playtest", (root) =>
-        webPlaytest(root, input, null, buildId, experimentDirectory),
+        webPlaytest(root, input, null, buildId, experimentDirectory, imageResponse),
       ),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),

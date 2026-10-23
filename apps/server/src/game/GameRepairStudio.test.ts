@@ -138,13 +138,13 @@ const withStudio = <A, E>(
             return Effect.fail(harness.replayError);
           if (directory !== undefined && harness.persistExperiment)
             return Effect.promise(async () => {
-              await writePlaytestEvidence({
+              const evidence = await writePlaytestEvidence({
                 root,
-                directory,
+                directory: NodePath.join(directory, "evidence"),
                 steps: input?.steps ?? [],
                 result: harness.results,
               });
-              return { ...harness.results, screenshots: [] };
+              return { ...harness.results, screenshots: [], evidenceDirectory: evidence.directory };
             });
           return Effect.succeed(harness.results);
         },

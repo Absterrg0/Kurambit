@@ -510,11 +510,16 @@ export const layer = (options: { readonly stateDir: string }) =>
                   : { width: input.viewport.width, height: input.viewport.height }),
               },
               directory,
+              "persisted",
             )
             .pipe(
               Effect.flatMap((result) =>
                 Effect.gen(function* () {
-                  const persisted = yield* Effect.promise(() => readPlaytestEvidenceAt(directory));
+                  const evidenceDirectory = result.evidenceDirectory;
+                  const persisted =
+                    evidenceDirectory === undefined
+                      ? null
+                      : yield* Effect.promise(() => readPlaytestEvidenceAt(evidenceDirectory));
                   const screenshots =
                     persisted === null
                       ? result.screenshots
@@ -526,7 +531,9 @@ export const layer = (options: { readonly stateDir: string }) =>
                                 ? {}
                                 : { inputPair: frame.inputPair }),
                               data: (
-                                await NodeFSP.readFile(NodePath.join(directory, frame.file))
+                                await NodeFSP.readFile(
+                                  NodePath.join(evidenceDirectory!, frame.file),
+                                )
                               ).toString("base64"),
                             })),
                           ),

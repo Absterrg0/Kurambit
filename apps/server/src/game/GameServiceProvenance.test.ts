@@ -1533,6 +1533,68 @@ const folderBytes = async (root: string): Promise<Record<string, string>> => {
 };
 
 it.live(
+  "internal experiment replay reads all persisted images beyond the tool response limit",
+  () => {
+    const data = Buffer.alloc(4 * 1024 * 1024, 7).toString("base64");
+    return withGame(
+      {
+        run: (input) =>
+          Effect.promise(async () => {
+            if (input.operation === "export-web") {
+              const directory = NodePath.dirname(input.args.at(-1)!);
+              await NodeFSP.mkdir(directory, { recursive: true });
+              for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+                await NodeFSP.writeFile(NodePath.join(directory, name), `export ${name}`);
+            }
+            return processOk(input.root);
+          }),
+        playtest: () =>
+          Effect.succeed({
+            ...playtestResult,
+            screenshots: ["before", "after"].map((label) => ({
+              label,
+              mimeType: "image/png" as const,
+              data,
+              width: 640,
+              height: 360,
+            })),
+          }),
+      },
+      ({ root, stateDir, game, studio, rounds }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "game.json"), JSON.stringify(manifest())),
+          );
+          yield* game.export(threadId, "Web");
+          const buildId = (yield* rounds.read(root)).selected!.buildId;
+          const external = yield* game
+            .webPlaytestBuild(
+              threadId,
+              buildId,
+              { steps: [{ press: "Space" }], captureAllSteps: true },
+              NodePath.join(stateDir, "external-experiment"),
+            )
+            .pipe(Effect.flip);
+          expect(external.detail).toContain("response limit");
+          const replay = yield* studio.experiment({
+            threadId,
+            root,
+            buildId,
+            steps: [{ press: "Space" }],
+            captureEveryMs: 100,
+            viewport: null,
+          });
+          expect(replay.frames.map((frame) => frame.label)).toEqual(["before", "after"]);
+          for (const frame of replay.frames) {
+            const bytes = yield* Effect.promise(() => NodeFSP.readFile(frame.path));
+            expect(bytes.equals(Buffer.from(data, "base64"))).toBe(true);
+          }
+        }),
+    );
+  },
+);
+
+it.live(
   "default input experiments use the real export hash and leave submission evidence and folder bytes intact",
   () => {
     const profiles: string[] = [];
