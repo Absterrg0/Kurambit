@@ -446,9 +446,15 @@ export const layer = (options: { readonly stateDir: string }) =>
                   status: "failed" as const,
                   detail: replay.failure.message.slice(0, 1000),
                 },
-                ...(booted === null
-                  ? []
-                  : checkResult(booted, { ...inputs, steps: [] }).filter(
+                ...(boot._tag === "Failure"
+                  ? [
+                      {
+                        id: "boot",
+                        status: "failed" as const,
+                        detail: boot.failure.message.slice(0, 1000),
+                      },
+                    ]
+                  : checkResult(boot.success, { ...inputs, steps: [] }).filter(
                       (entry) => entry.id !== "input",
                     )),
               ],

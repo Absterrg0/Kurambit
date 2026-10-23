@@ -1313,16 +1313,21 @@ it.live("t50d's cited boot, wait and jump reach ballots without duplicate click 
   ),
 );
 
-it.live("a failed route replay is evidence and the critic still runs", () =>
+it.live("failed route and boot replays reach the critic as evidence", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
       Effect.gen(function* () {
         const { scripted } = fixture;
         const detail =
           "Web playtest: Step 1 pointer coordinates exceed the frozen 640×360 viewport.";
+        const bootDetail = "Web playtest: The boot fallback browser process exited.";
         scripted.incumbent = {
           ...scripted.incumbent,
-          checks: [{ id: "replay", status: "failed" as const, detail }],
+          checks: [
+            { id: "replay", status: "failed" as const, detail },
+            { id: "boot", status: "failed" as const, detail: bootDetail },
+          ],
+          frames: [],
         };
         scripted.critic = () => criticAnswer(0);
         yield* runToCompletion(services, fixture);
@@ -1333,7 +1338,12 @@ it.live("a failed route replay is evidence and the critic still runs", () =>
           status: "failed",
           detail,
         });
-        expect(critic?.evidence?.frames.length).toBeGreaterThan(0);
+        expect(critic?.evidence?.checks).toContainEqual({
+          id: "boot",
+          status: "failed",
+          detail: bootDetail,
+        });
+        expect(critic?.evidence?.frames).toEqual([]);
         // The round continued to a real judgment instead of a review-error.
         expect(loopRecord(yield* readLoop(services)).reason).toContain("zero-defects");
       }),

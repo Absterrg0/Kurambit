@@ -72,6 +72,7 @@ interface Harness {
   readonly calls: Array<GameWebPlaytestInput | undefined>;
   /** When set, every route run fails; boot-only runs still succeed. */
   replayError: GameOperationError | null;
+  bootError?: GameOperationError;
   /** The raw stage records the qualification store would report. */
   exportStage: GameQualification.QualificationStageRecord | null;
   playtestStage: GameQualification.QualificationStageRecord | null;
@@ -136,6 +137,8 @@ const withStudio = <A, E>(
           harness.calls.push(input);
           if (harness.replayError !== null && (input?.steps?.length ?? 0) > 0)
             return Effect.fail(harness.replayError);
+          if (harness.bootError !== undefined && (input?.steps?.length ?? 0) === 0)
+            return Effect.fail(harness.bootError);
           if (directory !== undefined && harness.persistExperiment)
             return Effect.promise(async () => {
               const evidence = await writePlaytestEvidence({
@@ -330,6 +333,44 @@ it.live("a failed frozen-route replay is evidence, not the end of the review", (
       expect(checked.frames.length).toBeGreaterThan(0);
       expect(harness.calls.map((call) => call?.steps?.length ?? 0)).toEqual([1, 0]);
       expect(checked.viewport).toEqual({ width: 1280, height: 720 });
+    }),
+  ),
+);
+
+it.live("a failed boot fallback returns both errors as critic evidence", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      harness.replayError = new GameOperationError({
+        operation: "Web playtest",
+        path: harness.root,
+        reason: "invalid-input",
+        detail: "The recorded route could not run.",
+      });
+      harness.bootError = new GameOperationError({
+        operation: "Web playtest",
+        path: harness.root,
+        reason: "command-failed",
+        detail: "The boot fallback browser process exited.",
+      });
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId,
+        inputs: {
+          steps: [{ press: "Space" }],
+          viewport: { width: 640, height: 360 },
+          seed: "unknown",
+        },
+      });
+      expect(checked.checks).toEqual([
+        { id: "replay", status: "failed", detail: harness.replayError.message.slice(0, 1000) },
+        { id: "boot", status: "failed", detail: harness.bootError.message.slice(0, 1000) },
+      ]);
+      expect(checked.frames).toEqual([]);
+      expect(checked.viewport).toEqual({ width: 640, height: 360 });
     }),
   ),
 );
