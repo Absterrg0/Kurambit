@@ -24,6 +24,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as GameRecipes from "../game/GameRecipes.ts";
 import * as GameService from "../game/GameService.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as ServerConfig from "../config.ts";
@@ -1050,10 +1051,12 @@ it.effect(
         const serverLayer = Layer.mergeAll(
           McpHttpServer.layerGameReviewAnswers,
           McpHttpServer.layerGamePlaytest,
+          McpHttpServer.layerGameRecipes,
         ).pipe(
           Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
           Layer.provide(Layer.mock(GameService.GameService)({})),
           Layer.provideMerge(McpHttpServer.layerMcpTransport),
+          Layer.provide(GameRecipes.layer),
           Layer.provide(
             Layer.mock(GameReviewSessions.GameReviewSessions)({
               tryInput: (caller, input) =>
@@ -1119,7 +1122,15 @@ it.effect(
                     threadId:
                       token === "critic"
                         ? threadId
-                        : ThreadId.make(token === "ballot" ? "ballot-child" : "other-thread"),
+                        : ThreadId.make(
+                            token === "ballot"
+                              ? "ballot-child"
+                              : token === "builder"
+                                ? "builder-thread"
+                                : token === "repairer"
+                                  ? "repairer-thread"
+                                  : "other-thread",
+                          ),
                   },
                 }),
             }),
@@ -1156,6 +1167,8 @@ it.effect(
           }).pipe(Effect.map((response) => response.headers["mcp-session-id"]!));
         const critic = yield* connect("critic");
         const ballot = yield* connect("ballot");
+        const builder = yield* connect("builder");
+        const repairer = yield* connect("repairer");
         const other = yield* connect("other");
         const list = (token: string, session: string) =>
           rpc(token, session, "tools/list", {}).pipe(Effect.flatMap((response) => response.text));
@@ -1165,12 +1178,85 @@ it.effect(
         expect(yield* list("ballot", ballot)).not.toContain('"name":"game_try_input"');
         expect(yield* list("critic", critic)).toContain('"name":"game_try_input"');
         expect(yield* list("other", other)).toContain('"name":"game_try_input"');
+        // The read-only know-how toolkit is listed for the three working roles and
+        // hidden from ballots.
+        for (const [token, session] of [
+          ["builder", builder],
+          ["repairer", repairer],
+          ["critic", critic],
+        ] as const) {
+          expect(yield* list(token, session)).toContain('"name":"game_recipe_search"');
+          expect(yield* list(token, session)).toContain('"name":"game_recipe_get"');
+        }
+        expect(yield* list("ballot", ballot)).not.toContain("game_recipe_search");
+        expect(yield* list("ballot", ballot)).not.toContain("game_recipe_get");
         const forbiddenInput = yield* rpc("ballot", ballot, "tools/call", {
           name: "game_try_input",
           arguments: { steps: [{ press: "Space" }] },
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenInput).toContain("error");
         expect(tried).toHaveLength(0);
+        // A ballot cannot retrieve recipes either, even by naming the tool.
+        const forbiddenRecipe = yield* rpc("ballot", ballot, "tools/call", {
+          name: "game_recipe_search",
+          arguments: {},
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(forbiddenRecipe).toContain("error");
+        // The builder searches by tags and gets the complete reference back.
+        const builderSearch = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { genre: "platformer", defect: "unresponsive-jump" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(builderSearch).toContain('"id":"loop.platformer"');
+        expect(builderSearch).toContain('"matchingTags":["platformer","unresponsive-jump"]');
+        expect(builderSearch).toContain('"engines":["godot"]');
+        expect(builderSearch).toContain('"nextCursor":"5"');
+        const builderGet = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_get",
+          arguments: { id: "loop.platformer" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(builderGet).toContain('"engine":"godot"');
+        expect(builderGet).toContain("func snapshot() -> Dictionary:");
+        expect(builderGet).toContain('"tryInput"');
+        expect(builderGet).toContain('"kind":"write-original"');
+        expect(builderGet).toContain("Build a move, jump, collect and retry platformer");
+        // A repairer reads the guidance for the defect it is fixing, with no code.
+        const repairSearch = yield* rpc("repairer", repairer, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { defect: "weak-impact" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(repairSearch).toContain('"id":"feel.hit-stop"');
+        expect(repairSearch).toContain('"id":"feel.shake"');
+        const repairGuidance = yield* rpc("repairer", repairer, "tools/call", {
+          name: "game_recipe_get",
+          arguments: { id: "feel.hit-stop", includeReference: false },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(repairGuidance).toContain('"adapter":null');
+        expect(repairGuidance).toContain("Hold only the two bodies of an impact");
+        expect(repairGuidance).toContain('"version":1');
+        // A critic may retrieve guidance and cite it, but gets no reference by default
+        // when it asks for guidance only.
+        const criticSearch = yield* rpc("critic", critic, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { mechanic: "impact" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(criticSearch).toContain('"id":"feel.hit-stop"');
+        expect(criticSearch).toContain('"id":"feel.shake"');
+        const criticGuidance = yield* rpc("critic", critic, "tools/call", {
+          name: "game_recipe_get",
+          arguments: { id: "read.silhouette", includeReference: false },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(criticGuidance).toContain("walkable edge and the objective");
+        expect(criticGuidance).toContain('"adapter":null');
+        // The exact unknown-id reason names the alternatives.
+        const unknownRecipe = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_get",
+          arguments: { id: "loop.missing" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(unknownRecipe).toContain(
+          "No recipe with id 'loop.missing'. Available ids: feel.buffer",
+        );
+        expect(unknownRecipe).toContain("loop.platformer");
         const experiment = yield* rpc("critic", critic, "tools/call", {
           name: "game_try_input",
           arguments: { steps: [{ press: "Space" }] },

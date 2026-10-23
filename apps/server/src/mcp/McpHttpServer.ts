@@ -1,6 +1,7 @@
 import {
   GamePlaytestToolkit,
   GameToolkit,
+  GameRecipeToolkit,
   GameWebPlaytestTool,
   GameTryInputTool,
   GameReviewAnswerToolkit,
@@ -852,6 +853,8 @@ export const layerGameReviewAnswers = toolkitRegistration(
   GameHandlers.layerReviewAnswers,
 );
 
+export const layerGameRecipes = toolkitRegistration(GameRecipeToolkit, GameHandlers.layerRecipes);
+
 export const layerGamePlaytest = imageToolRegistration(
   registerGameWebPlaytest(),
   GameHandlers.layerPlaytest,
@@ -860,6 +863,7 @@ export const layerGamePlaytest = imageToolRegistration(
 const layerGameToolkit = Layer.mergeAll(
   layerGameReviewAnswers,
   layerGamePlaytest,
+  layerGameRecipes,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );
 

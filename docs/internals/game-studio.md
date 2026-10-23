@@ -199,8 +199,10 @@ provider/model by default; unavailable credentials mean unavailable review, neve
 model. Critic and comparison children start with fresh evidence-only context. The critic can test
 hypotheses through bounded headless `game_try_input` calls on the frozen build and viewport.
 Server-captured frames extend its hashed round evidence and are valid citations. Comparison ballots
-remain blind and frozen-evidence-only; they cannot call `game_try_input`. Builders and repair children
-can use it before `game_submit`. Repairs write in place,
+remain blind and frozen-evidence-only; they cannot call `game_try_input` or the read-only recipe
+tools. Builders, repair children and critics can search the static recipe catalog for a mechanism
+or fix; retrieval reads no game and starts no work. Builders and repair children
+can use `game_try_input` before `game_submit`. Repairs write in place,
 one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
 controls reduce position bias and must tie. Both ballots must prefer the challenger overall,
 or both must judge more listed defects fixed on the challenger without both reporting something

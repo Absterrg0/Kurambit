@@ -76,12 +76,9 @@ Examples (write 5 to 12 total for this game, not one of each; two per kind shown
 
 ## Art direction
 
-Six palette roles as hex values, each with a job: background, playfield, player, hazard,
-pickup, goal. Say which is darkest and which is brightest and keep that value order.
-Name the goal landmark: what it looks like, what light or shape makes it read from the
-start of the level, and how the player first sees it. Give one telegraph for every
-hazard. Say what the starter template's presentation kit already provides and what this
-game changes about it.
+This game's look and sound in its own terms: the visual idea the brief asks for, how the
+player, hazards, pickups and the goal read at gameplay scale, and which assets or effects
+carry it. Say what changes from the starter template.
 
 ## Audio
 
@@ -114,7 +111,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
     input.reviewDesign === true
       ? "Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab."
       : "Nobody has to approve it: as soon as DESIGN.md is written, build the game in this same turn by following AGENTS.md's steps.";
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. In Art direction, give the six palette roles as hex values with their jobs (background, playfield, player, hazard, pickup, goal), say which value is darkest and which is brightest, and name the goal landmark: how it reads from a distance and how the player first sees it. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. ${next}`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Make Art direction specific to this game's brief; the starter's look is a placeholder, not a requirement. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. ${next}`;
 }
 
 /** The manifest a new game starts from; the creation record also reads its probe flag. */
@@ -152,8 +149,8 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const designLine = !planFirst
     ? ""
     : input.reviewDesign === true
-      ? "\n\nDESIGN.md is your plan. Keep its section headings. When scope changes, update it and ask the creator to re-approve it on the Design tab; building waits until then."
-      : "\n\nDESIGN.md is your plan. Keep its section headings. When scope changes, update it; the server records each revision and nobody has to approve it.";
+      ? "\n\nDESIGN.md is your plan. Keep its section headings. Scope changes need the creator to re-approve on the Design tab before building."
+      : "\n\nDESIGN.md is your plan. Keep its section headings and update it when scope changes; nobody has to approve it.";
   const manifest = scaffoldManifest(input);
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
@@ -161,25 +158,29 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     ...(planFirst ? { "DESIGN.md": designSkeleton(manifest.name) } : {}),
     "AGENTS.md": `# Game Studio project
 
-Build the game in BRIEF.md with Godot 4.7 (GDScript, Compatibility renderer). The engine project is godot/; game.json is the studio manifest. TEMPLATE.md describes the **${templateName}** starter you inherit: reuse what fits, restyle or replace the rest.${designLine}
+Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the engine project; game.json the studio manifest. TEMPLATE.md describes the **${templateName}** starter: reuse what fits, restyle or replace the rest.${designLine}
 
 ## Steps
 
 1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (target Web).
-2. **Show the state.** Every value the brief names (score, lives, turn, laps, timer...) is on-screen text that updates when it changes, and lives in GameState when the template has one. Win and lose end on a result screen with the totals.
-3. **Playtest and look.** Run game_web_playtest with steps that play the core loop, then open the screenshots it returns and look at them. Before your first game_submit, use game_try_input to test any uncertain gameplay from a fresh headless boot and inspect its before/after frames. It also reports GameState keys that are "not on screen".
-4. **Check core play**: report broken or unreadable behaviour honestly. Do not start an open-ended repair loop. The server owns bounded review after your turn ends.
-5. **Submit and end your turn.** When the core loop is playable, call game_submit with a one-line note on what the game is, then summarize with the game_preview URL. The studio reviews and repairs it; do not start your own improvement loop.
+2. **Show the state.** Every brief value (score, lives, turn, laps, timer...) is on-screen text that updates, and in GameState when the template has one. Win and lose end on a result screen with totals.
+3. **Playtest and look.** Run game_web_playtest through the core loop and open its screenshots. Before game_submit, test anything uncertain with game_try_input from a fresh boot and inspect its frames.
+4. **Check core play**: report broken or unreadable behaviour honestly. Do not start a repair loop; the server runs bounded review after your turn.
+5. **Submit and end your turn.** When the loop is playable, call game_submit with a one-line note and summarize with the game_preview URL. Do not start your own improvement loop.
+
+Optional know-how: game_recipe_search and game_recipe_get return runnable references for unfamiliar mechanics. Copy the mechanism, choose presentation from BRIEF.md, tune, verify.
+
+Task modes: create, feature, bugfix, polish. A focused request is not a redesign; keep the rest working. Never claim a check you did not run: say when you did not inspect frames or play it.
 
 ## Rules that prevent breakage
 
-- Do engine work with the Game Studio tools: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_try_input, game_submit, game_preview. Never run godot from the shell; those runs are not recorded.
-- If the template ships scripts/studio_probe.gd, keep it and its autoload, and extend GameState instead of replacing it: the playtest reads both.
-- Godot imports models only as GLB under godot/assets/models/. Make them with game_blender_run; .blend sources stay in art/blender/, never inside godot/.
+- Use the game_* tools for engine work: game_status, game_godot_import after asset or engine changes, game_godot_check, game_godot_test, game_export, game_web_playtest, game_try_input, game_submit, game_preview. Never run godot from the shell.
+- Keep scripts/studio_probe.gd and its autoload; extend GameState, do not replace it.
+- Godot imports models as GLB under godot/assets/models/. Make them with game_blender_run; .blend sources stay in art/blender/.
 - builds/ and godot/.godot/ are generated; do not edit them.
-- If a tool is missing, tell the user to install it in Settings > General > Game tools.
+- Missing tool: install it in Settings > General > Game tools.
 
-Certification, not completion: game_godot_test runs tests/smoke_test.gd; game_scenarios_run replays godot/tests/scenarios/*.json. Missing reads as missing, not failed.
+Certification: game_godot_test runs tests/smoke_test.gd; game_scenarios_run replays scenarios/*.json. Missing reads as missing, not failed.
 `,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",

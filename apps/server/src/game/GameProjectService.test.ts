@@ -273,9 +273,12 @@ it.effect(
         // Planning is the default, so the first turn asks for DESIGN.md, not a build.
         expect(launch?.initialMessage?.text).toContain("DESIGN.md");
         expect(launch?.initialMessage?.text).toContain("Keep the scaffold's section headings");
-        // The design turn has to ask for the presentation decisions the templates rely on.
-        expect(launch?.initialMessage?.text).toContain("six palette roles");
-        expect(launch?.initialMessage?.text).toContain("goal landmark");
+        // Presentation belongs to the brief, not to starter palette or landmark rules.
+        expect(launch?.initialMessage?.text).toContain(
+          "Make Art direction specific to this game's brief",
+        );
+        expect(launch?.initialMessage?.text).not.toContain("six palette roles");
+        expect(launch?.initialMessage?.text).not.toContain("goal landmark");
         // Without design review the same turn goes on to build; nobody approves.
         expect(launch?.initialMessage?.text).toContain("build the game in this same turn");
         // The design turn fills the scaffold instead of inventing its own structure;
@@ -284,9 +287,15 @@ it.effect(
         expect(design).toContain("## Pitch");
         expect(design).toContain("## Milestones");
         expect(design).toContain("Keep these headings");
+        expect(design).not.toContain("Six palette roles");
+        expect(design).not.toContain("goal landmark");
         const agents = yield* readFile(NodePath.join(created.root, "AGENTS.md"));
         expect(agents).toContain("Keep its section headings");
         expect(agents).toContain("nobody has to approve it");
+        // The two standing lessons and the optional know-how hint travel with every game.
+        expect(agents).toContain("A focused request is not a redesign");
+        expect(agents).toContain("Never claim a check you did not run");
+        expect(agents).toContain("game_recipe_search");
         // A weak model follows a short brief: five numbered steps, at most 350 words.
         expect(agents.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
         expect(agents).toMatch(/\n1\. [\s\S]*\n5\. /);

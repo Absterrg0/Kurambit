@@ -15,6 +15,7 @@ import * as GameReviewSessions from "./game/GameReviewSessions.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
+import * as GameRecipes from "./game/GameRecipes.ts";
 import * as GitRepositoryService from "./project/GitRepositoryService.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 
@@ -561,6 +562,7 @@ const layerGameServices = Layer.mergeAll(
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provideMerge(GamePreview.layer),
+  Layer.provideMerge(GameRecipes.layer),
   Layer.provide(GameProcesses.layer),
   // Web playtest drives the same headless browser the html toolkit drives.
   Layer.provide(PreviewBrowser.layer),

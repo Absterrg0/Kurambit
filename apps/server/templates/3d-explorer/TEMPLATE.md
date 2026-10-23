@@ -172,70 +172,26 @@ control via the project setting `gui/theme/custom`; the HUD adds a font outline 
 `theme_override_*` on its root. No font files ship with the template — drop a `.ttf` in
 `godot/assets/fonts/` and set it as the theme's `default_font` if the game needs one.
 
-## Presentation kit
+## Presentation assets
 
-The explorer is a dusk diorama. The kit is deliberately small and lives in
-`materials/`, so a new prop inherits the look instead of starting a second one:
+The starter ships a small presentation kit you may keep, change or replace.
+`materials/palette.tres` (script `scripts/palette.gd`) holds the named colour roles the gate
+light, HUD and life pips read. `detail.gdshader` is the shared world shader: `base_color` /
+`accent_color`, `noise_scale`, `masonry` and `slope_darkening`, with `ground_grass`, `dirt`,
+`stone_light`, `stone_dark` and `wood` as its instances. `lava.gdshader` is the hazard
+surface and `beacon.gdshader` the goal shaft, with `beacon_locked` / `beacon_open` states.
+`outline.gdshader` and a small warm `OmniLight3D` keep the player body readable.
 
-- `materials/palette.tres` (script `scripts/palette.gd`) is the functional role list:
-  `background_deep` / `background_far` (sky and far haze), `playfield` /
-  `playfield_deep` (grass and soil), `player` / `player_accent`, `hazard` (the one
-  reserved warning hue), `pickup`, `goal` (the open gate), `ui_accent`, `ink` and
-  `glow`. The gate's state light, the HUD's low-vitality colour and the life pips read
-  these roles. Restyle the UI and goal state by editing this resource; restyle the
-  world through the shader parameters below.
+Choose this game's presentation from BRIEF.md. The kit's current look is a placeholder, not
+a requirement: restyle the palette and shader parameters, or replace the materials.
 
-- `detail.gdshader` is the shared world shader. `base_color` / `accent_color` carry the
-  material's two values, `noise_scale` controls how large the grain is in world metres,
-  and `masonry` adds staggered courses (1.6 m by 0.8 m) so a 60 m wall or path reads as
-  built stone instead of a flat box. `slope_darkening` gives every block a lit top and a
-  shadowed side in every light. `ground_grass`, `dirt`, `stone_light`, `stone_dark` and
-  `wood` are instances of it: restyle by editing their parameters, not by adding a
-  material with new colours.
-- `lava.gdshader` is the hazard surface: unshaded, self-lit, with a gentle vertex swell
-  and drifting veins. Its warm `Glow` light is what casts the hazard's colour onto the
-  bridge and the player. A new hazard should reuse the hot palette and bring its own
-  warning light.
-- `beacon.gdshader` is the goal's landmark shaft: additive-free, soft at both ends, so it
-  reads as light rather than a cone mesh. `beacon_locked` / `beacon_open` are the two
-  states, and `goal.gd` swaps them with the gate.
-- The player is readable against every ground colour through two cheap tricks:
-  `outline.gdshader` (an inverted-hull dark shell on the body) and a small warm
-  `OmniLight3D` halo. Keep both when the body becomes a Blender model; the outline is
-  what survives a pale sand or a lit path behind the hero.
-- Value order in the scene: sky and far walls darkest, stone mid, ground mid-warm, the
-  player and relics brightest, the lava the most saturated. New props should pick a value
-  from that ladder rather than a new saturation.
-- Keep the ground mid-value; the player must differ from it in brightness, not only hue;
-  noise ±10%, large features.
-- Ambient, key and fill are set once in `level_01.tscn`. If you need a mood change, change
-  the environment and the two lights together; adding a third shadow-casting light
-  flattens those shadows and costs the Web build.
+## Level facts
 
-## Level layout recipe
-
-Each level, or each section of a level, introduces one mechanic and then earns it:
-
-1. **Teach.** A safe, low-stakes instance: a shallow gap, a lake edge with a clear
-   landing, or a relic on the path. The lava pool sits below a bridge the player can cross
-   without touching it.
-2. **Vary.** The same mechanic with one new constraint: the second gap is wider, the relic
-   is one jump above the safe path, or the route asks the player to leave the bridge.
-3. **Test.** Combine it with the level's other verbs, then open onto a checkpoint and the
-   gate. A test never introduces a second new mechanic at the same time.
-
-Keep these layout rules:
-
-- Put a safe recovery spot (flat ground, a checkpoint or a non-damaging platform)
-  immediately before every challenge; a blind drop into lava is a layout bug.
-- Keep the beacon or the gate visible from the spawn, and once per section give the player
-  something tall to aim at: a pillar, a monolith, the beacon.
-- Telegraph hazards with the reserved hot palette, the lava's own light and a visible
-  landing zone. A hazard hidden behind a wall or below the camera is not telegraphing.
-- Relics and lamps lead the eye along the intended route. Put them on the path, not in a
-  corner the player cannot see.
-- Keep the camera comfortable at ground level: the third-person arm is 5.6 m, so build
-  courtyards and sightlines at metres, not kilometres, and let the props frame the path.
+- The third-person camera arm is 5.6 m; build courtyards and sightlines at metres, not
+  kilometres.
+- Steps of 1 m or less and gaps of 2.5 m or less are comfortable at walking speed.
+- Ambient, key and fill are set once in `level_01.tscn`; a third shadow-casting light
+  flattens the shadows and costs the Web build.
 
 ## Tests
 

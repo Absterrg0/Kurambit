@@ -1,5 +1,6 @@
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
+import * as GameRecipes from "../../../game/GameRecipes.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -39,6 +40,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
   Layer.mock(GameReviewApi.GameReviewApi)({}),
   Layer.mock(GameReviewSessions.GameReviewSessions)({ toolRole: () => Effect.succeed(null) }),
+  Layer.mock(GameRecipes.GameRecipes)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.empty,

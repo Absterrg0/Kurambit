@@ -182,66 +182,27 @@ through `theme_override_*` on its root. No font files ship with the template —
 `.ttf` in `godot/assets/fonts/` and set it as the theme's `default_font` if the game
 needs one.
 
-## Presentation kit
+## Presentation assets
 
-The template ships a small dusk-art kit; every level is expected to keep it. The look is
-built from value layers, not from one texture over everything:
+The starter ships a presentation kit you may keep, change or replace. `assets/palette.tres`
+(script `scripts/palette.gd`) holds the named colour roles the runtime effects and HUD read.
+`tools/generate_art.mjs` draws every tile and sprite and writes the palette from the same
+object; `tools/build_resources.gd` builds the TileSet and SpriteFrames from that output. A
+full restyle edits the generator and reruns both tools; a colour-only pass can edit
+`palette.tres` directly. `ui/theme.tres` styles every control through `gui/theme/custom`.
 
-- `assets/palette.tres` (script `scripts/palette.gd`) is the functional palette. The
-  roles, in value order, are `background_deep` / `background_far` (sky and far haze, the
-  darkest and least saturated), `playfield` / `playfield_deep` (grass and soil, mid),
-  `player` / `player_accent` (the brightest figures in the frame), `hazard` (one reserved
-  vermillion: only hazards may use it), `pickup` (warm gold), `goal` (cool cyan), and
-  `ui_accent` / `ink` / `glow` for the HUD, outlines and warm light.
-- The runtime effects read those roles: the hero's halo, coin halos, checkpoint and goal
-  glows, and the HUD timer colour. The PNGs are drawn by `tools/generate_art.mjs`, which
-  writes `palette.tres` from the same palette object, so a full restyle edits that object
-  and reruns the generator plus `tools/build_resources.gd`. A colour-only pass can edit
-  `palette.tres` directly. Prefer the palette over new colour literals in a scene.
+Choose this game's presentation from BRIEF.md. The kit's current look is a placeholder, not
+a requirement: replace the palette, sprites, effects and UI to match the brief.
 
-Rules the art follows; keep them when you add a tile, enemy or prop:
+## Level facts
 
-- **Value hierarchy.** Background bands stay darker and flatter than the playfield.
-  Grass is the brightest playfield line, the first soil row keeps a little structure, and
-  everything below it is low-frequency bedrock. The camera's 77% floor line then shows
-  less than a quarter of the screen as foreground soil, never a brick slab.
-- **Silhouettes.** The hero has an ink outline, a lit rim and a warm halo, and renders at
-  1.75x the sprite cell (see `scenes/player/player.tscn`); do not shrink that art scale.
-  Hazards have a dark base, a hot blade edge and the reserved hue. Pickups bob and carry
-  a halo. The goal is a tall lantern-topped door with a pulsing halo and a vertical
-  beacon, so it is a landmark rather than a door-sized rectangle.
-- **Texture frequency.** At most two scales of detail per screen. Ground and background
-  use 16px+ shapes; 1px speckle belongs on objects. A dense 1px field over a large area
-  reads as noise and pulls the eye away from the player.
-- **Sky.** A soft vertical gradient, a stepped moon halo (never a hard white disc) and
-  three parallax bands with different silhouettes: ridge haze, trees, undergrowth. Each
-  band repeats on its own texture width, so a wider texture buys more variety.
-
-## Level layout recipe
-
-Each level, or each section of a level, introduces one mechanic and then earns it:
-
-1. **Teach.** A safe, low-stakes instance: flat ground, a clear approach, no pit under
-   it. The first spike run sits on the plateau with a plank above it; the first gap is a
-   single tile.
-2. **Vary.** The same mechanic with one new constraint: the second spike run is longer,
-   or a coin line pulls the player toward the edge without requiring the risk.
-3. **Test.** Combine it with the level's other verbs, then open into a safe landing and
-   the exit. A test never introduces a second new mechanic at the same time.
-
-Keep these layout rules:
-
-- Put flat recovery ground or a checkpoint immediately before every challenge. A blind
-  jump or a hazard that appears from under the camera is a layout bug, not difficulty.
-- Keep the goal or the trail sign visible from the start. `t` in an objects map places
-  the signpost; the door itself is visible once the camera turns the last corner.
-- Telegraph hazards with the reserved hue and a lit rim, and show the landing zone beyond
-  them. The player should know a hazard exists before it can hurt them.
-- Place coins and decorations on the intended route, not off it: a coin line is the
-  cheapest signpost a level has.
-- Keep the camera floor line and `camera_bounds` in step with the map. Maps need six rows
-  of ground below their floor row, because the camera clamps to the level's bottom and
-  the lower rows are what it sees during a fall.
+- `tools/level_01.map` is built to the player's default jump (three tiles up, five across).
+  Retune `jump_velocity`, `gravity` or `apex_gravity_multiplier` and rebuild the map to
+  match, or the level becomes unfinishable.
+- Maps need six rows of ground below their floor row, and `camera_bounds` must match: the
+  camera clamps to the level's bottom and shows those rows during a fall.
+- The player's sprite renders at 1.75x its 16x16 cell (`scenes/player/player.tscn`); rework
+  that scale only together with the collision shape and the map.
 
 ## Tests
 

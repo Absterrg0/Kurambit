@@ -8,6 +8,10 @@ import {
   GameBlenderResult,
   GameCheckResult,
   GameOperationFailure,
+  GameRecipeGetInput,
+  GameRecipeGetResult,
+  GameRecipeSearchInput,
+  GameRecipeSearchResult,
   GameSceneInspectInput,
   GameSceneInspectResult,
   GameScenariosRunResult,
@@ -26,6 +30,7 @@ import {
   GameWebPlaytestResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
+import * as GameRecipes from "../../../game/GameRecipes.ts";
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
@@ -209,6 +214,40 @@ export const GameTryInputTool = Tool.make("game_try_input", {
     );
   });
 export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool, GameTryInputTool);
+
+const recipeDependencies = [GameRecipes.GameRecipes];
+/** Ballots keep frozen comparison context; retrieval is hidden and refused. */
+const hiddenFromBallots = () => {
+  const fiber = Fiber.getCurrent();
+  return (
+    fiber === undefined ||
+    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
+      ?.gameReviewRole !== "ballot"
+  );
+};
+const GameRecipeSearchTool = Tool.make("game_recipe_search", {
+  description:
+    "Search the optional game know-how catalog when an unfamiliar genre or mechanic blocks progress. genre, mechanic and defect match authored tags exactly; text matches a declared alias literally. Returns at most five ids, titles, matching tags, engines and nextCursor. Read-only; it reads no game files and starts no agent, build or model call.",
+  parameters: GameRecipeSearchInput,
+  success: GameRecipeSearchResult,
+  failure: Schema.String,
+  failureMode: "return",
+  dependencies: recipeDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
+const GameRecipeGetTool = Tool.make("game_recipe_get", {
+  description:
+    "Read one recipe by id. Returns the complete Godot reference, setup, input route, provenance and version, or guidance only with includeReference:false. Adapt the mechanism to this game's brief and verify the observed behaviour; fetching never copies code into the game. Read-only; reads no game files.",
+  parameters: GameRecipeGetInput,
+  success: GameRecipeGetResult,
+  failure: Schema.String,
+  failureMode: "return",
+  dependencies: recipeDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
+export const GameRecipeToolkit = Toolkit.make(GameRecipeSearchTool, GameRecipeGetTool);
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   ReviewStatusTool,

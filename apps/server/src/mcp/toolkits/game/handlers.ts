@@ -1,10 +1,16 @@
 import * as Effect from "effect/Effect";
+import * as GameRecipes from "../../../game/GameRecipes.ts";
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { GameToolkit, GamePlaytestToolkit, GameReviewAnswerToolkit } from "./tools.ts";
+import {
+  GameToolkit,
+  GamePlaytestToolkit,
+  GameRecipeToolkit,
+  GameReviewAnswerToolkit,
+} from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) =>
     McpInvocationContext.requireThreadScope(context, "Game Studio tools"),
@@ -150,6 +156,24 @@ export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
  * real image content; see McpHttpServer.registerGameWebPlaytest.
  */
 export const layerPlaytest = McpToolAccess.toLayer(GamePlaytestToolkit, playtestHandlers);
+
+// A read-only toolkit over the static catalog: the transport only maps input to
+// one service method, and the service can never read the game or start work.
+const recipeHandlers = {
+  game_recipe_search: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const recipes = yield* GameRecipes.GameRecipes;
+      return yield* recipes.search(input).pipe(Effect.mapError((error) => error.message));
+    }),
+  ),
+  game_recipe_get: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const recipes = yield* GameRecipes.GameRecipes;
+      return yield* recipes.get(input).pipe(Effect.mapError((error) => error.message));
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameRecipeToolkit.tools>;
+export const layerRecipes = McpToolAccess.toLayer(GameRecipeToolkit, recipeHandlers);
 
 const reviewAnswer = (role: "critic" | "ballot") =>
   McpToolAccess.readsAsCaller((input: unknown) =>
