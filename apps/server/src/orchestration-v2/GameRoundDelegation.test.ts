@@ -11,7 +11,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type RunId,
+  RuntimeRequestId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -451,12 +453,72 @@ it.effect("a round child is read-only: a follow-up is refused and starts no repl
           dispatchMode: { type: "start_immediately" },
           createdBy,
           creationSource,
+          ...(creationSource === "server" ? { manualContinuationOfRunId: child.runs[0]!.id } : {}),
         }),
       );
       assert.equal(refused._tag, "OrchestratorGameRoundChildReadOnlyError");
     }
+    const requestId = RuntimeRequestId.make("request:round-child-answer");
+    const nodeId = child.runs[0]!.rootNodeId!;
+    yield* seeded.projections.apply({
+      id: EventId.make("event:round-child-question"),
+      type: "runtime-request.updated",
+      threadId: child.thread.id,
+      occurredAt: seeded.now,
+      payload: {
+        id: requestId,
+        nodeId,
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "user_input",
+        status: "pending",
+        responseCapability: { type: "message" },
+        createdAt: seeded.now,
+        resolvedAt: null,
+      },
+    });
+    yield* seeded.projections.apply({
+      id: EventId.make("event:round-child-question-item"),
+      type: "turn-item.updated",
+      threadId: child.thread.id,
+      occurredAt: seeded.now,
+      payload: {
+        id: TurnItemId.make("item:round-child-question"),
+        threadId: child.thread.id,
+        runId: child.runs[0]!.id,
+        nodeId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status: "waiting",
+        title: null,
+        startedAt: seeded.now,
+        completedAt: null,
+        updatedAt: seeded.now,
+        type: "user_input_request",
+        requestId,
+        questions: [{ id: "q1", header: "Direction", question: "Which way?", options: [] }],
+      },
+    });
+    const refusedAnswer = yield* Effect.flip(
+      seeded.orchestrator.dispatch({
+        type: "runtime-request.respond",
+        commandId: CommandId.make("answer-round-child"),
+        threadId: child.thread.id,
+        requestId,
+        answers: { q1: "Left." },
+      }),
+    );
+    assert.equal(refusedAnswer._tag, "OrchestratorGameRoundChildReadOnlyError");
+    assert.equal(
+      (yield* seeded.projections.getRuntimeRequest(child.thread.id, requestId))?.status,
+      "pending",
+    );
     const after = yield* seeded.projections.getThreadProjection(child.thread.id);
     assert.lengthOf(after.runs, 1);
+    assert.lengthOf(after.messages, 1);
     assert.lengthOf((yield* seeded.projections.getThreadProjection(threadId)).subagents, 1);
   }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );

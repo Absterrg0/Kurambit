@@ -23,7 +23,6 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -130,7 +129,7 @@ interface Scripted {
   /** This role's dispatch commits, then its confirmation write fails. */
   failConfirmRoles: ReadonlySet<string>;
   /** While set, every child status read waits for it. */
-  shellGate: Deferred.Deferred<void> | null;
+  shellGate: { entered: Queue.Queue<void>; release: Deferred.Deferred<void> } | null;
   /** The thread's runs; a test may append a later text-only turn. */
   readonly runs: Array<{
     readonly id: RunId;
@@ -614,12 +613,17 @@ const withLoop = <A, E>(
               } as never;
             }),
           getThreadShell: () =>
-            (scripted.shellGate === null ? Effect.void : Deferred.await(scripted.shellGate)).pipe(
-              Effect.as({
+            Effect.gen(function* () {
+              const gate = scripted.shellGate;
+              if (gate !== null) {
+                yield* Queue.offer(gate.entered, undefined);
+                yield* Deferred.await(gate.release);
+              }
+              return {
                 projectId: "project:repair",
                 lineage: { relationshipToParent: "subagent", parentThreadId: null },
-              } as never),
-            ),
+              } as never;
+            }),
           interruptThread: (input) => {
             scripted.interrupts.push({
               threadId: input.threadId,
@@ -1160,17 +1164,20 @@ it.live("a restart re-arms the hold before reading whether any child looks done"
         }),
       );
       // The restart's child status reads stall; recovery must not depend on them.
-      const gate = yield* Deferred.make<void>();
+      const gate = {
+        entered: yield* Queue.unbounded<void>(),
+        release: yield* Deferred.make<void>(),
+      };
       scripted.shellGate = gate;
       yield* fixture.withServices((services) =>
         Effect.gen(function* () {
-          const recovered = yield* services.loop
-            .recover()
-            .pipe(Effect.timeoutOption(Duration.seconds(5)));
-          expect(Option.isSome(recovered)).toBe(true);
-          // Held: the action waits for the settle's verdict, then is admitted.
+          yield* services.loop.recover();
+          yield* Queue.take(gate.entered);
           const action = yield* Effect.forkChild(userAction(services, root));
-          yield* Deferred.succeed(gate, undefined);
+          // The action reached the recovered hold and awaits its child's verdict.
+          yield* Queue.take(gate.entered);
+          expect(action.pollUnsafe()).toBeUndefined();
+          yield* Deferred.succeed(gate.release, undefined);
           yield* Fiber.join(action);
         }),
       );

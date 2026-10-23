@@ -16,6 +16,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -511,66 +512,81 @@ it.effect("an admitted message turn commits after admission", () =>
   }),
 );
 
-it.effect("an async answer is a new message turn and is refused by turn admission", () =>
-  Effect.gen(function* () {
-    const dispatched: Array<string> = [];
-    const admitted: Array<string> = [];
-    const threadId = ThreadId.make("thread:thread-management:async-answer");
-    const layerTest = ThreadManagementService.layer.pipe(
-      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
-      Layer.provide(
-        Layer.mock(Orchestrator.OrchestratorV2)({
-          getThreadRecords: () =>
-            Effect.succeed({
-              thread: {
-                id: threadId,
-                projectId: ProjectId.make("project:thread-management:async-answer"),
-                worktreePath: null,
-              },
-              runtimeRequests: [
-                { id: "request:async", responseCapability: { type: "message" } },
-                { id: "request:live", responseCapability: { type: "live" } },
-              ],
-            } as unknown as OrchestrationV2ThreadProjection),
-          dispatch: (command) =>
-            Effect.sync(() => {
-              dispatched.push(command.type);
-              return { sequence: 1, storedEvents: [] } as never;
-            }),
-        }),
-      ),
-      Layer.provide(enabledChokepointSettings),
-      Layer.provideMerge(layerReceiptsTest),
-      Layer.provide(
-        Layer.succeed(TurnAdmission.TurnAdmission, {
-          admit: (thread) =>
-            Effect.sync(() => admitted.push(String(thread.id))).pipe(
-              Effect.andThen(
-                Effect.fail(new TurnAdmission.TurnAdmissionRejectedError({ detail: "game held" })),
-              ),
-            ),
-        }),
-      ),
-    );
-    yield* Effect.gen(function* () {
-      const threads = yield* ThreadManagementService.ThreadManagementService;
-      const respond = (requestId: string, commandId: string) =>
-        threads.dispatch({
-          type: "runtime-request.respond",
-          commandId: CommandId.make(commandId),
-          threadId,
-          requestId: requestId as never,
-          answers: { q1: "Use the left door." },
-        } as never);
-      const refused = yield* Effect.flip(respond("request:async", "command:async-answer"));
-      expect(refused).toBeInstanceOf(Orchestrator.OrchestratorCommandRejectedError);
-      expect(dispatched).toEqual([]);
-      // A live answer goes to the running provider turn: no new turn, no admission.
-      yield* respond("request:live", "command:live-answer");
-      expect(admitted).toEqual([String(threadId)]);
-      expect(dispatched).toEqual(["runtime-request.respond"]);
-    }).pipe(Effect.provide(layerTest));
-  }),
+it.effect.each(["default", "refuse"] as const)(
+  "async answers respect %s turn admission while live answers keep running",
+  (mode) =>
+    Effect.gen(function* () {
+      const dispatched: Array<string> = [];
+      const admitted: Array<string> = [];
+      const threadId = ThreadId.make("thread:thread-management:async-answer");
+      const layerTest = ThreadManagementService.layer.pipe(
+        Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+        Layer.provide(
+          Layer.mock(Orchestrator.OrchestratorV2)({
+            getThreadRecords: () =>
+              Effect.succeed({
+                thread: {
+                  id: threadId,
+                  projectId: ProjectId.make("project:thread-management:async-answer"),
+                  worktreePath: null,
+                },
+                runtimeRequests: [
+                  { id: "request:async", responseCapability: { type: "message" } },
+                  { id: "request:live", responseCapability: { type: "live" } },
+                ],
+              } as unknown as OrchestrationV2ThreadProjection),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatched.push(command.type);
+                return { sequence: 1, storedEvents: [] } as never;
+              }),
+          }),
+        ),
+        Layer.provide(enabledChokepointSettings),
+        Layer.provideMerge(layerReceiptsTest),
+        Layer.provide(
+          mode === "default"
+            ? Layer.empty
+            : Layer.succeed(TurnAdmission.TurnAdmission, {
+                admit: (thread) =>
+                  Effect.sync(() => admitted.push(String(thread.id))).pipe(
+                    Effect.andThen(
+                      Effect.fail(
+                        new TurnAdmission.TurnAdmissionRejectedError({ detail: "game held" }),
+                      ),
+                    ),
+                  ),
+              }),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagementService.ThreadManagementService;
+        const respond = (requestId: string, commandId: string) =>
+          threads.dispatch({
+            type: "runtime-request.respond",
+            commandId: CommandId.make(commandId),
+            threadId,
+            requestId: RuntimeRequestId.make(requestId),
+            answers: { q1: "Use the left door." },
+          });
+        if (mode === "refuse") {
+          const refused = yield* Effect.flip(respond("request:async", "command:async-answer"));
+          expect(refused).toBeInstanceOf(Orchestrator.OrchestratorCommandRejectedError);
+          expect(dispatched).toEqual([]);
+        } else {
+          yield* respond("request:async", "command:async-answer");
+          expect(dispatched).toEqual(["runtime-request.respond"]);
+        }
+        // A live answer goes to the running provider turn: no new turn, no admission.
+        yield* respond("request:live", "command:live-answer");
+        expect(admitted).toEqual(mode === "refuse" ? [String(threadId)] : []);
+        expect(dispatched).toEqual(
+          mode === "refuse"
+            ? ["runtime-request.respond"]
+            : ["runtime-request.respond", "runtime-request.respond"],
+        );
+      }).pipe(Effect.provide(layerTest));
+    }),
 );
 
 it.effect(
