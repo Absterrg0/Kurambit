@@ -27,9 +27,9 @@ import { gameRecipeCatalog } from "./recipeCatalog.ts";
 import { GODOT_RECIPE_ENGINE_VERSION } from "./recipes/godot/index.ts";
 
 /**
- * The nine task-62a references. Every one is run against a generated project:
- * the catalog must stay a set of references a model can actually boot, not code
- * that merely looks plausible in a review.
+ * Every shipped reference, in catalog id order. Each one is run against a
+ * generated project: the catalog must stay a set of references a model can
+ * actually boot, not code that merely looks plausible in a review.
  */
 const RECIPE_IDS = [
   "feel.buffer",
@@ -37,6 +37,14 @@ const RECIPE_IDS = [
   "feel.hit-stop",
   "feel.pickup",
   "feel.shake",
+  "loop.card",
+  "loop.dialogue",
+  "loop.first-person",
+  "loop.platformer",
+  "loop.puzzle",
+  "loop.racing",
+  "loop.top-down",
+  "loop.tower",
   "read.hud",
   "read.onboarding",
   "read.silhouette",
@@ -55,6 +63,14 @@ const LINE_BUDGETS: Record<RecipeId, number> = {
   "state.world": 70,
   "read.hud": 70,
   "read.onboarding": 70,
+  "loop.platformer": 130,
+  "loop.top-down": 130,
+  "loop.card": 150,
+  "loop.dialogue": 130,
+  "loop.tower": 150,
+  "loop.racing": 150,
+  "loop.puzzle": 130,
+  "loop.first-person": 130,
 };
 
 const workspaceRoot = (() => {
@@ -127,7 +143,7 @@ const available =
 /** Frames stay outside the checkout for the operator and reviewer. */
 const framesRoot = () =>
   process.env.GAME_STUDIO_RECIPE_FRAMES?.trim() ||
-  NodePath.join(NodeOS.homedir(), ".gs-tmp", "t62a", "frames");
+  NodePath.join(NodeOS.homedir(), ".gs-tmp", "t62b", "frames");
 
 const PROJECT_GODOT = `config_version=5
 
@@ -430,7 +446,9 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(before.jumps).toBe(1);
       expect(after.jumps).toBe(2);
       expect(after.queued_ms).toBe(0);
-      expect(during.some((probe) => Number(probe.gameState.queued_ms) > 0)).toBe(true);
+      // The counter proves the second jump was the queued press spent on the
+      // landing, not a fresh press after touchdown.
+      expect(after.buffered_jumps).toBe(1);
       expect(during.some((probe) => probe.gameState.jumps === 2)).toBe(true);
       break;
     case "feel.coyote":
@@ -454,7 +472,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
     case "feel.shake":
       // The baseline is the impact sample itself: it is already shaking.
       expect(before.impacts).toBe(1);
-      expect(Number(before.amplitude)).toBeGreaterThan(0);
+      expect(during.some((probe) => Number(probe.gameState.amplitude) > 0)).toBe(true);
       expect(after.impacts).toBe(1);
       expect(after.amplitude).toBe(0);
       expect(after.offset_x).toBe(0);
@@ -469,6 +487,121 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(after.gem_present).toBe(false);
       expect(after.effects).toBe(0);
       expect(during.some((probe) => probe.gameState.effects === 1)).toBe(true);
+      break;
+    case "loop.platformer":
+      // The baseline is after the first small step: no pickup, no retry yet.
+      expect(before.score).toBe(0);
+      expect(before.gem_present).toBe(true);
+      expect(before.retries).toBe(0);
+      expect(after.score).toBe(1);
+      expect(after.gem_present).toBe(false);
+      expect(after.jumps).toBe(1);
+      expect(after.retries).toBe(1);
+      expect(after.on_floor).toBe(true);
+      // The retry respawns at the start and the held key keeps control.
+      expect(Number(after.player_x)).toBeGreaterThan(120);
+      expect(Number(after.player_x)).toBeLessThan(280);
+      expect(during.some((probe) => probe.gameState.score === 1)).toBe(true);
+      break;
+    case "loop.top-down":
+      expect(before.target_hp).toBe(3);
+      expect(before.shots).toBe(0);
+      expect(after.target_hp).toBe(0);
+      expect(after.target_down).toBe(true);
+      expect(after.hits).toBe(3);
+      expect(after.score).toBe(1);
+      expect(during.some((probe) => probe.gameState.target_hp === 2)).toBe(true);
+      expect(during.some((probe) => Number(probe.gameState.shots_in_flight) > 0)).toBe(true);
+      break;
+    case "loop.card":
+      // The empty click is the baseline: an untouched turn.
+      expect(before.energy).toBe(3);
+      expect(before.turn).toBe(0);
+      expect(before.enemy_hp).toBe(10);
+      expect(before.played).toBe(0);
+      expect(before.rejected).toBe(0);
+      expect(after.enemy_hp).toBe(7);
+      expect(after.played).toBe(1);
+      expect(after.rejected).toBe(1);
+      expect(after.energy).toBe(3);
+      expect(after.turn).toBe(1);
+      expect(after.hand_size).toBe(3);
+      expect(
+        during.some((probe) => probe.gameState.energy === 2 && probe.gameState.enemy_hp === 7),
+      ).toBe(true);
+      break;
+    case "loop.dialogue":
+      // The first answer is the locked one: the node and its flags must not move.
+      expect(before.node).toBe("start");
+      expect(before.trust).toBe(0);
+      expect(before.blocked).toBe(1);
+      expect(after.node).toBe("end");
+      expect(after.trust).toBe(1);
+      expect(after.lantern).toBe(true);
+      expect(after.rope).toBe(false);
+      expect(after.blocked).toBe(1);
+      expect(during.some((probe) => probe.gameState.node === "help")).toBe(true);
+      expect(during.some((probe) => probe.gameState.node === "reward")).toBe(true);
+      break;
+    case "loop.tower":
+      // The pad click is the purchase, so the baseline already paid for it; the
+      // pre-click 60 gold and zero towers live in the paired frames.
+      expect(before.gold).toBe(20);
+      expect(before.spent).toBe(40);
+      expect(before.towers).toBe(1);
+      expect(before.kills).toBe(0);
+      expect(after.kills).toBe(2);
+      expect(after.wave).toBe(2);
+      expect(after.gold).toBe(30);
+      expect(after.towers).toBe(1);
+      expect(during.some((probe) => probe.gameState.gold === 60)).toBe(true);
+      expect(during.some((probe) => probe.gameState.towers === 0)).toBe(true);
+      expect(during.some((probe) => Number(probe.gameState.shots_in_flight) > 0)).toBe(true);
+      break;
+    case "loop.racing":
+      // The wrong-way press crosses the finish with no checkpoints: no lap.
+      expect(before.laps).toBe(0);
+      expect(before.out_of_order).toBe(1);
+      expect(before.checkpoints).toBe(0);
+      expect(after.laps).toBe(1);
+      expect(after.checkpoints).toBe(3);
+      expect(after.next_checkpoint).toBe(0);
+      expect(Number(after.out_of_order)).toBeGreaterThanOrEqual(1);
+      expect(during.some((probe) => probe.gameState.laps === 1)).toBe(true);
+      break;
+    case "loop.puzzle":
+      expect(before.pushes).toBe(0);
+      expect(before.box_x).toBe(3);
+      expect(before.player_cell_x).toBe(2);
+      expect(after.pushes).toBe(1);
+      expect(after.undos).toBe(1);
+      expect(after.blocked).toBe(1);
+      expect(after.box_x).toBe(3);
+      expect(after.player_cell_x).toBe(2);
+      expect(after.boxes_on_target).toBe(0);
+      expect(
+        during.some(
+          (probe) =>
+            probe.gameState.pushes === 1 &&
+            probe.gameState.box_x === 4 &&
+            probe.gameState.boxes_on_target === 1,
+        ),
+      ).toBe(true);
+      break;
+    case "loop.first-person":
+      // The click captures; the baseline is captured with the view at rest.
+      expect(before.captured).toBe(true);
+      expect(before.yaw_deg).toBe(0);
+      expect(before.pitch_deg).toBe(0);
+      expect(after.captured).toBe(false);
+      expect(Number(after.yaw_deg)).not.toBe(0);
+      expect(Number(after.pitch_deg)).not.toBe(0);
+      expect(Number(after.walked)).toBeGreaterThan(100);
+      expect(
+        during.some(
+          (probe) => probe.gameState.captured === true && Number(probe.gameState.yaw_deg) !== 0,
+        ),
+      ).toBe(true);
       break;
     case "read.silhouette":
       expect(before.in_contact).toBe(false);
@@ -555,7 +688,13 @@ const recipeJourney = (id: RecipeId) =>
         expect(result.consoleMessages.filter((message) => message.level === "error")).toEqual([]);
         expect(result.executedInputSteps, result.message).toBe(
           adapter.tryInput.steps.filter(
-            (step) => "key" in step || "keys" in step || "press" in step || "click" in step,
+            (step) =>
+              "key" in step ||
+              "keys" in step ||
+              "press" in step ||
+              "click" in step ||
+              "mouseMove" in step ||
+              "drag" in step,
           ).length,
         );
         assertMechanism(id, result);

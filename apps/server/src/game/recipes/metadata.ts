@@ -206,4 +206,187 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
       reference: "t50d/verdict.md:228 (missing onboarding); standard contextual prompt.",
     },
   },
+  {
+    id: "loop.platformer",
+    version: 1,
+    title: "Build a move, jump, collect and retry platformer",
+    genres: ["platformer"],
+    mechanics: ["movement", "jump", "pickup", "retry"],
+    defects: ["unresponsive-jump", "no-retry", "unclear-pickup"],
+    aliases: ["platformer loop", "run and jump", "respawn loop"],
+    intent:
+      "One body runs, jumps a gap with a forgiving press, scores a pickup and respawns after a fall.",
+    why: "The smallest platformer that is a game: movement to learn, a gap to read, a reward to want and a failure that costs a second instead of a run.",
+    failure:
+      "Without the retry the first fall ends the session, and without the pickup the gap has no reason to be crossed.",
+    restyle:
+      "Keep the move-jump-collect-retry shape. Choose this game's physics, reward and fail state.",
+    verificationQuestion:
+      "After the pickup is collected, does falling into a pit return control at the start with the score kept?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 platformer loop request (spec60 item 10); standard platformer structure.",
+    },
+  },
+  {
+    id: "loop.top-down",
+    version: 1,
+    title: "Aim and hit a target in a top-down arena",
+    genres: ["top-down", "action"],
+    mechanics: ["movement", "aim", "projectile"],
+    defects: ["unclear-hit", "no-target-response"],
+    aliases: ["twin stick", "top down shooter", "aim and shoot"],
+    intent: "Eight-way movement, an aiming direction and a shot whose hit changes the target.",
+    why: "A top-down action loop reads from the response: the shot must travel, land and show damage, or the player cannot tell aiming from decoration.",
+    failure:
+      "A shot that never visibly changes the target leaves the player guessing whether the action worked.",
+    restyle:
+      "Keep the aim, the travelling shot and the hit feedback. Choose this game's weapon, target and arena.",
+    verificationQuestion:
+      "Does firing at the target visibly reduce its health and finally disable it?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 twin-stick evidence (spec60 item 11); standard top-down action loop.",
+    },
+  },
+  {
+    id: "loop.card",
+    version: 1,
+    title: "Drag a card to its target and spend its cost",
+    genres: ["card", "turn-based"],
+    mechanics: ["drag-and-drop", "resource-cost", "turn"],
+    defects: ["double-spend", "illegal-play"],
+    aliases: ["card game loop", "energy cost", "drag to play"],
+    intent:
+      "Drag a card onto a target, pay its cost once, and start a new turn with restored resources.",
+    why: "The turn loop is a closed resource budget: every play removes exactly its cost, and a play the budget cannot afford leaves the board untouched.",
+    failure:
+      "A double spend or a free illegal play makes the counter meaningless and the choices unreadable.",
+    restyle:
+      "Keep the drag-to-target, one cost per play and the turn refill. Choose this game's cards and resources.",
+    verificationQuestion:
+      "Is a legal play charged once, and an unaffordable play ignored without changing energy or the board?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 card loop request (spec60 item 12); standard turn and resource loop.",
+    },
+  },
+  {
+    id: "loop.dialogue",
+    version: 1,
+    title: "Gate dialogue choices on state the scene keeps",
+    genres: ["dialogue", "rpg"],
+    mechanics: ["choice-graph", "conditions", "consequences"],
+    defects: ["dead-choice", "unclear-consequence"],
+    aliases: ["dialogue tree", "branching choices", "conditional choice"],
+    intent:
+      "A choice graph where each option moves to a node, some options are gated by flags, and a locked option changes nothing.",
+    why: "Conditions make a conversation feel like it remembers the player, and showing a locked option tells them which earlier choice would have opened it.",
+    failure:
+      "A choice that looks available but does nothing, or one that jumps nodes without its flag, breaks trust in the fiction.",
+    restyle:
+      "Keep the flags, the availability test and one node change per choice. Choose this game's voices and stakes.",
+    verificationQuestion:
+      "Does an open choice change the node while a locked choice leaves the node and its flags unchanged?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 dialogue loop request (spec60 item 13); standard choice graph.",
+    },
+  },
+  {
+    id: "loop.tower",
+    version: 1,
+    title: "Place a tower, spend gold and clear a wave",
+    genres: ["tower-defense", "strategy"],
+    mechanics: ["placement", "resource-cost", "targeting", "wave"],
+    defects: ["no-attack", "unclear-targeting"],
+    aliases: ["tower defense loop", "place tower", "wave defense"],
+    intent:
+      "Buy one tower on a pad, watch it pick a target and fire, and roll into the next wave when the lane is clear.",
+    why: "The loop is placement, spend, targeting and a wave clock. Each part has to be visible or the player cannot judge a purchase.",
+    failure:
+      "A purchase that does not spend, or a tower whose shots never reach a creep, makes the strategy unreadable.",
+    restyle:
+      "Keep the pad purchase, the leading-target rule and the wave break. Choose this game's towers and enemies.",
+    verificationQuestion:
+      "Does one purchase remove its gold exactly once, and does the tower visibly fire at a creep?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference:
+        "R4 tower-defense loop request (spec60 item 14); standard placement and wave loop.",
+    },
+  },
+  {
+    id: "loop.racing",
+    version: 1,
+    title: "Order checkpoints so only a clean lap counts",
+    genres: ["racing"],
+    mechanics: ["steering", "checkpoint-order", "lap"],
+    defects: ["missed-checkpoint", "shortcut-lap"],
+    aliases: ["race loop", "checkpoint order", "lap counting"],
+    intent: "Steer a car around a circuit where only the expected checkpoint advances the lap.",
+    why: "Checkpoints are the difference between a lap and a shortcut. The expected index is the rule; every gate is visible but only one counts.",
+    failure:
+      "A finish that counts after a skipped gate teaches the player to cut the course, and the lap time stops meaning anything.",
+    restyle:
+      "Keep the ordered index and the single finish test. Choose this game's handling, track and lap length.",
+    verificationQuestion:
+      "Does crossing the finish after a skipped checkpoint leave the lap count unchanged?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 racing loop request (spec60 item 15); standard ordered-checkpoint lap.",
+    },
+  },
+  {
+    id: "loop.puzzle",
+    version: 1,
+    title: "Push a crate on a grid with exact undo",
+    genres: ["puzzle"],
+    mechanics: ["grid-push", "blocked-move", "undo"],
+    defects: ["imprecise-undo", "stuck-state"],
+    aliases: ["sokoban", "grid puzzle", "undo move"],
+    intent:
+      "Grid movement pushes a crate one cell when the cell beyond is free, refuses blocked moves, and undo returns the exact previous board.",
+    why: "Push puzzles are only fair when a move can be taken back; undo has to restore the whole board, not just the player.",
+    failure:
+      "An undo that misses a crate, or a push that passes through a wall, makes a solvable level feel broken.",
+    restyle:
+      "Keep the cell rules and the full-board undo. Choose this game's grid, objects and win condition.",
+    verificationQuestion:
+      "After one legal push and undo, are the player, the crate and the target count exactly as before?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 Sokoban evidence (spec60 item 16); standard grid-push puzzle loop.",
+    },
+  },
+  {
+    id: "loop.first-person",
+    version: 1,
+    title: "Capture the mouse, look and walk in 3D",
+    genres: ["first-person", "action"],
+    mechanics: ["mouse-look", "movement", "pointer-capture"],
+    defects: ["dead-camera", "trapped-cursor"],
+    aliases: ["first person controller", "mouse look", "fps camera"],
+    intent:
+      "Click to capture the pointer, look with relative mouse motion, walk on WASD, and release the pointer with Escape.",
+    why: "First-person feel depends on captured relative look. Without a release the player cannot leave the game, which is a trap, not an immersive frame.",
+    failure:
+      "A camera that ignores the mouse, or a capture with no way out, makes the mode unusable.",
+    restyle:
+      "Keep the capture, relative look and the Escape release. Choose this game's speed, sensitivity and world.",
+    verificationQuestion:
+      "Does the view turn with look input, and does Escape release the captured pointer?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "R4 first-person fix 5 (spec60 item 17); standard captured mouse-look controller.",
+    },
+  },
 ];

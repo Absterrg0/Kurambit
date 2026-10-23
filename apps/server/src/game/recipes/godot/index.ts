@@ -5,6 +5,14 @@ import { feelCoyote } from "./feel.coyote.ts";
 import { feelHitStop } from "./feel.hit-stop.ts";
 import { feelPickup } from "./feel.pickup.ts";
 import { feelShake } from "./feel.shake.ts";
+import { loopCard } from "./loop.card.ts";
+import { loopDialogue } from "./loop.dialogue.ts";
+import { loopFirstPerson } from "./loop.first-person.ts";
+import { loopPlatformer } from "./loop.platformer.ts";
+import { loopPuzzle } from "./loop.puzzle.ts";
+import { loopRacing } from "./loop.racing.ts";
+import { loopTopDown } from "./loop.top-down.ts";
+import { loopTower } from "./loop.tower.ts";
 import { readHud } from "./read.hud.ts";
 import { readOnboarding } from "./read.onboarding.ts";
 import { readSilhouette } from "./read.silhouette.ts";
@@ -33,6 +41,14 @@ export const godotRecipeAdapters: ReadonlyMap<string, GameRecipeAdapter> = new M
   ["feel.hit-stop", adapter(feelHitStop)],
   ["feel.pickup", adapter(feelPickup)],
   ["feel.shake", adapter(feelShake)],
+  ["loop.card", adapter(loopCard)],
+  ["loop.dialogue", adapter(loopDialogue)],
+  ["loop.first-person", adapter(loopFirstPerson)],
+  ["loop.platformer", adapter(loopPlatformer)],
+  ["loop.puzzle", adapter(loopPuzzle)],
+  ["loop.racing", adapter(loopRacing)],
+  ["loop.top-down", adapter(loopTopDown)],
+  ["loop.tower", adapter(loopTower)],
   ["read.hud", adapter(readHud)],
   ["read.onboarding", adapter(readOnboarding)],
   ["read.silhouette", adapter(readSilhouette)],
