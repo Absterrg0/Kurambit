@@ -229,14 +229,17 @@ const sideFor = (plan: GameReviewBallotPlan, artifact: "incumbent" | "challenger
 const ballotAnswer = (
   plan: GameReviewBallotPlan,
   verdict: "promote" | "tie" | "worse",
-  options: { readonly control?: "tie" | "A"; readonly preservation?: "preserved" | "unknown" } = {},
+  options: {
+    readonly control?: "tie" | "A";
+    readonly preservation?: "preserved" | "unknown" | "lost";
+  } = {},
 ): GameReviewSessions.GameReviewSessionAnswerResult => {
   const choice =
     verdict === "tie"
       ? "tie"
       : (sideFor(plan, verdict === "promote" ? "challenger" : "incumbent") as "A" | "B");
   const control = options.control === "A" ? "A" : "tie";
-  const side = options.preservation === "unknown" ? "unknown" : "preserved";
+  const side = options.preservation ?? "preserved";
   const answer: GameReviewBallotAnswer = {
     main: { works: choice, look: choice, feel: choice, play: choice },
     preservation: [{ id: "turns", A: side, B: side, frameIds: ["a1"] }],
@@ -880,7 +883,7 @@ it.live("a tie keeps the incumbent", () =>
   ),
 );
 
-it.live("a ballot that did not preserve a do-not-regress item rejects the round", () =>
+it.live("a lost do-not-regress item on either ballot rejects the round", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
       Effect.gen(function* () {
@@ -889,7 +892,7 @@ it.live("a ballot that did not preserve a do-not-regress item rejects the round"
         let reviews = 0;
         scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
         scripted.ballots = [
-          ({ plan }) => ballotAnswer(plan, "promote", { preservation: "unknown" }),
+          ({ plan }) => ballotAnswer(plan, "promote", { preservation: "lost" }),
           ({ plan }) => ballotAnswer(plan, "promote"),
         ];
         yield* runToCompletion(services, fixture);
@@ -1927,7 +1930,7 @@ it.live("submit verifies and records only after taking the game gate", () =>
   ),
 );
 
-it.live("t50b's raw ballots validate but unknown preservation still vetoes round 1", () =>
+it.live("t50b's captured round 1 promotes with unknown preservation neutral", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
       Effect.gen(function* () {
@@ -1973,13 +1976,12 @@ it.live("t50b's raw ballots validate but unknown preservation still vetoes round
         fixture.scripted.ballots = [ballot, ballot];
         yield* runToCompletion(services, fixture);
         const state = loopRecord(yield* readLoop(services));
-        expect(state.promotedRounds).toEqual([]);
+        expect(state.promotedRounds).toHaveLength(1);
         expect(state.repairsUsed).toBe(1);
         const round = (yield* services.rounds.read(fixture.root)).rounds.find(
           (entry) => entry.ballotAnswers?.length === 2,
         )!;
-        expect(round.status).toBe("rejected");
-        expect(round.reason).toContain("preservation-lost");
+        expect(round.status).toBe("promoted");
         expect(round.ballotAnswers?.map((entry) => entry.outcome)).toEqual(["valid", "valid"]);
       }),
     ),

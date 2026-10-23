@@ -61,8 +61,7 @@ const decodeStoredLoops = Schema.decodeUnknownSync(Schema.fromJsonString(StoredL
 const MAX_STORED_LOOPS = 10;
 
 const MAX_REPAIR_PROMPT_DEFECTS = 5;
-/** Twelve evidence frames is the session service's limit; four sides share it. */
-const BALLOT_FRAMES_PER_SIDE = 3;
+const BALLOT_FRAMES_PER_SIDE = 6;
 const CRITIC_FRAMES = 6;
 const REQUIRED_POSITIVE_CHECKS = ["boot", "input"] as const;
 /** A child that ignores its interrupt may not hold a creator action forever. */
@@ -189,7 +188,7 @@ const vetoReason = (veto: VetoKind): string => {
 /**
  * One ballot's verdict. A ballot promotes only when the challenger is no worse
  * on every facet, strictly better on one, the identical control is a clean tie
- * and every preservation item is preserved on both sides.
+ * and neither side has a lost preservation item. Unknown is neutral.
  */
 const ballotReason = (
   answer: GameReviewBallotAnswer,
@@ -211,8 +210,8 @@ const ballotReason = (
   )
     return `tie: ballot ${plan.order} found no facet where the challenger is better.`;
   for (const entry of answer.preservation) {
-    if (entry.A !== "preserved" || entry.B !== "preserved")
-      return `preservation-lost: ballot ${plan.order} did not see ${entry.id} preserved on both builds.`;
+    if (entry.A === "lost" || entry.B === "lost")
+      return `preservation-lost: ballot ${plan.order} saw ${entry.id} lost on a build.`;
   }
   return null;
 };

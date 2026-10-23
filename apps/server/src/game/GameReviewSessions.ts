@@ -158,7 +158,7 @@ interface SessionKey {
 const FRAME_FILE = (index: number) => `frames/frame-${String(index + 1).padStart(2, "0")}.png`;
 const EVIDENCE_MANIFEST = "evidence.json";
 const BRIEF_FILE = "BRIEF.md";
-const MAX_FRAMES = 12;
+const MAX_FRAMES = 24;
 const MAX_CHECKS = 64;
 
 const ReviewFrameRecord = Schema.Struct({
