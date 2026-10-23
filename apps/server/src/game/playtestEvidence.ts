@@ -238,7 +238,9 @@ export const readPlaytestRunFacts = async (
     booted: stored.booted,
     responded: stored.responded,
     consoleErrors: stored.consoleMessages.filter((message) => message.level === "error").length,
-    steps: stored.steps.length,
+    steps: stored.steps.filter(
+      (step) => Schema.is(GamePlaytestStep)(step) && !("waitMs" in step) && !("screenshot" in step),
+    ).length,
   };
 };
 

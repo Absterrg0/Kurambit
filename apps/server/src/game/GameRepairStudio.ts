@@ -369,25 +369,19 @@ export const layer = (options: { readonly stateDir: string }) =>
                   "failed",
                   "No playtest is recorded for this game; run game_web_playtest with input steps that play the core loop, then submit.",
                 )
-              : played.outcome !== "passed"
+              : played.buildId !== buildId
                 ? check(
                     "playtest",
                     "failed",
-                    `The last playtest did not count as gameplay: ${played.detail ?? "no reason recorded"}.`,
+                    `The last playtest played ${played.buildId ?? "another build"}, not ${buildId}; playtest this build, then submit.`,
                   )
-                : played.buildId !== buildId
+                : played.evidenceDirectory === null
                   ? check(
                       "playtest",
                       "failed",
-                      `The last playtest played ${played.buildId ?? "another build"}, not ${buildId}; playtest this build, then submit.`,
+                      "The playtest recorded no evidence directory, so it cannot be verified.",
                     )
-                  : played.evidenceDirectory === null
-                    ? check(
-                        "playtest",
-                        "failed",
-                        "The playtest recorded no evidence directory, so it cannot be verified.",
-                      )
-                    : check("playtest", "passed");
+                  : check("playtest", "passed");
           const checks = [exists, bytes, current, binding];
           if (binding.status !== "passed") return result(buildId, directory, checks);
           const evidence = yield* Effect.promise(() =>

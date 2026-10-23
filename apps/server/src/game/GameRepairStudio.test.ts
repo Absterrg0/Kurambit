@@ -433,3 +433,81 @@ it.live("submission facts refuse console errors and a playtest with no input", (
     }),
   ),
 );
+
+for (const qualifies of [false, undefined]) {
+  it.live(`submission uses raw facts when gameplay qualification is ${qualifies}`, () =>
+    withStudio((harness) =>
+      Effect.gen(function* () {
+        const studio = yield* GameRepairStudio.GameRepairStudio;
+        const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+        const evidence = yield* Effect.promise(() =>
+          writePlaytestEvidence({
+            root: harness.root,
+            steps: [{ click: "left" }],
+            result: {
+              ...baseResult(),
+              ...(qualifies === undefined ? {} : { qualifies }),
+              blockers: ["no movement or design progress"],
+            },
+            at: FIRST_EVIDENCE_AT,
+          }),
+        );
+        harness.exportStage = stage({ buildId });
+        harness.playtestStage = {
+          ...stage({ buildId, evidenceDirectory: evidence.directory, outcome: "failed" }),
+          detail: "Interaction: none.",
+        };
+        expect((yield* studio.submissionFacts(harness.root)).passed).toBe(true);
+        yield* Effect.promise(() =>
+          writePlaytestEvidence({
+            root: harness.root,
+            steps: [{ click: "left" }],
+            result: {
+              ...baseResult(),
+              booted: false,
+              responded: false,
+              qualifies: false,
+              consoleMessages: [{ level: "error", text: "boom" }],
+            },
+            at: LATER_EVIDENCE_AT,
+          }).then((bad) => {
+            harness.playtestStage = stage({
+              buildId,
+              evidenceDirectory: bad.directory,
+              outcome: "failed",
+            });
+          }),
+        );
+        const refused = yield* studio.submissionFacts(harness.root);
+        expect(refused.reason).toContain("boot: The playtest recorded that the game did not boot.");
+        expect(refused.reason).toContain("console: 1 console error(s)");
+        expect(refused.reason).toContain("input: The game did not visibly respond");
+        expect(refused.reason).not.toContain("qualification");
+      }),
+    ),
+  );
+}
+
+it.live("waits and screenshots cannot supply submission input, even with animated frames", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ waitMs: 500 }, { screenshot: "animated" }],
+          result: baseResult(),
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed).toBe(false);
+      expect(facts.reason).toBe(
+        "input: The playtest executed no input steps; give it steps that play the core loop.",
+      );
+    }),
+  ),
+);
