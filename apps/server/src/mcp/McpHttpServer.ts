@@ -2,6 +2,7 @@ import {
   GamePlaytestToolkit,
   GameToolkit,
   GameWebPlaytestTool,
+  GameTryInputTool,
   GameReviewAnswerToolkit,
 } from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
@@ -681,11 +682,7 @@ const registerImageTool = <T extends Tool.Any, E, R>(
                   ...(screenshots === undefined
                     ? {}
                     : {
-                        screenshots: frames.map(({ mimeType, width, height }) => ({
-                          mimeType,
-                          width,
-                          height,
-                        })),
+                        screenshots: frames.map(({ data: _data, ...frame }) => frame),
                       }),
                 };
                 return Effect.succeed(
@@ -717,6 +714,7 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
   const games = yield* GameService.GameService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const built = yield* GamePlaytestToolkit;
+  const reviews = yield* GameReviewSessions.GameReviewSessions;
   yield* registerImageTool(
     GameWebPlaytestTool,
     (payload) =>
@@ -730,6 +728,16 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
       ),
     "playtest",
     (error) => (error instanceof Error ? error.message : "Game web playtest failed."),
+  );
+  yield* registerImageTool(
+    GameTryInputTool,
+    (payload) =>
+      built
+        .handle("game_try_input", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
+    "playtest",
+    (error) => (error instanceof Error ? error.message : "Game input experiment failed."),
   );
 });
 
@@ -844,9 +852,14 @@ export const layerGameReviewAnswers = toolkitRegistration(
   GameHandlers.layerReviewAnswers,
 );
 
+export const layerGamePlaytest = imageToolRegistration(
+  registerGameWebPlaytest(),
+  GameHandlers.layerPlaytest,
+);
+
 const layerGameToolkit = Layer.mergeAll(
   layerGameReviewAnswers,
-  imageToolRegistration(registerGameWebPlaytest(), GameHandlers.layerPlaytest),
+  layerGamePlaytest,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );
 

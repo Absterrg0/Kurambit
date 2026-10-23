@@ -22,6 +22,7 @@ import {
   GameSubmitInput,
   GameSubmitResult,
   GameWebPlaytestInput,
+  GameTryInput,
   GameWebPlaytestResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
@@ -190,7 +191,24 @@ const WebPlaytestTool = Tool.make("game_web_playtest", {
 }).annotate(Tool.Readonly, false);
 // Exported for the image-content transport registration in McpHttpServer.
 export const GameWebPlaytestTool = WebPlaytestTool;
-export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool);
+export const GameTryInputTool = Tool.make("game_try_input", {
+  description:
+    "Test a gameplay hypothesis from a fresh headless boot. Defaults to the frozen build under review for critics, or the current game for builders/repair children. Use press, hold + holdMs, click (+ x/y), drag {from,to} + holdMs, or waitMs. Returns labelled before/after frames, pixel deltas, bridge snapshot changes and console errors. Critic frames have citable frameId values and are recorded in the round evidence. Limits: 12 steps, 10 seconds per step, 30 seconds total, 32 frames, 6 calls per provider run; captureEveryMs defaults to 1000 and must be at least 100. Ballots cannot use this tool.",
+  parameters: GameTryInput,
+  success: GameWebPlaytestResult,
+  failure,
+  dependencies: [GameReviewSessions.GameReviewSessions, McpInvocationContext.McpInvocationContext],
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, () => {
+    const fiber = Fiber.getCurrent();
+    return (
+      fiber === undefined ||
+      Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
+        ?.gameReviewRole !== "ballot"
+    );
+  });
+export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool, GameTryInputTool);
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   ReviewStatusTool,

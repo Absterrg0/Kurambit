@@ -24,6 +24,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as GameService from "../game/GameService.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
@@ -1045,10 +1046,47 @@ it.effect(
     Effect.scoped(
       Effect.gen(function* () {
         const seen: unknown[] = [];
-        const serverLayer = McpHttpServer.layerGameReviewAnswers.pipe(
+        const tried: unknown[] = [];
+        const serverLayer = Layer.mergeAll(
+          McpHttpServer.layerGameReviewAnswers,
+          McpHttpServer.layerGamePlaytest,
+        ).pipe(
+          Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+          Layer.provide(Layer.mock(GameService.GameService)({})),
           Layer.provideMerge(McpHttpServer.layerMcpTransport),
           Layer.provide(
             Layer.mock(GameReviewSessions.GameReviewSessions)({
+              tryInput: (caller, input) =>
+                Effect.sync(() => {
+                  tried.push({ caller, input });
+                  return {
+                    success: true,
+                    booted: true,
+                    bootMs: 5,
+                    responded: true,
+                    changedPercent: 2,
+                    message: "experiment",
+                    consoleMessages: [],
+                    state: null,
+                    screenshots: [
+                      {
+                        label: "input 1 after",
+                        frameId: "try1f2",
+                        mimeType: "image/png",
+                        width: 640,
+                        height: 360,
+                        data: "cG5n",
+                        inputPair: {
+                          stepIndex: 0,
+                          phase: "after",
+                          input: { press: "Space" },
+                          changedPercent: 2,
+                          stateChanges: [],
+                        },
+                      },
+                    ],
+                  };
+                }),
               toolRole: (caller) =>
                 Effect.succeed(
                   caller.threadId === threadId
@@ -1124,6 +1162,24 @@ it.effect(
         expect(yield* list("critic", critic)).toContain('"name":"game_critic_report"');
         expect(yield* list("critic", critic)).not.toContain('"name":"game_ballot"');
         expect(yield* list("ballot", ballot)).toContain('"name":"game_ballot"');
+        expect(yield* list("ballot", ballot)).not.toContain('"name":"game_try_input"');
+        expect(yield* list("critic", critic)).toContain('"name":"game_try_input"');
+        expect(yield* list("other", other)).toContain('"name":"game_try_input"');
+        const forbiddenInput = yield* rpc("ballot", ballot, "tools/call", {
+          name: "game_try_input",
+          arguments: { steps: [{ press: "Space" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(forbiddenInput).toContain("error");
+        expect(tried).toHaveLength(0);
+        const experiment = yield* rpc("critic", critic, "tools/call", {
+          name: "game_try_input",
+          arguments: { steps: [{ press: "Space" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(experiment).toContain('"frameId":"try1f2"');
+        expect(experiment).toContain('"label":"input 1 after"');
+        expect(experiment).toContain('"changedPercent":2');
+        expect(experiment).toContain('"type":"image"');
+        expect(tried).toHaveLength(1);
         expect(yield* list("other", other)).not.toContain("game_critic_report");
         const refused = yield* rpc("other", other, "tools/call", {
           name: "game_critic_report",

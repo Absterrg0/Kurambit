@@ -129,6 +129,13 @@ const handlers = {
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
 // Contextual input typing comes from the satisfies check below.
 const playtestHandlers = {
+  game_try_input: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const sessions = yield* GameReviewSessions.GameReviewSessions;
+      return yield* sessions.tryInput(scope.thread, input);
+    }),
+  ),
   game_web_playtest: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;
