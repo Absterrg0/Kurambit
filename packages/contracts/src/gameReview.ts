@@ -187,7 +187,7 @@ export const GameSubmitInput = Schema.Struct({
    * edits the folder the current sources live in.
    */
   buildId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
-  /** One line; the builder's answer to "what is this game what did you fix". */
+  /** One line: what the game is, or which defects a repair fixed. */
   note: Schema.String.check(
     Schema.isMinLength(1),
     Schema.isMaxLength(500),

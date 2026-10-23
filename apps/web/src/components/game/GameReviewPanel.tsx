@@ -173,9 +173,7 @@ function ReviewRound({
       </p>
       <p className="text-xs text-muted-foreground">{round.reason ?? "Review in progress."}</p>
       {round.submissionNote ? (
-        <p className="text-xs text-muted-foreground">
-          The repair says it fixed: {round.submissionNote}
-        </p>
+        <p className="text-xs text-muted-foreground">Repair note: {round.submissionNote}</p>
       ) : null}
       <ul className="space-y-2 text-xs">
         {round.defects?.map((defect) => (
