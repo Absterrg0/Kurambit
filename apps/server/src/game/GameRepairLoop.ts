@@ -736,6 +736,23 @@ export const layer = (options: GameRepairLoopOptions) => {
         const current = yield* readRecord(input.root).pipe(Effect.orElseSucceed(() => null));
         if (current === null) return null;
         if (current.status !== "running") return current;
+        const state = yield* rounds.read(input.root).pipe(Effect.orElseSucceed(() => null));
+        const open = state?.rounds.find(
+          (round) => round.loopId === current.id && round.status === "running",
+        );
+        if (
+          open?.postRepairSourceId != null &&
+          (yield* settleChildren(input.root, current.id, input.reason))
+        ) {
+          yield* rounds
+            .reject(input.root, open.id, {
+              reason: input.reason,
+              preserveDirectories: preview.directories(input.root),
+            })
+            .pipe(
+              Effect.catchCause((cause) => logFailure("restoring a stopped review failed", cause)),
+            );
+        }
         yield* stopOpenRound(input.root, input.reason);
         const at = nowIso();
         return yield* save(input.root, {

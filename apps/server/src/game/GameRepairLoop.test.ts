@@ -29,6 +29,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as TestClock from "effect/testing/TestClock";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -1980,6 +1981,51 @@ it.live("t50b's raw ballots validate but unknown preservation still vetoes round
         expect(round.status).toBe("rejected");
         expect(round.reason).toContain("preservation-lost");
         expect(round.ballotAnswers?.map((entry) => entry.outcome)).toEqual(["valid", "valid"]);
+      }),
+    ),
+  ),
+);
+
+it.effect.each([
+  { ending: "stop", userEdit: false },
+  { ending: "stop", userEdit: true },
+  { ending: "deadline", userEdit: false },
+  { ending: "deadline", userEdit: true },
+] as const)("$ending after a repair restores safely, user edit=$userEdit", ({ ending, userEdit }) =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        yield* fixture.complete(services, yield* fixture.take);
+        yield* fixture.complete(services, yield* fixture.take);
+        const ballot = yield* fixture.take;
+        expect(ballot.role).toBe("ballot");
+        const file = NodePath.join(root, "godot/scripts/main.gd");
+        if (userEdit)
+          yield* Effect.promise(() => NodeFSP.writeFile(file, "extends Node # user edit\n"));
+        if (ending === "stop") yield* services.review.stop(threadId);
+        else yield* TestClock.adjust("45 minutes");
+        yield* services.loop.awaitIdle(threadId);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe(ending === "stop" ? "stopped" : "interrupted");
+        expect(yield* Effect.promise(() => NodeFSP.readFile(file, "utf8"))).toBe(
+          userEdit ? "extends Node # user edit\n" : "extends Node\n",
+        );
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        const round = game.rounds.find((entry) => entry.loopId === state.id)!;
+        expect(round.status).toBe(userEdit ? "stopped" : "rejected");
+        expect(round.reason).toContain(
+          userEdit
+            ? "changed after the repair"
+            : ending === "stop"
+              ? "creator stopped"
+              : "deadline",
+        );
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(userEdit);
       }),
     ),
   ),
