@@ -180,6 +180,7 @@ interface Scripted {
   readonly tries: Array<{ threadId: ThreadId; buildId: string; input: GameWebPlaytestInput }>;
   builderStatus: OrchestrationV2Run["status"];
   viewport: { width: number; height: number };
+  tryGate: (() => Effect.Effect<void>) | null;
   /** The commands the session service dispatched, when any ran. */
   readonly dispatches: Array<OrchestrationV2ServerCommand>;
   readonly receipts: Set<string>;
@@ -211,6 +212,7 @@ const makeScripted = (): Scripted => ({
   tries: [],
   builderStatus: "completed",
   viewport: { width: 640, height: 360 },
+  tryGate: null,
   dispatches: [],
   receipts: new Set(),
   rejectedReceipts: new Set(),
@@ -301,8 +303,9 @@ const withSession = <A, E>(
                   qualification: { servedArtifactId: "build-incumbent" },
                 } as import("@t3tools/contracts").GameStatus),
               webPlaytestBuild: (threadId, buildId, input) =>
-                Effect.sync(() => {
+                Effect.gen(function* () {
                   scripted.tries.push({ threadId, buildId, input });
+                  if (scripted.tryGate !== null) yield* scripted.tryGate();
                   return tryResult;
                 }),
             }),
@@ -1895,6 +1898,41 @@ it.live("active input cannot legitimize changed critic evidence", () =>
           .pipe(Effect.flip)).detail,
       ).toContain("evidence changed");
       expect(scripted.tries).toHaveLength(0);
+    }),
+  ),
+);
+
+it.live("playing in one session does not block unrelated MCP authentication", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const entered = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      scripted.tryGate = () =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(finish);
+        });
+      const playing = yield* service
+        .tryInput(
+          { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+          { steps: [{ press: "Space" }] },
+        )
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(entered);
+      expect(
+        yield* service.toolRole({ threadId, providerInstanceId: builderSelection.instanceId }),
+      ).toBeNull();
+      yield* Deferred.succeed(finish, undefined);
+      expect((yield* Fiber.join(playing)).screenshots).toHaveLength(2);
     }),
   ),
 );

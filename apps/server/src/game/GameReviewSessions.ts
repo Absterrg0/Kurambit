@@ -746,7 +746,16 @@ export const layer = (options: { readonly stateDir: string }) => {
     const rounds = yield* GameRoundStore.GameRoundStore;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const catalog = yield* GameReviewProviderCatalog;
-    const reporting = Semaphore.makeUnsafe(1);
+    const callerLocks = new Map<ThreadId, Semaphore.Semaphore>();
+    // Playing must not stall MCP authentication for unrelated game sessions.
+    const callerLock = (caller: GameReviewToolCaller) => {
+      let lock = callerLocks.get(caller.threadId);
+      if (lock === undefined) {
+        lock = Semaphore.makeUnsafe(1);
+        callerLocks.set(caller.threadId, lock);
+      }
+      return lock;
+    };
     const game = yield* Effect.serviceOption(GameService.GameService);
 
     const reviewRoot = Effect.fnUntraced(function* (root: string) {
@@ -1428,7 +1437,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     });
 
     const tryInput: GameReviewSessions["Service"]["tryInput"] = (caller, input) =>
-      reporting.withPermits(1)(
+      callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
           const invalid = (detail: string) =>
             failure("game_try_input", caller.threadId, "invalid-input", detail);
@@ -1620,7 +1629,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
 
     const toolRole: GameReviewSessions["Service"]["toolRole"] = (caller) =>
-      reporting.withPermits(1)(
+      callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
           const match = yield* matchingCaller(caller);
           if (match === null) return null;
@@ -1652,7 +1661,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
 
     const report: GameReviewSessions["Service"]["report"] = (caller, role, value) =>
-      reporting.withPermits(1)(
+      callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
           const match = yield* matchingCaller(caller);
           const refused = (error: string): GameReviewReportResult => ({
