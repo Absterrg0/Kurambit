@@ -50,6 +50,7 @@ const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(StoredState))
 const BuildPlaytest = Schema.Struct({
   booted: Schema.Boolean,
   responded: Schema.Boolean,
+  executedInputSteps: Schema.optionalKey(Schema.Int),
   consoleErrors: Schema.Int,
   steps: Schema.Array(GamePlaytestStep),
   viewport: Schema.NullOr(GameViewport),
@@ -129,6 +130,7 @@ export interface GameRoundBeginInput {
 }
 
 export interface GameRoundReviewInput {
+  readonly fundamentals?: GameReviewRoundType["fundamentals"] | undefined;
   readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
   readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
   readonly checks?: ReadonlyArray<GameReviewCheck> | undefined;
@@ -764,6 +766,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               const round: GameReviewRoundType = {
                 ...current,
+                ...(input.fundamentals === undefined ? {} : { fundamentals: input.fundamentals }),
                 ...(input.defects === undefined ? {} : { defects: [...input.defects] }),
                 ...(input.doNotRegress === undefined
                   ? {}

@@ -50,6 +50,7 @@ const LATER_EVIDENCE_AT = new Date("2026-10-01T10:05:00.000Z");
 
 const baseResult = (): GameWebPlaytestResult => ({
   success: true,
+  executedInputSteps: 1,
   booted: true,
   bootMs: 900,
   responded: true,
@@ -231,147 +232,75 @@ it.live("captures the builder's route once and replays it for every later check"
   ),
 );
 
-it.live("a frozen player with animated scenery fails the input and state checks", () =>
-  withStudio((harness) =>
-    Effect.gen(function* () {
-      const studio = yield* GameRepairStudio.GameRepairStudio;
-      const inputs: GameReviewFrozenInputs = {
-        steps: [{ key: "ArrowRight", holdMs: 120 }],
-        viewport: { width: 1152, height: 648 },
-        seed: null,
-      };
-      // Pixels change (animated scenery) and the browser saw a visible
-      // response, but the probe measured no player movement and the run did
-      // not qualify as gameplay.
-      harness.results = {
-        ...baseResult(),
-        responded: true,
-        changedPercent: 35,
-        state: {
-          before: probe("score 0"),
-          after: probe("score 0"),
-          playerMoved: 0,
-          changes: [],
-        },
-        qualifies: false,
-        blockers: ["the player did not move from the gameplay baseline"],
-      };
-      const checked = yield* studio.check({
-        threadId,
-        root: harness.root,
-        target: "candidate",
-        buildId: "a".repeat(64),
-        inputs,
-      });
-      const byId = new Map(checked.checks.map((check) => [check.id, check]));
-      expect(byId.get("boot")?.status).toBe("passed");
-      expect(byId.get("input")?.status).toBe("failed");
-      expect(byId.get("input")?.detail).toContain("did not move");
-      expect(byId.get("state")?.status).toBe("failed");
-      expect(byId.get("state")?.detail).toContain("did not move");
-      expect(byId.get("hud")?.status).toBe("passed");
-    }),
-  ),
-);
-
-it.live("an honest run passes movement, qualification and HUD from the real verdicts", () =>
-  withStudio((harness) =>
-    Effect.gen(function* () {
-      const studio = yield* GameRepairStudio.GameRepairStudio;
-      harness.results = {
-        ...baseResult(),
-        state: {
-          before: probe("score 0"),
-          after: probe("score 10"),
-          playerMoved: 48,
-          changes: [{ key: "score", before: 0, after: 10 }],
-        },
-        qualifies: true,
-        blockers: [],
-        pauseConfirmed: true,
-      };
-      const checked = yield* studio.check({
-        threadId,
-        root: harness.root,
-        target: "incumbent",
-        buildId: "a".repeat(64),
-        inputs: {
-          steps: [{ key: "ArrowRight", holdMs: 120 }],
+it.live.each(["stationary card", "instant dialogue", "endless", "animated scenery"])(
+  "%s measurements go to the critic without inferred vetoes",
+  (genre) =>
+    withStudio((harness) =>
+      Effect.gen(function* () {
+        const studio = yield* GameRepairStudio.GameRepairStudio;
+        harness.results = {
+          ...baseResult(),
+          success: false,
+          responded: false,
+          changedPercent: genre === "animated scenery" ? 35 : 0,
+          state: {
+            before: probe(""),
+            after: probe(""),
+            playerMoved: 0,
+            changes: [],
+            notOnScreen: ["score"],
+          },
+          qualifies: false,
+          blockers: ["no movement or win"],
+          designObservations: [],
+        };
+        const inputs: GameReviewFrozenInputs = {
+          steps: [{ click: "left" }],
           viewport: null,
           seed: null,
-        },
-      });
-      const byId = new Map(checked.checks.map((check) => [check.id, check]));
-      expect(byId.get("input")?.status).toBe("passed");
-      expect(byId.get("state")?.status).toBe("passed");
-      expect(byId.get("hud")?.status).toBe("passed");
-      expect(byId.get("bridge")?.status).toBe("passed");
-    }),
-  ),
-);
-
-it.live("a candidate that keeps a title but hides its score fails state-on-screen", () =>
-  withStudio((harness) =>
-    Effect.gen(function* () {
-      const studio = yield* GameRepairStudio.GameRepairStudio;
-      const check = (notOnScreen: ReadonlyArray<string> | undefined) =>
-        Effect.gen(function* () {
-          harness.results = {
-            ...baseResult(),
-            state: {
-              before: probe("Lantern Run"),
-              after: probe("Lantern Run"),
-              playerMoved: 48,
-              changes: [{ key: "score", before: 0, after: 10 }],
-              ...(notOnScreen === undefined ? {} : { notOnScreen: [...notOnScreen] }),
-            },
-            qualifies: true,
-            blockers: [],
-            pauseConfirmed: true,
-          };
-          const checked = yield* studio.check({
-            threadId,
-            root: harness.root,
-            target: "candidate",
-            buildId: "a".repeat(64),
-            inputs: { steps: [{ key: "ArrowRight", holdMs: 120 }], viewport: null, seed: null },
-          });
-          return new Map(checked.checks.map((entry) => [entry.id, entry]));
+        };
+        const checked = yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "candidate",
+          buildId: "a".repeat(64),
+          inputs,
         });
-      const hiding = yield* check(["score"]);
-      // Any HUD text still passes `hud`; the state check is independent of it.
-      expect(hiding.get("hud")?.status).toBe("passed");
-      expect(hiding.get("state-on-screen")?.status).toBe("failed");
-      expect(hiding.get("state-on-screen")?.detail).toContain("score");
-      expect((yield* check([])).get("state-on-screen")?.status).toBe("passed");
-      expect((yield* check(undefined)).get("state-on-screen")?.status).toBe("unmeasured");
-    }),
-  ),
+        expect(checked.checks.map(({ id, status }) => ({ id, status }))).toEqual([
+          { id: "boot", status: "passed" },
+          { id: "console", status: "passed" },
+          { id: "input", status: "passed" },
+        ]);
+        expect(checked.checks.find((check) => check.id === "input")?.measurements).toEqual({
+          steps: inputs.steps,
+          changedPercent: harness.results.changedPercent,
+          state: harness.results.state,
+          designObservations: [],
+        });
+        expect(checked.frames).toHaveLength(1);
+      }),
+    ),
 );
 
-it.live("a probe-less run leaves movement and state unmeasured instead of passing", () =>
-  withStudio((harness) =>
-    Effect.gen(function* () {
-      const studio = yield* GameRepairStudio.GameRepairStudio;
-      harness.results = { ...baseResult(), state: null };
-      const checked = yield* studio.check({
-        threadId,
-        root: harness.root,
-        target: "candidate",
-        buildId: "a".repeat(64),
-        inputs: {
-          steps: [{ key: "ArrowRight", holdMs: 120 }],
-          viewport: null,
-          seed: null,
-        },
-      });
-      const byId = new Map(checked.checks.map((check) => [check.id, check]));
-      expect(byId.get("input")?.status).toBe("unmeasured");
-      expect(byId.get("state")?.status).toBe("unmeasured");
-      expect(byId.get("hud")?.status).toBe("unmeasured");
-      expect(byId.get("boot")?.status).toBe("passed");
-    }),
-  ),
+it.live.each([undefined, 0])(
+  "missing or undispatched inputs do not pass: %s",
+  (executedInputSteps) =>
+    withStudio((harness) =>
+      Effect.gen(function* () {
+        const studio = yield* GameRepairStudio.GameRepairStudio;
+        harness.results = { ...baseResult(), executedInputSteps };
+        const checked = yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "candidate",
+          buildId: "a".repeat(64),
+          inputs: { steps: [{ click: "left" }], viewport: null, seed: null },
+        });
+        expect(checked.checks.find((check) => check.id === "input")?.status).toBe(
+          executedInputSteps === undefined ? "unmeasured" : "failed",
+        );
+      }),
+    ),
 );
 
 /** The passed playtest a submission needs, written as real evidence. */
@@ -457,6 +386,7 @@ it.live("submission facts refuse console errors and a playtest with no input", (
           result: {
             ...baseResult(),
             responded: false,
+            executedInputSteps: 0,
             consoleMessages: [
               { level: "error", text: "boom" },
               { level: "error", text: "bang" },
@@ -493,6 +423,8 @@ it.live.each([false, undefined])(
             steps: [{ click: "left" }],
             result: {
               ...baseResult(),
+              responded: false,
+              changedPercent: 0,
               ...(qualifies === undefined ? {} : { qualifies }),
               blockers: ["no movement or design progress"],
             },
@@ -528,7 +460,7 @@ it.live.each([false, undefined])(
         const refused = yield* studio.submissionFacts(harness.root);
         expect(refused.reason).toContain("boot: The playtest recorded that the game did not boot.");
         expect(refused.reason).toContain("console: 1 console error(s)");
-        expect(refused.reason).toContain("input: The game did not visibly respond");
+        expect(refused.reason).not.toContain("input:");
         expect(refused.reason).not.toContain("qualification");
       }),
     ),
@@ -543,7 +475,7 @@ it.live("waits and screenshots cannot supply submission input, even with animate
         writePlaytestEvidence({
           root: harness.root,
           steps: [{ waitMs: 500 }, { screenshot: "animated" }],
-          result: baseResult(),
+          result: { ...baseResult(), executedInputSteps: 0 },
           at: FIRST_EVIDENCE_AT,
         }),
       );
@@ -556,4 +488,64 @@ it.live("waits and screenshots cannot supply submission input, even with animate
       );
     }),
   ),
+);
+
+it.live(
+  "critic evidence uses eight complete persisted images even if the response omitted them",
+  () =>
+    withStudio((harness) =>
+      Effect.gen(function* () {
+        const studio = yield* GameRepairStudio.GameRepairStudio;
+        const screenshots = Array.from({ length: 5 }, (_, stepIndex) => [
+          {
+            ...baseResult().screenshots[0]!,
+            label: `input ${stepIndex} before`,
+            inputPair: {
+              stepIndex,
+              phase: "before" as const,
+              input: { key: "ArrowRight", holdMs: 1000 },
+              changedPercent: 12,
+              stateChanges: [{ key: "state.card", before: "ready", after: "chosen" }],
+            },
+          },
+          {
+            ...baseResult().screenshots[0]!,
+            label: `input ${stepIndex} after`,
+            inputPair: {
+              stepIndex,
+              phase: "after" as const,
+              input: { key: "ArrowRight", holdMs: 1000 },
+              changedPercent: 12,
+              stateChanges: [{ key: "state.card", before: "ready", after: "chosen" }],
+            },
+          },
+        ]).flat();
+        const evidence = yield* Effect.promise(() =>
+          writePlaytestEvidence({
+            root: harness.root,
+            steps: [],
+            result: { ...baseResult(), screenshots },
+          }),
+        );
+        harness.results = {
+          ...baseResult(),
+          screenshots: [],
+          evidenceDirectory: evidence.directory,
+        };
+        const checked = yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId: "a".repeat(64),
+          inputs: { steps: [{ key: "ArrowRight", holdMs: 1000 }], viewport: null, seed: null },
+        });
+        expect(checked.frames.map((frame) => frame.inputPair?.stepIndex)).toEqual([
+          0, 0, 1, 1, 3, 3, 4, 4,
+        ]);
+        expect(checked.frames[1]?.inputPair).toEqual(screenshots[1]?.inputPair);
+        expect(yield* Effect.promise(() => NodeFSP.readFile(checked.frames[0]!.path, "utf8"))).toBe(
+          "png",
+        );
+      }),
+    ),
 );

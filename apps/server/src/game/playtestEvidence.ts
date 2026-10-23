@@ -8,6 +8,7 @@ import {
   GamePlaytestState,
   GamePlaytestProbe,
   GamePlaytestStep,
+  GamePlaytestInputPair,
   type GameAcceptanceCriterion,
   type GameLastPlaytest,
   type GameWebPlaytestResult,
@@ -19,6 +20,7 @@ const DIRECTORY_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-\d+)?$/;
 const KEEP_RUNS = 5;
 
 const StoredFrame = Schema.Struct({
+  inputPair: Schema.optionalKey(GamePlaytestInputPair),
   label: Schema.String,
   file: Schema.String,
   width: Schema.Number,
@@ -34,6 +36,7 @@ const StoredPlaytest = Schema.fromJsonString(
     booted: Schema.Boolean,
     bootMs: Schema.NullOr(Schema.Number),
     responded: Schema.Boolean,
+    executedInputSteps: Schema.optionalKey(Schema.Int),
     changedPercent: Schema.Number,
     message: Schema.String,
     steps: Schema.Array(Schema.Unknown),
@@ -96,6 +99,7 @@ export const writePlaytestEvidence = async (input: {
     await NodeFSP.writeFile(NodePath.join(directory, file), Buffer.from(shot.data, "base64"));
     frames.push({
       label: shot.label,
+      ...(shot.inputPair === undefined ? {} : { inputPair: shot.inputPair }),
       file,
       width: shot.width,
       height: shot.height,
@@ -108,6 +112,9 @@ export const writePlaytestEvidence = async (input: {
     booted: input.result.booted,
     bootMs: input.result.bootMs,
     responded: input.result.responded,
+    ...(input.result.executedInputSteps === undefined
+      ? {}
+      : { executedInputSteps: input.result.executedInputSteps }),
     changedPercent: input.result.changedPercent,
     message: input.result.message,
     steps: [...input.steps],
@@ -179,6 +186,7 @@ const readStoredRun = async (parent: string, name: string): Promise<StoredPlayte
 const publicFrames = (name: string, stored: StoredPlaytest) =>
   stored.frames.map((frame) => ({
     label: frame.label,
+    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
     path: `${PLAYTEST_DIRECTORY}/${name}/${frame.file}`,
     ...(frame.probe === undefined ? {} : { probe: frame.probe }),
   }));
@@ -190,6 +198,7 @@ const publicFrames = (name: string, stored: StoredPlaytest) =>
 export interface PlaytestEvidenceRun {
   readonly frames: ReadonlyArray<{
     readonly label: string;
+    readonly inputPair?: GamePlaytestInputPair;
     readonly file: string;
     readonly probe?: GamePlaytestProbe;
   }>;
@@ -214,6 +223,7 @@ export const readPlaytestEvidence = async (
 export interface PlaytestRunFacts {
   readonly booted: boolean;
   readonly responded: boolean;
+  readonly executedInputSteps?: number | undefined;
   readonly consoleErrors: number;
   /** Input steps the run actually executed. Waits and screenshots do not count. */
   readonly steps: number;
@@ -238,6 +248,9 @@ export const readPlaytestRunFacts = async (
   return {
     booted: stored.booted,
     responded: stored.responded,
+    ...(stored.executedInputSteps === undefined
+      ? {}
+      : { executedInputSteps: stored.executedInputSteps }),
     consoleErrors: stored.consoleMessages.filter((message) => message.level === "error").length,
     steps: stored.steps.filter(
       (step) => isPlaytestStep(step) && !("waitMs" in step) && !("screenshot" in step),

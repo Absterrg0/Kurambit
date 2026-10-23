@@ -62,8 +62,17 @@ const MAX_STORED_LOOPS = 10;
 
 const MAX_REPAIR_PROMPT_DEFECTS = 5;
 const BALLOT_FRAMES_PER_SIDE = 6;
-const CRITIC_FRAMES = 6;
-const REQUIRED_POSITIVE_CHECKS = ["boot", "input"] as const;
+const CRITIC_FRAMES = 8;
+const REQUIRED_POSITIVE_CHECKS = ["boot", "console", "input"] as const;
+const FACT_CHECK_IDS = new Set([
+  "boot",
+  "console",
+  "input",
+  "build",
+  "bytes",
+  "sources",
+  "playtest",
+]);
 /** A child that ignores its interrupt may not hold a creator action forever. */
 const DEFAULT_CHILD_JOIN_TIMEOUT_MS = 15_000;
 
@@ -91,13 +100,21 @@ const budgetText = (record: GameRepairLoopRecord, at: number) => {
 };
 
 const framesFor = (frames: ReadonlyArray<GameRepairFrame>) =>
-  frames.map((frame) => ({ id: frame.id, label: frame.label, sourcePath: frame.path }));
+  frames.map((frame) => ({
+    id: frame.id,
+    label: frame.label,
+    sourcePath: frame.path,
+    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+  }));
 
-const criticFrames = (frames: ReadonlyArray<{ label: string; path: string }>): GameRepairFrame[] =>
+const criticFrames = (
+  frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+): GameRepairFrame[] =>
   frames.slice(0, CRITIC_FRAMES).map((frame, index) => ({
     id: `f${index + 1}`,
     label: frame.label,
     path: frame.path,
+    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
 
 const assignmentFrames = (frames: ReadonlyArray<GameRepairFrame>, side: "a" | "b" | "c" | "d") =>
@@ -105,6 +122,7 @@ const assignmentFrames = (frames: ReadonlyArray<GameRepairFrame>, side: "a" | "b
     id: `${side}${index + 1}`,
     label: `${side.toUpperCase()}: ${frame.label}`,
     sourcePath: frame.path,
+    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
 
 const sideChecks = (checks: ReadonlyArray<GameReviewCheck>, side: string) =>
@@ -112,6 +130,7 @@ const sideChecks = (checks: ReadonlyArray<GameReviewCheck>, side: string) =>
     id: `${side}:${check.id}`,
     status: check.status,
     ...(check.detail === undefined ? {} : { detail: check.detail }),
+    ...(check.measurements === undefined ? {} : { measurements: check.measurements }),
   }));
 
 /** A deterministic anonymous A/B order; the second ballot is always its reverse. */
@@ -143,9 +162,8 @@ type VetoKind =
   | { readonly kind: "preservation"; readonly item: string; readonly check: string };
 
 /**
- * The code veto: a check that passed on the incumbent may not fail or become
- * unmeasured, boot and ordinary input must be positively shown, and every
- * preservation item measured by a check must still pass.
+ * Only execution facts can veto a candidate. Older rounds may contain inferred
+ * quality checks; those remain evidence for model judgment.
  */
 const mechanicalVeto = (
   incumbent: ReadonlyArray<GameReviewCheck>,
@@ -154,7 +172,7 @@ const mechanicalVeto = (
 ): VetoKind | null => {
   const after = new Map(candidate.map((check) => [check.id, check]));
   for (const before of incumbent) {
-    if (before.status !== "passed") continue;
+    if (!FACT_CHECK_IDS.has(before.id) || before.status !== "passed") continue;
     const now = after.get(before.id);
     if (now === undefined || now.status === "unmeasured")
       return { kind: "unmeasured", check: before.id };
@@ -164,7 +182,7 @@ const mechanicalVeto = (
     if (after.get(id)?.status !== "passed") return { kind: "required", check: id };
   }
   for (const item of items) {
-    if (item.checkId === undefined) continue;
+    if (item.checkId === undefined || !FACT_CHECK_IDS.has(item.checkId)) continue;
     if (incumbent.find((check) => check.id === item.checkId)?.status !== "passed") continue;
     if (after.get(item.checkId)?.status !== "passed")
       return { kind: "preservation", item: item.id, check: item.checkId };
@@ -986,9 +1004,7 @@ export const layer = (options: GameRepairLoopOptions) => {
             updatedAt: nowIso(),
           }));
         }
-        const incumbentFrames = criticFrames(
-          checked.frames.map((frame) => ({ label: frame.label, path: frame.path })),
-        );
+        const incumbentFrames = criticFrames(checked.frames);
         yield* rounds.recordReview(task.root, round.id, { checks: [...checked.checks] });
         yield* progress(task.root, "Reviewing frames");
         const critic = yield* awaitChild(task, record, {
@@ -1033,14 +1049,26 @@ export const layer = (options: GameRepairLoopOptions) => {
               `invalid-critic: ${answered.kind === "invalid" ? answered.reason : "the critic did not answer with defects."}`,
             ),
           };
-        const defects = answered.answer.defects
+        const fundamentalDefects: GameReviewDefect[] = Object.entries(answered.answer.fundamentals)
+          .filter(([, judgment]) => judgment.verdict === "no" && judgment.frameIds.length > 0)
+          .map(([name, judgment]) => ({
+            severity: "blocker",
+            what: `${name}: ${judgment.note}`,
+            frameId: judgment.frameIds[0]!,
+            fix: `Resolve ${name}: ${judgment.note}`,
+          }));
+        const defects = [...fundamentalDefects, ...answered.answer.defects]
           .toSorted((left, right) => {
             const rank = { blocker: 0, visible: 1, nit: 2 } as const;
             return rank[left.severity] - rank[right.severity];
           })
           .slice(0, MAX_REPAIR_PROMPT_DEFECTS);
         const doNotRegress = answered.answer.doNotRegress;
-        yield* rounds.recordReview(task.root, round.id, { defects, doNotRegress });
+        yield* rounds.recordReview(task.root, round.id, {
+          fundamentals: answered.answer.fundamentals,
+          defects,
+          doNotRegress,
+        });
         if (defects.length === 0)
           return {
             record,
@@ -1211,6 +1239,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           id: `c${index + 1}`,
           label: frame.label,
           path: frame.path,
+          ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
         }));
         const veto = mechanicalVeto(incumbent.checks, candidate.checks, review.doNotRegress);
         yield* rounds.recordReview(task.root, round.id, {

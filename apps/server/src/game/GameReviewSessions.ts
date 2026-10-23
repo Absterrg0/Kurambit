@@ -11,6 +11,8 @@ import {
   GameReviewBallotInput,
   type GameReviewReportResult,
   GameReviewCriticAnswer,
+  GameReviewCheck,
+  GamePlaytestInputPair,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type ModelSelection,
@@ -53,6 +55,7 @@ export class GameReviewProviderCatalog extends Context.Service<
 >()("t3/game/GameReviewSessions/GameReviewProviderCatalog") {}
 
 export interface GameReviewFrameInput {
+  readonly inputPair?: GamePlaytestInputPair;
   /** The source frame's id, kept outside the child's directory. */
   readonly id: string;
   /** What the child sees, e.g. "A: boot". Never a build id or artifact path. */
@@ -65,6 +68,7 @@ export interface GameReviewCheckInput {
   readonly id: string;
   readonly status: "passed" | "failed" | "unmeasured";
   readonly detail?: string;
+  readonly measurements?: GameReviewCheck["measurements"];
 }
 
 export interface GameReviewEvidenceInput {
@@ -165,6 +169,7 @@ const MAX_FRAMES = 24;
 const MAX_CHECKS = 64;
 
 const ReviewFrameRecord = Schema.Struct({
+  inputPair: Schema.optionalKey(GamePlaytestInputPair),
   /** The manifest id the child cites: f1, f2, ... */
   id: Schema.String,
   file: Schema.String,
@@ -175,6 +180,7 @@ const ReviewCheckRecord = Schema.Struct({
   id: Schema.String,
   status: Schema.Literals(["passed", "failed", "unmeasured"]),
   detail: Schema.optionalKey(Schema.String),
+  measurements: GameReviewCheck.fields.measurements,
 });
 const ReviewEvidenceRecord = Schema.Struct({
   frames: Schema.Array(ReviewFrameRecord),
@@ -382,6 +388,7 @@ const writeEvidenceDirectory = async (input: {
       id: check.id,
       status: check.status,
       ...(check.detail === undefined ? {} : { detail: check.detail }),
+      ...(check.measurements === undefined ? {} : { measurements: check.measurements }),
     }))
     .toSorted((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
   const frames = input.frames.map((frame, index) => ({
@@ -389,6 +396,7 @@ const writeEvidenceDirectory = async (input: {
     file: FRAME_FILE(index),
     sourceId: frame.id,
     label: frame.label,
+    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
   for (const [index, frame] of input.frames.entries()) {
     await NodeFSP.copyFile(frame.sourcePath, NodePath.join(input.directory, FRAME_FILE(index)));
@@ -397,7 +405,15 @@ const writeEvidenceDirectory = async (input: {
   await NodeFSP.writeFile(
     NodePath.join(input.directory, EVIDENCE_MANIFEST),
     `${JSON.stringify(
-      { frames: frames.map((frame) => ({ id: frame.id, file: frame.file })), checks },
+      {
+        frames: frames.map((frame) => ({
+          id: frame.id,
+          file: frame.file,
+          label: frame.label,
+          ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+        })),
+        checks,
+      },
       null,
       2,
     )}\n`,
@@ -549,6 +565,16 @@ export const parseCriticAnswer = (
   if (decoded.kind === "invalid") return decoded;
   const answer = decoded.answer;
   const seenIds = new Set<string>();
+  for (const [name, judgment] of Object.entries(answer.fundamentals)) {
+    if (judgment.verdict === "no" && judgment.frameIds.length === 0)
+      return { kind: "invalid", reason: `The critic's ${name}=no needs a frame citation.` };
+    for (const frameId of judgment.frameIds)
+      if (!known.frameIds.has(frameId))
+        return {
+          kind: "invalid",
+          reason: `The critic cited frame ${frameId}, which is not in its manifest.`,
+        };
+  }
   for (const defect of answer.defects) {
     if (!known.frameIds.has(defect.frameId))
       return {
@@ -1703,6 +1729,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           frames: record.evidence.frames.map((frame) => ({
             id: frame.id,
             label: frame.label,
+            ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
             path: NodePath.join(record.evidenceDirectory!, frame.file),
           })),
         };

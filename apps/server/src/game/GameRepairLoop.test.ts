@@ -163,6 +163,7 @@ const makeScripted = (): Scripted => ({
   incumbent: {
     checks: [
       { id: "boot", status: "passed" },
+      { id: "console", status: "passed" },
       { id: "input", status: "passed" },
       { id: "state", status: "passed" },
       { id: "hud", status: "passed" },
@@ -172,6 +173,7 @@ const makeScripted = (): Scripted => ({
   candidate: {
     checks: [
       { id: "boot", status: "passed" },
+      { id: "console", status: "passed" },
       { id: "input", status: "passed" },
       { id: "state", status: "passed" },
       { id: "hud", status: "passed" },
@@ -208,10 +210,18 @@ const makeScripted = (): Scripted => ({
   completed: [],
 });
 
+const fundamentals = {
+  boots: { verdict: "yes" as const, frameIds: ["f1"], note: "Boot frame." },
+  respondsToInput: { verdict: "yes" as const, frameIds: ["f1"], note: "Input feedback." },
+  coreActionVisible: { verdict: "yes" as const, frameIds: ["f1"], note: "Core action visible." },
+  stateReadable: { verdict: "yes" as const, frameIds: ["f1"], note: "State readable." },
+};
+
 const criticAnswer = (defects: number): GameReviewSessions.GameReviewSessionAnswerResult => ({
   kind: "critic",
   raw: "{}",
   answer: {
+    fundamentals,
     defects: Array.from({ length: defects }, (_, index) => ({
       severity: "visible" as const,
       what: `Fault ${String(index + 1)}`,
@@ -827,7 +837,7 @@ it.live("rolls back a candidate that fails a frozen check and keeps reviewing", 
         scripted.candidate = {
           ...scripted.candidate,
           checks: scripted.candidate.checks.map((check) =>
-            check.id === "state" ? { id: "state", status: "failed" as const } : check,
+            check.id === "console" ? { id: "console", status: "failed" as const } : check,
           ),
         };
         let reviews = 0;
@@ -842,7 +852,7 @@ it.live("rolls back a candidate that fails a frozen check and keeps reviewing", 
         const game = yield* services.rounds.read(root);
         const vetoed = game.rounds.find((round) => round.reason?.includes("mechanical-veto"));
         expect(vetoed?.status).toBe("rejected");
-        expect(vetoed?.reason).toContain("check-failed: state");
+        expect(vetoed?.reason).toContain("check-failed: console");
         expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
       }),
     ),
@@ -1948,10 +1958,13 @@ it.live("t50b's captured round 1 promotes with unknown preservation neutral", ()
           Promise.all([read("critic-0"), read("ballot-0"), read("ballot-1")]),
         );
         const frameIds = new Set(Array.from({ length: 12 }, (_, index) => `f${index + 1}`));
-        const critic = GameReviewSessions.parseCriticAnswer(criticRaw!, {
-          frameIds,
-          checkIds: new Set(),
-        });
+        const critic = GameReviewSessions.parseCriticAnswer(
+          JSON.stringify({ ...JSON.parse(criticRaw!), fundamentals }),
+          {
+            frameIds,
+            checkIds: new Set(),
+          },
+        );
         expect(critic.kind).toBe("valid");
         if (critic.kind !== "valid") return;
         const answers = ballotRaws.map((raw) =>
@@ -2039,4 +2052,83 @@ it.effect.each([
       }),
     ),
   ),
+);
+
+it.live(
+  "animated scenery with respondsToInput=no creates a blocker even without listed defects",
+  () =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          let reviews = 0;
+          fixture.scripted.critic = () =>
+            reviews++ === 0
+              ? {
+                  kind: "critic",
+                  raw: "{}",
+                  answer: {
+                    fundamentals: {
+                      ...fundamentals,
+                      respondsToInput: {
+                        verdict: "no",
+                        frameIds: ["f1"],
+                        note: "Only background animation changes after the click.",
+                      },
+                    },
+                    defects: [],
+                    doNotRegress: [],
+                  },
+                }
+              : criticAnswer(0);
+          fixture.scripted.repairs = [repairWith()];
+          fixture.scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          const round = (yield* services.rounds.read(fixture.root)).rounds.find(
+            (entry) => entry.defects?.length,
+          );
+          expect(round?.fundamentals?.respondsToInput.verdict).toBe("no");
+          expect(round?.defects).toEqual([
+            expect.objectContaining({
+              severity: "blocker",
+              frameId: "f1",
+              what: expect.stringContaining("respondsToInput"),
+            }),
+          ]);
+          expect(loopRecord(yield* readLoop(services)).repairsUsed).toBe(1);
+        }),
+      ),
+    ),
+);
+
+it.live(
+  "legacy movement, scenario and HUD failures cannot veto a critic-approved stationary game",
+  () =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          let reviews = 0;
+          fixture.scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+          fixture.scripted.candidate = {
+            ...fixture.scripted.candidate,
+            checks: [
+              { id: "boot", status: "passed" },
+              { id: "console", status: "passed" },
+              { id: "input", status: "passed" },
+              { id: "state", status: "failed", detail: "No win reached." },
+              { id: "hud", status: "failed", detail: "No HUD text." },
+            ],
+          };
+          fixture.scripted.repairs = [repairWith()];
+          fixture.scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    ),
 );

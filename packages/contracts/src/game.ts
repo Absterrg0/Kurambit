@@ -292,17 +292,6 @@ export const GamePlaytestState = Schema.Struct({
   notOnScreen: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type GamePlaytestState = typeof GamePlaytestState.Type;
-export const GamePlaytestFrame = Schema.Struct({
-  label: Schema.String,
-  path: Schema.String,
-  /**
-   * The probe snapshot taken nearest this frame, persisted with the evidence
-   * so a cover can be chosen from observed play rather than frame labels.
-   * Older evidence and the boot frame may have none.
-   */
-  probe: Schema.optionalKey(GamePlaytestProbe),
-});
-export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
 export const GamePlaytestStep = Schema.Union([
   Schema.Struct({
     key: Schema.String.annotate({
@@ -337,6 +326,34 @@ export const GamePlaytestStep = Schema.Union([
   }),
 ]);
 export type GamePlaytestStep = typeof GamePlaytestStep.Type;
+export const GamePlaytestInputPair = Schema.Struct({
+  stepIndex: Schema.Int,
+  phase: Schema.Literals(["before", "after"]),
+  input: GamePlaytestStep,
+  changedPercent: Schema.NullOr(Schema.Number),
+  stateChanges: Schema.NullOr(
+    Schema.Array(
+      Schema.Struct({
+        key: Schema.String,
+        before: Schema.NullOr(GamePlaytestStateValue),
+        after: Schema.NullOr(GamePlaytestStateValue),
+      }),
+    ),
+  ),
+});
+export type GamePlaytestInputPair = typeof GamePlaytestInputPair.Type;
+export const GamePlaytestFrame = Schema.Struct({
+  label: Schema.String,
+  inputPair: Schema.optionalKey(GamePlaytestInputPair),
+  path: Schema.String,
+  /**
+   * The probe snapshot taken nearest this frame, persisted with the evidence
+   * so a cover can be chosen from observed play rather than frame labels.
+   * Older evidence and the boot frame may have none.
+   */
+  probe: Schema.optionalKey(GamePlaytestProbe),
+});
+export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
 export const GameLastPlaytest = Schema.Struct({
   at: Schema.String,
   directory: Schema.String,
@@ -632,6 +649,7 @@ export const GameConsoleMessage = Schema.Struct({
 export type GameConsoleMessage = typeof GameConsoleMessage.Type;
 export const GamePlaytestScreenshot = Schema.Struct({
   label: Schema.String,
+  inputPair: Schema.optionalKey(GamePlaytestInputPair),
   mimeType: Schema.Literal("image/png"),
   data: Schema.String,
   width: Schema.Number,
@@ -683,6 +701,8 @@ export const GameWebPlaytestInput = Schema.Struct({
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
 export const GameWebPlaytestResult = Schema.Struct({
+  /** Actual dispatched input steps; absent in older recordings. */
+  executedInputSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   success: Schema.Boolean,
   booted: Schema.Boolean,
   bootMs: Schema.NullOr(Schema.Number),

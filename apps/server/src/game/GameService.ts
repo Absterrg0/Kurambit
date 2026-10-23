@@ -1047,6 +1047,9 @@ const make = Effect.gen(function* () {
             yield* rounds.recordBuildPlaytest(root, build.buildId, {
               booted: result.booted,
               responded: result.responded,
+              ...(result.executedInputSteps === undefined
+                ? {}
+                : { executedInputSteps: result.executedInputSteps }),
               consoleErrors: result.consoleMessages.filter((message) => message.level === "error")
                 .length,
               steps: input.steps ?? [],

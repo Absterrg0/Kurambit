@@ -1,7 +1,12 @@
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import { RunId, ThreadId } from "./baseSchemas.ts";
-import { GamePlaytestStep, GameViewport } from "./game.ts";
+import {
+  GamePlaytestStep,
+  GamePlaytestState,
+  GamePlaytestInputPair,
+  GameViewport,
+} from "./game.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
 // Prose length must not discard a model's otherwise valid decision.
@@ -86,12 +91,28 @@ export const GameReviewPreservationEntry = Schema.Struct({
 });
 export type GameReviewPreservationEntry = typeof GameReviewPreservationEntry.Type;
 
+export const GameReviewFundamental = Schema.Struct({
+  verdict: Schema.Literals(["yes", "no", "cannot-tell"]),
+  frameIds: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16))).check(
+    Schema.isMaxLength(8),
+  ),
+  note: reviewText(400),
+});
+export const GameReviewFundamentals = Schema.Struct({
+  boots: GameReviewFundamental,
+  respondsToInput: GameReviewFundamental,
+  coreActionVisible: GameReviewFundamental,
+  stateReadable: GameReviewFundamental,
+});
+export type GameReviewFundamentals = typeof GameReviewFundamentals.Type;
+
 /**
  * The critic's whole answer. The loop caps the lists in the prompt; the parser
  * enforces the same caps so a model cannot hand back more than it was asked
  * for.
  */
 export const GameReviewCriticAnswer = Schema.Struct({
+  fundamentals: GameReviewFundamentals,
   defects: Schema.Array(GameReviewDefect).check(Schema.isMaxLength(5)),
   doNotRegress: Schema.Array(GameReviewDoNotRegress).check(Schema.isMaxLength(8)),
 });
@@ -189,6 +210,15 @@ export const GameReviewCheck = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
   status: Schema.Literals(["passed", "failed", "unmeasured"]),
   detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  /** Raw observations for the critic, never regression gates. */
+  measurements: Schema.optionalKey(
+    Schema.Struct({
+      steps: Schema.Array(GamePlaytestStep),
+      changedPercent: Schema.Number,
+      state: Schema.NullOr(GamePlaytestState),
+      designObservations: Schema.Array(Schema.String),
+    }),
+  ),
 });
 export type GameReviewCheck = typeof GameReviewCheck.Type;
 
@@ -328,6 +358,7 @@ export const EMPTY_GAME_REVIEW_USAGE: GameReviewUsage = {
 
 /** One captured frame a review child is shown, stored outside the game. */
 export const GameRepairFrame = Schema.Struct({
+  inputPair: Schema.optionalKey(GamePlaytestInputPair),
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   /** Absolute path in server state; never inside the game. */
@@ -430,6 +461,7 @@ export const GameReviewRound = Schema.Struct({
    */
   builderSelection: Schema.optionalKey(ModelSelection),
   reviewSelection: Schema.optionalKey(ModelSelection),
+  fundamentals: Schema.optionalKey(GameReviewFundamentals),
   defects: Schema.optionalKey(Schema.Array(GameReviewDefect)),
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),
   /** The frozen check run the round was reviewed against. */

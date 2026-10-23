@@ -375,16 +375,56 @@ const withSession = <A, E>(
 
 const frameInput = (paths: ReadonlyArray<string>): GameReviewSessions.GameReviewEvidenceInput => ({
   frames: [
-    { id: "incumbent-boot", label: "A: boot", sourcePath: paths[0]! },
-    { id: "incumbent-action", label: "A: core action", sourcePath: paths[1]! },
+    {
+      id: "incumbent-boot",
+      label: "before: no input",
+      sourcePath: paths[0]!,
+      inputPair: {
+        stepIndex: 0,
+        phase: "before",
+        input: { key: "ArrowRight", holdMs: 1000 },
+        changedPercent: 25,
+        stateChanges: [{ key: "state.card", before: "ready", after: "chosen" }],
+      },
+    },
+    {
+      id: "incumbent-action",
+      label: "after: held ArrowRight 1000ms",
+      sourcePath: paths[1]!,
+      inputPair: {
+        stepIndex: 0,
+        phase: "after",
+        input: { key: "ArrowRight", holdMs: 1000 },
+        changedPercent: 25,
+        stateChanges: [{ key: "state.card", before: "ready", after: "chosen" }],
+      },
+    },
   ],
   checks: [
     { id: "boot", status: "passed" },
-    { id: "input", status: "failed", detail: "left arrow did nothing" },
+    {
+      id: "input",
+      status: "passed",
+      detail: "1 input step executed",
+      measurements: {
+        steps: [{ key: "ArrowLeft", holdMs: 100 }],
+        state: null,
+        changedPercent: 0,
+        designObservations: [],
+      },
+    },
   ],
 });
 
+const fundamentals = {
+  boots: { verdict: "yes" as const, frameIds: ["f1"], note: "Boot frame." },
+  respondsToInput: { verdict: "yes" as const, frameIds: ["f1"], note: "Input feedback." },
+  coreActionVisible: { verdict: "yes" as const, frameIds: ["f1"], note: "Core action visible." },
+  stateReadable: { verdict: "yes" as const, frameIds: ["f1"], note: "State readable." },
+};
+
 const criticText = JSON.stringify({
+  fundamentals,
   defects: [
     {
       severity: "visible",
@@ -421,8 +461,8 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       expect(command.evidenceDirectory!.startsWith(stateDir)).toBe(true);
       expect(command.evidenceDirectory!.startsWith(`${root}${NodePath.sep}`)).toBe(false);
       // The prompt carries the manifest, never a build id or a source path.
-      expect(command.task).toContain("frames/frame-01.png (f1: A: boot)");
-      expect(command.task).toContain("f2: A: core action");
+      expect(command.task).toContain("frames/frame-01.png (f1: before: no input)");
+      expect(command.task).toContain("f2: after: held ArrowRight 1000ms");
       expect(command.task).toContain("calling game_critic_report");
       expect(command.task).toContain("correct that exact error and call again in this session");
       expect(command.task).toContain("Only if your provider cannot call tools");
@@ -448,8 +488,23 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
         yield* Effect.promise(() =>
           NodeFSP.readFile(NodePath.join(command.evidenceDirectory!, "evidence.json"), "utf8"),
         ),
-      ) as { checks: Array<{ id: string }> };
+      ) as { checks: Array<{ id: string }>; frames: Array<{ id: string }> };
       expect(evidenceJson.checks.map((check) => check.id)).toEqual(["boot", "input"]);
+      expect(evidenceJson.frames).toEqual([
+        expect.objectContaining({
+          id: "f1",
+          label: "before: no input",
+          inputPair: frameInput(frames).frames[0]!.inputPair,
+        }),
+        expect.objectContaining({
+          id: "f2",
+          label: "after: held ArrowRight 1000ms",
+          inputPair: frameInput(frames).frames[1]!.inputPair,
+        }),
+      ]);
+      expect(evidenceJson.checks[1]).toMatchObject({
+        measurements: frameInput(frames).checks[1]!.measurements,
+      });
       expect(started.evidenceHash).toMatch(/^[0-9a-f]{64}$/);
       const description = yield* service.describe({
         threadId,
@@ -893,7 +948,7 @@ it.live("an answer is bound to the run the round dispatched", () =>
         id: RunId.make("run:review-followup"),
         ordinal: 2,
         status: "completed",
-        answer: JSON.stringify({ defects: [], doNotRegress: [] }),
+        answer: JSON.stringify({ fundamentals, defects: [], doNotRegress: [] }),
       });
       const bound = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
       expect(bound.kind).toBe("critic");
@@ -1089,6 +1144,7 @@ it.live("accepts one JSON fence and truncates prose while keeping decisions and 
   Effect.sync(() => {
     const known = { frameIds: new Set(["f1"]), checkIds: new Set(["boot"]) };
     const critic = {
+      fundamentals,
       defects: [
         { severity: "visible", what: "w".repeat(401), frameId: "f1", fix: "f".repeat(401) },
       ],
@@ -1153,6 +1209,7 @@ it.live("returns the schema error, accepts a valid retry, and ends on the first 
       };
       expect(yield* service.toolRole(caller)).toBe("critic");
       const invalid = yield* service.report(caller, "critic", {
+        fundamentals,
         defects: [],
         doNotRegress: "wrong",
       });
@@ -1160,14 +1217,19 @@ it.live("returns the schema error, accepts a valid retry, and ends on the first 
       expect(invalid.error).toContain("doNotRegress");
       expect(scripted.dispatches).toHaveLength(1);
       const resumed = yield* restart();
-      const accepted = yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] });
+      const accepted = yield* resumed.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+      });
       expect(accepted).toEqual({ accepted: true, error: null, attemptsRemaining: 0, ended: true });
       expect(scripted.dispatches.at(-1)).toMatchObject({
         type: "run.interrupt",
         runId: started.runId,
       });
       expect(
-        (yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+        (yield* resumed.report(caller, "critic", { fundamentals, defects: [], doNotRegress: [] }))
+          .accepted,
       ).toBe(false);
     }),
   ),
@@ -1191,7 +1253,7 @@ it.live(
           threadId: started.childThreadId,
           providerInstanceId: builderSelection.instanceId,
         };
-        const answer = { defects: [], doNotRegress: [] };
+        const answer = { fundamentals, defects: [], doNotRegress: [] };
         expect(yield* service.toolRole({ ...caller, threadId })).toBeNull();
         expect((yield* service.report({ ...caller, threadId }, "critic", answer)).accepted).toBe(
           false,
@@ -1248,7 +1310,8 @@ it.live("ends after three invalid calls and refuses a fourth valid call", () =>
       expect(scripted.dispatches.at(-1)).toMatchObject({ type: "run.interrupt" });
       const resumed = yield* restart();
       expect(
-        (yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+        (yield* resumed.report(caller, "critic", { fundamentals, defects: [], doNotRegress: [] }))
+          .accepted,
       ).toBe(false);
     }),
   ),
@@ -1321,7 +1384,7 @@ it.live(
           threadId: started.childThreadId,
           providerInstanceId: builderSelection.instanceId,
         };
-        const answer = { defects: [], doNotRegress: [] };
+        const answer = { fundamentals, defects: [], doNotRegress: [] };
         expect((yield* service.report(caller, "critic", answer)).accepted).toBe(true);
         const input = { threadId, loopId, roundId, role: "critic" as const };
         expect(yield* service.answer(input)).toEqual({ kind: "pending" });
@@ -1391,7 +1454,8 @@ it.live("rejects a tool answer if its run binding or evidence hash changed", () 
         providerInstanceId: builderSelection.instanceId,
       };
       expect(
-        (yield* service.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+        (yield* service.report(caller, "critic", { fundamentals, defects: [], doNotRegress: [] }))
+          .accepted,
       ).toBe(true);
       scripted.childStatus = "interrupted";
       const input = { threadId, loopId, roundId, role: "critic" as const };
@@ -1479,4 +1543,37 @@ it.live("accepts the full six-frame ballot budget for all four slots", () =>
       expect(tooMany.detail).toBe("At most 24 frames are evidence.");
     }),
   ),
+);
+
+it.live("fundamentals require typed verdicts and honest frame citations", () =>
+  Effect.sync(() => {
+    const known = { frameIds: new Set(["f1"]), checkIds: new Set<string>() };
+    const answer = { fundamentals, defects: [], doNotRegress: [] };
+    const parse = (judgment: unknown) =>
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({ ...answer, fundamentals: { ...fundamentals, respondsToInput: judgment } }),
+        known,
+      );
+    expect(parse({ verdict: "no", frameIds: ["f1"], note: "Only scenery changes." }).kind).toBe(
+      "valid",
+    );
+    expect(
+      parse({ verdict: "cannot-tell", frameIds: [], note: "No interaction frame." }).kind,
+    ).toBe("valid");
+    expect(parse({ verdict: "no", frameIds: [], note: "No evidence." })).toMatchObject({
+      kind: "invalid",
+      reason: expect.stringContaining("needs a frame"),
+    });
+    expect(parse({ verdict: "yes", frameIds: ["f9"], note: "Unknown frame." })).toMatchObject({
+      kind: "invalid",
+      reason: expect.stringContaining("not in its manifest"),
+    });
+    expect(parse({ verdict: "maybe", frameIds: ["f1"], note: "Invalid enum." }).kind).toBe(
+      "invalid",
+    );
+    expect(
+      GameReviewSessions.parseCriticAnswer(JSON.stringify({ defects: [], doNotRegress: [] }), known)
+        .kind,
+    ).toBe("invalid");
+  }),
 );

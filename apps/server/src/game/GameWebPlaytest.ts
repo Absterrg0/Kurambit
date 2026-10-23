@@ -16,6 +16,7 @@ import {
   type GamePlaytestStep,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
+import { playtestStepWithEvidence } from "./playtestInputPairs.ts";
 import { sandboxDisabled } from "../preview/PreviewBrowserHost.ts";
 import {
   compareFrameSamples,
@@ -614,9 +615,11 @@ const runPlaytest = async (
         )
         .catch(() => null);
       const value = evaluated?.result?.value;
-      if (typeof value !== "string") return;
+      if (typeof value !== "string") return null;
       const probe = decodeProbe(value);
-      if (Option.isSome(probe)) samples.push({ probe: probe.value, afterInput: sawInput });
+      if (Option.isNone(probe)) return null;
+      samples.push({ probe: probe.value, afterInput: sawInput });
+      return probe.value;
     };
     const latestProbe = () => samples.findLast((sample) => sample.probe)?.probe ?? null;
     screenshots.push(await screenshot(cdp, session.sessionId, "booted", null));
@@ -629,52 +632,78 @@ const runPlaytest = async (
     if (booted && input.probeRequired && samples.length > 0)
       pauseConfirmed = await verifyPauseBridge(cdp, session.sessionId, signal);
 
-    for (const step of input.steps) {
+    let executedInputSteps = 0;
+    for (const [stepIndex, step] of input.steps.entries()) {
       signal?.throwIfAborted();
-      // Waits and screenshots receive nothing; everything else is player input.
-      const inputStep = !("waitMs" in step) && !("screenshot" in step);
-      if (inputStep) sawInput = true;
-      if ("waitMs" in step) await sleep(signal, step.waitMs);
-      else if ("screenshot" in step) {
-        screenshots.push(await screenshot(cdp, session.sessionId, step.screenshot, latestProbe()));
-        // The frame itself is the step's product; the next read pairs the probe
-        // that follows it, not the one before it.
-        await readProbe();
-        continue;
-      } else if ("click" in step)
-        pointer = (await clickCanvas(cdp, session.sessionId, step.click)) ?? pointer;
-      else if ("mouseMove" in step) {
-        const centre: { x: number; y: number } | null =
-          pointer ?? (await canvasCentre(cdp, session.sessionId));
-        if (centre) {
-          const next: { x: number; y: number } = {
-            x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
-            y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
+      const paired = await playtestStepWithEvidence({
+        step,
+        stepIndex,
+        capture: async () => {
+          const probe = await readProbe();
+          return {
+            screenshot: await screenshot(cdp, session.sessionId, "input", probe),
+            pixels: await sampleFrame(cdp, session.sessionId).catch(() => null),
+            probe,
           };
-          await cdp.send(
-            "Input.dispatchMouseEvent",
-            { type: "mouseMoved", x: Math.round(next.x), y: Math.round(next.y), button: "none" },
-            session.sessionId,
-          );
-          pointer = next;
-        }
-      } else {
-        try {
-          await cdp.send<unknown>(
-            "Runtime.evaluate",
-            { expression: `document.querySelector("canvas")?.focus()` },
-            session.sessionId,
-          );
-        } catch {
-          // The canvas may not be up yet; keyboard events still reach the document.
-        }
-        const keys = "keys" in step ? step.keys : [step.key];
-        for (const key of keys)
-          await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
-        await sleep(signal, step.holdMs);
-        for (const key of [...keys].toReversed())
-          await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
-      }
+        },
+        execute: async () => {
+          if (!("waitMs" in step) && !("screenshot" in step)) sawInput = true;
+          if ("waitMs" in step) await sleep(signal, step.waitMs);
+          else if ("screenshot" in step) {
+            screenshots.push(
+              await screenshot(cdp, session.sessionId, step.screenshot, latestProbe()),
+            );
+            // The frame itself is the step's product; the next read pairs the probe
+            // that follows it, not the one before it.
+            await readProbe();
+            return false;
+          } else if ("click" in step) {
+            const clicked = await clickCanvas(cdp, session.sessionId, step.click);
+            pointer = clicked ?? pointer;
+            return clicked !== null;
+          } else if ("mouseMove" in step) {
+            const centre: { x: number; y: number } | null =
+              pointer ?? (await canvasCentre(cdp, session.sessionId));
+            if (centre) {
+              const next: { x: number; y: number } = {
+                x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
+                y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
+              };
+              await cdp.send(
+                "Input.dispatchMouseEvent",
+                {
+                  type: "mouseMoved",
+                  x: Math.round(next.x),
+                  y: Math.round(next.y),
+                  button: "none",
+                },
+                session.sessionId,
+              );
+              pointer = next;
+              return true;
+            }
+          } else {
+            try {
+              await cdp.send<unknown>(
+                "Runtime.evaluate",
+                { expression: `document.querySelector("canvas")?.focus()` },
+                session.sessionId,
+              );
+            } catch {
+              // The canvas may not be up yet; keyboard events still reach the document.
+            }
+            const keys = "keys" in step ? step.keys : [step.key];
+            for (const key of keys)
+              await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
+            await sleep(signal, step.holdMs);
+            for (const key of [...keys].toReversed())
+              await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
+          }
+          return !("waitMs" in step) && !("mouseMove" in step);
+        },
+      });
+      if (paired.executed) executedInputSteps++;
+      screenshots.push(...paired.frames);
       await readProbe();
     }
     screenshots.push(await screenshot(cdp, session.sessionId, "after-steps", latestProbe()));
@@ -724,6 +753,7 @@ const runPlaytest = async (
     ].join("; ");
     return {
       success,
+      executedInputSteps,
       booted,
       bootMs: booted ? bootMs : null,
       responded: comparison.responded,

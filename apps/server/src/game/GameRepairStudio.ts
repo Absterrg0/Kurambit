@@ -9,6 +9,8 @@ import {
   type GameSubmissionFacts,
   type GameReviewFrozenInputs,
   type GameViewport,
+  type GameWebPlaytestResult,
+  type GamePlaytestInputPair,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -19,11 +21,13 @@ import * as GameQualification from "./GameQualification.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
 import { gameRecordFile } from "./gameRecord.ts";
-import { readLastPlaytest } from "./playtestEvidence.ts";
+import { selectInputPairFrames } from "./playtestInputPairs.ts";
+import { readPlaytestEvidence, readLastPlaytest } from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuild } from "./webBuild.ts";
 
 /** One captured frame the review may use, already written outside the game. */
 export interface GameRepairStudioFrame {
+  readonly inputPair?: GamePlaytestInputPair;
   readonly label: string;
   /** Absolute server-state path. */
   readonly path: string;
@@ -100,7 +104,7 @@ export class GameRepairStudio extends Context.Service<
     /**
      * Verifies the facts a submission (or the loop's fallback) must pass: the
      * build exists, hashes to its id, has recorded sources, and was played by
-     * a playtest that booted, logged no console errors and responded.
+     * a playtest that booted, logged no console errors and executed input.
      */
     readonly submissionFacts: (
       root: string,
@@ -127,85 +131,37 @@ export class GameRepairStudio extends Context.Service<
   }
 >()("t3/game/GameRepairStudio") {}
 
-/**
- * The playtest service's own measured verdicts, normalized into the stable
- * checks the loop freezes. Every check is a verdict, never a proxy: a frozen
- * player with animated scenery changes pixels and still fails movement, and a
- * run that does not qualify as honest gameplay fails `state` with its own
- * blockers. A measurement the run did not take stays `unmeasured` instead of
- * passing.
- */
-const checkResult = (result: {
-  readonly success: boolean;
-  readonly booted: boolean;
-  readonly consoleMessages: ReadonlyArray<{ readonly level: string }>;
-  readonly state: {
-    readonly before: { readonly hudText?: string | undefined } | null;
-    readonly after: { readonly hudText?: string | undefined } | null;
-    readonly playerMoved: number;
-    readonly notOnScreen?: ReadonlyArray<string> | undefined;
-  } | null;
-  readonly qualifies?: boolean | undefined;
-  readonly blockers?: ReadonlyArray<string> | undefined;
-  readonly pauseConfirmed?: boolean | null | undefined;
-}): ReadonlyArray<GameReviewCheck> => {
+/** Only execution facts gate the loop; measurements are evidence for the critic. */
+const checkResult = (
+  result: GameWebPlaytestResult,
+  inputs: GameReviewFrozenInputs,
+): ReadonlyArray<GameReviewCheck> => {
   const consoleErrors = result.consoleMessages.filter(
     (message) => message.level === "error",
   ).length;
-  const state = result.state;
-  const moved = state === null ? null : state.playerMoved > 0;
-  const hud =
-    state === null
-      ? null
-      : [state.before, state.after].some((probe) => (probe?.hudText ?? "").trim().length > 0);
-  // Some HUD text proves nothing about the game's state: a candidate can keep
-  // its title and hide the score. This judges whether every GameState value
-  // the probe read is shown on screen, and is unmeasured without screen text.
-  const hidden = state?.notOnScreen;
-  const blockers = (result.blockers ?? []).join("; ").slice(0, 1000);
-  const checks: GameReviewCheck[] = [
+  const executed = result.executedInputSteps;
+  return [
     { id: "boot", status: result.booted ? "passed" : "failed" },
     {
       id: "console",
-      status: consoleErrors === 0 && result.success ? "passed" : "failed",
-      ...(consoleErrors === 0 ? {} : { detail: `${consoleErrors} console errors` }),
+      status: consoleErrors === 0 ? "passed" : "failed",
+      detail: `${consoleErrors} console errors`,
     },
     {
       id: "input",
-      status: moved === null ? "unmeasured" : moved ? "passed" : "failed",
-      ...(moved === false ? { detail: "the player did not move from the gameplay baseline" } : {}),
-    },
-    {
-      id: "state",
-      status:
-        result.qualifies === undefined ? "unmeasured" : result.qualifies ? "passed" : "failed",
-      ...(result.qualifies === false
-        ? { detail: blockers === "" ? "the run did not qualify as gameplay" : blockers }
-        : {}),
-    },
-    {
-      id: "hud",
-      status: hud === null ? "unmeasured" : hud ? "passed" : "failed",
-      ...(hud === false ? { detail: "the probe saw no visible HUD text" } : {}),
-    },
-    {
-      id: "state-on-screen",
-      status: hidden === undefined ? "unmeasured" : hidden.length === 0 ? "passed" : "failed",
-      ...(hidden !== undefined && hidden.length > 0
-        ? { detail: `not on screen: ${hidden.join(", ")}`.slice(0, 1000) }
-        : {}),
-    },
-    {
-      id: "bridge",
-      status:
-        result.pauseConfirmed === undefined || result.pauseConfirmed === null
-          ? "unmeasured"
-          : result.pauseConfirmed
-            ? "passed"
-            : "failed",
+      status: executed === undefined ? "unmeasured" : executed > 0 ? "passed" : "failed",
+      detail:
+        executed === undefined
+          ? "Input dispatch was not recorded; playtest again."
+          : `${executed} input steps executed`,
+      measurements: {
+        steps: [...inputs.steps],
+        changedPercent: result.changedPercent,
+        state: result.state,
+        designObservations: [...(result.designObservations ?? [])],
+      },
     },
   ];
-  return checks;
 };
 
 export const layer = (options: { readonly stateDir: string }) =>
@@ -223,6 +179,7 @@ export const layer = (options: { readonly stateDir: string }) =>
         root: string,
         screenshots: ReadonlyArray<{
           readonly label: string;
+          readonly inputPair?: GamePlaytestInputPair;
           readonly data: string;
         }>,
       ) =>
@@ -250,7 +207,11 @@ export const layer = (options: { readonly stateDir: string }) =>
               catch: () => false,
             }).pipe(Effect.orElseSucceed(() => false));
             if (!written) continue;
-            frames.push({ label: shot.label, path: file });
+            frames.push({
+              label: shot.label,
+              path: file,
+              ...(shot.inputPair === undefined ? {} : { inputPair: shot.inputPair }),
+            });
           }
           return frames;
         });
@@ -368,9 +329,7 @@ export const layer = (options: { readonly stateDir: string }) =>
               ),
             ]);
           checks.push(check("playtest", "passed"));
-          const inputSteps = evidence.steps.filter(
-            (step) => !("waitMs" in step) && !("screenshot" in step),
-          ).length;
+          const inputSteps = evidence.executedInputSteps;
           const consoleErrors = evidence.consoleErrors;
           return result(buildId, directory, [
             ...checks,
@@ -386,12 +345,12 @@ export const layer = (options: { readonly stateDir: string }) =>
             ),
             check(
               "input",
-              inputSteps > 0 && evidence.responded ? "passed" : "failed",
-              inputSteps === 0
-                ? "The playtest executed no input steps; waits and screenshots do not count."
-                : evidence.responded
-                  ? undefined
-                  : "The game did not visibly respond to the playtest's input.",
+              inputSteps === undefined ? "unmeasured" : inputSteps > 0 ? "passed" : "failed",
+              inputSteps === undefined
+                ? "Input dispatch was not recorded; playtest again."
+                : inputSteps === 0
+                  ? "The playtest executed no input steps; waits and screenshots do not count."
+                  : `${inputSteps} input steps executed`,
             ),
           ]);
         });
@@ -423,14 +382,37 @@ export const layer = (options: { readonly stateDir: string }) =>
         Effect.gen(function* () {
           const { inputs } = input;
           const result = yield* game.webPlaytestBuild(input.threadId, input.buildId, {
-            ...(inputs.steps.length === 0 ? {} : { steps: [...inputs.steps] }),
+            steps: [...inputs.steps],
             ...(inputs.viewport === null
               ? {}
               : { width: inputs.viewport.width, height: inputs.viewport.height }),
           });
-          const frames = yield* storeFrames(input.root, result.screenshots);
+          // Read persisted pairs so a response byte cap cannot split the critic's evidence.
+          const persisted =
+            result.evidenceDirectory === undefined
+              ? null
+              : yield* Effect.promise(() =>
+                  readPlaytestEvidence(input.root, result.evidenceDirectory!),
+                );
+          const selected =
+            persisted === null
+              ? selectInputPairFrames(result.screenshots)
+              : yield* Effect.promise(() =>
+                  Promise.all(
+                    selectInputPairFrames(persisted.frames).map(async (frame) => ({
+                      label: frame.label,
+                      ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+                      data: (
+                        await NodeFSP.readFile(
+                          NodePath.join(input.root, result.evidenceDirectory!, frame.file),
+                        )
+                      ).toString("base64"),
+                    })),
+                  ),
+                );
+          const frames = yield* storeFrames(input.root, selected);
           return {
-            checks: checkResult(result),
+            checks: checkResult(result, inputs),
             frames,
             viewport: result.baseViewport ?? null,
           } satisfies GameRepairStudioCheckResult;

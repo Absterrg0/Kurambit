@@ -6,7 +6,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import type { GameWebPlaytestResult } from "@t3tools/contracts";
-import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
+import {
+  readLastPlaytest,
+  readPlaytestRunFacts,
+  writePlaytestEvidence,
+} from "./playtestEvidence.ts";
 
 const result = (label: string): GameWebPlaytestResult => ({
   success: true,
@@ -268,4 +272,31 @@ it.live("covers from the latest qualifying run, never a newer failed attempt", (
       yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
     }
   }),
+);
+
+it.live("records dispatched input separately from requests and pixel response", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "input-facts-"))),
+      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+    );
+    for (const executedInputSteps of [undefined, 0, 1]) {
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root,
+          steps: [{ click: "left" }],
+          result: {
+            ...result("after-steps"),
+            executedInputSteps,
+            responded: false,
+            changedPercent: 0,
+          },
+        }),
+      );
+      const facts = yield* Effect.promise(() => readPlaytestRunFacts(root, evidence.directory));
+      expect(facts?.executedInputSteps).toBe(executedInputSteps);
+      expect(facts?.responded).toBe(false);
+      expect(facts?.steps).toBe(1);
+    }
+  }).pipe(Effect.scoped),
 );
