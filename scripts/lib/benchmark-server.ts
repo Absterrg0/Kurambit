@@ -61,6 +61,38 @@ export interface BenchmarkServer {
   stop: () => Promise<void>;
 }
 
+/**
+ * A private benchmark home starts empty, and several provider drivers
+ * (opencode, cursor, grok, ...) default to disabled. A benchmark that asks for
+ * one of them would then fail before the first turn with a disabled-provider
+ * error. Enable exactly the requested instance and copy nothing from the
+ * operator's own home: the benchmark home's settings are its own.
+ */
+export async function seedBenchmarkProviderSettings(input: {
+  readonly homeDir: string;
+  readonly provider: string;
+}): Promise<void> {
+  const file = NodePath.join(input.homeDir, "userdata", "settings.json");
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  const parsed = await NodeFSP.readFile(file, "utf8")
+    .then((text) => JSON.parse(text) as unknown)
+    .catch(() => null);
+  const settings = isRecord(parsed) ? parsed : {};
+  const instances = isRecord(settings.providerInstances) ? settings.providerInstances : {};
+  const existing = instances[input.provider];
+  instances[input.provider] = {
+    ...(isRecord(existing) ? existing : {}),
+    // A custom instance id may not equal its driver; keep the configured one.
+    driver:
+      isRecord(existing) && typeof existing.driver === "string" ? existing.driver : input.provider,
+    enabled: true,
+  };
+  settings.providerInstances = instances;
+  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+  await NodeFSP.writeFile(file, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
 /** The startup line names the port the server actually bound; the token stays in the log. */
 const PAIRING_LINE = /Pairing URL:\s*(https?:\/\/\S+)/;
 const START_TIMEOUT_MS = 120_000;
@@ -76,7 +108,10 @@ export async function startBenchmarkServer(input: {
   readonly sandbox: DisplaySandbox;
   readonly logPath: string;
   readonly port?: number;
+  /** The provider instance this benchmark asks its builder to use. */
+  readonly provider: string;
 }): Promise<BenchmarkServer> {
+  await seedBenchmarkProviderSettings({ homeDir: input.homeDir, provider: input.provider });
   const spec = benchmarkServerSpawn(input);
   await NodeFSP.mkdir(NodePath.dirname(input.logPath), { recursive: true });
   const log = NodeFS.createWriteStream(input.logPath, { flags: "w" });

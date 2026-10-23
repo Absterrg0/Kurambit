@@ -557,6 +557,7 @@ const main = Effect.gen(function* () {
             homeDir: serverHome,
             sandbox: displaySandbox,
             logPath: NodePath.join(serverHome, "server.log"),
+            provider: values.provider,
           }),
         )
       : null;
