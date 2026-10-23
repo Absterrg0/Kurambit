@@ -17,6 +17,7 @@ import {
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
 import { playtestStepWithEvidence } from "./playtestInputPairs.ts";
+import { runCaptureWindow } from "./playtestTiming.ts";
 import { sandboxDisabled } from "../preview/PreviewBrowserHost.ts";
 import {
   compareFrameSamples,
@@ -641,36 +642,24 @@ const runPlaytest = async (
       const waitWithCaptures = async (
         duration: number,
         move?: (fraction: number) => Promise<void>,
-      ) => {
-        if (duration === 0) {
-          await move?.(1);
-          return;
-        }
-        const interval = input.captureEveryMs ?? duration;
-        let nextCapture = interval;
-        for (let elapsed = 0; elapsed < duration;) {
-          const slice = Math.min(
-            move === undefined ? interval : 50,
-            nextCapture - elapsed,
-            duration - elapsed,
-          );
-          await sleep(signal, slice);
-          elapsed += slice;
-          await move?.(elapsed / duration);
-          if (elapsed >= nextCapture) {
-            if (input.captureEveryMs !== undefined && elapsed < duration)
-              duringFrames.push(
-                await screenshot(
-                  cdp,
-                  session.sessionId,
-                  `step ${stepIndex + 1} during: ${elapsed}ms`,
-                  await readProbe(),
-                ),
-              );
-            nextCapture += interval;
-          }
-        }
-      };
+      ) =>
+        runCaptureWindow({
+          duration,
+          ...(input.captureEveryMs === undefined ? {} : { captureInterval: input.captureEveryMs }),
+          now: () => performance.now(),
+          sleep: (milliseconds) => sleep(signal, milliseconds),
+          ...(move === undefined ? {} : { move }),
+          capture: async (elapsed) => {
+            duringFrames.push(
+              await screenshot(
+                cdp,
+                session.sessionId,
+                `step ${stepIndex + 1} during: ${elapsed}ms`,
+                await readProbe(),
+              ),
+            );
+          },
+        });
       const paired = await playtestStepWithEvidence({
         step,
         stepIndex,
