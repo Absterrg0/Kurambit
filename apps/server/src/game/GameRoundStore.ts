@@ -14,7 +14,9 @@ import {
   GameReviewRound,
   GameSelectedBuild,
   GameSubmission,
-  type GameReviewArtifact,
+  GameReviewArtifact,
+  GamePlaytestStep,
+  GameViewport,
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
   type GameReviewBudget,
@@ -44,6 +46,19 @@ const StoredState = Schema.Struct({
 });
 type StoredState = typeof StoredState.Type;
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(StoredState));
+
+const BuildPlaytest = Schema.Struct({
+  booted: Schema.Boolean,
+  responded: Schema.Boolean,
+  consoleErrors: Schema.Int,
+  steps: Schema.Array(GamePlaytestStep),
+  viewport: Schema.NullOr(GameViewport),
+});
+const StoredExport = Schema.Struct({
+  artifact: GameReviewArtifact,
+  playtest: Schema.NullOr(BuildPlaytest),
+});
+const decodeExport = Schema.decodeUnknownSync(Schema.fromJsonString(StoredExport));
 
 /** A completed-round history is provenance, not a log; keep the recent window small. */
 const MAX_STORED_ROUNDS = 50;
@@ -229,6 +244,27 @@ export class GameRoundStore extends Context.Service<
       root: string,
       submission: GameSubmission,
     ) => Effect.Effect<GameSubmission, GameOperationError>;
+    /** Export provenance survives later exports and mutable qualification records. */
+    readonly recordExport: (
+      root: string,
+      artifact: GameReviewArtifact,
+    ) => Effect.Effect<void, GameOperationError>;
+    readonly exported: (
+      root: string,
+      buildId: string,
+    ) => Effect.Effect<
+      {
+        readonly artifact: GameReviewArtifact;
+        readonly sourceDirectory: string;
+        readonly playtest: typeof BuildPlaytest.Type | null;
+      } | null,
+      GameOperationError
+    >;
+    readonly recordBuildPlaytest: (
+      root: string,
+      buildId: string,
+      playtest: typeof BuildPlaytest.Type,
+    ) => Effect.Effect<void, GameOperationError>;
     /** The byte-accurate source identity round decisions use. */
     readonly sourceId: (root: string) => Effect.Effect<string, GameOperationError>;
     /**
@@ -493,6 +529,45 @@ export const layer = (options: { readonly stateDir: string }) => {
           return [candidate.directory];
         });
 
+      const exportFile = (root: string, buildId: string) =>
+        Effect.gen(function* () {
+          if (!/^[0-9a-f]{64}$/.test(buildId))
+            return yield* failure(
+              "read exported build",
+              root,
+              "invalid-input",
+              "Invalid build hash.",
+            );
+          const found = yield* attempt("read exported build", root, () => location(root));
+          return NodePath.join(
+            NodePath.dirname(found.file),
+            NodePath.basename(found.file, ".json"),
+            `${buildId}.json`,
+          );
+        });
+      const readExport = (root: string, buildId: string) =>
+        Effect.gen(function* () {
+          const file = yield* exportFile(root, buildId);
+          return yield* attempt("read exported build", file, async () => {
+            const text = await readRecordText(file);
+            return text === null ? null : decodeExport(text);
+          });
+        });
+      const writeExport = (root: string, buildId: string, record: typeof StoredExport.Type) =>
+        Effect.gen(function* () {
+          const file = yield* exportFile(root, buildId);
+          yield* attempt("record exported build", file, async () => {
+            await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+            const temporary = `${file}.${NodeCrypto.randomUUID()}.tmp`;
+            try {
+              await NodeFSP.writeFile(temporary, `${JSON.stringify(record)}\n`);
+              await NodeFSP.rename(temporary, file);
+            } finally {
+              await NodeFSP.rm(temporary, { force: true });
+            }
+          });
+        });
+
       return GameRoundStore.of({
         read: (root) =>
           withLock(root, "read game rounds", (found) =>
@@ -518,6 +593,56 @@ export const layer = (options: { readonly stateDir: string }) => {
               ].slice(-MAX_STORED_SUBMISSIONS);
               yield* writeStateEffect(found.file, { ...state, submissions });
               return submission;
+            }),
+          ),
+        recordExport: (root, artifact) =>
+          withLock(root, "record exported build", () =>
+            Effect.gen(function* () {
+              validatedArtifact(artifact);
+              if (artifact.sourceId === null)
+                return yield* failure(
+                  "record exported build",
+                  root,
+                  "invalid-input",
+                  "The export has no source manifest.",
+                );
+              const existing = yield* readExport(root, artifact.buildId);
+              if (existing !== null) return;
+              yield* writeExport(root, artifact.buildId, { artifact, playtest: null });
+            }),
+          ),
+        exported: (root, buildId) =>
+          Effect.gen(function* () {
+            const recorded = yield* readExport(root, buildId);
+            if (recorded === null) return null;
+            const artifact = validatedArtifact(recorded.artifact);
+            if (artifact.buildId !== buildId || artifact.sourceId === null)
+              return yield* failure(
+                "read exported build",
+                root,
+                "invalid-input",
+                "The export's build/source binding is invalid.",
+              );
+            const stored = yield* snapshots.read(root, artifact.sourceId);
+            const sourceDirectory = NodePath.join(stored.directory, "files");
+            const actual = yield* snapshots.capture(sourceDirectory);
+            if (
+              actual.sourceId !== artifact.sourceId ||
+              GameSnapshots.gameSourceId(stored.manifest.files) !== artifact.sourceId
+            )
+              return yield* failure(
+                "read exported build",
+                root,
+                "invalid-input",
+                "The export's recorded source manifest or snapshot changed.",
+              );
+            return { ...recorded, sourceDirectory };
+          }),
+        recordBuildPlaytest: (root, buildId, playtest) =>
+          withLock(root, "record build playtest", () =>
+            Effect.gen(function* () {
+              const recorded = yield* readExport(root, buildId);
+              if (recorded !== null) yield* writeExport(root, buildId, { ...recorded, playtest });
             }),
           ),
         sourceId: (root) =>

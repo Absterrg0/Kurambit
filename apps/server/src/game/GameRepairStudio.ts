@@ -15,9 +15,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as GameQualification from "./GameQualification.ts";
+import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
 import { gameRecordFile } from "./gameRecord.ts";
-import { readLastPlaytest, readPlaytestRunFacts } from "./playtestEvidence.ts";
+import { readLastPlaytest } from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuild } from "./webBuild.ts";
 
 /** One captured frame the review may use, already written outside the game. */
@@ -32,6 +33,7 @@ export interface GameRepairStudioCheckInput {
   readonly root: string;
   /** Which build the playtest should show. The service picks it itself. */
   readonly target: "incumbent" | "candidate";
+  readonly buildId: string;
   /**
    * The loop's frozen route and viewport. They were captured when the loop
    * opened and are replayed for every check, so a repair child's own playtest
@@ -105,8 +107,8 @@ export class GameRepairStudio extends Context.Service<
     ) => Effect.Effect<GameRepairStudioProvenance, GameOperationError>;
     /**
      * Verifies the facts a submission (or the loop's fallback) must pass: the
-     * build exists, hashes to its id, is the current export, and was played by
-     * a passing playtest that booted, logged no console errors and responded.
+     * build exists, hashes to its id, has recorded sources, and was played by
+     * a playtest that booted, logged no console errors and responded.
      */
     readonly submissionFacts: (
       root: string,
@@ -115,6 +117,7 @@ export class GameRepairStudio extends Context.Service<
     /** The builder's own inputs, captured once when a loop opens. */
     readonly frozenInputs: (
       root: string,
+      buildId?: string,
     ) => Effect.Effect<GameReviewFrozenInputs, GameOperationError>;
     /** Plays one build with the frozen inputs and normalizes its real verdicts. */
     readonly check: (
@@ -219,6 +222,7 @@ export const layer = (options: { readonly stateDir: string }) =>
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
       const qualification = yield* GameQualification.GameQualification;
+      const rounds = yield* GameRoundStore.GameRoundStore;
 
       const framesDirectory = (root: string) =>
         gameRecordFile(options.stateDir, "game-repair-frames", root, "");
@@ -271,7 +275,6 @@ export const layer = (options: { readonly stateDir: string }) =>
       const submissionFacts: GameRepairStudio["Service"]["submissionFacts"] = (root, requested) =>
         Effect.gen(function* () {
           const exported = yield* qualification.stageRecord(root, "export");
-          const played = yield* qualification.stageRecord(root, "playtest");
           const check = (
             id: string,
             status: GameReviewCheck["status"],
@@ -344,58 +347,35 @@ export const layer = (options: { readonly stateDir: string }) =>
                     `The build's files changed after export and now hash to ${hashed.buildId}; export the game again.`,
                   );
           if (bytes.status !== "passed") return result(buildId, directory, [exists, bytes]);
-          // The repair edits the folder those sources live in, so the build a
-          // review starts on has to be the one that folder currently produces.
-          const current =
-            exported === null
-              ? check("current", "failed", "This game has no recorded export yet.")
-              : exported.outcome !== "passed"
-                ? check(
-                    "current",
-                    "failed",
-                    `The last export did not pass: ${exported.detail ?? "no detail recorded"}.`,
-                  )
-                : exported.buildId !== buildId
-                  ? check(
-                      "current",
-                      "failed",
-                      `The latest export is ${exported.buildId ?? "unknown"}, not ${buildId}; export the current game, then submit the new build.`,
-                    )
-                  : check("current", "passed");
-          const binding =
-            played === null
-              ? check(
-                  "playtest",
-                  "failed",
-                  "No playtest is recorded for this game; run game_web_playtest with input steps that play the core loop, then submit.",
-                )
-              : played.buildId !== buildId
-                ? check(
-                    "playtest",
-                    "failed",
-                    `The last playtest played ${played.buildId ?? "another build"}, not ${buildId}; playtest this build, then submit.`,
-                  )
-                : played.evidenceDirectory === null
-                  ? check(
-                      "playtest",
-                      "failed",
-                      "The playtest recorded no evidence directory, so it cannot be verified.",
-                    )
-                  : check("playtest", "passed");
-          const checks = [exists, bytes, current, binding];
-          if (binding.status !== "passed") return result(buildId, directory, checks);
-          const evidence = yield* Effect.promise(() =>
-            readPlaytestRunFacts(root, played!.evidenceDirectory!),
-          );
+          const recorded = yield* rounds.exported(root, buildId).pipe(Effect.result);
+          if (recorded._tag === "Failure" || recorded.success === null)
+            return result(buildId, directory, [
+              exists,
+              bytes,
+              check(
+                "sources",
+                "failed",
+                recorded._tag === "Failure"
+                  ? (recorded.failure.detail ??
+                      "The export's recorded sources are missing or unreadable.")
+                  : "This build has no recorded export/source binding; export the game again.",
+              ),
+            ]);
+          const evidence = recorded.success.playtest;
+          const checks = [exists, bytes, check("sources", "passed")];
           if (evidence === null)
             return result(buildId, directory, [
               ...checks,
               check(
-                "evidence",
-                "unmeasured",
-                "The playtest evidence for this build is missing or unreadable; playtest it again.",
+                "playtest",
+                "failed",
+                "This build has no recorded playtest; playtest it before submitting.",
               ),
             ]);
+          checks.push(check("playtest", "passed"));
+          const inputSteps = evidence.steps.filter(
+            (step) => !("waitMs" in step) && !("screenshot" in step),
+          ).length;
           const consoleErrors = evidence.consoleErrors;
           return result(buildId, directory, [
             ...checks,
@@ -411,8 +391,8 @@ export const layer = (options: { readonly stateDir: string }) =>
             ),
             check(
               "input",
-              evidence.steps > 0 && evidence.responded ? "passed" : "failed",
-              evidence.steps === 0
+              inputSteps > 0 && evidence.responded ? "passed" : "failed",
+              inputSteps === 0
                 ? "The playtest executed no input steps; give it steps that play the core loop."
                 : evidence.responded
                   ? undefined
@@ -421,8 +401,16 @@ export const layer = (options: { readonly stateDir: string }) =>
           ]);
         });
 
-      const frozenInputs = (root: string) =>
+      const frozenInputs: GameRepairStudio["Service"]["frozenInputs"] = (root, buildId) =>
         Effect.gen(function* () {
+          if (buildId !== undefined) {
+            const recorded = yield* rounds.exported(root, buildId);
+            return {
+              steps: [...(recorded?.playtest?.steps ?? [])],
+              viewport: recorded?.playtest?.viewport ?? null,
+              seed: "unknown",
+            } satisfies GameReviewFrozenInputs;
+          }
           // The builder's own demo route is frozen evidence, not something the
           // repair child gets to choose again.
           const last = yield* Effect.promise(() =>
@@ -439,7 +427,7 @@ export const layer = (options: { readonly stateDir: string }) =>
       const check: GameRepairStudio["Service"]["check"] = (input) =>
         Effect.gen(function* () {
           const { inputs } = input;
-          const result = yield* game.webPlaytest(input.threadId, {
+          const result = yield* game.webPlaytestBuild(input.threadId, input.buildId, {
             ...(inputs.steps.length === 0 ? {} : { steps: [...inputs.steps] }),
             ...(inputs.viewport === null
               ? {}

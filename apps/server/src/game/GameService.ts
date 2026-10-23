@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   GameOperationError,
+  GameManifest,
   type GameCheckResult,
   type GameSceneInspectResult,
   type GameScenariosRunResult,
@@ -131,6 +132,12 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly webPlaytest: (
       threadId: ThreadId,
+      input: GameWebPlaytestInput,
+    ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
+    /** Plays recorded export bytes without importing or rebuilding editable sources. */
+    readonly webPlaytestBuild: (
+      threadId: ThreadId,
+      buildId: string,
       input: GameWebPlaytestInput,
     ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
@@ -679,6 +686,7 @@ const make = Effect.gen(function* () {
           target: "Web" as const,
           entry: "index.html",
         };
+        yield* rounds.recordExport(root, artifact);
         if (selection.mode === "candidate")
           yield* rounds.recordCandidate(root, selection.roundId, artifact);
         else yield* rounds.select(root, artifact);
@@ -844,7 +852,12 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const webPlaytest = (root: string, input: GameWebPlaytestInput, runId: string | null) =>
+  const webPlaytest = (
+    root: string,
+    input: GameWebPlaytestInput,
+    runId: string | null,
+    buildId?: string,
+  ) =>
     Effect.gen(function* () {
       // Reject before exporting, serving, or launching the browser: a bad capture
       // request must not cost a build or hold the game's operation lock.
@@ -863,24 +876,48 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
           const identity = yield* designApprovals.readPolicy(root, manifest);
-          const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
-          if (!(yield* webBuildIsCurrent(beforePlaytest))) {
-            const exported = yield* exportGame(root, "Web", yield* exportSelection(root), runId);
-            if (!exported.success)
+          const recorded = buildId === undefined ? null : yield* rounds.exported(root, buildId);
+          if (buildId !== undefined) {
+            if (recorded === null)
               return yield* new GameOperationError({
                 operation: "Web playtest",
-                path: NodePath.join(root, "builds/web"),
-                reason: "command-failed",
-                detail: exported.message,
+                path: root,
+                reason: "invalid-input",
+                detail: `Build ${buildId} has no recorded source binding.`,
               });
+            const actual = yield* Effect.promise(() =>
+              hashWebBuild(root, recorded.artifact.directory),
+            );
+            if (actual?.buildId !== buildId)
+              return yield* new GameOperationError({
+                operation: "Web playtest",
+                path: root,
+                reason: "invalid-input",
+                detail: `Build ${buildId} is missing or its bytes changed after export.`,
+              });
+          } else {
+            const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
+            if (!(yield* webBuildIsCurrent(beforePlaytest))) {
+              const exported = yield* exportGame(root, "Web", yield* exportSelection(root), runId);
+              if (!exported.success)
+                return yield* new GameOperationError({
+                  operation: "Web playtest",
+                  path: root,
+                  reason: "command-failed",
+                  detail: exported.message,
+                });
+            }
           }
-          // Bind the run to the build that exists now, before it starts. A later
-          // replacement makes this build stale through the export record.
-          const build = (yield* qualification.read(root, manifest.godotProject)).stages.find(
-            (stage) => stage.stage === "export",
-          );
-          // Playtest the bytes the export record names, which may be a round's
-          // candidate; Play itself keeps serving the selected build.
+          const build =
+            recorded === null
+              ? (yield* qualification.read(root, manifest.godotProject)).stages.find(
+                  (stage) => stage.stage === "export",
+                )
+              : {
+                  ...recorded.artifact,
+                  buildDirectory: recorded.artifact.directory,
+                  status: "passed" as const,
+                };
           const url = yield* preview.open(root, build?.buildDirectory ?? WEB_BUILD_DIRECTORY);
           const executable = yield* browser.executable.pipe(
             Effect.mapError(
@@ -900,9 +937,36 @@ const make = Effect.gen(function* () {
           // The game keeps its own pixel grid: capture a whole-number multiple of
           // the project's base viewport that fits the requested box, so a 640×360
           // game is recorded in real pixels instead of letterboxed into a box.
+          const playtestManifest =
+            recorded === null
+              ? manifest
+              : yield* Effect.tryPromise({
+                  try: async () =>
+                    Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest))(
+                      await NodeFSP.readFile(
+                        NodePath.join(recorded.sourceDirectory, "game.json"),
+                        "utf8",
+                      ),
+                    ),
+                  catch: (cause) =>
+                    new GameOperationError({
+                      operation: "Web playtest",
+                      path: root,
+                      reason: "io",
+                      detail: "The exported build's game manifest is unreadable.",
+                      cause,
+                    }),
+                });
           const projectGodot = yield* Effect.tryPromise({
             try: () =>
-              NodeFSP.readFile(NodePath.join(root, manifest.godotProject, "project.godot"), "utf8"),
+              NodeFSP.readFile(
+                NodePath.join(
+                  recorded?.sourceDirectory ?? root,
+                  playtestManifest.godotProject,
+                  "project.godot",
+                ),
+                "utf8",
+              ),
             catch: (cause) =>
               new GameOperationError({
                 operation: "Web playtest",
@@ -978,6 +1042,15 @@ const make = Effect.gen(function* () {
                 cause,
               }),
           });
+          if (build?.buildId !== null && build?.buildId !== undefined)
+            yield* rounds.recordBuildPlaytest(root, build.buildId, {
+              booted: result.booted,
+              responded: result.responded,
+              consoleErrors: result.consoleMessages.filter((message) => message.level === "error")
+                .length,
+              steps: input.steps ?? [],
+              viewport: baseViewport,
+            });
           const framesNote =
             droppedFrames === 0
               ? ""
@@ -1742,6 +1815,8 @@ const make = Effect.gen(function* () {
           Effect.flatMap(exporterRun(threadId), (runId) => webPlaytest(root, input, runId)),
         ),
       ),
+    webPlaytestBuild: (threadId, buildId, input) =>
+      withRoot(threadId, "Web playtest", (root) => webPlaytest(root, input, null, buildId)),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),
     inspectScene: (threadId, scenePath) =>

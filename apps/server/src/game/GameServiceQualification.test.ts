@@ -390,7 +390,9 @@ it.live("a design-doc edit and an engine import keep the exported build playable
         const qualification = yield* GameQualification.GameQualification;
         const exported = yield* game.export(threadId, "Web");
         expect(exported.success, exported.message).toBe(true);
-        const playtest = yield* game.webPlaytest(threadId, { steps: [{ waitMs: 1 }] });
+        const playtest = yield* game.webPlaytest(threadId, {
+          steps: [{ key: "ArrowRight", holdMs: 1 }],
+        });
         expect(playtest.success, playtest.message).toBe(true);
         const read = yield* qualification.read(root, "godot");
         expect(read.completion).toBe("complete");

@@ -144,7 +144,7 @@ interface Scripted {
     readonly startedAt: DateTime.Utc | null;
     readonly completedAt: DateTime.Utc | null;
   }>;
-  readonly checks: Array<{ target: string; inputs: unknown }>;
+  readonly checks: Array<{ target: string; buildId: string; inputs: unknown }>;
   readonly starts: Array<StartedChild>;
   readonly interrupts: Array<{ threadId: ThreadId; runId: string | null; reason: string }>;
   readonly completed: Array<{ key: string; status: string }>;
@@ -531,7 +531,11 @@ const withLoop = <A, E>(
           Effect.gen(function* () {
             const rounds = yield* GameRoundStore.GameRoundStore;
             const check: GameRepairStudio.GameRepairStudio["Service"]["check"] = (input) => {
-              scripted.checks.push({ target: input.target, inputs: input.inputs });
+              scripted.checks.push({
+                target: input.target,
+                buildId: input.buildId,
+                inputs: input.inputs,
+              });
               const run = input.target === "incumbent" ? scripted.incumbent : scripted.candidate;
               return Effect.succeed({
                 checks: run.checks,
@@ -565,13 +569,27 @@ const withLoop = <A, E>(
                   exportBuildId: scripted.exportBuildId,
                   exportRunId: scripted.exportRunId,
                 }),
-              submissionFacts: (_root, buildId) =>
-                Effect.succeed({
-                  buildId: buildId ?? scripted.exportBuildId,
-                  directory: `builds/candidates/${buildId ?? scripted.exportBuildId}`,
-                  checks: [],
-                  passed: scripted.facts.passed,
-                  reason: scripted.facts.reason,
+              submissionFacts: (_root, requested) =>
+                Effect.gen(function* () {
+                  const buildId = requested ?? scripted.exportBuildId;
+                  if (buildId !== null) {
+                    const frozen = yield* rounds.freeze(root);
+                    yield* rounds.recordExport(root, {
+                      buildId,
+                      directory: `builds/candidates/${buildId}`,
+                      sourceId: frozen.sourceId,
+                      engine: "godot",
+                      target: "Web",
+                      entry: "index.html",
+                    });
+                  }
+                  return {
+                    buildId,
+                    directory: `builds/candidates/${buildId}`,
+                    checks: [],
+                    passed: scripted.facts.passed,
+                    reason: scripted.facts.reason,
+                  };
                 }),
               frozenInputs: () =>
                 Effect.succeed({
@@ -808,7 +826,7 @@ it.live("rolls back a candidate that fails a frozen check and keeps reviewing", 
         const vetoed = game.rounds.find((round) => round.reason?.includes("mechanical-veto"));
         expect(vetoed?.status).toBe("rejected");
         expect(vetoed?.reason).toContain("check-failed: state");
-        expect(game.selected).toBeNull();
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
       }),
     ),
   ),
@@ -1013,7 +1031,7 @@ it.live("superseding while a repair runs joins it and promotes nothing", () =>
         expect(state.status).toBe("stopped");
         expect(state.promotedRounds).toHaveLength(0);
         const game = yield* services.rounds.read(root);
-        expect(game.selected).toBeNull();
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
         expect(game.rounds.every((round) => round.status === "stopped")).toBe(true);
       }),
     ),
@@ -1185,7 +1203,7 @@ it.live("a generation bump that lands during the selection commit blocks the pro
         const state = loopRecord(yield* readLoop(services));
         expect(state.promotedRounds).toHaveLength(0);
         expect(state.reason).toContain("superseded");
-        expect((yield* services.rounds.read(root)).selected).toBeNull();
+        expect((yield* services.rounds.read(root)).selected?.buildId).toBe(EXPORT_BUILD_ID);
       }),
     ),
   ),
@@ -1209,7 +1227,7 @@ it.live("a deadline that passes during the selection commit blocks the promotion
           const state = loopRecord(yield* readLoop(services));
           expect(state.promotedRounds).toHaveLength(0);
           expect(state.reason).toContain("deadline");
-          expect((yield* services.rounds.read(root)).selected).toBeNull();
+          expect((yield* services.rounds.read(root)).selected?.buildId).toBe(EXPORT_BUILD_ID);
         }),
       ),
     { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
@@ -1310,7 +1328,7 @@ it.live("the whole-loop deadline interrupts a hung child and nothing promotes", 
           expect(state.reason).toContain("deadline");
           expect(scripted.interrupts.length).toBeGreaterThan(0);
           const game = yield* services.rounds.read(root);
-          expect(game.selected).toBeNull();
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
         }),
       ),
     { budget: { repairs: 3, elapsedMs: 150 } },
@@ -1343,7 +1361,7 @@ it.live("a restart marks the loop interrupted, keeps the incumbent and has no Re
           expect(state.decision).toBe("interrupt");
           expect(state.reason).toContain("restore the previous version");
           const game = yield* services.rounds.read(root);
-          expect(game.selected).toBeNull();
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
           expect(game.rounds.every((round) => round.status !== "running")).toBe(true);
           expect("resume" in services.loop).toBe(false);
           // A live evidence preview may still lazily request candidate files.
@@ -1595,6 +1613,13 @@ it.live("a submission decides the loop's build, not the export provenance", () =
         const created = loopRecord(yield* ensureLoop(services));
         expect(created.exportBuildId).toBe(submittedBuild);
         expect(created.submissionNote).toBe("A tiny platformer.");
+        const critic = yield* fixture.take;
+        expect(critic.role).toBe("critic");
+        expect(fixture.scripted.checks[0]?.buildId).toBe(submittedBuild);
+        expect((yield* services.rounds.read(fixture.root)).selected?.buildId).toBe(submittedBuild);
+        expect((yield* services.rounds.read(fixture.root)).rounds[0]?.incumbentBuildId).toBe(
+          submittedBuild,
+        );
         yield* services.loop.interrupt(threadId, "Test cleanup.");
       }),
     ),

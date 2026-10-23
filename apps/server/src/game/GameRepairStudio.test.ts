@@ -18,8 +18,13 @@ import * as Layer from "effect/Layer";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
+import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
-import { writePlaytestEvidence } from "./playtestEvidence.ts";
+import {
+  readLastPlaytest,
+  readPlaytestRunFacts,
+  writePlaytestEvidence,
+} from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuildDirectory } from "./webBuild.ts";
 
 const threadId = ThreadId.make("thread:studio-check");
@@ -121,7 +126,7 @@ const withStudio = <A, E>(
         playtestStage: null,
       };
       const game = Layer.mock(GameService.GameService)({
-        webPlaytest: (_thread, input) => {
+        webPlaytestBuild: (_thread, _buildId, input) => {
           harness.calls.push(input);
           return Effect.succeed(harness.results);
         },
@@ -134,10 +139,37 @@ const withStudio = <A, E>(
         stageRecord: (_root, stage) =>
           Effect.succeed(stage === "export" ? harness.exportStage : harness.playtestStage),
       });
+      const rounds = Layer.mock(GameRoundStore.GameRoundStore)({
+        exported: (_root, buildId) =>
+          Effect.gen(function* () {
+            const played = harness.playtestStage;
+            const facts =
+              played?.buildId === buildId && played.evidenceDirectory !== null
+                ? yield* Effect.promise(() => readPlaytestRunFacts(root, played.evidenceDirectory!))
+                : null;
+            const last = yield* Effect.promise(() => readLastPlaytest(root, [], null));
+            return {
+              artifact: {
+                buildId,
+                directory: candidateBuildDirectory(buildId),
+                sourceId: "fixture",
+                engine: "godot" as const,
+                target: "Web" as const,
+                entry: "index.html",
+              },
+              sourceDirectory: root,
+              playtest:
+                facts === null
+                  ? null
+                  : { ...facts, steps: last?.steps ?? [], viewport: last?.viewport ?? null },
+            };
+          }),
+      });
       const layer = GameRepairStudio.layer({ stateDir: NodePath.join(base, "state") }).pipe(
         Layer.provide(game),
         Layer.provide(projects),
         Layer.provide(qualification),
+        Layer.provide(rounds),
         Layer.provide(NodeServices.layer),
       );
       return yield* body(harness).pipe(Effect.provide(layer));
@@ -162,7 +194,13 @@ it.live("captures the builder's route once and replays it for every later check"
       // The playtest records no seed; it says so rather than inventing one.
       expect(inputs.seed).toBe("unknown");
 
-      yield* studio.check({ threadId, root: harness.root, target: "incumbent", inputs });
+      yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
       expect(harness.calls.at(-1)).toEqual({
         steps: [{ key: "ArrowRight", holdMs: 120 }],
         width: 1152,
@@ -181,7 +219,13 @@ it.live("captures the builder's route once and replays it for every later check"
       );
       const newer = yield* studio.frozenInputs(harness.root);
       expect(newer.steps).toEqual([{ key: "ArrowLeft", holdMs: 20 }]);
-      yield* studio.check({ threadId, root: harness.root, target: "candidate", inputs });
+      yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId: "a".repeat(64),
+        inputs,
+      });
       expect(harness.calls.at(-1)?.steps).toEqual([{ key: "ArrowRight", holdMs: 120 }]);
     }),
   ),
@@ -216,6 +260,7 @@ it.live("a frozen player with animated scenery fails the input and state checks"
         threadId,
         root: harness.root,
         target: "candidate",
+        buildId: "a".repeat(64),
         inputs,
       });
       const byId = new Map(checked.checks.map((check) => [check.id, check]));
@@ -249,6 +294,7 @@ it.live("an honest run passes movement, qualification and HUD from the real verd
         threadId,
         root: harness.root,
         target: "incumbent",
+        buildId: "a".repeat(64),
         inputs: {
           steps: [{ key: "ArrowRight", holdMs: 120 }],
           viewport: null,
@@ -287,6 +333,7 @@ it.live("a candidate that keeps a title but hides its score fails state-on-scree
             threadId,
             root: harness.root,
             target: "candidate",
+            buildId: "a".repeat(64),
             inputs: { steps: [{ key: "ArrowRight", holdMs: 120 }], viewport: null, seed: null },
           });
           return new Map(checked.checks.map((entry) => [entry.id, entry]));
@@ -311,6 +358,7 @@ it.live("a probe-less run leaves movement and state unmeasured instead of passin
         threadId,
         root: harness.root,
         target: "candidate",
+        buildId: "a".repeat(64),
         inputs: {
           steps: [{ key: "ArrowRight", holdMs: 120 }],
           viewport: null,
@@ -348,7 +396,7 @@ it.live("submission facts pass on the bytes, the current export and a clean play
       expect(facts.buildId).toBe(buildId);
       expect(facts.reason).toBeNull();
       const byId = new Map(facts.checks.map((entry) => [entry.id, entry]));
-      for (const id of ["build", "bytes", "current", "playtest", "boot", "console", "input"]) {
+      for (const id of ["build", "bytes", "sources", "playtest", "boot", "console", "input"]) {
         expect(byId.get(id)?.status, id).toBe("passed");
       }
     }),
@@ -382,7 +430,7 @@ it.live("submission facts refuse a build whose bytes changed and name the fact",
   ),
 );
 
-it.live("submission facts refuse a build the latest export no longer names", () =>
+it.live("submission facts accept an older bound build when a newer export exists", () =>
   withStudio((harness) =>
     Effect.gen(function* () {
       const studio = yield* GameRepairStudio.GameRepairStudio;
@@ -391,10 +439,8 @@ it.live("submission facts refuse a build the latest export no longer names", () 
       harness.exportStage = stage({ buildId: "e".repeat(64) });
       harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
       const facts = yield* studio.submissionFacts(harness.root, buildId);
-      expect(facts.passed).toBe(false);
-      const current = facts.checks.find((entry) => entry.id === "current");
-      expect(current?.status).toBe("failed");
-      expect(current?.detail).toContain("latest export is");
+      expect(facts.passed, facts.reason ?? "").toBe(true);
+      expect(facts.checks.find((entry) => entry.id === "sources")?.status).toBe("passed");
     }),
   ),
 );

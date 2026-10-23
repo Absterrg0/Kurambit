@@ -28,6 +28,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import type * as GameServiceModule from "./GameService.ts";
+import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -108,6 +109,7 @@ const withGame = <A, E, R = never>(
   options: FixtureOptions,
   body: (input: {
     readonly root: string;
+    readonly studio: GameRepairStudio.GameRepairStudio["Service"];
     readonly game: GameServiceModule.GameService["Service"];
     readonly qualification: QualificationService;
     readonly rounds: GameRoundStore.GameRoundStore["Service"];
@@ -138,7 +140,7 @@ const withGame = <A, E, R = never>(
       const current = manifest(options.manifest);
       const qualificationLayer =
         options.qualification?.(stateDir) ?? GameQualification.layer({ stateDir });
-      const services = GameService.layerWithPlaytest(
+      const gameServices = GameService.layerWithPlaytest(
         options.playtest ?? (() => Effect.die("This test provides no browser run.")),
       ).pipe(
         Layer.provide(
@@ -228,11 +230,13 @@ const withGame = <A, E, R = never>(
         Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
       );
+      const services = GameRepairStudio.layer({ stateDir }).pipe(Layer.provideMerge(gameServices));
       return yield* Effect.gen(function* () {
         const game = yield* GameService.GameService;
+        const studio = yield* GameRepairStudio.GameRepairStudio;
         const qualification = yield* GameQualification.GameQualification;
         const rounds = yield* GameRoundStore.GameRoundStore;
-        return yield* body({ root, game, qualification, rounds });
+        return yield* body({ root, game, studio, qualification, rounds });
       }).pipe(Effect.provide(services));
     }),
   );
@@ -1323,4 +1327,109 @@ it.live("cancelling the originating turn stops the open round without touching t
       ).toBe("extends Node\n# repair\n");
     }),
   ),
+);
+
+it.live(
+  "review plays an older submitted artifact and its frozen viewport without rebuilding current sources",
+  () => {
+    let exports = 0;
+    const played: string[] = [];
+    return withGame(
+      {
+        run: (input) => {
+          if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+          const output = input.args.at(-1)!;
+          return Effect.promise(async () => {
+            exports += 1;
+            await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+            for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+              await NodeFSP.writeFile(
+                NodePath.join(NodePath.dirname(output), name),
+                `export ${exports} ${name}`,
+              );
+            return processOk(input.root);
+          });
+        },
+        playtest: (input) => {
+          played.push(input.url);
+          return Effect.succeed({
+            ...playtestResult,
+            qualifies: false,
+            blockers: ["no movement or design progress"],
+            screenshots: [
+              {
+                label: "after-steps",
+                mimeType: "image/png",
+                data: Buffer.from(input.url).toString("base64"),
+                width: 960,
+                height: 540,
+              },
+            ],
+          });
+        },
+      },
+      ({ root, game, studio, rounds }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "game.json"), JSON.stringify(manifest())),
+          );
+          yield* game.export(threadId, "Web");
+          const first = (yield* rounds.read(root)).selected!;
+          yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
+          expect((yield* studio.submissionFacts(root, first.buildId)).passed).toBe(true);
+          const bound = (yield* rounds.exported(root, first.buildId))!;
+          yield* Effect.promise(async () => {
+            await NodeFSP.appendFile(
+              NodePath.join(root, "godot/scripts/main.gd"),
+              "# newer sources\n",
+            );
+            await NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# New design\n");
+          });
+          yield* game.export(threadId, "Web");
+          const second = (yield* rounds.read(root)).selected!;
+          expect(second.buildId).not.toBe(first.buildId);
+          yield* game.webPlaytest(threadId, { steps: [{ key: "ArrowRight", holdMs: 10 }] });
+          expect((yield* studio.submissionFacts(root, first.buildId)).passed).toBe(true);
+          expect((yield* studio.frozenInputs(root, first.buildId)).steps).toEqual([
+            { click: "left" },
+          ]);
+          // Even an unexported, invalid viewport must not influence the older artifact.
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(
+              NodePath.join(root, "godot/project.godot"),
+              "[display]\nwindow/size/viewport_width=99999\n",
+            ),
+          );
+          const checked = yield* studio.check({
+            threadId,
+            root,
+            buildId: first.buildId,
+            target: "incumbent",
+            inputs: yield* studio.frozenInputs(root, first.buildId),
+          });
+          expect(exports).toBe(2);
+          expect(played.at(-1)).toContain(first.directory);
+          expect(checked.viewport).toEqual(bound.playtest?.viewport);
+          expect(
+            yield* Effect.promise(() => NodeFSP.readFile(checked.frames[0]!.path, "utf8")),
+          ).toContain(first.directory);
+          const direct = yield* game.webPlaytestBuild(threadId, first.buildId, {
+            steps: [{ click: "left" }],
+          });
+          expect(direct.success).toBe(true);
+          expect(exports).toBe(2);
+          yield* Effect.promise(() =>
+            NodeFSP.appendFile(
+              NodePath.join(bound.sourceDirectory, "godot/scripts/main.gd"),
+              "# corrupt\n",
+            ),
+          );
+          const refused = yield* studio.submissionFacts(root, first.buildId);
+          expect(refused.passed).toBe(false);
+          expect(refused.reason).toBe(
+            "sources: The export's recorded source manifest or snapshot changed.",
+          );
+        }),
+    );
+  },
 );

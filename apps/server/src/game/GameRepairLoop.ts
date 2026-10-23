@@ -956,6 +956,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           threadId: record.threadId,
           root: task.root,
           target: "incumbent",
+          buildId: round.incumbentBuildId!,
           inputs: record.inputs,
         });
         // Legacy evidence recorded no viewport. This first incumbent run is its
@@ -1187,6 +1188,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           threadId: record.threadId,
           root: task.root,
           target: "candidate",
+          buildId: afterRepair.candidate.buildId,
           inputs: record.inputs,
         });
         const candidateFrames: GameRepairFrame[] = candidate.frames.map((frame, index) => ({
@@ -1540,7 +1542,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         }
         const completedAt =
           run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-        const inputs = yield* studio.frozenInputs(root);
+        const inputs = yield* studio.frozenInputs(root, exportBuildId);
         // No recorded route means nothing honest to replay. The review is not
         // run on invented input; it is recorded as skipped so the reason stays
         // visible instead of the review silently never appearing.
@@ -1568,6 +1570,8 @@ export const layer = (options: GameRepairLoopOptions) => {
             const latest = yield* admission.stamp(root);
             // An action took the game while the reads above ran; it owns it now.
             if (latest.generation !== stamp.generation) return null;
+            const exported = yield* rounds.exported(root, exportBuildId);
+            if (exported !== null) yield* rounds.select(root, exported.artifact);
             const builderSelection = run.modelSelection ?? records.thread.modelSelection;
             const reviewSelection = input.reviewSelection ?? builderSelection;
             const at = nowIso();
