@@ -11,12 +11,13 @@ export const feelBuffer: GodotRecipeReference = {
 const FLOOR_Y := 280.0
 const GRAVITY := 950.0
 const JUMP_SPEED := -520.0
-const BUFFER_MS := 500.0  # Demo window. Tighten to 100-200 for a real game.
+const BUFFER_MS := 200.0  # Top of the usual 100-200 ms; longer eats a late press.
 
 var _y := FLOOR_Y
 var _vy := 0.0
 var _queued_ms := 0.0
 var _jumps := 0
+var _buffered_jumps := 0
 
 func _ready() -> void:
 	if not InputMap.has_action("jump"):
@@ -43,6 +44,7 @@ func _physics_process(delta: float) -> void:
 			# Spend the queued press once, on the landing frame.
 			_queued_ms = 0.0
 			_jumps += 1
+			_buffered_jumps += 1
 			_vy = JUMP_SPEED
 	queue_redraw()
 
@@ -56,13 +58,16 @@ func _draw() -> void:
 func snapshot() -> Dictionary:
 	return {
 		"player_x": 320, "player_y": int(_y),
-		"on_floor": _y >= FLOOR_Y, "queued_ms": int(_queued_ms), "jumps": _jumps,
+		"on_floor": _y >= FLOOR_Y, "queued_ms": int(_queued_ms), "jumps": _jumps, "buffered_jumps": _buffered_jumps,
 	}
 `,
   tryInput: {
+    // The arc lasts ~1.1 s at this gravity. The second press lands just over
+    // 100 ms before touchdown, inside the 200 ms window, so the jump is spent on
+    // the landing frame without a third press after landing.
     steps: [
       { key: "Space", holdMs: 60 },
-      { waitMs: 450 },
+      { waitMs: 550 },
       { key: "Space", holdMs: 60 },
       { waitMs: 900 },
       { screenshot: "buffered-jump" },

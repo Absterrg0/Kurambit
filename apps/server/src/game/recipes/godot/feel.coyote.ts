@@ -2,16 +2,17 @@ import type { GodotRecipeReference } from "./reference.ts";
 
 export const feelCoyote: GodotRecipeReference = {
   setup:
-    "Create an empty Node2D scene, attach this script to the root and run it. D starts a walk off the ledge; Space jumps inside the grace window and is ignored after it. Stop and run again to reset; the demo writes nothing.",
+    "Create an empty Node2D scene, attach this script to the root and run it. D walks off the ledge; a Space press just after the lip still jumps, and a press after the grace window is ignored. Stop and run again to reset; the demo writes nothing.",
   referenceCode: String.raw`extends Node2D
 ## Coyote time: a body that just left a ledge still accepts a jump for COYOTE_MS.
 ## The grace is per body, refreshed on every leave and spent once.
 
-const LEDGE_END := 240.0; const LEDGE_Y := 180.0
-const WALK_SPEED := 90.0; const GRAVITY := 900.0
-const JUMP_SPEED := -520.0; const COYOTE_MS := 500.0  # 100-200 ms is typical.
+const LEDGE_END := 300.0; const LEDGE_Y := 180.0
+const START_X := 270.0
+const WALK_SPEED := 200.0; const GRAVITY := 1200.0
+const JUMP_SPEED := -520.0; const COYOTE_MS := 150.0  # 100-150 ms is typical.
 
-var _x := 80.0
+var _x := START_X
 var _y := LEDGE_Y
 var _vy := 0.0
 var _walking := false
@@ -47,7 +48,7 @@ func _physics_process(delta: float) -> void:
 		else:
 			_ignored += 1
 	if _y > 420.0:
-		_x = 80.0; _y = LEDGE_Y; _vy = 0.0
+		_x = START_X; _y = LEDGE_Y; _vy = 0.0
 		_grounded = true; _walking = false
 	queue_redraw()
 
@@ -64,14 +65,23 @@ func snapshot() -> Dictionary:
 	}
 `,
   tryInput: {
+    // D starts a 30 px walk to the lip. The body leaves while the next step is
+    // being set up, so the Space press lands ~100 ms after the lip, inside the
+    // 150 ms grace. The second walk leaves and waits 250 ms before its press, so
+    // that one is past the window and must be counted as ignored.
     steps: [
+      { waitMs: 300 },
       { key: "D", holdMs: 50 },
-      { waitMs: 1750 },
       { key: "Space", holdMs: 60 },
-      { waitMs: 100 },
+      { waitMs: 150 },
       { screenshot: "grace-jump" },
+      { waitMs: 1400 },
+      { key: "D", holdMs: 50 },
+      { waitMs: 250 },
       { key: "Space", holdMs: 60 },
-      { waitMs: 800 },
+      { waitMs: 120 },
+      { screenshot: "expired-press" },
+      { waitMs: 1300 },
     ],
     captureEveryMs: 250,
   },

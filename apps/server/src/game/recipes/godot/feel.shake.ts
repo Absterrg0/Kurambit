@@ -10,7 +10,7 @@ export const feelShake: GodotRecipeReference = {
 
 const BASE := Vector2(320.0, 180.0)
 const STRENGTH := 16.0  # Peak offset in pixels. Try 4-24.
-const DECAY := 20.0  # Pixels per second; higher snaps back sooner.
+const DECAY := 48.0  # Pixels per second; a 16 px impact is gone in ~0.3 s.
 
 var _camera: Camera2D
 var _rng := RandomNumberGenerator.new()
