@@ -140,6 +140,8 @@ export interface BenchmarkBriefResult {
    */
   readonly repairDelta: number | null;
   readonly review?: GameE2eRunSummary["review"];
+  /** The review loop's rounds, decisions and final selected build. */
+  readonly loop?: GameE2eRunSummary["loop"];
   readonly playtest: {
     readonly frames: number;
     readonly responded: boolean;
@@ -350,6 +352,7 @@ export function readBenchmarkResult(input: {
     },
     repairDelta: visualRepairDelta(judgements),
     ...(summary?.schemaVersion === 2 ? { review: summary.review ?? null } : {}),
+    ...(summary?.loop == null ? {} : { loop: summary.loop }),
     playtest:
       summary?.lastPlaytest === null || summary?.lastPlaytest === undefined
         ? null

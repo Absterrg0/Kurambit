@@ -103,6 +103,7 @@ const summary = (
     readonly timedOut?: boolean;
     readonly lastPlaytest?: GameLastPlaytest | null;
     readonly visualJudgements?: ReadonlyArray<GameVisualJudgement>;
+    readonly loop?: GameE2eRunSummary["loop"];
   } = {},
 ): GameE2eRunSummary => ({
   schemaVersion: input.schemaVersion ?? 1,
@@ -118,6 +119,7 @@ const summary = (
   lastPlaytest: input.lastPlaytest ?? null,
   obligations: input.obligations ?? [obligation("count-move", "proven")],
   visualJudgements: input.visualJudgements ?? [],
+  loop: input.loop ?? null,
   error: input.error ?? null,
 });
 
@@ -348,6 +350,43 @@ describe("benchmark results", () => {
     // A crashed row still names every frozen promise rather than dropping it.
     assert.match(markdown, /Unsupported obligations/);
     assert.match(markdown, /illegal-move — No invariance check\./);
+  });
+
+  it("carries the review loop's rounds, decisions and selected build into the result", () => {
+    const loop = {
+      id: "loop-1",
+      status: "stopped" as const,
+      decision: "promote" as const,
+      reason: "The candidate is better.",
+      startedAt: "2026-10-21T00:00:00.000Z",
+      finishedAt: "2026-10-21T00:05:00.000Z",
+      repairsUsed: 1,
+      budget: { repairs: 3, elapsedMs: 1_200_000 },
+      rounds: [
+        {
+          id: "round-1",
+          status: "promoted" as const,
+          decision: "promote" as const,
+          reason: "The candidate is better.",
+          candidateBuildId: "a".repeat(64),
+          candidateDirectory: `builds/candidates/${"a".repeat(64)}`,
+          startedAt: "2026-10-21T00:01:00.000Z",
+          finishedAt: "2026-10-21T00:05:00.000Z",
+        },
+      ],
+      selectedBuildId: "b".repeat(64),
+      waitedMs: 300_000,
+      timedOut: false,
+    };
+    const result = readBenchmarkResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-21T00:00:00.000Z",
+      durationMs: 600_000,
+      observation: observe({ loop }),
+    });
+    assert.deepEqual(result.loop, loop);
   });
 
   it("renders per-dimension scores and rates a run that judged once as no repair", () => {

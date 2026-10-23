@@ -242,10 +242,30 @@ describe("run summaries", () => {
     assert.equal(decoded?.obligations[0]?.status, "proven");
     assert.equal(decoded?.fixture?.checksum, "checksum");
     const modern = decodeRunSummary(
-      JSON.stringify({ ...JSON.parse(text), schemaVersion: 2, review: null }),
+      JSON.stringify({
+        ...JSON.parse(text),
+        schemaVersion: 2,
+        review: null,
+        loop: {
+          id: "loop-1",
+          status: "stopped",
+          decision: "promote",
+          reason: "The candidate is better.",
+          startedAt: "2026-10-21T00:00:00.000Z",
+          finishedAt: "2026-10-21T00:05:00.000Z",
+          repairsUsed: 1,
+          budget: { repairs: 3, elapsedMs: 1_200_000 },
+          rounds: [],
+          selectedBuildId: "build",
+          waitedMs: 300_000,
+          timedOut: false,
+        },
+      }),
     );
     assert.equal(modern?.schemaVersion, 2);
     assert.equal(modern?.review, null);
+    assert.equal(modern?.loop?.status, "stopped");
+    assert.equal(modern?.loop?.rounds.length, 0);
   });
 
   it("treats a truncated or foreign summary as unreadable", () => {

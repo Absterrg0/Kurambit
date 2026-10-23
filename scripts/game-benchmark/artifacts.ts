@@ -10,6 +10,10 @@ import {
 import {
   GameAcceptanceCriterionKind,
   GameLastPlaytest,
+  GameRepairLoopStatus,
+  GameReviewBudget,
+  GameReviewDecision,
+  GameReviewRoundStatus,
   GameReviewStatus,
   GameTemplateId,
   type GameAcceptanceCriterion,
@@ -227,6 +231,42 @@ export const GameE2eTurnRead = Schema.Struct({
 });
 export type GameE2eTurnRead = typeof GameE2eTurnRead.Type;
 
+/** One repair round as the run summary reports it, without ballots or evidence. */
+export const GameE2eRepairLoopRoundRead = Schema.Struct({
+  id: Schema.String,
+  status: GameReviewRoundStatus,
+  decision: Schema.NullOr(GameReviewDecision),
+  reason: Schema.NullOr(Schema.String),
+  candidateBuildId: Schema.NullOr(Schema.String),
+  candidateDirectory: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  finishedAt: Schema.NullOr(Schema.String),
+});
+export type GameE2eRepairLoopRoundRead = typeof GameE2eRepairLoopRoundRead.Type;
+
+/**
+ * The review loop a builder turn started, as the harness observed it. The
+ * benchmark reads this instead of inferring review from qualification: a loop
+ * can stop without promoting and still leave a playable build.
+ */
+export const GameE2eRepairLoopRead = Schema.Struct({
+  id: Schema.String,
+  status: GameRepairLoopStatus,
+  decision: Schema.NullOr(GameReviewDecision),
+  reason: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  finishedAt: Schema.NullOr(Schema.String),
+  repairsUsed: Schema.Number,
+  budget: GameReviewBudget,
+  rounds: Schema.Array(GameE2eRepairLoopRoundRead),
+  /** The build Play shows after the loop ended; completion is asserted on it. */
+  selectedBuildId: Schema.NullOr(Schema.String),
+  waitedMs: Schema.Number,
+  /** The loop outlived its budget plus the shutdown margin. */
+  timedOut: Schema.Boolean,
+});
+export type GameE2eRepairLoopRead = typeof GameE2eRepairLoopRead.Type;
+
 export const GameE2eRunSummary = Schema.Struct({
   // V1 aggregates keep their historical score gate; V2 reports review separately.
   schemaVersion: Schema.Literals([1, 2]),
@@ -243,6 +283,8 @@ export const GameE2eRunSummary = Schema.Struct({
     Schema.Struct({ name: Schema.String, root: Schema.String, threadId: Schema.String }),
   ),
   turns: Schema.Array(GameE2eTurnRead),
+  /** The review loop the build turn started, once it reached a terminal state. */
+  loop: Schema.optionalKey(Schema.NullOr(GameE2eRepairLoopRead)),
   qualification: Schema.NullOr(LegacyGameQualificationRead),
   lastPlaytest: Schema.NullOr(GameLastPlaytest),
   obligations: Schema.Array(GameBenchmarkObligationRead),

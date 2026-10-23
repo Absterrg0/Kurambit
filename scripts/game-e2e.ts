@@ -44,11 +44,13 @@ import {
   readObligations,
   readVisualJudgements,
   type GameBenchmarkObligationRead,
+  type GameE2eRepairLoopRead,
   type GameE2eRunSummary,
   type GameE2eTurnRead,
 } from "./game-benchmark/artifacts.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 import { externalServerOrigin, startBenchmarkServer } from "./lib/benchmark-server.ts";
+import { summarizeRepairLoop, watchRepairLoop } from "./game-benchmark/repairLoop.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const { values } = NodeUtil.parseArgs({
@@ -157,6 +159,7 @@ let summaryTimedOut = false;
 let summaryError: string | null = null;
 let gameInfo: GameE2eRunSummary["game"] = null;
 let review: GameE2eRunSummary["review"] = null;
+let reviewLoop: GameE2eRepairLoopRead | null = null;
 let qualification: GameStatus["qualification"] | null = null;
 let lastPlaytest: GameStatus["lastPlaytest"] = null;
 let obligations: ReadonlyArray<GameBenchmarkObligationRead> = [];
@@ -182,6 +185,7 @@ const writeSummary = async () => {
     fixture: fixture === null ? null : { id: fixture.id, checksum: fixture.checksum },
     game: gameInfo,
     turns,
+    loop: reviewLoop,
     qualification,
     lastPlaytest,
     obligations,
@@ -742,6 +746,35 @@ const main = Effect.gen(function* () {
     observedTurnItems,
   );
   logTurnTools("build", buildCalls);
+  /**
+   * The loop opens from the turn's completion event, and a repair may move the
+   * sources while it runs. Wait for it before reading completion, so the gate
+   * below sees the final selected build instead of a mid-repair snapshot; the
+   * loop's own budget plus a shutdown margin bounds the wait.
+   */
+  const watchReviewLoop = (label: string) =>
+    Effect.gen(function* () {
+      const watched = yield* watchRepairLoop({
+        status: client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }),
+        history: client[WS_METHODS.gameReviewHistory]({ threadId: created.threadId, limit: 20 }),
+        onWait: (message) => timeline(`${label}: ${message}`),
+      });
+      if (watched === null) {
+        timeline(`${label}: no review loop started`);
+        return null;
+      }
+      const decision =
+        watched.loop.decision === null
+          ? "no decision"
+          : `${watched.loop.decision}${watched.loop.reason === null ? "" : `: ${watched.loop.reason}`}`;
+      timeline(
+        `${label}: review loop ${watched.loop.id} ${
+          watched.timedOut ? "still running at its bound" : `ended ${watched.loop.status}`
+        } (${decision}), ${watched.rounds.length} round(s), ${Math.round(watched.waitedMs / 1000)}s`,
+      );
+      return watched;
+    });
+  const buildLoop = yield* watchReviewLoop("after the build turn");
   const action = (operation: "preview" | "export-linux" | "native" | "stop") =>
     client[WS_METHODS.gameAction]({ threadId: created.threadId, action: operation }).pipe(
       Effect.tap((result) =>
@@ -754,6 +787,11 @@ const main = Effect.gen(function* () {
   const status = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
   // Record before any assertion: a failed run still has to say what it graded.
   recordStatus(status);
+  if (buildLoop !== null)
+    reviewLoop = summarizeRepairLoop({
+      watched: buildLoop,
+      selectedBuildId: status.selectedBuildId,
+    });
   review = yield* client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }).pipe(
     Effect.orElseSucceed(() => null),
   );
@@ -973,8 +1011,14 @@ const main = Effect.gen(function* () {
       "revise-build",
       yield* collectTurnTools(client, created.threadId, approveRevisionRun.id, observedTurnItems),
     );
+    const reviseLoop = yield* watchReviewLoop("after the revision turn");
     reviseStatus = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
     recordStatus(reviseStatus);
+    if (reviseLoop !== null)
+      reviewLoop = summarizeRepairLoop({
+        watched: reviseLoop,
+        selectedBuildId: reviseStatus.selectedBuildId,
+      });
     summaryPhase = "revise";
     assert(reviseStatus.design.state === "approved", "The approved revision did not take");
     assert(reviseStatus.design.pendingRevision === null, "The approved revision is still pending");
