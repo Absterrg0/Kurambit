@@ -416,6 +416,24 @@ export const EMPTY_GAME_REVIEW_USAGE: GameReviewUsage = {
   outputTokens: 0,
 };
 
+export const GameReviewChildUsage = Schema.Struct({
+  role: Schema.Literals(["critic", "repair", "ballot"]),
+  order: Schema.Int,
+  childThreadId: ThreadId,
+  runId: Schema.NullOr(RunId),
+  tryInputCalls: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  usage: GameReviewUsage,
+});
+export type GameReviewChildUsage = typeof GameReviewChildUsage.Type;
+
+export const GameReviewUsageByRole = Schema.Struct({
+  critic: GameReviewUsage,
+  repair: GameReviewUsage,
+  ballot: GameReviewUsage,
+  /** Subset of child usage with at least one try_input call, not an added cost. */
+  "try_input-heavy": GameReviewUsage,
+});
+
 /** One captured frame a review child is shown, stored outside the game. */
 export const GameRepairFrame = Schema.Struct({
   inputPair: Schema.optionalKey(GamePlaytestInputPair),
@@ -521,6 +539,8 @@ export const GameReviewRound = Schema.Struct({
    */
   builderSelection: Schema.optionalKey(ModelSelection),
   reviewSelection: Schema.optionalKey(ModelSelection),
+  childUsage: Schema.optionalKey(Schema.Array(GameReviewChildUsage)),
+  usageByRole: Schema.optionalKey(GameReviewUsageByRole),
   fundamentals: Schema.optionalKey(GameReviewFundamentals),
   defects: Schema.optionalKey(Schema.Array(GameReviewDefect)),
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),

@@ -17,6 +17,8 @@ import {
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
   type GameReviewCheck,
+  type GameReviewUsage,
+  type GameReviewChildUsage,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type GameReviewExperimentRoute,
@@ -278,8 +280,6 @@ type ChildOutcome =
 interface Task {
   readonly root: string;
   readonly owned: Ref.Ref<OwnedChild | null>;
-  /** False once any child failed to report provider-turn usage. */
-  readonly usageGaps: Ref.Ref<boolean>;
 }
 
 interface RoundOutcome {
@@ -625,28 +625,80 @@ export const layer = (options: GameRepairLoopOptions) => {
         Effect.orElseSucceed(() => null),
       );
 
-    /** Adds what a child could measure; one gap makes the whole loop unknown. */
+    const sumUsage = (entries: ReadonlyArray<GameReviewUsage>): GameReviewUsage => ({
+      status:
+        entries.length > 0 && entries.every((entry) => entry.status === "measured")
+          ? "measured"
+          : "unknown",
+      providerTurns: entries.reduce((sum, entry) => sum + entry.providerTurns, 0),
+      usedTokens: entries.reduce((sum, entry) => sum + entry.usedTokens, 0),
+      inputTokens: entries.reduce((sum, entry) => sum + entry.inputTokens, 0),
+      outputTokens: entries.reduce((sum, entry) => sum + entry.outputTokens, 0),
+    });
+
     const recordUsage = (
       task: Task,
       child: OwnedChild,
+      input: {
+        readonly roundId: string;
+        readonly role: GameReviewSessions.GameReviewTaskRole;
+        readonly order: number;
+      },
       measured: boolean,
     ): Effect.Effect<void, never> =>
       Effect.gen(function* () {
         const usage = measured ? yield* usageOf(child) : null;
-        if (usage === null) {
-          yield* Ref.set(task.usageGaps, true);
-          return;
-        }
-        const gaps = yield* Ref.get(task.usageGaps);
+        const calls =
+          child.runId === null
+            ? null
+            : yield* sessions
+                .inputCalls(child.childThreadId, child.runId)
+                .pipe(Effect.orElseSucceed(() => null));
+        const round = yield* findRound(task.root, input.roundId);
+        if (round === null || round.status !== "running") return;
+        const entry: GameReviewChildUsage = {
+          role: input.role,
+          order: input.order,
+          childThreadId: child.childThreadId,
+          runId: child.runId,
+          tryInputCalls: calls,
+          usage: usage === null ? EMPTY_GAME_REVIEW_USAGE : { status: "measured", ...usage },
+        };
+        const children = [
+          ...(round.childUsage ?? []).filter(
+            (entry) => entry.childThreadId !== child.childThreadId || entry.runId !== child.runId,
+          ),
+          entry,
+        ];
+        const heavy = sumUsage(
+          children.filter((entry) => (entry.tryInputCalls ?? 0) > 0).map((entry) => entry.usage),
+        );
+        yield* rounds.recordReview(task.root, input.roundId, {
+          childUsage: children,
+          usageByRole: {
+            critic: sumUsage(
+              children.filter((entry) => entry.role === "critic").map((entry) => entry.usage),
+            ),
+            repair: sumUsage(
+              children.filter((entry) => entry.role === "repair").map((entry) => entry.usage),
+            ),
+            ballot: sumUsage(
+              children.filter((entry) => entry.role === "ballot").map((entry) => entry.usage),
+            ),
+            "try_input-heavy": children.some((entry) => entry.tryInputCalls === null)
+              ? { ...heavy, status: "unknown" }
+              : heavy,
+          },
+        });
+        const all = yield* rounds.read(task.root);
         yield* patch(task.root, (record) => ({
           ...record,
-          usage: {
-            status: gaps ? "unknown" : "measured",
-            providerTurns: record.usage.providerTurns + usage.providerTurns,
-            usedTokens: record.usage.usedTokens + usage.usedTokens,
-            inputTokens: record.usage.inputTokens + usage.inputTokens,
-            outputTokens: record.usage.outputTokens + usage.outputTokens,
-          },
+          usage: sumUsage(
+            all.rounds
+              .filter((round) => round.loopId === record.id)
+              .flatMap((round) => round.childUsage ?? [])
+              .map((entry) => entry.usage),
+          ),
           updatedAt: nowIso(),
         }));
       }).pipe(
@@ -703,6 +755,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               label: `${input.role}:${input.order}`,
             };
             yield* Ref.set(task.owned, child);
+            yield* recordUsage(task, child, input, false);
             const shell = yield* threads
               .getThreadShell(started.childThreadId)
               .pipe(Effect.orElseSucceed(() => null));
@@ -725,7 +778,10 @@ export const layer = (options: GameRepairLoopOptions) => {
                   Effect.onInterrupt(() =>
                     interruptChild(child, "The review was superseded.").pipe(
                       Effect.flatMap((settled) =>
-                        settled ? Ref.set(task.owned, null) : Effect.void,
+                        Effect.gen(function* () {
+                          yield* recordUsage(task, child, input, settled);
+                          if (settled) yield* Ref.set(task.owned, null);
+                        }),
                       ),
                     ),
                   ),
@@ -753,7 +809,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               order: input.order,
             });
             yield* Ref.set(task.owned, null);
-            yield* recordUsage(task, child, !started.reconciled);
+            yield* recordUsage(task, child, input, true);
             if (status.kind === "missing")
               return {
                 kind: "failed",
@@ -1607,7 +1663,6 @@ export const layer = (options: GameRepairLoopOptions) => {
         const task: Task = {
           root,
           owned: yield* Ref.make<OwnedChild | null>(null),
-          usageGaps: yield* Ref.make(false),
         };
         const fiber = yield* runLoop(record, task).pipe(Effect.forkIn(scope));
         const held = yield* hold(root, record.id, fiber);

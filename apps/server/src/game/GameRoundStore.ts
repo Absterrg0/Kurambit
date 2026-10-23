@@ -133,6 +133,8 @@ export interface GameRoundBeginInput {
 }
 
 export interface GameRoundReviewInput {
+  readonly childUsage?: GameReviewRoundType["childUsage"] | undefined;
+  readonly usageByRole?: GameReviewRoundType["usageByRole"] | undefined;
   readonly fundamentals?: GameReviewRoundType["fundamentals"] | undefined;
   readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
   readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
@@ -771,6 +773,8 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               const round: GameReviewRoundType = {
                 ...current,
+                ...(input.childUsage === undefined ? {} : { childUsage: input.childUsage }),
+                ...(input.usageByRole === undefined ? {} : { usageByRole: input.usageByRole }),
                 ...(input.fundamentals === undefined ? {} : { fundamentals: input.fundamentals }),
                 ...(input.defects === undefined ? {} : { defects: [...input.defects] }),
                 ...(input.doNotRegress === undefined

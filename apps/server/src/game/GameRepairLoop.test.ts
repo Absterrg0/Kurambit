@@ -148,7 +148,9 @@ interface Scripted {
   ballots: ReadonlyArray<AnswerFactory>;
   promoteKind: "promoted" | "blocked";
   /** The builder's recorded route and viewport the loop freezes. */
-  steps: Array<{ readonly key: string; readonly holdMs: number }>;
+  steps: ReadonlyArray<GamePlaytestStep>;
+  tokenUsage: Record<string, { usedTokens: number; inputTokens: number; outputTokens: number }>;
+  inputCalls: Record<string, number | null>;
   viewport: { readonly width: number; readonly height: number } | null;
   /** Runs inside the promotion, after validation and before the commit. */
   beforeCommit: Effect.Effect<void> | null;
@@ -221,6 +223,8 @@ const makeScripted = (): Scripted => ({
   ballots: [],
   promoteKind: "promoted",
   steps: [{ key: "ArrowRight", holdMs: 120 }],
+  tokenUsage: {},
+  inputCalls: {},
   viewport: { width: 1152, height: 648 },
   beforeCommit: null,
   repairs: [],
@@ -583,6 +587,19 @@ const withLoop = <A, E>(
                 };
               });
             return GameReviewSessions.GameReviewSessions.of({
+              inputCalls: (id) => {
+                const child = [...children.values()].find((child) => child.childThreadId === id);
+                const calls = scripted.inputCalls[`${child?.role}:${child?.order}`];
+                return calls === null
+                  ? Effect.fail(
+                      new GameOperationError({
+                        operation: "read input calls",
+                        path: root,
+                        reason: "io",
+                      }),
+                    )
+                  : Effect.succeed(calls ?? 0);
+              },
               tryInput: () => Effect.die("The loop fixture does not launch input experiments."),
               experiments: (input) =>
                 Effect.succeed(
@@ -781,7 +798,10 @@ const withLoop = <A, E>(
               const status = Option.isNone(polled) ? "running" : (yield* polled.value).status;
               return {
                 runs: [{ id: child.runId, status }],
-                providerTurns: [],
+                providerTurns:
+                  scripted.tokenUsage[`${child.role}:${child.order}`] === undefined
+                    ? []
+                    : [{ tokenUsage: scripted.tokenUsage[`${child.role}:${child.order}`] }],
               } as never;
             }),
           getThreadShell: () =>
@@ -2599,5 +2619,81 @@ it.live("zero repair budget opens no round and dispatches no critic", () =>
         }),
       ),
     { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 0 } },
+  ),
+);
+
+it.live.each(["measured", "gap", "unknown-calls"] as const)(
+  "records per-round role usage with %s evidence",
+  (scenario) =>
+    withLoop(
+      (fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            const { scripted } = fixture;
+            scripted.critic = () => criticAnswer(1);
+            scripted.repairs = [repairWith()];
+            scripted.ballots = [0, 1].map(
+              () =>
+                ({ plan }) =>
+                  ballotAnswer(plan, "tie"),
+            );
+            scripted.tokenUsage = {
+              "critic:0": { usedTokens: 100, inputTokens: 80, outputTokens: 20 },
+              "repair:0": { usedTokens: 200, inputTokens: 150, outputTokens: 50 },
+              "ballot:0": { usedTokens: 30, inputTokens: 20, outputTokens: 10 },
+              "ballot:1": { usedTokens: 40, inputTokens: 30, outputTokens: 10 },
+            };
+            if (scenario === "gap") delete scripted.tokenUsage["ballot:1"];
+            scripted.inputCalls = {
+              "critic:0": scenario === "unknown-calls" ? null : 3,
+              "repair:0": 1,
+            };
+            yield* runToCompletion(services, fixture);
+            const round = (yield* services.rounds.read(fixture.root)).rounds[0]!;
+            expect(round.childUsage).toHaveLength(4);
+            expect(round.childUsage?.find((child) => child.role === "critic")?.tryInputCalls).toBe(
+              scenario === "unknown-calls" ? null : 3,
+            );
+            expect(round.usageByRole?.critic).toMatchObject({
+              status: "measured",
+              usedTokens: 100,
+            });
+            expect(round.usageByRole?.repair).toMatchObject({
+              status: "measured",
+              usedTokens: 200,
+            });
+            expect(round.usageByRole?.ballot).toMatchObject({
+              status: scenario === "gap" ? "unknown" : "measured",
+              usedTokens: scenario === "gap" ? 30 : 70,
+            });
+            expect(round.usageByRole?.["try_input-heavy"]).toMatchObject({
+              status: scenario === "unknown-calls" ? "unknown" : "measured",
+              usedTokens: scenario === "unknown-calls" ? 200 : 300,
+            });
+            expect(loopRecord(yield* readLoop(services)).usage).toMatchObject({
+              status: scenario === "gap" ? "unknown" : "measured",
+              usedTokens: scenario === "gap" ? 330 : 370,
+            });
+          }),
+        ),
+      { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+    ),
+);
+
+it.live("interrupted children retain unknown usage instead of disappearing from the round", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.hungRoles = new Set(["critic:0"]);
+        yield* ensureLoop(services);
+        yield* fixture.take;
+        yield* services.review.stop(threadId);
+        yield* services.loop.awaitIdle(threadId);
+        const round = (yield* services.rounds.read(fixture.root)).rounds[0]!;
+        expect(round.childUsage).toHaveLength(1);
+        expect(round.childUsage?.[0]?.usage.status).toBe("unknown");
+        expect(loopRecord(yield* readLoop(services)).usage.status).toBe("unknown");
+      }),
+    ),
   ),
 );

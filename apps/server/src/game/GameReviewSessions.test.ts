@@ -1907,6 +1907,9 @@ it.live("bounds active calls durably and rejects invalid routes before launching
       for (let call = 0; call < 6; call++) {
         const resumed = yield* restart();
         yield* resumed.tryInput(caller, { steps: [{ press: "Space" }] });
+        expect(
+          yield* resumed.inputCalls(started.childThreadId, RunId.make("run:review-child")),
+        ).toBe(call + 1);
       }
       const resumed = yield* restart();
       expect(

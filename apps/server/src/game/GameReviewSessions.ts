@@ -755,6 +755,10 @@ export class GameReviewSessions extends Context.Service<
      * ballot children run in their evidence directory; a repair child runs in
      * the game folder and is the only writable role.
      */
+    readonly inputCalls: (
+      threadId: ThreadId,
+      runId: RunId,
+    ) => Effect.Effect<number, GameOperationError>;
     readonly tryInput: (
       caller: GameReviewToolCaller,
       input: GameTryInput,
@@ -1529,6 +1533,32 @@ export const layer = (options: { readonly stateDir: string }) => {
       return { key, record, runId: active.id };
     });
 
+    const inputBudgetFile = (threadId: ThreadId, runId: RunId) =>
+      NodePath.join(
+        options.stateDir,
+        "game-input-calls",
+        encodePart(threadId),
+        `${encodePart(runId)}.json`,
+      );
+    const inputCalls: GameReviewSessions["Service"]["inputCalls"] = (threadId, runId) => {
+      const file = inputBudgetFile(threadId, runId);
+      return attempt("read game input budget", file, () => readJson(file)).pipe(
+        Effect.flatMap((value) =>
+          value === null
+            ? Effect.succeed(0)
+            : Schema.decodeUnknownEffect(
+                Schema.Int.check(
+                  Schema.isBetween({ minimum: 0, maximum: GAME_TRY_INPUT_BOUNDS.maxCalls }),
+                ),
+              )(value).pipe(
+                Effect.mapError((cause) =>
+                  failure("read game input budget", file, "io", undefined, cause),
+                ),
+              ),
+        ),
+      );
+    };
+
     const tryInput: GameReviewSessions["Service"]["tryInput"] = (caller, input) =>
       callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
@@ -1602,27 +1632,8 @@ export const layer = (options: { readonly stateDir: string }) => {
             return yield* invalid(
               "The evidence changed after this child started; active input is refused.",
             );
-          const budgetFile = NodePath.join(
-            options.stateDir,
-            "game-input-calls",
-            encodePart(caller.threadId),
-            `${encodePart(run.id)}.json`,
-          );
-          const previous = yield* attempt("read game input budget", budgetFile, () =>
-            readJson(budgetFile),
-          );
-          const calls =
-            previous === null
-              ? 0
-              : yield* Schema.decodeUnknownEffect(
-                  Schema.Int.check(
-                    Schema.isBetween({ minimum: 0, maximum: GAME_TRY_INPUT_BOUNDS.maxCalls }),
-                  ),
-                )(previous).pipe(
-                  Effect.mapError((cause) =>
-                    failure("read game input budget", budgetFile, "io", undefined, cause),
-                  ),
-                );
+          const budgetFile = inputBudgetFile(caller.threadId, run.id);
+          const calls = yield* inputCalls(caller.threadId, run.id);
           if (calls >= GAME_TRY_INPUT_BOUNDS.maxCalls)
             return yield* invalid(
               `game_try_input exhausted its ${GAME_TRY_INPUT_BOUNDS.maxCalls} calls for this session.`,
@@ -2126,6 +2137,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       });
     return GameReviewSessions.of({
       describe,
+      inputCalls,
       tryInput,
       start,
       toolRole,
