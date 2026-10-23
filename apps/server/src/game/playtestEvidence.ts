@@ -55,6 +55,7 @@ const StoredPlaytest = Schema.fromJsonString(
 );
 type StoredPlaytest = typeof StoredPlaytest.Type;
 const decodeStoredPlaytest = Schema.decodeUnknownSync(StoredPlaytest);
+const isPlaytestStep = Schema.is(GamePlaytestStep);
 const decodePlaytestSteps = Schema.decodeUnknownOption(Schema.Array(GamePlaytestStep));
 
 const slug = (label: string) => {
@@ -239,7 +240,7 @@ export const readPlaytestRunFacts = async (
     responded: stored.responded,
     consoleErrors: stored.consoleMessages.filter((message) => message.level === "error").length,
     steps: stored.steps.filter(
-      (step) => Schema.is(GamePlaytestStep)(step) && !("waitMs" in step) && !("screenshot" in step),
+      (step) => isPlaytestStep(step) && !("waitMs" in step) && !("screenshot" in step),
     ).length,
   };
 };

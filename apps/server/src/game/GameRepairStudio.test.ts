@@ -480,8 +480,9 @@ it.live("submission facts refuse console errors and a playtest with no input", (
   ),
 );
 
-for (const qualifies of [false, undefined]) {
-  it.live(`submission uses raw facts when gameplay qualification is ${qualifies}`, () =>
+it.live.each([false, undefined])(
+  "submission uses raw facts when gameplay qualification is %s",
+  (qualifies) =>
     withStudio((harness) =>
       Effect.gen(function* () {
         const studio = yield* GameRepairStudio.GameRepairStudio;
@@ -531,8 +532,7 @@ for (const qualifies of [false, undefined]) {
         expect(refused.reason).not.toContain("qualification");
       }),
     ),
-  );
-}
+);
 
 it.live("waits and screenshots cannot supply submission input, even with animated frames", () =>
   withStudio((harness) =>
@@ -552,7 +552,7 @@ it.live("waits and screenshots cannot supply submission input, even with animate
       const facts = yield* studio.submissionFacts(harness.root);
       expect(facts.passed).toBe(false);
       expect(facts.reason).toBe(
-        "input: The playtest executed no input steps; give it steps that play the core loop.",
+        "input: The playtest executed no input steps; waits and screenshots do not count.",
       );
     }),
   ),

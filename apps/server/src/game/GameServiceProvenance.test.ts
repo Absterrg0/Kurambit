@@ -1375,6 +1375,14 @@ it.live(
           );
           yield* game.export(threadId, "Web");
           const first = (yield* rounds.read(root)).selected!;
+          yield* game.webPlaytest(threadId, {
+            steps: [{ waitMs: 10 }, { screenshot: "animation" }],
+          });
+          const waiting = yield* studio.submissionFacts(root, first.buildId);
+          expect(waiting.passed).toBe(false);
+          expect(waiting.reason).toBe(
+            "input: The playtest executed no input steps; waits and screenshots do not count.",
+          );
           yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
           expect((yield* studio.submissionFacts(root, first.buildId)).passed).toBe(true);
           const bound = (yield* rounds.exported(root, first.buildId))!;

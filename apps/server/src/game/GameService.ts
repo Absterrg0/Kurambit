@@ -150,6 +150,7 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameSceneInspectResult, GameOperationError>;
   }
 >()("t3/game/GameService") {}
+const decodeGameManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const decodeBlenderMetadata = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
@@ -942,7 +943,7 @@ const make = Effect.gen(function* () {
               ? manifest
               : yield* Effect.tryPromise({
                   try: async () =>
-                    Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest))(
+                    decodeGameManifest(
                       await NodeFSP.readFile(
                         NodePath.join(recorded.sourceDirectory, "game.json"),
                         "utf8",

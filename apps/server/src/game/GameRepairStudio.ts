@@ -31,7 +31,7 @@ export interface GameRepairStudioFrame {
 export interface GameRepairStudioCheckInput {
   readonly threadId: ThreadId;
   readonly root: string;
-  /** Which build the playtest should show. The service picks it itself. */
+  /** The immutable build's role in the comparison. */
   readonly target: "incumbent" | "candidate";
   readonly buildId: string;
   /**
@@ -274,7 +274,8 @@ export const layer = (options: { readonly stateDir: string }) =>
 
       const submissionFacts: GameRepairStudio["Service"]["submissionFacts"] = (root, requested) =>
         Effect.gen(function* () {
-          const exported = yield* qualification.stageRecord(root, "export");
+          const exported =
+            requested === undefined ? yield* qualification.stageRecord(root, "export") : null;
           const check = (
             id: string,
             status: GameReviewCheck["status"],
@@ -335,7 +336,9 @@ export const layer = (options: { readonly stateDir: string }) =>
               : `The build directory ${directory} is missing or has no non-empty index.html; export the game again.`,
           );
           if (!present) return result(buildId, directory, [exists]);
-          const hashed = yield* Effect.promise(() => hashWebBuild(root, directory));
+          const hashed = yield* Effect.promise(() =>
+            hashWebBuild(root, directory).catch(() => null),
+          );
           const bytes =
             hashed === null
               ? check("bytes", "failed", "The build's files could not be read and hashed.")
@@ -393,7 +396,7 @@ export const layer = (options: { readonly stateDir: string }) =>
               "input",
               inputSteps > 0 && evidence.responded ? "passed" : "failed",
               inputSteps === 0
-                ? "The playtest executed no input steps; give it steps that play the core loop."
+                ? "The playtest executed no input steps; waits and screenshots do not count."
                 : evidence.responded
                   ? undefined
                   : "The game did not visibly respond to the playtest's input.",

@@ -1577,7 +1577,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         const inputs =
           failedFact === null
             ? yield* studio.frozenInputs(root, exportBuildId)
-            : { steps: [], viewport: null, seed: "unknown" };
+            : { steps: [], viewport: null, seed: "unknown" as const };
         // No recorded route means nothing honest to replay. The review is not
         // run on invented input; it is recorded as skipped so the reason stays
         // visible instead of the review silently never appearing.
