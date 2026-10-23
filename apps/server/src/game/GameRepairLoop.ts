@@ -1525,9 +1525,13 @@ export const layer = (options: GameRepairLoopOptions) => {
         const submitted = yield* submissionForRun(root, input.runId);
         let exportBuildId: string;
         let submissionNote: string | undefined;
+        let failedFact: string | null = null;
         if (submitted !== null) {
           const facts = yield* studio.submissionFacts(root, submitted.buildId);
-          if (!facts.passed || facts.buildId !== submitted.buildId) return null;
+          if (!facts.passed || facts.buildId !== submitted.buildId)
+            failedFact =
+              facts.reason ??
+              `build: the verified build does not match submitted build ${submitted.buildId}.`;
           exportBuildId = submitted.buildId;
           submissionNote = submitted.note;
         } else {
@@ -1537,19 +1541,24 @@ export const layer = (options: GameRepairLoopOptions) => {
           if (provenance.exportBuildId === null || provenance.exportRunId !== String(input.runId))
             return null;
           const facts = yield* studio.submissionFacts(root, provenance.exportBuildId);
-          if (!facts.passed) return null;
+          if (!facts.passed)
+            failedFact = facts.reason ?? "build: the server could not verify the exported build.";
           exportBuildId = provenance.exportBuildId;
         }
         const completedAt =
           run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-        const inputs = yield* studio.frozenInputs(root, exportBuildId);
+        const inputs =
+          failedFact === null
+            ? yield* studio.frozenInputs(root, exportBuildId)
+            : { steps: [], viewport: null, seed: "unknown" };
         // No recorded route means nothing honest to replay. The review is not
         // run on invented input; it is recorded as skipped so the reason stays
         // visible instead of the review silently never appearing.
-        const skipped =
-          inputs.steps.length === 0
+        let skipped =
+          failedFact ??
+          (inputs.steps.length === 0
             ? "skipped: the builder's playtest recorded no input route, so there is nothing to replay. Playtest the game with input steps to enable review."
-            : null;
+            : null);
         const stamp = yield* admission.stamp(root);
         // A creator action admitted after this run finished supersedes it, even
         // when that action's own run has not been created yet.
@@ -1570,8 +1579,15 @@ export const layer = (options: GameRepairLoopOptions) => {
             const latest = yield* admission.stamp(root);
             // An action took the game while the reads above ran; it owns it now.
             if (latest.generation !== stamp.generation) return null;
-            const exported = yield* rounds.exported(root, exportBuildId);
-            if (exported !== null) yield* rounds.select(root, exported.artifact);
+            if (skipped === null) {
+              const exported = yield* rounds.exported(root, exportBuildId).pipe(Effect.result);
+              if (exported._tag === "Failure")
+                skipped =
+                  exported.failure.detail ?? "sources: the recorded sources could not be read.";
+              else if (exported.success === null)
+                skipped = "sources: the build has no recorded export/source binding.";
+              else yield* rounds.select(root, exported.success.artifact);
+            }
             const builderSelection = run.modelSelection ?? records.thread.modelSelection;
             const reviewSelection = input.reviewSelection ?? builderSelection;
             const at = nowIso();

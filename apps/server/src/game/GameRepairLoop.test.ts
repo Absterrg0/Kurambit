@@ -518,6 +518,7 @@ const withLoop = <A, E>(
               recordedChildren: () =>
                 Effect.sync(() =>
                   [...children.values()].map((child) => ({
+                    role: child.role,
                     childThreadId: child.childThreadId,
                     runId: child.runId,
                   })),
@@ -1651,18 +1652,43 @@ it.live("a DESIGN.md edit after submitting changes nothing about the review's bu
   ),
 );
 
-it.live("without a submission the latest export starts only when the same facts pass", () =>
+for (const submitted of [true, false]) {
+  it.live(
+    `${submitted ? "submission" : "fallback"} re-check failure stays visible in review status`,
+    () =>
+      withLoop((fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            if (submitted) {
+              const accepted = yield* services.review.submit(threadId, {
+                note: "A tiny platformer.",
+              });
+              expect(accepted.accepted).toBe(true);
+            }
+            fixture.scripted.facts = {
+              passed: false,
+              reason: "bytes: the build's files changed after export",
+            };
+            const record = loopRecord(yield* ensureLoop(services));
+            expect(record.status).toBe("stopped");
+            expect(record.reason).toBe(fixture.scripted.facts.reason);
+            expect(record.exportBuildId).toBe(EXPORT_BUILD_ID);
+            const status = yield* services.review.status(threadId);
+            expect(status.loop?.id).toBe(record.id);
+            expect(status.loop?.reason).toBe(fixture.scripted.facts.reason);
+            expect(status.held).toBe(false);
+            expect(fixture.scripted.starts).toHaveLength(0);
+            expect((yield* ensureLoop(services))?.id).toBe(record.id);
+          }),
+        ),
+      ),
+  );
+}
+
+it.live("without a submission the turn's export starts when its facts pass", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
       Effect.gen(function* () {
-        fixture.scripted.facts = {
-          passed: false,
-          reason: "bytes: the build's files changed after export",
-        };
-        expect(yield* ensureLoop(services)).toBeNull();
-        expect(yield* readLoop(services)).toBeNull();
-
-        fixture.scripted.facts = { passed: true, reason: null };
         const created = loopRecord(yield* ensureLoop(services));
         expect(created.exportBuildId).toBe(EXPORT_BUILD_ID);
         expect(created.submissionNote).toBeUndefined();
