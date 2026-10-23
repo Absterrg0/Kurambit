@@ -1118,6 +1118,34 @@ it.live("ballots see the critic's cited experiment routes replayed on both build
   ),
 );
 
+it.live("a failed route replay is evidence and the critic still runs", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        const detail =
+          "Web playtest: Step 1 pointer coordinates exceed the frozen 640×360 viewport.";
+        scripted.incumbent = {
+          ...scripted.incumbent,
+          checks: [{ id: "replay", status: "failed" as const, detail }],
+        };
+        scripted.critic = () => criticAnswer(0);
+        yield* runToCompletion(services, fixture);
+        const critic = scripted.starts.find((child) => child.role === "critic");
+        expect(critic).toBeDefined();
+        expect(critic?.evidence?.checks).toContainEqual({
+          id: "replay",
+          status: "failed",
+          detail,
+        });
+        expect(critic?.evidence?.frames.length).toBeGreaterThan(0);
+        // The round continued to a real judgment instead of a review-error.
+        expect(loopRecord(yield* readLoop(services)).reason).toContain("zero-defects");
+      }),
+    ),
+  ),
+);
+
 it.live("zero defects stop the loop without a repair or a selection change", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>

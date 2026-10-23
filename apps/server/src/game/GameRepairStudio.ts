@@ -412,10 +412,47 @@ export const layer = (options: { readonly stateDir: string }) =>
             inputs.viewport === null
               ? {}
               : { width: inputs.viewport.width, height: inputs.viewport.height };
-          const result = yield* game.webPlaytestBuild(input.threadId, input.buildId, {
-            steps: [...inputs.steps],
-            ...size,
-          });
+          const replay = yield* game
+            .webPlaytestBuild(input.threadId, input.buildId, {
+              steps: [...inputs.steps],
+              ...size,
+            })
+            .pipe(Effect.result);
+          if (replay._tag === "Failure") {
+            // A build that is gone or whose bytes changed cannot be reviewed.
+            // Any other failed replay is evidence, not the end of the round:
+            // the critic gets the boot frames, the exact error and its own
+            // game_try_input runs.
+            const intact = yield* Effect.promise(() =>
+              hashWebBuild(input.root, candidateBuildDirectory(input.buildId)).then(
+                (hashed) => hashed?.buildId === input.buildId,
+                () => false,
+              ),
+            );
+            if (!intact) return yield* replay.failure;
+            const boot = yield* game
+              .webPlaytestBuild(input.threadId, input.buildId, size)
+              .pipe(Effect.result);
+            const booted = boot._tag === "Success" ? boot.success : null;
+            return {
+              checks: [
+                {
+                  id: "replay",
+                  status: "failed" as const,
+                  detail: replay.failure.message.slice(0, 1000),
+                },
+                ...(booted === null
+                  ? []
+                  : checkResult(booted, { ...inputs, steps: [] }).filter(
+                      (entry) => entry.id !== "input",
+                    )),
+              ],
+              frames: booted === null ? [] : yield* storeFrames(input.root, booted.screenshots),
+              viewport:
+                playedViewport(booted?.baseViewport, booted?.captureScale) ?? inputs.viewport,
+            } satisfies GameRepairStudioCheckResult;
+          }
+          const result = replay.success;
           // Read persisted pairs so a response byte cap cannot split the critic's evidence.
           const persisted =
             result.evidenceDirectory === undefined

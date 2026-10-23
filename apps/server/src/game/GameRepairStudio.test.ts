@@ -11,6 +11,7 @@ import {
   type GameWebPlaytestInput,
   type GameWebPlaytestResult,
   type GameReviewFrozenInputs,
+  GameOperationError,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -68,6 +69,8 @@ interface Harness {
   readonly root: string;
   results: GameWebPlaytestResult;
   readonly calls: Array<GameWebPlaytestInput | undefined>;
+  /** When set, every route run fails; boot-only runs still succeed. */
+  replayError: GameOperationError | null;
   /** The raw stage records the qualification store would report. */
   exportStage: GameQualification.QualificationStageRecord | null;
   playtestStage: GameQualification.QualificationStageRecord | null;
@@ -123,12 +126,15 @@ const withStudio = <A, E>(
         root,
         results: baseResult(),
         calls: [],
+        replayError: null,
         exportStage: null,
         playtestStage: null,
       };
       const game = Layer.mock(GameService.GameService)({
         webPlaytestBuild: (_thread, _buildId, input) => {
           harness.calls.push(input);
+          if (harness.replayError !== null && (input?.steps?.length ?? 0) > 0)
+            return Effect.fail(harness.replayError);
           return Effect.succeed(harness.results);
         },
       });
@@ -274,6 +280,82 @@ it.live("freezes and replays the window a scaled route was played in", () =>
         height: 720,
       });
       expect(checked.viewport).toEqual({ width: 1280, height: 720 });
+    }),
+  ),
+);
+
+it.live("a failed frozen-route replay is evidence, not the end of the review", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      harness.results = {
+        ...baseResult(),
+        baseViewport: { width: 640, height: 360 },
+        captureScale: 2,
+      };
+      harness.replayError = new GameOperationError({
+        operation: "Web playtest",
+        path: harness.root,
+        reason: "invalid-input",
+        detail: "Step 1 pointer coordinates exceed the frozen 640×360 viewport.",
+      });
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId,
+        inputs: {
+          steps: [{ click: "left", x: 640, y: 400 }],
+          viewport: { width: 1280, height: 720 },
+          seed: "unknown",
+        },
+      });
+      expect(checked.checks.find((check) => check.id === "replay")).toMatchObject({
+        status: "failed",
+        detail: expect.stringContaining("Step 1 pointer coordinates exceed"),
+      });
+      // Boot frames still show the critic the build it is reviewing.
+      expect(checked.frames.length).toBeGreaterThan(0);
+      expect(harness.calls.map((call) => call?.steps?.length ?? 0)).toEqual([1, 0]);
+      expect(checked.viewport).toEqual({ width: 1280, height: 720 });
+    }),
+  ),
+);
+
+it.live("a build whose bytes changed still ends the replay", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      harness.replayError = new GameOperationError({
+        operation: "Web playtest",
+        path: harness.root,
+        reason: "invalid-input",
+        detail: "Step 1 pointer coordinates exceed the frozen 640×360 viewport.",
+      });
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(harness.root, candidateBuildDirectory(buildId), "index.html"),
+          "<html>hacked</html>\n",
+        ),
+      );
+      const failed = yield* studio
+        .check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId,
+          inputs: {
+            steps: [{ click: "left", x: 640, y: 400 }],
+            viewport: { width: 1280, height: 720 },
+            seed: "unknown",
+          },
+        })
+        .pipe(Effect.flip);
+      expect(failed.detail).toContain("Step 1 pointer coordinates exceed");
+      // No boot-only evidence run: a changed build ends the replay.
+      expect(harness.calls.map((call) => call?.steps?.length ?? 0)).toEqual([1]);
     }),
   ),
 );
