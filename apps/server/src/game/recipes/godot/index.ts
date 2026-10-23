@@ -5,6 +5,10 @@ import { feelCoyote } from "./feel.coyote.ts";
 import { feelHitStop } from "./feel.hit-stop.ts";
 import { feelPickup } from "./feel.pickup.ts";
 import { feelShake } from "./feel.shake.ts";
+import { readHud } from "./read.hud.ts";
+import { readOnboarding } from "./read.onboarding.ts";
+import { readSilhouette } from "./read.silhouette.ts";
+import { stateWorld } from "./state.world.ts";
 
 /**
  * The engine pin these references were written and verified against. It is kept
@@ -29,4 +33,8 @@ export const godotRecipeAdapters: ReadonlyMap<string, GameRecipeAdapter> = new M
   ["feel.hit-stop", adapter(feelHitStop)],
   ["feel.pickup", adapter(feelPickup)],
   ["feel.shake", adapter(feelShake)],
+  ["read.hud", adapter(readHud)],
+  ["read.onboarding", adapter(readOnboarding)],
+  ["read.silhouette", adapter(readSilhouette)],
+  ["state.world", adapter(stateWorld)],
 ]);

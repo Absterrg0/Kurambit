@@ -26,7 +26,7 @@ import { gameRecipeCatalog } from "./recipeCatalog.ts";
 import { GODOT_RECIPE_ENGINE_VERSION } from "./recipes/godot/index.ts";
 
 /**
- * The task-62a references. Every one is run against a generated project:
+ * The nine task-62a references. Every one is run against a generated project:
  * the catalog must stay a set of references a model can actually boot, not code
  * that merely looks plausible in a review.
  */
@@ -36,6 +36,10 @@ const RECIPE_IDS = [
   "feel.hit-stop",
   "feel.pickup",
   "feel.shake",
+  "read.hud",
+  "read.onboarding",
+  "read.silhouette",
+  "state.world",
 ] as const;
 type RecipeId = (typeof RECIPE_IDS)[number];
 
@@ -46,6 +50,10 @@ const LINE_BUDGETS: Record<RecipeId, number> = {
   "feel.hit-stop": 60,
   "feel.shake": 60,
   "feel.pickup": 70,
+  "read.silhouette": 70,
+  "state.world": 70,
+  "read.hud": 70,
+  "read.onboarding": 70,
 };
 
 const workspaceRoot = (() => {
@@ -460,6 +468,40 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(after.gem_present).toBe(false);
       expect(after.effects).toBe(0);
       expect(during.some((probe) => probe.gameState.effects === 1)).toBe(true);
+      break;
+    case "read.silhouette":
+      expect(before.in_contact).toBe(false);
+      expect(after.contacts).toBeGreaterThanOrEqual(1);
+      expect(after.in_contact).toBe(true);
+      expect(Number(after.actor_value) - Number(after.background_value)).toBeGreaterThanOrEqual(40);
+      expect(Number(after.background_value) - Number(after.hazard_value)).toBeGreaterThanOrEqual(
+        20,
+      );
+      break;
+    case "state.world":
+      expect(before.locked).toBe(true);
+      expect(before.gate_open).toBe(false);
+      expect(after.locked).toBe(false);
+      expect(after.gate_open).toBe(true);
+      expect(after.lever_pulled).toBe(true);
+      expect(Number(after.player_x)).toBeGreaterThan(500);
+      break;
+    case "read.hud":
+      // The baseline follows the hit; the pre-hit 3 lives in the frames before it.
+      expect(before.health).toBe(2);
+      expect(Number(before.feedback_ms)).toBeGreaterThan(0);
+      expect(after.health).toBe(2);
+      expect(after.goal).toBe(2);
+      expect(after.feedback_ms).toBe(0);
+      expect(during.some((probe) => probe.gameState.health === 3)).toBe(true);
+      expect(during.some((probe) => Number(probe.gameState.feedback_ms) > 0)).toBe(true);
+      break;
+    case "read.onboarding":
+      expect(before.prompt).toBe(false);
+      expect(after.prompt).toBe(false);
+      expect(after.opened).toBe(true);
+      expect(after.prompts_shown).toBe(1);
+      expect(during.some((probe) => probe.gameState.prompt === true)).toBe(true);
       break;
   }
 };

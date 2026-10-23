@@ -116,4 +116,94 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
       reference: "t50d/verdict.md:162 (persistent feedback); standard pickup confirmation.",
     },
   },
+  {
+    id: "read.silhouette",
+    version: 1,
+    title: "Separate actor and hazard from the background",
+    genres: ["platformer", "top-down"],
+    mechanics: ["readability", "silhouette"],
+    defects: ["indistinct-silhouette", "low-contrast"],
+    aliases: ["silhouette contrast", "low visibility", "outline contrast"],
+    intent: "Separate the actor and the hazard from a busy background by value and contour.",
+    why: "At gameplay scale the eye needs the actor, the threat and the scenery to differ before colour or detail is read. Value and shape do that work in one frame.",
+    failure:
+      "Similar values and contours make the player lose the actor in motion or walk into a hazard they could not see.",
+    restyle:
+      "Keep the value and contour separation. Choose this game's own palette, shapes and background density.",
+    verificationQuestion:
+      "At gameplay scale, can you identify both the actor and the hazard in one frame?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "t50d/verdict.md:102 (indistinct silhouettes); standard contrast technique.",
+    },
+  },
+  {
+    id: "state.world",
+    version: 1,
+    title: "Draw the gate from its real state",
+    genres: ["platformer", "top-down", "action"],
+    mechanics: ["world-state", "readability"],
+    defects: ["misleading-world-state", "invisible-change"],
+    aliases: ["world state", "locked gate", "state driven visual"],
+    intent:
+      "Draw every world object that carries state from that state, not a separate animation flag.",
+    why: "A gate, door or lamp opened by a special animation can drift from the state the rest of the game reads. One source keeps the picture and the rules in step.",
+    failure:
+      "The world shows a locked gate while the state says unlocked, so the player is told to act on something already done.",
+    restyle:
+      "Keep the single source of truth. Choose this game's own gate, lamp or prop and its open/closed treatment.",
+    verificationQuestion: "Does the closed gate visibly differ after its unlocking action?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "t50d/verdict.md:162 (misleading world state); standard state-driven rendering.",
+    },
+  },
+  {
+    id: "read.hud",
+    version: 1,
+    title: "Keep critical HUD readable during feedback",
+    genres: ["platformer", "action", "top-down"],
+    mechanics: ["hud", "feedback-priority"],
+    defects: ["obscured-hud", "unreadable-feedback"],
+    aliases: ["hud priority", "damage banner", "readable hud"],
+    intent:
+      "Give the current action and state a fixed, high-priority place that transient feedback cannot cover.",
+    why: "Damage flashes and toasts are read at the moment the player most needs health and the objective. The critical layer has to sit above them and outside their band.",
+    failure:
+      "A full-screen banner or a toast hides the health the player needs, or a moving HUD drops the information entirely.",
+    restyle:
+      "Keep the fixed zones and the layer order. Choose this game's HUD placement and feedback vocabulary.",
+    verificationQuestion:
+      "During the damage feedback, are health and the objective still fully readable?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "t50d/verdict.md:162 (death banner); standard layered-HUD technique.",
+    },
+  },
+  {
+    id: "read.onboarding",
+    version: 1,
+    title: "Show the action prompt only while it applies",
+    genres: ["platformer", "top-down", "action"],
+    mechanics: ["onboarding", "prompt"],
+    defects: ["missing-onboarding", "unexplained-prompt"],
+    aliases: ["onboarding prompt", "contextual hint", "action prompt"],
+    intent:
+      "Show a contextual action prompt only while the action is available, and clear it when it is taken.",
+    why: "A prompt attached to the thing it acts on teaches the control at the moment of need. A stale prompt sends the player looking for an action already done.",
+    failure:
+      "A prompt that stays after the gate opens, or one with no visible target, reads as broken or as unfinished onboarding.",
+    restyle:
+      "Keep the range test and the clear-on-action. Choose this game's input, wording and prompt placement.",
+    verificationQuestion:
+      "Is the prompt visible before the first interaction and gone after the action?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "t50d/verdict.md:228 (missing onboarding); standard contextual prompt.",
+    },
+  },
 ];
