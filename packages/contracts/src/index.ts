@@ -69,3 +69,4 @@ export * from "./playtestBounds.ts";
 export * from "./gameDesign.ts";
 export * from "./gameScenario.ts";
 export * from "./gameReview.ts";
+export * from "./gameRecipe.ts";
