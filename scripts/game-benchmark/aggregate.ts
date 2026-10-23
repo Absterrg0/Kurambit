@@ -139,6 +139,7 @@ export interface BenchmarkBriefResult {
    * when the run judged fewer than twice.
    */
   readonly repairDelta: number | null;
+  readonly review?: GameE2eRunSummary["review"];
   readonly playtest: {
     readonly frames: number;
     readonly responded: boolean;
@@ -245,7 +246,7 @@ export function classifyRun(observation: BenchmarkRunObservation): {
     };
 
   const visual = visualReading(summary);
-  if (visual.gap)
+  if (summary.schemaVersion === 1 && visual.gap)
     return {
       outcome: "evidence-gap",
       reason:
@@ -254,7 +255,10 @@ export function classifyRun(observation: BenchmarkRunObservation): {
           ? "No visual stage was recorded for the current build."
           : `The visual stage is ${visual.stage.status} without usable gameplay frames.`),
     };
-  if (visual.stage?.status !== "passed" || visual.judgement?.status === "failed")
+  if (
+    summary.schemaVersion === 1 &&
+    (visual.stage?.status !== "passed" || visual.judgement?.status === "failed")
+  )
     return {
       outcome: "failed-visual",
       reason:
@@ -276,7 +280,10 @@ export function classifyRun(observation: BenchmarkRunObservation): {
     };
   return {
     outcome: "passed",
-    reason: "Mechanics, frozen obligations and visual judgement passed.",
+    reason:
+      summary.schemaVersion === 1
+        ? "Mechanics, frozen obligations and visual judgement passed."
+        : "Playable completion and frozen obligations passed. Presentation quality is unmeasured by this summary; review decisions are reported separately.",
   };
 }
 
@@ -342,6 +349,7 @@ export function readBenchmarkResult(input: {
       detail: visual?.judgement?.detail ?? null,
     },
     repairDelta: visualRepairDelta(judgements),
+    ...(summary?.schemaVersion === 2 ? { review: summary.review ?? null } : {}),
     playtest:
       summary?.lastPlaytest === null || summary?.lastPlaytest === undefined
         ? null

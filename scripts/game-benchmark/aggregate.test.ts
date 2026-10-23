@@ -95,6 +95,7 @@ const obligation = (
 
 const summary = (
   input: {
+    readonly schemaVersion?: 1 | 2;
     readonly qualification?: GameQualificationRead | null;
     readonly obligations?: ReadonlyArray<GameBenchmarkObligationRead>;
     readonly error?: string | null;
@@ -104,7 +105,7 @@ const summary = (
     readonly visualJudgements?: ReadonlyArray<GameVisualJudgement>;
   } = {},
 ): GameE2eRunSummary => ({
-  schemaVersion: 1,
+  schemaVersion: input.schemaVersion ?? 1,
   harnessCommit: "commit",
   startedAt: "2026-10-21T00:00:00.000Z",
   durationMs: 1_000,
@@ -466,4 +467,30 @@ describe("grade summaries", () => {
     // An old grade document without the profile cannot be attributed to one.
     assert.equal(readGradeSummary({ build: { kind: "existing" } })?.graderVersion, null);
   });
+});
+
+it("new summaries report completion without requiring a retired visual verdict", () => {
+  const modern = observe({
+    schemaVersion: 2,
+    qualification: qualification({
+      stages: [stage("export", "passed"), stage("playtest", "passed")],
+    }),
+  });
+  assert.equal(classifyRun(modern).outcome, "passed");
+  assert.match(classifyRun(modern).reason, /Presentation quality is unmeasured/);
+  const row = readBenchmarkResult({
+    harnessCommit: "commit",
+    brief,
+    fixtureChecksum: "checksum",
+    startedAt: "2026-10-23T00:00:00Z",
+    durationMs: 1,
+    observation: modern,
+  });
+  assert.equal(row.review, null);
+  assert.equal(row.visual.status, null);
+  assert.equal(row.repairDelta, null);
+  assert.equal(
+    classifyRun(observe({ schemaVersion: 1, qualification: modern.summary.qualification })).outcome,
+    "evidence-gap",
+  );
 });

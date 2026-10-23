@@ -156,6 +156,7 @@ let summaryPhase = "create";
 let summaryTimedOut = false;
 let summaryError: string | null = null;
 let gameInfo: GameE2eRunSummary["game"] = null;
+let review: GameE2eRunSummary["review"] = null;
 let qualification: GameStatus["qualification"] | null = null;
 let lastPlaytest: GameStatus["lastPlaytest"] = null;
 let obligations: ReadonlyArray<GameBenchmarkObligationRead> = [];
@@ -171,7 +172,8 @@ const writeSummary = async () => {
   const path = NodePath.resolve(values.summary);
   await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true });
   const summary: GameE2eRunSummary = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    review: review ?? null,
     harnessCommit,
     startedAt: summaryStartedAt,
     durationMs: Date.now() - started,
@@ -751,6 +753,9 @@ const main = Effect.gen(function* () {
   const status = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
   // Record before any assertion: a failed run still has to say what it graded.
   recordStatus(status);
+  review = yield* client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }).pipe(
+    Effect.orElseSucceed(() => null),
+  );
   printStatus(status);
   if (status.assets.length === 0) timeline("Build turn produced no Blender assets");
   else
@@ -1028,6 +1033,9 @@ const main = Effect.gen(function* () {
     );
     timeline("Cancellation: no tracked processes remain");
   }
+  review = yield* client[WS_METHODS.gameReviewStatus]({ threadId: created.threadId }).pipe(
+    Effect.orElseSucceed(() => null),
+  );
   summaryPhase = "done";
   timeline("PASS");
 });

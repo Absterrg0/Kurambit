@@ -241,6 +241,11 @@ describe("run summaries", () => {
     assert.equal(decoded?.turns[0]?.name, "design");
     assert.equal(decoded?.obligations[0]?.status, "proven");
     assert.equal(decoded?.fixture?.checksum, "checksum");
+    const modern = decodeRunSummary(
+      JSON.stringify({ ...JSON.parse(text), schemaVersion: 2, review: null }),
+    );
+    assert.equal(modern?.schemaVersion, 2);
+    assert.equal(modern?.review, null);
   });
 
   it("treats a truncated or foreign summary as unreadable", () => {

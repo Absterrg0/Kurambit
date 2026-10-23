@@ -10,6 +10,7 @@ import {
 import {
   GameAcceptanceCriterionKind,
   GameLastPlaytest,
+  GameReviewStatus,
   GameTemplateId,
   type GameAcceptanceCriterion,
   type GameScenarioCriterionResult,
@@ -227,7 +228,9 @@ export const GameE2eTurnRead = Schema.Struct({
 export type GameE2eTurnRead = typeof GameE2eTurnRead.Type;
 
 export const GameE2eRunSummary = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  // V1 aggregates keep their historical score gate; V2 reports review separately.
+  schemaVersion: Schema.Literals([1, 2]),
+  review: Schema.optionalKey(Schema.NullOr(GameReviewStatus)),
   harnessCommit: Schema.String,
   startedAt: Schema.String,
   durationMs: Schema.Number,
