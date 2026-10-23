@@ -16,7 +16,9 @@ import {
   type GameReviewReportResult,
   GameReviewCriticAnswer,
   GameReviewCheck,
+  type GameReviewExperimentRoute,
   GamePlaytestInputPair,
+  GamePlaytestStep,
   GameViewport,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
@@ -149,6 +151,14 @@ export type GameReviewChildRunStatus =
       readonly status: "completed" | "failed" | "cancelled" | "interrupted" | "rolled_back";
     };
 
+export interface GameReviewExperimentInput {
+  readonly threadId: ThreadId;
+  readonly loopId: string;
+  readonly roundId: string;
+  /** Frames the critic cited; non-experiment frame ids are ignored. */
+  readonly frameIds: ReadonlyArray<string>;
+}
+
 export type GameReviewSessionAnswerResult =
   | { readonly kind: "critic"; readonly answer: GameReviewCriticAnswer; readonly raw: string }
   | { readonly kind: "ballot"; readonly answer: GameReviewBallotAnswer; readonly raw: string }
@@ -194,6 +204,25 @@ const ReviewEvidenceRecord = Schema.Struct({
   checks: Schema.Array(ReviewCheckRecord),
 });
 type ReviewEvidenceRecordType = typeof ReviewEvidenceRecord.Type;
+
+/**
+ * The server-written record of one active experiment. Only the route and the
+ * frames it produced are read back; the result measurements stay the child's.
+ */
+const StoredExperiment = Schema.Struct({
+  buildId: Schema.String,
+  steps: Schema.Array(GamePlaytestStep),
+  captureEveryMs: Schema.Number,
+  baseViewport: Schema.optionalKey(GameViewport),
+  screenshots: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.String,
+      inputPair: Schema.optionalKey(GamePlaytestInputPair),
+    }),
+  ),
+});
+const decodeStoredExperiment = Schema.decodeUnknownEffect(StoredExperiment);
 
 const ReviewSelectionRecord = Schema.Struct({
   schemaVersion: Schema.Literal(1),
@@ -330,6 +359,19 @@ const attempt = <A>(operation: string, path: string, run: () => Promise<A>) =>
 
 /** Ids are encoded so a colon inside a caller's id cannot forge another order. */
 const encodePart = (value: string) => encodeURIComponent(value);
+
+const EXPERIMENT_FRAME_ID = /^try(\d+)f\d+$/u;
+const DURING_FRAME_STEP = /^step (\d+) during:/u;
+
+/** The step an interval frame belongs to, when its pair metadata has no index. */
+const experimentStepIndex = (frame: {
+  readonly inputPair?: { readonly stepIndex: number } | undefined;
+  readonly label: string;
+}): number | null => {
+  if (frame.inputPair !== undefined) return frame.inputPair.stepIndex;
+  const match = DURING_FRAME_STEP.exec(frame.label);
+  return match === null ? null : Number(match[1]) - 1;
+};
 
 /**
  * The command id is the idempotency key. It names the loop, round, role and
@@ -694,6 +736,14 @@ export class GameReviewSessions extends Context.Service<
     readonly answer: (
       input: GameReviewSessionAnswerInput,
     ) => Effect.Effect<GameReviewSessionAnswerResult, GameOperationError>;
+    /**
+     * Freezes the routes behind the critic's cited experiment frames. Only
+     * routes whose frames the critic cited are returned, with the frozen
+     * viewport it played, so the loop can replay them on both builds.
+     */
+    readonly experiments: (
+      input: GameReviewExperimentInput,
+    ) => Effect.Effect<ReadonlyArray<GameReviewExperimentRoute>, GameOperationError>;
     /**
      * The bound child run's status. A repair has no audited answer, so the loop
      * needs this to know when the writable child stopped writing.
@@ -1865,6 +1915,68 @@ export const layer = (options: { readonly stateDir: string }) => {
           : { kind: "ballot", answer: parsed.answer as GameReviewBallotAnswer, raw: read.text };
       });
 
+    const experiments: GameReviewSessions["Service"]["experiments"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(input.threadId);
+        const record = yield* readRecord(root, {
+          loopId: input.loopId,
+          roundId: input.roundId,
+          role: "critic",
+          order: 0,
+        });
+        if (record === null || record.evidenceDirectory === null || record.evidenceHash === null)
+          return [];
+        const hash = yield* attempt("hash game review evidence", record.evidenceDirectory, () =>
+          hashEvidenceDirectory(record.evidenceDirectory!),
+        ).pipe(Effect.orElseSucceed(() => null));
+        if (hash !== record.evidenceHash)
+          return yield* failure(
+            "game review experiments",
+            record.evidenceDirectory,
+            "invalid-input",
+            "The evidence changed after this child started; its cited experiments cannot be replayed.",
+          );
+        const byExperiment = new Map<number, Set<string>>();
+        for (const frameId of new Set(input.frameIds)) {
+          const match = EXPERIMENT_FRAME_ID.exec(frameId);
+          if (match === null) continue;
+          const call = Number(match[1]);
+          const ids = byExperiment.get(call) ?? new Set<string>();
+          ids.add(frameId);
+          byExperiment.set(call, ids);
+        }
+        const routes: GameReviewExperimentRoute[] = [];
+        for (const [call, frameIds] of [...byExperiment].toSorted(
+          ([left], [right]) => left - right,
+        )) {
+          const file = NodePath.join(record.evidenceDirectory, `try-${call}.json`);
+          const value = yield* attempt("read game review experiment", file, () => readJson(file));
+          if (value === null) continue;
+          const stored = yield* decodeStoredExperiment(value).pipe(
+            Effect.mapError((cause) =>
+              failure("read game review experiment", file, "io", undefined, cause),
+            ),
+          );
+          const frames = stored.screenshots
+            .filter((frame) => frameIds.has(frame.id))
+            .map((frame) => ({
+              frameId: frame.id,
+              label: frame.label,
+              stepIndex: experimentStepIndex(frame),
+            }));
+          if (frames.length === 0) continue;
+          routes.push({
+            id: `try-${call}`,
+            buildId: stored.buildId,
+            steps: stored.steps,
+            captureEveryMs: stored.captureEveryMs,
+            viewport: stored.baseViewport ?? record.playViewport ?? null,
+            frames,
+          });
+        }
+        return routes;
+      });
+
     const evidenceDirectory: GameReviewSessions["Service"]["evidenceDirectory"] = (input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(input.threadId);
@@ -1969,6 +2081,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       toolRole,
       report,
       answer,
+      experiments,
       runStatus,
       evidenceDirectory,
       evidenceHash,

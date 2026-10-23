@@ -1755,6 +1755,63 @@ it.live(
     ),
 );
 
+it.live("freezes the routes of the critic's cited experiments", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      yield* service.tryInput(caller, {
+        steps: [{ key: "ArrowRight", holdMs: 250 }],
+        captureEveryMs: 125,
+      });
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "try1f1" }],
+      });
+      expect(accepted.accepted).toBe(true);
+      const routes = yield* service.experiments({
+        threadId,
+        loopId,
+        roundId,
+        frameIds: ["f1", "try1f1", "try1f2"],
+      });
+      expect(routes).toEqual([
+        {
+          id: "try-1",
+          buildId: "build-incumbent",
+          steps: [{ key: "ArrowRight", holdMs: 250 }],
+          captureEveryMs: 125,
+          viewport: { width: 640, height: 360 },
+          frames: [
+            { frameId: "try1f1", label: "input 1 before", stepIndex: 0 },
+            { frameId: "try1f2", label: "input 1 after", stepIndex: 0 },
+          ],
+        },
+      ]);
+      expect(
+        yield* service.experiments({
+          threadId,
+          loopId,
+          roundId,
+          frameIds: ["f1"],
+        }),
+      ).toEqual([]);
+    }),
+  ),
+);
+
 it.live("bounds active calls durably and rejects invalid routes before launching", () =>
   withSession(({ service, restart, scripted, frames }) =>
     Effect.gen(function* () {

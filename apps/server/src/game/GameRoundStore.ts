@@ -23,6 +23,7 @@ import {
   type GameReviewCheck,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
+  type GameReviewExperimentRoute,
   type GameReviewRound as GameReviewRoundType,
   type GameReviewState as GameReviewStateType,
   type ModelSelection,
@@ -134,6 +135,8 @@ export interface GameRoundReviewInput {
   readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
   readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
   readonly checks?: ReadonlyArray<GameReviewCheck> | undefined;
+  /** Routes of the critic's cited experiments, frozen before the repair runs. */
+  readonly experiments?: ReadonlyArray<GameReviewExperimentRoute> | undefined;
   readonly candidateChecks?: ReadonlyArray<GameReviewCheck> | undefined;
   readonly mechanicalVeto?: string | undefined;
   /** The repair child's own `game_submit` note, when it made one. */
@@ -772,6 +775,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                   ? {}
                   : { doNotRegress: [...input.doNotRegress] }),
                 ...(input.checks === undefined ? {} : { checks: [...input.checks] }),
+                ...(input.experiments === undefined ? {} : { experiments: [...input.experiments] }),
                 ...(input.candidateChecks === undefined
                   ? {}
                   : { candidateChecks: [...input.candidateChecks] }),

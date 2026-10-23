@@ -11,6 +11,7 @@ import {
   type GameViewport,
   type GameWebPlaytestResult,
   type GamePlaytestInputPair,
+  type GamePlaytestStep,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -52,6 +53,23 @@ export interface GameRepairStudioCheckResult {
   readonly frames: ReadonlyArray<GameRepairStudioFrame>;
   /** The viewport this run actually played at, when the playtest reported it. */
   readonly viewport: GameViewport | null;
+}
+
+/**
+ * One critic experiment replayed for the ballots. It is a read-only playtest in
+ * an isolated store: it must not write playtest bindings or qualification.
+ */
+export interface GameRepairStudioExperimentInput {
+  readonly threadId: ThreadId;
+  readonly root: string;
+  readonly buildId: string;
+  readonly steps: ReadonlyArray<GamePlaytestStep>;
+  readonly captureEveryMs: number;
+  readonly viewport: GameViewport | null;
+}
+
+export interface GameRepairStudioExperimentResult {
+  readonly frames: ReadonlyArray<GameRepairStudioFrame>;
 }
 
 /** The export stage as the loop needs it to tell "no output" from "failed". */
@@ -119,6 +137,10 @@ export class GameRepairStudio extends Context.Service<
     readonly check: (
       input: GameRepairStudioCheckInput,
     ) => Effect.Effect<GameRepairStudioCheckResult, GameOperationError>;
+    /** Replays one critic experiment route without recording a playtest. */
+    readonly experiment: (
+      input: GameRepairStudioExperimentInput,
+    ) => Effect.Effect<GameRepairStudioExperimentResult, GameOperationError>;
     readonly exportState: (
       root: string,
     ) => Effect.Effect<GameRepairStudioExportState, GameOperationError>;
@@ -418,6 +440,38 @@ export const layer = (options: { readonly stateDir: string }) =>
           } satisfies GameRepairStudioCheckResult;
         });
 
+      const experiment: GameRepairStudio["Service"]["experiment"] = (input) =>
+        Effect.gen(function* () {
+          // The route is replayed in its own experiment store. GameService
+          // skips stage writes and the build playtest binding for that path.
+          const directory = NodePath.join(
+            gameRecordFile(options.stateDir, "game-review-experiments", input.root, ""),
+            NodeCrypto.randomUUID(),
+          );
+          const result = yield* game
+            .webPlaytestBuild(
+              input.threadId,
+              input.buildId,
+              {
+                steps: [...input.steps],
+                captureEveryMs: input.captureEveryMs,
+                captureAllSteps: true,
+                ...(input.viewport === null
+                  ? {}
+                  : { width: input.viewport.width, height: input.viewport.height }),
+              },
+              directory,
+            )
+            .pipe(
+              Effect.ensuring(
+                Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+              ),
+            );
+          return {
+            frames: yield* storeFrames(input.root, result.screenshots),
+          } satisfies GameRepairStudioExperimentResult;
+        });
+
       const exportState = (root: string) =>
         Effect.gen(function* () {
           const stage = yield* qualification.stageRecord(root, "export");
@@ -445,6 +499,7 @@ export const layer = (options: { readonly stateDir: string }) =>
         submissionFacts,
         frozenInputs,
         check,
+        experiment,
         exportState,
         promote,
       });

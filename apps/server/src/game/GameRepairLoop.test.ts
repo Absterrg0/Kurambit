@@ -12,7 +12,10 @@ import {
   type GameReviewBallotPlan,
   type GameReviewBudget,
   type GameReviewCheck,
+  type GameReviewExperimentRoute,
   type GameManifest,
+  type GamePlaytestStep,
+  type GameViewport,
   GameOperationError,
   type GameRepairLoop as GameRepairLoopRecord,
   type GameReviewRound,
@@ -118,6 +121,7 @@ interface StartedChild {
   readonly childThreadId: ThreadId;
   readonly runId: RunId;
   readonly completion: Deferred.Deferred<ChildCompletion>;
+  readonly evidence: GameReviewSessions.GameReviewEvidenceInput | null;
   readonly hung: boolean;
   completed: boolean;
 }
@@ -170,6 +174,15 @@ interface Scripted {
   }>;
   readonly checks: Array<{ target: string; buildId: string; inputs: unknown }>;
   readonly starts: Array<StartedChild>;
+  /** Routes the session fixture returns for the critic's cited frames. */
+  criticExperiments: Array<GameReviewExperimentRoute>;
+  /** Experiment replays the studio fixture was asked to run. */
+  readonly experiments: Array<{
+    readonly buildId: string;
+    readonly steps: ReadonlyArray<GamePlaytestStep>;
+    readonly captureEveryMs: number;
+    readonly viewport: GameViewport | null;
+  }>;
   readonly interrupts: Array<{ threadId: ThreadId; runId: string | null; reason: string }>;
   readonly completed: Array<{ key: string; status: string }>;
 }
@@ -227,6 +240,8 @@ const makeScripted = (): Scripted => ({
   ],
   checks: [],
   starts: [],
+  criticExperiments: [],
+  experiments: [],
   interrupts: [],
   completed: [],
 });
@@ -501,6 +516,7 @@ const withLoop = <A, E>(
                   childThreadId: ThreadId.make(`thread:child:${key}`),
                   runId: RunId.make(`run:child:${key}`),
                   completion,
+                  evidence: input.evidence ?? null,
                   hung: scripted.hungRoles.has(`${input.role}:${order}`),
                   completed: false,
                 };
@@ -564,6 +580,17 @@ const withLoop = <A, E>(
               });
             return GameReviewSessions.GameReviewSessions.of({
               tryInput: () => Effect.die("The loop fixture does not launch input experiments."),
+              experiments: (input) =>
+                Effect.succeed(
+                  scripted.criticExperiments
+                    .map((route) => ({
+                      ...route,
+                      frames: route.frames.filter((frame) =>
+                        input.frameIds.includes(frame.frameId),
+                      ),
+                    }))
+                    .filter((route) => route.frames.length > 0),
+                ),
               describe: () => Effect.succeed(null),
               toolRole: () => Effect.succeed(null),
               report: () =>
@@ -610,6 +637,44 @@ const withLoop = <A, E>(
                 })),
                 // What the run actually played at; a frozen viewport wins.
                 viewport: input.inputs.viewport ?? { width: 1280, height: 720 },
+              });
+            };
+            const experiment: GameRepairStudio.GameRepairStudio["Service"]["experiment"] = (
+              input,
+            ) => {
+              scripted.experiments.push({
+                buildId: input.buildId,
+                steps: input.steps,
+                captureEveryMs: input.captureEveryMs,
+                viewport: input.viewport,
+              });
+              // The loop replays each route on the incumbent, then candidate.
+              const broken = scripted.experiments.length % 2 === 0;
+              return Effect.succeed({
+                frames: input.steps.flatMap((step, stepIndex) => [
+                  {
+                    label: `experiment ${String(stepIndex + 1)} before`,
+                    path: NodePath.join(frameDirectory, "incumbent-boot.png"),
+                    inputPair: {
+                      stepIndex,
+                      phase: "before" as const,
+                      input: step,
+                      changedPercent: null,
+                      stateChanges: null,
+                    },
+                  },
+                  {
+                    label: `experiment ${String(stepIndex + 1)} after`,
+                    path: NodePath.join(frameDirectory, "incumbent-action.png"),
+                    inputPair: {
+                      stepIndex,
+                      phase: "after" as const,
+                      input: step,
+                      changedPercent: broken ? 0 : 40,
+                      stateChanges: null,
+                    },
+                  },
+                ]),
               });
             };
             const promote: GameRepairStudio.GameRepairStudio["Service"]["promote"] = (
@@ -664,6 +729,7 @@ const withLoop = <A, E>(
                   seed: "unknown",
                 }),
               check,
+              experiment,
               exportState: () =>
                 Effect.succeed({
                   outcome: scripted.exportOutcome.outcome,
@@ -960,6 +1026,95 @@ it.live("both ballots must agree a preservation item was lost on the challenger"
         expect(game.rounds.some((round) => round.reason?.includes("preservation-lost"))).toBe(true);
       }),
     ),
+  ),
+);
+
+it.live("ballots see the critic's cited experiment routes replayed on both builds", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.repairs = [repairWith()];
+          const route = (id: string, frameId: string, key: string): GameReviewExperimentRoute => ({
+            id,
+            buildId: EXPORT_BUILD_ID,
+            steps: [{ hold: key, holdMs: 100 }],
+            captureEveryMs: 100,
+            viewport: { width: 640, height: 360 },
+            frames: [{ frameId, label: `experiment ${id} after`, stepIndex: 0 }],
+          });
+          scripted.criticExperiments = [
+            route("try-1", "try1f1", "ArrowRight"),
+            route("try-2", "try2f1", "ArrowLeft"),
+            route("try-3", "try3f1", "Space"),
+          ];
+          scripted.critic = () => ({
+            kind: "critic",
+            raw: "{}",
+            answer: {
+              fundamentals: {
+                ...fundamentals,
+                boots: { verdict: "yes", frameIds: ["f1", "try3f1"], note: "Boot frame." },
+              },
+              defects: [
+                {
+                  severity: "visible",
+                  what: "Input fault",
+                  frameId: "try2f1",
+                  fix: "Fix the input fault.",
+                },
+              ],
+              doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "try1f1" }],
+            },
+          });
+          const ballot = (context: {
+            readonly order: number;
+            readonly plan: GameReviewBallotPlan;
+          }) => {
+            const child = scripted.starts.find(
+              (entry) => entry.role === "ballot" && entry.order === context.order,
+            );
+            const frames = child?.evidence?.frames ?? [];
+            const experimentAfter = frames.filter(
+              (frame) =>
+                (frame.id.startsWith("a") || frame.id.startsWith("b")) &&
+                frame.label.includes("experiment") &&
+                frame.inputPair?.phase === "after",
+            );
+            // Two matched routes: one do-not-regress pair and one defect pair.
+            expect(experimentAfter).toHaveLength(4);
+            const candidateSide = context.plan.main.A === "challenger" ? "a" : "b";
+            const broken =
+              experimentAfter.find((frame) => frame.id.startsWith(candidateSide))?.inputPair
+                ?.changedPercent === 0;
+            return ballotAnswer(
+              context.plan,
+              "promote",
+              broken ? { preservation: "lost", lossOn: "challenger" } : {},
+            );
+          };
+          scripted.ballots = [ballot, ballot];
+          yield* runToCompletion(services, fixture);
+          expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
+          const game = yield* services.rounds.read(root);
+          const rejected = game.rounds.find((round) => round.reason?.includes("preservation-lost"));
+          expect(rejected?.status).toBe("rejected");
+          expect(rejected?.experiments?.map((entry) => entry.id)).toEqual([
+            "try-1",
+            "try-2",
+            "try-3",
+          ]);
+          expect(scripted.experiments).toHaveLength(4);
+          expect(new Set(scripted.experiments.map((entry) => entry.buildId)).size).toBe(2);
+          expect(
+            scripted.experiments.map((entry) =>
+              "hold" in entry.steps[0]! ? entry.steps[0].hold : null,
+            ),
+          ).toEqual(["ArrowRight", "ArrowRight", "ArrowLeft", "ArrowLeft"]);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
   ),
 );
 

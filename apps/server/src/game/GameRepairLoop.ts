@@ -18,6 +18,7 @@ import {
   type GameReviewCheck,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
+  type GameReviewExperimentRoute,
   type GameReviewRound as GameReviewRoundRecord,
   type GameSubmission,
   type GameSubmitInput,
@@ -62,6 +63,8 @@ const MAX_STORED_LOOPS = 10;
 
 const MAX_REPAIR_PROMPT_DEFECTS = 5;
 const BALLOT_FRAMES_PER_SIDE = 6;
+/** Two matched experiment pairs leave two frozen route frames per side. */
+const BALLOT_EXPERIMENT_PAIRS = 2;
 const CRITIC_FRAMES = 8;
 const REQUIRED_POSITIVE_CHECKS = ["boot", "console", "input"] as const;
 const FACT_CHECK_IDS = new Set([
@@ -124,6 +127,51 @@ const assignmentFrames = (frames: ReadonlyArray<GameRepairFrame>, side: "a" | "b
     sourcePath: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
+
+/** The same critic route replayed on both builds; the ballot sees A and B alike. */
+interface BallotExperimentPair {
+  readonly routeId: string;
+  readonly stepIndex: number;
+  readonly incumbent: readonly [GameRepairFrame, GameRepairFrame];
+  readonly candidate: readonly [GameRepairFrame, GameRepairFrame];
+}
+
+const experimentFrame = (frame: GameRepairStudio.GameRepairStudioFrame): GameRepairFrame => ({
+  // assignmentFrames supplies the ballot's anonymous id.
+  id: "e1",
+  label: frame.label,
+  path: frame.path,
+  ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+});
+
+const pairedExperimentFrames = (
+  frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+  stepIndex: number,
+): readonly [GameRepairFrame, GameRepairFrame] | null => {
+  const before = frames.find(
+    (frame) => frame.inputPair?.stepIndex === stepIndex && frame.inputPair.phase === "before",
+  );
+  const after = frames.find(
+    (frame) => frame.inputPair?.stepIndex === stepIndex && frame.inputPair.phase === "after",
+  );
+  return before === undefined || after === undefined
+    ? null
+    : [experimentFrame(before), experimentFrame(after)];
+};
+
+const completeExperimentSteps = (
+  left: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+  right: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+) => {
+  const steps = (frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>) =>
+    new Set(
+      frames
+        .filter((frame) => frame.inputPair?.phase === "after")
+        .map((frame) => frame.inputPair!.stepIndex),
+    );
+  const rightSteps = steps(right);
+  return [...steps(left)].filter((step) => rightSteps.has(step)).toSorted((a, b) => a - b);
+};
 
 const sideChecks = (checks: ReadonlyArray<GameReviewCheck>, side: string) =>
   checks.map((check) => ({
@@ -821,9 +869,16 @@ export const layer = (options: GameRepairLoopOptions) => {
       incumbentChecks: ReadonlyArray<GameReviewCheck>,
       candidateChecks: ReadonlyArray<GameReviewCheck>,
       plan: GameReviewBallotPlan,
+      experiments: ReadonlyArray<BallotExperimentPair>,
     ) => {
-      const buildFrames = (side: "incumbent" | "challenger") =>
-        side === "challenger" ? candidateFrames : incumbentFrames;
+      const experimentFrames = (side: "incumbent" | "challenger") =>
+        experiments.flatMap((pair) => (side === "challenger" ? pair.candidate : pair.incumbent));
+      const buildFrames = (side: "incumbent" | "challenger") => {
+        // Matched experiment pairs come first: the ballots judge the routes
+        // the critic actually exercised, and the frozen route fills the rest.
+        const frozen = side === "challenger" ? candidateFrames : incumbentFrames;
+        return [...experimentFrames(side), ...frozen].slice(0, BALLOT_FRAMES_PER_SIDE);
+      };
       const buildChecks = (side: "incumbent" | "challenger") =>
         side === "challenger" ? candidateChecks : incumbentChecks;
       const frames = ["A", "B"].flatMap((label) => {
@@ -832,7 +887,10 @@ export const layer = (options: GameRepairLoopOptions) => {
       });
       const controls = ["C", "D"].flatMap((label) => {
         const side = label as "C" | "D";
-        return assignmentFrames(incumbentFrames, side.toLowerCase() as "c" | "d");
+        return assignmentFrames(
+          [...experimentFrames("incumbent"), ...incumbentFrames].slice(0, BALLOT_FRAMES_PER_SIDE),
+          side.toLowerCase() as "c" | "d",
+        );
       });
       const checks = [
         ...sideChecks(buildChecks(plan.main.A), "a"),
@@ -842,6 +900,83 @@ export const layer = (options: GameRepairLoopOptions) => {
       ];
       return { frames: [...frames, ...controls], checks };
     };
+
+    /**
+     * Replays the critic's cited experiment routes on both builds. The first
+     * pairs belong to preservation items, so the evidence behind a do-not-
+     * regress claim survives the frame budget before a lower-priority route.
+     */
+    const replayExperimentPairs = (input: {
+      readonly threadId: ThreadId;
+      readonly root: string;
+      readonly incumbentBuildId: string | null;
+      readonly candidateBuildId: string;
+      readonly experiments: ReadonlyArray<GameReviewExperimentRoute>;
+      readonly defects: ReadonlyArray<GameReviewDefect>;
+      readonly doNotRegress: ReadonlyArray<GameReviewDoNotRegress>;
+    }): Effect.Effect<ReadonlyArray<BallotExperimentPair>, GameOperationError> =>
+      Effect.gen(function* () {
+        if (input.experiments.length === 0 || input.incumbentBuildId === null) return [];
+        const doNotRegressFrames = new Set(input.doNotRegress.map((item) => item.frameId));
+        const defectFrames = new Set(input.defects.map((defect) => defect.frameId));
+        const priority = (frameId: string) =>
+          doNotRegressFrames.has(frameId) ? 0 : defectFrames.has(frameId) ? 1 : 2;
+        const routes = input.experiments
+          .map((route, index) => ({
+            route,
+            index,
+            priority:
+              route.frames.length === 0
+                ? 2
+                : Math.min(...route.frames.map((frame) => priority(frame.frameId))),
+          }))
+          .toSorted((left, right) => left.priority - right.priority || left.index - right.index);
+        const pairs: BallotExperimentPair[] = [];
+        for (const { route } of routes) {
+          if (pairs.length >= BALLOT_EXPERIMENT_PAIRS) break;
+          const run = (buildId: string) =>
+            studio.experiment({
+              threadId: input.threadId,
+              root: input.root,
+              buildId,
+              steps: route.steps,
+              captureEveryMs: route.captureEveryMs,
+              viewport: route.viewport,
+            });
+          const incumbent = yield* run(input.incumbentBuildId);
+          const candidate = yield* run(input.candidateBuildId);
+          const citedSteps = [
+            ...new Set(
+              route.frames
+                .filter((frame) => frame.stepIndex !== null)
+                .toSorted(
+                  (left, right) =>
+                    priority(left.frameId) - priority(right.frameId) ||
+                    left.stepIndex! - right.stepIndex!,
+                )
+                .map((frame) => frame.stepIndex!),
+            ),
+          ];
+          // A cited interval frame may lack a step; replay its first matched pair.
+          const steps =
+            citedSteps.length === 0
+              ? completeExperimentSteps(incumbent.frames, candidate.frames).slice(0, 1)
+              : citedSteps;
+          for (const stepIndex of steps) {
+            const before = pairedExperimentFrames(incumbent.frames, stepIndex);
+            const after = pairedExperimentFrames(candidate.frames, stepIndex);
+            if (before === null || after === null) continue;
+            pairs.push({
+              routeId: route.id,
+              stepIndex,
+              incumbent: before,
+              candidate: after,
+            });
+            if (pairs.length >= BALLOT_EXPERIMENT_PAIRS) break;
+          }
+        }
+        return pairs;
+      });
 
     const decide = (
       record: GameRepairLoopRecord,
@@ -1066,10 +1201,28 @@ export const layer = (options: GameRepairLoopOptions) => {
           })
           .slice(0, MAX_REPAIR_PROMPT_DEFECTS);
         const doNotRegress = answered.answer.doNotRegress;
+        const citedFrameIds = [
+          ...new Set([
+            ...answered.answer.defects.map((defect) => defect.frameId),
+            ...doNotRegress.map((item) => item.frameId),
+            ...Object.values(answered.answer.fundamentals).flatMap((judgment) => judgment.frameIds),
+          ]),
+        ];
+        const experimentFrameIds = citedFrameIds.filter((frameId) => frameId.startsWith("try"));
+        const experiments =
+          experimentFrameIds.length === 0
+            ? []
+            : yield* sessions.experiments({
+                threadId: record.threadId,
+                loopId: record.id,
+                roundId: round.id,
+                frameIds: experimentFrameIds,
+              });
         yield* rounds.recordReview(task.root, round.id, {
           fundamentals: answered.answer.fundamentals,
           defects,
           doNotRegress,
+          experiments,
         });
         if (defects.length === 0)
           return {
@@ -1087,6 +1240,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           {
             defects,
             doNotRegress,
+            experiments,
           },
         );
       });
@@ -1102,6 +1256,7 @@ export const layer = (options: GameRepairLoopOptions) => {
       review: {
         readonly defects: ReadonlyArray<GameReviewDefect>;
         readonly doNotRegress: ReadonlyArray<GameReviewDoNotRegress>;
+        readonly experiments: ReadonlyArray<GameReviewExperimentRoute>;
       },
     ): Effect.Effect<RoundOutcome, GameOperationError> =>
       Effect.gen(function* () {
@@ -1251,6 +1406,15 @@ export const layer = (options: GameRepairLoopOptions) => {
         if (veto !== null)
           return yield* rejectRound(reserved, round.id, `mechanical-veto: ${vetoReason(veto)}`);
 
+        const experimentPairs = yield* replayExperimentPairs({
+          threadId: record.threadId,
+          root: task.root,
+          incumbentBuildId: afterRepair.incumbentBuildId ?? round.incumbentBuildId,
+          candidateBuildId: afterRepair.candidate.buildId,
+          experiments: review.experiments,
+          defects: review.defects,
+          doNotRegress: review.doNotRegress,
+        });
         const plans = ballotPlans(record.id, round.id);
         yield* rounds.recordReview(task.root, round.id, { ballots: plans });
         let current = yield* findRound(task.root, round.id);
@@ -1275,6 +1439,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               incumbent.checks,
               candidate.checks,
               plan,
+              experimentPairs,
             ),
             items: review.doNotRegress.map((item) => ({ id: item.id, what: item.what })),
           });

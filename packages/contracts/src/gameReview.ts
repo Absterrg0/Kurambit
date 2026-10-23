@@ -54,6 +54,34 @@ export const GameReviewDoNotRegress = Schema.Struct({
 });
 export type GameReviewDoNotRegress = typeof GameReviewDoNotRegress.Type;
 
+/**
+ * One frame from an experiment the critic cited, frozen with the round so the
+ * route can be replayed on both builds after the repair.
+ */
+export const GameReviewExperimentFrame = Schema.Struct({
+  frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  stepIndex: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+});
+export type GameReviewExperimentFrame = typeof GameReviewExperimentFrame.Type;
+
+/**
+ * A critic experiment route, not its outcome: the exact inputs and capture
+ * cadence are replayed on the incumbent and the candidate for the ballots.
+ */
+export const GameReviewExperimentRoute = Schema.Struct({
+  /** The critic's call id, e.g. try-1. */
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  /** The build the critic actually played when it recorded the route. */
+  buildId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  steps: Schema.Array(GamePlaytestStep),
+  captureEveryMs: Schema.Number,
+  viewport: Schema.NullOr(GameViewport),
+  /** Only the frames the critic cited; the route replays all of its steps. */
+  frames: Schema.Array(GameReviewExperimentFrame),
+});
+export type GameReviewExperimentRoute = typeof GameReviewExperimentRoute.Type;
+
 /** The four pairwise facets a ballot must answer for each comparison. */
 export const GAME_REVIEW_FACETS = ["works", "look", "feel", "play"] as const;
 export const GameReviewFacet = Schema.Literals(GAME_REVIEW_FACETS);
@@ -475,6 +503,11 @@ export const GameReviewRound = Schema.Struct({
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),
   /** The frozen check run the round was reviewed against. */
   checks: Schema.optionalKey(Schema.Array(GameReviewCheck)),
+  /**
+   * Routes of the experiments the critic cited, replayed on both builds so a
+   * behaviour discovered outside the original check route is judged.
+   */
+  experiments: Schema.optionalKey(Schema.Array(GameReviewExperimentRoute)),
   /** The challenger's check run and the mechanical veto reason, when it ran. */
   candidateChecks: Schema.optionalKey(Schema.Array(GameReviewCheck)),
   mechanicalVeto: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
