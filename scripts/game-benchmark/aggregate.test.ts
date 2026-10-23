@@ -13,7 +13,9 @@ import {
   readBenchmarkResult,
   readGradeSummary,
   classifyRun,
+  decodeBenchmarkResult,
   renderResultsMarkdown,
+  shouldRegradeReusedRaw,
   shouldResume,
 } from "./aggregate.ts";
 import type { BenchmarkEvaluationProfile, BenchmarkGrade } from "./aggregate.ts";
@@ -491,6 +493,39 @@ describe("resume", () => {
       shouldResume({ harnessCommit: "commit", fixtureChecksum: "checksum", grade: null }, expected),
       true,
     );
+  });
+
+  it("reuses a pre-profile raw row's build and regrades it", () => {
+    const grade: BenchmarkGrade = {
+      build: "existing",
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 3,
+      quick: null,
+      obligationIds: [],
+      obligations: { yes: 0, total: 0 },
+      control: false,
+      void: false,
+      solCalls: 0,
+    };
+    const evaluation: BenchmarkEvaluationProfile = {
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      version: 3,
+    };
+    // The t42 cache predates the profile: its result.json has no evaluation key.
+    const cached = decodeBenchmarkResult({
+      schemaVersion: 1,
+      lane: "raw",
+      harnessCommit: "638d309d",
+      fixtureId: "platformer",
+      fixtureChecksum: "checksum",
+      outcome: "passed",
+      grade,
+    });
+    assert.notEqual(cached, null);
+    assert.equal(Object.hasOwn(cached!, "evaluation"), false);
+    assert.equal(shouldRegradeReusedRaw(cached!, evaluation), true);
+    // A row already graded under this profile keeps its build and verdict.
+    assert.equal(shouldRegradeReusedRaw({ ...cached!, evaluation }, evaluation), false);
   });
 });
 

@@ -16,7 +16,7 @@ import {
   readGradeSummary,
   readRawResult,
   renderResultsMarkdown,
-  sameEvaluationProfile,
+  shouldRegradeReusedRaw,
   shouldResume,
   summarizeResults,
   type BenchmarkBriefResult,
@@ -438,9 +438,8 @@ const reuseRawBrief = async (
   if (previous.lane !== "raw") throw new Error(`${source} is not a raw-lane result.`);
   if (previous.fixtureChecksum !== brief.checksum)
     throw new Error(`${source} was measured on different brief bytes; refusing to reuse it.`);
-  const sameProfile = sameEvaluationProfile(previous.evaluation, expected);
   // Nothing was graded: there is no verdict to inherit, so the row stands.
-  const regrade = previous.grade !== null && !sameProfile;
+  const regrade = shouldRegradeReusedRaw(previous, expected);
   for (const entry of regrade ? ["raw"] : ["grade", "raw"]) {
     const from = NodePath.join(sourceDirectory, entry);
     const to = NodePath.join(directory, entry);

@@ -544,6 +544,20 @@ export const sameEvaluationProfile = (
   left.grader.model === right.grader.model;
 
 /**
+ * A reused raw row keeps its build and is regraded unless its grade carries the
+ * same profile. A graded row written before profiles existed has no profile at
+ * all, so it is regraded too: never inherit a verdict from an unknown grader.
+ */
+export const shouldRegradeReusedRaw = (
+  previous: {
+    readonly grade: BenchmarkGrade | null;
+    readonly evaluation?: BenchmarkEvaluationProfile | null;
+  },
+  expected: BenchmarkEvaluationProfile,
+): boolean =>
+  previous.grade !== null && !sameEvaluationProfile(previous.evaluation ?? null, expected);
+
+/**
  * A row is only reused when it measures the same commit, lane and fixture bytes
  * under the same evaluation profile. A graded row without a recorded profile is
  * from before the profile existed, so it cannot be reused either: changing the
