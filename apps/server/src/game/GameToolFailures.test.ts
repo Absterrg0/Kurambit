@@ -21,6 +21,7 @@ import * as McpToolAccessTestkit from "../mcp/McpToolAccess.testkit.ts";
 import { toolkitRegistration } from "../mcp/McpHttpServer.ts";
 import * as GameHandlers from "../mcp/toolkits/game/handlers.ts";
 import { GameToolkit } from "../mcp/toolkits/game/tools.ts";
+import * as GameReviewApi from "./GameReviewApi.ts";
 import * as GameService from "./GameService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -32,7 +33,6 @@ import {
   roundStoreTestLayer,
   previewBrowserTestLayer,
   qualificationTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("tool-failures");
@@ -117,14 +117,16 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(
           Layer.mock(GamePreview.GamePreview)({
+            directories: () => [],
             url: () => null,
             urlFor: () => null,
             serving: () => false,
           }),
         ),
         Layer.provide(previewBrowserTestLayer()),
+        Layer.provideMerge(Layer.mock(GameReviewApi.GameReviewApi)({})),
         Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
-        Layer.provideMerge(visualJudgeTestLayer(NodePath.join(root, ".test-state"))),
+
         Layer.provideMerge(designApprovalTestLayer(NodePath.join(root, ".test-state"))),
         Layer.provideMerge(roundStoreTestLayer(NodePath.join(root, ".test-state"))),
         Layer.provideMerge(admissionTestLayer),

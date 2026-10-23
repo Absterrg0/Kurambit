@@ -372,3 +372,43 @@ export const GameReviewState = Schema.Struct({
   rounds: Schema.Array(GameReviewRound),
 });
 export type GameReviewState = typeof GameReviewState.Type;
+
+export const GameReviewHistoryInput = Schema.Struct({
+  threadId: ThreadId,
+  before: Schema.optionalKey(Schema.String),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 }))),
+});
+export type GameReviewHistoryInput = typeof GameReviewHistoryInput.Type;
+export const GameReviewEvidenceRef = Schema.Struct({
+  role: Schema.Literals(["critic", "ballot"]),
+  order: Schema.Number,
+  directory: Schema.String,
+  childThreadId: ThreadId,
+  runId: Schema.NullOr(Schema.String),
+  taskId: Schema.NullOr(Schema.String),
+  hash: Schema.NullOr(Schema.String),
+  frames: Schema.Array(GameRepairFrame),
+});
+export const GameReviewHistory = Schema.Struct({
+  rounds: Schema.Array(
+    Schema.Struct({ round: GameReviewRound, evidence: Schema.Array(GameReviewEvidenceRef) }),
+  ),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type GameReviewHistory = typeof GameReviewHistory.Type;
+export const GameReviewStatus = Schema.Struct({
+  loop: Schema.NullOr(GameRepairLoop),
+  phase: Schema.String,
+  held: Schema.Boolean,
+  repairsLeft: Schema.Number,
+  timeLeftMs: Schema.Number,
+  budget: GameReviewBudget,
+  restoreOffered: Schema.Boolean,
+});
+export type GameReviewStatus = typeof GameReviewStatus.Type;
+export const GameReviewRestoreResult = Schema.Struct({
+  kind: Schema.Literals(["restored", "blocked", "busy"]),
+  message: Schema.String,
+});
+
+export type GameReviewRestoreResult = typeof GameReviewRestoreResult.Type;

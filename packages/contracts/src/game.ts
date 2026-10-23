@@ -4,7 +4,6 @@ import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
 import { GameScenarioCriterionResult, GameScenarioKindCoverage } from "./gameScenario.ts";
-import { GameVisualJudgement } from "./gameVisual.ts";
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -385,8 +384,7 @@ export const GameLastPlaytest = Schema.Struct({
 export type GameLastPlaytest = typeof GameLastPlaytest.Type;
 /**
  * One qualification stage. `design` is the creator's approval of the current
- * DESIGN.md; `state` grades the approved behaviour criteria; `visual` is the
- * independent judge's verdict on the latest qualifying playtest evidence.
+ * DESIGN.md; `state` grades the approved behaviour criteria.
  */
 export const GameQualificationStage = Schema.Literals([
   "design",
@@ -395,7 +393,6 @@ export const GameQualificationStage = Schema.Literals([
   "export",
   "playtest",
   "state",
-  "visual",
 ]);
 export type GameQualificationStage = typeof GameQualificationStage.Type;
 export const GameQualificationStageStatus = Schema.Literals([
@@ -409,7 +406,7 @@ export type GameQualificationStageStatus = typeof GameQualificationStageStatus.T
 /**
  * Playable completion is deliberately narrower than qualification: a current
  * web export plus a playtest that played those exact bytes. Check, test, the
- * state exam and the visual review are certification, and stay optional.
+ * state exam are certification, and stay optional.
  */
 export const GameCompletionState = Schema.Literals(["complete", "incomplete", "unknown"]);
 export type GameCompletionState = typeof GameCompletionState.Type;
@@ -429,8 +426,6 @@ export const GameQualificationStageRead = Schema.Struct({
   detail: Schema.optionalKey(Schema.String),
   /** For an export, the build-addressed directory its files live in. */
   buildDirectory: Schema.optionalKey(Schema.String),
-  /** The independent visual judge's typed result, for the visual stage. */
-  visual: Schema.optionalKey(GameVisualJudgement),
 });
 export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
 /**
@@ -448,9 +443,8 @@ export const GameQualificationRead = Schema.Struct({
    */
   completion: GameCompletionState,
   /**
-   * Every mechanical stage and the design passed; only the visual stage is in
-   * question. The UI and harness need the two apart: a game whose behaviour
-   * works but whose look failed is not the same as one that does not work.
+   * Every mechanical stage and the design passed. Review decisions are separate
+   * and do not certify all presentation criteria.
    */
   mechanicsQualified: Schema.Boolean,
   /** The game's current source snapshot, or null when it is unknown. */
@@ -539,6 +533,7 @@ export type GameStatus = typeof GameStatus.Type;
  * so a subscriber can tell a repeat from news.
  */
 export const GameOperationEvent = Schema.Struct({
+  revision: Schema.optionalKey(Schema.Number),
   root: Schema.String,
   name: Schema.String,
   state: Schema.Union([GameOperationState, Schema.Literal("cancelled")]),
@@ -712,12 +707,6 @@ export const GameWebPlaytestResult = Schema.Struct({
   blockers: Schema.optionalKey(Schema.Array(Schema.String)),
   /** What changed from the run's gameplay baseline, human readable. */
   interaction: Schema.optionalKey(Schema.String),
-  /**
-   * The independent visual judgement this run received, when it qualified
-   * mechanically and the stage ran. Absent when mechanics failed, so the
-   * caller can tell "not judged" from "judged and failed".
-   */
-  visual: Schema.optionalKey(GameVisualJudgement),
   /**
    * The stage's pause/mute bridge, exercised once by the driver like the play
    * surface does. Null when the check did not run; otherwise true only when

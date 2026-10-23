@@ -10,10 +10,15 @@ import {
   GameSceneInspectResult,
   GameScenariosRunResult,
   GameStatus,
+  GameReviewStatus,
+  GameReviewHistory,
+  GameReviewHistoryInput,
+  GameReviewRestoreResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
+import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -32,6 +37,43 @@ const GameStatusTool = Tool.make("game_status", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, true);
+const reviewDependencies = [...dependencies, GameReviewApi.GameReviewApi];
+const ReviewStatusTool = Tool.make("game_review_status", {
+  description:
+    "Read the current review phase, remaining repairs/time, frozen builder/reviewer models, usage, interruption and restore availability. Existing games have no review until a new playable export's builder turn ends. Restart never resumes a review.",
+  success: GameReviewStatus,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+}).annotate(Tool.Readonly, true);
+const ReviewHistoryTool = Tool.make("game_review_history", {
+  description:
+    "Read a bounded page of repair rounds, defects and fixes, frozen checks, decisions and exact reasons, ballots, session IDs and evidence frame references. Use nextCursor as before for the next page.",
+  parameters: Schema.Struct({
+    before: GameReviewHistoryInput.fields.before,
+    limit: GameReviewHistoryInput.fields.limit,
+  }),
+  success: GameReviewHistory,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+}).annotate(Tool.Readonly, true);
+const ReviewStopTool = Tool.make("game_review_stop", {
+  description:
+    "Stop this game's review and wait for its owned child sessions to stop. The selected build remains playable. Fails if a session may still write; no Resume mid-round.",
+  success: GameReviewStatus,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+}).annotate(Tool.Readonly, false);
+const ReviewRestoreTool = Tool.make("game_review_restore", {
+  description:
+    "Explicitly restore the previous game-folder version from the latest interrupted review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
+  success: GameReviewRestoreResult,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+}).annotate(Tool.Readonly, false);
 const BlenderTool = Tool.make("game_blender_run", {
   description:
     "Build or revise a model in this thread's game. Supply a stable id and Python bpy script. Opens art/blender/<id>.blend if present, otherwise an empty factory scene. Set reset=true to rebuild from an empty scene at the same source/export paths; false/default modifies the existing file, so edit objects by name to avoid duplicates. Executes the script, preserves the .blend source, saves the script, exports GLB with applied modifiers to the same godot/assets/models/<id>.glb path, renders a small CPU thumbnail unless thumbnail=false, and updates game.json. Returns mesh/material counts, bounds, warnings and real output. Script exceptions return their traceback and a log path. Follow with game_godot_import.",
@@ -134,6 +176,10 @@ export const GameWebPlaytestTool = WebPlaytestTool;
 export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool);
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
+  ReviewStatusTool,
+  ReviewHistoryTool,
+  ReviewStopTool,
+  ReviewRestoreTool,
   BlenderTool,
   ImportTool,
   CheckTool,

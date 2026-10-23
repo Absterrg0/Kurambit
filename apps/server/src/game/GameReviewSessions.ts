@@ -632,6 +632,12 @@ export class GameReviewSessions extends Context.Service<
       readonly order?: number;
     }) => Effect.Effect<string | null, GameOperationError>;
     /** Hashes the evidence directory now; null for a repair session. */
+    readonly describe: (
+      input: GameReviewSessionAnswerInput,
+    ) => Effect.Effect<
+      typeof import("@t3tools/contracts").GameReviewEvidenceRef.Type | null,
+      GameOperationError
+    >;
     readonly evidenceHash: (
       input: GameReviewSessionAnswerInput,
     ) => Effect.Effect<string | null, GameOperationError>;
@@ -1429,7 +1435,33 @@ export const layer = (options: { readonly stateDir: string }) => {
         return children;
       });
 
+    const describe: GameReviewSessions["Service"]["describe"] = (input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(input.threadId);
+        const record = yield* readRecord(root, { ...input, order: input.order ?? 0 });
+        if (
+          record?.evidenceDirectory == null ||
+          record.evidence === null ||
+          record.role === "repair"
+        )
+          return null;
+        return {
+          role: record.role,
+          order: record.order,
+          directory: record.evidenceDirectory,
+          childThreadId: ThreadIdSchema.make(record.childThreadId),
+          runId: record.runId ?? null,
+          taskId: record.taskId,
+          hash: record.evidenceHash,
+          frames: record.evidence.frames.map((frame) => ({
+            id: frame.id,
+            label: frame.label,
+            path: NodePath.join(record.evidenceDirectory!, frame.file),
+          })),
+        };
+      });
     return GameReviewSessions.of({
+      describe,
       start,
       answer,
       runStatus,

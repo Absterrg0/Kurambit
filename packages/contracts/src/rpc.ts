@@ -1,4 +1,10 @@
 import {
+  GameReviewStatus,
+  GameReviewHistory,
+  GameReviewHistoryInput,
+  GameReviewRestoreResult,
+} from "./gameReview.ts";
+import {
   GameActionInput,
   GameActionResult,
   GameCreateInput,
@@ -303,6 +309,11 @@ export const WS_METHODS = {
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
   gameStatus: "game.status",
+  gameReviewStatus: "game.reviewStatus",
+  gameReviewHistory: "game.reviewHistory",
+  gameReviewStop: "game.reviewStop",
+  gameReviewRestore: "game.reviewRestore",
+
   gameList: "game.list",
   gameCreate: "game.create",
   gameOpen: "game.open",
@@ -1308,6 +1319,26 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 const gameError = Schema.Union([GameOperationError, EnvironmentAuthorizationError]);
+const WsGameReviewStatusRpc = Rpc.make(WS_METHODS.gameReviewStatus, {
+  payload: GameThreadInput,
+  success: GameReviewStatus,
+  error: gameError,
+});
+const WsGameReviewHistoryRpc = Rpc.make(WS_METHODS.gameReviewHistory, {
+  payload: GameReviewHistoryInput,
+  success: GameReviewHistory,
+  error: gameError,
+});
+const WsGameReviewStopRpc = Rpc.make(WS_METHODS.gameReviewStop, {
+  payload: GameThreadInput,
+  success: GameReviewStatus,
+  error: gameError,
+});
+const WsGameReviewRestoreRpc = Rpc.make(WS_METHODS.gameReviewRestore, {
+  payload: GameThreadInput,
+  success: GameReviewRestoreResult,
+  error: gameError,
+});
 const WsGameStatusRpc = Rpc.make(WS_METHODS.gameStatus, {
   payload: GameThreadInput,
   success: GameStatus,
@@ -1383,6 +1414,11 @@ const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
 
 export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
+  WsGameReviewStatusRpc,
+  WsGameReviewHistoryRpc,
+  WsGameReviewStopRpc,
+  WsGameReviewRestoreRpc,
+
   WsGameCreateRpc,
   WsGameListRpc,
   WsGameOpenRpc,

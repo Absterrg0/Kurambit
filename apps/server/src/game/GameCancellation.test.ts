@@ -31,7 +31,6 @@ import {
   roundStoreTestLayer,
   previewBrowserTestLayer,
   qualificationTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 it.live.each(["interrupt", "stop", "interrupted run"] as const)(
@@ -96,6 +95,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
           ),
           Layer.provide(
             Layer.mock(GamePreview.GamePreview)({
+              directories: () => [],
               serving: () => false,
               stop: () =>
                 Effect.sync(() => {
@@ -107,7 +107,7 @@ it.live.each(["interrupt", "stop", "interrupted run"] as const)(
           ),
           Layer.provide(previewBrowserTestLayer()),
           Layer.provideMerge(qualificationTestLayer(NodePath.join(root, ".test-state"))),
-          Layer.provideMerge(visualJudgeTestLayer(NodePath.join(root, ".test-state"))),
+
           Layer.provideMerge(designApprovalTestLayer(NodePath.join(root, ".test-state"))),
           Layer.provideMerge(roundStoreTestLayer(NodePath.join(root, ".test-state"))),
           Layer.provideMerge(admissionTestLayer),

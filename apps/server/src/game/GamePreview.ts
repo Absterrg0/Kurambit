@@ -39,6 +39,7 @@ export class GamePreview extends Context.Service<
     /** The URL Play shows if it is this directory; null when another is shown. */
     readonly urlFor: (root: string, directory: string) => string | null;
     /** Whether this game currently serves that directory (evidence or selected). */
+    readonly directories: (root: string) => readonly string[];
     readonly serving: (root: string, directory: string) => boolean;
   }
 >()("t3/game/GamePreview") {}
@@ -155,6 +156,8 @@ const make = Effect.gen(function* () {
       const current = latest.get(root);
       return current !== undefined && current.key === keyOf(root, directory) ? current.url : null;
     },
+    directories: (root) =>
+      [...servers.values()].filter((entry) => entry.root === root).map((entry) => entry.directory),
     serving: (root, directory) => servers.has(keyOf(root, directory)),
     stop: (root) => Effect.promise(() => closeWhere(root)),
     open: (root, directory = "builds/web") => openServer(root, directory),

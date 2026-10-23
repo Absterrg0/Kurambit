@@ -23,7 +23,6 @@ import {
   designApprovalTestLayer,
   roundStoreTestLayer,
   previewBrowserTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("game-events-test");
@@ -99,6 +98,7 @@ exit 0
         ),
         Layer.provide(
           Layer.mock(GamePreview.GamePreview)({
+            directories: () => [],
             url: () => null,
             urlFor: () => null,
             serving: () => false,
@@ -106,7 +106,7 @@ exit 0
         ),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
-        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provideMerge(admissionTestLayer),

@@ -26,7 +26,6 @@ import {
   designApprovalTestLayer,
   roundStoreTestLayer,
   qualificationTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const workspaceRoot = (() => {
@@ -174,7 +173,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provideMerge(qualificationTestLayer(stateDir)),
-        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),
@@ -273,7 +272,7 @@ it.live.skipIf(!available || !templatesInstalled)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer(browserExecutable!)),
         Layer.provideMerge(qualificationTestLayer(stateDir)),
-        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provide(ServerSettings.layerTest()),

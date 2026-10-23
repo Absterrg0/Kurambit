@@ -62,6 +62,8 @@ describe("command permissions", () => {
           WS_METHODS.gameCreate,
           WS_METHODS.gameOpen,
           WS_METHODS.gameAction,
+          WS_METHODS.gameReviewStop,
+          WS_METHODS.gameReviewRestore,
           WS_METHODS.gameInstall,
           WS_METHODS.gameVerify,
         ] as const) {

@@ -22,7 +22,6 @@ import {
   designApprovalTestLayer,
   roundStoreTestLayer,
   qualificationTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const godotExecutable = NodePath.join(
@@ -47,7 +46,7 @@ it.live.skipIf(!available)(
         Layer.provide(projectTestLayer()),
         Layer.provide(previewBrowserTestLayer()),
         Layer.provideMerge(qualificationTestLayer(NodePath.join(parent, ".test-state"))),
-        Layer.provideMerge(visualJudgeTestLayer(NodePath.join(parent, ".test-state"))),
+
         Layer.provideMerge(designApprovalTestLayer(NodePath.join(parent, ".test-state"))),
         Layer.provideMerge(roundStoreTestLayer(NodePath.join(parent, ".test-state"))),
         Layer.provide(ServerSettings.layerTest()),

@@ -1,5 +1,6 @@
 import { expect, it } from "vite-plus/test";
 
+import { gameSourceFreshnessLabel } from "./gameStageLogic";
 import {
   buildFailurePrompt,
   countGamePreviewRemounts,
@@ -178,4 +179,10 @@ it("folds frame keys across reads so unrelated churn cannot change the iframe", 
   // time, and it carries both halves of the identity.
   expect(gamePreviewFrameKey({ previewUrl: URL, servedArtifactId: "b" })).toBe(`${URL}#b`);
   expect(gamePreviewFrameKey({ previewUrl: null, servedArtifactId: null })).toBe("#");
+});
+
+it("describes unknown source freshness and preserves selected Play", () => {
+  expect(gameSourceFreshnessLabel("unknown")).toContain("Check");
+  expect(gameSourceFreshnessLabel(true)).toContain("Play keeps that build");
+  expect(gameSourceFreshnessLabel(false)).toContain("last check");
 });

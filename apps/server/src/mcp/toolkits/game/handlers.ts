@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -9,6 +10,35 @@ const caller = McpInvocationContext.McpInvocationContext.pipe(
   ),
 );
 const handlers = {
+  game_review_status: McpToolAccess.readsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const reviews = yield* GameReviewApi.GameReviewApi;
+      return yield* reviews.status(scope.thread.threadId);
+    }),
+  ),
+  game_review_history: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const reviews = yield* GameReviewApi.GameReviewApi;
+      return yield* reviews.history({ ...input, threadId: scope.thread.threadId });
+    }),
+  ),
+  game_review_stop: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const reviews = yield* GameReviewApi.GameReviewApi;
+      return yield* reviews.stop(scope.thread.threadId);
+    }),
+  ),
+  game_review_restore: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const reviews = yield* GameReviewApi.GameReviewApi;
+      return yield* reviews.restore(scope.thread.threadId);
+    }),
+  ),
+
   game_status: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;

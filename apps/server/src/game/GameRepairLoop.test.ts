@@ -30,6 +30,8 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import * as GamePreview from "./GamePreview.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
@@ -98,6 +100,7 @@ interface StartedChild {
 }
 
 interface Scripted {
+  previewDirectories: string[];
   playable: boolean;
   exportBuildId: string;
   exportRunId: string | null;
@@ -147,6 +150,7 @@ interface Scripted {
 }
 
 const makeScripted = (): Scripted => ({
+  previewDirectories: [],
   playable: true,
   exportBuildId: EXPORT_BUILD_ID,
   exportRunId: String(builderRunId),
@@ -503,6 +507,7 @@ const withLoop = <A, E>(
                 };
               });
             return GameReviewSessions.GameReviewSessions.of({
+              describe: () => Effect.succeed(null),
               start,
               answer,
               runStatus,
@@ -670,6 +675,15 @@ const withLoop = <A, E>(
             ),
           ),
           Layer.provideMerge(GameAdmission.layer({ stateDir })),
+          Layer.provide(GameOperations.layer),
+          Layer.provide(
+            Layer.mock(GamePreview.GamePreview)({
+              directories: () => scripted.previewDirectories,
+              url: () => null,
+              urlFor: () => null,
+              serving: () => false,
+            }),
+          ),
           Layer.provide(projects),
           Layer.provide(threads),
           Layer.provide(NodeServices.layer),
@@ -1280,9 +1294,18 @@ it.live("a restart marks the loop interrupted, keeps the incumbent and has no Re
           expect(game.selected).toBeNull();
           expect(game.rounds.every((round) => round.status !== "running")).toBe(true);
           expect("resume" in services.loop).toBe(false);
+          // A live evidence preview may still lazily request candidate files.
+          const candidate = game.rounds.find((round) => round.loopId === state.id)?.candidate;
+          expect(candidate).not.toBeNull();
+          scripted.previewDirectories = [candidate!.directory];
           // The explicit restore finds the round this loop owned by its id.
           const restored = yield* services.loop.restore(threadId);
           expect(restored.kind).toBe("restored");
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(root, candidate!.directory, "index.html"), "utf8"),
+            ),
+          ).not.toBe("");
           if (restored.kind === "restored") expect(restored.round.loopId).toBe(state.id);
           // Nothing interrupted is left to restore from.
           const again = yield* Effect.flip(services.loop.restore(threadId));

@@ -4,11 +4,13 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import {
+  GameVisualJudgement,
+  LegacyGameQualificationRead,
+} from "../../packages/contracts/src/legacyGameVisual.ts";
+import {
   GameAcceptanceCriterionKind,
   GameLastPlaytest,
-  GameQualificationRead,
   GameTemplateId,
-  GameVisualJudgement,
   type GameAcceptanceCriterion,
   type GameScenarioCriterionResult,
 } from "../../packages/contracts/src/index.ts";
@@ -238,7 +240,7 @@ export const GameE2eRunSummary = Schema.Struct({
     Schema.Struct({ name: Schema.String, root: Schema.String, threadId: Schema.String }),
   ),
   turns: Schema.Array(GameE2eTurnRead),
-  qualification: Schema.NullOr(GameQualificationRead),
+  qualification: Schema.NullOr(LegacyGameQualificationRead),
   lastPlaytest: Schema.NullOr(GameLastPlaytest),
   obligations: Schema.Array(GameBenchmarkObligationRead),
   /**

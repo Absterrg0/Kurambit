@@ -23,7 +23,9 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
 const gameEventSignal = Atom.family((environmentId: string) =>
   Atom.make((get) => {
     const result = get(gameEvents({ environmentId: environmentId as EnvironmentId, input: {} }));
-    return AsyncResult.isSuccess(result) ? `${result.value.root}\0${result.value.at}` : "";
+    return AsyncResult.isSuccess(result)
+      ? `${result.value.root}\0${result.value.at}\0${result.value.revision ?? ""}`
+      : "";
   }).pipe(Atom.withLabel(`game:event-signal:${environmentId}`)),
 );
 
@@ -51,6 +53,32 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
     refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+  }),
+  checkSources: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:checkSources",
+    tag: WS_METHODS.gameStatus,
+  }),
+  reviewStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:reviewStatus",
+    tag: WS_METHODS.gameReviewStatus,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+  }),
+  reviewHistory: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:reviewHistory",
+    tag: WS_METHODS.gameReviewHistory,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+  }),
+  reviewStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:reviewStop",
+    tag: WS_METHODS.gameReviewStop,
+  }),
+  reviewRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:reviewRestore",
+    tag: WS_METHODS.gameReviewRestore,
   }),
   events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {

@@ -1,3 +1,4 @@
+import { GameReviewHistoryInput } from "./gameReview.ts";
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
@@ -118,4 +119,10 @@ describe("round records", () => {
   it("rejects unknown states rather than recording them", () => {
     expect(() => decodeRound({ ...round, status: "winning" })).toThrow();
   });
+});
+
+it("bounds history pages at the transport boundary", () => {
+  const decode = Schema.decodeUnknownSync(GameReviewHistoryInput);
+  expect(decode({ threadId: "game", limit: 20 }).limit).toBe(20);
+  for (const limit of [0, 21, -1, 1.5]) expect(() => decode({ threadId: "game", limit })).toThrow();
 });

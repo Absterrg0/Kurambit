@@ -27,7 +27,6 @@ import {
   GameBlenderResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
-  type GameAcceptanceCriterion,
   type GameOperationEvent,
   type GameProcessResult,
   type ThreadId,
@@ -80,8 +79,6 @@ import {
 import { evaluateScenarios } from "./scenarioEvaluation.ts";
 import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
 import { satisfiedObservations } from "./playtestState.ts";
-import * as GameVisualJudge from "./GameVisualJudge.ts";
-import { formatVisualReport } from "./visualReport.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
@@ -202,7 +199,6 @@ const make = Effect.gen(function* () {
   const admission = yield* GameAdmission.GameAdmission;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
-  const visualJudge = yield* GameVisualJudge.GameVisualJudge;
   const operations = yield* GameOperations.GameOperations;
   const active = new Map<
     string,
@@ -404,78 +400,7 @@ const make = Effect.gen(function* () {
       );
       return completed.value;
     });
-  /**
-   * Judges a qualifying playtest's persisted frames. The visual stage is bound
-   * to the exact source, build and approved design it graded, and an
-   * unavailable judge records an unknown attempt, never a pass.
-   */
-  const judgeVisualStage = (input: {
-    readonly root: string;
-    readonly sourceId: string;
-    readonly buildId: string;
-    readonly designHash: string | null;
-    readonly evidenceDirectory: string;
-    readonly acceptance: readonly GameAcceptanceCriterion[];
-  }) =>
-    Effect.gen(function* () {
-      // An exhausted budget must not open a stage it will refuse: `begin`
-      // deletes the previous verdict and the refusal would leave it missing.
-      if (
-        (yield* visualJudge.previous(input.root, input)) === null &&
-        (yield* visualJudge.remaining(input.root, input.designHash)) <= 0
-      )
-        return null;
-      return yield* ownStage(
-        input.root,
-        "visual",
-        "Visual judge",
-        visualJudge.run(input.root, input).pipe(
-          Effect.map(
-            (
-              run,
-            ): {
-              readonly value: GameVisualJudge.GameVisualJudgeRun;
-              readonly record: StageOutcome;
-            } => {
-              if (run.status === "exhausted")
-                return {
-                  value: run,
-                  record: {
-                    // An exhausted certification budget is not a failed look:
-                    // it leaves the visual stage uncertified for this revision.
-                    outcome: "unknown",
-                    sourceId: input.sourceId,
-                    buildId: input.buildId,
-                    evidenceDirectory: input.evidenceDirectory,
-                    designHash: input.designHash,
-                    detail:
-                      "The visual review budget for this approved design revision is spent; the look is uncertified, not failed.",
-                  },
-                };
-              const judgement = run.judgement;
-              return {
-                value: run,
-                record: {
-                  outcome:
-                    judgement.status === "passed"
-                      ? "passed"
-                      : judgement.status === "unavailable"
-                        ? "unknown"
-                        : "failed",
-                  sourceId: input.sourceId,
-                  buildId: input.buildId,
-                  // A reused verdict names the run whose frames it was read from.
-                  evidenceDirectory: judgement.evidenceDirectory,
-                  designHash: input.designHash,
-                  visual: judgement,
-                  detail: judgement.detail ?? `Visual judge: ${judgement.status}.`,
-                },
-              };
-            },
-          ),
-        ),
-      );
-    });
+
   const response = (
     process: GameProcessResult,
     outputPath: string | null = null,
@@ -764,7 +689,7 @@ const make = Effect.gen(function* () {
             message:
               selection.mode === "candidate"
                 ? "Web game built as a candidate; Play keeps the selected build until the round promotes it."
-                : "Web game is ready to play.",
+                : "Web game is ready to play. Finish this turn after the input playtest; the server owns subsequent bounded review and repair.",
           },
           record: {
             outcome: "passed" as const,
@@ -877,7 +802,12 @@ const make = Effect.gen(function* () {
       const served = yield* selectedPreview(root);
       return served === null
         ? exported
-        : { ...exported, message: "Web game is ready to play.", url: served.url };
+        : {
+            ...exported,
+            message:
+              "Web game is ready to play. Finish this turn after the input playtest; the server owns subsequent bounded review and repair.",
+            url: served.url,
+          };
     });
   /**
    * Starts the native game. `display` is the caller's claim: the creator's Play
@@ -1057,40 +987,12 @@ const make = Effect.gen(function* () {
             : ` Qualification: this run does not count as honest gameplay evidence${
                 blockers.length === 0 ? "" : `: ${blockers.join("; ")}`
               }.${missingProbe ? ` ${probesMissing}.` : ""}`;
-          // Only a qualifying mechanics run reaches the visual stage: there is
-          // no point grading the look of a run that did not prove gameplay.
-          const visualAttempt =
-            qualifies &&
-            build?.status === "passed" &&
-            build.sourceId !== null &&
-            build.buildId !== null
-              ? yield* judgeVisualStage({
-                  root,
-                  sourceId: build.sourceId,
-                  buildId: build.buildId,
-                  designHash: approval?.designHash ?? null,
-                  evidenceDirectory: evidence.directory,
-                  acceptance: approval?.acceptance ?? [],
-                })
-              : undefined;
-          const visual = visualAttempt?.status === "judged" ? visualAttempt.judgement : null;
-          const visualNote =
-            visual !== null
-              ? `${
-                  visualAttempt?.status === "judged" && visualAttempt.reused
-                    ? `\nVisual judge: this source, build and design already have a verdict from ${visual.evidenceDirectory}; it is reused and no round was spent.`
-                    : ""
-                }\n${formatVisualReport(visual)}`
-              : visualAttempt === null
-                ? "\nVisual judge: the review budget for this design revision is spent. The look is uncertified, not failed; keep the playable build and its playtest current."
-                : "";
           return {
             value: {
               ...enriched,
               screenshots: budgeted.kept,
-              message: `${result.message}${qualificationNote}${observationNote}${framesNote}${visualNote}`,
+              message: `${result.message}${qualificationNote}${observationNote}${framesNote}`,
               evidenceDirectory: evidence.directory,
-              ...(visual === null ? {} : { visual }),
             },
             record: {
               outcome: qualifies ? ("passed" as const) : ("failed" as const),

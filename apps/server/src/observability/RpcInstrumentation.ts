@@ -14,6 +14,10 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
  * even where they differ from the method prefix.
  */
 const RPC_AGGREGATES = {
+  [WS_METHODS.gameReviewStatus]: "game",
+  [WS_METHODS.gameReviewHistory]: "game",
+  [WS_METHODS.gameReviewStop]: "game",
+  [WS_METHODS.gameReviewRestore]: "game",
   [WS_METHODS.gameStatus]: "game",
   [WS_METHODS.gameList]: "game",
   [WS_METHODS.gameCreate]: "game",

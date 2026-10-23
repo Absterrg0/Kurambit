@@ -183,8 +183,7 @@ const writeSummary = async () => {
     qualification,
     lastPlaytest,
     obligations,
-    // The qualification record keeps only the last verdict; the repair round's
-    // first judgement is still on disk next to its evidence.
+    // Older games may still have archived score-judge evidence.
     visualJudgements: await readVisualJudgements(gameRoot),
     error: summaryError,
   };
@@ -350,30 +349,21 @@ const logTurnTools = (label: string, calls: ReadonlyArray<TurnToolCall>) => {
 };
 const stageSummary = (status: GameStatus) =>
   status.qualification.stages.map((stage) => `${stage.stage}=${stage.status}`).join(", ");
-/** The independent judge's score table, printed so a run's PASS can be read honestly. */
-const visualTable = (status: GameStatus) => {
-  const stage = status.qualification.stages.find((entry) => entry.stage === "visual");
-  const judgement = stage?.visual;
-  if (judgement === undefined) return `${stage?.status ?? "missing"} (no judgement)`;
-  return `${judgement.status} (${stage?.status ?? "missing"}) — ${judgement.dimensions
-    .map((score) => `${score.dimension}=${score.score}`)
-    .join(", ")}`;
-};
 /**
  * PASS follows the server's own completion read, never an agent's summary.
- * Test, state and visual are optional certification: a run that ships a
+ * Test and state are optional certification: a run that ships a
  * current playable export/playtest passes even when they are missing.
  */
 const assertComplete = (label: string, status: GameStatus) => {
   const qualification = status.qualification;
   assert(
     qualification.completion === "complete",
-    `${label}: the game is ${qualification.completion} (${stageSummary(status)}; visual ${visualTable(status)})`,
+    `${label}: the game is ${qualification.completion} (${stageSummary(status)})`,
   );
   timeline(
     `${label}: playable; certification ${
       qualification.state === "qualified" ? "qualified" : stageSummary(status)
-    }; visual ${visualTable(status)}`,
+    }`,
   );
 };
 

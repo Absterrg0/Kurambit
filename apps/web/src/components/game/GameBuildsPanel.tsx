@@ -1,10 +1,4 @@
-import type {
-  GameLastPlaytest,
-  GameQualificationRead,
-  GameQualificationStageRead,
-  GameStatus,
-  ScopedThreadRef,
-} from "@t3tools/contracts";
+import type { GameLastPlaytest, GameStatus, ScopedThreadRef } from "@t3tools/contracts";
 import {
   CheckCircle2Icon,
   DownloadIcon,
@@ -16,6 +10,12 @@ import {
   XCircleIcon,
 } from "lucide-react";
 
+import { useState } from "react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { gameEnvironment } from "../../state/game";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { GameReviewPanel } from "./GameReviewPanel";
+import { gameSourceFreshnessLabel } from "./gameStageLogic";
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { Button } from "../ui/button";
@@ -45,7 +45,7 @@ export function GameBuildsPanel({
   builds,
   webBuildStale,
   lastPlaytest,
-  qualification,
+  sourcesDifferFromPlay,
   canOperate,
   onPlay,
   onExportLinux,
@@ -54,20 +54,41 @@ export function GameBuildsPanel({
   builds: readonly BuildEntry[];
   webBuildStale: boolean;
   lastPlaytest: GameLastPlaytest | null;
-  qualification: GameQualificationRead;
+  sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   canOperate: boolean;
   onPlay: () => void;
   onExportLinux: () => void;
 }) {
+  const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
+  const [checked, setChecked] = useState<GameStatus["sourcesDifferFromPlay"] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const checkSources = async () => {
+    setChecking(true);
+    const result = await check({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, checkSources: true },
+    });
+    setChecking(false);
+    if (result._tag === "Failure") setCheckError(String(squashAtomCommandFailure(result)));
+    else {
+      setChecked(result.value.sourcesDifferFromPlay);
+      setCheckError(null);
+    }
+  };
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
       <LastPlaytestSection threadRef={threadRef} lastPlaytest={lastPlaytest} onReveal={reveal} />
-      <VisualReviewSection
-        visual={qualification.stages.find((stage) => stage.stage === "visual")}
-        mechanicsQualified={qualification.mechanicsQualified}
-      />
+      <GameReviewPanel key={threadRef.threadId} threadRef={threadRef} />
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>{gameSourceFreshnessLabel(checked ?? sourcesDifferFromPlay)}</span>
+        <Button size="xs" variant="outline" disabled={checking} onClick={() => void checkSources()}>
+          Check
+        </Button>
+        {checkError ? <span role="alert">{checkError}</span> : null}
+      </div>
       {(["Web", "Linux"] as const).map((target) => {
         const meta = BUILD_META[target]!;
         const build = builds.find((entry) => entry.target === target);
@@ -184,7 +205,7 @@ function LastPlaytestSection({
   const badge =
     qualifies === true
       ? {
-          label: "Qualified",
+          label: "Gameplay checked",
           icon: CheckCircle2Icon,
           className: "border-success/40 bg-secondary text-success-foreground",
         }
@@ -265,131 +286,13 @@ function LastPlaytestSection({
           ))}
         </ul>
       ) : null}
-      <Button
-        size="xs"
-        variant="ghost"
-        className="mt-2"
-        onClick={() => onReveal(lastPlaytest.directory)}
-      >
+      <Button size="xs" variant="ghost" onClick={() => onReveal(lastPlaytest.directory)}>
         <FolderOpenIcon className="size-3" aria-hidden="true" />
         Open evidence
       </Button>
     </section>
   );
 }
-
-function VisualReviewSection({
-  visual,
-  mechanicsQualified,
-}: {
-  visual: GameQualificationStageRead | undefined;
-  mechanicsQualified: boolean;
-}) {
-  const judgement = visual?.visual;
-  const status = visual?.status ?? "missing";
-  const badge =
-    status === "passed"
-      ? {
-          label: "Passed",
-          icon: CheckCircle2Icon,
-          className: "border-success/40 bg-secondary text-success-foreground",
-        }
-      : status === "failed"
-        ? {
-            label: judgement?.status === "unavailable" ? "Unavailable" : "Failed",
-            icon: judgement?.status === "unavailable" ? TriangleAlertIcon : XCircleIcon,
-            className:
-              judgement?.status === "unavailable"
-                ? "border-warning/40 bg-warning-surface text-warning-foreground"
-                : "border-destructive/40 bg-secondary text-destructive-foreground",
-          }
-        : status === "stale"
-          ? {
-              label: "Not current",
-              icon: TriangleAlertIcon,
-              className: "border-warning/40 bg-warning-surface text-warning-foreground",
-            }
-          : status === "unknown"
-            ? {
-                label: "Unavailable",
-                icon: TriangleAlertIcon,
-                className: "border-warning/40 bg-warning-surface text-warning-foreground",
-              }
-            : {
-                label: "Not judged",
-                icon: ScrollTextIcon,
-                className: "border-border bg-secondary text-muted-foreground",
-              };
-  const BadgeIcon = badge.icon;
-  return (
-    <section data-game-visual={status} className="rounded-lg border border-border bg-card p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-medium">Visual review</h3>
-        <span
-          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs ${badge.className}`}
-        >
-          <BadgeIcon className="size-3" aria-hidden="true" />
-          {badge.label}
-        </span>
-        {judgement === undefined ? null : (
-          <span className="ml-auto text-xs text-muted-foreground">
-            {new Date(judgement.judgedAt).toLocaleString()} · {judgement.model}
-          </span>
-        )}
-      </div>
-      {judgement === undefined ? (
-        <p className="mt-1 text-xs text-muted-foreground">
-          {status === "stale"
-            ? "The last visual review no longer matches the game's sources, build or approved design. Run another playtest to judge the current build."
-            : "No independent visual review yet. A qualifying playtest runs one automatically."}
-        </p>
-      ) : (
-        <>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {judgement.detail ?? "No verdict detail was recorded."}
-          </p>
-          {judgement.dimensions.length > 0 ? (
-            <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              {judgement.dimensions.map((score) => (
-                <li key={score.dimension} className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">
-                    {VISUAL_DIMENSION_LABELS[score.dimension] ?? score.dimension}
-                  </span>
-                  <span className="font-medium">
-                    {score.score === "missing" ? "No evidence" : `${score.score}/4`}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {judgement.repairRequests.length > 0 ? (
-            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
-              {judgement.repairRequests.map((request) => (
-                <li key={`${request.frame}-${request.fix}`}>
-                  <span className="font-mono">{request.frame}</span> — {request.fix}
-                </li>
-              ))}
-            </ol>
-          ) : null}
-          {mechanicsQualified && status !== "passed" ? (
-            <p className="mt-2 text-xs text-warning-foreground">
-              Playable; this visual review is not current certification.
-            </p>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
-const VISUAL_DIMENSION_LABELS: Record<string, string> = {
-  readability: "Readability",
-  valueSeparation: "Value separation",
-  cameraFraming: "Camera & framing",
-  styleConsistency: "Style consistency",
-  feedback: "Feedback",
-  designCompliance: "Design compliance",
-};
 
 function PlaytestFrame({
   threadRef,

@@ -1,12 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
   GAME_VISUAL_DIMENSIONS,
-  type GameLastPlaytest,
-  type GameQualificationRead,
-  type GameQualificationStage,
-  type GameQualificationStageRead,
-  type GameQualificationStageStatus,
   type GameVisualJudgement,
+  type LegacyGameQualificationRead as GameQualificationRead,
+  type LegacyGameQualificationStageRead as GameQualificationStageRead,
+} from "../../packages/contracts/src/legacyGameVisual.ts";
+import {
+  type GameLastPlaytest,
+  type GameQualificationStageStatus,
 } from "../../packages/contracts/src/index.ts";
 import {
   readBenchmarkResult,
@@ -23,7 +24,7 @@ import type {
 } from "./artifacts.ts";
 
 const stage = (
-  name: GameQualificationStage,
+  name: GameQualificationStageRead["stage"],
   status: GameQualificationStageStatus,
   extra: Partial<GameQualificationStageRead> = {},
 ): GameQualificationStageRead => ({

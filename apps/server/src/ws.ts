@@ -1,4 +1,5 @@
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as GameReviewApi from "./game/GameReviewApi.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -1140,6 +1141,7 @@ const layerWsRpc = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
+      const gameReviews = yield* GameReviewApi.GameReviewApi;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
@@ -1724,6 +1726,10 @@ const layerWsRpc = (
       const handlers = ServerWsRpcGroup.of({
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
           game.status(threadId, { checkSources }),
+        [WS_METHODS.gameReviewStatus]: ({ threadId }) => gameReviews.status(threadId),
+        [WS_METHODS.gameReviewHistory]: (input) => gameReviews.history(input),
+        [WS_METHODS.gameReviewStop]: ({ threadId }) => gameReviews.stop(threadId),
+        [WS_METHODS.gameReviewRestore]: ({ threadId }) => gameReviews.restore(threadId),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
@@ -2175,29 +2181,23 @@ const layerWsRpc = (
               ) ?? projection.providerThreads.at(-1);
             const providerSessionId = providerThread?.providerSessionId ?? null;
             if (providerThread === undefined || providerSessionId === null) {
-              return yield* Effect.fail(
-                new ProviderUploadFeedbackError({
-                  threadId: input.threadId,
-                  cause: "No provider session has run in this thread yet.",
-                }),
-              );
+              return yield* new ProviderUploadFeedbackError({
+                threadId: input.threadId,
+                cause: "No provider session has run in this thread yet.",
+              });
             }
             const runtime = Option.getOrNull(yield* providerSessionsV2.get(providerSessionId));
             if (runtime === null) {
-              return yield* Effect.fail(
-                new ProviderUploadFeedbackError({
-                  threadId: input.threadId,
-                  cause: "The provider session is no longer running. Send a message first.",
-                }),
-              );
+              return yield* new ProviderUploadFeedbackError({
+                threadId: input.threadId,
+                cause: "The provider session is no longer running. Send a message first.",
+              });
             }
             if (runtime.uploadFeedback === undefined) {
-              return yield* Effect.fail(
-                new ProviderUploadFeedbackError({
-                  threadId: input.threadId,
-                  cause: `Provider '${runtime.driver}' does not support feedback uploads.`,
-                }),
-              );
+              return yield* new ProviderUploadFeedbackError({
+                threadId: input.threadId,
+                cause: `Provider '${runtime.driver}' does not support feedback uploads.`,
+              });
             }
             return yield* runtime.uploadFeedback({
               providerThread,
@@ -2842,6 +2842,7 @@ export const layer = Layer.unwrap(
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const game = yield* GameService.GameService;
+    const gameReviews = yield* GameReviewApi.GameReviewApi;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const sql = yield* SqlClient.SqlClient;
@@ -2900,6 +2901,7 @@ export const layer = Layer.unwrap(
               serverBrowser,
             ).pipe(
               Layer.provide(Layer.succeed(GameService.GameService, game)),
+              Layer.provide(Layer.succeed(GameReviewApi.GameReviewApi, gameReviews)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provideMerge(RpcSerialization.layerJson),

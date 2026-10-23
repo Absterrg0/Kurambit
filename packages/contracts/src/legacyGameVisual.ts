@@ -1,4 +1,6 @@
+// Historical decoding only. Live review contracts live in gameReview.ts.
 import * as Schema from "effect/Schema";
+import { GameQualificationRead, GameQualificationStageRead } from "./game.ts";
 
 /**
  * The visual rubric. Every dimension is scored 0–4 against anchors in the
@@ -40,14 +42,6 @@ export const GameVisualRepairRequest = Schema.Struct({
   fix: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(400)),
 });
 export type GameVisualRepairRequest = typeof GameVisualRepairRequest.Type;
-
-/** The model's own answer. The server computes pass/fail from these scores. */
-export const GameVisualReview = Schema.Struct({
-  dimensions: Schema.Array(GameVisualDimensionScore),
-  /** At most three, so a failed review stays a bounded repair turn. */
-  repairRequests: Schema.Array(GameVisualRepairRequest).check(Schema.isMaxLength(3)),
-});
-export type GameVisualReview = typeof GameVisualReview.Type;
 
 /**
  * Why a frame was selected. Only the gameplay roles carry evidence of play;
@@ -104,41 +98,15 @@ export const GameVisualJudgement = Schema.Struct({
 });
 export type GameVisualJudgement = typeof GameVisualJudgement.Type;
 
-/** Every applicable dimension must reach this bar; no averaging. */
-export const GAME_VISUAL_PASS_SCORE = 3;
-
-/**
- * The whole-review verdict. Missing hazard or finish evidence can never pass:
- * an unreadable hazard the frames never showed is exactly the failure this
- * stage exists to catch. A design that declares "No lose state" has no hazard
- * to show, so `hazardRequired: false` drops only that requirement.
- */
-export function evaluateVisualReview(input: {
-  readonly review: GameVisualReview;
-  readonly frames: readonly GameVisualFrame[];
-  /** Defaults to true: a design with an observed lose criterion owes a hazard frame. */
-  readonly hazardRequired?: boolean;
-}): { readonly passed: boolean; readonly detail: string } {
-  const byDimension = new Map<GameVisualDimension, GameVisualScore>();
-  for (const score of input.review.dimensions) byDimension.set(score.dimension, score.score);
-  const absent = GAME_VISUAL_DIMENSIONS.filter((dimension) => !byDimension.has(dimension));
-  if (absent.length > 0)
-    return { passed: false, detail: `The judge did not score: ${absent.join(", ")}.` };
-  const low = GAME_VISUAL_DIMENSIONS.flatMap((dimension) => {
-    const score = byDimension.get(dimension);
-    if (score === "missing") return [`${dimension} has no evidence in the supplied frames`];
-    return typeof score === "number" && score < GAME_VISUAL_PASS_SCORE
-      ? [`${dimension} scored ${score} (needs ${GAME_VISUAL_PASS_SCORE})`]
-      : [];
-  });
-  const hazard = input.frames.some((frame) => frame.role === "hazard");
-  const finish = input.frames.some((frame) => frame.role === "finish");
-  if (!hazard && input.hazardRequired !== false) low.push("no hazard frame was available to judge");
-  if (!finish) low.push("no finish frame was available to judge");
-  return low.length === 0
-    ? {
-        passed: true,
-        detail: "Every dimension reached the bar, with all required evidence.",
-      }
-    : { passed: false, detail: low.join("; ") };
-}
+/** Historical benchmark rows retain the exact judgement they originally recorded. */
+export const LegacyGameVisualStageRead = Schema.Struct({
+  ...GameQualificationStageRead.fields,
+  stage: Schema.Literal("visual"),
+  visual: Schema.optionalKey(GameVisualJudgement),
+});
+export const LegacyGameQualificationRead = Schema.Struct({
+  ...GameQualificationRead.fields,
+  stages: Schema.Array(Schema.Union([GameQualificationStageRead, LegacyGameVisualStageRead])),
+});
+export type LegacyGameQualificationRead = typeof LegacyGameQualificationRead.Type;
+export type LegacyGameQualificationStageRead = LegacyGameQualificationRead["stages"][number];

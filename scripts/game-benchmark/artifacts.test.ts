@@ -8,7 +8,7 @@ import type {
   GameVisualDimension,
   GameVisualJudgement,
   GameVisualScore,
-} from "../../packages/contracts/src/index.ts";
+} from "../../packages/contracts/src/legacyGameVisual.ts";
 import {
   checksumOfBytes,
   decodeGameBenchmarkBrief,

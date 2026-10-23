@@ -31,11 +31,7 @@ import type * as GameServiceModule from "./GameService.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
-import {
-  admissionTestLayer,
-  previewBrowserTestLayer,
-  visualJudgeTestLayer,
-} from "./gameTestLayers.ts";
+import { admissionTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("provenance-test");
 /** Test-local gates; the tests in this file run sequentially. */
@@ -196,6 +192,7 @@ const withGame = <A, E, R = never>(
         ),
         Layer.provide(
           Layer.mock(GamePreview.GamePreview)({
+            directories: () => [],
             open: (_root, directory) =>
               options.preview === undefined
                 ? Effect.succeed(`http://127.0.0.1:9/${directory ?? "builds/web"}`)
@@ -226,7 +223,7 @@ const withGame = <A, E, R = never>(
         Layer.provide(previewBrowserTestLayer(executable)),
         Layer.provideMerge(qualificationLayer),
         Layer.provideMerge(options.rounds?.(stateDir) ?? GameRoundStore.layer({ stateDir })),
-        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
         Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),

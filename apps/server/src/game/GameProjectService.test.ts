@@ -22,7 +22,6 @@ import {
   previewBrowserTestLayer,
   projectTestLayer,
   qualificationTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -56,7 +55,7 @@ const gameServiceLayers = (options: {
     Layer.provide(projectTestLayer(undefined, options.onSend)),
     Layer.provide(previewBrowserTestLayer()),
     Layer.provideMerge(qualificationTestLayer(options.stateDir)),
-    Layer.provideMerge(visualJudgeTestLayer(options.stateDir)),
+
     Layer.provideMerge(designApprovalTestLayer(options.stateDir)),
     Layer.provideMerge(roundStoreTestLayer(options.stateDir)),
     Layer.provide(ServerSettings.layerTest()),
@@ -85,7 +84,7 @@ const gameProjectLayer = (stateDir: string, registration = projectTestLayer()) =
     Layer.provideMerge(GameProcesses.layer),
     Layer.provideMerge(designApprovalTestLayer(stateDir)),
     Layer.provideMerge(qualificationTestLayer(stateDir)),
-    Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
     Layer.provideMerge(GameOperations.layer),
     Layer.provideMerge(admissionTestLayer),
     Layer.provide(NodeServices.layer),
@@ -603,7 +602,7 @@ it.effect("a failed creation removes the intent record it wrote", () =>
       ),
       Layer.provideMerge(designApprovalTestLayer(stateDir)),
       Layer.provideMerge(qualificationTestLayer(stateDir)),
-      Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
       Layer.provideMerge(GameOperations.layer),
       Layer.provideMerge(admissionTestLayer),
       Layer.provide(NodeServices.layer),

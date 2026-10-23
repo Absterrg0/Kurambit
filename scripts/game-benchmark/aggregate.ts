@@ -3,7 +3,7 @@ import type {
   GameVisualDimension,
   GameVisualDimensionScore,
   GameVisualJudgement,
-} from "../../packages/contracts/src/index.ts";
+} from "../../packages/contracts/src/legacyGameVisual.ts";
 import type {
   GameBenchmarkBrief,
   GameBenchmarkObligationRead,

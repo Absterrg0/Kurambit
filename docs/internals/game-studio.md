@@ -38,13 +38,13 @@ document is valid only when every scaffold section has real content and the fenc
 block parses with at least one `control`, `mechanic`, `win` and `lose`, and every mechanical
 criterion carries an `observe`. The only exception is a design whose "Win & lose" section
 declares that there is no lose state: it writes a `lose` criterion with the text "No lose
-state" and no observe. `presentation` criteria carry no observe and belong to the visual stage. Creation also writes an intent record
+state" and no observe. `presentation` criteria carry no observe and remain outside mechanical certification. Creation also writes an intent record
 beside the approval: `auto` for a plan-first game (the default), `required` for one whose creator
 opted into review, `skipped` for one created without planning. An `auto` game never gates staging on
 the design: each status read records the current DESIGN.md as a server-owned revision once its
 acceptance parses and differs from the scaffold's example block. A revision with the same
 acceptance keeps the exam's `designHash` (only `documentHash` moves), so prose edits never stale the
-state or visual stages; a changed acceptance set is a new exam. Skeleton hint lines are warnings in
+state stage; a changed acceptance set is a new exam. Skeleton hint lines are warnings in
 every mode.
 A skipped game is explicitly `legacy` and passes the design stage; a required game whose
 `DESIGN.md` is deleted stays a draft with a missing-document issue. Only a game with no server
@@ -136,9 +136,10 @@ Design, Assets and Builds workspace tabs and is hidden with `display: none` rath
 unmounting recreated the iframe and killed the run, while hiding reports the document as hidden,
 which is the signal the Godot web shell pauses and mutes on. The iframe's identity is the preview
 URL plus the qualified build; a tab switch does not change it, and only Stop, a deliberate restart
-or a new build may reset the game. Play reuses an existing build only while its export stage is
-current for the game's sources and exported files and otherwise exports first; Rebuild always exports. The source snapshot and the build identity it produced live in the qualification record
-(`GameQualification.ts`), so a missing, stale, failed or unknown export is never served as current.
+or a selected build change may reset the game. Play keeps the selected immutable artifact when
+sources differ; only Rebuild or an accepted repair changes selection. A missing artifact is an
+explicit error, never permission to publish the current repair sources. Legacy games without a
+selected-build record can still publish their first build.
 
 ## Qualification is server-owned
 
@@ -165,7 +166,7 @@ record is reported as an error rather than downgraded to legacy. The snapshot is
 additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
 unknown. Symlinks fail closed with the linked path in the reason rather than being followed, and
 size+mtime is the identity limit: a same-size edit inside one mtime tick is not detected. A web
-export also stores every file under `builds/web` (path, size, mtime); a missing, replaced or extra
+export also stores every file in its build-addressed directory (path, size, mtime); a missing, replaced or extra
 file makes the export stale even while the source snapshot still matches. A stage counts only while
 its snapshot (and, for a playtest, the build captured before it ran) still matches, so
 an edit, a deletion, a later failure or a re-export invalidates earlier passes. `GameStatus`
@@ -192,36 +193,28 @@ baseline. The stage stores the approved source snapshot, the approved design has
 per-criterion summary; a newly approved design revision makes the old route result stale even when
 the game sources did not change.
 
-The `visual` stage is an independent judgement of the latest qualifying playtest's frames
-(`GameVisualJudge.ts`), never of the builder's prose. The frames are chosen from the persisted
-per-frame probe state: early gameplay, the frame where an approved criterion first progressed, the
-first frame where an observed `lose` key moved from its baseline toward the lose condition (a hit
-that cost health or a life, since a winning run never reaches a met lose criterion; a met criterion
-counts as that movement), the last gameplay frame
-before the end, and the run's final frame. Captions are carried as captions only; t29's
-`04-double-jump.png` does not show a second jump and its `04-moon-pearl.png` was still 0/5
-collected. Evidence without per-frame probes falls back to run order, which can never tag an
-interaction or a hazard. At most six frames are sent, with the design's `Art direction` section and
-the approved `presentation` criteria.
+Review is separate from mechanical qualification. The first playable build is selected before
+review starts, so model latency cannot delay Play. Reviews use the originating game's frozen
+provider/model by default; unavailable credentials mean unavailable review, never a substitute
+model. Critic and comparison children are fresh evidence-only sessions. Repairs write in place,
+one at a time, within three repairs or twenty minutes. Opposite-order ballots and identical-build
+controls reduce position bias; mechanical regressions and unknown preservation veto selection.
+A pairwise improvement does not certify every presentation claim.
 
-The judge is Codex `gpt-6.1-sol` at high reasoning, through the existing text-generation provider
-path (`generateImageReview`); only that operation accepts absolute image paths, and a runner
-without image support fails rather than answering blind. A synthetic PNG (a large "7" on magenta)
-is checked once per server process before any game is judged: a provider that returns the wrong
-answer makes the stage `unavailable` with that reason, and availability is never assumed from the
-model catalog. Only a pass is remembered; a failure is retried on the next judgement instead of
-failing every later one. The model returns 0–4 scores against written anchors per dimension, with
-`missing` distinct from 0 when no frame shows the dimension at all. The server computes the verdict:
-every dimension must reach 3, and a review without finish evidence, or without hazard evidence when
-the approved design observes a `lose` criterion, fails regardless of scores.
-Repair requests are bounded to three and must name one of the supplied frames. The typed judgement
-lives beside the playtest evidence (`visual-review.json`) and in the qualification record, bound to
-the same source, build and approved design as the other stages, so a re-export, edit or re-approval
-makes it stale. One approved design revision gets two judgements: the initial one and one after the
-bounded repair turn. The playtest tool result prints the score table and either "one repair round
-left" or "no rounds left"; a third run is refused. Overall `qualified` now requires the visual stage
-too, and `mechanicsQualified` says whether everything except the look passed. Approval's
-`presentation` criteria report the visual stage's verdict; they are never claimed from a scenario.
+Play serves immutable build directories. Candidate exports never replace the selected build until
+accepted. Rejection restores the pre-repair source only while it still matches the recorded
+post-repair version. User edits take precedence: a conflict stops the review and offers an explicit
+Restore previous version. Restore preserves the folder it replaces and never deletes directories
+that live previews still serve. Cancellation joins owned sessions before releasing the game;
+a session that may still write keeps the game held. Restart marks unfinished work interrupted,
+without Resume or automatic model calls.
+
+Review history lives outside the game and persists across restarts. Clients fetch bounded pages
+on small revision/decision events; frame bytes never travel in broadcasts. Source freshness is
+unknown until explicitly checked. Version-two qualification records archive the old score-judge
+stage and keep mechanical evidence and playable completion. Old games have no new review until a
+new eligible export, never an inferred promotion. Historical benchmark readers retain legacy
+judgements; the frozen grader and historical aggregates keep their original meaning.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and
@@ -293,12 +286,10 @@ declares no gameplay scene has its check run only the main scene, and the warnin
 than implying gameplay was exercised.
 `game_scene_inspect` dumps a scene's node tree when the wiring, not the code, is the problem.
 
-Agents need a clear stopping point. Without one, a model that passed its gameplay test kept
-re-exporting and building its own screenshot tooling for an hour. The scaffolded `AGENTS.md`
-defines done: the qualification read reports check, test, export, playtest, state and visual current
-for the final sources, with a playtest whose steps prove the core loop responded (and, for a game
-with the probe, moved the player or changed a GameState value), and one bounded visual repair turn at
-most; preview URL returned, end the turn.
+Agents stop after a current playable export and ordinary-input playtest, returning the preview
+URL. The server starts bounded review only after the run that produced that export completes;
+a later text-only turn cannot start another review budget. Test and state certification remain
+optional for playable completion.
 
 ## Toolchain
 

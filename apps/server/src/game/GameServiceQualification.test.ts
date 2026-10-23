@@ -29,7 +29,6 @@ import {
   designApprovalTestLayer,
   roundStoreTestLayer,
   previewBrowserTestLayer,
-  visualJudgeTestLayer,
 } from "./gameTestLayers.ts";
 
 const threadId = ThreadId.make("qualification-rules-test");
@@ -203,6 +202,7 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(
           Layer.mock(GamePreview.GamePreview)({
+            directories: () => [],
             open: () => Effect.succeed("http://127.0.0.1:9/game"),
             stop: () => Effect.void,
             url: () => null,
@@ -212,7 +212,7 @@ const withFixture = <A, E, R>(
         ),
         Layer.provide(previewBrowserTestLayer(executable)),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
-        Layer.provideMerge(visualJudgeTestLayer(stateDir)),
+
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provideMerge(admissionTestLayer),

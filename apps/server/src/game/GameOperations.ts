@@ -30,6 +30,7 @@ export class GameOperations extends Context.Service<
       operation: GameOperation,
       eventState: GameOperationEventState,
     ) => Effect.Effect<void>;
+    readonly changed: (root: string, message: string) => Effect.Effect<void>;
     readonly events: Stream.Stream<GameOperationEvent>;
   }
 >()("t3/game/GameOperations") {}
@@ -39,13 +40,26 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const operations = new Map<string, GameOperation>();
     const events = yield* PubSub.unbounded<GameOperationEvent>();
+    let revision = 0;
     return GameOperations.of({
+      changed: (root, message) =>
+        Effect.gen(function* () {
+          yield* PubSub.publish(events, {
+            root,
+            name: "review",
+            state: "succeeded",
+            message,
+            revision: ++revision,
+            at: DateTime.formatIso(yield* DateTime.now),
+          });
+        }),
       current: (root) => operations.get(root) ?? null,
       record: (root, operation, eventState) =>
         Effect.gen(function* () {
           operations.set(root, operation);
           yield* PubSub.publish(events, {
             root,
+            revision: ++revision,
             name: operation.name,
             state: eventState,
             message: operation.message,

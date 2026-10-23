@@ -97,7 +97,6 @@ const recordAll = (
       passed("export", buildId, null, artifacts),
       passed("playtest", buildId, "builds/playtests/run-1"),
       passed("state", null, "builds/logs/scenarios-1"),
-      { ...passed("visual", buildId, "builds/playtests/run-1"), designHash: null },
     ])
       yield* qualification.record(root, { ...input, sourceId });
   });
@@ -114,7 +113,6 @@ it.effect("starts unqualified, with every stage missing and later stages never p
         ["export", "missing"],
         ["playtest", "missing"],
         ["state", "missing"],
-        ["visual", "missing"],
       ]);
     }),
   ),
@@ -193,7 +191,7 @@ it.effect("separates playable completion from optional certification", () =>
   ),
 );
 
-it.effect("a spent visual budget leaves the look uncertified, not the game incomplete", () =>
+it.effect("an edited game can complete without optional checks", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
       const sourceA = yield* Effect.promise(() => sourceIdOf(root));
@@ -215,7 +213,6 @@ it.effect("a spent visual budget leaves the look uncertified, not the game incom
       ])
         yield* qualification.record(root, { ...input, sourceId: sourceB });
       const read = yield* qualification.read(root, "godot", "approved");
-      expect(read.stages.find((stage) => stage.stage === "visual")?.status).toBe("stale");
       expect(read.completion).toBe("complete");
       expect(read.state).toBe("unqualified");
     }),
@@ -257,23 +254,13 @@ it.effect("keeps the state stage's per-criterion summary with its record", () =>
   ),
 );
 
-it.effect("lists presentation criteria under the visual stage as missing", () =>
+it.effect("a mechanical read never certifies presentation criteria", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
       const read = yield* qualification.read(root, "godot", "approved", null, null, [
-        {
-          id: "warm-glow",
-          kind: "presentation",
-          text: "Lit lanterns cast a warm glow",
-        },
+        { id: "warm-glow", kind: "presentation", text: "Lit lanterns cast a warm glow" },
       ]);
-      const visual = read.stages.find((entry) => entry.stage === "visual");
-      expect(visual).toMatchObject({ status: "missing" });
-      expect(visual?.criteria).toEqual([
-        expect.objectContaining({ id: "warm-glow", kind: "presentation", status: "missing" }),
-      ]);
-      const state = read.stages.find((entry) => entry.stage === "state");
-      expect(state?.criteria).toBeUndefined();
+      expect(read.stages.flatMap((stage) => stage.criteria ?? [])).toEqual([]);
     }),
   ),
 );
@@ -347,7 +334,7 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
       expect(read.state).toBe("unqualified");
       expect(
         read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
-      ).toEqual(["check", "test", "export", "playtest", "state", "visual"]);
+      ).toEqual(["check", "test", "export", "playtest", "state"]);
       expect(read.sourceId).not.toBe(sourceId);
       // The source edit does not touch builds/web: the running preview still
       // serves the recorded artifact, so its identity survives the staleness.
@@ -417,90 +404,63 @@ it.effect("a re-export on the same sources invalidates the playtest build", () =
   ),
 );
 
-it.effect("a visual verdict is bound to the source, build and approved design", () =>
-  withGame({}, ({ root, qualification }) =>
-    Effect.gen(function* () {
-      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
-      const buildId = `${sourceId}:first`;
-      yield* recordAll(qualification, root, sourceId, buildId);
-      const presentation = [{ id: "glow", kind: "presentation" as const, text: "The gate glows" }];
-      // The recorded pass was written for no approved design revision.
-      const unbound = yield* qualification.read(
-        root,
-        "godot",
-        "approved",
-        "design-1",
-        null,
-        presentation,
-      );
-      expect(unbound.stages.find((entry) => entry.stage === "visual")?.status).toBe("stale");
-      expect(unbound.state).toBe("unqualified");
-      expect(unbound.mechanicsQualified).toBe(false);
-      expect(unbound.stages.find((entry) => entry.stage === "visual")?.criteria?.[0]?.status).toBe(
-        "missing",
-      );
-
-      yield* qualification.record(root, {
-        stage: "state",
-        outcome: "passed",
-        sourceId,
-        buildId: null,
-        evidenceDirectory: "builds/logs/scenarios-1",
-        designHash: "design-1",
-      });
-      yield* qualification.record(root, {
-        stage: "visual",
-        outcome: "passed",
-        sourceId,
-        buildId,
-        evidenceDirectory: "builds/playtests/run-1",
-        designHash: "design-1",
-        visual: {
-          status: "passed",
-          judgedAt: "2026-10-21T00:00:00.000Z",
-          model: "codex/gpt-6.1-sol",
-          sourceId,
-          buildId,
-          designHash: "design-1",
-          evidenceDirectory: "builds/playtests/run-1",
-          frames: [
-            { id: "F1", label: "final", path: "builds/playtests/run-1/x.png", role: "finish" },
+it.effect(
+  "migrates legacy visual data without changing playable completion or mechanical evidence",
+  () =>
+    withGame({}, ({ root, stateDir, qualification }) =>
+      Effect.gen(function* () {
+        const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+        const buildId = `${sourceId}:first`;
+        yield* recordAll(qualification, root, sourceId, buildId);
+        const file = qualificationRecordPath(stateDir, root);
+        const before = yield* Effect.promise(async () =>
+          JSON.parse(await NodeFSP.readFile(file, "utf8")),
+        );
+        const visual = { outcome: "failed", visual: { old: "opaque historical result" } };
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            file,
+            JSON.stringify({ ...before, schemaVersion: 1, stages: { ...before.stages, visual } }),
+          ),
+        );
+        const read = yield* qualification.read(root, "godot", "approved");
+        expect(read.completion).toBe("complete");
+        expect(read.state).toBe("qualified");
+        expect(read.stages.map((stage) => stage.stage)).not.toContain("visual");
+        const migrated = yield* Effect.promise(async () =>
+          JSON.parse(await NodeFSP.readFile(file, "utf8")),
+        );
+        expect(migrated).toMatchObject({
+          schemaVersion: 2,
+          archivedVisual: visual,
+          stages: before.stages,
+        });
+        yield* qualification.record(root, { ...passed("check", null), sourceId });
+        const rewritten = yield* Effect.promise(async () =>
+          JSON.parse(await NodeFSP.readFile(file, "utf8")),
+        );
+        expect(rewritten.archivedVisual).toEqual(visual);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            file,
+            JSON.stringify({ ...before, schemaVersion: 1, stages: { ...before.stages, visual } }),
+          ),
+        );
+        yield* Effect.all(
+          [
+            qualification.read(root, "godot", "approved"),
+            qualification.stageRecord(root, "playtest"),
+            qualification.record(root, { ...passed("check", null), sourceId, outcome: "failed" }),
           ],
-          dimensions: [],
-          repairRequests: [],
-          roundsLeft: 1,
-        },
-      });
-      const bound = yield* qualification.read(
-        root,
-        "godot",
-        "approved",
-        "design-1",
-        null,
-        presentation,
-      );
-      expect(bound.stages.find((entry) => entry.stage === "visual")?.status).toBe("passed");
-      expect(bound.stages.find((entry) => entry.stage === "visual")?.criteria?.[0]?.status).toBe(
-        "passed",
-      );
-      expect(bound.state).toBe("qualified");
-
-      // A new build is new bytes: the old verdict cannot grade it.
-      yield* qualification.record(root, {
-        stage: "export",
-        outcome: "passed",
-        sourceId,
-        buildId: `${sourceId}:second`,
-        evidenceDirectory: null,
-        artifacts: (yield* Effect.promise(() => describeWebArtifacts(root)))!,
-      });
-      expect(
-        (yield* qualification.read(root, "godot", "approved", "design-1")).stages.find(
-          (entry) => entry.stage === "visual",
-        )?.status,
-      ).toBe("stale");
-    }),
-  ),
+          { concurrency: "unbounded" },
+        );
+        expect((yield* qualification.stageRecord(root, "check"))?.outcome).toBe("failed");
+        const concurrent = yield* Effect.promise(async () =>
+          JSON.parse(await NodeFSP.readFile(file, "utf8")),
+        );
+        expect(concurrent.archivedVisual).toEqual(visual);
+      }),
+    ),
 );
 
 it.effect("the design stage passes only for an approved or legacy design", () =>

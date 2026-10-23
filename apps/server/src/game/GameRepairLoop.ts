@@ -19,7 +19,6 @@ import {
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type GameReviewRound as GameReviewRoundRecord,
-  type GameReviewUsage,
   type ModelSelection,
   type NodeId,
   RunId,
@@ -37,6 +36,8 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as GameOperations from "./GameOperations.ts";
+import * as GamePreview from "./GamePreview.ts";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
@@ -263,6 +264,12 @@ export class GameRepairLoop extends Context.Service<
     readonly ensure: (
       input: GameRepairLoopEnsureInput,
     ) => Effect.Effect<GameRepairLoopRecord | null, GameOperationError>;
+    readonly activity: (
+      threadId: ThreadId,
+    ) => Effect.Effect<
+      { readonly held: boolean; readonly phase: string | null },
+      GameOperationError
+    >;
     /** The newest loop for the thread's game, if one exists. */
     readonly read: (
       threadId: ThreadId,
@@ -317,6 +324,14 @@ export const layer = (options: GameRepairLoopOptions) => {
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const admission = yield* GameAdmission.GameAdmission;
     const scope = yield* Effect.scope;
+    const operations = yield* GameOperations.GameOperations;
+    const preview = yield* GamePreview.GamePreview;
+    const phases = new Map<string, string>();
+    const progress = (root: string, phase: string) =>
+      Effect.gen(function* () {
+        phases.set(root, phase);
+        yield* operations.changed(root, phase);
+      });
 
     /**
      * A game this service holds. It stays held after its fiber ends until every
@@ -379,6 +394,7 @@ export const layer = (options: GameRepairLoopOptions) => {
             await NodeFSP.rm(temporary, { force: true });
           }
         });
+        yield* operations.changed(root, record.reason ?? "Review updated.");
         return record;
       });
 
@@ -717,10 +733,15 @@ export const layer = (options: GameRepairLoopOptions) => {
       reason: string,
     ): Effect.Effect<RoundOutcome, GameOperationError> =>
       Effect.gen(function* () {
-        const rejected = yield* rounds.reject(record.root, roundId, { reason }).pipe(
-          Effect.map((result) => result.kind),
-          Effect.orElseSucceed(() => "blocked" as const),
-        );
+        const rejected = yield* rounds
+          .reject(record.root, roundId, {
+            reason,
+            preserveDirectories: preview.directories(record.root),
+          })
+          .pipe(
+            Effect.map((result) => result.kind),
+            Effect.orElseSucceed(() => "blocked" as const),
+          );
         if (rejected === "blocked") {
           // The folder changed under the repair; restoring would discard a user
           // edit, so the loop stops and leaves the restore to its owner.
@@ -899,6 +920,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         });
         // B7: every check of every candidate replays the inputs captured once
         // when the loop opened, never the newest playtest on disk.
+        yield* progress(task.root, "Checking the selected build");
         const checked = yield* studio.check({
           threadId: record.threadId,
           root: task.root,
@@ -920,6 +942,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           checked.frames.map((frame) => ({ label: frame.label, path: frame.path })),
         );
         yield* rounds.recordReview(task.root, round.id, { checks: [...checked.checks] });
+        yield* progress(task.root, "Reviewing frames");
         const critic = yield* awaitChild(task, record, {
           role: "critic",
           order: 0,
@@ -1032,6 +1055,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           repairsUsed: Math.min(current.budget.repairs, current.repairsUsed + 1),
           updatedAt: nowIso(),
         }));
+        yield* progress(task.root, "Repairing the game");
         const repair = yield* awaitChild(task, reserved, {
           role: "repair",
           order: 0,
@@ -1110,6 +1134,7 @@ export const layer = (options: GameRepairLoopOptions) => {
             "unchanged: the repair exported the same build as the incumbent.",
           );
 
+        yield* progress(task.root, "Checking the repaired build");
         const candidate = yield* studio.check({
           threadId: record.threadId,
           root: task.root,
@@ -1142,6 +1167,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                 "superseded: a user action took the game before a ballot was dispatched.",
               ),
             };
+          yield* progress(task.root, `Comparing builds, vote ${plan.order + 1} of 2`);
           const ballot = yield* awaitChild(task, reserved, {
             role: "ballot",
             order: plan.order,
@@ -1268,6 +1294,8 @@ export const layer = (options: GameRepairLoopOptions) => {
       Effect.gen(function* () {
         if (live.get(root) === held) live.delete(root);
         yield* admission.unregister(root, held.entry);
+        phases.delete(root);
+        yield* operations.changed(root, "Review sessions stopped.");
       });
 
     /** Releases the game once its recorded children are terminal; otherwise it stays held. */
@@ -1565,10 +1593,28 @@ export const layer = (options: GameRepairLoopOptions) => {
             reason: "invalid-input",
             detail: "The latest review has no interrupted round to restore from.",
           });
-        return yield* rounds.restore(root, round.id);
+        const restored = yield* rounds.restore(root, round.id, {
+          preserveDirectories: preview.directories(root),
+        });
+        yield* operations.changed(
+          root,
+          restored.kind === "restored" ? "Previous version restored." : "Restore was blocked.",
+        );
+        return restored;
       });
 
-    return GameRepairLoop.of({ ensure, read, interrupt, recover, awaitIdle, restore });
+    return GameRepairLoop.of({
+      ensure,
+      read,
+      interrupt,
+      recover,
+      awaitIdle,
+      restore,
+      activity: (threadId) =>
+        projects
+          .resolve(threadId)
+          .pipe(Effect.map((root) => ({ held: live.has(root), phase: phases.get(root) ?? null }))),
+    });
   });
   return Layer.effect(GameRepairLoop, make);
 };

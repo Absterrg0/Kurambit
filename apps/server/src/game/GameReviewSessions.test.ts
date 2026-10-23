@@ -448,6 +448,20 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       ) as { checks: Array<{ id: string }> };
       expect(evidenceJson.checks.map((check) => check.id)).toEqual(["boot", "input"]);
       expect(started.evidenceHash).toMatch(/^[0-9a-f]{64}$/);
+      const description = yield* service.describe({
+        threadId,
+        loopId: command.loopId,
+        roundId: command.roundId,
+        role: "critic",
+        order: 0,
+      });
+      expect(description).toMatchObject({
+        role: "critic",
+        hash: started.evidenceHash,
+        childThreadId: started.childThreadId,
+        frames: [{ id: "f1" }, { id: "f2" }],
+      });
+      expect(description?.frames[0]?.path.startsWith(command.evidenceDirectory!)).toBe(true);
 
       // The answer is read only while the evidence still matches that hash.
       scripted.answer = criticText;

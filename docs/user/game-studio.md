@@ -62,11 +62,10 @@ updates the contract without starting another build turn; the agent is told to p
 
 Each game card and sidebar row says what the game actually is: **Design draft** before approval,
 **Building** while an agent operation runs, **Design changed** when an edit needs review, and
-**Qualified as of …** once the server's record shows the check, test, web export, playtest, state
-scenarios and independent visual review passed. State scenarios prove the acceptance after play
-starts, including a route that wins and, when the design has one, a route that loses the run. The
-visual review grades the playtest's frames on readability, value separation, camera and framing,
-style consistency, feedback and design compliance, and its presentation claims follow that verdict.
+**Checked as of …** once the server's record shows that mechanical checks passed.
+State scenarios check the agreed behaviour after play starts, including routes that win or lose
+when the design calls for them. Review compares visible changes separately and does not certify
+every presentation claim.
 The time matters: it is when the record was written, and the Stage re-checks the current files when
 you open the game. A card's cover is a frame of real play from the latest run that qualified, not
 its menu or a failed attempt.
@@ -81,7 +80,8 @@ start a new one.
 A game opens on its latest session: the game owns the middle of the window and the chat is docked to
 its right.
 
-- **Play** builds the web version when it is missing or older than the game's files, then plays it
+- **Play** serves the selected build, even when the game's files have changed. If no build exists,
+  it builds the web version and plays it
   in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
   it, and use **Fullscreen** to give it the whole screen. The line beside the game name says what the
   stage is doing — playing, building, or waiting for a rebuild. Opening **Design**, **Assets** or
@@ -93,9 +93,8 @@ its right.
   started for this game, and closes its preview server.
 - **Export Linux** writes a standalone build to `builds/linux/`. The **Builds** tab lists both
   targets with their times, folders and logs, the last playtest's verdict and frames, and the
-  independent visual review with its scores and repair requests. A failed review comes with at most
-  three concrete fixes; the agent gets one repair round, then it must report the remaining problems
-  instead of restyling on its own judgement.
+  review history with decisions, reasons, defects and frame links. Stop review and Restore previous
+  version are explained below.
 - **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
   scenes or scripts that use it.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
@@ -121,3 +120,16 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `art/blender/` holds the editable `.blend` files and `art/scripts/` the scripts behind them.
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor.
 - `builds/` holds exports and operation logs and is not committed.
+
+## Review and restore
+
+After your agent finishes a playable build with recorded controls, Game Studio reviews its frames
+and can attempt up to three repairs within twenty minutes. Play keeps the selected build while
+review runs. Open Builds to read defects, suggested fixes, decisions and the frames behind them.
+Review compares versions; it does not promise that every aspect of the game is correct.
+
+Choose Stop review to end it. If a review is interrupted or your edits prevent a safe return,
+Restore previous version returns the game folder to its saved version and preserves the version
+it replaces. A restart does not resume unfinished reviews. If a review session is still stopping,
+wait until the held state clears before restoring. Choose Check to compare the current sources
+with the selected build when source freshness is unknown.

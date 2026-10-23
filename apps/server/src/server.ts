@@ -7,11 +7,11 @@ import * as GameQualification from "./game/GameQualification.ts";
 import * as GameRoundStore from "./game/GameRoundStore.ts";
 import * as GameAdmission from "./game/GameAdmission.ts";
 import * as GameTurnAdmission from "./game/GameTurnAdmission.ts";
+import * as GameReviewApi from "./game/GameReviewApi.ts";
 import * as GameRepairLoop from "./game/GameRepairLoop.ts";
 import * as GameRepairReactor from "./game/GameRepairReactor.ts";
 import * as GameRepairStudio from "./game/GameRepairStudio.ts";
 import * as GameReviewSessions from "./game/GameReviewSessions.ts";
-import * as GameVisualJudge from "./game/GameVisualJudge.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
@@ -526,7 +526,7 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-const layerGame = Layer.mergeAll(
+const layerGameServices = Layer.mergeAll(
   // The repair loop owns a game's review phases; the studio is its engine-facing
   // half. Both wrap the one GameService instance below, so they share its locks,
   // preview and round store.
@@ -560,7 +560,7 @@ const layerGame = Layer.mergeAll(
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
-  Layer.provide(GamePreview.layer),
+  Layer.provideMerge(GamePreview.layer),
   Layer.provide(GameProcesses.layer),
   // Web playtest drives the same headless browser the html toolkit drives.
   Layer.provide(PreviewBrowser.layer),
@@ -588,19 +588,11 @@ const layerGame = Layer.mergeAll(
       }),
     ),
   ),
-  Layer.provideMerge(
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        return GameVisualJudge.layer({ stateDir: config.stateDir }).pipe(
-          Layer.provide(TextGeneration.layer),
-        );
-      }),
-    ),
-  ),
   // Provided last so every other layer above can require it.
   Layer.provideMerge(layerGameAdmission),
 );
+
+const layerGame = GameReviewApi.layer.pipe(Layer.provideMerge(layerGameServices));
 
 const layerMakeRoutes = Layer.mergeAll(
   Layer.effectDiscard(

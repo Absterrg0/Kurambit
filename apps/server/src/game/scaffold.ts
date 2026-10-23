@@ -45,8 +45,8 @@ boot constant or a world total. Content counts are proven by collecting or visit
 (\`collected >= 5\`), never by a world total such as \`total == 5\`. A \`win\` observes the
 template's \`won\` flag (\`won == 1\`), not a \`state\` enum value that pausing could also
 reach; a \`lose\` observes the value a losing run ends at (\`lives <= 0\`), not \`changes\`.
-\`presentation\` claims carry no observe because the visual stage owns them, and that stage
-is not implemented yet.
+\`presentation\` claims carry no observe. Review compares visible improvements but does not
+certify every presentation claim.
 The block needs at least one \`control\`, one \`mechanic\`, one \`win\` and one \`lose\`; cover every
 control and content count the game promises.
 
@@ -168,7 +168,7 @@ Build the game in BRIEF.md with Godot 4.7 (GDScript, Compatibility renderer). Th
 1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (target Web).
 2. **Show the state.** Every value the brief names (score, lives, turn, laps, timer...) is on-screen text that updates when it changes, and lives in GameState when the template has one. Win and lose end on a result screen with the totals.
 3. **Playtest and look.** Run game_web_playtest with steps that play the core loop, then open the screenshots it returns and look at them. It also reports GameState keys that are "not on screen".
-4. **Fix what you saw**: anything broken, unreadable, off screen or not responding, and any repair request in the playtest result. Export and playtest again.
+4. **Check core play**: report broken or unreadable behaviour honestly. Do not start an open-ended repair loop. The server owns bounded review after your turn ends.
 5. **End your turn.** After the playable export, summarize with the game_preview URL. The studio reviews and repairs the game automatically; do not start your own improvement loop.
 
 ## Rules that prevent breakage

@@ -18,6 +18,10 @@
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
+    },
+    "./legacyGameVisual": {
+      "types": "./src/legacyGameVisual.ts",
+      "import": "./src/legacyGameVisual.ts"
     }
   },
   "scripts": {

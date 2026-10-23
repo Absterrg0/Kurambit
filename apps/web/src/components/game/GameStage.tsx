@@ -185,7 +185,7 @@ export function GameStage({
     .map((stage) => `${stage.stage}: ${stage.status}`);
   const qualificationLabel =
     qualification.state === "qualified"
-      ? "Qualified"
+      ? "Checked"
       : qualification.completion === "complete"
         ? "Playable"
         : qualification.completion === "unknown"
@@ -201,8 +201,8 @@ export function GameStage({
     qualification.completion !== "complete"
       ? `No current playable build for the current sources. ${qualificationIssues.join(", ")}.`
       : qualification.state === "qualified"
-        ? "Playable, and the optional test, state and visual certification passed for the current sources."
-        : `Playable: the web export and its playtest are current. Optional certification: ${certification}.`;
+        ? "Playable, and the optional test and state checks passed for the current sources."
+        : `Playable: the web export and its playtest are current. Optional checks: ${certification}.`;
   const stagePhaseLabel =
     phase.kind === "playing"
       ? qualification.completion === "complete"
@@ -245,6 +245,10 @@ export function GameStage({
   const frameKey = frame.key;
   const askAgentToFix = (failure: string) => onAskAgent(buildFailurePrompt(failure));
   const perform = async (stageAction: GameAction) => {
+    if (stageAction === "preview" && data.previewUrl !== null) {
+      setTab("play");
+      return;
+    }
     if (busy !== null && stageAction !== "stop") return;
     setBusy({ action: stageAction, startedAt: Date.now() });
     setMessage(null);
@@ -410,7 +414,7 @@ export function GameStage({
           <Button
             size="sm"
             variant={designDraft ? "secondary" : "default"}
-            disabled={!canOperate || building}
+            disabled={!canOperate || (building && data.previewUrl === null)}
             onClick={() => void perform("preview")}
           >
             <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
@@ -604,11 +608,12 @@ export function GameStage({
       ) : null}
       {activeTab === "builds" ? (
         <GameBuildsPanel
+          key={`${threadRef.threadId}:${data.selectedBuildId ?? "legacy"}`}
           threadRef={threadRef}
           builds={data.builds}
           webBuildStale={data.webBuildStale}
           lastPlaytest={data.lastPlaytest}
-          qualification={data.qualification}
+          sourcesDifferFromPlay={data.sourcesDifferFromPlay}
           canOperate={canOperate}
           onPlay={() => {
             setTab("play");

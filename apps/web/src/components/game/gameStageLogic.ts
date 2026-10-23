@@ -118,3 +118,11 @@ export function countGamePreviewRemounts(serves: readonly GamePreviewServe[]): n
 export function gamePreviewFrameKey(serve: GamePreviewServe): string {
   return frameKeyOf(serve);
 }
+
+export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {
+  return value === "unknown"
+    ? "Source freshness unknown. Check to compare with the selected build."
+    : value
+      ? "Sources differ from the selected build. Play keeps that build."
+      : "Sources matched the selected build at the last check.";
+}
