@@ -646,3 +646,39 @@ it.live("keeps one submission per run beside the review state", () =>
     }),
   ),
 );
+
+it.live("old facet-only ballot history stays readable without inventing an overall decision", () =>
+  withGame(({ root, stateDir, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const source = yield* snapshots.capture(root);
+      const build = yield* Effect.promise(() => candidate(root, source.sourceId));
+      yield* rounds.select(root, build);
+      const round = yield* rounds.begin(root);
+      yield* rounds.recordReview(root, round.id, {
+        ballotAnswers: [
+          {
+            order: 0,
+            outcome: "valid",
+            answer: {
+              main: { works: "A", look: "tie", feel: "tie", play: "tie" },
+              preservation: [{ id: "turns", A: "preserved", B: "unknown", frameIds: ["f1"] }],
+              control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
+              reason: "Captured before overall judgments existed.",
+            },
+          },
+        ],
+      });
+      yield* rounds.stop(root, round.id, "Historical review.");
+      const restarted = yield* GameRoundStore.GameRoundStore.pipe(
+        Effect.provide(GameRoundStore.layer({ stateDir })),
+      );
+      const reopened = yield* restarted.read(root);
+      expect(reopened.selected?.buildId).toBe(build.buildId);
+      const ballot = reopened.rounds[0]?.ballotAnswers?.[0]?.answer;
+      expect(ballot?.overall).toBeUndefined();
+      expect(ballot?.main.works).toBe("A");
+      expect(ballot?.preservation[0]?.B).toBe("unknown");
+      expect(ballot?.reason).toBe("Captured before overall judgments existed.");
+    }),
+  ),
+);

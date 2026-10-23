@@ -47,8 +47,8 @@ export const GameReviewDoNotRegress = Schema.Struct({
   what: reviewText(400),
   frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /**
-   * The existing check that measures this behaviour, when one does. Ballots
-   * only judge items the code checks cannot measure.
+   * An existing factual check associated with this behaviour, when one exists.
+   * Ballots still judge preservation separately for each build.
    */
   checkId: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))),
 });
@@ -119,9 +119,8 @@ export const GameReviewCriticAnswer = Schema.Struct({
 export type GameReviewCriticAnswer = typeof GameReviewCriticAnswer.Type;
 
 /**
- * One pairwise ballot: main A/B facets, every preservation item, the
- * identical-build control, and the evidence behind it. The reason is prose with
- * frame IDs, never a score.
+ * The overall choice decides quality; facets explain tradeoffs. Preservation
+ * is assessed per build, with identical-build controls and cited evidence.
  */
 export const GameReviewBallotAnswer = Schema.Struct({
   overall: GameReviewChoice,
@@ -206,9 +205,8 @@ export const GameSelectedBuild = Schema.Struct({
 export type GameSelectedBuild = typeof GameSelectedBuild.Type;
 
 /**
- * One code check the loop froze from the incumbent's playtest. The id is
- * server-owned (boot, input, state...) so a repair cannot rename or drop the
- * checks it is judged by.
+ * Server-owned execution facts and raw observations frozen from a playtest.
+ * Only factual checks can veto promotion; measurements belong to the critic.
  */
 export const GameReviewCheck = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
@@ -301,7 +299,14 @@ export const GameReviewBallotRecord = Schema.Struct({
   order: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1)),
   outcome: Schema.Literals(["valid", "invalid"]),
   reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
-  answer: Schema.optionalKey(GameReviewBallotAnswer),
+  // Old history has facets without an overall judgment. Never invent a decision on read.
+  answer: Schema.optionalKey(
+    Schema.Struct({
+      ...GameReviewBallotAnswer.fields,
+      overall: Schema.optionalKey(GameReviewChoice),
+      overallReason: Schema.optionalKey(GameReviewBallotAnswer.fields.overallReason),
+    }),
+  ),
   raw: Schema.optionalKey(Schema.String),
 });
 export type GameReviewBallotRecord = typeof GameReviewBallotRecord.Type;

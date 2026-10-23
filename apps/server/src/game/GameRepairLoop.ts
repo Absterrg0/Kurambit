@@ -205,9 +205,11 @@ const vetoReason = (veto: VetoKind): string => {
 
 /** Overall quality belongs to the critic; identical controls must remain ties. */
 const ballotReason = (
-  answer: GameReviewBallotAnswer,
+  answer: NonNullable<GameReviewBallotRecord["answer"]>,
   plan: GameReviewBallotPlan,
 ): string | null => {
+  if (answer.overall === undefined || answer.overallReason === undefined)
+    return `invalid-ballot: ballot ${plan.order} has no overall judgment.`;
   if (GAME_REVIEW_FACETS.some((facet) => answer.control[facet] !== "tie"))
     return `failed-control: ballot ${plan.order} preferred one of two identical control builds.`;
   if (answer.overall === "tie") return `tie: ballot ${plan.order} found no overall improvement.`;
@@ -216,7 +218,10 @@ const ballotReason = (
   return null;
 };
 
-const challengerLosses = (answer: GameReviewBallotAnswer, plan: GameReviewBallotPlan) => {
+const challengerLosses = (
+  answer: Pick<GameReviewBallotAnswer, "preservation">,
+  plan: GameReviewBallotPlan,
+) => {
   const side = plan.main.A === "challenger" ? "A" : "B";
   return answer.preservation.filter((entry) => entry[side] === "lost").map((entry) => entry.id);
 };

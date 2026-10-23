@@ -48,9 +48,9 @@ const probe = (hudText: string): GamePlaytestProbe => ({
 const FIRST_EVIDENCE_AT = new Date("2026-10-01T10:00:00.000Z");
 const LATER_EVIDENCE_AT = new Date("2026-10-01T10:05:00.000Z");
 
-const baseResult = (): GameWebPlaytestResult => ({
+const baseResult = (inputSteps: number | null = 1): GameWebPlaytestResult => ({
   success: true,
-  executedInputSteps: 1,
+  ...(inputSteps === null ? {} : { executedInputSteps: inputSteps }),
   booted: true,
   bootMs: 900,
   responded: true,
@@ -288,7 +288,7 @@ it.live.each([undefined, 0])(
     withStudio((harness) =>
       Effect.gen(function* () {
         const studio = yield* GameRepairStudio.GameRepairStudio;
-        harness.results = { ...baseResult(), executedInputSteps };
+        harness.results = baseResult(executedInputSteps ?? null);
         const checked = yield* studio.check({
           threadId,
           root: harness.root,

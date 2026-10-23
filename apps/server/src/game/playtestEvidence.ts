@@ -223,7 +223,7 @@ export const readPlaytestEvidence = async (
 export interface PlaytestRunFacts {
   readonly booted: boolean;
   readonly responded: boolean;
-  readonly executedInputSteps?: number | undefined;
+  readonly executedInputSteps?: number;
   readonly consoleErrors: number;
   /** Input steps the run actually executed. Waits and screenshots do not count. */
   readonly steps: number;

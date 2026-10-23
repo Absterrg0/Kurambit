@@ -287,7 +287,7 @@ it.live("records dispatched input separately from requests and pixel response", 
           steps: [{ click: "left" }],
           result: {
             ...result("after-steps"),
-            executedInputSteps,
+            ...(executedInputSteps === undefined ? {} : { executedInputSteps }),
             responded: false,
             changedPercent: 0,
           },
