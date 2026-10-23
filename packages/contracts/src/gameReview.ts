@@ -110,6 +110,23 @@ export const GameReviewBallotAnswer = Schema.Struct({
 });
 export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
 
+/** The ballot tool exposes the four choices directly; storage keeps `main`. */
+export const GameReviewBallotInput = Schema.Struct({
+  ...GameReviewFacetVerdicts.fields,
+  preservation: GameReviewBallotAnswer.fields.preservation,
+  control: GameReviewBallotAnswer.fields.control,
+  reason: GameReviewBallotAnswer.fields.reason,
+});
+export type GameReviewBallotInput = typeof GameReviewBallotInput.Type;
+
+export const GameReviewReportResult = Schema.Struct({
+  accepted: Schema.Boolean,
+  error: Schema.NullOr(Schema.String),
+  attemptsRemaining: Schema.Number,
+  ended: Schema.Boolean,
+});
+export type GameReviewReportResult = typeof GameReviewReportResult.Type;
+
 /** One model answer is at most this many bytes of text, before parsing. */
 export const GAME_REVIEW_ANSWER_MAX_BYTES = 16 * 1024;
 

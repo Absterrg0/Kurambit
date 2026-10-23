@@ -40,6 +40,7 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
  */
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
+  readonly gameReviewRole?: "critic" | "ballot" | null;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
   readonly requestNamespace: string;

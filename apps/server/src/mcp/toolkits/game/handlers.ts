@@ -1,9 +1,10 @@
 import * as Effect from "effect/Effect";
+import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { GameToolkit, GamePlaytestToolkit } from "./tools.ts";
+import { GameToolkit, GamePlaytestToolkit, GameReviewAnswerToolkit } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) =>
     McpInvocationContext.requireThreadScope(context, "Game Studio tools"),
@@ -142,3 +143,16 @@ export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
  * real image content; see McpHttpServer.registerGameWebPlaytest.
  */
 export const layerPlaytest = McpToolAccess.toLayer(GamePlaytestToolkit, playtestHandlers);
+
+const reviewAnswer = (role: "critic" | "ballot") =>
+  McpToolAccess.readsAsCaller((input: unknown) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const sessions = yield* GameReviewSessions.GameReviewSessions;
+      return yield* sessions.report(scope.thread, role, input);
+    }),
+  );
+export const layerReviewAnswers = McpToolAccess.toLayer(GameReviewAnswerToolkit, {
+  game_critic_report: reviewAnswer("critic"),
+  game_ballot: reviewAnswer("ballot"),
+});

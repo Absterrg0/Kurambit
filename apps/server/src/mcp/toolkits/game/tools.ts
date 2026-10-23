@@ -1,4 +1,6 @@
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
+import * as Context from "effect/Context";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import {
   GameActionResult,
@@ -11,6 +13,9 @@ import {
   GameScenariosRunResult,
   GameStatus,
   GameReviewStatus,
+  GameReviewCriticAnswer,
+  GameReviewBallotInput,
+  GameReviewReportResult,
   GameReviewHistory,
   GameReviewHistoryInput,
   GameReviewRestoreResult,
@@ -20,6 +25,7 @@ import {
   GameWebPlaytestResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
+import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -202,4 +208,35 @@ export const GameToolkit = Toolkit.make(
   PreviewTool,
   NativeTool,
   StopTool,
+);
+
+// The service validates raw calls so schema failures count toward the same retry budget.
+const reviewAnswerTool = <const Name extends "game_critic_report" | "game_ballot">(
+  name: Name,
+  role: "critic" | "ballot",
+  parameters: Schema.Constraint,
+) =>
+  Tool.dynamic(name, {
+    description:
+      "Record this review session's answer. Fix the returned exact validation error and retry, at most three attempts. The first valid answer ends this session.",
+    parameters: Tool.getJsonSchemaFromSchema(parameters),
+    success: GameReviewReportResult,
+    failure,
+    failureMode: "return",
+  })
+    .addDependency(GameReviewSessions.GameReviewSessions)
+    .addDependency(McpInvocationContext.McpInvocationContext)
+    .annotate(Tool.Readonly, true)
+    .annotate(McpSchema.EnabledWhen, () => {
+      const fiber = Fiber.getCurrent();
+      return (
+        fiber !== undefined &&
+        Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
+          ?.gameReviewRole === role
+      );
+    });
+
+export const GameReviewAnswerToolkit = Toolkit.make(
+  reviewAnswerTool("game_critic_report", "critic", GameReviewCriticAnswer),
+  reviewAnswerTool("game_ballot", "ballot", GameReviewBallotInput),
 );

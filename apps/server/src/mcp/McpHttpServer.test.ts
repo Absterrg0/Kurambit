@@ -24,6 +24,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -1036,4 +1037,112 @@ it.effect("admits provider and OAuth client credentials and points only clients 
       expect(deadProvider.headers["www-authenticate"]).toBe('Bearer error="invalid_token"');
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "only lists the matching internal review answer tool and returns validation feedback through MCP",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen: unknown[] = [];
+        const serverLayer = McpHttpServer.layerGameReviewAnswers.pipe(
+          Layer.provideMerge(McpHttpServer.layerMcpTransport),
+          Layer.provide(
+            Layer.mock(GameReviewSessions.GameReviewSessions)({
+              toolRole: (caller) =>
+                Effect.succeed(
+                  caller.threadId === threadId
+                    ? "critic"
+                    : caller.threadId === ThreadId.make("ballot-child")
+                      ? "ballot"
+                      : null,
+                ),
+              report: (_caller, _role, value) =>
+                Effect.sync(() => {
+                  seen.push(value);
+                  return seen.length === 1
+                    ? {
+                        accepted: false,
+                        error: "doNotRegress must be an array",
+                        attemptsRemaining: 2,
+                        ended: false,
+                      }
+                    : { accepted: true, error: null, attemptsRemaining: 0, ended: true };
+                }),
+            }),
+          ),
+          Layer.provide(
+            Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+              resolve: (token) =>
+                Effect.succeed({
+                  ...invocation,
+                  thread: {
+                    ...invocation.thread,
+                    threadId:
+                      token === "critic"
+                        ? threadId
+                        : ThreadId.make(token === "ballot" ? "ballot-child" : "other-thread"),
+                  },
+                }),
+            }),
+          ),
+        );
+        yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+          Layer.build,
+        );
+        const client = yield* HttpClient.HttpClient;
+        const rpc = (
+          token: string,
+          sessionId: string | undefined,
+          method: string,
+          params: unknown,
+        ) =>
+          client.post("/mcp", {
+            headers: {
+              accept: "application/json, text/event-stream",
+              authorization: `Bearer ${token}`,
+              ...(sessionId === undefined
+                ? {}
+                : { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" }),
+            },
+            body: HttpBody.text(
+              JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+              "application/json",
+            ),
+          });
+        const connect = (token: string) =>
+          rpc(token, undefined, "initialize", {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "review-test", version: "1" },
+          }).pipe(Effect.map((response) => response.headers["mcp-session-id"]!));
+        const critic = yield* connect("critic");
+        const ballot = yield* connect("ballot");
+        const other = yield* connect("other");
+        const list = (token: string, session: string) =>
+          rpc(token, session, "tools/list", {}).pipe(Effect.flatMap((response) => response.text));
+        expect(yield* list("critic", critic)).toContain('"name":"game_critic_report"');
+        expect(yield* list("critic", critic)).not.toContain('"name":"game_ballot"');
+        expect(yield* list("ballot", ballot)).toContain('"name":"game_ballot"');
+        expect(yield* list("other", other)).not.toContain("game_critic_report");
+        const refused = yield* rpc("other", other, "tools/call", {
+          name: "game_critic_report",
+          arguments: {},
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(refused).toContain("error");
+        expect(seen).toEqual([]);
+        const invalid = yield* rpc("critic", critic, "tools/call", {
+          name: "game_critic_report",
+          arguments: { defects: [], doNotRegress: "wrong" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(invalid).toContain("doNotRegress must be an array");
+        expect(invalid).toContain('"attemptsRemaining":2');
+        const accepted = yield* rpc("critic", critic, "tools/call", {
+          name: "game_critic_report",
+          arguments: { defects: [], doNotRegress: [] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(accepted).toContain('"accepted":true');
+        expect(seen).toHaveLength(2);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

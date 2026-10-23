@@ -1,4 +1,9 @@
-import { GamePlaytestToolkit, GameToolkit, GameWebPlaytestTool } from "./toolkits/game/tools.ts";
+import {
+  GamePlaytestToolkit,
+  GameToolkit,
+  GameWebPlaytestTool,
+  GameReviewAnswerToolkit,
+} from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -19,6 +24,7 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contrac
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -136,6 +142,7 @@ const looksLikeProviderToken = (token: string) => token.length > 0 && !token.inc
 const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
+  const reviews = yield* Effect.serviceOption(GameReviewSessions.GameReviewSessions);
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -158,8 +165,15 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
       });
     }
+    const gameReviewRole =
+      invocation.thread !== undefined && Option.isSome(reviews)
+        ? yield* reviews.value.toolRole(invocation.thread).pipe(Effect.orElseSucceed(() => null))
+        : null;
     return yield* httpEffect.pipe(
-      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, {
+        ...invocation,
+        gameReviewRole,
+      }),
       Effect.map(normalizeMcpHttpResponse),
     );
   }) satisfies McpAuthMiddleware;
@@ -825,7 +839,13 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
+export const layerGameReviewAnswers = toolkitRegistration(
+  GameReviewAnswerToolkit,
+  GameHandlers.layerReviewAnswers,
+);
+
 const layerGameToolkit = Layer.mergeAll(
+  layerGameReviewAnswers,
   imageToolRegistration(registerGameWebPlaytest(), GameHandlers.layerPlaytest),
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );

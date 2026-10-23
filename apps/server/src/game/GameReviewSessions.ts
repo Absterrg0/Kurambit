@@ -8,6 +8,8 @@ import {
   GAME_REVIEW_ANSWER_MAX_BYTES,
   GameOperationError,
   GameReviewBallotAnswer,
+  GameReviewBallotInput,
+  type GameReviewReportResult,
   GameReviewCriticAnswer,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
@@ -27,6 +29,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -247,6 +250,27 @@ const ReviewSessionRecord = Schema.Struct({
   runId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 type ReviewSessionRecordType = typeof ReviewSessionRecord.Type;
+
+const ReviewCallerRecord = Schema.Struct({
+  root: Schema.String,
+  loopId: Schema.String,
+  roundId: Schema.String,
+  role: Schema.Literals(["critic", "ballot"]),
+  order: Schema.Number,
+});
+const ReviewToolRecord = Schema.Struct({
+  runId: Schema.String,
+  evidenceHash: Schema.NullOr(Schema.String),
+  attempts: Schema.Number,
+  raw: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+});
+const decodeToolRecord = Schema.decodeUnknownSync(ReviewToolRecord);
+
+export interface GameReviewToolCaller {
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: ProviderInstanceId;
+}
 
 const decodeSessionRecord = Schema.decodeUnknownSync(ReviewSessionRecord);
 const decodeSelectionRecord = Schema.decodeUnknownSync(ReviewSelectionRecord);
@@ -489,6 +513,7 @@ const decodeStrict = <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   value: unknown,
   label: string,
+  exactError = false,
 ): ParsedAnswer<S["Type"]> => {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return { kind: "invalid", reason: `The ${label} answer is not a JSON object.` };
@@ -498,7 +523,8 @@ const decodeStrict = <S extends Schema.ConstraintDecoder<unknown>>(
       answer: Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(value),
     };
   } catch (cause) {
-    const first = String(cause instanceof Error ? cause.message : cause).split("\n")[0]!;
+    const message = String(cause instanceof Error ? cause.message : cause);
+    const first = exactError ? message : message.split("\n")[0]!;
     return { kind: "invalid", reason: `The ${label} answer does not match its schema: ${first}` };
   }
 };
@@ -612,6 +638,15 @@ export class GameReviewSessions extends Context.Service<
     readonly start: (
       input: GameReviewSessionStartInput,
     ) => Effect.Effect<GameReviewSessionStartResult, GameOperationError>;
+    /** Only the active run of a server-owned review child can see its answer tool. */
+    readonly toolRole: (
+      caller: GameReviewToolCaller,
+    ) => Effect.Effect<"critic" | "ballot" | null, GameOperationError>;
+    readonly report: (
+      caller: GameReviewToolCaller,
+      role: "critic" | "ballot",
+      value: unknown,
+    ) => Effect.Effect<GameReviewReportResult, GameOperationError>;
     /** Reads and strictly validates the child's terminal answer. */
     readonly answer: (
       input: GameReviewSessionAnswerInput,
@@ -668,6 +703,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     const rounds = yield* GameRoundStore.GameRoundStore;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const catalog = yield* GameReviewProviderCatalog;
+    const reporting = Semaphore.makeUnsafe(1);
 
     const reviewRoot = Effect.fnUntraced(function* (root: string) {
       const canonical = yield* attempt("game review", root, () => realGameRoot(root));
@@ -684,6 +720,14 @@ export const layer = (options: { readonly stateDir: string }) => {
         "session.json",
       );
     });
+
+    const callerFile = (childThreadId: string) =>
+      NodePath.join(options.stateDir, "game-review-callers", `${encodePart(childThreadId)}.json`);
+
+    const toolFile = (root: string, key: SessionKey) =>
+      recordFile(root, key).pipe(
+        Effect.map((file) => NodePath.join(NodePath.dirname(file), "tool-answer.json")),
+      );
 
     const roundSelectionFile = Effect.fnUntraced(function* (root: string, roundId: string) {
       return NodePath.join(yield* reviewRoot(root), "rounds", `${encodePart(roundId)}.json`);
@@ -713,6 +757,12 @@ export const layer = (options: { readonly stateDir: string }) => {
     ) {
       const file = yield* recordFile(root, key);
       yield* attempt("write game review session", file, () => writeJsonAtomic(file, record));
+      if (record.role !== "repair") {
+        const lookup = callerFile(record.childThreadId);
+        yield* attempt("index game review caller", lookup, () =>
+          writeJsonAtomic(lookup, { root, ...key }),
+        );
+      }
     });
 
     const readRoundSelection = Effect.fnUntraced(function* (root: string, roundId: string) {
@@ -1261,6 +1311,149 @@ export const layer = (options: { readonly stateDir: string }) => {
         return { kind: "text", text: answer.text };
       });
 
+    const matchingCaller = Effect.fnUntraced(function* (caller: GameReviewToolCaller) {
+      const lookup = callerFile(caller.threadId);
+      const value = yield* attempt("read game review caller", lookup, () => readJson(lookup));
+      if (value === null) return null;
+      const key = yield* Effect.try({
+        try: () => Schema.decodeUnknownSync(ReviewCallerRecord)(value),
+        catch: (cause) => failure("read game review caller", lookup, "io", undefined, cause),
+      });
+      const record = yield* readRecord(key.root, key);
+      if (
+        record === null ||
+        record.childThreadId !== caller.threadId ||
+        record.selection.instanceId !== caller.providerInstanceId ||
+        record.dispatch?.state === "rejected"
+      )
+        return null;
+      const round = (yield* rounds.read(key.root)).rounds.find((round) => round.id === key.roundId);
+      if (round?.status !== "running") return null;
+      const records = yield* threads
+        .getThreadRecords(caller.threadId, ["runs"])
+        .pipe(
+          Effect.mapError((cause) =>
+            threadFailure("read game review caller", caller.threadId, cause),
+          ),
+        );
+      const dispatchedMessageId = IdAllocator.derive.delegatedTaskMessage({
+        commandId: CommandId.make(record.commandId),
+      });
+      const bound =
+        record.runId ?? records.runs.find((run) => run.userMessageId === dispatchedMessageId)?.id;
+      const active = records.runs.findLast(
+        (run) =>
+          run.status !== "completed" &&
+          run.status !== "failed" &&
+          run.status !== "cancelled" &&
+          run.status !== "interrupted" &&
+          run.status !== "rolled_back",
+      );
+      if (bound === undefined || active?.id !== bound) return null;
+      return { key, record, runId: active.id };
+    });
+
+    const toolRole: GameReviewSessions["Service"]["toolRole"] = (caller) =>
+      matchingCaller(caller).pipe(Effect.map((match) => match?.key.role ?? null));
+
+    const report: GameReviewSessions["Service"]["report"] = (caller, role, value) =>
+      reporting.withPermits(1)(
+        Effect.gen(function* () {
+          const match = yield* matchingCaller(caller);
+          const refused = (error: string): GameReviewReportResult => ({
+            accepted: false,
+            error,
+            attemptsRemaining: 0,
+            ended: true,
+          });
+          if (match === null || match.key.role !== role)
+            return refused(
+              "This tool is only available to its matching active internal review child run.",
+            );
+          const { key, record, runId } = match;
+          const file = yield* toolFile(key.root, key);
+          const stored = yield* attempt("read game review tool answer", file, () => readJson(file));
+          const previous =
+            stored === null
+              ? null
+              : yield* Effect.try({
+                  try: () => decodeToolRecord(stored),
+                  catch: (cause) =>
+                    failure("read game review tool answer", file, "io", undefined, cause),
+                });
+          if (
+            previous !== null &&
+            (previous.runId !== runId || previous.evidenceHash !== record.evidenceHash)
+          )
+            return refused("The recorded answer belongs to another run or evidence hash.");
+          if (previous?.raw !== null && previous?.raw !== undefined)
+            return refused("The first valid answer is already recorded; this session has ended.");
+          if ((previous?.attempts ?? 0) >= 3)
+            return refused("The review session exhausted its three answer attempts.");
+          const hash =
+            record.evidenceDirectory === null
+              ? null
+              : yield* attempt("hash game review evidence", record.evidenceDirectory, () =>
+                  hashEvidenceDirectory(record.evidenceDirectory!),
+                ).pipe(Effect.orElseSucceed(() => null));
+          if (hash === null || hash !== record.evidenceHash)
+            return refused(
+              "The evidence changed after this child started; its answer cannot be trusted.",
+            );
+          const known = {
+            frameIds: new Set(record.evidence?.frames.map((frame) => frame.id)),
+            checkIds: new Set(record.evidence?.checks.map((check) => check.id)),
+            itemIds: record.itemIds,
+          };
+          const parsed = (() => {
+            if (role === "critic") {
+              const decoded = decodeStrict(GameReviewCriticAnswer, value, role, true);
+              return decoded.kind === "invalid"
+                ? decoded
+                : parseCriticAnswer(JSON.stringify(decoded.answer), known);
+            }
+            const decoded = decodeStrict(GameReviewBallotInput, value, role, true);
+            if (decoded.kind === "invalid") return decoded;
+            const { works, look, feel, play, ...rest } = decoded.answer;
+            return parseBallotAnswer(
+              JSON.stringify({ main: { works, look, feel, play }, ...rest }),
+              known,
+            );
+          })();
+          const raw = parsed.kind === "valid" ? JSON.stringify(parsed.answer) : null;
+          const accepted = parsed.kind === "valid";
+          const attempts = (previous?.attempts ?? 0) + 1;
+          const error = parsed.kind === "invalid" ? parsed.reason : null;
+          yield* attempt("record game review tool answer", file, () =>
+            writeJsonAtomic(file, {
+              runId,
+              evidenceHash: record.evidenceHash,
+              attempts,
+              raw: accepted ? raw : null,
+              error,
+            }),
+          );
+          const ended = accepted || attempts === 3;
+          if (ended)
+            yield* threads
+              .dispatch({
+                type: "run.interrupt",
+                commandId: CommandId.make(`${record.commandId}:answer-ended`),
+                threadId: caller.threadId,
+                runId,
+                reason: accepted
+                  ? "The review answer was recorded."
+                  : "The review exhausted three answer attempts.",
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  threadFailure("end game review session", caller.threadId, cause),
+                ),
+              );
+          return { accepted, error, attemptsRemaining: accepted ? 0 : 3 - attempts, ended };
+        }),
+      );
+
     const runStatus: GameReviewSessions["Service"]["runStatus"] = (input) =>
       Effect.gen(function* () {
         const order = input.order ?? 0;
@@ -1465,6 +1658,8 @@ export const layer = (options: { readonly stateDir: string }) => {
     return GameReviewSessions.of({
       describe,
       start,
+      toolRole,
+      report,
       answer,
       runStatus,
       evidenceDirectory,

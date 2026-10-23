@@ -516,6 +516,14 @@ const withLoop = <A, E>(
               });
             return GameReviewSessions.GameReviewSessions.of({
               describe: () => Effect.succeed(null),
+              toolRole: () => Effect.succeed(null),
+              report: () =>
+                Effect.succeed({
+                  accepted: false,
+                  error: "No MCP caller in this fixture.",
+                  attemptsRemaining: 0,
+                  ended: true,
+                }),
               start,
               answer,
               runStatus,

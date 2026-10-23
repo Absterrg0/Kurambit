@@ -1131,3 +1131,163 @@ it.live("accepts one JSON fence and truncates prose while keeping decisions and 
     ).toBe("invalid");
   }),
 );
+
+it.live("returns the schema error, accepts a valid retry, and ends on the first valid call", () =>
+  withSession(({ frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      expect(yield* service.toolRole(caller)).toBe("critic");
+      const invalid = yield* service.report(caller, "critic", {
+        defects: [],
+        doNotRegress: "wrong",
+      });
+      expect(invalid).toMatchObject({ accepted: false, attemptsRemaining: 2, ended: false });
+      expect(invalid.error).toContain("doNotRegress");
+      expect(scripted.dispatches).toHaveLength(1);
+      const resumed = yield* restart();
+      const accepted = yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] });
+      expect(accepted).toEqual({ accepted: true, error: null, attemptsRemaining: 0, ended: true });
+      expect(scripted.dispatches.at(-1)).toMatchObject({
+        type: "run.interrupt",
+        runId: started.runId,
+      });
+      expect(
+        (yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+      ).toBe(false);
+    }),
+  ),
+);
+
+it.live(
+  "refuses other threads, roles, providers and follow-up runs without spending attempts",
+  () =>
+    withSession(({ frames, scripted, service }) =>
+      Effect.gen(function* () {
+        scripted.childStatus = "running";
+        const started = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: frameInput(frames),
+        });
+        if (started.kind !== "started") return expect(started.kind).toBe("started");
+        const caller = {
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        };
+        const answer = { defects: [], doNotRegress: [] };
+        expect(yield* service.toolRole({ ...caller, threadId })).toBeNull();
+        expect((yield* service.report({ ...caller, threadId }, "critic", answer)).accepted).toBe(
+          false,
+        );
+        expect((yield* service.report(caller, "ballot", answer)).accepted).toBe(false);
+        expect(
+          (yield* service.report(
+            { ...caller, providerInstanceId: overrideSelection.instanceId },
+            "critic",
+            answer,
+          )).accepted,
+        ).toBe(false);
+        scripted.childStatus = "completed";
+        scripted.extraChildRuns.push({
+          id: RunId.make("run:follow-up"),
+          ordinal: 2,
+          status: "running",
+          answer: "",
+        });
+        expect(yield* service.toolRole(caller)).toBeNull();
+        expect((yield* service.report(caller, "critic", answer)).accepted).toBe(false);
+        expect(scripted.dispatches).toHaveLength(1);
+      }),
+    ),
+);
+
+it.live("ends after three invalid calls and refuses a fourth valid call", () =>
+  withSession(({ frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = yield* service.report(caller, "critic", {
+          defects: [{ severity: "score" }],
+          doNotRegress: [],
+        });
+        expect(result).toMatchObject({
+          accepted: false,
+          attemptsRemaining: 2 - attempt,
+          ended: attempt === 2,
+        });
+      }
+      expect(scripted.dispatches.at(-1)).toMatchObject({ type: "run.interrupt" });
+      const resumed = yield* restart();
+      expect(
+        (yield* resumed.report(caller, "critic", { defects: [], doNotRegress: [] })).accepted,
+      ).toBe(false);
+    }),
+  ),
+);
+
+it.live("validates ballot coverage and evidence before recording the top-level facet choices", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: frameInput(frames),
+        items: [{ id: "turns", what: "Turning works" }],
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const value = {
+        works: "tie",
+        look: "B",
+        feel: "tie",
+        play: "tie",
+        preservation: [],
+        control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
+        reason: "f2 shows the improvement.",
+      };
+      expect((yield* service.report(caller, "ballot", value)).error).toContain(
+        "did not judge preservation items: turns",
+      );
+      const preservation = [{ id: "turns", A: "preserved", B: "unknown", frameIds: ["f99"] }];
+      expect((yield* service.report(caller, "ballot", { ...value, preservation })).error).toContain(
+        "frame f99",
+      );
+      preservation[0]!.frameIds = ["f2"];
+      expect((yield* service.report(caller, "ballot", { ...value, preservation })).accepted).toBe(
+        true,
+      );
+    }),
+  ),
+);
