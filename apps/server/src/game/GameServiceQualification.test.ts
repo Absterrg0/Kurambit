@@ -78,6 +78,8 @@ const playtestResult = (input: {
   booted: true,
   bootMs: 25,
   responded: input.responded,
+  // This fake stands in for a real run; a responding run dispatched input.
+  executedInputSteps: input.responded ? 1 : 0,
   changedPercent: input.responded ? 12 : 0,
   message: input.success ? "Playtest succeeded: fake run." : "Playtest failed: fake run.",
   consoleMessages: [],

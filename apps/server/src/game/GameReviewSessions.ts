@@ -1553,7 +1553,12 @@ export const layer = (options: { readonly stateDir: string }) => {
             ...(viewport == null ? {} : { width: viewport.width, height: viewport.height }),
           };
           const result = yield* game.value
-            .webPlaytestBuild(targetThreadId, buildId, playInput)
+            .webPlaytestBuild(
+              targetThreadId,
+              buildId,
+              playInput,
+              NodePath.join(options.stateDir, "game-input-experiments", NodeCrypto.randomUUID()),
+            )
             .pipe(
               Effect.timeoutOrElse({
                 duration: GAME_TRY_INPUT_BOUNDS.maxRunMs,

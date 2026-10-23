@@ -139,6 +139,7 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       buildId: string,
       input: GameWebPlaytestInput,
+      experimentDirectory?: string,
     ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
     readonly scenariosRun: (
@@ -408,6 +409,21 @@ const make = Effect.gen(function* () {
       );
       return completed.value;
     });
+
+  /**
+   * An isolated experiment returns the same result shape without owning the
+   * qualification stage: it is reviewer evidence, not the game's record.
+   */
+  const stageOrRun = <A>(
+    root: string,
+    stage: GameQualification.StoredQualificationStage,
+    operation: string,
+    work: Effect.Effect<{ readonly value: A; readonly record: StageOutcome }, GameOperationError>,
+    writeStage: boolean,
+  ): Effect.Effect<A, GameOperationError> =>
+    writeStage
+      ? ownStage(root, stage, operation, work)
+      : work.pipe(Effect.map(({ value }) => value));
 
   const response = (
     process: GameProcessResult,
@@ -858,6 +874,7 @@ const make = Effect.gen(function* () {
     input: GameWebPlaytestInput,
     runId: string | null,
     buildId?: string,
+    experimentDirectory?: string,
   ) =>
     Effect.gen(function* () {
       // Reject before exporting, serving, or launching the browser: a bad capture
@@ -870,7 +887,25 @@ const make = Effect.gen(function* () {
           reason: "invalid-input",
           detail: issues.join("\n"),
         });
-      return yield* ownStage(
+      if (experimentDirectory !== undefined) {
+        const isolated = NodePath.resolve(experimentDirectory);
+        const gameRoot = NodePath.resolve(root);
+        if (isolated === gameRoot || isolated.startsWith(`${gameRoot}${NodePath.sep}`))
+          return yield* new GameOperationError({
+            operation: "Web playtest",
+            path: root,
+            reason: "invalid-input",
+            detail: "An isolated input experiment must write outside the game folder.",
+          });
+        if (buildId === undefined)
+          return yield* new GameOperationError({
+            operation: "Web playtest",
+            path: root,
+            reason: "invalid-input",
+            detail: "An isolated input experiment must name a recorded build.",
+          });
+      }
+      return yield* stageOrRun(
         root,
         "playtest",
         "playtest",
@@ -1008,11 +1043,10 @@ const make = Effect.gen(function* () {
           const result = yield* playtest.run({
             executable,
             url,
-            profileDirectory: NodePath.join(
-              root,
-              "builds/logs",
-              `playtest-${NodeCrypto.randomUUID()}`,
-            ),
+            profileDirectory:
+              experimentDirectory === undefined
+                ? NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`)
+                : NodePath.join(experimentDirectory, "profile"),
             width: capture.width,
             height: capture.height,
             bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
@@ -1053,13 +1087,19 @@ const make = Effect.gen(function* () {
             try: () =>
               writePlaytestEvidence({
                 root,
+                ...(experimentDirectory === undefined
+                  ? {}
+                  : { directory: NodePath.join(experimentDirectory, "evidence") }),
                 result: enriched,
                 steps: input.steps ?? [],
               }),
             catch: (cause) =>
               new GameOperationError({
                 operation: "Web playtest evidence",
-                path: NodePath.join(root, "builds/playtests"),
+                path:
+                  experimentDirectory === undefined
+                    ? NodePath.join(root, "builds/playtests")
+                    : NodePath.join(experimentDirectory, "evidence"),
                 reason: "io",
                 cause,
               }),
@@ -1071,7 +1111,13 @@ const make = Effect.gen(function* () {
               reason: "invalid-input",
               detail: `Captured frames exceed the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes} byte response limit. All frames are stored in ${evidence.directory}; shorten the route or increase captureEveryMs.`,
             });
-          if (build?.buildId !== null && build?.buildId !== undefined)
+          // An experiment is reviewer evidence, never the game's playtest
+          // record: it must not replace the build binding a submission uses.
+          if (
+            experimentDirectory === undefined &&
+            build?.buildId !== null &&
+            build?.buildId !== undefined
+          )
             yield* rounds.recordBuildPlaytest(root, build.buildId, {
               booted: result.booted,
               responded: result.responded,
@@ -1113,6 +1159,7 @@ const make = Effect.gen(function* () {
             },
           };
         }),
+        experimentDirectory === undefined,
       );
     });
   /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
@@ -1847,8 +1894,10 @@ const make = Effect.gen(function* () {
           Effect.flatMap(exporterRun(threadId), (runId) => webPlaytest(root, input, runId)),
         ),
       ),
-    webPlaytestBuild: (threadId, buildId, input) =>
-      withRoot(threadId, "Web playtest", (root) => webPlaytest(root, input, null, buildId)),
+    webPlaytestBuild: (threadId, buildId, input, experimentDirectory) =>
+      withRoot(threadId, "Web playtest", (root) =>
+        webPlaytest(root, input, null, buildId, experimentDirectory),
+      ),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),
     inspectScene: (threadId, scenePath) =>

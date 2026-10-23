@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import {
+  ProviderInstanceId,
   GameOperationError,
   RunId,
   ThreadId,
@@ -30,6 +31,10 @@ import * as GameRoundStore from "./GameRoundStore.ts";
 import type * as GameServiceModule from "./GameService.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameService from "./GameService.ts";
+import * as GameReviewSessions from "./GameReviewSessions.ts";
+import * as GameRepairLoop from "./GameRepairLoop.ts";
+import * as GameOperations from "./GameOperations.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import { admissionTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
@@ -109,6 +114,7 @@ const withGame = <A, E, R = never>(
   options: FixtureOptions,
   body: (input: {
     readonly root: string;
+    readonly stateDir: string;
     readonly studio: GameRepairStudio.GameRepairStudio["Service"];
     readonly game: GameServiceModule.GameService["Service"];
     readonly qualification: QualificationService;
@@ -236,7 +242,7 @@ const withGame = <A, E, R = never>(
         const studio = yield* GameRepairStudio.GameRepairStudio;
         const qualification = yield* GameQualification.GameQualification;
         const rounds = yield* GameRoundStore.GameRoundStore;
-        return yield* body({ root, game, studio, qualification, rounds });
+        return yield* body({ root, stateDir, game, studio, qualification, rounds });
       }).pipe(Effect.provide(services));
     }),
   );
@@ -1447,6 +1453,145 @@ it.live(
           expect(refused.reason).toBe(
             "sources: The export's recorded source manifest or snapshot changed.",
           );
+        }),
+    );
+  },
+);
+
+const folderBytes = async (root: string): Promise<Record<string, string>> => {
+  const bytes: Record<string, string> = {};
+  for (const entry of await NodeFSP.readdir(root, { withFileTypes: true })) {
+    const path = NodePath.join(root, entry.name);
+    if (entry.isDirectory()) {
+      for (const [file, data] of Object.entries(await folderBytes(path)))
+        bytes[`${entry.name}/${file}`] = data;
+    } else bytes[entry.name] = (await NodeFSP.readFile(path)).toString("base64");
+  }
+  return bytes;
+};
+
+it.live(
+  "default input experiments use the real export hash and leave submission evidence and folder bytes intact",
+  () => {
+    const profiles: string[] = [];
+    return withGame(
+      {
+        run: (input) =>
+          Effect.promise(async () => {
+            if (input.operation === "export-web") {
+              const directory = NodePath.dirname(input.args.at(-1)!);
+              await NodeFSP.mkdir(directory, { recursive: true });
+              for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+                await NodeFSP.writeFile(NodePath.join(directory, name), `export ${name}`);
+            }
+            return processOk(input.root);
+          }),
+        playtest: (input) =>
+          Effect.promise(async () => {
+            profiles.push(input.profileDirectory);
+            await NodeFSP.mkdir(input.profileDirectory, { recursive: true });
+            await NodeFSP.writeFile(
+              NodePath.join(input.profileDirectory, "browser-state"),
+              "profile",
+            );
+            const executedInputSteps = input.steps.filter((step) => !("waitMs" in step)).length;
+            return {
+              ...playtestResult,
+              executedInputSteps,
+              responded: executedInputSteps > 0,
+              screenshots: [
+                {
+                  label: "after",
+                  mimeType: "image/png" as const,
+                  data: "cG5n",
+                  width: 640,
+                  height: 360,
+                },
+              ],
+            };
+          }),
+      },
+      ({ root, stateDir, game, studio, rounds }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "game.json"), JSON.stringify(manifest())),
+          );
+          yield* game.export(threadId, "Web");
+          yield* game.webPlaytest(threadId, { steps: [{ press: "Space" }] });
+          const status = yield* game.status(threadId);
+          const buildId = status.qualification.stages.find(
+            (stage) => stage.stage === "export",
+          )!.buildId!;
+          expect(buildId).toHaveLength(64);
+          expect(status.qualification.servedArtifactId).toHaveLength(24);
+          const binding = yield* rounds.exported(root, buildId);
+          const statusBefore = yield* game.status(threadId);
+          const before = yield* Effect.promise(() => folderBytes(root));
+          const projects = Layer.mock(GameProjectService.GameProjectService)({
+            resolve: () => Effect.succeed(root),
+            activeRun: () => Effect.succeed(RunId.make("run:exporter")),
+          });
+          const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: () =>
+              Effect.succeed({
+                runs: [
+                  {
+                    id: RunId.make("run:exporter"),
+                    status: "running",
+                    providerInstanceId: ProviderInstanceId.make("codex"),
+                  },
+                ],
+              } as never),
+          });
+          const sessionLayer = GameReviewSessions.layer({ stateDir }).pipe(
+            Layer.provide(Layer.succeed(GameService.GameService, game)),
+            Layer.provide(Layer.succeed(GameRoundStore.GameRoundStore, rounds)),
+            Layer.provide(projects),
+            Layer.provide(threads),
+            Layer.provide(
+              Layer.succeed(GameReviewSessions.GameReviewProviderCatalog, {
+                available: () => Effect.succeed(true),
+              }),
+            ),
+          );
+          yield* Effect.gen(function* () {
+            const sessions = yield* GameReviewSessions.GameReviewSessions;
+            const result = yield* sessions.tryInput(
+              { threadId, providerInstanceId: ProviderInstanceId.make("codex") },
+              { steps: [{ waitMs: 100 }] },
+            );
+            expect(result.executedInputSteps).toBe(0);
+            expect(NodePath.isAbsolute(result.evidenceDirectory!)).toBe(true);
+            expect(result.evidenceDirectory).not.toContain(root);
+            expect(profiles.at(-1)).not.toContain(root);
+            expect(yield* Effect.promise(() => folderBytes(root))).toEqual(before);
+            expect(yield* rounds.exported(root, buildId)).toEqual(binding);
+            const statusAfter = yield* game.status(threadId);
+            expect(statusAfter.qualification).toEqual(statusBefore.qualification);
+            expect(statusAfter.lastPlaytest).toEqual(statusBefore.lastPlaytest);
+            const loopLayer = GameRepairLoop.layer({ stateDir }).pipe(
+              Layer.provide(Layer.succeed(GameRepairStudio.GameRepairStudio, studio)),
+              Layer.provide(Layer.succeed(GameRoundStore.GameRoundStore, rounds)),
+              Layer.provide(Layer.succeed(GameReviewSessions.GameReviewSessions, sessions)),
+              Layer.provide(projects),
+              Layer.provide(threads),
+              Layer.provide(admissionTestLayer),
+              Layer.provide(GameOperations.layer),
+              Layer.provide(
+                Layer.mock(GamePreview.GamePreview)({
+                  directories: () => [],
+                  url: () => null,
+                  urlFor: () => null,
+                  serving: () => false,
+                }),
+              ),
+            );
+            const submitted = yield* Effect.flatMap(GameRepairLoop.GameRepairLoop, (loop) =>
+              loop.submit(threadId, { note: "A playable game" }),
+            ).pipe(Effect.provide(loopLayer));
+            expect(submitted.accepted, submitted.message).toBe(true);
+            expect(submitted.buildId).toBe(buildId);
+          }).pipe(Effect.provide(sessionLayer));
         }),
     );
   },

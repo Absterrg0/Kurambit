@@ -274,6 +274,40 @@ it.live("covers from the latest qualifying run, never a newer failed attempt", (
   }),
 );
 
+it.live("an isolated experiment store leaves the game's playtest history alone", () =>
+  Effect.gen(function* () {
+    const root = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "isolated-evidence-"))),
+      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+    );
+    const store = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "experiment-store-"))),
+      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+    );
+    const existing = NodePath.join(root, "builds/playtests/2026-10-20T12-00-00-000Z");
+    yield* Effect.promise(() => NodeFSP.mkdir(existing, { recursive: true }));
+    const written = yield* Effect.promise(() =>
+      writePlaytestEvidence({
+        root,
+        directory: store,
+        steps: [{ waitMs: 100 }],
+        result: result("waited"),
+      }),
+    );
+    expect(written.directory).toBe(store);
+    expect((yield* Effect.promise(() => NodeFSP.readdir(store))).sort()).toEqual([
+      "01-booted.png",
+      "02-waited.png",
+      "result.json",
+    ]);
+    expect(
+      (yield* Effect.promise(() =>
+        NodeFSP.readdir(NodePath.join(root, "builds/playtests")),
+      )).sort(),
+    ).toEqual(["2026-10-20T12-00-00-000Z"]);
+  }).pipe(Effect.scoped),
+);
+
 it.live("records dispatched input separately from requests and pixel response", () =>
   Effect.gen(function* () {
     const root = yield* Effect.acquireRelease(

@@ -1,5 +1,5 @@
 // @effect-diagnostics globalDate:off -- Evidence folder names and result timestamps are wall-clock records of a run.
-// @effect-diagnostics nodeBuiltinImport:off -- Playtest evidence is files under the game's builds/ directory.
+// @effect-diagnostics nodeBuiltinImport:off -- Playtest evidence is files under builds/ or an isolated experiment store.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
@@ -84,14 +84,17 @@ const uniqueDirectory = async (root: string, base: string) => {
 /** Writes frames and a result.json, then keeps only the newest five runs. */
 export const writePlaytestEvidence = async (input: {
   readonly root: string;
+  /** An isolated experiment store; never prunes or writes the game playtest history. */
+  readonly directory?: string;
   readonly steps: readonly GamePlaytestStep[];
   readonly result: GameWebPlaytestResult;
   readonly at?: Date;
 }): Promise<{ readonly directory: string }> => {
   const at = input.at ?? new Date();
-  const name = await uniqueDirectory(input.root, timestampName(at));
-  const relativeDirectory = `${PLAYTEST_DIRECTORY}/${name}`;
-  const directory = NodePath.join(input.root, relativeDirectory);
+  const relativeDirectory =
+    input.directory ??
+    `${PLAYTEST_DIRECTORY}/${await uniqueDirectory(input.root, timestampName(at))}`;
+  const directory = input.directory ?? NodePath.join(input.root, relativeDirectory);
   await NodeFSP.mkdir(directory, { recursive: true });
   const frames: (typeof StoredFrame)["Type"][] = [];
   for (const [index, shot] of input.result.screenshots.entries()) {
@@ -147,7 +150,7 @@ export const writePlaytestEvidence = async (input: {
     NodePath.join(directory, "result.json"),
     `${JSON.stringify(stored, null, 2)}\n`,
   );
-  await prunePlaytests(input.root);
+  if (input.directory === undefined) await prunePlaytests(input.root);
   return { directory: relativeDirectory };
 };
 
