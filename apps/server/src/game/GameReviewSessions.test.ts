@@ -8,6 +8,8 @@ import {
   CommandId,
   GAME_REVIEW_ANSWER_MAX_BYTES,
   type GameManifest,
+  type GameWebPlaytestInput,
+  type GameWebPlaytestResult,
   type GameReviewRound,
   MessageId,
   type ModelSelection,
@@ -26,6 +28,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as GameService from "./GameService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
@@ -71,7 +74,7 @@ const runningRound: GameReviewRound = {
   finishedAt: null,
   incumbentSnapshotId: "source-incumbent",
   incumbentSourceId: "source-incumbent",
-  incumbentBuildId: null,
+  incumbentBuildId: "build-incumbent",
   postRepairSourceId: null,
   candidate: null,
   budget: { repairs: 3, elapsedMs: 20 * 60_000 },
@@ -149,7 +152,34 @@ interface ScriptedChildRun {
   readonly answer: string;
 }
 
+const tryResult: GameWebPlaytestResult = {
+  success: true,
+  booted: true,
+  bootMs: 10,
+  responded: true,
+  changedPercent: 25,
+  message: "Played",
+  consoleMessages: [{ level: "error", text: "observed console fault" }],
+  state: null,
+  screenshots: ["before", "after"].map((phase) => ({
+    label: `input 1 ${phase}`,
+    mimeType: "image/png",
+    data: "cG5n",
+    width: 640,
+    height: 360,
+    inputPair: {
+      stepIndex: 0,
+      phase: phase as "before" | "after",
+      input: { press: "Space" },
+      changedPercent: 25,
+      stateChanges: [{ key: "state.score", before: 0, after: 1 }],
+    },
+  })),
+};
 interface Scripted {
+  readonly tries: Array<{ threadId: ThreadId; buildId: string; input: GameWebPlaytestInput }>;
+  builderStatus: OrchestrationV2Run["status"];
+  viewport: { width: number; height: number };
   /** The commands the session service dispatched, when any ran. */
   readonly dispatches: Array<OrchestrationV2ServerCommand>;
   readonly receipts: Set<string>;
@@ -178,6 +208,9 @@ interface Scripted {
 }
 
 const makeScripted = (): Scripted => ({
+  tries: [],
+  builderStatus: "completed",
+  viewport: { width: 640, height: 360 },
   dispatches: [],
   receipts: new Set(),
   rejectedReceipts: new Set(),
@@ -262,6 +295,19 @@ const withSession = <A, E>(
         });
         const service = GameReviewSessions.layer({ stateDir }).pipe(
           Layer.provide(
+            Layer.mock(GameService.GameService)({
+              status: () =>
+                Effect.succeed({
+                  qualification: { servedArtifactId: "build-incumbent" },
+                } as import("@t3tools/contracts").GameStatus),
+              webPlaytestBuild: (threadId, buildId, input) =>
+                Effect.sync(() => {
+                  scripted.tries.push({ threadId, buildId, input });
+                  return tryResult;
+                }),
+            }),
+          ),
+          Layer.provide(
             Layer.mock(GameProjectService.GameProjectService)({
               resolve: () => Effect.succeed(root),
               read: () => Effect.succeed(manifest),
@@ -270,6 +316,25 @@ const withSession = <A, E>(
           Layer.provide(
             Layer.mock(GameRoundStore.GameRoundStore)({
               read: () => Effect.succeed(roundState()),
+              exported: () =>
+                Effect.succeed({
+                  artifact: {
+                    buildId: "build-incumbent",
+                    sourceId: "source-incumbent",
+                    directory: "builds/web",
+                    engine: "godot",
+                    target: "Web",
+                    entry: "builds/web/index.html",
+                  },
+                  sourceDirectory: root,
+                  playtest: {
+                    booted: true,
+                    responded: true,
+                    consoleErrors: 0,
+                    steps: [],
+                    viewport: scripted.viewport,
+                  },
+                }),
             }),
           ),
           Layer.provide(
@@ -298,7 +363,7 @@ const withSession = <A, E>(
                   if (target === threadId)
                     return {
                       thread: { ...parentThread, modelSelection: scripted.parentSelection },
-                      runs: [builderRun],
+                      runs: [{ ...builderRun, status: scripted.builderStatus }],
                     } as unknown as OrchestrationV2ThreadProjection;
                   if (scripted.childThreadId !== null && target === scripted.childThreadId) {
                     if (scripted.childRecordsGate !== null) yield* scripted.childRecordsGate();
@@ -1598,4 +1663,234 @@ it.live("fundamentals require typed verdicts and honest frame citations", () =>
         .kind,
     ).toBe("invalid");
   }),
+);
+
+it.live(
+  "records active critic frames, validates citations and preserves hashes across restart",
+  () =>
+    withSession(({ service, restart, scripted, frames }) =>
+      Effect.gen(function* () {
+        scripted.childStatus = "running";
+        const started = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: frameInput(frames),
+        });
+        if (started.kind !== "started") return expect(started.kind).toBe("started");
+        const caller = {
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        };
+        expect(yield* service.toolRole(caller)).toBe("critic");
+        scripted.viewport = { width: 1280, height: 720 };
+        const result = yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+        expect(result.consoleMessages).toEqual(tryResult.consoleMessages);
+        expect(result.screenshots.map((frame) => frame.frameId)).toEqual(["try1f1", "try1f2"]);
+        expect(result.screenshots[1]?.inputPair?.stateChanges).toEqual([
+          { key: "state.score", before: 0, after: 1 },
+        ]);
+        expect(scripted.tries).toEqual([
+          {
+            threadId,
+            buildId: "build-incumbent",
+            input: {
+              steps: [{ press: "Space" }],
+              captureEveryMs: 1000,
+              captureAllSteps: true,
+              width: 640,
+              height: 360,
+            },
+          },
+        ]);
+        const ref = yield* service.describe({ threadId, loopId, roundId, role: "critic" });
+        expect(ref?.frames.map((frame) => frame.id)).toEqual(["f1", "f2", "try1f1", "try1f2"]);
+        expect(ref?.hash).not.toBe(started.evidenceHash);
+        const bytes = yield* Effect.promise(() => NodeFSP.readFile(ref!.frames[3]!.path));
+        expect(bytes.toString()).toBe("png");
+        const recorded = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(ref!.directory, "try-1.json"), "utf8"),
+        );
+        expect(JSON.parse(recorded)).toMatchObject({
+          buildId: "build-incumbent",
+          steps: [{ press: "Space" }],
+          consoleMessages: tryResult.consoleMessages,
+        });
+        const resumed = yield* restart();
+        expect(yield* resumed.toolRole(caller)).toBe("critic");
+        const accepted = yield* resumed.report(caller, "critic", {
+          fundamentals,
+          defects: [
+            {
+              severity: "visible",
+              what: "Observed fault",
+              frameId: "try1f2",
+              fix: "Fix and verify with input",
+            },
+          ],
+          doNotRegress: [{ id: "working-input", what: "Input responds", frameId: "try1f1" }],
+        });
+        expect(accepted.accepted).toBe(true);
+        expect(
+          (yield* resumed.tryInput(caller, { steps: [{ press: "Space" }] }).pipe(Effect.flip))
+            .detail,
+        ).toContain("ended");
+        scripted.childStatus = "interrupted";
+        expect((yield* resumed.answer({ threadId, loopId, roundId, role: "critic" })).kind).toBe(
+          "critic",
+        );
+      }),
+    ),
+);
+
+it.live("bounds active calls durably and rejects invalid routes before launching", () =>
+  withSession(({ service, restart, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      expect(
+        (yield* service
+          .tryInput(caller, { steps: Array.from({ length: 13 }, () => ({ press: "w" })) })
+          .pipe(Effect.flip)).detail,
+      ).toContain("1–12 steps");
+      expect(
+        (yield* service
+          .tryInput(caller, { buildId: "other", steps: [{ press: "w" }] })
+          .pipe(Effect.flip)).detail,
+      ).toContain("frozen build");
+      expect(scripted.tries).toHaveLength(0);
+      for (let call = 0; call < 6; call++) {
+        const resumed = yield* restart();
+        yield* resumed.tryInput(caller, { steps: [{ press: "Space" }] });
+      }
+      const resumed = yield* restart();
+      expect(
+        (yield* resumed.tryInput(caller, { steps: [{ press: "Space" }] }).pipe(Effect.flip)).detail,
+      ).toBe("game_try_input exhausted its 6 calls for this session.");
+      expect(scripted.tries).toHaveLength(6);
+      const ref = yield* resumed.describe({ threadId, loopId, roundId, role: "critic" });
+      expect(ref?.frames).toHaveLength(14);
+      expect(new Set(ref?.frames.map((frame) => frame.id)).size).toBe(14);
+    }),
+  ),
+);
+
+it.live("ballots cannot play and their frozen evidence remains unchanged", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const error = yield* service
+        .tryInput(
+          { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+          { steps: [{ press: "Space" }] },
+        )
+        .pipe(Effect.flip);
+      expect(error.detail).toContain("ballots compare frozen evidence only");
+      expect(scripted.tries).toHaveLength(0);
+      expect(yield* service.evidenceHash({ threadId, loopId, roundId, role: "ballot" })).toBe(
+        started.evidenceHash,
+      );
+    }),
+  ),
+);
+
+it.live("builders and repair children can verify their exported game before submitting", () =>
+  withSession(({ service, scripted }) =>
+    Effect.gen(function* () {
+      scripted.builderStatus = "running";
+      yield* service.tryInput(
+        { threadId, providerInstanceId: builderSelection.instanceId },
+        { steps: [{ press: "Space" }] },
+      );
+      scripted.builderStatus = "completed";
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        repair: { remainingBudget: "1 repair", defects: [], doNotRegress: [] },
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      yield* service.tryInput(
+        { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+        { steps: [{ click: "left" }] },
+      );
+      expect(scripted.tries.map((call) => call.threadId)).toEqual([
+        threadId,
+        started.childThreadId,
+      ]);
+      expect(
+        (yield* service
+          .tryInput(
+            { threadId: started.childThreadId, providerInstanceId: overrideSelection.instanceId },
+            { steps: [{ press: "Space" }] },
+          )
+          .pipe(Effect.flip)).detail,
+      ).toContain("active provider run");
+      scripted.childStatus = "completed";
+      expect(
+        (yield* service
+          .tryInput(
+            { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+            { steps: [{ press: "Space" }] },
+          )
+          .pipe(Effect.flip)).detail,
+      ).toContain("active provider run");
+    }),
+  ),
+);
+
+it.live("active input cannot legitimize changed critic evidence", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(directory!, "frames/frame-01.png"), "tampered"),
+      );
+      expect(
+        (yield* service
+          .tryInput(
+            { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+            { steps: [{ press: "Space" }] },
+          )
+          .pipe(Effect.flip)).detail,
+      ).toContain("evidence changed");
+      expect(scripted.tries).toHaveLength(0);
+    }),
+  ),
 );

@@ -5,6 +5,10 @@ import * as NodePath from "node:path";
 
 import {
   CommandId,
+  GAME_TRY_INPUT_BOUNDS,
+  tryInputIssues,
+  type GameTryInput,
+  type GameWebPlaytestResult,
   GAME_REVIEW_ANSWER_MAX_BYTES,
   GameOperationError,
   GameReviewBallotAnswer,
@@ -13,6 +17,7 @@ import {
   GameReviewCriticAnswer,
   GameReviewCheck,
   GamePlaytestInputPair,
+  GameViewport,
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type ModelSelection,
@@ -30,6 +35,8 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as GameService from "./GameService.ts";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
@@ -248,6 +255,8 @@ const ReviewSessionRecord = Schema.Struct({
   evidenceHash: Schema.NullOr(Schema.String),
   evidence: Schema.NullOr(ReviewEvidenceRecord),
   itemIds: Schema.Array(Schema.String),
+  playBuildId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  playViewport: Schema.optionalKey(Schema.NullOr(GameViewport)),
   startedAt: Schema.String,
   /** Present from this version on; absent records predate the pending write. */
   dispatch: Schema.optionalKey(ReviewDispatchRecord),
@@ -665,6 +674,10 @@ export class GameReviewSessions extends Context.Service<
      * ballot children run in their evidence directory; a repair child runs in
      * the game folder and is the only writable role.
      */
+    readonly tryInput: (
+      caller: GameReviewToolCaller,
+      input: GameTryInput,
+    ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
     readonly start: (
       input: GameReviewSessionStartInput,
     ) => Effect.Effect<GameReviewSessionStartResult, GameOperationError>;
@@ -734,6 +747,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const catalog = yield* GameReviewProviderCatalog;
     const reporting = Semaphore.makeUnsafe(1);
+    const game = yield* Effect.serviceOption(GameService.GameService);
 
     const reviewRoot = Effect.fnUntraced(function* (root: string) {
       const canonical = yield* attempt("game review", root, () => realGameRoot(root));
@@ -1222,7 +1236,11 @@ export const layer = (options: { readonly stateDir: string }) => {
 
         const childThreadId = IdAllocator.derive.delegatedTaskThread({ commandId });
         const taskId = IdAllocator.derive.delegatedTaskNode({ commandId });
+        const playBuildId = input.role === "critic" ? live.incumbentBuildId : null;
+        const playBinding = playBuildId === null ? null : yield* rounds.exported(root, playBuildId);
         const record: ReviewSessionRecordType = {
+          playBuildId,
+          playViewport: playBinding?.playtest?.viewport ?? null,
           schemaVersion: 1,
           loopId: input.loopId,
           roundId: input.roundId,
@@ -1408,6 +1426,198 @@ export const layer = (options: { readonly stateDir: string }) => {
       if (bound === undefined || active?.id !== bound) return null;
       return { key, record, runId: active.id };
     });
+
+    const tryInput: GameReviewSessions["Service"]["tryInput"] = (caller, input) =>
+      reporting.withPermits(1)(
+        Effect.gen(function* () {
+          const invalid = (detail: string) =>
+            failure("game_try_input", caller.threadId, "invalid-input", detail);
+          const issues = tryInputIssues(input);
+          if (issues.length > 0) return yield* invalid(issues.join("\n"));
+          const indexed = yield* attempt("read game review caller", caller.threadId, () =>
+            readJson(callerFile(caller.threadId)),
+          );
+          const match = yield* matchingCaller(caller);
+          if (indexed !== null && (match === null || match.key.role !== "critic"))
+            return yield* invalid(
+              "game_try_input is unavailable to ballots and inactive review sessions; ballots compare frozen evidence only.",
+            );
+          if (Option.isNone(game))
+            return yield* invalid("The headless game playtest service is unavailable.");
+          const records = yield* threads
+            .getThreadRecords(caller.threadId, ["runs"])
+            .pipe(
+              Effect.mapError((cause) =>
+                threadFailure("read game input caller", caller.threadId, cause),
+              ),
+            );
+          const run = records.runs.findLast(
+            (run) =>
+              run.status === "running" ||
+              run.status === "starting" ||
+              run.status === "waiting" ||
+              run.status === "queued",
+          );
+          if (run === undefined || run.providerInstanceId !== caller.providerInstanceId)
+            return yield* invalid("game_try_input requires the caller's active provider run.");
+          const root = match?.key.root ?? (yield* projects.resolve(caller.threadId));
+          const round =
+            match === null
+              ? null
+              : (yield* rounds.read(root)).rounds.find((round) => round.id === match.key.roundId);
+          const targetThreadId = round?.threadId ?? caller.threadId;
+          const buildId =
+            match === null
+              ? (input.buildId ??
+                (yield* game.value.status(targetThreadId)).qualification.servedArtifactId ??
+                undefined)
+              : (match.record.playBuildId ?? round?.incumbentBuildId ?? undefined);
+          if (
+            match !== null &&
+            (buildId === undefined || (input.buildId !== undefined && input.buildId !== buildId))
+          )
+            return yield* invalid("The critic can only play the frozen build under review.");
+          const priorTool =
+            match === null ? null : yield* readToolRecord(yield* toolFile(root, match.key));
+          if (
+            match !== null &&
+            priorTool !== null &&
+            (priorTool.runId !== run.id || priorTool.evidenceHash !== match.record.evidenceHash)
+          )
+            return yield* invalid("The recorded answer belongs to another run or evidence hash.");
+          if (priorTool !== null && (priorTool.raw !== null || priorTool.attempts >= 3))
+            return yield* invalid("The review session has ended.");
+          if (
+            match !== null &&
+            (yield* attempt("hash game review evidence", root, () =>
+              hashEvidenceDirectory(match.record.evidenceDirectory!),
+            )) !== match.record.evidenceHash
+          )
+            return yield* invalid(
+              "The evidence changed after this child started; active input is refused.",
+            );
+          const budgetFile = NodePath.join(
+            options.stateDir,
+            "game-input-calls",
+            encodePart(caller.threadId),
+            `${encodePart(run.id)}.json`,
+          );
+          const previous = yield* attempt("read game input budget", budgetFile, () =>
+            readJson(budgetFile),
+          );
+          const calls =
+            previous === null
+              ? 0
+              : yield* Schema.decodeUnknownEffect(
+                  Schema.Int.check(
+                    Schema.isBetween({ minimum: 0, maximum: GAME_TRY_INPUT_BOUNDS.maxCalls }),
+                  ),
+                )(previous).pipe(
+                  Effect.mapError((cause) =>
+                    failure("read game input budget", budgetFile, "io", undefined, cause),
+                  ),
+                );
+          if (calls >= GAME_TRY_INPUT_BOUNDS.maxCalls)
+            return yield* invalid(
+              `game_try_input exhausted its ${GAME_TRY_INPUT_BOUNDS.maxCalls} calls for this session.`,
+            );
+          // Reserve before launching: failures and restarts cannot reset the session's cost.
+          yield* attempt("reserve game input call", budgetFile, () =>
+            writeJsonAtomic(budgetFile, calls + 1),
+          );
+          if (buildId === undefined)
+            return yield* invalid(
+              "No exported build is available. Export the game before trying input.",
+            );
+          const bound = yield* rounds.exported(root, buildId);
+          if (bound === null)
+            return yield* invalid(`Build ${buildId} has no recorded source binding.`);
+          const viewport = match?.record.playViewport ?? bound.playtest?.viewport;
+          const playInput = {
+            steps: input.steps,
+            captureEveryMs: input.captureEveryMs ?? 1000,
+            captureAllSteps: true,
+            ...(viewport == null ? {} : { width: viewport.width, height: viewport.height }),
+          };
+          const result = yield* game.value
+            .webPlaytestBuild(targetThreadId, buildId, playInput)
+            .pipe(
+              Effect.timeoutOrElse({
+                duration: GAME_TRY_INPUT_BOUNDS.maxRunMs,
+                orElse: () =>
+                  Effect.fail(
+                    invalid(
+                      `game_try_input exceeded its ${GAME_TRY_INPUT_BOUNDS.maxRunMs} ms run deadline.`,
+                    ),
+                  ),
+              }),
+            );
+          if (result.screenshots.length > GAME_TRY_INPUT_BOUNDS.maxFrames)
+            return yield* invalid(
+              `game_try_input produced ${result.screenshots.length} frames; limit is ${GAME_TRY_INPUT_BOUNDS.maxFrames}.`,
+            );
+          if (match === null) return result;
+          const directory = match.record.evidenceDirectory!;
+          if (
+            (yield* attempt("hash game review evidence", directory, () =>
+              hashEvidenceDirectory(directory),
+            )) !== match.record.evidenceHash
+          )
+            return yield* invalid(
+              "The evidence changed during active input; its frames cannot be recorded.",
+            );
+          const evidence = match.record.evidence!;
+          const frames = result.screenshots.map((frame, index) => ({
+            id: `try${calls + 1}f${index + 1}`,
+            file: `frames/try-${calls + 1}-${index + 1}.png`,
+            sourceId: `try-${calls + 1}-${index + 1}`,
+            label: frame.label,
+            ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+          }));
+          const nextEvidence = { ...evidence, frames: [...evidence.frames, ...frames] };
+          yield* attempt("record active critic evidence", directory, async () => {
+            for (const [index, frame] of result.screenshots.entries())
+              await NodeFSP.writeFile(
+                NodePath.join(directory, frames[index]!.file),
+                Buffer.from(frame.data, "base64"),
+              );
+            await writeJsonAtomic(NodePath.join(directory, `try-${calls + 1}.json`), {
+              buildId,
+              steps: input.steps,
+              captureEveryMs: playInput.captureEveryMs,
+              ...result,
+              screenshots: frames,
+            });
+            await writeJsonAtomic(NodePath.join(directory, EVIDENCE_MANIFEST), {
+              ...nextEvidence,
+              frames: nextEvidence.frames.map(({ sourceId: _sourceId, ...frame }) => frame),
+            });
+          });
+          const hash = yield* attempt("hash active critic evidence", directory, () =>
+            hashEvidenceDirectory(directory),
+          );
+          yield* writeRecord(root, match.key, {
+            ...match.record,
+            evidence: nextEvidence,
+            evidenceHash: hash,
+          });
+          if (priorTool !== null)
+            yield* attempt("bind active critic answer", directory, () =>
+              writeJsonAtomic(
+                // The answer continues to validate the complete, server-extended evidence tree.
+                NodePath.join(NodePath.dirname(directory), "tool-answer.json"),
+                { ...priorTool, evidenceHash: hash },
+              ),
+            );
+          return {
+            ...result,
+            screenshots: result.screenshots.map((frame, index) => ({
+              ...frame,
+              frameId: frames[index]!.id,
+            })),
+          };
+        }),
+      );
 
     const toolRole: GameReviewSessions["Service"]["toolRole"] = (caller) =>
       reporting.withPermits(1)(
@@ -1736,6 +1946,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       });
     return GameReviewSessions.of({
       describe,
+      tryInput,
       start,
       toolRole,
       report,

@@ -30,13 +30,14 @@ export const playtestStepWithEvidence = async (input: {
   readonly stepIndex: number;
   readonly capture: () => Promise<Capture>;
   readonly execute: () => Promise<boolean>;
+  readonly captureAllSteps?: boolean;
 }): Promise<{ readonly executed: boolean; readonly frames: readonly GamePlaytestScreenshot[] }> => {
   const { step, stepIndex } = input;
-  if ("waitMs" in step || "screenshot" in step)
+  if (("waitMs" in step && !input.captureAllSteps) || "screenshot" in step)
     return { executed: await input.execute(), frames: [] };
   const before = await input.capture();
   const executed = await input.execute();
-  if (!executed) return { executed, frames: [] };
+  if (!executed && !input.captureAllSteps) return { executed, frames: [] };
   const after = await input.capture();
   const changedPercent =
     before.pixels === null || after.pixels === null
@@ -49,10 +50,16 @@ export const playtestStepWithEvidence = async (input: {
     .map((key) => ({ key, before: beforeState[key] ?? null, after: afterState[key] ?? null }));
   const action =
     "holdMs" in step
-      ? `held ${"keys" in step ? step.keys.join("+") : step.key} ${step.holdMs}ms`
+      ? `held ${"keys" in step ? step.keys.join("+") : "key" in step ? step.key : "hold" in step ? step.hold : "drag"} ${step.holdMs}ms`
       : "click" in step
         ? `clicked ${step.click} 0ms`
-        : `mouseMove ${step.mouseMove.dx},${step.mouseMove.dy} 0ms`;
+        : "mouseMove" in step
+          ? `mouseMove ${step.mouseMove.dx},${step.mouseMove.dy} 0ms`
+          : "press" in step
+            ? `pressed ${step.press}`
+            : "waitMs" in step
+              ? `waited ${step.waitMs}ms`
+              : "screenshot";
   const pair = {
     stepIndex,
     input: step,

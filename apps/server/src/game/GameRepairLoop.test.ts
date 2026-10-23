@@ -563,6 +563,7 @@ const withLoop = <A, E>(
                 };
               });
             return GameReviewSessions.GameReviewSessions.of({
+              tryInput: () => Effect.die("The loop fixture does not launch input experiments."),
               describe: () => Effect.succeed(null),
               toolRole: () => Effect.succeed(null),
               report: () =>

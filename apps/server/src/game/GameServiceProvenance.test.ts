@@ -1354,6 +1354,9 @@ it.live(
           played.push(input.url);
           return Effect.succeed({
             ...playtestResult,
+            executedInputSteps: input.steps.filter(
+              (step) => !("waitMs" in step) && !("screenshot" in step),
+            ).length,
             qualifies: false,
             blockers: ["no movement or design progress"],
             screenshots: [
@@ -1425,6 +1428,13 @@ it.live(
             steps: [{ click: "left" }],
           });
           expect(direct.success).toBe(true);
+          const outside = yield* game
+            .webPlaytestBuild(threadId, first.buildId, {
+              steps: [{ click: "left", x: 3000, y: 10 }],
+              captureAllSteps: true,
+            })
+            .pipe(Effect.flip);
+          expect(outside.detail).toContain("pointer coordinates exceed the frozen");
           expect(exports).toBe(2);
           yield* Effect.promise(() =>
             NodeFSP.appendFile(

@@ -1,5 +1,6 @@
 import {
   GAME_PLAYTEST_BOUNDS,
+  GAME_TRY_INPUT_BOUNDS,
   type GamePlaytestStep,
   type GameViewport,
   type GameWebPlaytestInput,
@@ -8,6 +9,7 @@ import {
 export { GAME_PLAYTEST_BOUNDS };
 
 const durationMs = (step: GamePlaytestStep) => {
+  if ("press" in step) return 50;
   if ("waitMs" in step) return step.waitMs;
   if ("holdMs" in step) return step.holdMs;
   return 0;
@@ -21,6 +23,27 @@ const durationMs = (step: GamePlaytestStep) => {
 export const playtestInputIssues = (input: GameWebPlaytestInput): readonly string[] => {
   const issues: string[] = [];
   const bounds = GAME_PLAYTEST_BOUNDS;
+  if (
+    input.captureEveryMs !== undefined &&
+    (!Number.isFinite(input.captureEveryMs) ||
+      input.captureEveryMs < GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs)
+  )
+    issues.push(`captureEveryMs must be at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms.`);
+  if (input.captureEveryMs !== undefined && input.captureEveryMs > 0) {
+    const captures =
+      2 +
+      (input.steps ?? []).reduce(
+        (sum, step) =>
+          sum +
+          ("screenshot" in step ? 1 : "waitMs" in step && !input.captureAllSteps ? 0 : 2) +
+          Math.max(0, Math.ceil(durationMs(step) / input.captureEveryMs!) - 1),
+        0,
+      );
+    if (captures > GAME_TRY_INPUT_BOUNDS.maxFrames)
+      issues.push(
+        `Interval capture requests ${captures} frames; limit is ${GAME_TRY_INPUT_BOUNDS.maxFrames}.`,
+      );
+  }
   for (const [name, value] of [
     ["width", input.width],
     ["height", input.height],
@@ -136,4 +159,70 @@ export const fitScreenshotsToBudget = <T extends { readonly data: string }>(
     }
   }
   return { kept, dropped };
+};
+
+/** The active critic gets a short experiment, with every requested frame accounted for. */
+export const tryInputIssues = (input: import("./game.ts").GameTryInput): readonly string[] => {
+  const bounds = GAME_TRY_INPUT_BOUNDS;
+  const issues = [...playtestInputIssues(input)];
+  if (input.steps.length === 0 || input.steps.length > bounds.maxSteps)
+    issues.push(
+      `game_try_input requires 1–${bounds.maxSteps} steps; received ${input.steps.length}.`,
+    );
+  const interval = input.captureEveryMs ?? 1000;
+  if (!Number.isFinite(interval) || interval < bounds.minCaptureEveryMs)
+    issues.push(`captureEveryMs must be at least ${bounds.minCaptureEveryMs} ms.`);
+  const total = input.steps.reduce((sum, step) => sum + durationMs(step), 0);
+  if (total > bounds.maxSequenceMs)
+    issues.push(`game_try_input steps take ${total} ms; limit is ${bounds.maxSequenceMs} ms.`);
+  const frames =
+    2 +
+    input.steps.reduce(
+      (sum, step) =>
+        sum +
+        ("screenshot" in step ? 1 : 2) +
+        Math.max(0, Math.ceil(durationMs(step) / interval) - 1),
+      0,
+    );
+  if (frames > bounds.maxFrames)
+    issues.push(
+      `game_try_input requests ${frames} frames; limit is ${bounds.maxFrames}. Increase captureEveryMs or shorten the steps.`,
+    );
+  for (const [index, step] of input.steps.entries()) {
+    if ("keys" in step && (step.keys.length === 0 || step.keys.length > 8))
+      issues.push(`Step ${index + 1} requires 1–8 keys.`);
+    const keys =
+      "keys" in step
+        ? step.keys
+        : "key" in step
+          ? [step.key]
+          : "press" in step
+            ? [step.press]
+            : "hold" in step
+              ? [step.hold]
+              : [];
+    if (keys.some((key) => key.length === 0 || key.length > 80))
+      issues.push(`Step ${index + 1} keys must contain 1–80 characters.`);
+    const points = "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
+    for (const point of points)
+      if (
+        (point.x !== undefined &&
+          (!Number.isFinite(point.x) ||
+            point.x < 0 ||
+            point.x > GAME_PLAYTEST_BOUNDS.maxDimension)) ||
+        (point.y !== undefined &&
+          (!Number.isFinite(point.y) || point.y < 0 || point.y > GAME_PLAYTEST_BOUNDS.maxDimension))
+      )
+        issues.push(
+          `Step ${index + 1} pointer coordinates must be finite and within the viewport.`,
+        );
+    if ("click" in step && (step.x === undefined) !== (step.y === undefined))
+      issues.push(`Step ${index + 1} click requires both x and y.`);
+    if (
+      "mouseMove" in step &&
+      (!Number.isFinite(step.mouseMove.dx) || !Number.isFinite(step.mouseMove.dy))
+    )
+      issues.push(`Step ${index + 1} mouse movement must be finite.`);
+  }
+  return issues;
 };

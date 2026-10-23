@@ -292,7 +292,14 @@ export const GamePlaytestState = Schema.Struct({
   notOnScreen: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type GamePlaytestState = typeof GamePlaytestState.Type;
+const GamePointerPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 export const GamePlaytestStep = Schema.Union([
+  Schema.Struct({ press: Schema.String }),
+  Schema.Struct({ hold: Schema.String, holdMs: Schema.Number }),
+  Schema.Struct({
+    drag: Schema.Struct({ from: GamePointerPosition, to: GamePointerPosition }),
+    holdMs: Schema.Number,
+  }),
   Schema.Struct({
     key: Schema.String.annotate({
       description: 'Key to hold while playing, such as "ArrowUp", "w", "Space".',
@@ -308,6 +315,8 @@ export const GamePlaytestStep = Schema.Union([
   }),
   Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
   Schema.Struct({
+    x: Schema.optionalKey(Schema.Number),
+    y: Schema.optionalKey(Schema.Number),
     click: Schema.Literals(["left", "middle", "right"]).annotate({
       description:
         "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
@@ -648,6 +657,7 @@ export const GameConsoleMessage = Schema.Struct({
 });
 export type GameConsoleMessage = typeof GameConsoleMessage.Type;
 export const GamePlaytestScreenshot = Schema.Struct({
+  frameId: Schema.optionalKey(Schema.String),
   label: Schema.String,
   inputPair: Schema.optionalKey(GamePlaytestInputPair),
   mimeType: Schema.Literal("image/png"),
@@ -675,7 +685,23 @@ export const GAME_PLAYTEST_BOUNDS = {
   /** Aggregate PNG bytes returned to the caller; the rest stay as evidence. */
   maxResultImageBytes: 6 * 1024 * 1024,
 } as const;
+export const GAME_TRY_INPUT_BOUNDS = {
+  maxRunMs: 180_000,
+  maxSteps: 12,
+  maxSequenceMs: 30_000,
+  maxFrames: 32,
+  maxCalls: 6,
+  minCaptureEveryMs: 100,
+} as const;
+export const GameTryInput = Schema.Struct({
+  buildId: Schema.optionalKey(Schema.String),
+  steps: Schema.Array(GamePlaytestStep),
+  captureEveryMs: Schema.optionalKey(Schema.Number),
+});
+export type GameTryInput = typeof GameTryInput.Type;
 export const GameWebPlaytestInput = Schema.Struct({
+  captureEveryMs: Schema.optionalKey(Schema.Number),
+  captureAllSteps: Schema.optionalKey(Schema.Boolean),
   steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
   width: Schema.optionalKey(
     Schema.Number.check(

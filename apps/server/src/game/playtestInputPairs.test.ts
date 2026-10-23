@@ -74,3 +74,21 @@ describe("input pairs", () => {
     expect(chosen[0]?.inputPair?.changedPercent).toBeNull();
   });
 });
+
+it("captures waiting as an observation without crediting it as input", async () => {
+  const result = await playtestStepWithEvidence({
+    step: { waitMs: 100 },
+    stepIndex: 2,
+    captureAllSteps: true,
+    execute: async () => false,
+    capture: async () => ({
+      screenshot: { label: "raw", mimeType: "image/png", data: "cG5n", width: 640, height: 360 },
+      pixels: null,
+      probe: null,
+    }),
+  });
+  expect(result.executed).toBe(false);
+  expect(result.frames.map((frame) => frame.inputPair?.phase)).toEqual(["before", "after"]);
+  expect(result.frames[1]?.inputPair?.changedPercent).toBeNull();
+  expect(result.frames[1]?.inputPair?.stateChanges).toBeNull();
+});

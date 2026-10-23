@@ -988,6 +988,23 @@ const make = Effect.gen(function* () {
               reason: "invalid-input",
               detail: `The game's base viewport (${baseViewport.width}×${baseViewport.height}) does not fit the capture bounds (${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension} px). Change display/window/size in project.godot first.`,
             });
+          for (const [index, step] of (input.steps ?? []).entries()) {
+            const points =
+              "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
+            if (
+              points.some(
+                (point) =>
+                  (point.x !== undefined && (point.x < 0 || point.x > capture.width)) ||
+                  (point.y !== undefined && (point.y < 0 || point.y > capture.height)),
+              )
+            )
+              return yield* new GameOperationError({
+                operation: "Web playtest",
+                path: root,
+                reason: "invalid-input",
+                detail: `Step ${index + 1} pointer coordinates exceed the frozen ${capture.width}×${capture.height} viewport.`,
+              });
+          }
           const result = yield* playtest.run({
             executable,
             url,
@@ -1000,6 +1017,10 @@ const make = Effect.gen(function* () {
             height: capture.height,
             bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
             steps: input.steps ?? [],
+            ...(input.captureEveryMs === undefined ? {} : { captureEveryMs: input.captureEveryMs }),
+            ...(input.captureAllSteps === undefined
+              ? {}
+              : { captureAllSteps: input.captureAllSteps }),
             probeRequired: identity.policy.probe,
             acceptance: approval?.acceptance ?? null,
           });
@@ -1043,6 +1064,13 @@ const make = Effect.gen(function* () {
                 cause,
               }),
           });
+          if (input.captureAllSteps && droppedFrames > 0)
+            return yield* new GameOperationError({
+              operation: "game_try_input",
+              path: root,
+              reason: "invalid-input",
+              detail: `Captured frames exceed the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes} byte response limit. All frames are stored in ${evidence.directory}; shorten the route or increase captureEveryMs.`,
+            });
           if (build?.buildId !== null && build?.buildId !== undefined)
             yield* rounds.recordBuildPlaytest(root, build.buildId, {
               booted: result.booted,

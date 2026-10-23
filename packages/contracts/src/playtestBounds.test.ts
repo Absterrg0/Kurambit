@@ -7,6 +7,7 @@ import {
   fitScreenshotsToBudget,
   integerScaledCapture,
   playtestInputIssues,
+  tryInputIssues,
 } from "./playtestBounds.ts";
 
 describe("playtestInputIssues", () => {
@@ -18,6 +19,19 @@ describe("playtestInputIssues", () => {
         height: 540,
       }),
     ).toEqual([]);
+  });
+
+  it("rejects unsafe interval captures through the existing playtest entry point", () => {
+    expect(playtestInputIssues({ captureEveryMs: 0 })).toContain(
+      "captureEveryMs must be at least 100 ms.",
+    );
+    expect(
+      playtestInputIssues({
+        captureEveryMs: 100,
+        captureAllSteps: true,
+        steps: [{ waitMs: 10_000 }],
+      }).join(),
+    ).toContain("limit is 32");
   });
 
   it("rejects dimensions outside 320-1920", () => {
@@ -128,5 +142,49 @@ describe("integerScaledCapture", () => {
     ).toBeNull();
     expect(integerScaledCapture({ width: 100, height: 100 }, PLAYTEST_DEFAULT_CAPTURE)).toBeNull();
     expect(integerScaledCapture({ width: 0, height: 0 }, PLAYTEST_DEFAULT_CAPTURE)).toBeNull();
+  });
+});
+
+describe("tryInputIssues", () => {
+  it("bounds steps, total duration, capture interval and planned frame count exactly", () => {
+    expect(tryInputIssues({ steps: [] })).toContain(
+      "game_try_input requires 1–12 steps; received 0.",
+    );
+    expect(
+      tryInputIssues({ steps: Array.from({ length: 13 }, () => ({ press: "Space" })) }),
+    ).toContain("game_try_input requires 1–12 steps; received 13.");
+    expect(
+      tryInputIssues({ steps: Array.from({ length: 4 }, () => ({ hold: "w", holdMs: 10_000 })) }),
+    ).toContain("game_try_input steps take 40000 ms; limit is 30000 ms.");
+    expect(tryInputIssues({ steps: [{ waitMs: 1000 }], captureEveryMs: 99 })).toContain(
+      "captureEveryMs must be at least 100 ms.",
+    );
+    expect(
+      tryInputIssues({ steps: [{ hold: "w", holdMs: 10_000 }], captureEveryMs: 100 }),
+    ).toContain(
+      "game_try_input requests 103 frames; limit is 32. Increase captureEveryMs or shorten the steps.",
+    );
+    expect(
+      tryInputIssues({
+        steps: [
+          { press: "Space" },
+          { click: "left", x: 30, y: 40 },
+          { drag: { from: { x: 0, y: 0 }, to: { x: 300, y: 200 } }, holdMs: 1000 },
+          { waitMs: 300 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects unbounded input payloads and invalid pointer values", () => {
+    expect(tryInputIssues({ steps: [{ keys: Array(9).fill("w"), holdMs: 1 }] }).join()).toContain(
+      "1–8 keys",
+    );
+    expect(tryInputIssues({ steps: [{ press: "" }] }).join()).toContain("1–80 characters");
+    expect(tryInputIssues({ steps: [{ click: "left", x: 10 }] }).join()).toContain("both x and y");
+    expect(tryInputIssues({ steps: [{ mouseMove: { dx: Infinity, dy: 0 } }] }).join()).toContain(
+      "finite",
+    );
+    expect(tryInputIssues({ steps: [{ waitMs: -1 }] }).join()).toContain("invalid duration");
   });
 });

@@ -42,6 +42,8 @@ export interface GameWebPlaytestInput {
   readonly height: number;
   readonly bootTimeoutMs: number;
   readonly steps: readonly GamePlaytestStep[];
+  readonly captureEveryMs?: number;
+  readonly captureAllSteps?: boolean;
   /** The engine owes a probe, so qualification reads the probe samples. */
   readonly probeRequired: boolean;
   /** The approved acceptance, or null for a game created without a design. */
@@ -635,9 +637,44 @@ const runPlaytest = async (
     let executedInputSteps = 0;
     for (const [stepIndex, step] of input.steps.entries()) {
       signal?.throwIfAborted();
+      const duringFrames: GamePlaytestScreenshot[] = [];
+      const waitWithCaptures = async (
+        duration: number,
+        move?: (fraction: number) => Promise<void>,
+      ) => {
+        if (duration === 0) {
+          await move?.(1);
+          return;
+        }
+        const interval = input.captureEveryMs ?? duration;
+        let nextCapture = interval;
+        for (let elapsed = 0; elapsed < duration;) {
+          const slice = Math.min(
+            move === undefined ? interval : 50,
+            nextCapture - elapsed,
+            duration - elapsed,
+          );
+          await sleep(signal, slice);
+          elapsed += slice;
+          await move?.(elapsed / duration);
+          if (elapsed >= nextCapture) {
+            if (input.captureEveryMs !== undefined && elapsed < duration)
+              duringFrames.push(
+                await screenshot(
+                  cdp,
+                  session.sessionId,
+                  `step ${stepIndex + 1} during: ${elapsed}ms`,
+                  await readProbe(),
+                ),
+              );
+            nextCapture += interval;
+          }
+        }
+      };
       const paired = await playtestStepWithEvidence({
         step,
         stepIndex,
+        ...(input.captureAllSteps === undefined ? {} : { captureAllSteps: input.captureAllSteps }),
         capture: async () => {
           const probe = await readProbe();
           return {
@@ -648,7 +685,7 @@ const runPlaytest = async (
         },
         execute: async () => {
           if (!("waitMs" in step) && !("screenshot" in step)) sawInput = true;
-          if ("waitMs" in step) await sleep(signal, step.waitMs);
+          if ("waitMs" in step) await waitWithCaptures(step.waitMs);
           else if ("screenshot" in step) {
             screenshots.push(
               await screenshot(cdp, session.sessionId, step.screenshot, latestProbe()),
@@ -658,9 +695,51 @@ const runPlaytest = async (
             await readProbe();
             return false;
           } else if ("click" in step) {
-            const clicked = await clickCanvas(cdp, session.sessionId, step.click);
+            const clicked =
+              step.x === undefined || step.y === undefined
+                ? await clickCanvas(cdp, session.sessionId, step.click)
+                : await (async () => {
+                    const point = { x: step.x!, y: step.y! };
+                    for (const type of ["mousePressed", "mouseReleased"])
+                      await cdp.send(
+                        "Input.dispatchMouseEvent",
+                        { type, ...point, button: step.click, clickCount: 1 },
+                        session.sessionId,
+                      );
+                    return point;
+                  })();
             pointer = clicked ?? pointer;
             return clicked !== null;
+          } else if ("drag" in step) {
+            const { from, to } = step.drag;
+            await cdp.send(
+              "Input.dispatchMouseEvent",
+              { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 },
+              session.sessionId,
+            );
+            try {
+              await waitWithCaptures(step.holdMs, async (fraction) => {
+                await cdp.send(
+                  "Input.dispatchMouseEvent",
+                  {
+                    type: "mouseMoved",
+                    x: from.x + (to.x - from.x) * fraction,
+                    y: from.y + (to.y - from.y) * fraction,
+                    button: "left",
+                    buttons: 1,
+                  },
+                  session.sessionId,
+                );
+              });
+            } finally {
+              await cdp.send(
+                "Input.dispatchMouseEvent",
+                { type: "mouseReleased", ...to, button: "left", clickCount: 1 },
+                session.sessionId,
+              );
+            }
+            pointer = to;
+            return true;
           } else if ("mouseMove" in step) {
             const centre: { x: number; y: number } | null =
               pointer ?? (await canvasCentre(cdp, session.sessionId));
@@ -692,18 +771,24 @@ const runPlaytest = async (
             } catch {
               // The canvas may not be up yet; keyboard events still reach the document.
             }
-            const keys = "keys" in step ? step.keys : [step.key];
+            const keys =
+              "keys" in step
+                ? step.keys
+                : ["key" in step ? step.key : "hold" in step ? step.hold : step.press];
             for (const key of keys)
               await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
-            await sleep(signal, step.holdMs);
-            for (const key of [...keys].toReversed())
-              await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
+            try {
+              await waitWithCaptures("holdMs" in step ? step.holdMs : 50);
+            } finally {
+              for (const key of [...keys].toReversed())
+                await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
+            }
           }
           return !("waitMs" in step) && !("mouseMove" in step);
         },
       });
       if (paired.executed) executedInputSteps++;
-      screenshots.push(...paired.frames);
+      screenshots.push(...paired.frames.slice(0, 1), ...duringFrames, ...paired.frames.slice(1));
       await readProbe();
     }
     screenshots.push(await screenshot(cdp, session.sessionId, "after-steps", latestProbe()));
