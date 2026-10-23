@@ -1056,6 +1056,9 @@ export const layer = (options: GameRepairLoopOptions) => {
           repairsUsed: Math.min(current.budget.repairs, current.repairsUsed + 1),
           updatedAt: nowIso(),
         }));
+        // Marked before dispatch so a repair cancelled or interrupted mid-run
+        // keeps Restore even though it never records a post-repair tree.
+        yield* rounds.recordRepairStart(task.root, round.id);
         yield* progress(task.root, "Repairing the game");
         const repair = yield* awaitChild(task, reserved, {
           role: "repair",

@@ -128,8 +128,8 @@ and can attempt up to three repairs within twenty minutes. Play keeps the select
 review runs. Open Builds to read defects, suggested fixes, decisions and the frames behind them.
 Review compares versions; it does not promise that every aspect of the game is correct.
 
-Choose Stop review to end it. If a review is interrupted or your edits prevent a safe return,
-Restore previous version returns the game folder to its saved version and preserves the version
-it replaces. A restart does not resume unfinished reviews. If a review session is still stopping,
-wait until the held state clears before restoring. Choose Check to compare the current sources
-with the selected build when source freshness is unknown.
+Choose Stop review to end it. If a repair started but its result could not be kept, or your edits
+prevent a safe return, Restore previous version returns the game folder to its saved version and
+preserves the version it replaces. A restart does not resume unfinished reviews. If a review session
+is still stopping, wait until the held state clears before restoring. Choose Check to compare the
+current sources with the selected build when source freshness is unknown.

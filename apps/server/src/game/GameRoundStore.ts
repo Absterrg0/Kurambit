@@ -199,15 +199,15 @@ export type GameRestore =
 
 /**
  * The one restore-eligibility rule, shared by the status that offers the
- * restore control and the restore that acts on it. An interrupted round
- * qualifies; so does a stopped one, because only a successful restore closes
- * a round, and that closes it as rejected. A blocked rejection, a cancelled
- * review and a restore that a user edit blocked all leave the round stopped
- * with its pre-repair snapshot, so all of them stay retryable.
+ * restore control and the restore that acts on it. Only a round where a repair
+ * was actually dispatched can have changed the folder: a clean review or an
+ * invalid critic stops before dispatch, so it has nothing to return from. An
+ * interrupted round is judged the same way; the dispatch marker survives the
+ * recovery that marks it interrupted.
  */
 export const isRestorableRound = (round: GameReviewRoundType): boolean =>
-  round.status === "interrupted" ||
-  (round.status === "stopped" && round.incumbentSnapshotId.length > 0);
+  (round.status === "interrupted" || round.status === "stopped") &&
+  (round.repairStartedAt !== undefined || round.postRepairSourceId !== null);
 
 export class GameRoundStore extends Context.Service<
   GameRoundStore,
@@ -236,6 +236,11 @@ export class GameRoundStore extends Context.Service<
     ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
     /** Records the tree the repair child left behind, before any later edit. */
     readonly recordPostRepair: (
+      root: string,
+      roundId: string,
+    ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
+    /** Marks the round as one the repair child may have written in. */
+    readonly recordRepairStart: (
       root: string,
       roundId: string,
     ) => Effect.Effect<GameReviewRoundType, GameOperationError>;
@@ -563,6 +568,26 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               const manifest = yield* snapshots.capture(root);
               const round = { ...current, postRepairSourceId: manifest.sourceId };
+              yield* writeStateEffect(found.file, replaceRound(state, round));
+              return round;
+            }),
+          ),
+        recordRepairStart: (root, roundId) =>
+          withLock(root, "record game review repair start", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const current = roundById(state, roundId, "record game review repair start");
+              if (current.status !== "running")
+                return yield* failure(
+                  "record game review repair start",
+                  roundId,
+                  "invalid-input",
+                  "That round is no longer running.",
+                );
+              const round = {
+                ...current,
+                repairStartedAt: DateTime.formatIso(yield* DateTime.now),
+              };
               yield* writeStateEffect(found.file, replaceRound(state, round));
               return round;
             }),

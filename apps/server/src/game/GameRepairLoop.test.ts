@@ -888,6 +888,50 @@ it.live("zero defects stop the loop without a repair or a selection change", () 
   ),
 );
 
+it.live("a zero-defect stop offers no Restore because no repair touched the folder", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.critic = () => criticAnswer(0);
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.reason).toContain("zero-defects");
+        const game = yield* services.rounds.read(fixture.root);
+        const stopped = game.rounds.find((round) => round.loopId === state.id);
+        expect(stopped?.status).toBe("stopped");
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(false);
+        expect((yield* Effect.flip(services.review.restore(threadId))).reason).toBe(
+          "invalid-input",
+        );
+      }),
+    ),
+  ),
+);
+
+it.live("an invalid critic answer offers no Restore because no repair touched the folder", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.critic = () => ({
+          kind: "invalid" as const,
+          reason: "The critic answered with a score.",
+          raw: "{}",
+        });
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.reason).toContain("invalid-critic");
+        const game = yield* services.rounds.read(fixture.root);
+        const stopped = game.rounds.find((round) => round.loopId === state.id);
+        expect(stopped?.status).toBe("stopped");
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(false);
+        expect((yield* Effect.flip(services.review.restore(threadId))).reason).toBe(
+          "invalid-input",
+        );
+      }),
+    ),
+  ),
+);
+
 it.live("the third started repair is judged before the budget stops the loop", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>

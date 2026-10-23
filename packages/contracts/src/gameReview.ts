@@ -333,6 +333,12 @@ export const GameReviewRound = Schema.Struct({
    */
   postRepairSourceId: Schema.NullOr(Schema.String),
   /**
+   * When a repair child was dispatched for this round. A review that stops
+   * before dispatch (zero defects, an invalid critic) never touched the folder,
+   * so there is nothing to restore.
+   */
+  repairStartedAt: Schema.optionalKey(Schema.String),
+  /**
    * The version an explicit restore preserved before rewriting the folder, so
    * the user can return to the state they had when they asked for the restore.
    */
