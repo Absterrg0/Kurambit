@@ -49,6 +49,15 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import { gameRecordLocation } from "./gameRecord.ts";
 import { hashWebBuildDirectory } from "./webBuild.ts";
 
+const decodeT50dRound = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      ...GameReviewCriticAnswer.fields,
+      experiments: Schema.Array(GameReviewExperimentRoute),
+    }),
+  ),
+);
+
 const decodeCapturedCritic = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
@@ -179,7 +188,7 @@ interface Scripted {
   readonly checks: Array<{ target: string; buildId: string; inputs: unknown }>;
   readonly starts: Array<StartedChild>;
   /** Routes the session fixture returns for the critic's cited frames. */
-  criticExperiments: Array<GameReviewExperimentRoute>;
+  criticExperiments: ReadonlyArray<GameReviewExperimentRoute>;
   /** Experiment replays the studio fixture was asked to run. */
   readonly experiments: Array<{
     readonly buildId: string;
@@ -677,30 +686,39 @@ const withLoop = <A, E>(
               return Effect.succeed({
                 frames: [
                   { label: "booted", path: NodePath.join(frameDirectory, "incumbent-boot.png") },
-                  ...input.steps.flatMap((step, stepIndex) => [
-                    {
-                      label: `experiment ${String(stepIndex + 1)} before`,
-                      path: NodePath.join(frameDirectory, "incumbent-boot.png"),
-                      inputPair: {
-                        stepIndex,
-                        phase: "before" as const,
-                        input: step,
-                        changedPercent: null,
-                        stateChanges: null,
-                      },
-                    },
-                    {
-                      label: `experiment ${String(stepIndex + 1)} after`,
-                      path: NodePath.join(frameDirectory, "incumbent-action.png"),
-                      inputPair: {
-                        stepIndex,
-                        phase: "after" as const,
-                        input: step,
-                        changedPercent: broken ? 0 : 40,
-                        stateChanges: null,
-                      },
-                    },
-                  ]),
+                  ...input.steps.flatMap((step, stepIndex) =>
+                    "screenshot" in step
+                      ? [
+                          {
+                            label: step.screenshot,
+                            path: NodePath.join(frameDirectory, "incumbent-action.png"),
+                          },
+                        ]
+                      : [
+                          {
+                            label: `experiment ${String(stepIndex + 1)} before`,
+                            path: NodePath.join(frameDirectory, "incumbent-boot.png"),
+                            inputPair: {
+                              stepIndex,
+                              phase: "before" as const,
+                              input: step,
+                              changedPercent: null,
+                              stateChanges: null,
+                            },
+                          },
+                          {
+                            label: `experiment ${String(stepIndex + 1)} after`,
+                            path: NodePath.join(frameDirectory, "incumbent-action.png"),
+                            inputPair: {
+                              stepIndex,
+                              phase: "after" as const,
+                              input: step,
+                              changedPercent: broken ? 0 : 40,
+                              stateChanges: null,
+                            },
+                          },
+                        ],
+                  ),
                 ],
               });
             };
@@ -1153,14 +1171,7 @@ it.live("t50d's cited boot, wait and jump reach ballots without duplicate click 
     (fixture) =>
       fixture.withServices((services) =>
         Effect.gen(function* () {
-          const captured = Schema.decodeUnknownSync(
-            Schema.fromJsonString(
-              Schema.Struct({
-                ...GameReviewCriticAnswer.fields,
-                experiments: Schema.Array(GameReviewExperimentRoute),
-              }),
-            ),
-          )(
+          const captured = decodeT50dRound(
             yield* Effect.promise(() =>
               NodeFSP.readFile(new URL("./fixtures/t50d/round-1.json", import.meta.url), "utf8"),
             ),
@@ -2695,5 +2706,51 @@ it.live("interrupted children retain unknown usage instead of disappearing from 
         expect(loopRecord(yield* readLoop(services)).usage.status).toBe("unknown");
       }),
     ),
+  ),
+);
+
+it.live("a cited named screenshot is replayed as that observation, not replaced with boot", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.criticExperiments = [
+            {
+              id: "try-1",
+              buildId: EXPORT_BUILD_ID,
+              steps: [{ press: "Space" }, { screenshot: "after-action" }],
+              captureEveryMs: 100,
+              viewport: null,
+              frames: [{ frameId: "try1f4", label: "after-action", stepIndex: null }],
+            },
+          ];
+          const original = criticAnswer(1);
+          if (original.kind !== "critic") return;
+          scripted.critic = () => ({
+            ...original,
+            answer: {
+              ...original.answer,
+              defects: original.answer.defects.map((defect) => ({ ...defect, frameId: "try1f4" })),
+            },
+          });
+          scripted.ballots = [0, 1].map(() => ({ plan, order }) => {
+            const frames = scripted.starts.find(
+              (child) => child.role === "ballot" && child.order === order,
+            )!.evidence!.frames;
+            expect(
+              frames.filter((frame) => frame.label.includes("experiment try-1: after-action")),
+            ).toHaveLength(4);
+            expect(frames.some((frame) => frame.label.includes("experiment try-1: booted"))).toBe(
+              false,
+            );
+            return ballotAnswer(plan, "tie");
+          });
+          yield* runToCompletion(services, fixture);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(2);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
   ),
 );

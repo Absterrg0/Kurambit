@@ -145,10 +145,16 @@ const inputRouteKey = (
 const experimentFrames = (
   frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
   route: GameReviewExperimentRoute,
-  stepIndex: number | null,
+  citation: GameReviewExperimentRoute["frames"][number],
 ): GameRepairFrame[] => {
-  const atStep = frames.filter((frame) => frame.inputPair?.stepIndex === stepIndex);
-  const selected = stepIndex === null ? frames.slice(0, 1) : atStep;
+  const atStep = frames.filter((frame) => frame.inputPair?.stepIndex === citation.stepIndex);
+  const selected =
+    citation.stepIndex === null
+      ? frames.filter((frame) => frame.label === citation.label).slice(0, 1)
+      : atStep.some((frame) => frame.inputPair?.phase === "before") &&
+          atStep.some((frame) => frame.inputPair?.phase === "after")
+        ? atStep
+        : [];
   return selected.map((frame) => {
     const pair = frame.inputPair;
     const observation =
@@ -978,14 +984,15 @@ export const layer = (options: GameRepairLoopOptions) => {
             });
           const incumbent = yield* run(input.incumbentBuildId);
           const candidate = yield* run(input.candidateBuildId);
-          for (const stepIndex of new Set(route.frames.map((frame) => frame.stepIndex))) {
+          for (const citation of route.frames) {
+            const stepIndex = citation.stepIndex;
             const key =
               stepIndex === null
-                ? `${route.id}:boot`
+                ? `${route.id}:${citation.frameId}`
                 : inputRouteKey(route.steps, stepIndex, route.viewport);
             if (seen.has(key)) continue;
-            const before = experimentFrames(incumbent.frames, route, stepIndex);
-            const after = experimentFrames(candidate.frames, route, stepIndex);
+            const before = experimentFrames(incumbent.frames, route, citation);
+            const after = experimentFrames(candidate.frames, route, citation);
             if (before.length === 0 || after.length === 0)
               return yield* new GameOperationError({
                 operation: "replay critic experiment",
