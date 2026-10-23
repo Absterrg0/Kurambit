@@ -53,7 +53,7 @@ import {
   hashWebBuildDirectory,
   isWebBuildFresh,
 } from "./webBuild.ts";
-import { comparedSource, snapshotSource } from "./sourceSnapshot.ts";
+import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
@@ -322,7 +322,7 @@ const make = Effect.gen(function* () {
     };
   });
   const snapshot = (root: string, godotProject: string) =>
-    Effect.promise(() => snapshotSource(root, godotProject));
+    Effect.promise(() => snapshotBuildSource(root, godotProject));
   /**
    * Qualification says the export matches the sources and its artifact files;
    * the read verifies both, so anything else forces a rebuild.

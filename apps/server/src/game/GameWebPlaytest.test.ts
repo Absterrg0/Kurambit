@@ -16,7 +16,7 @@ import * as GameQualification from "./GameQualification.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
-import { snapshotSource } from "./sourceSnapshot.ts";
+import { snapshotBuildSource } from "./sourceSnapshot.ts";
 import { describeWebArtifacts } from "./webBuild.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -195,7 +195,7 @@ it.live.skipIf(!available || !templatesInstalled)(
             const index = NodePath.join(root, "builds/web/index.html");
             const builtBefore = (yield* Effect.promise(() => NodeFSP.stat(index))).mtimeMs;
             const qualification = yield* GameQualification.GameQualification;
-            const snapshot = yield* Effect.promise(() => snapshotSource(root, "godot"));
+            const snapshot = yield* Effect.promise(() => snapshotBuildSource(root, "godot"));
             if (snapshot.kind !== "known") throw new Error("Fixture sources should be known");
             yield* qualification.record(root, {
               stage: "export",

@@ -20,16 +20,23 @@ export type SourceSnapshot =
     };
 
 /**
- * Identifies the game's Godot sources by path, size and mtime. Additions,
- * deletions and edits all change the hash. Godot's scratch directory is
- * excluded because importing and exporting rewrite it on their own.
+ * The BUILD-source identity: what the engine export consumes, and nothing else.
+ * It covers the Godot project directory by path, size and mtime, so additions,
+ * deletions and edits to the build's inputs all change the hash. Engine output
+ * (`godot/.godot/`, `*.import`, `*.uid`) is excluded because one import can
+ * rewrite it without changing the export; design documents, briefs, notes and
+ * art sources live outside `godot/` and are other identities' business.
+ *
+ * The full-tree snapshot in `GameSnapshots` is deliberately different: rollback
+ * and user-edit detection must notice every game-owned file, while a build is
+ * stale only when something it was built from moved.
  *
  * Symlinks fail closed: following a linked script would let its content change
  * without changing the identity of the tree Godot loaded. Size and mtime are
  * deliberately not content hashes; a same-size edit within one mtime tick is
  * the known limit.
  */
-export const snapshotSource = async (
+export const snapshotBuildSource = async (
   root: string,
   godotProject: string,
   options: { readonly maxEntries?: number | undefined } = {},
@@ -54,6 +61,9 @@ export const snapshotSource = async (
           continue;
         }
         if (!entry.isFile()) continue;
+        // Sidecars the engine generates beside real sources. An import rewrites
+        // them, so they can never be part of whether the build still matches.
+        if (entry.name.endsWith(".import") || entry.name.endsWith(".uid")) continue;
         const stat = await NodeFSP.stat(path);
         lines.push(`${relative}\0${stat.size}\0${stat.mtimeMs}\n`);
       }

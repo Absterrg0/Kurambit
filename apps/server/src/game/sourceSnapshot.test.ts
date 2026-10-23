@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { comparedSource, snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
+import { comparedSource, snapshotBuildSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 
 const withTree = <A, E, R>(run: (root: string) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
@@ -27,7 +27,7 @@ const withTree = <A, E, R>(run: (root: string) => Effect.Effect<A, E, R>) =>
   );
 
 const knownId = async (root: string) => {
-  const snapshot = await snapshotSource(root, "godot");
+  const snapshot = await snapshotBuildSource(root, "godot");
   if (snapshot.kind !== "known")
     throw new Error(`Expected a known snapshot, got ${snapshot.reason}`);
   return snapshot.sourceId;
@@ -75,6 +75,35 @@ it.effect("ignores Godot's own scratch directory", () =>
   ),
 );
 
+it.effect("ignores engine-generated sidecars and everything outside the engine project", () =>
+  withTree((root) =>
+    Effect.gen(function* () {
+      const first = yield* Effect.promise(() => knownId(root));
+      // An import writes these beside real sources; one import must not make a
+      // build look stale.
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd.uid"), "uid:1\n"),
+      );
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "godot/icon.svg.import"), "[remap]\n"),
+      );
+      // Design, briefs, notes and art sources are not export inputs.
+      yield* Effect.promise(() =>
+        NodeFSP.mkdir(NodePath.join(root, "art/blender"), { recursive: true }),
+      );
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Design\n"),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "BRIEF.md"), "# Brief\n"));
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "notes.md"), "# Notes\n"));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "art/blender/hero.blend"), "blend"),
+      );
+      expect(yield* Effect.promise(() => knownId(root))).toBe(first);
+    }),
+  ),
+);
+
 it.effect("reports unknown instead of fresh when the scan bound is exceeded", () =>
   withTree((root) =>
     Effect.gen(function* () {
@@ -85,7 +114,9 @@ it.effect("reports unknown instead of fresh when the scan bound is exceeded", ()
             "extends Node\n",
           ),
         );
-      const bounded = yield* Effect.promise(() => snapshotSource(root, "godot", { maxEntries: 4 }));
+      const bounded = yield* Effect.promise(() =>
+        snapshotBuildSource(root, "godot", { maxEntries: 4 }),
+      );
       expect(bounded).toEqual({ kind: "unknown", reason: "entry-limit" });
     }),
   ),
@@ -94,7 +125,7 @@ it.effect("reports unknown instead of fresh when the scan bound is exceeded", ()
 it.effect("reports unknown when the tree cannot be read", () =>
   withTree((root) =>
     Effect.gen(function* () {
-      const missing = yield* Effect.promise(() => snapshotSource(root, "missing-godot"));
+      const missing = yield* Effect.promise(() => snapshotBuildSource(root, "missing-godot"));
       expect(missing).toEqual({ kind: "unknown", reason: "io" });
     }),
   ),
@@ -106,7 +137,7 @@ it.effect("reports unknown instead of fresh when a linked input is found", () =>
       const linked = NodePath.join(root, "linked.gd");
       yield* Effect.promise(() => NodeFSP.writeFile(linked, "extends Node\nvar from_link=1\n"));
       yield* Effect.promise(() => NodeFSP.symlink(linked, NodePath.join(root, "godot/smoke.gd")));
-      const snapshot = yield* Effect.promise(() => snapshotSource(root, "godot"));
+      const snapshot = yield* Effect.promise(() => snapshotBuildSource(root, "godot"));
       expect(snapshot.kind).toBe("unknown");
       if (snapshot.kind === "unknown") {
         expect(snapshot.reason).toBe("symlink");
@@ -115,7 +146,7 @@ it.effect("reports unknown instead of fresh when a linked input is found", () =>
       // Following the link would hide its content: the same tree with an edited
       // target must not look fresh.
       yield* Effect.promise(() => NodeFSP.writeFile(linked, "extends Node\nvar from_link=2\n"));
-      const after = yield* Effect.promise(() => snapshotSource(root, "godot"));
+      const after = yield* Effect.promise(() => snapshotBuildSource(root, "godot"));
       expect(after.kind).toBe("unknown");
     }),
   ),

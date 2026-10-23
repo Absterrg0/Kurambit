@@ -10,7 +10,7 @@ import {
   type QualificationRecordInput,
   type StoredQualificationStage,
 } from "./GameQualification.ts";
-import { snapshotSource } from "./sourceSnapshot.ts";
+import { snapshotBuildSource } from "./sourceSnapshot.ts";
 import { describeWebArtifacts, type WebArtifactFile } from "./webBuild.ts";
 
 const withGame = <A, E>(
@@ -53,7 +53,7 @@ const withGame = <A, E>(
   );
 
 const sourceIdOf = async (root: string) => {
-  const snapshot = await snapshotSource(root, "godot");
+  const snapshot = await snapshotBuildSource(root, "godot");
   if (snapshot.kind !== "known") throw new Error("Fixture sources should be known");
   return snapshot.sourceId;
 };

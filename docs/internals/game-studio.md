@@ -162,8 +162,8 @@ each stage stores its outcome, the source snapshot it covered, the verification-
 build identity. Design and qualification records are keyed by the game root's realpath, so a
 directory-symlink alias shares one record, one operation lock and one design state; a record
 written under the old lexical key is renamed when the alias is read, and an unreadable required
-record is reported as an error rather than downgraded to legacy. The snapshot is a sorted hash of the `godot/` tree's paths, sizes and mtimes;
-additions and deletions change it, `.godot/` is excluded, and a tree beyond the scan bound reads as
+record is reported as an error rather than downgraded to legacy. The snapshot is the build-source identity: a sorted hash of the `godot/` tree's paths, sizes and mtimes;
+additions and deletions change it, while `.godot/`, `*.import` and `*.uid` are excluded because one engine import rewrites them. Design documents, briefs and art sources live outside it, so editing them never stales a build; the full-tree snapshot used for rollback and user-edit detection deliberately covers more. A tree beyond the scan bound reads as
 unknown. Symlinks fail closed with the linked path in the reason rather than being followed, and
 size+mtime is the identity limit: a same-size edit inside one mtime tick is not detected. A web
 export also stores every file in its build-addressed directory (path, size, mtime); a missing, replaced or extra

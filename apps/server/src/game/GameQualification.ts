@@ -18,7 +18,7 @@ import {
   type GameQualificationStageRead,
   type GameQualificationSummary,
 } from "@t3tools/contracts";
-import { snapshotSource, type SourceSnapshot } from "./sourceSnapshot.ts";
+import { snapshotBuildSource, type SourceSnapshot } from "./sourceSnapshot.ts";
 import { webArtifactIdentity, webArtifactsMatch, type WebArtifactFile } from "./webBuild.ts";
 import { gameRecordFile, gameRecordLocation, migrateGameRecord } from "./gameRecord.ts";
 
@@ -489,7 +489,7 @@ export const layer = (options: {
       read: (root, godotProject, designState, designHash, identity, acceptance) =>
         Effect.gen(function* () {
           const source = yield* Effect.promise(() =>
-            snapshotSource(root, godotProject, {
+            snapshotBuildSource(root, godotProject, {
               maxEntries: options.maxSourceEntries,
             }),
           );

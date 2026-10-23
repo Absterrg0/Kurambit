@@ -21,6 +21,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import { approvalRecordFile, designDocumentHash, designIntentFile } from "./GameDesignApproval.ts";
+import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
@@ -158,12 +159,12 @@ const withFixture = <A, E, R>(
         }
       });
       const current = options.manifest ?? manifest();
-      const services = GameService.layerWithPlaytest(
+      const gameLayer = GameService.layerWithPlaytest(
         options.playtest ??
           (() => Effect.succeed(playtestResult({ success: true, responded: true }))),
       ).pipe(
         Layer.provideMerge(GameProcesses.layer),
-        Layer.provide(
+        Layer.provideMerge(
           Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
             read: () => Effect.succeed(current),
@@ -180,7 +181,7 @@ const withFixture = <A, E, R>(
               }),
           }),
         ),
-        Layer.provide(
+        Layer.provideMerge(
           Layer.mock(GameToolchain.GameToolchain)({
             executable: () =>
               Effect.succeed({ path: executable, version: "4.7.2", templates: null }),
@@ -200,7 +201,7 @@ const withFixture = <A, E, R>(
             }),
           }),
         ),
-        Layer.provide(
+        Layer.provideMerge(
           Layer.mock(GamePreview.GamePreview)({
             directories: () => [],
             open: () => Effect.succeed("http://127.0.0.1:9/game"),
@@ -210,12 +211,17 @@ const withFixture = <A, E, R>(
             serving: () => false,
           }),
         ),
-        Layer.provide(previewBrowserTestLayer(executable)),
+        Layer.provideMerge(previewBrowserTestLayer(executable)),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
 
         Layer.provideMerge(designApprovalTestLayer(stateDir)),
         Layer.provideMerge(roundStoreTestLayer(stateDir)),
         Layer.provideMerge(admissionTestLayer),
+      );
+      // The studio reads the same services the game layer built, so the test
+      // exercises the loop's real playable check rather than a fake.
+      const services = GameRepairStudio.layer({ stateDir }).pipe(
+        Layer.provideMerge(gameLayer),
         Layer.provide(NodeServices.layer),
       );
       return yield* run({ root }).pipe(Effect.provide(services));
@@ -360,6 +366,66 @@ it.live("a scripted playtest that responded records a passed playtest", () =>
         const read = yield* qualification.read(root, "godot");
         expect(stageOf(read, "playtest")?.status).toBe("passed");
         expect(NodeFS.existsSync(NodePath.join(root, "builds/playtests"))).toBe(true);
+      }),
+    {
+      playtest: () =>
+        Effect.succeed(
+          playtestResult({
+            success: true,
+            responded: true,
+            qualifies: true,
+            interaction: "no state probe",
+          }),
+        ),
+    },
+  ),
+);
+
+it.live("a design-doc edit and an engine import keep the exported build playable", () =>
+  withFixture(
+    ({ root }) =>
+      Effect.gen(function* () {
+        const game = yield* GameService.GameService;
+        const studio = yield* GameRepairStudio.GameRepairStudio;
+        const qualification = yield* GameQualification.GameQualification;
+        const exported = yield* game.export(threadId, "Web");
+        expect(exported.success, exported.message).toBe(true);
+        const playtest = yield* game.webPlaytest(threadId, { steps: [{ waitMs: 1 }] });
+        expect(playtest.success, playtest.message).toBe(true);
+        const read = yield* qualification.read(root, "godot");
+        expect(read.completion).toBe("complete");
+        expect(stageOf(read, "export")?.status).toBe("passed");
+        expect(stageOf(read, "playtest")?.status).toBe("passed");
+
+        // The t50 sequence: the builder edited DESIGN.md after the export, and
+        // the next Godot run wrote sidecars beside the sources. Neither is
+        // build input, so neither may stale the playable build.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Revised design\n"),
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd.uid"), "uid://new\n"),
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "godot/project.godot.import"), "[remap]\n"),
+        );
+        const afterDesign = yield* qualification.read(root, "godot");
+        expect(afterDesign.completion).toBe("complete");
+        const playable = yield* studio.exportProvenance(root);
+        expect(playable.playable).toBe(true);
+        expect(playable.exportBuildId).not.toBeNull();
+        expect(playable.playtestBuildId).toBe(playable.exportBuildId);
+
+        // A real build input still invalidates the export, the playtest and the
+        // loop's playable check.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "extends Node\n# edit\n"),
+        );
+        const stale = yield* qualification.read(root, "godot");
+        expect(stageOf(stale, "export")?.status).toBe("stale");
+        expect(stageOf(stale, "playtest")?.status).toBe("stale");
+        expect(stale.completion).toBe("incomplete");
+        expect((yield* studio.exportProvenance(root)).playable).toBe(false);
       }),
     {
       playtest: () =>
