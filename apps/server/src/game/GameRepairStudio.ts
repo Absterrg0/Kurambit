@@ -75,16 +75,13 @@ export interface GameRepairStudioSubmissionFacts {
 /**
  * The exact bytes an export produced and where they came from. Review starts
  * from a builder's submission, not from an inferred playable state; this read
- * supplies the fallback export identity and remains available to status code.
+ * supplies the fallback export identity.
  */
 export interface GameRepairStudioProvenance {
   /** The build the export stage produced, when it recorded one. */
   readonly exportBuildId: string | null;
   /** The run whose tool call exported those bytes, when it was recorded. */
   readonly exportRunId: string | null;
-  readonly exportFinishedAt: string | null;
-  /** The build the qualifying playtest played, when it recorded one. */
-  readonly playtestBuildId: string | null;
 }
 
 export type GameRepairStudioPromotion =
@@ -265,12 +262,9 @@ export const layer = (options: { readonly stateDir: string }) =>
       const exportProvenance = (root: string) =>
         Effect.gen(function* () {
           const exported = yield* qualification.stageRecord(root, "export");
-          const played = yield* qualification.stageRecord(root, "playtest");
           return {
             exportBuildId: exported?.buildId ?? null,
             exportRunId: exported?.runId ?? null,
-            exportFinishedAt: exported?.finishedAt ?? null,
-            playtestBuildId: played?.buildId ?? null,
           } satisfies GameRepairStudioProvenance;
         });
 

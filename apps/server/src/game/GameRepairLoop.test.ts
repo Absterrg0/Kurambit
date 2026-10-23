@@ -50,7 +50,6 @@ const builderSelection: ModelSelection = {
 };
 const BUILDER_STARTED = "2026-10-01T10:00:00.000Z";
 const BUILDER_FINISHED = "2026-10-01T10:10:00.000Z";
-const EXPORT_FINISHED = "2026-10-01T10:05:00.000Z";
 const EXPORT_BUILD_ID = "a".repeat(64);
 
 const manifest: GameManifest = {
@@ -104,8 +103,6 @@ interface Scripted {
   previewDirectories: string[];
   exportBuildId: string;
   exportRunId: string | null;
-  exportFinishedAt: string;
-  playtestBuildId: string;
   /** The one running turn `projects.activeRun` reports; submit needs an owner. */
   activeRun: RunId | null;
   /** What the studio's factual check says for every build it is asked about. */
@@ -157,8 +154,6 @@ const makeScripted = (): Scripted => ({
   previewDirectories: [],
   exportBuildId: EXPORT_BUILD_ID,
   exportRunId: String(builderRunId),
-  exportFinishedAt: EXPORT_FINISHED,
-  playtestBuildId: EXPORT_BUILD_ID,
   activeRun: builderRunId,
   facts: { passed: true, reason: null },
   incumbent: {
@@ -569,8 +564,6 @@ const withLoop = <A, E>(
                 Effect.succeed({
                   exportBuildId: scripted.exportBuildId,
                   exportRunId: scripted.exportRunId,
-                  exportFinishedAt: scripted.exportFinishedAt,
-                  playtestBuildId: scripted.playtestBuildId,
                 }),
               submissionFacts: (_root, buildId) =>
                 Effect.succeed({
@@ -1070,8 +1063,6 @@ const ensureLaterBuild = (fixture: Fixture, services: Services) =>
     });
     fixture.scripted.exportBuildId = build;
     fixture.scripted.exportRunId = String(runId);
-    fixture.scripted.playtestBuildId = build;
-    fixture.scripted.exportFinishedAt = DateTime.formatIso(DateTime.makeUnsafe(now + 1));
     return yield* services.loop.ensure({
       threadId,
       runId,
@@ -1548,8 +1539,6 @@ it.live("a new builder run after a stopped loop starts a new review", () =>
         });
         scripted.exportBuildId = nextBuild;
         scripted.exportRunId = String(nextRunId);
-        scripted.playtestBuildId = nextBuild;
-        scripted.exportFinishedAt = "2026-10-01T10:25:00.000Z";
         const created = yield* services.loop.ensure({
           threadId,
           runId: nextRunId,

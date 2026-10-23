@@ -275,7 +275,7 @@ export class GameRepairLoop extends Context.Service<
      */
     readonly submit: (
       threadId: ThreadId,
-      input: typeof GameSubmitInput.Type,
+      input: GameSubmitInput,
     ) => Effect.Effect<GameSubmitResult, GameOperationError>;
     readonly activity: (
       threadId: ThreadId,

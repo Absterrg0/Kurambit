@@ -419,7 +419,6 @@ it.live("a design-doc edit and an engine import keep the exported build playable
         const provenance = yield* studio.exportProvenance(root);
         expect(provenance.exportBuildId).not.toBeNull();
         expect(submitted.buildId).toBe(provenance.exportBuildId);
-        expect(provenance.playtestBuildId).toBe(provenance.exportBuildId);
 
         // A real build input still invalidates the export and the playtest for
         // the current sources. That is a status fact; the exported build is
