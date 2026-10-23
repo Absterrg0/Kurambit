@@ -12,9 +12,10 @@ import {
   type GameReviewBallotPlan,
   type GameReviewBudget,
   type GameReviewCheck,
-  type GameReviewExperimentRoute,
+  GameReviewExperimentRoute,
   type GameManifest,
   type GamePlaytestStep,
+  type GamePlaytestInputPair,
   type GameViewport,
   GameOperationError,
   type GameRepairLoop as GameRepairLoopRecord,
@@ -89,6 +90,7 @@ const manifest: GameManifest = {
 };
 
 interface CheckRun {
+  readonly inputPairs?: ReadonlyArray<GamePlaytestInputPair>;
   readonly checks: ReadonlyArray<GameReviewCheck>;
   readonly frames: ReadonlyArray<string>;
 }
@@ -634,6 +636,9 @@ const withLoop = <A, E>(
                 frames: run.frames.map((path, index) => ({
                   label: `frame ${String(index + 1)}`,
                   path,
+                  ...(run.inputPairs?.[index] === undefined
+                    ? {}
+                    : { inputPair: run.inputPairs[index] }),
                 })),
                 // What the run actually played at; a frozen viewport wins.
                 viewport: input.inputs.viewport ?? { width: 1280, height: 720 },
@@ -651,30 +656,33 @@ const withLoop = <A, E>(
               // The loop replays each route on the incumbent, then candidate.
               const broken = scripted.experiments.length % 2 === 0;
               return Effect.succeed({
-                frames: input.steps.flatMap((step, stepIndex) => [
-                  {
-                    label: `experiment ${String(stepIndex + 1)} before`,
-                    path: NodePath.join(frameDirectory, "incumbent-boot.png"),
-                    inputPair: {
-                      stepIndex,
-                      phase: "before" as const,
-                      input: step,
-                      changedPercent: null,
-                      stateChanges: null,
+                frames: [
+                  { label: "booted", path: NodePath.join(frameDirectory, "incumbent-boot.png") },
+                  ...input.steps.flatMap((step, stepIndex) => [
+                    {
+                      label: `experiment ${String(stepIndex + 1)} before`,
+                      path: NodePath.join(frameDirectory, "incumbent-boot.png"),
+                      inputPair: {
+                        stepIndex,
+                        phase: "before" as const,
+                        input: step,
+                        changedPercent: null,
+                        stateChanges: null,
+                      },
                     },
-                  },
-                  {
-                    label: `experiment ${String(stepIndex + 1)} after`,
-                    path: NodePath.join(frameDirectory, "incumbent-action.png"),
-                    inputPair: {
-                      stepIndex,
-                      phase: "after" as const,
-                      input: step,
-                      changedPercent: broken ? 0 : 40,
-                      stateChanges: null,
+                    {
+                      label: `experiment ${String(stepIndex + 1)} after`,
+                      path: NodePath.join(frameDirectory, "incumbent-action.png"),
+                      inputPair: {
+                        stepIndex,
+                        phase: "after" as const,
+                        input: step,
+                        changedPercent: broken ? 0 : 40,
+                        stateChanges: null,
+                      },
                     },
-                  },
-                ]),
+                  ]),
+                ],
               });
             };
             const promote: GameRepairStudio.GameRepairStudio["Service"]["promote"] = (
@@ -1082,8 +1090,8 @@ it.live("ballots see the critic's cited experiment routes replayed on both build
                 frame.label.includes("experiment") &&
                 frame.inputPair?.phase === "after",
             );
-            // Two matched routes: one do-not-regress pair and one defect pair.
-            expect(experimentAfter).toHaveLength(4);
+            // Every cited route survives, including the fundamental's evidence.
+            expect(experimentAfter).toHaveLength(6);
             const candidateSide = context.plan.main.A === "challenger" ? "a" : "b";
             const broken =
               experimentAfter.find((frame) => frame.id.startsWith(candidateSide))?.inputPair
@@ -1105,13 +1113,79 @@ it.live("ballots see the critic's cited experiment routes replayed on both build
             "try-2",
             "try-3",
           ]);
-          expect(scripted.experiments).toHaveLength(4);
+          expect(scripted.experiments).toHaveLength(6);
           expect(new Set(scripted.experiments.map((entry) => entry.buildId)).size).toBe(2);
           expect(
             scripted.experiments.map((entry) =>
               "hold" in entry.steps[0]! ? entry.steps[0].hold : null,
             ),
-          ).toEqual(["ArrowRight", "ArrowRight", "ArrowLeft", "ArrowLeft"]);
+          ).toEqual(["ArrowRight", "ArrowRight", "ArrowLeft", "ArrowLeft", "Space", "Space"]);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("t50d's cited boot, wait and jump reach ballots without duplicate click pairs", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const captured = Schema.decodeUnknownSync(
+            Schema.fromJsonString(
+              Schema.Struct({
+                ...GameReviewCriticAnswer.fields,
+                experiments: Schema.Array(GameReviewExperimentRoute),
+              }),
+            ),
+          )(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(new URL("./fixtures/t50d/round-1.json", import.meta.url), "utf8"),
+            ),
+          );
+          const { scripted } = fixture;
+          scripted.criticExperiments = captured.experiments;
+          scripted.critic = () => ({ kind: "critic", raw: "{}", answer: captured });
+          scripted.repairs = [repairWith()];
+          scripted.steps = captured.experiments[0]!.steps;
+          scripted.viewport = captured.experiments[0]!.viewport;
+          const inputPairs = (["before", "after"] as const).map((phase) => ({
+            phase,
+            stepIndex: 0,
+            input: scripted.steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          }));
+          scripted.incumbent = { ...scripted.incumbent, inputPairs };
+          scripted.candidate = { ...scripted.candidate, inputPairs };
+          scripted.ballots = [0, 1].map(() => ({ plan, order }) => {
+            const frames = scripted.starts.find(
+              (child) => child.role === "ballot" && child.order === order,
+            )!.evidence!.frames;
+            for (const side of ["a", "b", "c", "d"]) {
+              const evidence = frames.filter((frame) => frame.id.startsWith(side));
+              expect(
+                evidence.some((frame) => frame.label.includes("experiment try-1: booted")),
+              ).toBe(true);
+              expect(
+                evidence.some(
+                  (frame) => frame.inputPair?.stepIndex === 6 && frame.inputPair.phase === "after",
+                ),
+              ).toBe(true);
+              expect(evidence.filter((frame) => frame.inputPair?.stepIndex === 0)).toHaveLength(2);
+              expect(
+                evidence.some(
+                  (frame) => frame.inputPair !== undefined && "waitMs" in frame.inputPair.input,
+                ),
+              ).toBe(false);
+              expect(evidence.some((frame) => frame.label.includes("try-2: observation"))).toBe(
+                true,
+              );
+            }
+            return ballotAnswer(plan, "tie");
+          });
+          yield* runToCompletion(services, fixture);
+          expect(scripted.experiments).toHaveLength(4);
         }),
       ),
     { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },

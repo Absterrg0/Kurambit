@@ -92,3 +92,18 @@ it("captures waiting as an observation without crediting it as input", async () 
   expect(result.frames[1]?.inputPair?.changedPercent).toBeNull();
   expect(result.frames[1]?.inputPair?.stateChanges).toBeNull();
 });
+
+it("excludes legacy wait pairs when selecting input evidence", async () => {
+  const result = await playtestStepWithEvidence({
+    step: { waitMs: 300 },
+    stepIndex: 5,
+    captureAllSteps: true,
+    execute: async () => false,
+    capture: async () => ({
+      screenshot: { label: "raw", mimeType: "image/png", data: "cG5n", width: 1, height: 1 },
+      pixels: null,
+      probe: null,
+    }),
+  });
+  expect(selectInputPairFrames(result.frames)).toEqual([]);
+});

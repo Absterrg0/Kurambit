@@ -230,8 +230,14 @@ export const readPlaytestEvidence = async (
   directory: string,
 ): Promise<PlaytestEvidenceRun | null> => {
   if (NodePath.dirname(directory) !== PLAYTEST_DIRECTORY) return null;
-  const parent = NodePath.join(root, PLAYTEST_DIRECTORY);
-  const stored = await readStoredRun(parent, NodePath.basename(directory));
+  return readPlaytestEvidenceAt(NodePath.join(root, directory));
+};
+
+/** Reads a server-owned evidence directory, including an isolated experiment. */
+export const readPlaytestEvidenceAt = async (
+  directory: string,
+): Promise<PlaytestEvidenceRun | null> => {
+  const stored = await readStoredRun(NodePath.dirname(directory), NodePath.basename(directory));
   return stored === null ? null : { frames: stored.frames, state: stored.state ?? null };
 };
 

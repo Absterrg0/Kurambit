@@ -23,7 +23,12 @@ import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 import { selectInputPairFrames } from "./playtestInputPairs.ts";
-import { playedViewport, readPlaytestEvidence, readLastPlaytest } from "./playtestEvidence.ts";
+import {
+  playedViewport,
+  readPlaytestEvidence,
+  readPlaytestEvidenceAt,
+  readLastPlaytest,
+} from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuild } from "./webBuild.ts";
 
 /** One captured frame the review may use, already written outside the game. */
@@ -507,13 +512,33 @@ export const layer = (options: { readonly stateDir: string }) =>
               directory,
             )
             .pipe(
+              Effect.flatMap((result) =>
+                Effect.gen(function* () {
+                  const persisted = yield* Effect.promise(() => readPlaytestEvidenceAt(directory));
+                  const screenshots =
+                    persisted === null
+                      ? result.screenshots
+                      : yield* Effect.promise(() =>
+                          Promise.all(
+                            persisted.frames.map(async (frame) => ({
+                              label: frame.label,
+                              ...(frame.inputPair === undefined
+                                ? {}
+                                : { inputPair: frame.inputPair }),
+                              data: (
+                                await NodeFSP.readFile(NodePath.join(directory, frame.file))
+                              ).toString("base64"),
+                            })),
+                          ),
+                        );
+                  return { frames: yield* storeFrames(input.root, screenshots) };
+                }),
+              ),
               Effect.ensuring(
                 Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
               ),
             );
-          return {
-            frames: yield* storeFrames(input.root, result.screenshots),
-          } satisfies GameRepairStudioExperimentResult;
+          return result satisfies GameRepairStudioExperimentResult;
         });
 
       const exportState = (root: string) =>

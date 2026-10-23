@@ -86,7 +86,11 @@ export const playtestStepWithEvidence = async (input: {
 /** Four complete pairs replace loose frames; spread across long routes. */
 export const selectInputPairFrames = <
   T extends {
-    readonly inputPair?: { readonly stepIndex: number; readonly phase: "before" | "after" };
+    readonly inputPair?: {
+      readonly stepIndex: number;
+      readonly phase: "before" | "after";
+      readonly input?: GamePlaytestStep;
+    };
   },
 >(
   frames: readonly T[],
@@ -94,6 +98,11 @@ export const selectInputPairFrames = <
   const pairs = new Map<number, T[]>();
   for (const frame of frames) {
     if (frame.inputPair === undefined) continue;
+    if (
+      frame.inputPair.input !== undefined &&
+      ("waitMs" in frame.inputPair.input || "screenshot" in frame.inputPair.input)
+    )
+      continue;
     const pair = pairs.get(frame.inputPair.stepIndex) ?? [];
     pair.push(frame);
     pairs.set(frame.inputPair.stepIndex, pair);

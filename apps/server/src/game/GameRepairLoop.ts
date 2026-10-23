@@ -9,6 +9,7 @@ import {
   EMPTY_GAME_REVIEW_USAGE,
   GameOperationError,
   type GameRepairFrame,
+  type GamePlaytestStep,
   GameRepairLoop as GameRepairLoopSchema,
   type GameRepairLoop as GameRepairLoopRecord,
   GAME_REVIEW_FACETS,
@@ -63,8 +64,6 @@ const MAX_STORED_LOOPS = 10;
 
 const MAX_REPAIR_PROMPT_DEFECTS = 5;
 const BALLOT_FRAMES_PER_SIDE = 6;
-/** Two matched experiment pairs leave two frozen route frames per side. */
-const BALLOT_EXPERIMENT_PAIRS = 2;
 const CRITIC_FRAMES = 8;
 const REQUIRED_POSITIVE_CHECKS = ["boot", "console", "input"] as const;
 const FACT_CHECK_IDS = new Set([
@@ -121,56 +120,44 @@ const criticFrames = (
   }));
 
 const assignmentFrames = (frames: ReadonlyArray<GameRepairFrame>, side: "a" | "b" | "c" | "d") =>
-  frames.slice(0, BALLOT_FRAMES_PER_SIDE).map((frame, index) => ({
+  frames.map((frame, index) => ({
     id: `${side}${index + 1}`,
     label: `${side.toUpperCase()}: ${frame.label}`,
     sourcePath: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
 
-/** The same critic route replayed on both builds; the ballot sees A and B alike. */
+/** Matched evidence from one cited point of a critic route. */
 interface BallotExperimentPair {
-  readonly routeId: string;
-  readonly stepIndex: number;
-  readonly incumbent: readonly [GameRepairFrame, GameRepairFrame];
-  readonly candidate: readonly [GameRepairFrame, GameRepairFrame];
+  readonly key: string;
+  readonly incumbent: ReadonlyArray<GameRepairFrame>;
+  readonly candidate: ReadonlyArray<GameRepairFrame>;
 }
 
-const experimentFrame = (frame: GameRepairStudio.GameRepairStudioFrame): GameRepairFrame => ({
-  // assignmentFrames supplies the ballot's anonymous id.
-  id: "e1",
-  label: frame.label,
-  path: frame.path,
-  ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
-});
-
-const pairedExperimentFrames = (
-  frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+const inputRouteKey = (
+  steps: ReadonlyArray<GamePlaytestStep>,
   stepIndex: number,
-): readonly [GameRepairFrame, GameRepairFrame] | null => {
-  const before = frames.find(
-    (frame) => frame.inputPair?.stepIndex === stepIndex && frame.inputPair.phase === "before",
-  );
-  const after = frames.find(
-    (frame) => frame.inputPair?.stepIndex === stepIndex && frame.inputPair.phase === "after",
-  );
-  return before === undefined || after === undefined
-    ? null
-    : [experimentFrame(before), experimentFrame(after)];
-};
+  viewport: GameRepairLoopRecord["inputs"]["viewport"],
+) => JSON.stringify([viewport, steps.slice(0, stepIndex + 1)]);
 
-const completeExperimentSteps = (
-  left: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
-  right: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
-) => {
-  const steps = (frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>) =>
-    new Set(
-      frames
-        .filter((frame) => frame.inputPair?.phase === "after")
-        .map((frame) => frame.inputPair!.stepIndex),
-    );
-  const rightSteps = steps(right);
-  return [...steps(left)].filter((step) => rightSteps.has(step)).toSorted((a, b) => a - b);
+const experimentFrames = (
+  frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
+  route: GameReviewExperimentRoute,
+  stepIndex: number | null,
+): GameRepairFrame[] => {
+  const atStep = frames.filter((frame) => frame.inputPair?.stepIndex === stepIndex);
+  const selected = stepIndex === null ? frames.slice(0, 1) : atStep;
+  return selected.map((frame) => {
+    const pair = frame.inputPair;
+    const observation =
+      pair !== undefined && ("waitMs" in pair.input || "screenshot" in pair.input);
+    return {
+      id: "e1",
+      label: `experiment ${route.id}: ${observation ? "observation: " : ""}${frame.label}`,
+      path: frame.path,
+      ...(pair === undefined || observation ? {} : { inputPair: pair }),
+    };
+  });
 };
 
 const sideChecks = (checks: ReadonlyArray<GameReviewCheck>, side: string) =>
@@ -870,14 +857,26 @@ export const layer = (options: GameRepairLoopOptions) => {
       candidateChecks: ReadonlyArray<GameReviewCheck>,
       plan: GameReviewBallotPlan,
       experiments: ReadonlyArray<BallotExperimentPair>,
+      inputs: GameRepairLoopRecord["inputs"],
     ) => {
       const experimentFrames = (side: "incumbent" | "challenger") =>
         experiments.flatMap((pair) => (side === "challenger" ? pair.candidate : pair.incumbent));
       const buildFrames = (side: "incumbent" | "challenger") => {
-        // Matched experiment pairs come first: the ballots judge the routes
-        // the critic actually exercised, and the frozen route fills the rest.
+        // Route prefixes distinguish repeated actions reached through different inputs.
         const frozen = side === "challenger" ? candidateFrames : incumbentFrames;
-        return [...experimentFrames(side), ...frozen].slice(0, BALLOT_FRAMES_PER_SIDE);
+        const replayed = new Set(experiments.map((entry) => entry.key));
+        return [
+          ...experimentFrames(side),
+          ...frozen
+            .slice(0, BALLOT_FRAMES_PER_SIDE)
+            .filter(
+              (frame) =>
+                frame.inputPair === undefined ||
+                !replayed.has(
+                  inputRouteKey(inputs.steps, frame.inputPair.stepIndex, inputs.viewport),
+                ),
+            ),
+        ];
       };
       const buildChecks = (side: "incumbent" | "challenger") =>
         side === "challenger" ? candidateChecks : incumbentChecks;
@@ -887,10 +886,7 @@ export const layer = (options: GameRepairLoopOptions) => {
       });
       const controls = ["C", "D"].flatMap((label) => {
         const side = label as "C" | "D";
-        return assignmentFrames(
-          [...experimentFrames("incumbent"), ...incumbentFrames].slice(0, BALLOT_FRAMES_PER_SIDE),
-          side.toLowerCase() as "c" | "d",
-        );
+        return assignmentFrames(buildFrames("incumbent"), side.toLowerCase() as "c" | "d");
       });
       const checks = [
         ...sideChecks(buildChecks(plan.main.A), "a"),
@@ -901,11 +897,7 @@ export const layer = (options: GameRepairLoopOptions) => {
       return { frames: [...frames, ...controls], checks };
     };
 
-    /**
-     * Replays the critic's cited experiment routes on both builds. The first
-     * pairs belong to preservation items, so the evidence behind a do-not-
-     * regress claim survives the frame budget before a lower-priority route.
-     */
+    /** Replay every cited point on both builds before adding the frozen route. */
     const replayExperimentPairs = (input: {
       readonly threadId: ThreadId;
       readonly root: string;
@@ -917,23 +909,9 @@ export const layer = (options: GameRepairLoopOptions) => {
     }): Effect.Effect<ReadonlyArray<BallotExperimentPair>, GameOperationError> =>
       Effect.gen(function* () {
         if (input.experiments.length === 0 || input.incumbentBuildId === null) return [];
-        const doNotRegressFrames = new Set(input.doNotRegress.map((item) => item.frameId));
-        const defectFrames = new Set(input.defects.map((defect) => defect.frameId));
-        const priority = (frameId: string) =>
-          doNotRegressFrames.has(frameId) ? 0 : defectFrames.has(frameId) ? 1 : 2;
-        const routes = input.experiments
-          .map((route, index) => ({
-            route,
-            index,
-            priority:
-              route.frames.length === 0
-                ? 2
-                : Math.min(...route.frames.map((frame) => priority(frame.frameId))),
-          }))
-          .toSorted((left, right) => left.priority - right.priority || left.index - right.index);
         const pairs: BallotExperimentPair[] = [];
-        for (const { route } of routes) {
-          if (pairs.length >= BALLOT_EXPERIMENT_PAIRS) break;
+        const seen = new Set<string>();
+        for (const route of input.experiments) {
           const run = (buildId: string) =>
             studio.experiment({
               threadId: input.threadId,
@@ -945,34 +923,23 @@ export const layer = (options: GameRepairLoopOptions) => {
             });
           const incumbent = yield* run(input.incumbentBuildId);
           const candidate = yield* run(input.candidateBuildId);
-          const citedSteps = [
-            ...new Set(
-              route.frames
-                .filter((frame) => frame.stepIndex !== null)
-                .toSorted(
-                  (left, right) =>
-                    priority(left.frameId) - priority(right.frameId) ||
-                    left.stepIndex! - right.stepIndex!,
-                )
-                .map((frame) => frame.stepIndex!),
-            ),
-          ];
-          // A cited interval frame may lack a step; replay its first matched pair.
-          const steps =
-            citedSteps.length === 0
-              ? completeExperimentSteps(incumbent.frames, candidate.frames).slice(0, 1)
-              : citedSteps;
-          for (const stepIndex of steps) {
-            const before = pairedExperimentFrames(incumbent.frames, stepIndex);
-            const after = pairedExperimentFrames(candidate.frames, stepIndex);
-            if (before === null || after === null) continue;
-            pairs.push({
-              routeId: route.id,
-              stepIndex,
-              incumbent: before,
-              candidate: after,
-            });
-            if (pairs.length >= BALLOT_EXPERIMENT_PAIRS) break;
+          for (const stepIndex of new Set(route.frames.map((frame) => frame.stepIndex))) {
+            const key =
+              stepIndex === null
+                ? `${route.id}:boot`
+                : inputRouteKey(route.steps, stepIndex, route.viewport);
+            if (seen.has(key)) continue;
+            const before = experimentFrames(incumbent.frames, route, stepIndex);
+            const after = experimentFrames(candidate.frames, route, stepIndex);
+            if (before.length === 0 || after.length === 0)
+              return yield* new GameOperationError({
+                operation: "replay critic experiment",
+                path: input.root,
+                reason: "invalid-input",
+                detail: `Experiment ${route.id} has no matched evidence for step ${stepIndex === null ? "boot" : stepIndex + 1}.`,
+              });
+            seen.add(key);
+            pairs.push({ key, incumbent: before, candidate: after });
           }
         }
         return pairs;
@@ -1440,6 +1407,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               candidate.checks,
               plan,
               experimentPairs,
+              record.inputs,
             ),
             items: review.doNotRegress.map((item) => ({ id: item.id, what: item.what })),
           });

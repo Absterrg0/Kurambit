@@ -1620,13 +1620,13 @@ it.live("an invalid tool attempt cannot be bypassed with a printed answer", () =
   ),
 );
 
-it.live("accepts the full six-frame ballot budget for all four slots", () =>
+it.live("accepts all cited ballot frames and bounds the evidence manifest", () =>
   withSession(({ frames, service }) =>
     Effect.gen(function* () {
       const evidence = frameInput(frames);
-      const ballotFrames = Array.from({ length: 24 }, (_, index) => ({
+      const ballotFrames = Array.from({ length: 384 }, (_, index) => ({
         id: `source-${index}`,
-        label: `${"ABCD"[Math.floor(index / 6)]}: action ${index % 6}`,
+        label: `${"ABCD"[Math.floor(index / 96)]}: action ${index % 6}`,
         sourcePath: frames[index % frames.length]!,
       }));
       const started = yield* service.start({
@@ -1639,7 +1639,7 @@ it.live("accepts the full six-frame ballot budget for all four slots", () =>
       expect(started.kind).toBe("started");
       expect(
         (yield* service.describe({ threadId, loopId, roundId, role: "ballot" }))?.frames,
-      ).toHaveLength(24);
+      ).toHaveLength(384);
       const tooMany = yield* service
         .start({
           threadId,
@@ -1650,7 +1650,7 @@ it.live("accepts the full six-frame ballot budget for all four slots", () =>
           evidence: { ...evidence, frames: [...ballotFrames, ballotFrames[0]!] },
         })
         .pipe(Effect.flip);
-      expect(tooMany.detail).toBe("At most 24 frames are evidence.");
+      expect(tooMany.detail).toBe("At most 384 frames are evidence.");
     }),
   ),
 );

@@ -68,6 +68,7 @@ const baseResult = (inputSteps: number | null = 1): GameWebPlaytestResult => ({
 interface Harness {
   readonly root: string;
   results: GameWebPlaytestResult;
+  persistExperiment?: boolean;
   readonly calls: Array<GameWebPlaytestInput | undefined>;
   /** When set, every route run fails; boot-only runs still succeed. */
   replayError: GameOperationError | null;
@@ -131,10 +132,20 @@ const withStudio = <A, E>(
         playtestStage: null,
       };
       const game = Layer.mock(GameService.GameService)({
-        webPlaytestBuild: (_thread, _buildId, input) => {
+        webPlaytestBuild: (_thread, _buildId, input, directory) => {
           harness.calls.push(input);
           if (harness.replayError !== null && (input?.steps?.length ?? 0) > 0)
             return Effect.fail(harness.replayError);
+          if (directory !== undefined && harness.persistExperiment)
+            return Effect.promise(async () => {
+              await writePlaytestEvidence({
+                root,
+                directory,
+                steps: input?.steps ?? [],
+                result: harness.results,
+              });
+              return { ...harness.results, screenshots: [] };
+            });
           return Effect.succeed(harness.results);
         },
       });
@@ -676,4 +687,25 @@ it.live(
         );
       }),
     ),
+);
+
+it.live("experiment replay keeps persisted frames omitted from the response before cleanup", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.persistExperiment = true;
+      const result = yield* studio.experiment({
+        threadId,
+        root: harness.root,
+        buildId: "a".repeat(64),
+        steps: [{ press: "Space" }],
+        captureEveryMs: 100,
+        viewport: null,
+      });
+      expect(result.frames).toHaveLength(1);
+      expect(yield* Effect.promise(() => NodeFSP.readFile(result.frames[0]!.path, "utf8"))).toBe(
+        "png",
+      );
+    }),
+  ),
 );
