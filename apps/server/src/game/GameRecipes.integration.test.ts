@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off -- The Godot timeout is a wall-clock guard around a tracked child process, not an Effect workflow timer.
 // @effect-diagnostics nodeBuiltinImport:off -- Generates real Godot projects, runs the pinned headless engine, exports Web builds and plays them in the headless browser.
 import { it, expect } from "@effect/vitest";
 import * as NodeChildProcess from "node:child_process";
