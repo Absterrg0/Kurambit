@@ -1301,8 +1301,10 @@ it.live("the third started repair is judged before the budget stops the loop", (
         const state = loopRecord(yield* readLoop(services));
         expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(3);
         expect(state.repairsUsed).toBe(3);
+        expect(scripted.starts.filter((child) => child.role === "critic")).toHaveLength(3);
         expect(state.reason).toContain("budget-exhausted");
         const game = yield* services.rounds.read(root);
+        expect(game.rounds).toHaveLength(3);
         const judged = game.rounds.filter((round) => (round.candidateChecks ?? []).length > 0);
         expect(judged).toHaveLength(3);
         expect((judged.at(-1)?.ballotAnswers ?? []).length).toBe(2);
@@ -2582,4 +2584,20 @@ it.live.each(["fixes", "both-regress", "one-regresses", "unknown", "control", "l
         ),
       { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
     ),
+);
+
+it.live("zero repair budget opens no round and dispatches no critic", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          yield* runToCompletion(services, fixture);
+          expect(fixture.scripted.starts).toEqual([]);
+          expect(fixture.scripted.checks).toEqual([]);
+          expect((yield* services.rounds.read(fixture.root)).rounds).toEqual([]);
+          expect(loopRecord(yield* readLoop(services)).reason).toContain("budget-exhausted");
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 0 } },
+  ),
 );

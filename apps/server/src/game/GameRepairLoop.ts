@@ -1526,6 +1526,13 @@ export const layer = (options: GameRepairLoopOptions) => {
             yield* interrupted(task.root, "deadline: the review budget ran out.");
             return;
           }
+          if (remaining.repairs <= 0) {
+            yield* stop(
+              task.root,
+              "budget-exhausted: no repairs remain; the selected build is kept.",
+            );
+            return;
+          }
           const outcome = yield* playRound(task, latest).pipe(
             Effect.catchCause((cause) =>
               finish({

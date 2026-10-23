@@ -206,7 +206,7 @@ export const GAME_REVIEW_ANSWER_MAX_BYTES = 16 * 1024;
 /**
  * The loop's spend. The default is three repairs or forty-five elapsed minutes,
  * whichever runs out first, and includes the checks and reviews those repairs
- * caused. Zero repairs is a valid budget: it reviews once and never repairs.
+ * caused. Zero repairs is a valid budget: it ends without opening a review round.
  */
 export const GameReviewBudget = Schema.Struct({
   repairs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(3)),
