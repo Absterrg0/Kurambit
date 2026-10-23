@@ -1081,3 +1081,53 @@ it.live("a repair is a separate writable child in the game folder", () =>
     }),
   ),
 );
+
+it.live("accepts one JSON fence and truncates prose while keeping decisions and ids strict", () =>
+  Effect.sync(() => {
+    const known = { frameIds: new Set(["f1"]), checkIds: new Set(["boot"]) };
+    const critic = {
+      defects: [
+        { severity: "visible", what: "w".repeat(401), frameId: "f1", fix: "f".repeat(401) },
+      ],
+      doNotRegress: [{ id: "input", what: "p".repeat(401), frameId: "f1" }],
+    };
+    const raw = JSON.stringify(critic);
+    for (const text of [raw, `\n\`\`\`json\n${raw}\n\`\`\`\n`]) {
+      const parsed = GameReviewSessions.parseCriticAnswer(text, known);
+      expect(parsed.kind).toBe("valid");
+      if (parsed.kind !== "valid") continue;
+      for (const field of [
+        parsed.answer.defects[0]!.what,
+        parsed.answer.defects[0]!.fix,
+        parsed.answer.doNotRegress[0]!.what,
+      ]) {
+        expect(field).toHaveLength(400);
+        expect(field).toMatch(/\[truncated\]$/);
+      }
+    }
+    for (const text of [
+      `Here is JSON: ${raw}`,
+      `\`\`\`json\n${raw}\n\`\`\`\n\`\`\`json\n${raw}\n\`\`\``,
+      `\`\`\`js\n${raw}\n\`\`\``,
+    ])
+      expect(GameReviewSessions.parseCriticAnswer(text, known).kind).toBe("invalid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          ...critic,
+          defects: [{ ...critic.defects[0], severity: "visible".repeat(80) }],
+        }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          ...critic,
+          doNotRegress: [{ ...critic.doNotRegress[0], id: "i".repeat(81) }],
+        }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+  }),
+);

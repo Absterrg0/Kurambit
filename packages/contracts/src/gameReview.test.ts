@@ -160,3 +160,10 @@ it("bounds history pages at the transport boundary", () => {
   expect(decode({ threadId: "game", limit: 20 }).limit).toBe(20);
   for (const limit of [0, 21, -1, 1.5]) expect(() => decode({ threadId: "game", limit })).toThrow();
 });
+
+it("truncates a long submission note with a marker and keeps build ids strict", () => {
+  const input = decodeSubmit({ note: "n".repeat(501), buildId });
+  expect(input.note).toHaveLength(500);
+  expect(input.note).toMatch(/\[truncated\]$/);
+  expect(() => decodeSubmit({ note: "n".repeat(501), buildId: "x".repeat(65) })).toThrow();
+});

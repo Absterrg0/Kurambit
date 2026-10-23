@@ -1,7 +1,19 @@
 import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import { RunId, ThreadId } from "./baseSchemas.ts";
 import { GamePlaytestStep, GameViewport } from "./game.ts";
 import { ModelSelection } from "./modelSelection.ts";
+
+// Prose length must not discard a model's otherwise valid decision.
+const reviewText = (cap: number) =>
+  Schema.String.pipe(
+    Schema.decodeTo(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(cap)), {
+      decode: SchemaGetter.transform((text) =>
+        text.length > cap ? `${text.slice(0, cap - " [truncated]".length)} [truncated]` : text,
+      ),
+      encode: SchemaGetter.passthrough(),
+    }),
+  );
 
 /**
  * The review loop's judgement vocabulary. A defect is something the critic saw
@@ -17,17 +29,17 @@ export type GameReviewSeverity = typeof GameReviewSeverity.Type;
 export const GameReviewDefect = Schema.Struct({
   severity: GameReviewSeverity,
   /** One observed fault, in the critic's words. */
-  what: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(400)),
+  what: reviewText(400),
   /** A frame id from the evidence manifest, never a caption the critic invented. */
   frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /** A concrete change with a yes/no completion test. */
-  fix: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(400)),
+  fix: reviewText(400),
 });
 export type GameReviewDefect = typeof GameReviewDefect.Type;
 
 export const GameReviewDoNotRegress = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
-  what: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(400)),
+  what: reviewText(400),
   frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /**
    * The existing check that measures this behaviour, when one does. Ballots
@@ -94,7 +106,7 @@ export const GameReviewBallotAnswer = Schema.Struct({
   main: GameReviewFacetVerdicts,
   preservation: Schema.Array(GameReviewPreservationEntry),
   control: GameReviewFacetVerdicts,
-  reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
+  reason: reviewText(2_000),
 });
 export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
 
@@ -175,7 +187,7 @@ export const GameSubmission = Schema.Struct({
   runId: RunId,
   /** The build-addressed export the builder stands behind. */
   buildId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
-  note: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+  note: reviewText(500),
   submittedAt: Schema.String,
 });
 export type GameSubmission = typeof GameSubmission.Type;
@@ -188,11 +200,7 @@ export const GameSubmitInput = Schema.Struct({
    */
   buildId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
   /** One line: what the game is, or which defects a repair fixed. */
-  note: Schema.String.check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(500),
-    Schema.isPattern(/^[^\r\n]+$/),
-  ),
+  note: Schema.String.check(Schema.isPattern(/^[^\r\n]+$/)).pipe(Schema.decodeTo(reviewText(500))),
 });
 export type GameSubmitInput = typeof GameSubmitInput.Type;
 

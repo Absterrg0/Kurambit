@@ -1924,3 +1924,62 @@ it.live("submit verifies and records only after taking the game gate", () =>
     ),
   ),
 );
+
+it.live("t50b's raw ballots validate but unknown preservation still vetoes round 1", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const read = (name: string) =>
+          NodeFSP.readFile(new URL(`./fixtures/t50b/${name}.txt`, import.meta.url), "utf8");
+        const [criticRaw, ...ballotRaws] = yield* Effect.promise(() =>
+          Promise.all([read("critic-0"), read("ballot-0"), read("ballot-1")]),
+        );
+        const frameIds = new Set(Array.from({ length: 12 }, (_, index) => `f${index + 1}`));
+        const critic = GameReviewSessions.parseCriticAnswer(criticRaw!, {
+          frameIds,
+          checkIds: new Set(),
+        });
+        expect(critic.kind).toBe("valid");
+        if (critic.kind !== "valid") return;
+        const answers = ballotRaws.map((raw) =>
+          GameReviewSessions.parseBallotAnswer(raw, {
+            frameIds,
+            itemIds: critic.answer.doNotRegress.map((item) => item.id),
+          }),
+        );
+        expect(answers.map((answer) => answer.kind)).toEqual(["valid", "valid"]);
+        for (const answer of answers)
+          if (answer.kind === "valid")
+            expect(answer.answer.reason.length).toBeLessThanOrEqual(2000);
+        let critics = 0;
+        fixture.scripted.critic = () =>
+          critics++ === 0
+            ? {
+                kind: "critic",
+                raw: criticRaw!,
+                answer: critic.answer,
+              }
+            : criticAnswer(0);
+        fixture.scripted.repairs = [repairWith()];
+        const ballot: AnswerFactory = ({ plan }) => {
+          const index = plan.main.A === "challenger" ? 0 : 1;
+          const parsed = answers[index]!;
+          return parsed.kind === "valid"
+            ? { kind: "ballot", raw: ballotRaws[index]!, answer: parsed.answer }
+            : { kind: "invalid", raw: ballotRaws[index]!, reason: parsed.reason };
+        };
+        fixture.scripted.ballots = [ballot, ballot];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toEqual([]);
+        expect(state.repairsUsed).toBe(1);
+        const round = (yield* services.rounds.read(fixture.root)).rounds.find(
+          (entry) => entry.ballotAnswers?.length === 2,
+        )!;
+        expect(round.status).toBe("rejected");
+        expect(round.reason).toContain("preservation-lost");
+        expect(round.ballotAnswers?.map((entry) => entry.outcome)).toEqual(["valid", "valid"]);
+      }),
+    ),
+  ),
+);

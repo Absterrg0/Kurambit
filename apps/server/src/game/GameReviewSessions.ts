@@ -455,7 +455,7 @@ const duplicateJsonMember = (text: string): string | null => {
 const parseAnswerText = (text: string): { kind: "parsed"; value: unknown } | AnswerParseFailure => {
   if (Buffer.byteLength(text, "utf8") > GAME_REVIEW_ANSWER_MAX_BYTES)
     return { kind: "invalid", reason: "The answer is larger than 16 KiB." };
-  const trimmed = text.trim();
+  const trimmed = text.trim().replace(/^```json\s*\n([\s\S]*?)\n```$/u, "$1");
   if (trimmed.length === 0) return { kind: "invalid", reason: "The answer is empty." };
   let value: unknown;
   let duplicate: string | null;
