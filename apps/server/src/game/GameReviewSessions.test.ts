@@ -866,6 +866,8 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
 
     const ballot = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
+        overall: "A",
+        overallReason: "The input pair shows clearer action feedback.",
         main: { works: "A", look: "tie", feel: "B", play: "tie" },
         preservation: [{ id: "turns", A: "preserved", B: "unknown", frameIds: ["f1"] }],
         control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
@@ -896,6 +898,20 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
         }),
         { frameIds: frames, itemIds: items },
       ).kind,
+    ).toBe("invalid");
+    for (const overall of [undefined, "C", "accept"]) {
+      expect(
+        GameReviewSessions.parseBallotAnswer(ballot({ overall }), {
+          frameIds: frames,
+          itemIds: items,
+        }).kind,
+      ).toBe("invalid");
+    }
+    expect(
+      GameReviewSessions.parseBallotAnswer(ballot({ overallReason: "" }), {
+        frameIds: frames,
+        itemIds: items,
+      }).kind,
     ).toBe("invalid");
     expect(
       GameReviewSessions.parseBallotAnswer(ballot({ score: 4 }), {
@@ -1343,6 +1359,8 @@ it.live("validates ballot coverage and evidence before recording the top-level f
       expect(command.task).toContain('four choices wrapped in "main"');
       expect(command.task).toContain("unknown is neutral");
       const value = {
+        overall: "A",
+        overallReason: "The input pair shows clearer action feedback.",
         works: "tie",
         look: "B",
         feel: "tie",

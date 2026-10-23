@@ -7,7 +7,8 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_GAME_REVIEW_BUDGET,
-  type GameReviewBallotAnswer,
+  GameReviewBallotAnswer,
+  GameReviewCriticAnswer,
   type GameReviewBallotPlan,
   type GameReviewBudget,
   type GameReviewCheck,
@@ -29,6 +30,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -42,6 +44,25 @@ import * as GameRoundStore from "./GameRoundStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import { gameRecordLocation } from "./gameRecord.ts";
 import { hashWebBuildDirectory } from "./webBuild.ts";
+
+const decodeCapturedCritic = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      defects: GameReviewCriticAnswer.fields.defects,
+      doNotRegress: GameReviewCriticAnswer.fields.doNotRegress,
+    }),
+  ),
+);
+const decodeCapturedBallot = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      main: GameReviewBallotAnswer.fields.main,
+      preservation: GameReviewBallotAnswer.fields.preservation,
+      control: GameReviewBallotAnswer.fields.control,
+      reason: GameReviewBallotAnswer.fields.reason,
+    }),
+  ),
+);
 
 const threadId = ThreadId.make("thread:repair-game");
 const builderRunId = RunId.make("run:builder");
@@ -242,6 +263,8 @@ const ballotAnswer = (
   options: {
     readonly control?: "tie" | "A";
     readonly preservation?: "preserved" | "unknown" | "lost";
+    readonly lossOn?: "challenger" | "incumbent";
+    readonly facets?: "tie" | "incumbent";
   } = {},
 ): GameReviewSessions.GameReviewSessionAnswerResult => {
   const choice =
@@ -250,9 +273,24 @@ const ballotAnswer = (
       : (sideFor(plan, verdict === "promote" ? "challenger" : "incumbent") as "A" | "B");
   const control = options.control === "A" ? "A" : "tie";
   const side = options.preservation ?? "preserved";
+  const facet =
+    options.facets === "tie"
+      ? "tie"
+      : options.facets === "incumbent"
+        ? sideFor(plan, "incumbent")
+        : choice;
   const answer: GameReviewBallotAnswer = {
-    main: { works: choice, look: choice, feel: choice, play: choice },
-    preservation: [{ id: "turns", A: side, B: side, frameIds: ["a1"] }],
+    overall: choice,
+    overallReason: "The input pairs show the overall preference.",
+    main: { works: facet, look: facet, feel: facet, play: facet },
+    preservation: [
+      {
+        id: "turns",
+        A: options.lossOn === undefined || plan.main.A === options.lossOn ? side : "preserved",
+        B: options.lossOn === undefined || plan.main.B === options.lossOn ? side : "preserved",
+        frameIds: ["a1"],
+      },
+    ],
     control: { works: control, look: control, feel: control, play: control },
     reason: "a1 shows the change.",
   };
@@ -901,7 +939,7 @@ it.live("a tie keeps the incumbent", () =>
   ),
 );
 
-it.live("a lost do-not-regress item on either ballot rejects the round", () =>
+it.live("both ballots must agree a preservation item was lost on the challenger", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
       Effect.gen(function* () {
@@ -910,8 +948,10 @@ it.live("a lost do-not-regress item on either ballot rejects the round", () =>
         let reviews = 0;
         scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
         scripted.ballots = [
-          ({ plan }) => ballotAnswer(plan, "promote", { preservation: "lost" }),
-          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) =>
+            ballotAnswer(plan, "promote", { preservation: "lost", lossOn: "challenger" }),
+          ({ plan }) =>
+            ballotAnswer(plan, "promote", { preservation: "lost", lossOn: "challenger" }),
         ];
         yield* runToCompletion(services, fixture);
         expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
@@ -1959,7 +1999,7 @@ it.live("t50b's captured round 1 promotes with unknown preservation neutral", ()
         );
         const frameIds = new Set(Array.from({ length: 12 }, (_, index) => `f${index + 1}`));
         const critic = GameReviewSessions.parseCriticAnswer(
-          JSON.stringify({ ...JSON.parse(criticRaw!), fundamentals }),
+          JSON.stringify({ ...decodeCapturedCritic(criticRaw!), fundamentals }),
           {
             frameIds,
             checkIds: new Set(),
@@ -1967,11 +2007,21 @@ it.live("t50b's captured round 1 promotes with unknown preservation neutral", ()
         );
         expect(critic.kind).toBe("valid");
         if (critic.kind !== "valid") return;
-        const answers = ballotRaws.map((raw) =>
-          GameReviewSessions.parseBallotAnswer(raw, {
-            frameIds,
-            itemIds: critic.answer.doNotRegress.map((item) => item.id),
-          }),
+        // Retrospective model judgments from the captured reasons, not inferred by the loop.
+        const overallChoices = ["A", "B"] as const;
+        const answers = ballotRaws.map((raw, index) =>
+          GameReviewSessions.parseBallotAnswer(
+            JSON.stringify({
+              ...decodeCapturedBallot(raw.trim().replace(/^```json\s*\n([\s\S]*?)\n```$/u, "$1")),
+              overall: overallChoices[index],
+              overallReason:
+                "The captured reasons prefer the repaired HUD, level banner and rooftop art overall.",
+            }),
+            {
+              frameIds,
+              itemIds: critic.answer.doNotRegress.map((item) => item.id),
+            },
+          ),
         );
         expect(answers.map((answer) => answer.kind)).toEqual(["valid", "valid"]);
         for (const answer of answers)
@@ -2131,4 +2181,78 @@ it.live(
         }),
       ),
     ),
+);
+
+it.live.each(["tie", "incumbent"] as const)(
+  "overall challenger judgments promote despite %s facets",
+  (facets) =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          let reviews = 0;
+          fixture.scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+          fixture.scripted.repairs = [repairWith()];
+          fixture.scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote", { facets }),
+            ({ plan }) => ballotAnswer(plan, "promote", { facets }),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    ),
+);
+
+it.live.each(["single-challenger", "both-incumbent"] as const)(
+  "%s preservation loss remains a note, not a veto",
+  (caseName) =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          let reviews = 0;
+          fixture.scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+          fixture.scripted.repairs = [repairWith()];
+          fixture.scripted.ballots = [
+            ({ plan }) =>
+              ballotAnswer(plan, "promote", {
+                preservation: "lost",
+                lossOn: caseName === "single-challenger" ? "challenger" : "incumbent",
+              }),
+            ({ plan }) =>
+              ballotAnswer(
+                plan,
+                "promote",
+                caseName === "single-challenger"
+                  ? {}
+                  : { preservation: "lost", lossOn: "incumbent" },
+              ),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+          const round = (yield* services.rounds.read(fixture.root)).rounds.find(
+            (entry) => entry.status === "promoted",
+          )!;
+          if (caseName === "single-challenger")
+            expect(round.ballotAnswers?.[0]?.reason).toContain("preservation-note");
+        }),
+      ),
+    ),
+);
+
+it.live("opposite-order overall disagreement keeps the incumbent", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        let reviews = 0;
+        fixture.scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        fixture.scripted.repairs = [repairWith()];
+        fixture.scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "worse"),
+        ];
+        yield* runToCompletion(services, fixture);
+        expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(0);
+      }),
+    ),
+  ),
 );

@@ -124,6 +124,8 @@ export type GameReviewCriticAnswer = typeof GameReviewCriticAnswer.Type;
  * frame IDs, never a score.
  */
 export const GameReviewBallotAnswer = Schema.Struct({
+  overall: GameReviewChoice,
+  overallReason: reviewText(600),
   main: GameReviewFacetVerdicts,
   preservation: Schema.Array(GameReviewPreservationEntry),
   control: GameReviewFacetVerdicts,
@@ -133,6 +135,8 @@ export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
 
 /** The ballot tool exposes the four choices directly; storage keeps `main`. */
 export const GameReviewBallotInput = Schema.Struct({
+  overall: GameReviewBallotAnswer.fields.overall,
+  overallReason: GameReviewBallotAnswer.fields.overallReason,
   ...GameReviewFacetVerdicts.fields,
   preservation: GameReviewBallotAnswer.fields.preservation,
   control: GameReviewBallotAnswer.fields.control,

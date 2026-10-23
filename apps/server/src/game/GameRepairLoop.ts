@@ -203,35 +203,22 @@ const vetoReason = (veto: VetoKind): string => {
   }
 };
 
-/**
- * One ballot's verdict. A ballot promotes only when the challenger is no worse
- * on every facet, strictly better on one, the identical control is a clean tie
- * and neither side has a lost preservation item. Unknown is neutral.
- */
+/** Overall quality belongs to the critic; identical controls must remain ties. */
 const ballotReason = (
   answer: GameReviewBallotAnswer,
   plan: GameReviewBallotPlan,
 ): string | null => {
   if (GAME_REVIEW_FACETS.some((facet) => answer.control[facet] !== "tie"))
     return `failed-control: ballot ${plan.order} preferred one of two identical control builds.`;
-  for (const facet of GAME_REVIEW_FACETS) {
-    const choice = answer.main[facet];
-    if (choice === "tie") continue;
-    if (plan.main[choice] === "incumbent")
-      return `worse-build: ballot ${plan.order} rated the incumbent better on ${facet}.`;
-  }
-  if (
-    !GAME_REVIEW_FACETS.some(
-      (facet) =>
-        answer.main[facet] !== "tie" && plan.main[answer.main[facet] as "A" | "B"] === "challenger",
-    )
-  )
-    return `tie: ballot ${plan.order} found no facet where the challenger is better.`;
-  for (const entry of answer.preservation) {
-    if (entry.A === "lost" || entry.B === "lost")
-      return `preservation-lost: ballot ${plan.order} saw ${entry.id} lost on a build.`;
-  }
+  if (answer.overall === "tie") return `tie: ballot ${plan.order} found no overall improvement.`;
+  if (plan.main[answer.overall] !== "challenger")
+    return `worse-build: ballot ${plan.order} preferred the incumbent overall.`;
   return null;
+};
+
+const challengerLosses = (answer: GameReviewBallotAnswer, plan: GameReviewBallotPlan) => {
+  const side = plan.main.A === "challenger" ? "A" : "B";
+  return answer.preservation.filter((entry) => entry[side] === "lost").map((entry) => entry.id);
 };
 
 /** A child the live fiber currently owns, and how to stop it. */
@@ -892,6 +879,16 @@ export const layer = (options: GameRepairLoopOptions) => {
             round.id,
             "invalid-ballot: both pairwise sessions must answer before a decision.",
           );
+        const losses = plans.map((plan) =>
+          challengerLosses(answers.find((entry) => entry.order === plan.order)!.answer!, plan),
+        );
+        const confirmedLoss = losses[0]!.find((id) => losses[1]!.includes(id));
+        if (confirmedLoss !== undefined)
+          return yield* rejectRound(
+            record,
+            round.id,
+            `preservation-lost: both ballots saw ${confirmedLoss} lost on the challenger.`,
+          );
         // The veto is recomputed from the round's persisted checks immediately
         // before the selection moves, so no crash boundary can skip it.
         const current = yield* findRound(record.root, round.id);
@@ -1295,14 +1292,20 @@ export const layer = (options: GameRepairLoopOptions) => {
               role: "ballot",
               order: plan.order,
             });
-            if (answer.kind === "ballot")
+            if (answer.kind === "ballot") {
+              const lost = challengerLosses(answer.answer, plan);
               entry = {
                 order: plan.order,
                 outcome: "valid",
                 answer: answer.answer,
                 raw: answer.raw,
+                ...(lost.length === 0
+                  ? {}
+                  : {
+                      reason: `preservation-note: ballot ${plan.order} saw ${lost.join(", ")} lost on the challenger; requires confirmation from the opposite order.`,
+                    }),
               };
-            else if (answer.kind === "pending")
+            } else if (answer.kind === "pending")
               entry = {
                 order: plan.order,
                 outcome: "invalid",
