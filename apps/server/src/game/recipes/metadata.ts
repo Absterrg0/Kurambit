@@ -109,7 +109,7 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     restyle:
       "Keep the one-shot guard and the clear. Choose this game's pickup shape, popup and sound.",
     verificationQuestion:
-      "Is the pickup absent at boot, shown once on collection, and gone afterwards?",
+      "Is the pickup feedback absent at boot, shown once on collection, and gone afterwards?",
     source: {
       kind: "write-original",
       license: "MIT",
@@ -124,14 +124,15 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     mechanics: ["readability", "silhouette"],
     defects: ["indistinct-silhouette", "low-contrast"],
     aliases: ["silhouette contrast", "low visibility", "outline contrast"],
-    intent: "Separate the actor and the hazard from a busy background by value and contour.",
-    why: "At gameplay scale the eye needs the actor, the threat and the scenery to differ before colour or detail is read. Value and shape do that work in one frame.",
+    intent:
+      "Separate the actor, the hazard, the walkable edge and the objective from a busy background by value and contour.",
+    why: "At gameplay scale the eye needs the actor, the threat, the safe ground and the goal to differ before colour or detail is read. Value and shape do that work in one frame, so terrain reads as a path and scenery does not.",
     failure:
-      "Similar values and contours make the player lose the actor in motion or walk into a hazard they could not see.",
+      "Similar values and contours make the player lose the actor in motion, walk into a hazard they could not see, or read scenery as the route.",
     restyle:
-      "Keep the value and contour separation. Choose this game's own palette, shapes and background density.",
+      "Keep the separation of actor, hazard, walkable ground and objective. Choose this game's own palette, shapes and background density.",
     verificationQuestion:
-      "At gameplay scale, can you identify both the actor and the hazard in one frame?",
+      "At gameplay scale, can you identify the actor, the hazard, the walkable edge and the objective in one frame?",
     source: {
       kind: "write-original",
       license: "MIT",
@@ -169,14 +170,14 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     defects: ["obscured-hud", "unreadable-feedback"],
     aliases: ["hud priority", "damage banner", "readable hud"],
     intent:
-      "Give the current action and state a fixed, high-priority place that transient feedback cannot cover.",
-    why: "Damage flashes and toasts are read at the moment the player most needs health and the objective. The critical layer has to sit above them and outside their band.",
+      "Give the current action and state a fixed, high-priority place that transient feedback cannot cover, and fit instruction text inside the viewport.",
+    why: "Damage flashes and toasts are read at the moment the player most needs health and the objective. The critical layer has to sit above them and outside their band, and a long instruction line has to wrap or shrink instead of running off the edge.",
     failure:
-      "A full-screen banner or a toast hides the health the player needs, or a moving HUD drops the information entirely.",
+      "A full-screen banner or a toast hides the health the player needs, a moving HUD drops the information, or clipped instruction text leaves the player guessing the control.",
     restyle:
-      "Keep the fixed zones and the layer order. Choose this game's HUD placement and feedback vocabulary.",
+      "Keep the fixed zones, the layer order and the measured fit. Choose this game's HUD placement and feedback vocabulary.",
     verificationQuestion:
-      "During the damage feedback, are health and the objective still fully readable?",
+      "During the damage feedback, are health, the objective and the instruction line fully readable and uncropped?",
     source: {
       kind: "write-original",
       license: "MIT",
@@ -192,14 +193,14 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     defects: ["missing-onboarding", "unexplained-prompt"],
     aliases: ["onboarding prompt", "contextual hint", "action prompt"],
     intent:
-      "Show a contextual action prompt only while the action is available, and clear it when it is taken.",
-    why: "A prompt attached to the thing it acts on teaches the control at the moment of need. A stale prompt sends the player looking for an action already done.",
+      "Show a contextual action prompt only while the action is available, with distinct hover, focus and pressed states, and clear it when it is taken.",
+    why: "A prompt attached to the thing it acts on teaches the control at the moment of need. A control that never reacts to the pointer or the press reads as a label, and a stale prompt sends the player looking for an action already done.",
     failure:
-      "A prompt that stays after the gate opens, or one with no visible target, reads as broken or as unfinished onboarding.",
+      "A prompt that stays after the gate opens, one with no visible target, or one that never shows hover, focus or press reads as broken or as unfinished onboarding.",
     restyle:
-      "Keep the range test and the clear-on-action. Choose this game's input, wording and prompt placement.",
+      "Keep the range test, the clear-on-action and the three control states. Choose this game's input, wording and prompt placement.",
     verificationQuestion:
-      "Is the prompt visible before the first interaction and gone after the action?",
+      "Do the prompt's hover, focus and pressed states look distinct, and does the action clear it?",
     source: {
       kind: "write-original",
       license: "MIT",
@@ -380,7 +381,7 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     failure:
       "A camera that ignores the mouse, or a capture with no way out, makes the mode unusable.",
     restyle:
-      "Keep the capture, relative look and the Escape release. Choose this game's speed, sensitivity and world.",
+      "Keep the capture, the mouse look and the Escape release; the arrow keys are a keyboard mirror, not a substitute. Choose this game's speed, sensitivity and world.",
     verificationQuestion:
       "Does the view turn with look input, and does Escape release the captured pointer?",
     source: {

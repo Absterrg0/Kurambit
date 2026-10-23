@@ -468,6 +468,15 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
           (probe) => probe.gameState.strikes === 1 && Number(probe.gameState.pause_ms) > 0,
         ),
       ).toBe(true);
+      // The marker lives outside the pause branch: its own counter moved during
+      // the hold, and a captured frame shows the hold and that movement together.
+      expect(Number(after.hold_motion)).toBeGreaterThan(0);
+      expect(
+        during.some(
+          (probe) =>
+            Number(probe.gameState.pause_ms) > 0 && Number(probe.gameState.hold_motion) > 0,
+        ),
+      ).toBe(true);
       break;
     case "feel.shake":
       // The baseline is the impact sample itself: it is already shaking.
@@ -498,6 +507,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(after.jumps).toBe(1);
       expect(after.retries).toBe(1);
       expect(after.on_floor).toBe(true);
+      expect(after.under_ledge).toBe(true);
       // The retry respawns at the start and the held key keeps control.
       expect(Number(after.player_x)).toBeGreaterThan(120);
       expect(Number(after.player_x)).toBeLessThan(280);
@@ -611,6 +621,8 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(Number(after.background_value) - Number(after.hazard_value)).toBeGreaterThanOrEqual(
         20,
       );
+      // The actor's fill is the advertised tunable itself, not a separate literal.
+      expect(after.actor_fill).toBe("f2f2f2");
       break;
     case "state.world":
       expect(before.locked).toBe(true);
@@ -629,14 +641,30 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(after.feedback_ms).toBe(0);
       expect(during.some((probe) => probe.gameState.health === 3)).toBe(true);
       expect(during.some((probe) => Number(probe.gameState.feedback_ms) > 0)).toBe(true);
+      // The instruction line was measured: it stays inside the bottom band at a
+      // readable size, during the flash as well.
+      expect(Number(after.hint_font_size)).toBeGreaterThanOrEqual(10);
+      expect(Number(after.hint_height)).toBeLessThanOrEqual(40);
+      expect(
+        during.some(
+          (probe) =>
+            Number(probe.gameState.feedback_ms) > 0 && Number(probe.gameState.hint_height) <= 40,
+        ),
+      ).toBe(true);
       break;
-    case "read.onboarding":
+    case "read.onboarding": {
       expect(before.prompt).toBe(false);
       expect(after.prompt).toBe(false);
       expect(after.opened).toBe(true);
       expect(after.prompts_shown).toBe(1);
       expect(during.some((probe) => probe.gameState.prompt === true)).toBe(true);
+      // Hover, keyboard focus and press each have a distinct captured state.
+      const promptStates = during.map((probe) => probe.gameState.prompt_state);
+      expect(promptStates).toContain("focus");
+      expect(promptStates).toContain("hover");
+      expect(promptStates).toContain("pressed");
       break;
+    }
   }
 };
 

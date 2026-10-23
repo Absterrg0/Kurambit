@@ -2,19 +2,22 @@ import type { GodotRecipeReference } from "./reference.ts";
 
 export const loopFirstPerson: GodotRecipeReference = {
   setup:
-    "Create an empty Node2D scene, attach this script to the root and run it. Click the view to capture the pointer; move the mouse or press the arrow keys to look, WASD walks, and Escape releases the pointer. Stop and run again to reset; the demo writes nothing.",
+    "Create an empty Node2D scene, attach this script to the root and run it. Click the view to capture the pointer; mouse look is the primary path, the arrow keys mirror it for keyboard or headless use, WASD walks and Escape releases the pointer. Stop and run again to reset; the demo writes nothing.",
   referenceCode: String.raw`extends Node2D
 ## First-person loop: click to capture the pointer, look with relative mouse
-## motion (or the arrow keys), walk with WASD and press Escape to get the cursor
-## back. The 3D world is built from primitives here, so the demo needs no scene,
-## asset or input map.
+## motion (the primary path), walk with WASD and press Escape to get the cursor
+## back. The arrow keys mirror the look for keyboards and headless capture. The
+## 3D world is primitives here, so the demo needs no scene, asset or input map.
 
 const WALK_SPEED := 3.2  # m/s, a brisk walk.
 const LOOK_SENSITIVITY := 0.0032  # Radians per pixel; 0.002-0.004 is typical.
 const KEY_LOOK_SPEED := 1.8  # rad/s for the arrow keys, so look works without a mouse.
-const MAX_LOOK_STEP := 80.0  # px per event; one frame never turns further.
+const CAPTURE_JUMP_PX := 400.0  # No hand can flick this far in one event.
 const PITCH_LIMIT := 1.4  # Just under a right angle, so the view never flips.
 const EYE_HEIGHT := 1.6
+
+const CAPTURE_SETTLE_MS := 400  # Pointer-lock warp events land inside this window.
+const SETTLE_MAX_STEP := 120.0  # Warp deltas are hundreds of px; real ones are not.
 
 var _world: Node3D
 var _pivot: Node3D
@@ -23,6 +26,8 @@ var _yaw := 0.0
 var _pitch := 0.0
 var _captured := false
 var _walked := 0.0
+var _settle_until := 0
+var _ignored := 0
 
 func _ready() -> void:
 	for action in [["move_left", KEY_A], ["move_right", KEY_D], ["move_forward", KEY_W], ["move_back", KEY_S], ["look_left", KEY_LEFT], ["look_right", KEY_RIGHT], ["look_up", KEY_UP], ["look_down", KEY_DOWN]]:
@@ -75,17 +80,20 @@ func _box(at: Vector3, size: Vector3, color: Color) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_captured = true
+		_settle_until = Time.get_ticks_msec() + CAPTURE_SETTLE_MS
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and _captured:
 		# Escape always exits: a capture with no way out traps the player.
 		_captured = false
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	elif event is InputEventMouseMotion and _captured:
-		# Pointer lock can report the cursor's jump into the locked position as one
-		# huge relative event; that is a capture artefact, not a look.
-		if event.relative.length() > MAX_LOOK_STEP * 2.5:
+		# Pointer lock reports the cursor's warp into the locked position as huge
+		# deltas just after capture. Only those settle events are ignored; once the
+		# window closes every unscaled delta is consumed in full, with no clipping.
+		var step: Vector2 = event.screen_relative
+		if Time.get_ticks_msec() < _settle_until and step.length() > SETTLE_MAX_STEP:
+			_ignored += 1
 			return
-		var step: Vector2 = event.relative.clamp(Vector2.ONE * -MAX_LOOK_STEP, Vector2.ONE * MAX_LOOK_STEP)
 		_yaw -= step.x * LOOK_SENSITIVITY
 		_pitch = clampf(_pitch - step.y * LOOK_SENSITIVITY, -PITCH_LIMIT, PITCH_LIMIT)
 
@@ -110,7 +118,7 @@ func snapshot() -> Dictionary:
 	return {
 		"player_x": int(_pivot.position.x * 100.0), "player_y": int(_pivot.position.z * 100.0),
 		"yaw_deg": int(rad_to_deg(_yaw)), "pitch_deg": int(rad_to_deg(_pitch)),
-		"captured": _captured, "walked": int(_walked * 100.0),
+		"captured": _captured, "walked": int(_walked * 100.0), "ignored_look": _ignored,
 	}
 `,
   tryInput: {
