@@ -102,11 +102,14 @@ interface StartedChild {
 
 interface Scripted {
   previewDirectories: string[];
-  playable: boolean;
   exportBuildId: string;
   exportRunId: string | null;
   exportFinishedAt: string;
   playtestBuildId: string;
+  /** The one running turn `projects.activeRun` reports; submit needs an owner. */
+  activeRun: RunId | null;
+  /** What the studio's factual check says for every build it is asked about. */
+  facts: { readonly passed: boolean; readonly reason: string | null };
   incumbent: CheckRun;
   candidate: CheckRun;
   exportOutcome: {
@@ -152,11 +155,12 @@ interface Scripted {
 
 const makeScripted = (): Scripted => ({
   previewDirectories: [],
-  playable: true,
   exportBuildId: EXPORT_BUILD_ID,
   exportRunId: String(builderRunId),
   exportFinishedAt: EXPORT_FINISHED,
   playtestBuildId: EXPORT_BUILD_ID,
+  activeRun: builderRunId,
+  facts: { passed: true, reason: null },
   incumbent: {
     checks: [
       { id: "boot", status: "passed" },
@@ -563,11 +567,18 @@ const withLoop = <A, E>(
             return GameRepairStudio.GameRepairStudio.of({
               exportProvenance: () =>
                 Effect.succeed({
-                  playable: scripted.playable,
                   exportBuildId: scripted.exportBuildId,
                   exportRunId: scripted.exportRunId,
                   exportFinishedAt: scripted.exportFinishedAt,
                   playtestBuildId: scripted.playtestBuildId,
+                }),
+              submissionFacts: (_root, buildId) =>
+                Effect.succeed({
+                  buildId: buildId ?? scripted.exportBuildId,
+                  directory: `builds/candidates/${buildId ?? scripted.exportBuildId}`,
+                  checks: [],
+                  passed: scripted.facts.passed,
+                  reason: scripted.facts.reason,
                 }),
               frozenInputs: () =>
                 Effect.succeed({
@@ -591,6 +602,7 @@ const withLoop = <A, E>(
         const projects = Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed(root),
           read: () => Effect.succeed(manifest),
+          activeRun: () => Effect.succeed(scripted.activeRun),
         });
 
         const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
@@ -1547,6 +1559,133 @@ it.live("a new builder run after a stopped loop starts a new review", () =>
         expect(created?.status).toBe("running");
         expect(created?.exportBuildId).toBe(nextBuild);
         yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("game_submit records a verified build and refuses with the exact failed fact", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const submitted = yield* services.review.submit(threadId, {
+          note: "  A tiny platformer about lanterns.  ",
+        });
+        expect(submitted.accepted).toBe(true);
+        expect(submitted.buildId).toBe(EXPORT_BUILD_ID);
+        expect(submitted.submission?.runId).toBe(builderRunId);
+        expect(submitted.submission?.note).toBe("A tiny platformer about lanterns.");
+        const state = yield* services.rounds.read(fixture.root);
+        expect(state.submissions).toEqual([submitted.submission]);
+
+        fixture.scripted.facts = { passed: false, reason: "console: 2 console error(s)" };
+        const refused = yield* services.review.submit(threadId, { note: "Second try." });
+        expect(refused.accepted).toBe(false);
+        expect(refused.message).toContain("console: 2 console error(s)");
+        expect(refused.submission).toBeNull();
+        // A refusal records nothing: the earlier accepted declaration stands.
+        expect((yield* services.rounds.read(fixture.root)).submissions).toEqual([
+          submitted.submission,
+        ]);
+      }),
+    ),
+  ),
+);
+
+it.live("a submission decides the loop's build, not the export provenance", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const submittedBuild = "b".repeat(64);
+        yield* services.rounds.recordSubmission(fixture.root, {
+          runId: builderRunId,
+          buildId: submittedBuild,
+          note: "A tiny platformer.",
+          submittedAt: "2026-10-01T10:06:00.000Z",
+        });
+        const created = loopRecord(yield* ensureLoop(services));
+        expect(created.exportBuildId).toBe(submittedBuild);
+        expect(created.submissionNote).toBe("A tiny platformer.");
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("a DESIGN.md edit after submitting changes nothing about the review's build", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const submittedBuild = "c".repeat(64);
+        yield* services.rounds.recordSubmission(fixture.root, {
+          runId: builderRunId,
+          buildId: submittedBuild,
+          note: "A tiny platformer.",
+          submittedAt: "2026-10-01T10:06:00.000Z",
+        });
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(fixture.root, "DESIGN.md"),
+            "# Rewritten after the submission\n",
+          ),
+        );
+        const created = loopRecord(yield* ensureLoop(services));
+        expect(created.exportBuildId).toBe(submittedBuild);
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("without a submission the latest export starts only when the same facts pass", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.facts = {
+          passed: false,
+          reason: "bytes: the build's files changed after export",
+        };
+        expect(yield* ensureLoop(services)).toBeNull();
+        expect(yield* readLoop(services)).toBeNull();
+
+        fixture.scripted.facts = { passed: true, reason: null };
+        const created = loopRecord(yield* ensureLoop(services));
+        expect(created.exportBuildId).toBe(EXPORT_BUILD_ID);
+        expect(created.submissionNote).toBeUndefined();
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("a repair child's submit note is recorded on the round", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [
+          (input) =>
+            Effect.gen(function* () {
+              // The child's own run owns the declaration while it runs.
+              scripted.activeRun = RunId.make(`run:child:${input.roundId}:repair:0`);
+              const submitted = yield* services.review.submit(threadId, {
+                note: "Fixed the player's speed and kept the owls slow.",
+              });
+              expect(submitted.accepted).toBe(true);
+              yield* repairWith()(input);
+            }),
+        ];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = yield* services.rounds.read(fixture.root);
+        const noted = state.rounds.filter((round) => round.submissionNote !== undefined);
+        expect(noted).toHaveLength(1);
+        expect(noted[0]?.submissionNote).toBe("Fixed the player's speed and kept the owls slow.");
       }),
     ),
   ),

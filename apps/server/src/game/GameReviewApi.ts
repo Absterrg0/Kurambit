@@ -5,6 +5,8 @@ import {
   type GameReviewHistoryInput,
   type GameReviewRestoreResult,
   type GameReviewStatus,
+  type GameSubmitInput,
+  type GameSubmitResult,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -20,6 +22,14 @@ export class GameReviewApi extends Context.Service<
   GameReviewApi,
   {
     readonly status: (threadId: ThreadId) => Effect.Effect<GameReviewStatus, GameOperationError>;
+    /**
+     * The builder's declaration of the build it stands behind. The server
+     * verifies facts and records it; the review starts from it when the turn ends.
+     */
+    readonly submit: (
+      threadId: ThreadId,
+      input: GameSubmitInput,
+    ) => Effect.Effect<GameSubmitResult, GameOperationError>;
     readonly history: (
       input: GameReviewHistoryInput,
     ) => Effect.Effect<GameReviewHistory, GameOperationError>;
@@ -107,6 +117,7 @@ const make = Effect.gen(function* () {
     });
   return GameReviewApi.of({
     status,
+    submit: (threadId, input) => loops.submit(threadId, input),
     history,
     stop: (threadId) =>
       loops

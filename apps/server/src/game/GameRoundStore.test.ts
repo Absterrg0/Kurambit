@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import { ProviderInstanceId, type GameReviewArtifact } from "@t3tools/contracts";
+import { ProviderInstanceId, RunId, type GameReviewArtifact } from "@t3tools/contracts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameSnapshots from "./GameSnapshots.ts";
 import { candidateBuildDirectory, hashWebBuildDirectory } from "./webBuild.ts";
@@ -616,4 +616,33 @@ it.live(
         }
       }),
     ),
+);
+
+it.live("keeps one submission per run beside the review state", () =>
+  withGame(({ root, rounds }) =>
+    Effect.gen(function* () {
+      const builder = RunId.make("run:builder");
+      const repair = RunId.make("run:repair");
+      const submission = (runId: typeof builder, note: string, letter: string) => ({
+        runId,
+        buildId: letter.repeat(64),
+        note,
+        submittedAt: "2026-10-23T12:00:00.000Z",
+      });
+      yield* rounds.recordSubmission(root, submission(builder, "The game.", "a"));
+      yield* rounds.recordSubmission(root, submission(repair, "Fixed the HUD.", "b"));
+      // A resubmit in the same run replaces its declaration rather than adding
+      // a second origin for one turn.
+      yield* rounds.recordSubmission(root, submission(builder, "The revised game.", "c"));
+      const state = yield* rounds.read(root);
+      expect(state.submissions?.map((entry) => [String(entry.runId), entry.note])).toEqual([
+        [String(repair), "Fixed the HUD."],
+        [String(builder), "The revised game."],
+      ]);
+      expect(state.submissions?.map((entry) => entry.buildId)).toEqual([
+        "b".repeat(64),
+        "c".repeat(64),
+      ]);
+    }),
+  ),
 );

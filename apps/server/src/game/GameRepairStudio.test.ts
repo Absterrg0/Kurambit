@@ -20,6 +20,7 @@ import * as GameQualification from "./GameQualification.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameService from "./GameService.ts";
 import { writePlaytestEvidence } from "./playtestEvidence.ts";
+import { candidateBuildDirectory, hashWebBuildDirectory } from "./webBuild.ts";
 
 const threadId = ThreadId.make("thread:studio-check");
 const manifest: GameManifest = {
@@ -61,7 +62,39 @@ interface Harness {
   readonly root: string;
   results: GameWebPlaytestResult;
   readonly calls: Array<GameWebPlaytestInput | undefined>;
+  /** The raw stage records the qualification store would report. */
+  exportStage: GameQualification.QualificationStageRecord | null;
+  playtestStage: GameQualification.QualificationStageRecord | null;
 }
+
+/**
+ * A real content-addressed build directory: the id is the hash of the files, so
+ * the test can corrupt it afterwards and prove the byte check noticed.
+ */
+const makeBuild = async (root: string): Promise<string> => {
+  const staging = NodePath.join(root, "builds/candidates/staging");
+  await NodeFSP.mkdir(staging, { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(staging, "index.html"), "<html>game</html>\n");
+  await NodeFSP.writeFile(NodePath.join(staging, "index.pck"), "pck");
+  const hashed = await hashWebBuildDirectory(staging);
+  if (hashed === null) throw new Error("the fixture build did not hash");
+  const final = NodePath.join(root, candidateBuildDirectory(hashed.buildId));
+  await NodeFSP.rename(staging, final);
+  return hashed.buildId;
+};
+
+const stage = (input: {
+  readonly buildId: string;
+  readonly evidenceDirectory?: string | null;
+  readonly outcome?: "passed" | "failed";
+}): GameQualification.QualificationStageRecord => ({
+  outcome: input.outcome ?? "passed",
+  sourceId: "fixture-source",
+  buildId: input.buildId,
+  finishedAt: "2026-10-01T10:05:00.000Z",
+  evidenceDirectory: input.evidenceDirectory ?? null,
+  runId: "run:builder",
+});
 
 const withStudio = <A, E>(
   body: (harness: Harness) => Effect.Effect<A, E, GameRepairStudio.GameRepairStudio>,
@@ -80,7 +113,13 @@ const withStudio = <A, E>(
           `${JSON.stringify({ name: "Studio probe", brief: "Make a platformer." })}\n`,
         );
       });
-      const harness: Harness = { root, results: baseResult(), calls: [] };
+      const harness: Harness = {
+        root,
+        results: baseResult(),
+        calls: [],
+        exportStage: null,
+        playtestStage: null,
+      };
       const game = Layer.mock(GameService.GameService)({
         webPlaytest: (_thread, input) => {
           harness.calls.push(input);
@@ -91,10 +130,14 @@ const withStudio = <A, E>(
         resolve: () => Effect.succeed(root),
         read: () => Effect.succeed(manifest),
       });
+      const qualification = Layer.mock(GameQualification.GameQualification)({
+        stageRecord: (_root, stage) =>
+          Effect.succeed(stage === "export" ? harness.exportStage : harness.playtestStage),
+      });
       const layer = GameRepairStudio.layer({ stateDir: NodePath.join(base, "state") }).pipe(
         Layer.provide(game),
         Layer.provide(projects),
-        Layer.provide(Layer.mock(GameQualification.GameQualification)({})),
+        Layer.provide(qualification),
         Layer.provide(NodeServices.layer),
       );
       return yield* body(harness).pipe(Effect.provide(layer));
@@ -279,6 +322,114 @@ it.live("a probe-less run leaves movement and state unmeasured instead of passin
       expect(byId.get("state")?.status).toBe("unmeasured");
       expect(byId.get("hud")?.status).toBe("unmeasured");
       expect(byId.get("boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+/** The passed playtest a submission needs, written as real evidence. */
+const passedPlaytest = (root: string, at = FIRST_EVIDENCE_AT) =>
+  writePlaytestEvidence({
+    root,
+    steps: [{ key: "ArrowRight", holdMs: 120 }],
+    result: baseResult(),
+    at,
+  });
+
+it.live("submission facts pass on the bytes, the current export and a clean playtest", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() => passedPlaytest(harness.root));
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed, facts.reason ?? "").toBe(true);
+      expect(facts.buildId).toBe(buildId);
+      expect(facts.reason).toBeNull();
+      const byId = new Map(facts.checks.map((entry) => [entry.id, entry]));
+      for (const id of ["build", "bytes", "current", "playtest", "boot", "console", "input"]) {
+        expect(byId.get(id)?.status, id).toBe("passed");
+      }
+    }),
+  ),
+);
+
+it.live("submission facts refuse a build whose bytes changed and name the fact", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() => passedPlaytest(harness.root));
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      // A same-size rewrite changes the id the directory claims to name.
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(harness.root, candidateBuildDirectory(buildId), "index.html"),
+          "<html>hacked</html>\n",
+        ),
+      );
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed).toBe(false);
+      expect(facts.reason).toContain("bytes:");
+      const bytes = facts.checks.find((entry) => entry.id === "bytes");
+      expect(bytes?.status).toBe("failed");
+      expect(bytes?.detail).toContain("changed after export");
+      // The dirty build is never hashed as if it were the one it claims to be.
+      expect(facts.checks.some((entry) => entry.id === "playtest")).toBe(false);
+    }),
+  ),
+);
+
+it.live("submission facts refuse a build the latest export no longer names", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() => passedPlaytest(harness.root));
+      harness.exportStage = stage({ buildId: "e".repeat(64) });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const facts = yield* studio.submissionFacts(harness.root, buildId);
+      expect(facts.passed).toBe(false);
+      const current = facts.checks.find((entry) => entry.id === "current");
+      expect(current?.status).toBe("failed");
+      expect(current?.detail).toContain("latest export is");
+    }),
+  ),
+);
+
+it.live("submission facts refuse console errors and a playtest with no input", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [],
+          result: {
+            ...baseResult(),
+            responded: false,
+            consoleMessages: [
+              { level: "error", text: "boom" },
+              { level: "error", text: "bang" },
+            ],
+          },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed).toBe(false);
+      const byId = new Map(facts.checks.map((entry) => [entry.id, entry]));
+      expect(byId.get("console")?.status).toBe("failed");
+      expect(byId.get("console")?.detail).toContain("2 console error(s)");
+      expect(byId.get("input")?.status).toBe("failed");
+      expect(byId.get("input")?.detail).toContain("no input steps");
+      expect(facts.reason).toContain("console:");
+      expect(facts.reason).toContain("input:");
     }),
   ),
 );

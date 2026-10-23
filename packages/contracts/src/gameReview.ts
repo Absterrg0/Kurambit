@@ -163,6 +163,53 @@ export const GameReviewCheck = Schema.Struct({
 });
 export type GameReviewCheck = typeof GameReviewCheck.Type;
 
+/**
+ * The builder's own declaration that it stands behind one exact export, with a
+ * one-line note on what the game is (repair children name what they believe
+ * they fixed). It is recorded only after the server's factual checks pass, so
+ * the review starts on a build someone named and the code vouched for, never
+ * on a playable state inferred from whatever was last written.
+ */
+export const GameSubmission = Schema.Struct({
+  /** The turn whose tool call declared it. */
+  runId: RunId,
+  /** The build-addressed export the builder stands behind. */
+  buildId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  note: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+  submittedAt: Schema.String,
+});
+export type GameSubmission = typeof GameSubmission.Type;
+
+export const GameSubmitInput = Schema.Struct({
+  /**
+   * The export to stand behind; omitted means this game's latest export. The
+   * server refuses a build that is not the current export, because the repair
+   * edits the folder the current sources live in.
+   */
+  buildId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
+  /** One line; the builder's answer to "what is this game what did you fix". */
+  note: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(500),
+    Schema.isPattern(/^[^\r\n]+$/),
+  ),
+});
+export type GameSubmitInput = typeof GameSubmitInput.Type;
+
+/**
+ * The submit tool's answer. A refusal is a value, not a thrown error: the agent
+ * must read exactly which fact failed and fix the game, then submit again.
+ */
+export const GameSubmitResult = Schema.Struct({
+  accepted: Schema.Boolean,
+  message: Schema.String,
+  buildId: Schema.NullOr(Schema.String),
+  submission: Schema.NullOr(GameSubmission),
+  /** Every fact the server checked, passed or not. */
+  checks: Schema.Array(GameReviewCheck),
+});
+export type GameSubmitResult = typeof GameSubmitResult.Type;
+
 /** Which artifact an anonymous ballot slot held. */
 export const GameRepairBallotSide = Schema.Literals(["incumbent", "challenger"]);
 export type GameRepairBallotSide = typeof GameRepairBallotSide.Type;
@@ -273,6 +320,11 @@ export const GameRepairLoop = Schema.Struct({
   originatingNodeId: Schema.String,
   /** The build the originating run exported; the loop repairs these bytes. */
   exportBuildId: Schema.String,
+  /**
+   * What the builder said this game is, when it submitted before the turn ended.
+   * It is the origin note the review status shows, frozen with the loop.
+   */
+  submissionNote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
   status: GameRepairLoopStatus,
   /** Attempted repairs, counted when a repair starts. */
   repairsUsed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -360,6 +412,11 @@ export const GameReviewRound = Schema.Struct({
   /** The challenger's check run and the mechanical veto reason, when it ran. */
   candidateChecks: Schema.optionalKey(Schema.Array(GameReviewCheck)),
   mechanicalVeto: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
+  /**
+   * The repair child's own `game_submit` note: which defects it believes it
+   * fixed. It is testimony for the history; the ballots and checks still decide.
+   */
+  submissionNote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
   /** Anonymous mappings persisted before either ballot was dispatched. */
   ballots: Schema.optionalKey(Schema.Array(GameReviewBallotPlan)),
   /** The ballots' validated answers (or invalidity) at decision time. */
@@ -376,6 +433,8 @@ export type GameReviewRound = typeof GameReviewRound.Type;
 export const GameReviewState = Schema.Struct({
   selected: Schema.NullOr(GameSelectedBuild),
   rounds: Schema.Array(GameReviewRound),
+  /** Builders' and repair children's submissions, newest last. */
+  submissions: Schema.optionalKey(Schema.Array(GameSubmission)),
 });
 export type GameReviewState = typeof GameReviewState.Type;
 

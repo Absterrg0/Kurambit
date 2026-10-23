@@ -411,13 +411,19 @@ it.live("a design-doc edit and an engine import keep the exported build playable
         );
         const afterDesign = yield* qualification.read(root, "godot");
         expect(afterDesign.completion).toBe("complete");
-        const playable = yield* studio.exportProvenance(root);
-        expect(playable.playable).toBe(true);
-        expect(playable.exportBuildId).not.toBeNull();
-        expect(playable.playtestBuildId).toBe(playable.exportBuildId);
+        // The submission gate reads the build's own facts: these bytes exist,
+        // hash to their id, are the current export, and their playtest booted
+        // cleanly and responded. A design edit cannot move any of that.
+        const submitted = yield* studio.submissionFacts(root);
+        expect(submitted.passed, submitted.reason ?? "").toBe(true);
+        const provenance = yield* studio.exportProvenance(root);
+        expect(provenance.exportBuildId).not.toBeNull();
+        expect(submitted.buildId).toBe(provenance.exportBuildId);
+        expect(provenance.playtestBuildId).toBe(provenance.exportBuildId);
 
-        // A real build input still invalidates the export, the playtest and the
-        // loop's playable check.
+        // A real build input still invalidates the export and the playtest for
+        // the current sources. That is a status fact; the exported build is
+        // immutable, so its own submission facts still describe it honestly.
         yield* Effect.promise(() =>
           NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "extends Node\n# edit\n"),
         );
@@ -425,7 +431,7 @@ it.live("a design-doc edit and an engine import keep the exported build playable
         expect(stageOf(stale, "export")?.status).toBe("stale");
         expect(stageOf(stale, "playtest")?.status).toBe("stale");
         expect(stale.completion).toBe("incomplete");
-        expect((yield* studio.exportProvenance(root)).playable).toBe(false);
+        expect((yield* studio.submissionFacts(root)).passed).toBe(true);
       }),
     {
       playtest: () =>

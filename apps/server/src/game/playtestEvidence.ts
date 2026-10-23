@@ -206,6 +206,42 @@ export const readPlaytestEvidence = async (
   return stored === null ? null : { frames: stored.frames, state: stored.state ?? null };
 };
 
+/**
+ * One persisted run's own factual verdict, for callers that vouch for a build
+ * without replaying it: boot, console errors, and a real response to input.
+ */
+export interface PlaytestRunFacts {
+  readonly booted: boolean;
+  readonly responded: boolean;
+  readonly consoleErrors: number;
+  /** Input steps the run actually executed. Waits and screenshots do not count. */
+  readonly steps: number;
+}
+
+/**
+ * The stored verdict of one run, by its game-relative evidence directory. Null
+ * means missing or malformed evidence, never a pass. This is the same record
+ * the playtest stage was derived from, so a submission checks facts the server
+ * already measured instead of running the browser again.
+ */
+export const readPlaytestRunFacts = async (
+  root: string,
+  directory: string,
+): Promise<PlaytestRunFacts | null> => {
+  if (NodePath.dirname(directory) !== PLAYTEST_DIRECTORY) return null;
+  const stored = await readStoredRun(
+    NodePath.join(root, PLAYTEST_DIRECTORY),
+    NodePath.basename(directory),
+  );
+  if (stored === null) return null;
+  return {
+    booted: stored.booted,
+    responded: stored.responded,
+    consoleErrors: stored.consoleMessages.filter((message) => message.level === "error").length,
+    steps: stored.steps.length,
+  };
+};
+
 /** Reads the newest run; malformed evidence counts as no evidence. */
 export const readLastPlaytest = async (
   root: string,

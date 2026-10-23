@@ -9,6 +9,8 @@ import {
   GameReviewDefect,
   GameReviewDoNotRegress,
   GameReviewRound,
+  GameSubmission,
+  GameSubmitInput,
 } from "./gameReview.ts";
 
 const decodeDefect = Schema.decodeUnknownSync(GameReviewDefect);
@@ -16,6 +18,8 @@ const decodeArtifact = Schema.decodeUnknownSync(GameReviewArtifact);
 const decodeBudget = Schema.decodeUnknownSync(GameReviewBudget);
 const decodeRound = Schema.decodeUnknownSync(GameReviewRound);
 const decodeItem = Schema.decodeUnknownSync(GameReviewDoNotRegress);
+const decodeSubmit = Schema.decodeUnknownSync(GameSubmitInput);
+const decodeSubmission = Schema.decodeUnknownSync(GameSubmission);
 
 const buildId = "a".repeat(64);
 
@@ -55,6 +59,36 @@ describe("review vocabulary", () => {
     expect(() => decodeBudget({ repairs: -1, elapsedMs: 1 })).toThrow();
     expect(() => decodeBudget({ repairs: 4, elapsedMs: 1 })).toThrow();
     expect(() => decodeBudget({ repairs: 1, elapsedMs: 0 })).toThrow();
+  });
+});
+
+describe("submissions", () => {
+  it("keeps a one-line note and an optional content-addressed build", () => {
+    expect(decodeSubmit({ note: "A tiny lantern platformer." })).toEqual({
+      note: "A tiny lantern platformer.",
+    });
+    expect(decodeSubmit({ note: "x", buildId }).buildId).toBe(buildId);
+    expect(() => decodeSubmit({ note: "first line\nsecond line" })).toThrow();
+    expect(() => decodeSubmit({ note: "" })).toThrow();
+    expect(() => decodeSubmit({ note: "x", buildId: "not-a-hash" })).toThrow();
+  });
+
+  it("records the run, build, note and time, never an inferred playable state", () => {
+    const submission = decodeSubmission({
+      runId: "run:builder",
+      buildId,
+      note: "A tiny lantern platformer.",
+      submittedAt: "2026-10-23T12:00:00.000Z",
+    });
+    expect(submission).toMatchObject({ buildId, note: "A tiny lantern platformer." });
+    expect(() =>
+      decodeSubmission({
+        runId: "run:builder",
+        buildId: "not-a-hash",
+        note: "x",
+        submittedAt: "2026-10-23T12:00:00.000Z",
+      }),
+    ).toThrow();
   });
 });
 

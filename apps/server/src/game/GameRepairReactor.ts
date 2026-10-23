@@ -11,10 +11,10 @@ import { forkParked } from "../serverActivation.ts";
 import * as GameRepairLoop from "./GameRepairLoop.ts";
 
 /**
- * Starts the repair loop after the builder turn that produced the current
- * playable export ends. Supersession is not here: a new turn takes the game
- * before it commits, through TurnAdmission. The loop's own fiber owns every
- * phase and decision; this reactor never wakes a parked loop.
+ * Starts the repair loop after the builder turn that submitted a verified
+ * build (or ended with one) is over. Supersession is not here: a new turn takes
+ * the game before it commits, through TurnAdmission. The loop's own fiber owns
+ * every phase and decision; this reactor never wakes a parked loop.
  */
 export class GameRepairReactor extends Context.Service<
   GameRepairReactor,

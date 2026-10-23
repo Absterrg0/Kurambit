@@ -13,6 +13,7 @@ import {
   GameOperationError,
   GameReviewRound,
   GameSelectedBuild,
+  GameSubmission,
   type GameReviewArtifact,
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
@@ -38,12 +39,16 @@ const StoredState = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   selected: Schema.NullOr(GameSelectedBuild),
   rounds: Schema.Array(GameReviewRound),
+  /** Builders' and repair children's declarations, newest last. */
+  submissions: Schema.optionalKey(Schema.Array(GameSubmission)),
 });
 type StoredState = typeof StoredState.Type;
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(StoredState));
 
 /** A completed-round history is provenance, not a log; keep the recent window small. */
 const MAX_STORED_ROUNDS = 50;
+/** Submissions are the review's recent declarations, one per turn. */
+const MAX_STORED_SUBMISSIONS = 20;
 
 const isGameOperationError = Schema.is(GameOperationError);
 const failure = (
@@ -114,6 +119,8 @@ export interface GameRoundReviewInput {
   readonly checks?: ReadonlyArray<GameReviewCheck> | undefined;
   readonly candidateChecks?: ReadonlyArray<GameReviewCheck> | undefined;
   readonly mechanicalVeto?: string | undefined;
+  /** The repair child's own `game_submit` note, when it made one. */
+  readonly submissionNote?: string | undefined;
   readonly ballots?: ReadonlyArray<GameReviewBallotPlan> | undefined;
   readonly ballotAnswers?: ReadonlyArray<GameReviewBallotRecord> | undefined;
 }
@@ -214,6 +221,14 @@ export class GameRoundStore extends Context.Service<
   {
     /** The selected build and recent rounds, recovering interrupted rounds first. */
     readonly read: (root: string) => Effect.Effect<GameReviewStateType, GameOperationError>;
+    /**
+     * Records a verified declaration beside the review state. A later submit in
+     * the same turn replaces it; the review starts from the declaration.
+     */
+    readonly recordSubmission: (
+      root: string,
+      submission: GameSubmission,
+    ) => Effect.Effect<GameSubmission, GameOperationError>;
     /** The byte-accurate source identity round decisions use. */
     readonly sourceId: (root: string) => Effect.Effect<string, GameOperationError>;
     /**
@@ -484,7 +499,25 @@ export const layer = (options: { readonly stateDir: string }) => {
             Effect.gen(function* () {
               yield* recoverLocked(found);
               const state = yield* readStateEffect(found.file);
-              return { selected: state.selected, rounds: state.rounds };
+              return {
+                selected: state.selected,
+                rounds: state.rounds,
+                ...(state.submissions === undefined ? {} : { submissions: state.submissions }),
+              };
+            }),
+          ),
+        recordSubmission: (root, submission) =>
+          withLock(root, "record game submission", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const submissions = [
+                ...(state.submissions ?? []).filter(
+                  (entry) => String(entry.runId) !== String(submission.runId),
+                ),
+                submission,
+              ].slice(-MAX_STORED_SUBMISSIONS);
+              yield* writeStateEffect(found.file, { ...state, submissions });
+              return submission;
             }),
           ),
         sourceId: (root) =>
@@ -617,6 +650,9 @@ export const layer = (options: { readonly stateDir: string }) => {
                 ...(input.mechanicalVeto === undefined
                   ? {}
                   : { mechanicalVeto: input.mechanicalVeto }),
+                ...(input.submissionNote === undefined
+                  ? {}
+                  : { submissionNote: input.submissionNote }),
                 ...(input.ballots === undefined ? {} : { ballots: [...input.ballots] }),
                 ...(input.ballotAnswers === undefined
                   ? {}

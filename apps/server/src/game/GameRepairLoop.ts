@@ -19,6 +19,9 @@ import {
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type GameReviewRound as GameReviewRoundRecord,
+  type GameSubmission,
+  type GameSubmitInput,
+  type GameSubmitResult,
   type ModelSelection,
   type NodeId,
   RunId,
@@ -258,12 +261,22 @@ export class GameRepairLoop extends Context.Service<
   {
     /**
      * The reactor's entry point: create the loop for the completed builder run
-     * whose export is the current playable bytes, or return the loop already
-     * there. Starting a loop is serialized with every user action.
+     * whose submission (or, without one, verified export) names the build to
+     * review, or return the loop already there. Starting a loop is serialized
+     * with every user action.
      */
     readonly ensure: (
       input: GameRepairLoopEnsureInput,
     ) => Effect.Effect<GameRepairLoopRecord | null, GameOperationError>;
+    /**
+     * The builder's (or repair child's) declaration of the build it stands
+     * behind. The server verifies only facts and records the declaration; the
+     * review starts from the recorded submission after the turn ends.
+     */
+    readonly submit: (
+      threadId: ThreadId,
+      input: typeof GameSubmitInput.Type,
+    ) => Effect.Effect<GameSubmitResult, GameOperationError>;
     readonly activity: (
       threadId: ThreadId,
     ) => Effect.Effect<
@@ -423,6 +436,23 @@ export const layer = (options: GameRepairLoopOptions) => {
         const state = yield* rounds.read(root).pipe(Effect.orElseSucceed(() => null));
         return state?.rounds.find((round) => round.id === roundId) ?? null;
       });
+
+    /**
+     * The newest declaration a turn made. A submission is scoped to its run, so
+     * a later text-only turn can never inherit the previous turn's build.
+     */
+    const submissionForRun = (root: string, runId: RunId | null) =>
+      runId === null
+        ? Effect.succeed(null)
+        : rounds.read(root).pipe(
+            Effect.map(
+              (state) =>
+                (state.submissions ?? [])
+                  .filter((entry) => String(entry.runId) === String(runId))
+                  .at(-1) ?? null,
+            ),
+            Effect.orElseSucceed(() => null),
+          );
 
     const stopOpenRound = (root: string, reason: string) =>
       rounds.stopRunning(root, reason).pipe(
@@ -1096,6 +1126,20 @@ export const layer = (options: GameRepairLoopOptions) => {
           .pipe(
             Effect.catchCause((cause) => logFailure("recording the repair tree failed", cause)),
           );
+        // The child's own submit says which defects it believes it fixed. It is
+        // testimony for the history, never evidence: the checks and ballots
+        // below still decide, and a child that never submitted is still judged.
+        if (repair.child.runId !== null) {
+          const claimed = yield* submissionForRun(task.root, repair.child.runId);
+          if (claimed !== null)
+            yield* rounds
+              .recordReview(task.root, round.id, { submissionNote: claimed.note })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  logFailure("recording the repair submission note failed", cause),
+                ),
+              );
+        }
         const afterRepair = yield* findRound(task.root, round.id);
         if (afterRepair === null || afterRepair.status !== "running")
           return {
@@ -1373,6 +1417,51 @@ export const layer = (options: GameRepairLoopOptions) => {
         yield* admission.admit({ root, reason, threadId });
       });
 
+    const submit: GameRepairLoop["Service"]["submit"] = (threadId, input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        const note = input.note.trim();
+        const refused = (
+          message: string,
+          buildId: string | null,
+          checks: ReadonlyArray<GameReviewCheck>,
+        ): GameSubmitResult => ({
+          accepted: false,
+          message: `Submission refused: ${message}`,
+          buildId,
+          submission: null,
+          checks: [...checks],
+        });
+        if (note === "" || /[\r\n]/.test(note))
+          return refused("the note must be one non-empty line on what the game is.", null, []);
+        // The declaration belongs to the turn that made it: a later turn cannot
+        // claim someone else's build, and the review starts for this run alone.
+        const runId = yield* projects.activeRun(threadId);
+        if (runId === null)
+          return refused("no turn is running, so this submission has no owner.", null, []);
+        const facts = yield* studio.submissionFacts(root, input.buildId);
+        if (!facts.passed || facts.buildId === null)
+          return refused(
+            facts.reason ?? "the server could not verify a build.",
+            facts.buildId,
+            facts.checks,
+          );
+        const submission: GameSubmission = {
+          runId,
+          buildId: facts.buildId,
+          note,
+          submittedAt: nowIso(),
+        };
+        yield* rounds.recordSubmission(root, submission);
+        return {
+          accepted: true,
+          message: `Submitted ${facts.buildId.slice(0, 12)}: it boots, logs no console errors and responds to input. The studio reviews it after this turn ends.`,
+          buildId: facts.buildId,
+          submission,
+          checks: [...facts.checks],
+        };
+      });
+
     const ensure: GameRepairLoop["Service"]["ensure"] = (input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(input.threadId);
@@ -1426,17 +1515,31 @@ export const layer = (options: GameRepairLoopOptions) => {
             : latest,
         );
         if (newest.id !== run.id) return null;
-        const provenance = yield* studio.exportProvenance(root);
-        if (!provenance.playable || provenance.exportBuildId === null) return null;
-        const exportBuildId = provenance.exportBuildId;
-        // The export must name this run as its exporter. Timestamps cannot say
-        // that: another thread on the same game can export inside this run's
-        // window. A legacy export without a run id never starts a review.
-        if (provenance.exportRunId !== String(input.runId)) return null;
+        // A submission is the origin: the builder named these bytes and the
+        // server verified them at submit time. The facts are checked once more
+        // because the build or its records can be replaced before the turn
+        // ends; nothing about the current design or source freshness is
+        // re-derived, so a later DESIGN.md edit cannot change what was declared.
+        const submitted = yield* submissionForRun(root, input.runId);
+        let exportBuildId: string;
+        let submissionNote: string | undefined;
+        if (submitted !== null) {
+          const facts = yield* studio.submissionFacts(root, submitted.buildId);
+          if (!facts.passed || facts.buildId !== submitted.buildId) return null;
+          exportBuildId = submitted.buildId;
+          submissionNote = submitted.note;
+        } else {
+          // No submission: the turn's own latest export may still start the
+          // review, but only on the same facts a submission would have to pass.
+          const provenance = yield* studio.exportProvenance(root);
+          if (provenance.exportBuildId === null || provenance.exportRunId !== String(input.runId))
+            return null;
+          const facts = yield* studio.submissionFacts(root, provenance.exportBuildId);
+          if (!facts.passed) return null;
+          exportBuildId = provenance.exportBuildId;
+        }
         const completedAt =
           run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
-        // The playtest that made it playable must have played those bytes.
-        if (provenance.playtestBuildId !== provenance.exportBuildId) return null;
         const inputs = yield* studio.frozenInputs(root);
         // No recorded route means nothing honest to replay. The review is not
         // run on invented input; it is recorded as skipped so the reason stays
@@ -1476,6 +1579,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               originatingRunId: input.runId,
               originatingNodeId: input.nodeId,
               exportBuildId,
+              ...(submissionNote === undefined ? {} : { submissionNote }),
               status: skipped === null ? "running" : "stopped",
               repairsUsed: 0,
               budget,
@@ -1609,6 +1713,7 @@ export const layer = (options: GameRepairLoopOptions) => {
 
     return GameRepairLoop.of({
       ensure,
+      submit,
       read,
       interrupt,
       recover,
