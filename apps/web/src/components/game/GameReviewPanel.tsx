@@ -69,6 +69,9 @@ export function GameReviewPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             minutes left as of this update
           </p>
           <p className="text-xs text-muted-foreground">{review.loop.reason}</p>
+          {review.loop.submissionNote ? (
+            <p className="text-xs text-muted-foreground">Submitted: {review.loop.submissionNote}</p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             Reviewer: {review.loop.reviewSelection.instanceId} / {review.loop.reviewSelection.model}
             . Builder: {review.loop.builderSelection.instanceId} /{" "}
@@ -84,8 +87,8 @@ export function GameReviewPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </>
       ) : review ? (
         <p className="text-xs text-muted-foreground">
-          A review starts after the agent finishes a playable build with recorded input steps. Play
-          remains on the selected build during review.
+          A review starts after the agent submits a verified build, or after a turn ends with a
+          verified export. Play remains on the selected build during review.
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
@@ -169,6 +172,11 @@ function ReviewRound({
         {new Date(round.startedAt).toLocaleString()} · {round.decision ?? round.status}
       </p>
       <p className="text-xs text-muted-foreground">{round.reason ?? "Review in progress."}</p>
+      {round.submissionNote ? (
+        <p className="text-xs text-muted-foreground">
+          The repair says it fixed: {round.submissionNote}
+        </p>
+      ) : null}
       <ul className="space-y-2 text-xs">
         {round.defects?.map((defect) => (
           <li key={`${defect.frameId}-${defect.what}`}>

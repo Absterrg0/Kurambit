@@ -26,7 +26,7 @@ const PAIRWISE_PROMPT = `Read only FILES. Do not edit, execute, browse, delegate
 {"main":{"works":"tie","look":"tie","feel":"tie","play":"tie"},"preservation":[{"id":"item-id","A":"preserved","B":"unknown","frameIds":["frame-id"]}],"control":{"works":"tie","look":"tie","feel":"tie","play":"tie"},"reason":"concrete evidence with frame IDs"}
 Replace example values with your findings. No scores.`;
 
-const BUILDER_FIX_PROMPT = `Repair only this isolated game copy within REMAINING_BUDGET. BRIEF defines scope. Fix DEFECTS in severity order and preserve DO_NOT_REGRESS. Keep the bridge and ordinary input demos working. Do not change checks, evidence or review records. Use recorded game tools to check and export once; inspect returned frames. Report unresolved defects and stop. The server decides acceptance; never claim your change won or start another repair loop.`;
+const BUILDER_FIX_PROMPT = `Repair only this isolated game copy within REMAINING_BUDGET. BRIEF defines scope. Fix DEFECTS in severity order and preserve DO_NOT_REGRESS. Keep the bridge and ordinary input demos working. Do not change checks, evidence or review records. Use recorded game tools to check, export once and playtest; inspect returned frames. Then call game_submit with a one-line note naming the defects you believe you fixed. Report unresolved defects and stop. The server decides acceptance; never claim your change won or start another repair loop.`;
 
 /** A comma-separated manifest the prompt can read without any build mapping. */
 export const renderEvidenceFiles = (files: ReadonlyArray<GameReviewEvidenceFile>): string =>

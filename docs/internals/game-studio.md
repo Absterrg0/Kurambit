@@ -201,6 +201,17 @@ one at a time, within three repairs or twenty minutes. Opposite-order ballots an
 controls reduce position bias; mechanical regressions and unknown preservation veto selection.
 A pairwise improvement does not certify every presentation claim.
 
+A review has one origin: the builder's `game_submit`. The builder names the export it stands
+behind (default: the latest one), and the server checks only facts before recording the
+declaration: the build directory exists, its bytes hash to the id they are addressed by, the export
+record names that build, and the playtest recorded against those exact bytes booted, logged no
+console errors and responded to input. A refusal lists the failed checks. When the turn ends, the
+loop starts on the submitted build. A turn with no submission falls back to its own latest export
+only when the same facts pass. The derived playable completion no longer gates review; it stays a
+status display. A repair child submits the same way, and its note (which defects it believes it
+fixed) is recorded on the round for the history, not as evidence: the frozen checks and the ballots
+still decide. A restart does not resume unfinished work.
+
 Play serves immutable build directories. Candidate exports never replace the selected build until
 accepted. Rejection restores the pre-repair source only while it still matches the recorded
 post-repair version. User edits take precedence: a conflict stops the review and offers an explicit
@@ -213,8 +224,8 @@ Review history lives outside the game and persists across restarts. Clients fetc
 on small revision/decision events; frame bytes never travel in broadcasts. Source freshness is
 unknown until explicitly checked. Version-two qualification records archive the old score-judge
 stage and keep mechanical evidence and playable completion. Old games have no new review until a
-new eligible export, never an inferred promotion. Historical benchmark readers retain legacy
-judgements; the frozen grader and historical aggregates keep their original meaning.
+new verified submission or export, never an inferred promotion. Historical benchmark readers
+retain legacy judgements; the frozen grader and historical aggregates keep their original meaning.
 
 `game_web_playtest` loads that real build in the app's managed headless Chrome with software WebGL
 (SwiftShader), waits for Godot to boot, sends keys and pointer input, and captures screenshots and

@@ -689,7 +689,7 @@ const make = Effect.gen(function* () {
             message:
               selection.mode === "candidate"
                 ? "Web game built as a candidate; Play keeps the selected build until the round promotes it."
-                : "Web game is ready to play. Finish this turn after the input playtest; the server owns subsequent bounded review and repair.",
+                : "Web game is ready to play. Playtest it with input steps, then call game_submit and end your turn; the server owns subsequent bounded review and repair.",
           },
           record: {
             outcome: "passed" as const,
@@ -805,7 +805,7 @@ const make = Effect.gen(function* () {
         : {
             ...exported,
             message:
-              "Web game is ready to play. Finish this turn after the input playtest; the server owns subsequent bounded review and repair.",
+              "Web game is ready to play. Playtest it with input steps, then call game_submit and end your turn; the server owns subsequent bounded review and repair.",
             url: served.url,
           };
     });

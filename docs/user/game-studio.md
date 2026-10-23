@@ -123,8 +123,8 @@ Each game is a self-contained git repository you can move, back up, or open on a
 
 ## Review and restore
 
-After your agent finishes a playable build with recorded controls, Game Studio reviews its frames
-and can attempt up to three repairs within twenty minutes. Play keeps the selected build while
+After your agent submits a verified build (or ends a turn with a playable export), Game Studio
+reviews its frames and can attempt up to three repairs within twenty minutes. Play keeps the selected build while
 review runs. Open Builds to read defects, suggested fixes, decisions and the frames behind them.
 Review compares versions; it does not promise that every aspect of the game is correct.
 
