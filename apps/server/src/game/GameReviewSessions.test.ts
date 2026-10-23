@@ -1445,3 +1445,38 @@ it.live("an invalid tool attempt cannot be bypassed with a printed answer", () =
     }),
   ),
 );
+
+it.live("accepts the full six-frame ballot budget for all four slots", () =>
+  withSession(({ frames, service }) =>
+    Effect.gen(function* () {
+      const evidence = frameInput(frames);
+      const ballotFrames = Array.from({ length: 24 }, (_, index) => ({
+        id: `source-${index}`,
+        label: `${"ABCD"[Math.floor(index / 6)]}: action ${index % 6}`,
+        sourcePath: frames[index % frames.length]!,
+      }));
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: { ...evidence, frames: ballotFrames },
+      });
+      expect(started.kind).toBe("started");
+      expect(
+        (yield* service.describe({ threadId, loopId, roundId, role: "ballot" }))?.frames,
+      ).toHaveLength(24);
+      const tooMany = yield* service
+        .start({
+          threadId,
+          loopId,
+          roundId,
+          role: "ballot",
+          order: 1,
+          evidence: { ...evidence, frames: [...ballotFrames, ballotFrames[0]!] },
+        })
+        .pipe(Effect.flip);
+      expect(tooMany.detail).toBe("At most 24 frames are evidence.");
+    }),
+  ),
+);

@@ -265,6 +265,10 @@ const ReviewToolRecord = Schema.Struct({
   raw: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
 });
+const encodeReviewAnswer = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Union([GameReviewCriticAnswer, GameReviewBallotAnswer])),
+);
+const decodeCallerRecord = Schema.decodeUnknownSync(ReviewCallerRecord);
 const decodeToolRecord = Schema.decodeUnknownSync(ReviewToolRecord);
 
 export interface GameReviewToolCaller {
@@ -1342,7 +1346,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       const value = yield* attempt("read game review caller", lookup, () => readJson(lookup));
       if (value === null) return null;
       const key = yield* Effect.try({
-        try: () => Schema.decodeUnknownSync(ReviewCallerRecord)(value),
+        try: () => decodeCallerRecord(value),
         catch: (cause) => failure("read game review caller", lookup, "io", undefined, cause),
       });
       const record = yield* readRecord(key.root, key);
@@ -1467,7 +1471,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               known,
             );
           })();
-          const raw = parsed.kind === "valid" ? JSON.stringify(parsed.answer) : null;
+          const raw = parsed.kind === "valid" ? encodeReviewAnswer(parsed.answer) : null;
           const accepted = parsed.kind === "valid";
           const attempts = (previous?.attempts ?? 0) + 1;
           const error = parsed.kind === "invalid" ? parsed.reason : null;
