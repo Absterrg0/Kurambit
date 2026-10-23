@@ -1478,7 +1478,11 @@ export const layer = (options: { readonly stateDir: string }) => {
           const buildId =
             match === null
               ? (input.buildId ??
-                (yield* game.value.status(targetThreadId)).qualification.servedArtifactId ??
+                // The served preview id is a 24-character identity; only the
+                // export stage's build id names the exported artifact bytes.
+                (yield* game.value.status(targetThreadId)).qualification.stages.find(
+                  (stage) => stage.stage === "export",
+                )?.buildId ??
                 undefined)
               : (match.record.playBuildId ?? round?.incumbentBuildId ?? undefined);
           if (

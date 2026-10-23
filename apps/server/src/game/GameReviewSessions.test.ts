@@ -8,6 +8,7 @@ import {
   CommandId,
   GAME_REVIEW_ANSWER_MAX_BYTES,
   type GameManifest,
+  type GameStatus,
   type GameWebPlaytestInput,
   type GameWebPlaytestResult,
   type GameReviewRound,
@@ -300,8 +301,11 @@ const withSession = <A, E>(
             Layer.mock(GameService.GameService)({
               status: () =>
                 Effect.succeed({
-                  qualification: { servedArtifactId: "build-incumbent" },
-                } as import("@t3tools/contracts").GameStatus),
+                  qualification: {
+                    servedArtifactId: "preview-id",
+                    stages: [{ stage: "export", status: "passed", buildId: "build-incumbent" }],
+                  },
+                } as unknown as GameStatus),
               webPlaytestBuild: (threadId, buildId, input) =>
                 Effect.gen(function* () {
                   scripted.tries.push({ threadId, buildId, input });
