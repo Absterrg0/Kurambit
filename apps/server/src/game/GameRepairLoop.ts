@@ -1422,46 +1422,73 @@ export const layer = (options: GameRepairLoopOptions) => {
     const submit: GameRepairLoop["Service"]["submit"] = (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
-        const note = input.note.trim();
-        const refused = (
-          message: string,
-          buildId: string | null,
-          checks: ReadonlyArray<GameReviewCheck>,
-        ): GameSubmitResult => ({
-          accepted: false,
-          message: `Submission refused: ${message}`,
-          buildId,
-          submission: null,
-          checks: [...checks],
-        });
-        if (note === "" || /[\r\n]/.test(note))
-          return refused("the note must be one non-empty line on what the game is.", null, []);
-        // The declaration belongs to the turn that made it: a later turn cannot
-        // claim someone else's build, and the review starts for this run alone.
-        const runId = yield* projects.activeRun(threadId);
-        if (runId === null)
-          return refused("no turn is running, so this submission has no owner.", null, []);
-        const facts = yield* studio.submissionFacts(root, input.buildId);
-        if (!facts.passed || facts.buildId === null)
-          return refused(
-            facts.reason ?? "the server could not verify a build.",
-            facts.buildId,
-            facts.checks,
-          );
-        const submission: GameSubmission = {
-          runId,
-          buildId: facts.buildId,
-          note,
-          submittedAt: nowIso(),
-        };
-        yield* rounds.recordSubmission(root, submission);
-        return {
-          accepted: true,
-          message: `Submitted ${facts.buildId.slice(0, 12)}: it boots, logs no console errors and responds to input. The studio reviews it after this turn ends.`,
-          buildId: facts.buildId,
-          submission,
-          checks: [...facts.checks],
-        };
+        return yield* admission.withGate(
+          root,
+          Effect.gen(function* () {
+            const note = input.note.trim();
+            const refused = (
+              message: string,
+              buildId: string | null,
+              checks: ReadonlyArray<GameReviewCheck>,
+            ): GameSubmitResult => ({
+              accepted: false,
+              message: `Submission refused: ${message}`,
+              buildId,
+              submission: null,
+              checks: [...checks],
+            });
+            if (note === "" || /[\r\n]/.test(note))
+              return refused("the note must be one non-empty line on what the game is.", null, []);
+            // The declaration belongs to the turn that made it: a later turn cannot
+            // claim someone else's build, and the review starts for this run alone.
+            const runId = yield* projects.activeRun(threadId);
+            if (runId === null)
+              return refused("no turn is running, so this submission has no owner.", null, []);
+            const held = live.get(root);
+            const reviewing = yield* readRecord(root);
+            if (held !== undefined || reviewing?.status === "running") {
+              const children =
+                held === undefined
+                  ? []
+                  : yield* sessions.recordedChildren({ root, loopId: held.loopId });
+              const ownedRepair = children.some(
+                (child) =>
+                  child.role === "repair" &&
+                  child.childThreadId === threadId &&
+                  String(child.runId) === String(runId),
+              );
+              if (!ownedRepair)
+                return refused(
+                  reviewing?.status === "running"
+                    ? "a review is running for this game; only its owned repair child can submit."
+                    : "the game is held until its review children stop; only its owned repair child can submit.",
+                  input.buildId ?? null,
+                  [],
+                );
+            }
+            const facts = yield* studio.submissionFacts(root, input.buildId);
+            if (!facts.passed || facts.buildId === null)
+              return refused(
+                facts.reason ?? "the server could not verify a build.",
+                facts.buildId,
+                facts.checks,
+              );
+            const submission: GameSubmission = {
+              runId,
+              buildId: facts.buildId,
+              note,
+              submittedAt: nowIso(),
+            };
+            yield* rounds.recordSubmission(root, submission);
+            return {
+              accepted: true,
+              message: `Submitted ${facts.buildId.slice(0, 12)}: it boots, logs no console errors and responds to input. The studio reviews it after this turn ends.`,
+              buildId: facts.buildId,
+              submission,
+              checks: [...facts.checks],
+            };
+          }),
+        );
       });
 
     const ensure: GameRepairLoop["Service"]["ensure"] = (input) =>

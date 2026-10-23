@@ -654,6 +654,7 @@ export class GameReviewSessions extends Context.Service<
 >()("t3/game/GameReviewSessions") {}
 
 export interface GameReviewRecordedChild {
+  readonly role: GameReviewTaskRole;
   readonly childThreadId: ThreadId;
   readonly runId: RunId | null;
 }
@@ -1428,6 +1429,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               ),
           });
           children.push({
+            role: record.role,
             childThreadId: ThreadIdSchema.make(record.childThreadId),
             runId: record.runId == null ? null : RunId.make(record.runId),
           });

@@ -107,6 +107,7 @@ interface Scripted {
   activeRun: RunId | null;
   /** What the studio's factual check says for every build it is asked about. */
   facts: { readonly passed: boolean; readonly reason: string | null };
+  factChecks: number;
   incumbent: CheckRun;
   candidate: CheckRun;
   exportOutcome: {
@@ -156,6 +157,7 @@ const makeScripted = (): Scripted => ({
   exportRunId: String(builderRunId),
   activeRun: builderRunId,
   facts: { passed: true, reason: null },
+  factChecks: 0,
   incumbent: {
     checks: [
       { id: "boot", status: "passed" },
@@ -572,6 +574,7 @@ const withLoop = <A, E>(
                 }),
               submissionFacts: (_root, requested) =>
                 Effect.gen(function* () {
+                  scripted.factChecks += 1;
                   const buildId = requested ?? scripted.exportBuildId;
                   if (buildId !== null) {
                     const frozen = yield* rounds.freeze(root);
@@ -1111,6 +1114,11 @@ it.live("a failed join keeps the game held until the child really stops", () =>
         yield* services.loop.awaitIdle(threadId);
         expect((yield* Effect.flip(userAction(services, root))).operation).toBe(
           "supersede game review",
+        );
+        const submission = yield* services.review.submit(threadId, { note: "An unrelated build." });
+        expect(submission.accepted).toBe(false);
+        expect(submission.message).toBe(
+          "Submission refused: the game is held until its review children stop; only its owned repair child can submit.",
         );
         // No new review may start over the running child either.
         expect(yield* ensureLaterBuild(fixture, services)).toBeNull();
@@ -1708,9 +1716,12 @@ it.live("a repair child's submit note is recorded on the round", () =>
             Effect.gen(function* () {
               // The child's own run owns the declaration while it runs.
               scripted.activeRun = RunId.make(`run:child:${input.roundId}:repair:0`);
-              const submitted = yield* services.review.submit(threadId, {
-                note: "Fixed the player's speed and kept the owls slow.",
-              });
+              const submitted = yield* services.review.submit(
+                ThreadId.make(`thread:child:${input.roundId}:repair:0`),
+                {
+                  note: "Fixed the player's speed and kept the owls slow.",
+                },
+              );
               expect(submitted.accepted).toBe(true);
               yield* repairWith()(input);
             }),
@@ -1848,6 +1859,69 @@ it.live("a repair playtest cannot replace the frozen route", () =>
             seed: "unknown",
           });
         }
+      }),
+    ),
+  ),
+);
+
+it.live("submit refuses another caller and a critic while a review owns the game", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        const before = (yield* services.rounds.read(fixture.root)).submissions;
+        const refused = yield* services.review.submit(threadId, { note: "An unrelated build." });
+        expect(refused.accepted).toBe(false);
+        expect(refused.message).toBe(
+          "Submission refused: a review is running for this game; only its owned repair child can submit.",
+        );
+        fixture.scripted.activeRun = critic.runId;
+        const criticSubmit = yield* services.review.submit(critic.childThreadId, {
+          note: "The critic cannot declare a build.",
+        });
+        expect(criticSubmit.accepted).toBe(false);
+        expect(criticSubmit.message).toBe(refused.message);
+        expect((yield* services.rounds.read(fixture.root)).submissions).toEqual(before);
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("submit verifies and records only after taking the game gate", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const submitted = yield* Deferred.make<void>();
+        const owner = yield* services.admission
+          .withGate(
+            fixture.root,
+            Effect.gen(function* () {
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              fixture.scripted.facts = {
+                passed: false,
+                reason: "bytes: changed while submission waited for admission",
+              };
+            }),
+          )
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(entered);
+        const submit = yield* services.review
+          .submit(threadId, { note: "A gated declaration." })
+          .pipe(Effect.ensuring(Deferred.succeed(submitted, undefined)), Effect.forkChild);
+        yield* Effect.yieldNow;
+        expect(fixture.scripted.factChecks).toBe(0);
+        expect(Option.isNone(yield* Deferred.poll(submitted))).toBe(true);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(owner);
+        const result = yield* Fiber.join(submit);
+        expect(result.accepted).toBe(false);
+        expect(result.message).toContain("bytes: changed while submission waited for admission");
+        expect((yield* services.rounds.read(fixture.root)).submissions ?? []).toEqual([]);
       }),
     ),
   ),
