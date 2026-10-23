@@ -300,6 +300,8 @@ const ballotAnswer = (
     overall: choice,
     overallReason: "The input pairs show the overall preference.",
     main: { works: facet, look: facet, feel: facet, play: facet },
+    defects: [],
+    regressions: { A: [], B: [] },
     preservation: [
       {
         id: "turns",
@@ -2271,6 +2273,8 @@ it.live("t50b's captured round 1 promotes with unknown preservation neutral", ()
           GameReviewSessions.parseBallotAnswer(
             JSON.stringify({
               ...decodeCapturedBallot(raw.trim().replace(/^```json\s*\n([\s\S]*?)\n```$/u, "$1")),
+              defects: [],
+              regressions: { A: [], B: [] },
               overall: overallChoices[index],
               overallReason:
                 "The captured reasons prefer the repaired HUD, level banner and rooftop art overall.",
@@ -2513,4 +2517,69 @@ it.live("opposite-order overall disagreement keeps the incumbent", () =>
       }),
     ),
   ),
+);
+
+it.live.each(["fixes", "both-regress", "one-regresses", "unknown", "control", "loss"] as const)(
+  "split overall ballots use concrete defect judgments: %s",
+  (scenario) =>
+    withLoop(
+      (fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            const { scripted } = fixture;
+            scripted.critic = () => criticAnswer(1);
+            scripted.repairs = [repairWith()];
+            scripted.ballots = [0, 1].map(() => ({ plan, order }) => {
+              const result = ballotAnswer(
+                plan,
+                plan.main.B === "challenger" ? "promote" : "worse",
+                {
+                  ...(scenario === "control" ? { control: "A" as const } : {}),
+                  ...(scenario === "loss"
+                    ? { preservation: "lost" as const, lossOn: "challenger" as const }
+                    : {}),
+                },
+              );
+              if (result.kind !== "ballot") return result;
+              const challenger = plan.main.A === "challenger" ? "A" : "B";
+              const fixed = {
+                fixed: scenario === "unknown" ? "cannot-tell" : "yes",
+                frameIds: [`${challenger.toLowerCase()}1`],
+              } as const;
+              const notFixed = { fixed: "no", frameIds: ["a1", "b1"] } as const;
+              const judgments: GameReviewBallotAnswer["defects"] = [
+                {
+                  id: "defect-1",
+                  A: challenger === "A" ? fixed : notFixed,
+                  B: challenger === "B" ? fixed : notFixed,
+                },
+              ];
+              const worse =
+                scenario === "both-regress" || (scenario === "one-regresses" && order === 0)
+                  ? [
+                      {
+                        what: "The help text is clipped.",
+                        frameIds: [`${challenger.toLowerCase()}1`],
+                      },
+                    ]
+                  : [];
+              const regressions: GameReviewBallotAnswer["regressions"] = {
+                A: challenger === "A" ? worse : [],
+                B: challenger === "B" ? worse : [],
+              };
+              return { ...result, answer: { ...result.answer, defects: judgments, regressions } };
+            });
+            yield* runToCompletion(services, fixture);
+            const state = loopRecord(yield* readLoop(services));
+            expect(state.promotedRounds).toHaveLength(
+              scenario === "fixes" || scenario === "one-regresses" ? 1 : 0,
+            );
+            const round = (yield* services.rounds.read(fixture.root)).rounds.find(
+              (entry) => entry.ballotAnswers?.length === 2,
+            )!;
+            expect(round.ballotAnswers?.every((entry) => entry.answer?.overall === "B")).toBe(true);
+          }),
+        ),
+      { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+    ),
 );

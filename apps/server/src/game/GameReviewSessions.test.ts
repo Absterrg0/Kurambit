@@ -958,6 +958,8 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
       JSON.stringify({
         overall: "A",
         overallReason: "The input pair shows clearer action feedback.",
+        defects: [],
+        regressions: { A: [], B: [] },
         main: { works: "A", look: "tie", feel: "B", play: "tie" },
         preservation: [{ id: "turns", A: "preserved", B: "unknown", frameIds: ["f1"] }],
         control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
@@ -1434,6 +1436,7 @@ it.live("validates ballot coverage and evidence before recording the top-level f
         role: "ballot",
         evidence: frameInput(frames),
         items: [{ id: "turns", what: "Turning works" }],
+        defects: [{ id: "defect-1", severity: "visible", what: "Clipped HUD", fix: "Fit the HUD" }],
       });
       if (started.kind !== "started") return expect(started.kind).toBe("started");
       const caller = {
@@ -1443,16 +1446,26 @@ it.live("validates ballot coverage and evidence before recording the top-level f
       const command = scripted.dispatches[0]!;
       if (command.type !== "game-round.task.request") return;
       expect(command.task).toContain("Call game_ballot");
+      expect(command.task).toContain("Clipped HUD");
+      expect(command.task).toContain("Fit the HUD");
       expect(command.task).toContain('"overall":"tie"');
       expect(command.task).toContain('"overallReason"');
       expect(command.task).toContain(
-        '"works":"tie","look":"tie","feel":"tie","play":"tie","preservation"',
+        '"works":"tie","look":"tie","feel":"tie","play":"tie","defects"',
       );
       expect(command.task).toContain('four choices wrapped in "main"');
       expect(command.task).toContain("unknown is neutral");
       const value = {
         overall: "A",
         overallReason: "The input pair shows clearer action feedback.",
+        defects: [
+          {
+            id: "defect-1",
+            A: { fixed: "yes", frameIds: ["f1"] },
+            B: { fixed: "no", frameIds: ["f2"] },
+          },
+        ],
+        regressions: { A: [], B: [] },
         works: "tie",
         look: "B",
         feel: "tie",
@@ -2049,3 +2062,40 @@ it.live("playing in one session does not block unrelated MCP authentication", ()
     }),
   ),
 );
+
+it("ballots require every defect once and known evidence for fixes and regressions", () => {
+  const judgment = { fixed: "yes", frameIds: ["f1"] };
+  const answer = {
+    overall: "tie",
+    overallReason: "The defect is fixed but the rest is close.",
+    main: { works: "tie", look: "tie", feel: "tie", play: "tie" },
+    defects: [{ id: "defect-1", A: judgment, B: { ...judgment, fixed: "no" } }],
+    regressions: { A: [], B: [] },
+    preservation: [],
+    control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
+    reason: "f1 shows the repair.",
+  };
+  const known = { frameIds: new Set(["f1"]), itemIds: [], defectIds: ["defect-1"] };
+  const parse = (value: unknown) =>
+    GameReviewSessions.parseBallotAnswer(JSON.stringify(value), known);
+  expect(parse(answer).kind).toBe("valid");
+  expect(parse({ ...answer, defects: [] })).toMatchObject({
+    kind: "invalid",
+    reason: expect.stringContaining("did not judge defects"),
+  });
+  expect(parse({ ...answer, defects: [...answer.defects, ...answer.defects] }).kind).toBe(
+    "invalid",
+  );
+  expect(parse({ ...answer, defects: [{ ...answer.defects[0], id: "unknown" }] }).kind).toBe(
+    "invalid",
+  );
+  expect(
+    parse({ ...answer, regressions: { A: [{ what: "Clipped", frameIds: ["f99"] }], B: [] } }).kind,
+  ).toBe("invalid");
+  expect(
+    parse({
+      ...answer,
+      defects: [{ id: "defect-1", A: { fixed: "yes", frameIds: [] }, B: judgment }],
+    }).kind,
+  ).toBe("invalid");
+});

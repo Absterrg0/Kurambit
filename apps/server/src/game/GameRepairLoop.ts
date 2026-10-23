@@ -247,9 +247,6 @@ const ballotReason = (
     return `invalid-ballot: ballot ${plan.order} has no overall judgment.`;
   if (GAME_REVIEW_FACETS.some((facet) => answer.control[facet] !== "tie"))
     return `failed-control: ballot ${plan.order} preferred one of two identical control builds.`;
-  if (answer.overall === "tie") return `tie: ballot ${plan.order} found no overall improvement.`;
-  if (plan.main[answer.overall] !== "challenger")
-    return `worse-build: ballot ${plan.order} preferred the incumbent overall.`;
   return null;
 };
 
@@ -673,6 +670,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         readonly evidence?: GameReviewSessions.GameReviewEvidenceInput | undefined;
         readonly repair?: GameReviewSessions.GameReviewRepairInput | undefined;
         readonly items?: ReadonlyArray<{ readonly id: string; readonly what: string }> | undefined;
+        readonly defects?: GameReviewSessions.GameReviewSessionStartInput["defects"] | undefined;
       },
     ): Effect.Effect<ChildOutcome, GameOperationError> =>
       Effect.gen(function* () {
@@ -695,6 +693,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
               ...(input.repair === undefined ? {} : { repair: input.repair }),
               ...(input.items === undefined ? {} : { items: input.items }),
+              ...(input.defects === undefined ? {} : { defects: input.defects }),
             });
             if (started.kind !== "started")
               return { kind: "failed", reason: started.reason } as const;
@@ -996,6 +995,51 @@ export const layer = (options: GameRepairLoopOptions) => {
             round.id,
             `preservation-lost: both ballots saw ${confirmedLoss} lost on the challenger.`,
           );
+        const overallWin = plans.every((plan) => {
+          const answer = answers.find((entry) => entry.order === plan.order)!.answer!;
+          return (
+            answer.overall !== "tie" &&
+            answer.overall !== undefined &&
+            plan.main[answer.overall] === "challenger"
+          );
+        });
+        const defectWin =
+          (round.defects?.length ?? 0) > 0 &&
+          plans.every((plan) => {
+            const answer = answers.find((entry) => entry.order === plan.order)!.answer!;
+            const defects = answer.defects ?? [];
+            const challenger = plan.main.A === "challenger" ? "A" : "B";
+            const incumbent = challenger === "A" ? "B" : "A";
+            return (
+              defects.length === round.defects!.length &&
+              defects.filter((entry) => entry[challenger].fixed === "yes").length >
+                defects.filter((entry) => entry[incumbent].fixed === "yes").length
+            );
+          });
+        const agreedRegression = plans.every((plan) => {
+          const answer = answers.find((entry) => entry.order === plan.order)!.answer!;
+          const challenger = plan.main.A === "challenger" ? "A" : "B";
+          return (answer.regressions?.[challenger].length ?? 0) > 0;
+        });
+        if (!overallWin && (!defectWin || agreedRegression)) {
+          const plan = plans.find((entry) => {
+            const answer = answers.find((answer) => answer.order === entry.order)!.answer!;
+            return (
+              answer.overall === "tie" ||
+              (answer.overall !== undefined && entry.main[answer.overall] !== "challenger")
+            );
+          })!;
+          const answer = answers.find((entry) => entry.order === plan.order)!.answer!;
+          return yield* rejectRound(
+            record,
+            round.id,
+            agreedRegression
+              ? "regression: both ballots found something worse on the challenger."
+              : answer.overall === "tie"
+                ? `tie: ballot ${plan.order} found no overall improvement.`
+                : `worse-build: ballot ${plan.order} preferred the incumbent overall.`,
+          );
+        }
         // The veto is recomputed from the round's persisted checks immediately
         // before the selection moves, so no crash boundary can skip it.
         const current = yield* findRound(record.root, round.id);
@@ -1409,6 +1453,10 @@ export const layer = (options: GameRepairLoopOptions) => {
               experimentPairs,
               record.inputs,
             ),
+            defects: review.defects.map(({ frameId: _frameId, ...defect }, index) => ({
+              id: `defect-${index + 1}`,
+              ...defect,
+            })),
             items: review.doNotRegress.map((item) => ({ id: item.id, what: item.what })),
           });
           if (ballot.kind === "expired")

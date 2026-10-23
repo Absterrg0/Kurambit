@@ -146,6 +146,20 @@ export const GameReviewCriticAnswer = Schema.Struct({
 });
 export type GameReviewCriticAnswer = typeof GameReviewCriticAnswer.Type;
 
+const GameReviewFixJudgment = Schema.Struct({
+  fixed: Schema.Literals(["yes", "no", "cannot-tell"]),
+  frameIds: GameReviewPreservationEntry.fields.frameIds,
+});
+const GameReviewDefectJudgment = Schema.Struct({
+  id: GameReviewPreservationEntry.fields.id,
+  A: GameReviewFixJudgment,
+  B: GameReviewFixJudgment,
+});
+const GameReviewRegression = Schema.Struct({
+  what: reviewText(600),
+  frameIds: GameReviewPreservationEntry.fields.frameIds,
+});
+
 /**
  * The overall choice decides quality; facets explain tradeoffs. Preservation
  * is assessed per build, with identical-build controls and cited evidence.
@@ -154,6 +168,11 @@ export const GameReviewBallotAnswer = Schema.Struct({
   overall: GameReviewChoice,
   overallReason: reviewText(600),
   main: GameReviewFacetVerdicts,
+  defects: Schema.Array(GameReviewDefectJudgment).check(Schema.isMaxLength(5)),
+  regressions: Schema.Struct({
+    A: Schema.Array(GameReviewRegression).check(Schema.isMaxLength(8)),
+    B: Schema.Array(GameReviewRegression).check(Schema.isMaxLength(8)),
+  }),
   preservation: Schema.Array(GameReviewPreservationEntry),
   control: GameReviewFacetVerdicts,
   reason: reviewText(2_000),
@@ -165,6 +184,8 @@ export const GameReviewBallotInput = Schema.Struct({
   overall: GameReviewBallotAnswer.fields.overall,
   overallReason: GameReviewBallotAnswer.fields.overallReason,
   ...GameReviewFacetVerdicts.fields,
+  defects: GameReviewBallotAnswer.fields.defects,
+  regressions: GameReviewBallotAnswer.fields.regressions,
   preservation: GameReviewBallotAnswer.fields.preservation,
   control: GameReviewBallotAnswer.fields.control,
   reason: GameReviewBallotAnswer.fields.reason,
@@ -331,6 +352,8 @@ export const GameReviewBallotRecord = Schema.Struct({
   answer: Schema.optionalKey(
     Schema.Struct({
       ...GameReviewBallotAnswer.fields,
+      defects: Schema.optionalKey(GameReviewBallotAnswer.fields.defects),
+      regressions: Schema.optionalKey(GameReviewBallotAnswer.fields.regressions),
       overall: Schema.optionalKey(GameReviewChoice),
       overallReason: Schema.optionalKey(GameReviewBallotAnswer.fields.overallReason),
     }),

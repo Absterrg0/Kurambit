@@ -202,9 +202,12 @@ Server-captured frames extend its hashed round evidence and are valid citations.
 remain blind and frozen-evidence-only; they cannot call `game_try_input`. Builders and repair children
 can use it before `game_submit`. Repairs write in place,
 one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
-controls reduce position bias. Both ballots must prefer the challenger overall, with no factual
-regression or preservation item judged lost on the challenger in both ballots. Facets inform the
-overall judgment; one ballot's preservation loss is a note, and unknown is neutral.
+controls reduce position bias and must tie. Both ballots must prefer the challenger overall,
+or both must judge more listed defects fixed on the challenger without both reporting something
+worse there. Each ballot receives the critic's defect list and cites frames for each fix and
+regression. Mechanical regressions and preservation items judged lost on the challenger in both
+orders still block promotion. Facets inform the overall judgment; one ballot's preservation loss
+is a note, and unknown is neutral.
 The critic judges boot, input response, visible core action and state readability through typed
 fundamentals. A cited negative judgment creates a blocker. Per-input before/after pairs carry
 exact steps, sampled pixel deltas and bridge changes; up to four complete pairs replace loose

@@ -48,7 +48,12 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import { gameRecordFile, realGameRoot } from "./gameRecord.ts";
-import { builderFixPrompt, criticPrompt, pairwisePrompt } from "./gameReviewPrompts.ts";
+import {
+  type GameReviewPromptDefect,
+  builderFixPrompt,
+  criticPrompt,
+  pairwisePrompt,
+} from "./gameReviewPrompts.ts";
 import { playedViewport } from "./playtestEvidence.ts";
 
 /**
@@ -108,6 +113,7 @@ export interface GameReviewSessionStartInput {
   readonly repair?: GameReviewRepairInput;
   /** Preservation items a ballot must judge; the critic's answer is their source. */
   readonly items?: ReadonlyArray<{ readonly id: string; readonly what: string }>;
+  readonly defects?: ReadonlyArray<GameReviewPromptDefect>;
   /**
    * Review-role override chosen from the provider catalog. Ignored for repair,
    * and ignored after the round has frozen its review selection.
@@ -288,6 +294,7 @@ const ReviewSessionRecord = Schema.Struct({
   evidenceHash: Schema.NullOr(Schema.String),
   evidence: Schema.NullOr(ReviewEvidenceRecord),
   itemIds: Schema.Array(Schema.String),
+  defectIds: Schema.optionalKey(Schema.Array(Schema.String)),
   playBuildId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   playViewport: Schema.optionalKey(Schema.NullOr(GameViewport)),
   startedAt: Schema.String,
@@ -658,6 +665,7 @@ export const parseCriticAnswer = (
 export interface BallotAnswerKnownIds {
   readonly frameIds: ReadonlySet<string>;
   readonly itemIds: ReadonlyArray<string>;
+  readonly defectIds?: ReadonlyArray<string>;
 }
 
 /** Strict ballot parsing: complete item coverage, known frames, no extras. */
@@ -695,6 +703,33 @@ export const parseBallotAnswer = (
       kind: "invalid",
       reason: `The ballot did not judge preservation items: ${missing.join(", ")}.`,
     };
+  const defectIds = known.defectIds ?? [];
+  const judged = new Set<string>();
+  for (const entry of answer.defects) {
+    if (!defectIds.includes(entry.id) || judged.has(entry.id))
+      return {
+        kind: "invalid",
+        reason: `The ballot judged unknown or repeated defect ${entry.id}.`,
+      };
+    judged.add(entry.id);
+  }
+  if (judged.size !== defectIds.length)
+    return {
+      kind: "invalid",
+      reason: `The ballot did not judge defects: ${defectIds.filter((id) => !judged.has(id)).join(", ")}.`,
+    };
+  for (const entry of [
+    ...answer.defects.flatMap((defect) => [defect.A, defect.B]),
+    ...answer.regressions.A,
+    ...answer.regressions.B,
+  ]) {
+    for (const frameId of entry.frameIds)
+      if (!known.frameIds.has(frameId))
+        return {
+          kind: "invalid",
+          reason: `The ballot cited frame ${frameId}, which is not in its manifest.`,
+        };
+  }
   return { kind: "valid", answer };
 };
 
@@ -1260,7 +1295,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           input.role === "critic"
             ? criticPrompt(files)
             : input.role === "ballot"
-              ? pairwisePrompt({ files, items: input.items ?? [] })
+              ? pairwisePrompt({ files, items: input.items ?? [], defects: input.defects ?? [] })
               : builderFixPrompt({
                   remainingBudget: input.repair?.remainingBudget ?? "the remaining round budget",
                   brief,
@@ -1320,6 +1355,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           evidenceHash,
           evidence,
           itemIds: (input.items ?? []).map((item) => item.id),
+          defectIds: (input.defects ?? []).map((defect) => defect.id),
           startedAt: DateTime.formatIso(yield* DateTime.now),
           dispatch: { state: "pending" },
           command: {
@@ -1768,6 +1804,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             frameIds: new Set(record.evidence?.frames.map((frame) => frame.id)),
             checkIds: new Set(record.evidence?.checks.map((check) => check.id)),
             itemIds: record.itemIds,
+            defectIds: record.defectIds ?? [],
           };
           const parsed = (() => {
             if (role === "critic") {
@@ -1905,6 +1942,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           frameIds: new Set(evidence.frames.map((frame) => frame.id)),
           checkIds: new Set(evidence.checks.map((check) => check.id)),
           itemIds: record.itemIds,
+          defectIds: record.defectIds ?? [],
         };
         const parsed =
           record.role === "critic"
