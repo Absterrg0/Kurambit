@@ -153,6 +153,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "game_preview",
         "game_run_native",
         "game_stop",
+        "game_submit",
       ]) {
         expect(toolNames).toContain(name);
         expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(

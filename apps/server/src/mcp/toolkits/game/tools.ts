@@ -14,6 +14,8 @@ import {
   GameReviewHistory,
   GameReviewHistoryInput,
   GameReviewRestoreResult,
+  GameSubmitInput,
+  GameSubmitResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
   OrchestratorMcpFailure,
@@ -40,7 +42,7 @@ const GameStatusTool = Tool.make("game_status", {
 const reviewDependencies = [...dependencies, GameReviewApi.GameReviewApi];
 const ReviewStatusTool = Tool.make("game_review_status", {
   description:
-    "Read the current review phase, remaining repairs/time, frozen builder/reviewer models, usage, interruption and restore availability. Existing games have no review until a new playable export's builder turn ends. Restart never resumes a review.",
+    "Read the current review phase, remaining repairs/time, frozen builder/reviewer models, usage, interruption and restore availability. Existing games have no review until the builder submits a verified build (or a turn ends with one). Restart never resumes a review.",
   success: GameReviewStatus,
   failure,
   failureMode: "return",
@@ -70,6 +72,15 @@ const ReviewRestoreTool = Tool.make("game_review_restore", {
   description:
     "Explicitly restore the previous game-folder version from the latest review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
   success: GameReviewRestoreResult,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+}).annotate(Tool.Readonly, false);
+const SubmitTool = Tool.make("game_submit", {
+  description:
+    "Hand this game to the studio's review. When the core loop is playable, name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Accepted, the submission is recorded and the review starts on that build after your turn ends; refused, the result lists the exact failed check so you can fix it and submit again. Call it once, then end your turn; do not start your own improvement loop.",
+  parameters: GameSubmitInput,
+  success: GameSubmitResult,
   failure,
   failureMode: "return",
   dependencies: reviewDependencies,
@@ -180,6 +191,7 @@ export const GameToolkit = Toolkit.make(
   ReviewHistoryTool,
   ReviewStopTool,
   ReviewRestoreTool,
+  SubmitTool,
   BlenderTool,
   ImportTool,
   CheckTool,

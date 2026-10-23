@@ -38,6 +38,13 @@ const handlers = {
       return yield* reviews.restore(scope.thread.threadId);
     }),
   ),
+  game_submit: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const reviews = yield* GameReviewApi.GameReviewApi;
+      return yield* reviews.submit(scope.thread.threadId, input);
+    }),
+  ),
 
   game_status: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
