@@ -7,6 +7,7 @@ import type {
 import type {
   GameBenchmarkBrief,
   GameBenchmarkObligationRead,
+  GameE2eProductionRead,
   GameE2eRunSummary,
   GameE2eTurnRead,
 } from "./artifacts.ts";
@@ -123,6 +124,8 @@ export interface BenchmarkBriefResult {
   readonly startedAt: string;
   readonly durationMs: number;
   readonly turns: ReadonlyArray<GameE2eTurnRead>;
+  /** Time to first playable and to the final submit, from the producing turn's start. */
+  readonly production?: GameE2eProductionRead | null;
   readonly judgeCalls: number;
   readonly obligations: ReadonlyArray<GameBenchmarkObligationRead>;
   readonly visual: {
@@ -338,6 +341,7 @@ export function readBenchmarkResult(input: {
     startedAt: input.startedAt,
     durationMs: input.durationMs,
     turns: summary?.turns ?? [],
+    ...(summary?.production == null ? {} : { production: summary.production }),
     judgeCalls: visual?.judgeCalls ?? 0,
     obligations:
       summary === null || summary.obligations.length === 0
@@ -492,6 +496,15 @@ const turnCell = (turns: ReadonlyArray<GameE2eTurnRead>) =>
     ? "—"
     : turns.map((turn) => `${turn.name} ${seconds(turn.durationMs)}`).join(", ");
 
+/** First playable → final submit, both measured from the producing turn's start. */
+const productionCell = (production: GameE2eProductionRead | null | undefined) => {
+  const milestone = (ms: number | null) =>
+    ms === null ? "—" : ms < 60_000 ? seconds(ms) : `${Math.round(ms / 60_000)}m`;
+  return production == null
+    ? "—"
+    : `${milestone(production.firstPlayableMs)} / ${milestone(production.lastSubmitMs)}`;
+};
+
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 const DIMENSION_HEADERS = [
@@ -636,8 +649,8 @@ export function renderResultsMarkdown(input: {
           `Obligations (independent grade): ${totals.obligations.proven} YES, ${totals.obligations.failed} NO.`,
         ]),
     "",
-    "| Brief | Outcome | Obligations p/f/u | Visual | Repair Δ | Judge calls | Turns |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Brief | Outcome | Obligations p/f/u | Visual | Repair Δ | Judge calls | Turns | Production first/last |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...input.results.map((result) => {
       const proven = result.obligations.filter((o) => o.status === "proven").length;
       const failed = result.obligations.filter(
@@ -650,7 +663,7 @@ export function renderResultsMarkdown(input: {
           : result.outcome === "evidence-gap"
             ? `evidence gap (${result.visual.status})`
             : result.visual.status;
-      return `| ${result.fixtureId} | ${result.outcome} | ${proven}/${failed}/${unsupported} | ${visual} | ${result.repairDelta === null ? "—" : signed(result.repairDelta)} | ${result.judgeCalls} | ${turnCell(result.turns)} |`;
+      return `| ${result.fixtureId} | ${result.outcome} | ${proven}/${failed}/${unsupported} | ${visual} | ${result.repairDelta === null ? "—" : signed(result.repairDelta)} | ${result.judgeCalls} | ${turnCell(result.turns)} | ${productionCell(result.production)} |`;
     }),
     "",
     "## Visual dimensions",

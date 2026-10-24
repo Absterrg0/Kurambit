@@ -106,6 +106,7 @@ const summary = (
     readonly lastPlaytest?: GameLastPlaytest | null;
     readonly visualJudgements?: ReadonlyArray<GameVisualJudgement>;
     readonly loop?: GameE2eRunSummary["loop"];
+    readonly production?: GameE2eRunSummary["production"];
   } = {},
 ): GameE2eRunSummary => ({
   schemaVersion: input.schemaVersion ?? 1,
@@ -122,6 +123,7 @@ const summary = (
   obligations: input.obligations ?? [obligation("count-move", "proven")],
   visualJudgements: input.visualJudgements ?? [],
   loop: input.loop ?? null,
+  production: input.production ?? null,
   error: input.error ?? null,
 });
 
@@ -389,6 +391,29 @@ describe("benchmark results", () => {
       observation: observe({ loop }),
     });
     assert.deepEqual(result.loop, loop);
+  });
+
+  it("records the first playable and final submit as separate report columns", () => {
+    const production = {
+      firstPlayableAt: "2026-10-21T00:12:00.000Z",
+      firstPlayableMs: 12 * 60_000,
+      lastSubmitAt: "2026-10-21T00:38:00.000Z",
+      lastSubmitMs: 38 * 60_000,
+      submissions: 4,
+      budgetMs: 45 * 60_000,
+    };
+    const result = readBenchmarkResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-21T00:00:00.000Z",
+      durationMs: 600_000,
+      observation: observe({ production }),
+    });
+    assert.deepEqual(result.production, production);
+    const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: [result] });
+    assert.match(markdown, /\| Production first\/last \|/);
+    assert.match(markdown, /\| 12m \/ 38m \|/);
   });
 
   it("renders per-dimension scores and rates a run that judged once as no repair", () => {

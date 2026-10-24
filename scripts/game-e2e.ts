@@ -9,6 +9,7 @@ import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
@@ -42,8 +43,10 @@ import {
   encodeRunSummary,
   loadGameBenchmarkBrief,
   readObligations,
+  readProductionTiming,
   readVisualJudgements,
   type GameBenchmarkObligationRead,
+  type GameE2eProductionRead,
   type GameE2eRepairLoopRead,
   type GameE2eRunSummary,
   type GameE2eTurnRead,
@@ -165,6 +168,7 @@ let qualification: GameStatus["qualification"] | null = null;
 let lastPlaytest: GameStatus["lastPlaytest"] = null;
 let obligations: ReadonlyArray<GameBenchmarkObligationRead> = [];
 const turns: GameE2eTurnRead[] = [];
+let productionTiming: GameE2eProductionRead | null = null;
 const harnessCommit = await exec("git", ["rev-parse", "HEAD"], {
   cwd: checkout,
   timeout: 30_000,
@@ -186,6 +190,7 @@ const writeSummary = async () => {
     fixture: fixture === null ? null : { id: fixture.id, checksum: fixture.checksum },
     game: gameInfo,
     turns,
+    production: productionTiming,
     loop: reviewLoop,
     qualification,
     lastPlaytest,
@@ -771,6 +776,20 @@ const main = Effect.gen(function* () {
   const status = yield* client[WS_METHODS.gameStatus]({ threadId: created.threadId });
   // Record before any assertion: a failed run still has to say what it graded.
   recordStatus(status);
+  // The production record names the turn that produced, so a turn that submitted
+  // nothing cannot inherit the previous turn's milestones.
+  if (status.production.runId !== null && String(status.production.runId) === String(buildRun.id))
+    productionTiming = readProductionTiming({
+      production: status.production,
+      turnStartedAtMs: DateTime.toEpochMillis(buildRun.startedAt ?? buildRun.requestedAt),
+    });
+  if (productionTiming !== null) {
+    const minutes = (ms: number | null) =>
+      ms === null ? "no submit" : `${Math.round(ms / 60_000)}m`;
+    timeline(
+      `Production: first playable after ${minutes(productionTiming.firstPlayableMs)}, final submit after ${minutes(productionTiming.lastSubmitMs)} (${productionTiming.submissions} accepted submit(s))`,
+    );
+  }
   if (buildLoop !== null)
     reviewLoop = summarizeRepairLoop({
       watched: buildLoop,

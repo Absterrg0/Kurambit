@@ -17,6 +17,7 @@ import {
   GameReviewStatus,
   GameTemplateId,
   type GameAcceptanceCriterion,
+  type GameProductionStatus,
   type GameScenarioCriterionResult,
 } from "../../packages/contracts/src/index.ts";
 
@@ -231,6 +232,42 @@ export const GameE2eTurnRead = Schema.Struct({
 });
 export type GameE2eTurnRead = typeof GameE2eTurnRead.Type;
 
+/**
+ * The builder's two milestones measured from its producing turn's start: the
+ * first playable it published and the last submit it stood behind. They are
+ * separate because the gap between them is the production phase; a turn's wall
+ * time cannot show it (the turn also waits for review afterwards).
+ */
+export const GameE2eProductionRead = Schema.Struct({
+  firstPlayableAt: Schema.NullOr(Schema.String),
+  firstPlayableMs: Schema.NullOr(Schema.Number),
+  lastSubmitAt: Schema.NullOr(Schema.String),
+  lastSubmitMs: Schema.NullOr(Schema.Number),
+  /** Accepted submits in the producing turn; refusals are not counted. */
+  submissions: Schema.Number,
+  budgetMs: Schema.Number,
+});
+export type GameE2eProductionRead = typeof GameE2eProductionRead.Type;
+
+const since = (iso: string | null, turnStartedAtMs: number): number | null => {
+  if (iso === null) return null;
+  const at = Date.parse(iso);
+  return Number.isNaN(at) ? null : Math.max(0, at - turnStartedAtMs);
+};
+
+/** Reads the server's production record; a missing timestamp stays missing. */
+export const readProductionTiming = (input: {
+  readonly production: GameProductionStatus;
+  readonly turnStartedAtMs: number;
+}): GameE2eProductionRead => ({
+  firstPlayableAt: input.production.firstPlayableAt,
+  firstPlayableMs: since(input.production.firstPlayableAt, input.turnStartedAtMs),
+  lastSubmitAt: input.production.turnLastSubmitAt,
+  lastSubmitMs: since(input.production.turnLastSubmitAt, input.turnStartedAtMs),
+  submissions: input.production.submissions,
+  budgetMs: input.production.budgetMs,
+});
+
 /** One repair round as the run summary reports it, without ballots or evidence. */
 export const GameE2eRepairLoopRoundRead = Schema.Struct({
   id: Schema.String,
@@ -283,6 +320,8 @@ export const GameE2eRunSummary = Schema.Struct({
     Schema.Struct({ name: Schema.String, root: Schema.String, threadId: Schema.String }),
   ),
   turns: Schema.Array(GameE2eTurnRead),
+  /** The producing turn's first playable and final submit, from its start. */
+  production: Schema.optionalKey(Schema.NullOr(GameE2eProductionRead)),
   /** The review loop the build turn started, once it reached a terminal state. */
   loop: Schema.optionalKey(Schema.NullOr(GameE2eRepairLoopRead)),
   qualification: Schema.NullOr(LegacyGameQualificationRead),

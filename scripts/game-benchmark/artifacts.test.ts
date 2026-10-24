@@ -19,6 +19,7 @@ import {
   loadGameBenchmarkBriefs,
   parseExpectation,
   readObligations,
+  readProductionTiming,
   readVisualJudgements,
   visualRepairDelta,
   type GameBenchmarkBrief,
@@ -271,6 +272,40 @@ describe("run summaries", () => {
   it("treats a truncated or foreign summary as unreadable", () => {
     assert.equal(decodeRunSummary('{"schemaVersion":1}'), null);
     assert.equal(decodeRunSummary("not json"), null);
+  });
+});
+
+describe("production timings", () => {
+  const production = {
+    firstPlayableAt: "2026-10-21T00:12:00.000Z",
+    firstPlayableBuildId: "a".repeat(64),
+    runId: null,
+    turnFirstSubmitAt: "2026-10-21T00:12:00.000Z",
+    turnLastSubmitAt: "2026-10-21T00:38:00.000Z",
+    submissions: 4,
+    budgetMs: 45 * 60_000,
+    elapsedMs: 26 * 60_000,
+    remainingMs: 19 * 60_000,
+  };
+  const turnStartedAtMs = Date.parse("2026-10-21T00:00:00.000Z");
+
+  it("measures the first playable and the final submit separately from the turn's start", () => {
+    const timing = readProductionTiming({ production, turnStartedAtMs });
+    assert.equal(timing.firstPlayableMs, 12 * 60_000);
+    assert.equal(timing.lastSubmitMs, 38 * 60_000);
+    assert.equal(timing.firstPlayableAt, production.firstPlayableAt);
+    assert.equal(timing.lastSubmitAt, production.turnLastSubmitAt);
+    assert.equal(timing.submissions, 4);
+    assert.equal(timing.budgetMs, production.budgetMs);
+  });
+
+  it("keeps a missing milestone missing instead of counting from zero", () => {
+    const timing = readProductionTiming({
+      production: { ...production, firstPlayableAt: null, turnLastSubmitAt: null, submissions: 0 },
+      turnStartedAtMs,
+    });
+    assert.equal(timing.firstPlayableMs, null);
+    assert.equal(timing.lastSubmitMs, null);
   });
 });
 
