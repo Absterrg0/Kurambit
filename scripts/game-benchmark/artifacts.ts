@@ -17,7 +17,9 @@ import {
   GameReviewStatus,
   GameTemplateId,
   type GameAcceptanceCriterion,
+  type GameObservedValue,
   type GameProductionStatus,
+  type GameScenarioCriterionMeasurement,
   type GameScenarioCriterionResult,
 } from "../../packages/contracts/src/index.ts";
 import { candidateBuildId } from "../../apps/server/src/game/webBuild.ts";
@@ -165,14 +167,71 @@ export const GameBenchmarkObligationRead = Schema.Struct({
 export type GameBenchmarkObligationRead = typeof GameBenchmarkObligationRead.Type;
 
 /**
+ * Typed samples prove a promise when the caller knows the results describe the
+ * current game. The e2e harness passes `measurementEligible: false` when the
+ * state stage is stale or unknown; the declared-threshold fallback still grades
+ * that historical record.
+ */
+export interface ObligationEvidence {
+  /** Omitted means the results are taken as current evidence. */
+  readonly measurementEligible?: boolean;
+}
+
+const measuredNumber = (value: GameObservedValue): number | null =>
+  typeof value === "boolean"
+    ? value
+      ? 1
+      : 0
+    : typeof value === "number" && Number.isFinite(value)
+      ? value
+      : null;
+
+const satisfiesMeasurement = (
+  expectation: ParsedExpectation,
+  value: GameObservedValue,
+): boolean => {
+  const number = measuredNumber(value);
+  if (number === null) return false;
+  if (expectation.op === "==") return Math.abs(number - expectation.value) < 1e-9;
+  if (expectation.op === ">=") return number >= expectation.value;
+  return number <= expectation.value;
+};
+
+/**
+ * A frozen threshold is proven only when the gameplay baseline missed it and
+ * the run's last sample satisfies it. The last sample is recorded after the
+ * baseline frame, so this is a transition the player caused, not a boot value.
+ */
+const samplesProve = (
+  measurement: GameScenarioCriterionMeasurement,
+  expectation: ParsedExpectation,
+): boolean =>
+  expectation.op !== "changes" &&
+  measurement.baseline !== null &&
+  measurement.last !== null &&
+  !satisfiesMeasurement(expectation, measurement.baseline) &&
+  satisfiesMeasurement(expectation, measurement.last);
+
+const sampleText = (value: GameObservedValue | null): string => {
+  if (value === null) return "missing";
+  return typeof value === "string" ? JSON.stringify(value.slice(0, 40)) : String(value);
+};
+
+/**
  * Grades each frozen promise against the approved design and the state stage's
- * per-criterion results. `proven` requires a design criterion with a matching
- * key and a strong enough expectation whose state result passed.
+ * per-criterion results. `proven` requires either a design criterion with a
+ * matching key and a strong enough expectation whose state result passed, or a
+ * passing criterion whose typed samples themselves cross the frozen threshold.
+ * The second path exists because a design may commit to a weaker bound than the
+ * benchmark promises; the run's real samples still decide.
  */
 export function readObligations(
   obligations: ReadonlyArray<GameBenchmarkObligation>,
   acceptance: ReadonlyArray<GameAcceptanceCriterion>,
-  results: ReadonlyArray<Pick<GameScenarioCriterionResult, "id" | "status" | "observed">>,
+  results: ReadonlyArray<
+    Pick<GameScenarioCriterionResult, "id" | "status" | "observed" | "measurement">
+  >,
+  evidence: ObligationEvidence = {},
 ): ReadonlyArray<GameBenchmarkObligationRead> {
   return obligations.map((obligation) => {
     const base = {
@@ -190,19 +249,15 @@ export function readObligations(
         criteria: [],
       };
     const frozen = parseExpectation(obligation.expect!);
-    const criteria = acceptance.filter((criterion) => {
-      if (criterion.observe === undefined || criterion.observe.key !== obligation.key) return false;
-      const observed = parseExpectation(criterion.observe.expect);
+    const sameKey = acceptance.filter(
+      (criterion) => criterion.observe !== undefined && criterion.observe.key === obligation.key,
+    );
+    const sameKeyIds = new Set(sameKey.map((criterion) => criterion.id));
+    const criteria = sameKey.filter((criterion) => {
+      const observed = parseExpectation(criterion.observe!.expect);
       return frozen !== null && observed !== null && expectationCovers(frozen, observed);
     });
     const ids = criteria.map((criterion) => criterion.id);
-    if (ids.length === 0)
-      return {
-        ...base,
-        status: "missing" as const,
-        detail: `The approved design has no criterion observing GameState.${obligation.key} ${obligation.expect}.`,
-        criteria: [],
-      };
     const graded = results.filter((result) => ids.includes(result.id));
     const proven = graded.find((result) => result.status === "passed");
     if (proven !== undefined)
@@ -212,6 +267,47 @@ export function readObligations(
         detail: `${proven.id} passed the state stage.`,
         criteria: ids,
       };
+    const typed =
+      evidence.measurementEligible !== false
+        ? results.flatMap((result) =>
+            result.status === "passed" &&
+            result.measurement !== undefined &&
+            result.measurement.key === obligation.key &&
+            sameKeyIds.has(result.id)
+              ? [{ id: result.id, measurement: result.measurement }]
+              : [],
+          )
+        : [];
+    const measured = typed.find(
+      (entry) => frozen !== null && samplesProve(entry.measurement, frozen),
+    );
+    if (measured !== undefined) {
+      const { scenario, baseline, last } = measured.measurement;
+      return {
+        ...base,
+        status: "proven" as const,
+        detail: `${measured.id} passed; ${scenario} measured GameState.${obligation.key} ${sampleText(baseline)} → ${sampleText(last)}, which proves ${obligation.expect}.`,
+        criteria: [...ids, measured.id],
+      };
+    }
+    if (ids.length === 0) {
+      const nearMiss = typed[0];
+      if (nearMiss !== undefined) {
+        const { scenario, baseline, last } = nearMiss.measurement;
+        return {
+          ...base,
+          status: "missing" as const,
+          detail: `${nearMiss.id} passed, but ${scenario} measured GameState.${obligation.key} ${sampleText(baseline)} → ${sampleText(last)}, which does not prove ${obligation.expect}.`,
+          criteria: [],
+        };
+      }
+      return {
+        ...base,
+        status: "missing" as const,
+        detail: `The approved design has no criterion observing GameState.${obligation.key} ${obligation.expect}.`,
+        criteria: [],
+      };
+    }
     const failed = graded[0];
     return {
       ...base,

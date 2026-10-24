@@ -190,6 +190,14 @@ const criterionResult = (
       observed: `${match.run.id}: ${key} ${valueText(observation.baseline ?? null)} → ${valueText(observation.last)} at frame ${match.frame}.`,
       scenarios: [match.run.id],
       provenBy: { scenario: match.run.id, frame: match.frame },
+      // The samples stay typed so a stricter benchmark promise can be checked
+      // later without parsing `observed`.
+      measurement: {
+        scenario: match.run.id,
+        key,
+        baseline: observation.baseline ?? null,
+        last: observation.last,
+      },
     };
   }
   if (alreadyTrue !== null) {

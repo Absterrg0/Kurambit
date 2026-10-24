@@ -203,6 +203,20 @@ export const GameScenarioCriterionStatus = Schema.Literals([
 ]);
 export type GameScenarioCriterionStatus = typeof GameScenarioCriterionStatus.Type;
 /**
+ * The real samples behind a pass, kept typed so a consumer can check a promise
+ * stricter than the criterion declared without reading `observed`. `baseline`
+ * is the gameplay baseline the criterion had to be false at, and `last` is a
+ * later sample; a scenario that only flashed a value and returned cannot prove
+ * a final state. Older results predate this field.
+ */
+export const GameScenarioCriterionMeasurement = Schema.Struct({
+  scenario: Schema.String,
+  key: Schema.String,
+  baseline: Schema.NullOr(GameObservedValue),
+  last: Schema.NullOr(GameObservedValue),
+});
+export type GameScenarioCriterionMeasurement = typeof GameScenarioCriterionMeasurement.Type;
+/**
  * One approved criterion checked against the run. Mechanical claims without
  * `observe` are `missing` and block the stage; presentation claims never reach
  * this result and are reported by the visual stage as `missing` instead.
@@ -220,6 +234,8 @@ export const GameScenarioCriterionResult = Schema.Struct({
   provenBy: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ scenario: Schema.String, frame: Schema.Int })),
   ),
+  /** The proving scenario's baseline and final samples, when it passed. */
+  measurement: Schema.optionalKey(GameScenarioCriterionMeasurement),
 });
 export type GameScenarioCriterionResult = typeof GameScenarioCriterionResult.Type;
 /** One kind's coverage in the state stage. `proven` means the criterion passed. */

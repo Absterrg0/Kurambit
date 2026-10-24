@@ -206,13 +206,19 @@ const writeSummary = async () => {
 const recordStatus = (status: GameStatus) => {
   qualification = status.qualification;
   lastPlaytest = status.lastPlaytest;
+  const stateStage = status.qualification.stages.find((stage) => stage.stage === "state");
   obligations =
     fixture === null
       ? []
       : readObligations(
           fixture.obligations,
           status.design.state === "approved" ? status.design.acceptance : [],
-          status.qualification.stages.find((stage) => stage.stage === "state")?.criteria ?? [],
+          stateStage?.criteria ?? [],
+          // A stale or unknown state stage measured another source tree; its
+          // typed samples cannot prove the current game.
+          {
+            measurementEligible: stateStage?.status === "passed" || stateStage?.status === "failed",
+          },
         );
 };
 function assert(condition: unknown, message: string): asserts condition {

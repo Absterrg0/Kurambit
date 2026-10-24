@@ -135,6 +135,52 @@ describe("evaluateScenarios", () => {
     ]);
   });
 
+  it("records the proving run's typed samples, and only for a pass", () => {
+    const passing = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("win", "win", { key: "state", expect: "==3" })],
+      runs: [
+        run({
+          observations: [
+            observation("state", {
+              baseline: 1,
+              last: 3,
+              min: 1,
+              max: 3,
+              matches: [{ id: "win", frame: 800 }],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(passing.criteria[0]?.measurement).toEqual({
+      scenario: "full-run",
+      key: "state",
+      baseline: 1,
+      last: 3,
+    });
+    // A win that flashed and returned to play is not the run's final state.
+    const failed = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("win", "win", { key: "state", expect: "==3" })],
+      runs: [
+        run({
+          observations: [
+            observation("state", {
+              baseline: 1,
+              last: 1,
+              min: 1,
+              max: 3,
+              matches: [{ id: "win", frame: 300 }],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(failed.criteria[0]?.status).toBe("failed");
+    expect(failed.criteria[0]?.measurement).toBeUndefined();
+  });
+
   it("fails a boot constant that is already true when play starts", () => {
     const summary = evaluateScenarios({
       mode: "criteria",

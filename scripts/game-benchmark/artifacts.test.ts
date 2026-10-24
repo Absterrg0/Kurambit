@@ -5,10 +5,16 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import type {
+  GameAcceptanceCriterion,
+  GameScenarioEvidence,
+  GameScenarioObservation,
+} from "../../packages/contracts/src/index.ts";
+import type {
   GameVisualDimension,
   GameVisualJudgement,
   GameVisualScore,
 } from "../../packages/contracts/src/legacyGameVisual.ts";
+import { evaluateScenarios } from "../../apps/server/src/game/scenarioEvaluation.ts";
 import {
   checksumOfBytes,
   decodeGameBenchmarkBrief,
@@ -24,6 +30,7 @@ import {
   resolveSelectedArtifact,
   visualRepairDelta,
   type GameBenchmarkBrief,
+  type GameBenchmarkObligation,
   type GameE2eRunSummary,
 } from "./artifacts.ts";
 
@@ -223,7 +230,27 @@ describe("run summaries", () => {
         sourceId: "source",
         buildId: "build",
         servedArtifactId: "build",
-        stages: [],
+        stages: [
+          {
+            stage: "state",
+            status: "passed",
+            sourceId: "source",
+            buildId: null,
+            finishedAt: "2026-10-21T00:01:00.000Z",
+            criteria: [
+              {
+                id: "moves-count",
+                kind: "control",
+                text: "Walking counts.",
+                status: "passed",
+                observed: "full-run: moves 0 → 2 at frame 20.",
+                scenarios: ["full-run"],
+                provenBy: { scenario: "full-run", frame: 20 },
+                measurement: { scenario: "full-run", key: "moves", baseline: 0, last: 2 },
+              },
+            ],
+          },
+        ],
       },
       lastPlaytest: null,
       obligations: [
@@ -244,6 +271,45 @@ describe("run summaries", () => {
     assert.equal(decoded?.turns[0]?.name, "design");
     assert.equal(decoded?.obligations[0]?.status, "proven");
     assert.equal(decoded?.fixture?.checksum, "checksum");
+    // The state stage's typed measurement survives the run.json encoder, and a
+    // record written before the field existed still decodes.
+    assert.deepEqual(decoded?.qualification?.stages[0]?.criteria?.[0]?.measurement, {
+      scenario: "full-run",
+      key: "moves",
+      baseline: 0,
+      last: 2,
+    });
+    const parsed = JSON.parse(text);
+    const legacyText = JSON.stringify({
+      ...parsed,
+      qualification: {
+        ...parsed.qualification,
+        stages: [
+          {
+            stage: "state",
+            status: "passed",
+            sourceId: "source",
+            buildId: null,
+            finishedAt: null,
+            criteria: [
+              {
+                id: "moves-count",
+                kind: "control",
+                text: "Walking counts.",
+                status: "passed",
+                observed: "full-run: moves 0 → 2 at frame 20.",
+                scenarios: ["full-run"],
+                provenBy: { scenario: "full-run", frame: 20 },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(
+      decodeRunSummary(legacyText)?.qualification?.stages[0]?.criteria?.[0]?.measurement,
+      undefined,
+    );
     const modern = decodeRunSummary(
       JSON.stringify({
         ...JSON.parse(text),
@@ -585,5 +651,173 @@ describe("obligation grading", () => {
     );
     assert.equal(read?.status, "unsupported");
     assert.equal(read?.detail, "No invariance check.");
+  });
+});
+
+describe("typed obligation evidence", () => {
+  const acceptance: GameAcceptanceCriterion[] = [
+    {
+      id: "replies-cost-clock",
+      kind: "mechanic",
+      text: "Every reply is charged against the 120-second shift clock",
+      observe: { key: "time_left", expect: "<=111" },
+    },
+  ];
+  const obligation: GameBenchmarkObligation[] = [
+    {
+      id: "reply-costs-time",
+      kind: "mechanic",
+      description: "Sending a reply lowers time_left from its starting 120.",
+      key: "time_left",
+      expect: "<=100",
+    },
+  ];
+  const scenarioRun = (observation: GameScenarioObservation): GameScenarioEvidence => ({
+    id: "lose-run",
+    frames: 516,
+    durationMs: 8_600,
+    firstInputFrame: 30,
+    baselineFrame: 36,
+    playerMoved: true,
+    error: null,
+    invalidActions: [],
+    observations: [observation],
+  });
+  const clockRun = (
+    baseline: number,
+    last: number,
+    low = Math.min(baseline, last),
+  ): GameScenarioEvidence =>
+    scenarioRun({
+      key: "time_left",
+      min: low,
+      max: Math.max(baseline, last),
+      first: baseline,
+      last,
+      firstChangeFrame: 12,
+      baseline,
+      // The declared 111 threshold first became true here; the frozen 100 did
+      // not, so only a later sample can prove the frozen promise.
+      matches: [{ id: "replies-cost-clock", frame: 180, value: 108.016666666667 }],
+    });
+
+  const grade = (runs: readonly GameScenarioEvidence[], measurementEligible = true) => {
+    const evaluated = evaluateScenarios({ mode: "criteria", criteria: acceptance, runs });
+    return {
+      evaluated,
+      reads: readObligations(obligation, acceptance, evaluated.criteria, { measurementEligible }),
+    };
+  };
+
+  it("proves the frozen threshold from the run's typed samples though the declared one is weaker", () => {
+    const { evaluated, reads } = grade([clockRun(119.416666666667, 89.0833333333337)]);
+    assert.equal(evaluated.criteria[0]?.status, "passed");
+    assert.deepEqual(evaluated.criteria[0]?.measurement, {
+      scenario: "lose-run",
+      key: "time_left",
+      baseline: 119.416666666667,
+      last: 89.0833333333337,
+    });
+    assert.equal(reads[0]?.status, "proven");
+    assert.match(reads[0]?.detail ?? "", /89\.08/);
+    assert.deepEqual(reads[0]?.criteria, ["replies-cost-clock"]);
+  });
+
+  it("keeps a run whose last measured value does not cross the frozen threshold missing", () => {
+    const { reads } = grade([clockRun(119.416666666667, 108)]);
+    assert.equal(reads[0]?.status, "missing");
+    assert.match(reads[0]?.detail ?? "", /108/);
+    assert.match(reads[0]?.detail ?? "", /<=100/);
+  });
+
+  it("does not credit a value that changed and returned above the promise", () => {
+    const { reads } = grade([clockRun(119.416666666667, 119.916666666667, 108.016666666667)]);
+    assert.equal(reads[0]?.status, "missing");
+  });
+
+  it("does not credit typed samples when the state stage is not current", () => {
+    const { reads } = grade([clockRun(119.416666666667, 89.0833333333337)], false);
+    assert.equal(reads[0]?.status, "missing");
+  });
+
+  it("ignores a measurement for another key or one that already held at baseline", () => {
+    const result = (measurement: { key: string; baseline: number; last: number }) => [
+      {
+        id: "replies-cost-clock",
+        status: "passed" as const,
+        observed: "lose-run: time_left 119.4 → 89.1 at frame 180.",
+        measurement: { scenario: "lose-run", ...measurement },
+      },
+    ];
+    const wrongKey = readObligations(
+      obligation,
+      acceptance,
+      result({ key: "trust", baseline: 119.416666666667, last: 89.0833333333337 }),
+      { measurementEligible: true },
+    );
+    assert.equal(wrongKey[0]?.status, "missing");
+    const alreadyTrue = readObligations(
+      obligation,
+      acceptance,
+      result({ key: "time_left", baseline: 95, last: 89.0833333333337 }),
+      { measurementEligible: true },
+    );
+    assert.equal(alreadyTrue[0]?.status, "missing");
+  });
+
+  it("keeps an old record without typed samples on the strict declared-threshold rule", () => {
+    const reads = readObligations(
+      obligation,
+      acceptance,
+      [
+        {
+          id: "replies-cost-clock",
+          status: "passed",
+          observed: "lose-run: time_left 119.4 → 89.1 at frame 180.",
+        },
+      ],
+      { measurementEligible: true },
+    );
+    assert.equal(reads[0]?.status, "missing");
+  });
+
+  it("proves a boolean false-to-true only in that direction", () => {
+    const flipAcceptance: GameAcceptanceCriterion[] = [
+      {
+        id: "won-flip",
+        kind: "control",
+        text: "Winning flips won",
+        observe: { key: "won", expect: "changes" },
+      },
+    ];
+    const flipObligation: GameBenchmarkObligation[] = [
+      {
+        id: "finish-won",
+        kind: "win",
+        description: "The shift ends won.",
+        key: "won",
+        expect: "==1",
+      },
+    ];
+    const wonRun = (baseline: boolean, last: boolean): GameScenarioEvidence =>
+      scenarioRun({
+        key: "won",
+        min: null,
+        max: null,
+        first: baseline,
+        last,
+        firstChangeFrame: 500,
+        baseline,
+        matches: [{ id: "won-flip", frame: 500, value: last }],
+      });
+    const gradeWon = (run: GameScenarioEvidence) =>
+      readObligations(
+        flipObligation,
+        flipAcceptance,
+        evaluateScenarios({ mode: "criteria", criteria: flipAcceptance, runs: [run] }).criteria,
+        { measurementEligible: true },
+      );
+    assert.equal(gradeWon(wonRun(false, true))[0]?.status, "proven");
+    assert.equal(gradeWon(wonRun(true, false))[0]?.status, "missing");
   });
 });
