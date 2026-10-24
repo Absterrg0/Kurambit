@@ -297,6 +297,9 @@ it.effect(
         expect(agents).toContain("Never claim a check you did not run");
         expect(agents).toContain("game_recipe_search");
         expect(agents).toContain("Before building the core loop, game_recipe_search");
+        // Optional art kits are discoverable without becoming an upfront step.
+        expect(agents).toContain("game_art_search");
+        expect(agents).toContain("game_art_import");
         // The turn continues into production after the first playable; that is
         // the instruction t66 showed cutting the build phase short.
         expect(agents).toContain("the first playable, not the end of your turn");

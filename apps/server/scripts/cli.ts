@@ -103,6 +103,15 @@ const buildCmd = Command.make(
       } else {
         yield* Effect.logWarning("[cli] Starter templates not found — skipping template bundle.");
       }
+
+      // Art kits resolve beside the packed bundle, exactly like templates.
+      const artKitsSource = path.join(serverDir, "assets/art-kits");
+      if (yield* fs.exists(artKitsSource)) {
+        yield* fs.copy(artKitsSource, path.join(serverDir, "dist/art-kits"));
+        yield* Effect.log("[cli] Bundled game art kits into dist/art-kits");
+      } else {
+        yield* Effect.logWarning("[cli] Game art kits not found — skipping art kit bundle.");
+      }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 

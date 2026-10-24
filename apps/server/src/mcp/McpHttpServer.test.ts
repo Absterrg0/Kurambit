@@ -1048,13 +1048,23 @@ it.effect(
       Effect.gen(function* () {
         const seen: unknown[] = [];
         const tried: unknown[] = [];
+        const imported: unknown[] = [];
         const serverLayer = Layer.mergeAll(
           McpHttpServer.layerGameReviewAnswers,
           McpHttpServer.layerGamePlaytest,
           McpHttpServer.layerGameRecipes,
+          McpHttpServer.layerGameArt,
         ).pipe(
           Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
-          Layer.provide(Layer.mock(GameService.GameService)({})),
+          Layer.provide(
+            Layer.mock(GameService.GameService)({
+              importArtKit: (_threadId, input) =>
+                Effect.sync(() => {
+                  imported.push(input);
+                  return {} as never;
+                }),
+            }),
+          ),
           Layer.provideMerge(McpHttpServer.layerMcpTransport),
           Layer.provide(GameRecipes.layer),
           Layer.provide(
@@ -1202,6 +1212,28 @@ it.effect(
           arguments: {},
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenRecipe).toContain("error");
+        // Art search/get are read-only and follow the know-how rules; import is
+        // a build write, so critics and ballots never receive the tool.
+        for (const [token, session] of [
+          ["builder", builder],
+          ["repairer", repairer],
+          ["critic", critic],
+        ] as const) {
+          expect(yield* list(token, session)).toContain('"name":"game_art_search"');
+          expect(yield* list(token, session)).toContain('"name":"game_art_get"');
+        }
+        expect(yield* list("builder", builder)).toContain('"name":"game_art_import"');
+        expect(yield* list("repairer", repairer)).toContain('"name":"game_art_import"');
+        expect(yield* list("critic", critic)).not.toContain("game_art_import");
+        expect(yield* list("ballot", ballot)).not.toContain("game_art_search");
+        expect(yield* list("ballot", ballot)).not.toContain("game_art_get");
+        expect(yield* list("ballot", ballot)).not.toContain("game_art_import");
+        const forbiddenArt = yield* rpc("critic", critic, "tools/call", {
+          name: "game_art_import",
+          arguments: { id: "kenney-tiny-dungeon" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(forbiddenArt).toContain("error");
+        expect(imported).toHaveLength(0);
         // The builder searches by tags and gets the complete reference back.
         const builderSearch = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_search",

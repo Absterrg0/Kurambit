@@ -4,6 +4,12 @@ import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import {
   GameActionResult,
+  GameArtGetInput,
+  GameArtGetResult,
+  GameArtImportInput,
+  GameArtImportResult,
+  GameArtSearchInput,
+  GameArtSearchResult,
   GameBlenderInput,
   GameBlenderResult,
   GameCheckResult,
@@ -31,6 +37,7 @@ import {
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as GameRecipes from "../../../game/GameRecipes.ts";
+import * as GameArtKits from "../../../game/GameArtKits.ts";
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
@@ -248,6 +255,51 @@ const GameRecipeGetTool = Tool.make("game_recipe_get", {
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
 export const GameRecipeToolkit = Toolkit.make(GameRecipeSearchTool, GameRecipeGetTool);
+
+const artDependencies = [GameArtKits.GameArtKits];
+const hiddenFromReviewChildren = () => {
+  const fiber = Fiber.getCurrent();
+  if (fiber === undefined) return true;
+  const role = Context.getOrUndefined(
+    fiber.context,
+    McpInvocationContext.McpInvocationContext,
+  )?.gameReviewRole;
+  return role === null || role === undefined;
+};
+const GameArtSearchTool = Tool.make("game_art_search", {
+  description:
+    "Search Game Studio's optional pinned CC0 art kits before choosing art. style matches an authored tag exactly (pixel-art, top-down, dungeon, fantasy, roguelike); text matches a declared word or phrase literally. Returns stable kit ids, contents, atlas dimensions, license and source. Nothing is imported and no kit is picked for you: use a kit only when it fits BRIEF.md and the game's art direction. Read-only; reads no game files and starts no work.",
+  parameters: GameArtSearchInput,
+  success: GameArtSearchResult,
+  failure: Schema.String,
+  failureMode: "return",
+  dependencies: artDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
+const GameArtGetTool = Tool.make("game_art_get", {
+  description:
+    "Read one art kit's complete declared files, byte sizes, SHA-256 hashes, atlas layout, license and source provenance before importing it. Read-only; reads no game files.",
+  parameters: GameArtGetInput,
+  success: GameArtGetResult,
+  failure: Schema.String,
+  failureMode: "return",
+  dependencies: artDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
+const GameArtImportTool = Tool.make("game_art_import", {
+  description:
+    "Copy one chosen art kit's declared atlas, license and provenance files into this game under godot/assets/art/kits/<kitId>/, and return exact res:// paths and atlas layout. It copies no scripts, scenes, levels or acceptance, changes no game.json and changes no mechanics. Repeated import of the unchanged kit writes nothing; if a destination file exists with different bytes it refuses and leaves every existing file untouched. Run game_godot_import afterward. Hidden from read-only critic and ballot sessions.",
+  parameters: GameArtImportInput,
+  success: GameArtImportResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromReviewChildren);
+export const GameArtToolkit = Toolkit.make(GameArtSearchTool, GameArtGetTool, GameArtImportTool);
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
   ReviewStatusTool,

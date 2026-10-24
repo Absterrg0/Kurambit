@@ -28,6 +28,7 @@ import {
   GameBlenderResult,
   GameWebPlaytestInput,
   GameWebPlaytestResult,
+  type GameArtImportResult,
   type GameOperationEvent,
   type GameProcessResult,
   type ThreadId,
@@ -39,6 +40,7 @@ import {
   playtestInputIssues,
 } from "@t3tools/contracts";
 import * as GameAdmission from "./GameAdmission.ts";
+import * as GameArtKits from "./GameArtKits.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -159,6 +161,15 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       scenePath: string,
     ) => Effect.Effect<GameSceneInspectResult, GameOperationError>;
+    /**
+     * Copies one optional art kit's declared files into the game's Godot
+     * project and returns the exact resource paths. It never edits the
+     * manifest, design or mechanics.
+     */
+    readonly importArtKit: (
+      threadId: ThreadId,
+      input: { readonly id: string },
+    ) => Effect.Effect<GameArtImportResult, GameOperationError>;
   }
 >()("t3/game/GameService") {}
 const decodeGameManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
@@ -216,6 +227,7 @@ const make = Effect.gen(function* () {
   const qualification = yield* GameQualification.GameQualification;
   const rounds = yield* GameRoundStore.GameRoundStore;
   const admission = yield* GameAdmission.GameAdmission;
+  const artKits = yield* GameArtKits.GameArtKits;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
   const operations = yield* GameOperations.GameOperations;
@@ -1934,6 +1946,21 @@ const make = Effect.gen(function* () {
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),
     inspectScene: (threadId, scenePath) =>
       withRoot(threadId, "Inspect scene", (root) => inspectScene(root, scenePath)),
+    importArtKit: (threadId, input) =>
+      withRoot(threadId, "Import art kit", (root) =>
+        Effect.gen(function* () {
+          // Art is building work: a reviewed draft and a changed design are the
+          // same gate as Blender, export and playtest. The manifest supplies the
+          // engine project path, never a destination from the caller.
+          yield* refuseWhileUnapproved(root, "import-art-kit");
+          const manifest = yield* projects.read(root);
+          return yield* artKits.install({
+            root,
+            godotProject: manifest.godotProject,
+            id: input.id,
+          });
+        }),
+      ),
     test: (threadId, script, timeoutMs = 60_000) =>
       withRoot(threadId, "Test", (root) =>
         Effect.gen(function* () {
@@ -2186,12 +2213,14 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(GameService, make).pipe(
+  Layer.provide(GameArtKits.layer),
   Layer.provide(GameWebPlaytest.layer),
   Layer.provideMerge(GameOperations.layer),
 );
 /** Tests inject a fake browser run; production uses the real playtest. */
 export const layerWithPlaytest = (run: typeof GameWebPlaytest.playtest) =>
   Layer.effect(GameService, make).pipe(
+    Layer.provide(GameArtKits.layer),
     Layer.provide(GameWebPlaytest.layerOf(run)),
     Layer.provideMerge(GameOperations.layer),
   );

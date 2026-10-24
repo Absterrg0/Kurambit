@@ -107,6 +107,8 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     // Starter templates resolve from beside the executable, so a game created
     // by this archive would otherwise fail to copy its godot/ tree.
     path.join(contentDir, "templates/3d-explorer/template.json"),
+    // Art kits resolve beside the executable too (apps/server/src/game/GameArtKits.ts).
+    path.join(contentDir, "art-kits/kenney-tiny-dungeon/tilemap_packed.png"),
   ]) {
     if (!(yield* fs.exists(required))) {
       return yield* new CliArchiveSmokeError({

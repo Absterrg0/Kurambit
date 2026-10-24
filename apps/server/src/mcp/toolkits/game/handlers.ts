@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as GameRecipes from "../../../game/GameRecipes.ts";
+import * as GameArtKits from "../../../game/GameArtKits.ts";
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
 import * as GameService from "../../../game/GameService.ts";
@@ -8,6 +9,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   GameToolkit,
+  GameArtToolkit,
   GamePlaytestToolkit,
   GameRecipeToolkit,
   GameReviewAnswerToolkit,
@@ -187,6 +189,29 @@ const recipeHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GameRecipeToolkit.tools>;
 export const layerRecipes = McpToolAccess.toLayer(GameRecipeToolkit, recipeHandlers);
+
+const artHandlers = {
+  game_art_search: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const kits = yield* GameArtKits.GameArtKits;
+      return yield* kits.search(input);
+    }),
+  ),
+  game_art_get: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const kits = yield* GameArtKits.GameArtKits;
+      return yield* kits.get(input).pipe(Effect.mapError((error) => error.message));
+    }),
+  ),
+  game_art_import: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.importArtKit(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameArtToolkit.tools>;
+export const layerArt = McpToolAccess.toLayer(GameArtToolkit, artHandlers);
 
 const reviewAnswer = (role: "critic" | "ballot") =>
   McpToolAccess.readsAsCaller((input: unknown) =>

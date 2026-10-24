@@ -1,6 +1,7 @@
 import {
   GamePlaytestToolkit,
   GameToolkit,
+  GameArtToolkit,
   GameRecipeToolkit,
   GameWebPlaytestTool,
   GameTryInputTool,
@@ -28,6 +29,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as GameService from "../game/GameService.ts";
+import * as GameArtKits from "../game/GameArtKits.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -855,6 +857,10 @@ export const layerGameReviewAnswers = toolkitRegistration(
 
 export const layerGameRecipes = toolkitRegistration(GameRecipeToolkit, GameHandlers.layerRecipes);
 
+export const layerGameArt = toolkitRegistration(GameArtToolkit, GameHandlers.layerArt).pipe(
+  Layer.provide(GameArtKits.layer),
+);
+
 export const layerGamePlaytest = imageToolRegistration(
   registerGameWebPlaytest(),
   GameHandlers.layerPlaytest,
@@ -864,6 +870,7 @@ const layerGameToolkit = Layer.mergeAll(
   layerGameReviewAnswers,
   layerGamePlaytest,
   layerGameRecipes,
+  layerGameArt,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );
 

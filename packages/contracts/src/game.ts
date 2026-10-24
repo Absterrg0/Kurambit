@@ -189,6 +189,10 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "templates-missing",
       "unknown-template",
       "starter-templates-missing",
+      "art-kits-missing",
+      "unknown-art-kit",
+      "art-kit-conflict",
+      "art-kit-corrupt",
       "command-failed",
       "busy",
       "unsupported-platform",
@@ -223,6 +227,13 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "unknown-template": "Pick a starter template from the New game dialog.",
       "starter-templates-missing":
         "Game Studio's starter template files are missing. Reinstall or update the app.",
+      "art-kits-missing": "Game Studio's art kit files are missing. Reinstall or update the app.",
+      "unknown-art-kit":
+        "Search the optional art kit catalog with game_art_search and use a kit id it returns.",
+      "art-kit-conflict":
+        "One of this kit's files already exists with different contents. The import changed nothing. Keep the existing files, or move them aside, then retry.",
+      "art-kit-corrupt":
+        "Game Studio's shipped art kit file is corrupt or does not match its catalog hash. Reinstall or update the app.",
       "command-failed":
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
       busy: "Another operation is running for this game. Wait for it or press Stop.",

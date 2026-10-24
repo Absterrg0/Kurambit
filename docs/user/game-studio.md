@@ -28,6 +28,10 @@ the game workspace.
 
 The agent models assets in Blender, brings them into Godot, writes the scenes and GDScript, runs a
 headless gameplay test, and checks the web build in a headless browser before it reports back.
+When an optional pinned art kit fits the game's art direction, ask the agent to use it: it can
+search the shipped CC0 kits and import one into `godot/assets/art/kits/`. A kit adds only its own
+image, license and provenance files; it never changes the game's scripts, scenes or mechanics, and
+the agent chooses whether any kit fits.
 
 ## Design the game first
 
