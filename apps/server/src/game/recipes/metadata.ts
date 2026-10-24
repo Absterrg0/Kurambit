@@ -117,6 +117,36 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     },
   },
   {
+    id: "audio.feedback",
+    version: 1,
+    title: "Give each action its own short, bounded sound cue",
+    genres: ["platformer", "top-down", "action"],
+    mechanics: ["audio-feedback", "feedback"],
+    defects: ["silent-pickup", "no-audio-feedback", "unbounded-audio"],
+    aliases: [
+      "sound",
+      "audio feedback",
+      "event sounds",
+      "silent pickup",
+      "sound cues",
+      "mute sound",
+    ],
+    intent:
+      "Two short, distinct cues — a confirmation and a damage or rejection — play only on real actions, stay bounded, and stop on mute.",
+    why: "Two pitches tell success from failure without reading the HUD. Bounded voices and a mute that stops a sounding cue keep feedback pleasant and controllable.",
+    failure:
+      "A silent action leaves the player unsure it landed; a cue that loops or keeps playing after mute becomes noise.",
+    restyle:
+      "Keep the event mapping, one voice per cue, the echo guard and the mute stop. Pick this game's two cues; use licensed samples when available.",
+    verificationQuestion:
+      "Do two different actions produce two different short cues, and does muting silence a cue already playing?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "P6 audio request (t87); short event-cue practice with bounded voices and mute.",
+    },
+  },
+  {
     id: "read.silhouette",
     version: 1,
     title: "Separate actor and hazard from the background",

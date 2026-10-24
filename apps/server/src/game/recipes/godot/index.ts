@@ -1,5 +1,6 @@
 import type { GameRecipeAdapter } from "@t3tools/contracts";
 import type { GodotRecipeReference } from "./reference.ts";
+import { audioFeedback } from "./audio.feedback.ts";
 import { feelBuffer } from "./feel.buffer.ts";
 import { feelCoyote } from "./feel.coyote.ts";
 import { feelHitStop } from "./feel.hit-stop.ts";
@@ -37,6 +38,7 @@ const adapter = (reference: GodotRecipeReference): GameRecipeAdapter => ({
  * catalog mistake the test catches, not a runtime fallback.
  */
 export const godotRecipeAdapters: ReadonlyMap<string, GameRecipeAdapter> = new Map([
+  ["audio.feedback", adapter(audioFeedback)],
   ["feel.buffer", adapter(feelBuffer)],
   ["feel.coyote", adapter(feelCoyote)],
   ["feel.hit-stop", adapter(feelHitStop)],

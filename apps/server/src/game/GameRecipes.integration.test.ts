@@ -32,6 +32,7 @@ import { GODOT_RECIPE_ENGINE_VERSION } from "./recipes/godot/index.ts";
  * actually boot, not code that merely looks plausible in a review.
  */
 const RECIPE_IDS = [
+  "audio.feedback",
   "feel.buffer",
   "feel.coyote",
   "feel.hit-stop",
@@ -55,6 +56,7 @@ type RecipeId = (typeof RECIPE_IDS)[number];
 
 /** The spec's maximum GDScript lines per recipe, setup included. */
 const LINE_BUDGETS: Record<RecipeId, number> = {
+  "audio.feedback": 110,
   "feel.buffer": 60,
   "feel.coyote": 60,
   "feel.hit-stop": 60,
@@ -141,6 +143,7 @@ const templatesInstalled = (() => {
 })();
 const available =
   NodeFS.existsSync(godotExecutable) && browserExecutable !== null && templatesInstalled;
+const godotAvailable = NodeFS.existsSync(godotExecutable);
 
 /** Frames stay outside the checkout for the operator and reviewer. */
 const framesRoot = () =>
@@ -321,6 +324,298 @@ const writeProject = async (directory: string, adapter: GameRecipeAdapter) => {
   await NodeFSP.writeFile(NodePath.join(godot, "export_presets.cfg"), EXPORT_PRESETS);
 };
 
+const AUDIO_PROJECT_GODOT = `config_version=5
+
+[application]
+
+config/name="Recipe audio capture"
+run/main_scene="res://main.tscn"
+
+[autoload]
+
+AudioProbe="*res://audio_probe.gd"
+
+[audio]
+
+driver="Dummy"
+`;
+
+/**
+ * Test-only instrumentation. It taps the Master bus after the engine mixer,
+ * which is the signal an output device would receive, and drives the shipped
+ * reference through real key events. The Dummy driver keeps every sample on
+ * this machine and writes the WAV outside the checkout; the recipe never sees
+ * this file, so no capture code ships in the demo.
+ */
+const AUDIO_PROBE_GD = String.raw`extends Node
+## Offscreen mixer capture: Master bus tap, real key events, stages that advance
+## on captured audio. Markers record the captured frame at each event so the test
+## can slice the WAV by what actually mixed, not by wall-clock guesses.
+
+var _cap: AudioEffectCapture
+var _left := PackedFloat32Array()
+var _right := PackedFloat32Array()
+var _rate := 44100.0
+var _started := false
+var _finished := false
+var _scene: Node
+var _out_dir := ""
+var _marks := {}
+var _stage := 0
+var _stage_frames := 0
+var _damage_heard := -1
+
+func _ready() -> void:
+	var args := OS.get_cmdline_user_args()
+	_out_dir = String(args[0]) if args.size() > 0 else "user://"
+	_rate = AudioServer.get_mix_rate()
+	_cap = AudioEffectCapture.new()
+	_cap.buffer_length = 4.0
+	AudioServer.add_bus_effect(AudioServer.get_bus_index("Master"), _cap)
+
+func _process(_delta: float) -> void:
+	if _finished:
+		return
+	if not _started:
+		var scene := get_tree().current_scene
+		if scene == null or not scene.is_node_ready() or not scene.has_method("snapshot"):
+			return
+		_started = true
+		_scene = scene
+	_drain()
+	if _started and _left.size() > int(6.0 * _rate):
+		_write()  # Missing marks fail the test quickly instead of waiting for the timeout.
+		get_tree().quit()
+		return
+	var frames := _left.size()
+	var since := frames - _stage_frames
+	# Stages advance on the audio actually captured. The damage cue is muted only
+	# after its energy reached the tap, so a silent gap cannot pass as mute.
+	match _stage:
+		0:
+			if frames >= int(0.30 * _rate):
+				_marks["boot_end"] = frames
+				_tap(KEY_J)
+				_marks["confirm_down"] = frames
+				_next(1)
+		1:
+			if since >= int(0.30 * _rate):
+				_marks["confirm_silent"] = frames
+				_tap(KEY_J, true)
+				_marks["echo_down"] = frames
+				_next(2)
+		2:
+			if since >= int(0.20 * _rate):
+				_tap(KEY_K)
+				_marks["damage_down"] = frames
+				_next(3)
+		3:
+			if _damage_heard < 0 and _tail_peak(0.04) > 0.01:
+				_damage_heard = frames
+				_marks["damage_heard"] = frames
+			if _damage_heard >= 0 and frames - _damage_heard >= int(0.05 * _rate):
+				_tap(KEY_M)
+				_marks["mute_down"] = frames
+				_next(4)
+		4:
+			if since >= int(0.08 * _rate) and _tail_peak(0.08) < 0.0005:
+				_marks["mute_silent"] = frames
+				_next(5)
+		5:
+			if since >= int(0.10 * _rate):
+				_tap(KEY_J)
+				_marks["muted_action_down"] = frames
+				_next(6)
+		6:
+			if since >= int(0.25 * _rate):
+				_marks["muted_action_end"] = frames
+				_tap(KEY_M)
+				_marks["unmute_down"] = frames
+				_next(7)
+		7:
+			if since >= int(0.15 * _rate):
+				_tap(KEY_J)
+				_marks["confirm2_down"] = frames
+				_next(8)
+		8:
+			if since >= int(0.30 * _rate):
+				_marks["end"] = frames
+				_write()
+				get_tree().quit()
+
+func _drain() -> void:
+	var available := _cap.get_frames_available()
+	if available <= 0:
+		return
+	for frame in _cap.get_buffer(available):
+		_left.append(frame.x)
+		_right.append(frame.y)
+
+func _next(stage: int) -> void:
+	_stage = stage
+	_stage_frames = _left.size()
+
+func _tail_peak(seconds: float) -> float:
+	var count := int(seconds * _rate)
+	var peak := 0.0
+	for i in range(maxi(_left.size() - count, 0), _left.size()):
+		peak = maxf(peak, absf(_left[i]))
+	return peak
+
+func _tap(key: int, echo := false) -> void:
+	var input := InputEventKey.new()
+	input.physical_keycode = key
+	input.pressed = true
+	input.echo = echo
+	Input.parse_input_event(input)
+	var release := InputEventKey.new()
+	release.physical_keycode = key
+	release.pressed = false
+	Input.parse_input_event(release)
+
+func _write() -> void:
+	_finished = true
+	DirAccess.make_dir_recursive_absolute(_out_dir)
+	var frames := _left.size()
+	var data := PackedByteArray()
+	data.resize(frames * 4)
+	for i in frames:
+		data.encode_s16(i * 4, int(clampf(_left[i], -1.0, 1.0) * 32767.0))
+		data.encode_s16(i * 4 + 2, int(clampf(_right[i], -1.0, 1.0) * 32767.0))
+	var wav := PackedByteArray()
+	wav.resize(44)
+	wav.encode_u32(0, 0x46464952)
+	wav.encode_u32(4, 36 + data.size())
+	wav.encode_u32(8, 0x45564157)
+	wav.encode_u32(12, 0x20746d66)
+	wav.encode_u32(16, 16)
+	wav.encode_u16(20, 1)
+	wav.encode_u16(22, 2)
+	wav.encode_u32(24, int(_rate))
+	wav.encode_u32(28, int(_rate) * 4)
+	wav.encode_u16(32, 4)
+	wav.encode_u16(34, 16)
+	wav.encode_u32(36, 0x61746164)
+	wav.encode_u32(40, data.size())
+	var file := FileAccess.open(_out_dir.path_join("mix.wav"), FileAccess.WRITE)
+	file.store_buffer(wav)
+	file.store_buffer(data)
+	file.close()
+	var players := 0
+	for child in _scene.get_children():
+		if child is AudioStreamPlayer:
+			players += 1
+	var doc := {
+		"engine": Engine.get_version_info()["string"],
+		"driver": AudioServer.get_driver_name(),
+		"mix_rate": int(_rate),
+		"channels": 2,
+		"frames": frames,
+		"seconds": float(frames) / _rate,
+		"audio_players": players,
+		"marks": _marks,
+		"snapshot": _scene.snapshot(),
+	}
+	var meta := FileAccess.open(_out_dir.path_join("timeline.json"), FileAccess.WRITE)
+	meta.store_string(JSON.stringify(doc, "  "))
+	meta.close()
+`;
+
+const audioRoot = () =>
+  process.env.GAME_STUDIO_RECIPE_AUDIO?.trim() ||
+  NodePath.join(NodeOS.homedir(), ".gs-tmp", "t87", "audio");
+
+const writeAudioProject = async (directory: string, adapter: GameRecipeAdapter) => {
+  const godot = NodePath.join(directory, "godot");
+  await NodeFSP.mkdir(godot, { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(godot, "project.godot"), AUDIO_PROJECT_GODOT);
+  await NodeFSP.writeFile(NodePath.join(godot, "main.tscn"), MAIN_SCENE);
+  await NodeFSP.writeFile(NodePath.join(godot, "main.gd"), adapter.referenceCode);
+  await NodeFSP.writeFile(NodePath.join(godot, "audio_probe.gd"), AUDIO_PROBE_GD);
+};
+
+interface CapturedWav {
+  readonly sampleRate: number;
+  readonly channels: number;
+  readonly samples: Float32Array;
+}
+
+/** Reads the test's own small PCM WAV; the assertion is on the bytes. */
+const readWav = (file: string): CapturedWav => {
+  const buffer = NodeFS.readFileSync(file);
+  expect(buffer.toString("ascii", 0, 4)).toBe("RIFF");
+  expect(buffer.toString("ascii", 8, 12)).toBe("WAVE");
+  let offset = 12;
+  let sampleRate = 0;
+  let channels = 0;
+  let bitsPerSample = 0;
+  let pcm: Buffer | null = null;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString("ascii", offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === "fmt ") {
+      channels = buffer.readUInt16LE(body + 2);
+      sampleRate = buffer.readUInt32LE(body + 4);
+      bitsPerSample = buffer.readUInt16LE(body + 14);
+    } else if (id === "data") {
+      pcm = buffer.subarray(body, body + size);
+    }
+    offset = body + size + (size % 2);
+  }
+  expect(pcm, "WAV has a data chunk").not.toBeNull();
+  expect(channels, "stereo mix").toBe(2);
+  expect(bitsPerSample, "16-bit PCM").toBe(16);
+  const frames = Math.floor(pcm!.length / 4);
+  const samples = new Float32Array(frames);
+  for (let index = 0; index < frames; index++) {
+    const left = pcm!.readInt16LE(index * 4) / 32768;
+    const right = pcm!.readInt16LE(index * 4 + 2) / 32768;
+    samples[index] = (left + right) / 2;
+  }
+  return { sampleRate, channels, samples };
+};
+
+const analyze = (samples: Float32Array, fromFrame: number, toFrame: number) => {
+  const from = Math.max(0, Math.round(fromFrame));
+  const to = Math.min(samples.length, Math.round(toFrame));
+  let peak = 0;
+  let energy = 0;
+  let nonzero = 0;
+  for (let index = from; index < to; index++) {
+    const value = samples[index]!;
+    const magnitude = Math.abs(value);
+    peak = Math.max(peak, magnitude);
+    energy += value * value;
+    if (magnitude > 1 / 32768) nonzero++;
+  }
+  const frames = Math.max(to - from, 1);
+  return { frames: to - from, peak, rms: Math.sqrt(energy / frames), nonzero };
+};
+
+/** Goertzel energy at one frequency, to show the two cues differ spectrally. */
+const toneEnergy = (
+  samples: Float32Array,
+  sampleRate: number,
+  fromFrame: number,
+  toFrame: number,
+  hz: number,
+) => {
+  const from = Math.max(0, Math.round(fromFrame));
+  const to = Math.min(samples.length, Math.round(toFrame));
+  const coefficient = 2 * Math.cos((2 * Math.PI * hz) / sampleRate);
+  let previous = 0;
+  let beforePrevious = 0;
+  for (let index = from; index < to; index++) {
+    const current = samples[index]! + coefficient * previous - beforePrevious;
+    beforePrevious = previous;
+    previous = current;
+  }
+  return (
+    previous * previous + beforePrevious * beforePrevious - coefficient * previous * beforePrevious
+  );
+};
+
 const checkProject = (directory: string, parent: string) =>
   Effect.gen(function* () {
     const scriptPath = NodePath.join(parent, "check.gd");
@@ -442,6 +737,33 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
   const after = probeState(result.state?.after ?? null);
   const during = frameProbes(result.screenshots);
   switch (id) {
+    case "audio.feedback":
+      // The baseline follows the first confirm press; the boot frame is silent.
+      expect(before.muted).toBe(false);
+      expect(before.cues).toBe(1);
+      expect(before.last_cue).toBe("confirm");
+      expect(before.voices).toBe(2);
+      expect(after.muted).toBe(false);
+      // Damage plus the unmuted confirm are the only other cues: the muted
+      // press and a held/repeated key must not add one.
+      expect(after.cues).toBe(3);
+      expect(after.last_cue).toBe("confirm");
+      expect(after.playing).toBe(0);
+      expect(after.voices).toBe(2);
+      expect(during.some((probe) => probe.gameState.cues === 0)).toBe(true);
+      expect(
+        during.some((probe) => probe.gameState.cues === 2 && probe.gameState.last_cue === "damage"),
+      ).toBe(true);
+      // Mute drops the cue already sounding and leaves the counter alone.
+      expect(
+        during.some(
+          (probe) =>
+            probe.gameState.muted === true &&
+            probe.gameState.cues === 2 &&
+            probe.gameState.playing === 0,
+        ),
+      ).toBe(true);
+      break;
     case "feel.buffer":
       // The playtest baseline is the first sample after player input, so the
       // first press has already produced jump 1; the buffered press adds jump 2.
@@ -795,6 +1117,168 @@ it.effect("serves every reference within its line budget and at the pinned Godot
       expect(guidance.split(/\s+/).length).toBeLessThanOrEqual(120);
     }
   }).pipe(Effect.provide(recipeLayer)),
+);
+
+it.live.skipIf(!godotAvailable)(
+  "captures the audio.feedback reference from the real Godot mixer",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const recipes = yield* GameRecipes.GameRecipes;
+        const entry = yield* recipes.get({ id: "audio.feedback" });
+        const adapter = entry.adapter!;
+        const parent = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-recipe-audio-")),
+        );
+        const evidence = NodePath.join(audioRoot(), "audio-feedback");
+        return yield* Effect.gen(function* () {
+          const directory = NodePath.join(parent, "audio-feedback");
+          yield* Effect.promise(() => writeAudioProject(directory, adapter));
+          yield* Effect.promise(() =>
+            NodeFSP.rm(evidence, { recursive: true, force: true }).then(() =>
+              NodeFSP.mkdir(evidence, { recursive: true }),
+            ),
+          );
+          // Headless keeps the Dummy audio driver: the Master bus still mixes,
+          // and AudioEffectCapture receives the PCM no device is needed for.
+          const run = yield* runGodot(
+            godotExecutable,
+            ["--headless", "--path", NodePath.join(directory, "godot"), "--", evidence],
+            180_000,
+          );
+          expectNoEngineErrors(run, "audio capture");
+
+          const wav = readWav(NodePath.join(evidence, "mix.wav"));
+          const timeline = JSON.parse(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(evidence, "timeline.json"), "utf8"),
+            ),
+          ) as {
+            readonly engine: string;
+            readonly driver: string;
+            readonly mix_rate: number;
+            readonly frames: number;
+            readonly seconds: number;
+            readonly audio_players: number;
+            readonly marks: Readonly<Record<string, number>>;
+            readonly snapshot: Readonly<Record<string, unknown>>;
+          };
+          expect(timeline.driver).toBe("Dummy");
+          expect(timeline.audio_players, "one player per cue, none per press").toBe(2);
+          expect(timeline.snapshot).toMatchObject({
+            muted: false,
+            cues: 3,
+            playing: 0,
+            last_cue: "confirm",
+            voices: 2,
+          });
+          expect(wav.sampleRate).toBe(timeline.mix_rate);
+          expect(wav.samples.length).toBe(timeline.frames);
+          // 1.5 seconds of audio, not an unbounded recording.
+          expect(timeline.seconds).toBeGreaterThan(1.4);
+          expect(timeline.seconds).toBeLessThan(2.6);
+
+          const rate = wav.sampleRate;
+          const mark = (name: string): number => {
+            const value = timeline.marks[name];
+            expect(value, `capture marks ${name}`).toBeTypeOf("number");
+            return Number(value);
+          };
+          const seconds = (value: number) => Math.round(value * rate);
+
+          const overall = analyze(wav.samples, 0, wav.samples.length);
+          expect(overall.peak, "actual mixed audio is audible").toBeGreaterThan(0.02);
+          expect(overall.peak, "two -6 dB voices keep headroom").toBeLessThan(0.9);
+          expect(wav.samples.every(Number.isFinite)).toBe(true);
+
+          const boot = analyze(wav.samples, 0, mark("boot_end"));
+          expect(boot.frames).toBeGreaterThan(seconds(0.25));
+          expect(boot.peak, "silent at boot").toBeLessThan(0.001);
+
+          const confirm = analyze(wav.samples, mark("confirm_down"), mark("confirm_silent"));
+          expect(confirm.peak, "confirm cue reached the mixer").toBeGreaterThan(0.02);
+          expect(confirm.nonzero, "confirm cue has real samples").toBeGreaterThan(500);
+          const confirmTail = analyze(
+            wav.samples,
+            mark("confirm_down") + seconds(0.15),
+            mark("confirm_silent"),
+          );
+          expect(confirmTail.peak, "confirm cue is bounded").toBeLessThan(0.001);
+
+          const echo = analyze(wav.samples, mark("echo_down"), mark("damage_down"));
+          expect(echo.peak, "a held-key echo plays nothing").toBeLessThan(0.001);
+
+          const damage = analyze(wav.samples, mark("damage_down"), mark("mute_down"));
+          expect(damage.peak, "damage cue reached the mixer").toBeGreaterThan(0.02);
+          expect(damage.nonzero, "damage cue has real samples").toBeGreaterThan(500);
+
+          // Different pitches, measured in the mixed waveform: the confirmation
+          // sits at 650 Hz and the damage cue at 120 Hz.
+          const confirmHigh = toneEnergy(
+            wav.samples,
+            rate,
+            mark("confirm_down"),
+            mark("confirm_silent"),
+            650,
+          );
+          const confirmLow = toneEnergy(
+            wav.samples,
+            rate,
+            mark("confirm_down"),
+            mark("confirm_silent"),
+            120,
+          );
+          const damageLow = toneEnergy(
+            wav.samples,
+            rate,
+            mark("damage_down"),
+            mark("mute_down"),
+            120,
+          );
+          const damageHigh = toneEnergy(
+            wav.samples,
+            rate,
+            mark("damage_down"),
+            mark("mute_down"),
+            650,
+          );
+          expect(confirmHigh, "confirm is the higher cue").toBeGreaterThan(confirmLow * 10);
+          expect(damageLow, "damage is the lower cue").toBeGreaterThan(damageHigh * 10);
+
+          // The probe only mutes after the damage energy reached the tap, and
+          // marks the first silence after it. The 0.40 s cue would still be
+          // sounding, so reaching silence this early proves mute stopped it.
+          const heardAt = mark("damage_heard");
+          const silentAt = mark("mute_silent");
+          expect((silentAt - heardAt) / rate).toBeLessThan(0.25);
+          expect((silentAt - mark("damage_down")) / rate).toBeLessThan(0.35);
+
+          const mutedTail = analyze(wav.samples, silentAt, mark("muted_action_down"));
+          expect(mutedTail.frames, "the muted window is real audio").toBeGreaterThan(seconds(0.08));
+          expect(mutedTail.peak, "mute stops the sounding damage cue").toBeLessThan(0.001);
+
+          const mutedAction = analyze(wav.samples, mark("muted_action_down"), mark("unmute_down"));
+          expect(mutedAction.peak, "a muted action plays nothing").toBeLessThan(0.001);
+
+          const unmuted = analyze(wav.samples, mark("confirm2_down"), mark("end"));
+          expect(unmuted.peak, "unmute restores the confirm cue").toBeGreaterThan(0.02);
+          expect(unmuted.nonzero).toBeGreaterThan(500);
+
+          yield* Effect.log(
+            `audio.feedback: ${wav.samples.length} frames at ${rate} Hz\n  wav: ${NodePath.join(evidence, "mix.wav")}\n  timeline: ${NodePath.join(evidence, "timeline.json")}\n  peaks boot=${boot.peak.toFixed(4)} confirm=${confirm.peak.toFixed(4)} damage=${damage.peak.toFixed(4)} muted=${mutedTail.peak.toFixed(4)} unmuted=${unmuted.peak.toFixed(4)}`,
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.promise(() =>
+              process.env.GAME_STUDIO_KEEP_TEST === "1"
+                ? Promise.resolve()
+                : NodeFSP.rm(parent, { recursive: true, force: true }),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(recipeLayer)),
+  240_000,
 );
 
 for (const id of RECIPE_IDS) {
