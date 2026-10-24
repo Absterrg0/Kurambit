@@ -263,7 +263,7 @@ because it only ever loads the game's own loopback server. Do not merge it into
 
 Booting is not a verdict. The playtest downsamples the boot frame and the after-steps frame and
 requires a visible difference when steps were given, so an inert game fails instead of passing on a
-clean console. Pixels alone still are not gameplay: both starter templates autoload `StudioProbe`,
+clean console. Pixels alone still are not gameplay: every starter template autoloads `StudioProbe`,
 which exposes a read-only `window.__studioProbe()` snapshot (GameState's public numeric, boolean and
 string members plus the first `player`-group position). The playtest reads it after boot, after
 every step and at the end, and reports `state: { before, after }` with a short diff such as

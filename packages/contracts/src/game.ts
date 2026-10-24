@@ -66,11 +66,13 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
   {
     id: "blank",
     name: "Blank",
-    description: "An empty Godot project: a camera, a light, and Web and Linux export presets.",
+    description:
+      "An empty Godot project: a camera, a light, a live state probe and Web and Linux export presets.",
     dimension: "3d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
     // Blank has no menu: its main scene is the game, and the check runs it once.
     gameplayScene: "res://scenes/main.tscn",
+    probe: true,
   },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";

@@ -98,6 +98,13 @@ interface TemplateJourney {
   readonly expectedScreenshots: readonly string[];
   /** Optional second pass that ends on a menu, saved as `<template>-pause.png`. */
   readonly pauseSteps?: readonly GamePlaytestStep[];
+  /** Runs the Godot check before the smoke test, for the template's entry scenes. */
+  readonly checkScene?: boolean;
+  /**
+   * The untouched starter has no gameplay, so the journey may only prove engine
+   * readiness: the build boots, the probe answers and the run stays unqualified.
+   */
+  readonly engineReadinessOnly?: boolean;
 }
 
 const readLog = (logPath: string | undefined) =>
@@ -106,9 +113,10 @@ const readLog = (logPath: string | undefined) =>
   );
 
 /**
- * Takes a game from a clean import through its smoke test, both export targets and a
- * real Web playtest, then writes the frames the orchestrator reviews as evidence.
- * One path for every starter template, so a new template inherits the same bar.
+ * Takes a game from a clean import through its optional Godot check, its smoke test,
+ * both export targets and a real Web playtest, then writes the frames the orchestrator
+ * reviews as evidence. One path for every starter template, so a new template inherits
+ * the same bar.
  */
 const templateJourney = (journey: TemplateJourney) =>
   Effect.gen(function* () {
@@ -160,20 +168,27 @@ const templateJourney = (journey: TemplateJourney) =>
           const importLog = yield* readLog(imported.process?.logPath);
           expect(importLog).not.toMatch(/SCRIPT ERROR|ERROR:|WARNING:|Parse Error/);
 
-          // 2. The template's smoke test drives the real loop.
+          // 2. The check instantiates the main and gameplay entries and lints the tree.
+          if (journey.checkScene === true) {
+            const checked = yield* game.check(threadId);
+            expect(checked.ok, JSON.stringify(checked.errors)).toBe(true);
+            expect(checked.entries).toEqual(["main", "gameplay"]);
+          }
+
+          // 3. The template's smoke suite proves its shipped starting point.
           const tested = yield* game.test(threadId, "tests/smoke_test.gd", 300_000);
           expect(tested.success, tested.message).toBe(true);
           expect(tested.process?.stdout).toContain("SMOKE PASS");
           const smokeLog = `${tested.process?.stdout ?? ""}\n${tested.process?.stderr ?? ""}`;
           expect(smokeLog).not.toMatch(/SCRIPT ERROR|ERROR:|Parse Error/);
 
-          // 3. Both export targets, with real export templates.
+          // 4. Both export targets, with real export templates.
           const web = yield* game.export(threadId, "Web");
           expect(web.success, web.message).toBe(true);
           const linux = yield* game.export(threadId, "Linux");
           expect(linux.success, linux.message).toBe(true);
 
-          // 4. Play the real Web build: click the canvas, start the run from the menu,
+          // 5. Play the real Web build: click the canvas, start the run from the menu,
           // then walk and jump for a while.
           const playtest = yield* game.webPlaytest(threadId, {
             width: 1280,
@@ -185,6 +200,22 @@ const templateJourney = (journey: TemplateJourney) =>
           expect(playtest.screenshots.map((shot) => shot.label)).toEqual(
             journey.expectedScreenshots,
           );
+          if (journey.engineReadinessOnly === true) {
+            // `success` only says the browser booted without errors. The untouched
+            // starter must prove the engine and the bridge, and must stay
+            // unqualified until a player and run values exist.
+            expect(playtest.state, "the StudioProbe answered from the live build").not.toBeNull();
+            expect(playtest.state?.before, "no player means no gameplay baseline").toBeNull();
+            expect(playtest.state?.after).toBeNull();
+            expect(playtest.state?.playerMoved).toBe(0);
+            expect(playtest.state?.changes).toEqual([]);
+            expect(playtest.pauseConfirmed, "the visibility bridge pauses and restores").toBe(true);
+            expect(playtest.qualifies, "engine readiness is not a playability proof").toBe(false);
+            expect(playtest.blockers).toContain("no input steps were given");
+            expect(playtest.blockers).toContain(
+              "no gameplay baseline: the player never appeared after an input step",
+            );
+          }
 
           // A second pass that stops on the pause overlay, so the evidence shows the
           // menu the player actually sees mid-run.
@@ -310,6 +341,24 @@ it.live.skipIf(!available)(
         { key: "Escape", holdMs: 80 },
         { waitMs: 400 },
       ],
+    }),
+  900_000,
+);
+
+it.live.skipIf(!available)(
+  "boots the blank template to an engine-ready web build without claiming gameplay",
+  () =>
+    templateJourney({
+      template: "blank",
+      name: "Blank Prototype",
+      brief: "Start from an empty project.",
+      // No steps: there is no gameplay to drive and no player to move. The
+      // journey still proves the engine boots, the probe answers and the run
+      // stays unqualified, which is the honest claim for a blank starter.
+      steps: [],
+      expectedScreenshots: ["booted", "after-steps"],
+      checkScene: true,
+      engineReadinessOnly: true,
     }),
   900_000,
 );

@@ -578,6 +578,7 @@ it.effect("creates a game from an explicitly requested starter template", () =>
       yield* Effect.scoped(
         Effect.gen(function* () {
           const projects = yield* GameProjectService.GameProjectService;
+          const approvals = yield* GameDesignApproval.GameDesignApproval;
           const created = yield* projects.create({
             name: "Plain Quest",
             parentDirectory: parent,
@@ -585,7 +586,22 @@ it.effect("creates a game from an explicitly requested starter template", () =>
             template: "blank",
             modelSelection: selection,
           });
-          expect((yield* projects.read(created.root)).template).toBe("blank");
+          const manifest = yield* projects.read(created.root);
+          expect(manifest.template).toBe("blank");
+          expect(manifest.probe).toBe(true);
+          // The blank starter owes the same live tree contract as the genre
+          // templates, so creation records the probe obligation and the files it
+          // names actually exist.
+          const godotConfig = yield* readFile(NodePath.join(created.root, "godot/project.godot"));
+          expect(godotConfig).toMatch(/^GameState="\*res:\/\/scripts\/game_state\.gd"$/m);
+          expect(godotConfig).toMatch(/^StudioProbe="\*res:\/\/scripts\/studio_probe\.gd"$/m);
+          for (const file of [
+            "godot/scripts/game_state.gd",
+            "godot/scripts/studio_probe.gd",
+            "godot/tests/smoke_test.gd",
+          ])
+            expect(yield* exists(NodePath.join(created.root, file))).toBe(true);
+          expect((yield* approvals.readPolicy(created.root, manifest)).policy.probe).toBe(true);
           expect(yield* exists(NodePath.join(created.root, "godot/scenes/main.tscn"))).toBe(true);
           expect(yield* readFile(NodePath.join(created.root, "TEMPLATE.md"))).toContain(
             "Blank starter template",
