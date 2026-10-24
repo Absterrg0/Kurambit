@@ -15,7 +15,6 @@ import {
   readBenchmarkResult,
   readGradeSummary,
   readRawResult,
-  renderResultsMarkdown,
   shouldRegradeReusedRaw,
   shouldResume,
   summarizeResults,
@@ -32,6 +31,15 @@ import {
   defaultGodotBinary,
 } from "./game-grade.ts";
 import { makeCompareReviewer, runComparison } from "./game-benchmark/compare.ts";
+import {
+  abortReason,
+  benchmarkJobLocation,
+  createBenchmarkAggregateWriter,
+  parseJobCount,
+  readSavedBenchmarkRows,
+  runBounded,
+  runRegradeBatch,
+} from "./game-benchmark/batch.ts";
 import { externalServerOrigin } from "./lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
@@ -54,6 +62,10 @@ const { values, positionals } = NodeUtil.parseArgs({
     lane: { type: "string", default: "harness" },
     /** Cap for one independent grade, not for the build under it. */
     "grade-timeout-ms": { type: "string", default: "2700000" },
+    /** How many briefs may run at once; each concurrent job owns its own homes. */
+    jobs: { type: "string", default: "1" },
+    /** Regrade the saved game roots under this run directory without rebuilding. */
+    regrade: { type: "string" },
     /** Which model family grades the finished games: codex (Sol) or opencode. */
     grader: { type: "string", default: "codex" },
     /** The model the opencode grader uses. */
@@ -78,20 +90,25 @@ if (values.help) {
     [
       "Usage: node scripts/game-benchmark.ts [--url http://localhost:PORT [--allow-external-server]] [--home-dir .t3] [--only platformer,sokoban]",
       "       [--out DIR] [--provider opencode] [--model opencode-go/deepseek-v4.1-flash] [--reasoning-effort high]",
-      "       [--timeout-ms 3600000] [--runner scripts/game-e2e.ts]",
+      "       [--timeout-ms 3600000] [--runner scripts/game-e2e.ts] [--jobs 1]",
       "       [--lane harness|raw] [--opencode opencode] [--grade-timeout-ms 2700000] [--raw-timeout-ms 7200000]",
       "       [--grader codex|opencode] [--grader-model opencode-go/minimax-m3.1-flash-free]",
       "       [--reuse-raw <benchmark-out-dir>]",
+      "       [--regrade <saved-run-dir>]",
       "       [--compare <harnessDir> <rawDir> [--out DIR]]",
       "",
-      "Runs the frozen briefs serially through game-e2e. Without --url each brief starts its own",
-      "private server under the display sandbox; an external server needs --allow-external-server.",
+      "Runs the frozen briefs through game-e2e, up to --jobs at once. Without --url each brief starts",
+      "its own private server under the display sandbox; an external server needs",
+      "--allow-external-server and cannot be used with --jobs above 1.",
       "The raw lane (--lane raw) lets the bare agent build one in a scratch folder; either way the",
       "finished game is graded by scripts/game-grade.ts. Results are written to",
       "<out>/<harness-commit>/<brief>/result.json plus results.json/.md.",
       "An existing result for the same harness commit, lane, fixture checksum and evaluation profile is skipped.",
       "--reuse-raw copies a cached raw-lane build per brief and regrades it when the grader profile differs,",
       "instead of spending the agent's two-hour budget again.",
+      "--regrade <saved-run-dir> grades the game root recorded in each <brief>/run.json under that",
+      "directory, using the current frozen grader. It never asks an agent to build, refuses missing or",
+      "mismatched fixture evidence, and replaces only each row's grade and evaluation profile.",
       "--compare reads two lanes' already-saved grade frames and asks the frozen grader model which",
       "build reads better, in both orders plus an identical-pair control. It writes <out>/comparison.json",
       "and comparison.md and is never summed with the obligations totals.",
@@ -102,6 +119,7 @@ if (values.help) {
 if (values.compare) {
   // The comparison is a separate ruler: it reuses the frozen grader model and
   // never runs the lane machinery, so none of the run flags apply.
+  if (values.regrade !== undefined) throw new Error("--regrade cannot be combined with --compare.");
   if (values.grader !== "codex")
     throw new Error("--compare measures with the frozen codex grader; drop --grader.");
   const [harnessDir, rawDir] = positionals;
@@ -140,6 +158,14 @@ const lane = values.lane as BenchmarkLane;
 if (lane !== "harness" && lane !== "raw") throw new Error("--lane must be harness or raw.");
 const reuseRaw = values["reuse-raw"] === undefined ? null : NodePath.resolve(values["reuse-raw"]);
 if (reuseRaw !== null && lane !== "raw") throw new Error("--reuse-raw only applies to --lane raw.");
+const jobs = parseJobCount(values.jobs);
+const savedRunDirectory = values.regrade === undefined ? null : NodePath.resolve(values.regrade);
+if (savedRunDirectory !== null) {
+  if (lane !== "harness") throw new Error("--regrade only reads --lane harness saved runs.");
+  if (reuseRaw !== null) throw new Error("--regrade cannot be combined with --reuse-raw.");
+  if (values.url !== undefined)
+    throw new Error("--regrade reads saved files and never starts a server; drop --url.");
+}
 const gradeTimeoutMs = Number(values["grade-timeout-ms"]);
 if (!Number.isFinite(gradeTimeoutMs) || gradeTimeoutMs <= 0)
   throw new Error("--grade-timeout-ms must be positive");
@@ -152,6 +178,12 @@ const externalServerUrl = externalServerOrigin({
   url: values.url,
   allowExternalServer: values["allow-external-server"] === true,
 });
+// Briefs above 1 each need their own server; an external server is shared, so
+// concurrent harness runs would also share its provider and game processes.
+if (externalServerUrl !== null && jobs > 1)
+  throw new Error(
+    "--jobs above 1 needs a private server per brief; drop --url/--allow-external-server.",
+  );
 // Which grader a row must be measured by before it may be resumed.
 const expectedEvaluation: BenchmarkEvaluationProfile = {
   grader: {
@@ -222,8 +254,11 @@ const writeJson = (path: string, value: unknown) =>
 const runBrief = async (
   brief: LoadedGameBenchmarkBrief,
   directory: string,
+  location: ReturnType<typeof benchmarkJobLocation>,
   environment: NodeJS.ProcessEnv,
+  abort: AbortSignal,
 ): Promise<BenchmarkRunObservation> => {
+  if (abort.aborted) throw abortReason(abort);
   const summaryPath = NodePath.join(directory, "run.json");
   const logPath = NodePath.join(directory, "run.log");
   // A previous attempt's summary must not be read as this run's facts if this
@@ -241,9 +276,9 @@ const runBrief = async (
     "--name",
     `${brief.title} ${stamp}`,
     "--parent-dir",
-    NodePath.resolve(values["parent-dir"]),
+    location.parentDir,
     "--home-dir",
-    NodePath.resolve(values["home-dir"]),
+    location.homeDir,
     "--timeout-ms",
     String(timeoutMs),
     "--provider",
@@ -269,6 +304,12 @@ const runBrief = async (
       // The group already exited; its close event decides the result.
     }
   };
+  const stopOnAbort = () => {
+    signal("SIGTERM");
+    setTimeout(() => signal("SIGKILL"), 20_000).unref();
+  };
+  abort.addEventListener("abort", stopOnAbort, { once: true });
+  if (abort.aborted) stopOnAbort();
   // The runner has its own Effect timeout; this is the backstop for a hang.
   const timer = setTimeout(() => {
     timedOut = true;
@@ -279,6 +320,7 @@ const runBrief = async (
     (resolve) => child.on("close", (code, closedBy) => resolve({ code, signal: closedBy })),
   );
   clearTimeout(timer);
+  abort.removeEventListener("abort", stopOnAbort);
   await log.close();
   const summaryText = await NodeFSP.readFile(summaryPath, "utf8").catch(() => null);
   const summary = summaryText === null ? null : decodeRunSummary(summaryText);
@@ -295,7 +337,10 @@ const runInGroup = async (input: {
   readonly logPath: string;
   readonly timeoutMs: number;
   readonly env?: NodeJS.ProcessEnv;
+  readonly abort?: AbortSignal;
 }): Promise<{ timedOut: boolean; exitCode: number | null; signal: string | null }> => {
+  const abort = input.abort;
+  if (abort !== undefined && abort.aborted) throw abortReason(abort);
   const log = await NodeFSP.open(input.logPath, "w");
   const child = NodeChildProcess.spawn(input.executable, [...input.args], {
     cwd: input.cwd,
@@ -316,6 +361,12 @@ const runInGroup = async (input: {
       // The group already exited; its close event decides the result.
     }
   };
+  const stopOnAbort = () => {
+    signal("SIGTERM");
+    setTimeout(() => signal("SIGKILL"), 20_000).unref();
+  };
+  abort?.addEventListener("abort", stopOnAbort, { once: true });
+  if (abort !== undefined && abort.aborted) stopOnAbort();
   const timer = setTimeout(() => {
     timedOut = true;
     signal("SIGTERM");
@@ -325,6 +376,7 @@ const runInGroup = async (input: {
     (resolve) => child.on("close", (code, closedBy) => resolve({ code, signal: closedBy })),
   );
   clearTimeout(timer);
+  abort?.removeEventListener("abort", stopOnAbort);
   await log.close();
   await NodeFSP.rm(`${input.logPath}.pid`, { force: true }).catch(() => undefined);
   return { timedOut, exitCode: exit.code, signal: exit.signal };
@@ -336,7 +388,9 @@ const gradeFinishedGame = async (
   root: string,
   directory: string,
   environment: NodeJS.ProcessEnv,
+  abort: AbortSignal,
 ): Promise<BenchmarkGrade | null> => {
+  if (abort.aborted) throw abortReason(abort);
   const out = NodePath.join(directory, "grade");
   await runInGroup({
     executable: process.execPath,
@@ -355,7 +409,9 @@ const gradeFinishedGame = async (
     env: environment,
     logPath: NodePath.join(directory, "grade.log"),
     timeoutMs: gradeTimeoutMs,
+    abort,
   });
+  if (abort.aborted) throw abortReason(abort);
   const text = await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8").catch(() => null);
   if (text === null) return null;
   try {
@@ -414,7 +470,9 @@ const runRawBrief = async (
   brief: LoadedGameBenchmarkBrief,
   directory: string,
   environment: NodeJS.ProcessEnv,
+  abort: AbortSignal,
 ): Promise<{ timedOut: boolean; exitCode: number | null; grade: BenchmarkGrade | null }> => {
+  if (abort.aborted) throw abortReason(abort);
   const scratch = NodePath.join(directory, "raw");
   await prepareRawGame(brief, scratch);
   const run = await runInGroup({
@@ -435,8 +493,10 @@ const runRawBrief = async (
     // spawn does not rewrite PWD; the CLI would resolve its project from the
     // inherited checkout path instead of the scratch folder.
     env: { ...freshOpenCodeEnvironment(environment), PWD: scratch },
+    abort,
   });
-  const grade = await gradeFinishedGame(brief, scratch, directory, environment);
+  if (abort.aborted) throw abortReason(abort);
+  const grade = await gradeFinishedGame(brief, scratch, directory, environment, abort);
   return { timedOut: run.timedOut, exitCode: run.exitCode, grade };
 };
 
@@ -469,7 +529,9 @@ const reuseRawBrief = async (
   directory: string,
   environment: NodeJS.ProcessEnv,
   expected: BenchmarkEvaluationProfile,
+  abort: AbortSignal,
 ): Promise<BenchmarkBriefResult> => {
+  if (abort.aborted) throw abortReason(abort);
   const source = await findReusableRawResult(reuseRaw!, brief.id);
   if (source === null)
     throw new Error(`--reuse-raw has no cached raw result for ${brief.id} under ${reuseRaw}.`);
@@ -499,7 +561,8 @@ const reuseRawBrief = async (
   console.log(
     `[${brief.id}] cached build was graded by ${previous.evaluation?.grader.provider ?? "an unknown grader"}/${previous.evaluation?.grader.model ?? "unknown"}; regrading with ${expected.grader.provider}/${expected.grader.model}`,
   );
-  const grade = await gradeFinishedGame(brief, rawRoot, directory, environment);
+  const grade = await gradeFinishedGame(brief, rawRoot, directory, environment, abort);
+  if (abort.aborted) throw abortReason(abort);
   const regraded = readRawResult({
     harnessCommit,
     brief,
@@ -514,24 +577,52 @@ const reuseRawBrief = async (
   return regraded;
 };
 
-const aggregate = async (results: ReadonlyArray<BenchmarkBriefResult>) => {
-  await writeJson(NodePath.join(runDirectory, "results.json"), {
-    schemaVersion: 1,
-    harnessCommit,
-    generatedAt: new Date().toISOString(),
-    totals: summarizeResults(results),
-    briefs: results,
+if (savedRunDirectory !== null) {
+  await NodeFSP.access(savedRunDirectory).catch(() => {
+    throw new Error(`--regrade needs an existing saved run directory: ${savedRunDirectory}`);
   });
-  await writeFile(
-    NodePath.join(runDirectory, "results.md"),
-    renderResultsMarkdown({ harnessCommit, lane, results }),
+  console.log(
+    `Regrading ${briefs.length} saved run(s) under ${savedRunDirectory} with up to ${jobs} at a time; no agent build.`,
   );
-};
+  const results = await runRegradeBatch({
+    runDirectory: savedRunDirectory,
+    briefs,
+    order: allBriefs.map((brief) => brief.id),
+    jobs,
+    grade: (input) =>
+      gradeFinishedGame(
+        input.brief,
+        input.root,
+        input.outDirectory,
+        input.environment,
+        input.signal,
+      ),
+    sandbox: prepareDisplaySandbox,
+    log: (line) => console.log(line),
+  });
+  const totals = summarizeResults(results);
+  console.log(
+    `${briefs.length} saved run(s) regraded; ${totals.outcomes.passed}/${totals.attempted} rows passed; results: ${NodePath.join(savedRunDirectory, "results.md")}`,
+  );
+  process.exit(0);
+}
 
 await NodeFSP.mkdir(runDirectory, { recursive: true });
-const results: BenchmarkBriefResult[] = [];
-console.log(`Harness commit ${harnessCommit}; running ${briefs.length} brief(s) serially.`);
-for (const brief of briefs) {
+const savedRows = await readSavedBenchmarkRows(
+  runDirectory,
+  allBriefs.map((brief) => brief.id),
+);
+const writer = createBenchmarkAggregateWriter({
+  runDirectory,
+  harnessCommit,
+  lane,
+  order: allBriefs.map((brief) => brief.id),
+  // Rows from another lane or commit in this directory are not ours to merge.
+  initial: savedRows.results.filter(
+    (result) => result.harnessCommit === harnessCommit && (result.lane ?? "harness") === lane,
+  ),
+});
+const runOne = async (brief: LoadedGameBenchmarkBrief, abort: AbortSignal) => {
   const directory = NodePath.join(runDirectory, brief.id);
   const resultPath = NodePath.join(directory, "result.json");
   const previous = decodeBenchmarkResult(
@@ -549,21 +640,27 @@ for (const brief of briefs) {
     })
   ) {
     console.log(`[${brief.id}] resume ${previous.outcome} from ${previous.startedAt}`);
-    results.push(previous);
-    continue;
+    await writer.record(previous);
+    return;
   }
   await NodeFSP.mkdir(directory, { recursive: true });
   if (lane === "raw" && reuseRaw !== null) {
     // The display sandbox is prepared before the cached build is regraded too:
     // the grader launches headless Chrome and must not see the operator's.
     const sandbox = await prepareDisplaySandbox(directory);
-    const reused = await reuseRawBrief(brief, directory, sandbox.environment, expectedEvaluation);
-    results.push(reused);
-    await aggregate(results);
+    const reused = await reuseRawBrief(
+      brief,
+      directory,
+      sandbox.environment,
+      expectedEvaluation,
+      abort,
+    );
+    if (abort.aborted) throw abortReason(abort);
+    await writer.record(reused);
     console.log(
       `[${brief.id}] reused raw result measured at ${reused.harnessCommit.slice(0, 8)} (${reused.outcome})`,
     );
-    continue;
+    return;
   }
   // Nothing this brief spawns may reach the operator's display: the raw agent
   // and the harness runner both inherit this environment, and an empty private
@@ -574,7 +671,7 @@ for (const brief of briefs) {
   const started = Date.now();
   let result: BenchmarkBriefResult;
   if (lane === "raw") {
-    const observation = await runRawBrief(brief, directory, sandbox.environment);
+    const observation = await runRawBrief(brief, directory, sandbox.environment, abort);
     result = readRawResult({
       harnessCommit,
       brief,
@@ -586,12 +683,19 @@ for (const brief of briefs) {
       grade: observation.grade,
     });
   } else {
-    const observation = await runBrief(brief, directory, sandbox.environment);
+    const location = benchmarkJobLocation({
+      homeDir: values["home-dir"],
+      parentDir: values["parent-dir"],
+      jobs,
+      briefId: brief.id,
+    });
+    const observation = await runBrief(brief, directory, location, sandbox.environment, abort);
+    if (abort.aborted) throw abortReason(abort);
     const root = observation.summary?.game?.root;
     const grade =
       root === undefined
         ? null
-        : await gradeFinishedGame(brief, root, directory, sandbox.environment);
+        : await gradeFinishedGame(brief, root, directory, sandbox.environment, abort);
     result = readBenchmarkResult({
       harnessCommit,
       brief,
@@ -603,20 +707,33 @@ for (const brief of briefs) {
       grade,
     });
   }
+  if (abort.aborted) throw abortReason(abort);
   await writeJson(resultPath, result);
-  results.push(result);
-  await aggregate(results);
+  await writer.record(result);
   console.log(
     `[${brief.id}] ${result.outcome} (${(result.durationMs / 1000).toFixed(0)}s): ${result.failureReason}`,
   );
-}
-// Keep one deterministic order in the aggregate regardless of --only.
-const ordered = [...results].sort(
-  (left, right) =>
-    allBriefs.findIndex((brief) => brief.id === left.fixtureId) -
-    allBriefs.findIndex((brief) => brief.id === right.fixtureId),
+};
+
+console.log(
+  `Harness commit ${harnessCommit}; running ${briefs.length} brief(s) ${
+    jobs === 1 ? "serially" : `with up to ${jobs} at a time`
+  }.`,
 );
-await aggregate(ordered);
+let failure: unknown = null;
+try {
+  await runBounded(briefs, jobs, runOne);
+} catch (error) {
+  failure = error;
+}
+try {
+  // Flush even after a failure so rows that did finish are never lost.
+  await writer.flush();
+} catch (error) {
+  if (failure === null) throw error;
+}
+if (failure !== null) throw failure;
+const ordered = writer.snapshot();
 const totals = summarizeResults(ordered);
 console.log(
   `${totals.outcomes.passed}/${totals.attempted} passed; results: ${NodePath.join(runDirectory, "results.md")}`,

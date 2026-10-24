@@ -312,6 +312,17 @@ const evaluationOf = (
     ? null
     : { grader: grade.grader, version: grade.graderVersion };
 
+/**
+ * The same run row with only its independent grade replaced. Regrading a saved
+ * build must not rewrite the outcome or timing the builder earned.
+ */
+export function replaceIndependentGrade(
+  result: BenchmarkBriefResult,
+  grade: BenchmarkGrade,
+): BenchmarkBriefResult {
+  return { ...result, grade, evaluation: evaluationOf(grade) };
+}
+
 /** Builds the row the aggregate stores for one brief, including its failures. */
 export function readBenchmarkResult(input: {
   readonly harnessCommit: string;
