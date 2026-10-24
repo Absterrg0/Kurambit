@@ -209,6 +209,7 @@ const samplesProve = (
   expectation.op !== "changes" &&
   measurement.baseline !== null &&
   measurement.last !== null &&
+  measuredNumber(measurement.baseline) !== null &&
   !satisfiesMeasurement(expectation, measurement.baseline) &&
   satisfiesMeasurement(expectation, measurement.last);
 

@@ -740,6 +740,17 @@ describe("typed obligation evidence", () => {
     assert.equal(reads[0]?.status, "missing");
   });
 
+  it("does not treat an unknown numeric baseline as a missed threshold", () => {
+    for (const baseline of ["loading", Number.NaN, Number.POSITIVE_INFINITY]) {
+      const run = clockRun(120, 89);
+      const { evaluated, reads } = grade([
+        { ...run, observations: run.observations.map((sample) => ({ ...sample, baseline })) },
+      ]);
+      assert.equal(evaluated.criteria[0]?.status, "passed");
+      assert.equal(reads[0]?.status, "missing");
+    }
+  });
+
   it("ignores a measurement for another key or one that already held at baseline", () => {
     const result = (measurement: { key: string; baseline: number; last: number }) => [
       {
