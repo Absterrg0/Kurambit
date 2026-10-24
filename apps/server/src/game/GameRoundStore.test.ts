@@ -271,6 +271,41 @@ it.live("a design-doc edit after the export does not block the promotion", () =>
   ),
 );
 
+it.live("an unusable engine project fails closed instead of trusting the folder", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const first = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repaired\n");
+      yield* rounds.recordPostRepair(root, first.id);
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordCandidate(root, first.id, build);
+      // A project path outside the game cannot name build inputs, so the
+      // promotion must not fall back to "both build sets are empty".
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(root, "game.json"),
+          `${JSON.stringify({
+            schemaVersion: 1,
+            name: "probe",
+            brief: "A probe game.",
+            artDirection: "Plain.",
+            engine: { name: "godot", version: "4.7.2" },
+            godotProject: "../outside",
+            assets: [],
+          })}\n`,
+        ),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Moved\n"));
+
+      const blocked = yield* rounds.promote(root, first.id);
+      expect(blocked.kind).toBe("blocked");
+      if (blocked.kind !== "blocked") return;
+      expect(blocked.round.reason).toContain("source-changed");
+    }),
+  ),
+);
+
 it.live("an engine-source edit after the export still blocks the promotion", () =>
   withGame(({ root, rounds, snapshots }) =>
     Effect.gen(function* () {

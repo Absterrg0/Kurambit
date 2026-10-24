@@ -132,6 +132,14 @@ const decodeGameManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameMa
 const engineProject = (root: string): Effect.Effect<string | null> =>
   Effect.tryPromise(() => NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")).pipe(
     Effect.map((text) => decodeGameManifest(text).godotProject),
+    Effect.map((project) =>
+      project !== "" &&
+      !project.startsWith("/") &&
+      !project.startsWith(".") &&
+      !project.split(/[\\/]/u).includes("..")
+        ? project
+        : null,
+    ),
     Effect.orElseSucceed(() => null),
   );
 

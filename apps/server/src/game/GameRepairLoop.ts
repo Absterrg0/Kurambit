@@ -1610,10 +1610,12 @@ export const layer = (options: GameRepairLoopOptions) => {
               experimentPairs,
               record.inputs,
             ),
-            defects: review.defects.map(({ frameId: _frameId, ...defect }, index) => ({
-              id: `defect-${index + 1}`,
-              ...defect,
-            })),
+            defects: review.defects.map(
+              ({ frameId: _frameId, recipeId: _recipeId, ...defect }, index) => ({
+                id: `defect-${index + 1}`,
+                ...defect,
+              }),
+            ),
             items: review.doNotRegress.map((item) => ({ id: item.id, what: item.what })),
           });
           if (ballot.kind === "expired")
