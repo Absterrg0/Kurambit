@@ -170,7 +170,10 @@ export const make = (catalog: ReadonlyArray<GameRecipeCatalogEntry>): GameRecipe
     function* (input) {
       // `query` is the same literal alias filter as `text`; the input contract
       // refuses two different values, so either one names the whole text filter.
-      const terms: GameRecipeSearchInput = { ...input, text: input.text ?? input.query };
+      const terms: GameRecipeSearchInput =
+        input.text === undefined && input.query !== undefined
+          ? { ...input, text: input.query }
+          : input;
       let offset = 0;
       if (input.cursor !== undefined) {
         if (!CURSOR_PATTERN.test(input.cursor)) {
