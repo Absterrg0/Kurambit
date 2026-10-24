@@ -24,6 +24,22 @@ const values = (
   hudText: probe?.hudText ?? null,
 });
 
+const inputAction = (step: GamePlaytestStep): string =>
+  "holdMs" in step
+    ? `held ${"keys" in step ? step.keys.join("+") : "key" in step ? step.key : "hold" in step ? step.hold : "drag"} ${step.holdMs}ms`
+    : "click" in step
+      ? `clicked ${step.click} 0ms`
+      : "mouseMove" in step
+        ? `mouseMove ${step.mouseMove.dx},${step.mouseMove.dy} 0ms`
+        : "press" in step
+          ? `pressed ${step.press}`
+          : "waitMs" in step
+            ? `waited ${step.waitMs}ms`
+            : "screenshot";
+
+/** The input in words, shared by frame labels and composed pair cards. */
+export const playtestStepAction = inputAction;
+
 /** Capture input causality, including zero change, without inferring response. */
 export const playtestStepWithEvidence = async (input: {
   readonly step: GamePlaytestStep;
@@ -48,18 +64,7 @@ export const playtestStepWithEvidence = async (input: {
   const stateChanges = [...new Set([...Object.keys(beforeState), ...Object.keys(afterState)])]
     .filter((key) => beforeState[key] !== afterState[key])
     .map((key) => ({ key, before: beforeState[key] ?? null, after: afterState[key] ?? null }));
-  const action =
-    "holdMs" in step
-      ? `held ${"keys" in step ? step.keys.join("+") : "key" in step ? step.key : "hold" in step ? step.hold : "drag"} ${step.holdMs}ms`
-      : "click" in step
-        ? `clicked ${step.click} 0ms`
-        : "mouseMove" in step
-          ? `mouseMove ${step.mouseMove.dx},${step.mouseMove.dy} 0ms`
-          : "press" in step
-            ? `pressed ${step.press}`
-            : "waitMs" in step
-              ? `waited ${step.waitMs}ms`
-              : "screenshot";
+  const action = inputAction(step);
   const pair = {
     stepIndex,
     input: step,

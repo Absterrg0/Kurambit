@@ -51,6 +51,7 @@ import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import { playtestIntervalObservation } from "./playtestEvidence.ts";
+import { playtestStepAction } from "./playtestInputPairs.ts";
 import { gameRecordLocation, readRecordText } from "./gameRecord.ts";
 
 /**
@@ -122,19 +123,66 @@ const criticFrames = (
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
 
-const assignmentFrames = (frames: ReadonlyArray<GameRepairFrame>, side: "a" | "b" | "c" | "d") =>
+const assignmentFrames = (
+  frames: ReadonlyArray<BallotFrame>,
+  side: "a" | "b" | "c" | "d",
+): ReadonlyArray<GameReviewSessions.GameReviewFrameInput> =>
   frames.map((frame, index) => ({
     id: `${side}${index + 1}`,
     label: `${side.toUpperCase()}: ${frame.label}`,
     sourcePath: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+    ...(frame.pair === undefined ? {} : { pair: frame.pair }),
   }));
+
+/**
+ * One card per input: the before and after captures of the same input become
+ * one labelled image, so a ballot judges the change rather than a lone still.
+ * Observations and boot frames stay as they are.
+ */
+const ballotFrames = (frames: ReadonlyArray<GameRepairFrame>): ReadonlyArray<BallotFrame> => {
+  const cards: BallotFrame[] = [];
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index]!;
+    const next = frames[index + 1];
+    const pair = frame.inputPair;
+    if (
+      pair !== undefined &&
+      pair.phase === "before" &&
+      next?.inputPair !== undefined &&
+      next.inputPair.phase === "after" &&
+      next.inputPair.stepIndex === pair.stepIndex &&
+      JSON.stringify(next.inputPair.input) === JSON.stringify(pair.input)
+    ) {
+      const caption = playtestStepAction(pair.input);
+      cards.push({
+        ...frame,
+        label: `${frame.label.replace(/ before: .*$/u, "")} (before | after): ${caption}`,
+        inputPair: next.inputPair,
+        pair: { beforePath: frame.path, afterPath: next.path, caption },
+      });
+      index += 1;
+      continue;
+    }
+    cards.push(frame);
+  }
+  return cards;
+};
 
 /** Matched evidence from one cited point of a critic route. */
 interface BallotExperimentPair {
   readonly key: string;
   readonly incumbent: ReadonlyArray<GameRepairFrame>;
   readonly candidate: ReadonlyArray<GameRepairFrame>;
+}
+
+/** One frame a ballot sees, or one composed before/after card. */
+interface BallotFrame {
+  readonly id: string;
+  readonly label: string;
+  readonly path: string;
+  readonly inputPair?: GameRepairFrame["inputPair"];
+  readonly pair?: GameReviewSessions.GameReviewFrameInput["pair"];
 }
 
 const inputRouteKey = (
@@ -956,7 +1004,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         // Route prefixes distinguish repeated actions reached through different inputs.
         const frozen = side === "challenger" ? candidateFrames : incumbentFrames;
         const replayed = new Set(experiments.map((entry) => entry.key));
-        return [
+        return ballotFrames([
           ...experimentFrames(side),
           ...frozen
             .slice(0, BALLOT_FRAMES_PER_SIDE)
@@ -967,7 +1015,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                   inputRouteKey(inputs.steps, frame.inputPair.stepIndex, inputs.viewport),
                 ),
             ),
-        ];
+        ]);
       };
       const buildChecks = (side: "incumbent" | "challenger") =>
         side === "challenger" ? candidateChecks : incumbentChecks;

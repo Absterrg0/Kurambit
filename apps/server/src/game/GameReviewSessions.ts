@@ -56,6 +56,7 @@ import {
   pairwisePrompt,
 } from "./gameReviewPrompts.ts";
 import { playedViewport, playtestIntervalObservation } from "./playtestEvidence.ts";
+import { composePairFiles } from "./frameCompose.ts";
 
 /**
  * Which models a review can run on. The catalog is the provider registry
@@ -78,6 +79,15 @@ export interface GameReviewFrameInput {
   readonly label: string;
   /** PNG bytes to copy into the evidence directory. */
   readonly sourcePath: string;
+  /**
+   * When set, the writer composes both captures into one labelled side-by-side
+   * card and keeps the two originals beside it; `sourcePath` is the before one.
+   */
+  readonly pair?: {
+    readonly beforePath: string;
+    readonly afterPath: string;
+    readonly caption: string;
+  };
 }
 
 export interface GameReviewCheckInput {
@@ -188,6 +198,8 @@ interface SessionKey {
 }
 
 const FRAME_FILE = (index: number) => `frames/frame-${String(index + 1).padStart(2, "0")}.png`;
+const PAIR_SOURCE_FILE = (index: number, phase: "before" | "after") =>
+  `frames/source/frame-${String(index + 1).padStart(2, "0")}-${phase}.png`;
 const EVIDENCE_MANIFEST = "evidence.json";
 const BRIEF_FILE = "BRIEF.md";
 // Four slots, each with up to 45 cited pairs, their observations and six frozen-route frames.
@@ -451,7 +463,24 @@ const writeEvidenceDirectory = async (input: {
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
   }));
   for (const [index, frame] of input.frames.entries()) {
-    await NodeFSP.copyFile(frame.sourcePath, NodePath.join(input.directory, FRAME_FILE(index)));
+    if (frame.pair === undefined) {
+      await NodeFSP.copyFile(frame.sourcePath, NodePath.join(input.directory, FRAME_FILE(index)));
+      continue;
+    }
+    // A composed card is the ballot's view; the two exact captures stay in the
+    // evidence directory so a cited original is never lost.
+    await NodeFSP.mkdir(NodePath.join(input.directory, "frames/source"), { recursive: true });
+    for (const [phase, path] of [
+      ["before", frame.pair.beforePath],
+      ["after", frame.pair.afterPath],
+    ] as const)
+      await NodeFSP.copyFile(path, NodePath.join(input.directory, PAIR_SOURCE_FILE(index, phase)));
+    const composed = await composePairFiles({
+      beforePath: frame.pair.beforePath,
+      afterPath: frame.pair.afterPath,
+      caption: frame.pair.caption,
+    });
+    await NodeFSP.writeFile(NodePath.join(input.directory, FRAME_FILE(index)), composed);
   }
   const evidence: ReviewEvidenceRecordType = { frames, checks };
   await NodeFSP.writeFile(

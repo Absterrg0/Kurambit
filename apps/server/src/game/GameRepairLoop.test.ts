@@ -1069,7 +1069,7 @@ it.live("the control pair shows the same captured frames under the C and D label
                   .filter((frame) => frame.label.startsWith(`${label}: `))
                   .map(
                     (frame) =>
-                      `${frame.label.slice(`${label}: `.length)}\u0000${frame.sourcePath}\u0000${JSON.stringify(frame.inputPair ?? null)}`,
+                      `${frame.label.slice(`${label}: `.length)}\u0000${frame.sourcePath}\u0000${JSON.stringify(frame.inputPair ?? null)}\u0000${JSON.stringify(frame.pair ?? null)}`,
                   );
               captured.push({ c: side("C"), d: side("D") });
               return ballotAnswer(plan, "tie");
@@ -1280,9 +1280,11 @@ it.live(
               )!.evidence!.frames;
               for (const side of ["a", "b", "c", "d"]) {
                 const evidence = frames.filter((frame) => frame.id.startsWith(side));
-                expect(evidence.filter((frame) => frame.inputPair?.stepIndex === 0)).toHaveLength(
-                  2,
-                );
+                // The input pair is one composed card, not two stills.
+                const pairs = evidence.filter((frame) => frame.inputPair?.stepIndex === 0);
+                expect(pairs).toHaveLength(1);
+                expect(pairs[0]?.label).toContain("(before | after):");
+                expect(pairs[0]?.inputPair?.phase).toBe("after");
                 const observations = evidence.filter((frame) => frame.label.includes("during:"));
                 expect(observations).toHaveLength(2);
                 const offset =

@@ -4,6 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { PNG } from "pngjs";
 import {
   CommandId,
   GAME_REVIEW_ANSWER_MAX_BYTES,
@@ -848,6 +849,81 @@ it.live("the control pair is the same captured frames written twice", () =>
       // Position bias is the only difference a control ballot can be reacting to.
       expect(cBoot.equals(dBoot)).toBe(true);
       expect(cAction.equals(dAction)).toBe(true);
+    }),
+  ),
+);
+
+it.live("a ballot pair becomes one composed card and keeps both originals", () =>
+  withSession(({ stateDir, service }) =>
+    Effect.gen(function* () {
+      const sources = NodePath.join(stateDir, "pair-sources");
+      const solid = (color: readonly [number, number, number]) => {
+        const png = new PNG({ width: 64, height: 36 });
+        for (let at = 0; at < png.data.length; at += 4) {
+          png.data[at] = color[0];
+          png.data[at + 1] = color[1];
+          png.data[at + 2] = color[2];
+          png.data[at + 3] = 255;
+        }
+        return PNG.sync.write(png);
+      };
+      const beforePath = NodePath.join(sources, "before.png");
+      const afterPath = NodePath.join(sources, "after.png");
+      const before = solid([200, 20, 20]);
+      const after = solid([20, 20, 200]);
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(sources, { recursive: true });
+        await NodeFSP.writeFile(beforePath, before);
+        await NodeFSP.writeFile(afterPath, after);
+      });
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: {
+          frames: [
+            {
+              id: "c1",
+              label: "C: input 1 (before | after): held d 1000ms",
+              sourcePath: beforePath,
+              pair: { beforePath, afterPath, caption: "held d 1000ms" },
+            },
+          ],
+          checks: [],
+        },
+        items: [],
+      });
+      expect(started.kind).toBe("started");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+      });
+      expect(directory).not.toBeNull();
+      const manifest = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: ReadonlyArray<{ id: string; file: string; label: string }> };
+      expect(manifest.frames).toHaveLength(1);
+      const card = PNG.sync.read(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, manifest.frames[0]!.file)),
+        ),
+      );
+      expect(card.width).toBe(64 + 8 + 64);
+      expect(card.height).toBeGreaterThan(36);
+      // The two exact captures are still in the evidence directory, byte for byte.
+      const [keptBefore, keptAfter] = yield* Effect.promise(() =>
+        Promise.all([
+          NodeFSP.readFile(NodePath.join(directory!, "frames/source/frame-01-before.png")),
+          NodeFSP.readFile(NodePath.join(directory!, "frames/source/frame-01-after.png")),
+        ]),
+      );
+      expect(keptBefore.equals(before)).toBe(true);
+      expect(keptAfter.equals(after)).toBe(true);
     }),
   ),
 );
