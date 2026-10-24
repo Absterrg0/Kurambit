@@ -1,7 +1,7 @@
 import { expect, it } from "vite-plus/test";
 import { PNG } from "pngjs";
 
-import { composeCaption, composePairPng } from "./frameCompose.ts";
+import { composeCaption, composePairPng, composeSideBySidePng } from "./frameCompose.ts";
 
 const solid = (width: number, height: number, color: readonly [number, number, number]): Buffer => {
   const png = new PNG({ width, height });
@@ -58,4 +58,31 @@ it("captions only use glyphs the card can draw", () => {
   expect(composeCaption("held ArrowRight 1000ms")).toBe("HELD ARROWRIGHT 1000MS");
   expect(composeCaption("drag {from,to} → 500ms")).toBe("DRAG FROM,TO 500MS");
   expect(composeCaption("click (700,120) left")).toBe("CLICK (700,120) LEFT");
+});
+
+it("labels both panels of a side-by-side card without touching their pixels", () => {
+  const left = solid(120, 60, [200, 20, 20]);
+  const right = solid(120, 60, [20, 20, 200]);
+  const card = composeSideBySidePng({
+    left,
+    right,
+    leftLabel: "A",
+    rightLabel: "B",
+    caption: "frame 1 of 6",
+  });
+  expect(card.width).toBe(120 + 8 + 120);
+  const png = PNG.sync.read(card.png);
+  const imageTop = card.height - 60;
+  expect(pixel(png, 1, imageTop)).toEqual([200, 20, 20, 255]);
+  expect(pixel(png, 1 + 128, imageTop)).toEqual([20, 20, 200, 255]);
+  // A/B are drawn above their panels: swapping the labels changes the header.
+  const swapped = composeSideBySidePng({
+    left,
+    right,
+    leftLabel: "B",
+    rightLabel: "A",
+    caption: "frame 1 of 6",
+  });
+  expect(swapped.png.equals(card.png)).toBe(false);
+  expect(swapped.height).toBe(card.height);
 });

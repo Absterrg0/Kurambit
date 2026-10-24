@@ -31,11 +31,12 @@ import {
   OPENCODE_GRADER_MODEL,
   defaultGodotBinary,
 } from "./game-grade.ts";
+import { makeCompareReviewer, runComparison } from "./game-benchmark/compare.ts";
 import { externalServerOrigin } from "./lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
-const { values } = NodeUtil.parseArgs({
+const { values, positionals } = NodeUtil.parseArgs({
   options: {
     /** The dev server the runner authenticates against. */
     url: { type: "string" },
@@ -61,6 +62,8 @@ const { values } = NodeUtil.parseArgs({
     "raw-timeout-ms": { type: "string", default: "7200000" },
     /** Copy cached raw-lane results from this directory instead of rebuilding. */
     "reuse-raw": { type: "string" },
+    /** Compare two lanes' saved grades blindly; takes two directories as positionals. */
+    compare: { type: "boolean", default: false },
     opencode: { type: "string", default: "opencode" },
     provider: { type: "string", default: "codex" },
     model: { type: "string", default: "gpt-6.1-sol" },
@@ -68,6 +71,7 @@ const { values } = NodeUtil.parseArgs({
     "timeout-ms": { type: "string", default: "3600000" },
     help: { type: "boolean", default: false },
   },
+  allowPositionals: true,
 });
 if (values.help) {
   console.log(
@@ -78,6 +82,7 @@ if (values.help) {
       "       [--lane harness|raw] [--opencode opencode] [--grade-timeout-ms 2700000] [--raw-timeout-ms 7200000]",
       "       [--grader codex|opencode] [--grader-model opencode-go/minimax-m3.1-flash-free]",
       "       [--reuse-raw <benchmark-out-dir>]",
+      "       [--compare <harnessDir> <rawDir> [--out DIR]]",
       "",
       "Runs the frozen briefs serially through game-e2e. Without --url each brief starts its own",
       "private server under the display sandbox; an external server needs --allow-external-server.",
@@ -87,8 +92,46 @@ if (values.help) {
       "An existing result for the same harness commit, lane, fixture checksum and evaluation profile is skipped.",
       "--reuse-raw copies a cached raw-lane build per brief and regrades it when the grader profile differs,",
       "instead of spending the agent's two-hour budget again.",
+      "--compare reads two lanes' already-saved grade frames and asks the frozen grader model which",
+      "build reads better, in both orders plus an identical-pair control. It writes <out>/comparison.json",
+      "and comparison.md and is never summed with the obligations totals.",
     ].join("\n"),
   );
+  process.exit(0);
+}
+if (values.compare) {
+  // The comparison is a separate ruler: it reuses the frozen grader model and
+  // never runs the lane machinery, so none of the run flags apply.
+  if (values.grader !== "codex")
+    throw new Error("--compare measures with the frozen codex grader; drop --grader.");
+  const [harnessDir, rawDir] = positionals;
+  if (harnessDir === undefined || rawDir === undefined || positionals.length !== 2)
+    throw new Error("--compare takes a harness directory and a raw directory.");
+  const allBriefs = await loadGameBenchmarkBriefs(
+    NodePath.join(checkout, "scripts/game-benchmark/briefs"),
+  );
+  const only = values.only
+    ?.split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const selected =
+    only === undefined ? allBriefs : allBriefs.filter((brief) => only.includes(brief.id));
+  const unknown = (only ?? []).filter((id) => !allBriefs.some((brief) => brief.id === id));
+  if (unknown.length > 0)
+    throw new Error(
+      `Unknown brief id(s): ${unknown.join(", ")}. Known briefs: ${allBriefs.map((brief) => brief.id).join(", ")}`,
+    );
+  const { report, markdownPath } = await runComparison({
+    harnessDir: NodePath.resolve(harnessDir),
+    rawDir: NodePath.resolve(rawDir),
+    out: NodePath.resolve(values.out),
+    briefs: selected,
+    review: makeCompareReviewer(),
+    log: (line) => console.log(line),
+  });
+  for (const brief of report.briefs)
+    console.log(`${brief.briefId}: ${brief.verdict} (${brief.frameCount} cards)`);
+  console.log(`comparison: ${markdownPath}`);
   process.exit(0);
 }
 const timeoutMs = Number(values["timeout-ms"]);

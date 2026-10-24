@@ -140,6 +140,50 @@ export interface ComposedPair {
 }
 
 /**
+ * One card for two captures side by side under their own labels and a shared
+ * caption. Both captures keep their exact pixels, so a pixel comparison of the
+ * card is a comparison of the two runs.
+ */
+export const composeSideBySidePng = (input: {
+  readonly left: Buffer;
+  readonly right: Buffer;
+  readonly leftLabel: string;
+  readonly rightLabel: string;
+  readonly caption: string;
+}): ComposedPair => {
+  const left = PNG.sync.read(input.left);
+  const right = PNG.sync.read(input.right);
+  const caption = composeCaption(input.caption);
+  const labelsY = PADDING;
+  const captionY = labelsY + LINE_HEIGHT + 4;
+  const headerHeight =
+    caption === "" ? labelsY + LINE_HEIGHT + PADDING : captionY + LINE_HEIGHT + PADDING;
+  const width = left.width + GAP + right.width;
+  const height = headerHeight + Math.max(left.height, right.height);
+  const png = new PNG({ width, height });
+  fill(png, 0, 0, width, height, BACKGROUND);
+  drawText(png, PADDING, labelsY, input.leftLabel, LABEL);
+  drawText(png, left.width + GAP + PADDING, labelsY, input.rightLabel, LABEL);
+  if (caption !== "") drawText(png, PADDING, captionY, caption, LABEL);
+  fill(png, 0, headerHeight - 1, width, 1, DIVIDER);
+  blit(png, left, 0, headerHeight);
+  blit(png, right, left.width + GAP, headerHeight);
+  if (left.height < right.height)
+    fill(png, 0, headerHeight + left.height, left.width, right.height - left.height, BACKGROUND);
+  if (right.height < left.height)
+    fill(
+      png,
+      left.width + GAP,
+      headerHeight + right.height,
+      right.width,
+      left.height - right.height,
+      BACKGROUND,
+    );
+  const bytes = PNG.sync.write(png);
+  return { png: bytes, width, height };
+};
+
+/**
  * One card for one input: BEFORE | AFTER side by side under their labels and
  * the input that caused the change. Both captures keep their exact pixels.
  */
@@ -147,45 +191,14 @@ export const composePairPng = (input: {
   readonly before: Buffer;
   readonly after: Buffer;
   readonly caption: string;
-}): ComposedPair => {
-  const before = PNG.sync.read(input.before);
-  const after = PNG.sync.read(input.after);
-  const caption = composeCaption(input.caption);
-  const labelsY = PADDING;
-  const captionY = labelsY + LINE_HEIGHT + 4;
-  const headerHeight =
-    caption === "" ? labelsY + LINE_HEIGHT + PADDING : captionY + LINE_HEIGHT + PADDING;
-  const width = before.width + GAP + after.width;
-  const height = headerHeight + Math.max(before.height, after.height);
-  const png = new PNG({ width, height });
-  fill(png, 0, 0, width, height, BACKGROUND);
-  drawText(png, PADDING, labelsY, "BEFORE", LABEL);
-  drawText(png, before.width + GAP + PADDING, labelsY, "AFTER", LABEL);
-  if (caption !== "") drawText(png, PADDING, captionY, caption, LABEL);
-  fill(png, 0, headerHeight - 1, width, 1, DIVIDER);
-  blit(png, before, 0, headerHeight);
-  blit(png, after, before.width + GAP, headerHeight);
-  if (before.height < after.height)
-    fill(
-      png,
-      0,
-      headerHeight + before.height,
-      before.width,
-      after.height - before.height,
-      BACKGROUND,
-    );
-  if (after.height < before.height)
-    fill(
-      png,
-      before.width + GAP,
-      headerHeight + after.height,
-      after.width,
-      before.height - after.height,
-      BACKGROUND,
-    );
-  const bytes = PNG.sync.write(png);
-  return { png: bytes, width, height };
-};
+}): ComposedPair =>
+  composeSideBySidePng({
+    left: input.before,
+    right: input.after,
+    leftLabel: "BEFORE",
+    rightLabel: "AFTER",
+    caption: input.caption,
+  });
 
 export const composePairFiles = async (input: {
   readonly beforePath: string;
