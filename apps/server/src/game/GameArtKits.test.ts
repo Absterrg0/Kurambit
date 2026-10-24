@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The test reads the real shipped bytes and installs into a temporary game.
 import { expect, it } from "@effect/vitest";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -251,6 +252,62 @@ it.live("a conflicting user file is refused before any kit file is written", () 
       ).toBe(false);
     }),
   ),
+);
+
+it.live.skipIf(!symlinksSupported)(
+  "refuses a symlinked ancestor and writes nothing outside the game",
+  () =>
+    withTemporaryGame(({ root }) =>
+      Effect.gen(function* () {
+        const outside = NodePath.join(NodePath.dirname(root), "outside");
+        const linked = NodePath.join(root, "godot/assets");
+        yield* Effect.promise(() => NodeFSP.mkdir(outside));
+        yield* Effect.promise(() => NodeFSP.symlink(outside, linked, "dir"));
+        const service = GameArtKits.make(gameArtKitCatalog);
+        const error = yield* service
+          .install({ root, godotProject: "godot", id: "kenney-tiny-dungeon" })
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("GameOperationError");
+        expect(error.reason).toBe("art-kit-conflict");
+        expect(error.path).toBe(linked);
+        expect(error.detail).toContain("symbolic link");
+        expect(yield* Effect.promise(() => NodeFSP.readdir(outside))).toEqual([]);
+        expect((yield* Effect.promise(() => NodeFSP.lstat(linked))).isSymbolicLink()).toBe(true);
+      }),
+    ),
+);
+
+it.live.skipIf(!symlinksSupported)(
+  "refuses a symlinked kit destination without reading or damaging its target",
+  () =>
+    withTemporaryGame(({ root }) =>
+      Effect.gen(function* () {
+        const outside = NodePath.join(NodePath.dirname(root), "outside");
+        const destination = NodePath.join(root, "godot/assets/art/kits/kenney-tiny-dungeon");
+        const outsideFile = NodePath.join(outside, "tilemap_packed.png");
+        yield* Effect.promise(() =>
+          NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true }),
+        );
+        yield* Effect.promise(() => NodeFSP.mkdir(outside));
+        yield* Effect.promise(() => NodeFSP.writeFile(outsideFile, "outside"));
+        yield* Effect.promise(() => NodeFSP.symlink(outside, destination, "dir"));
+        const service = GameArtKits.make(gameArtKitCatalog);
+        const error = yield* service
+          .install({ root, godotProject: "godot", id: "kenney-tiny-dungeon" })
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("GameOperationError");
+        expect(error.reason).toBe("art-kit-conflict");
+        expect(error.path).toBe(destination);
+        expect(error.detail).toContain("symbolic link");
+        expect(yield* Effect.promise(() => NodeFSP.readdir(outside))).toEqual([
+          "tilemap_packed.png",
+        ]);
+        expect(yield* Effect.promise(() => NodeFSP.readFile(outsideFile, "utf8"))).toBe("outside");
+        expect((yield* Effect.promise(() => NodeFSP.lstat(destination))).isSymbolicLink()).toBe(
+          true,
+        );
+      }),
+    ),
 );
 
 it.live("resolves the packaged layout beside the bundle and the dev layout in the checkout", () =>

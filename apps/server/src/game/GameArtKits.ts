@@ -66,6 +66,72 @@ const hash = (bytes: Uint8Array): string =>
   NodeCrypto.createHash("sha256").update(bytes).digest("hex");
 const toPosix = (value: string): string => value.replaceAll("\\", "/");
 
+const isErrno = (cause: unknown, ...codes: ReadonlyArray<string>): boolean => {
+  const code = (cause as NodeJS.ErrnoException | null)?.code;
+  return code !== undefined && codes.includes(code);
+};
+const conflict = (path: string, detail: string) =>
+  new GameOperationError({
+    operation: "import-art-kit",
+    path,
+    reason: "art-kit-conflict",
+    detail,
+  });
+const ioFailure = (path: string, cause: unknown) =>
+  new GameOperationError({ operation: "import-art-kit", path, reason: "io", cause });
+
+/** Only a genuinely missing entry means "import it"; other failures stay visible. */
+const lstatOrMissing = async (path: string) => {
+  try {
+    return await NodeFSP.lstat(path);
+  } catch (cause) {
+    if (isErrno(cause, "ENOENT")) return null;
+    throw cause;
+  }
+};
+const readExistingOrNull = async (path: string) => {
+  try {
+    return await NodeFSP.readFile(path);
+  } catch (cause) {
+    if (isErrno(cause, "ENOENT", "EISDIR", "ENOTDIR")) return null;
+    throw cause;
+  }
+};
+const notRealDirectory = (root: string, path: string, symlink: boolean) =>
+  conflict(
+    path,
+    `${NodePath.relative(root, path)} is ${symlink ? "a symbolic link" : "not a directory"}, so writing through it could leave the game. Nothing was written; move it aside or restore a real directory.`,
+  );
+
+/**
+ * The install may create missing folders, but every existing component below
+ * the game root must be a real directory. `mkdir` would otherwise follow a
+ * symlinked `assets` or `kits` and copy the kit outside the game.
+ */
+const ensureRealDirectoryChain = async (root: string, relative: string) => {
+  let current = root;
+  for (const part of relative.split(NodePath.sep)) {
+    if (part === "") continue;
+    current = NodePath.join(current, part);
+    let info: Awaited<ReturnType<typeof NodeFSP.lstat>> | null;
+    try {
+      info = await lstatOrMissing(current);
+    } catch (cause) {
+      throw ioFailure(current, cause);
+    }
+    if (info === null) {
+      try {
+        await NodeFSP.mkdir(current);
+        info = await NodeFSP.lstat(current);
+      } catch (cause) {
+        throw ioFailure(current, cause);
+      }
+    }
+    if (info.isSymbolicLink() || !info.isDirectory())
+      throw notRealDirectory(root, current, info.isSymbolicLink());
+  }
+};
+
 /** The packed and checked-in layouts the running server can see. */
 export const resolveArtKitsDirectory = Effect.fn("GameArtKits.resolveDirectory")(function* (
   moduleDirectory: string,
@@ -294,39 +360,47 @@ export const make = (catalog: ReadonlyArray<GameArtKit>): GameArtKits["Service"]
                 cause,
               }),
       });
+      const gameRoot = NodePath.resolve(input.root);
       const kitRelative = toPosix(NodePath.join("assets", "art", "kits", kit.id));
       const destinationRelative = toPosix(NodePath.join(input.godotProject, kitRelative));
       const destination = insideGame(godotRoot, kitRelative);
+      const parent = NodePath.dirname(destination);
 
-      const existing = yield* Effect.promise(() =>
-        NodeFSP.stat(destination).then(
-          (info) => (info.isDirectory() ? "directory" : "file"),
-          () => "missing",
-        ),
-      );
-      if (existing !== "missing") {
-        const mismatches: string[] = [];
-        if (existing === "directory") {
-          for (const { file, bytes } of sourceFiles) {
-            const current = yield* Effect.promise(() =>
-              NodeFSP.readFile(NodePath.join(destination, file.path)).then(
-                (value) => value,
-                () => null,
-              ),
-            );
-            if (current === null || !sameFile(current, bytes)) mismatches.push(file.path);
-          }
+      // The game root is the caller's chosen boundary. Everything below it is
+      // re-checked, because a symlinked `assets` or `kits` folder would send
+      // this copy outside the game even though the lexical path looks inside.
+      yield* Effect.tryPromise({
+        try: () => ensureRealDirectoryChain(gameRoot, NodePath.relative(gameRoot, parent)),
+        catch: (cause) => (isGameOperationError(cause) ? cause : ioFailure(parent, cause)),
+      });
+
+      const existing = yield* Effect.tryPromise({
+        try: () => lstatOrMissing(destination),
+        catch: (cause) => ioFailure(destination, cause),
+      });
+      if (existing !== null) {
+        if (existing.isSymbolicLink() || !existing.isDirectory()) {
+          return yield* existing.isSymbolicLink()
+            ? notRealDirectory(gameRoot, destination, true)
+            : conflict(
+                destination,
+                "The kit destination exists but is not a directory. Nothing was written.",
+              );
         }
-        if (existing !== "directory" || mismatches.length > 0) {
-          return yield* new GameOperationError({
-            operation: "import-art-kit",
-            path: destination,
-            reason: "art-kit-conflict",
-            detail:
-              existing !== "directory"
-                ? "The kit destination exists but is not a directory. Nothing was written."
-                : `Existing files differ or are missing: ${mismatches.join(", ")}. Nothing was written.`,
+        const mismatches: string[] = [];
+        for (const { file, bytes } of sourceFiles) {
+          const filePath = NodePath.join(destination, file.path);
+          const current = yield* Effect.tryPromise({
+            try: () => readExistingOrNull(filePath),
+            catch: (cause) => ioFailure(filePath, cause),
           });
+          if (current === null || !sameFile(current, bytes)) mismatches.push(file.path);
+        }
+        if (mismatches.length > 0) {
+          return yield* conflict(
+            destination,
+            `Existing files differ or are missing: ${mismatches.join(", ")}. Nothing was written.`,
+          );
         }
         return installedResult({
           kit,
@@ -335,18 +409,6 @@ export const make = (catalog: ReadonlyArray<GameArtKit>): GameArtKits["Service"]
           alreadyPresent: true,
         });
       }
-
-      const parent = NodePath.dirname(destination);
-      yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(parent, { recursive: true }),
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "import-art-kit",
-            path: parent,
-            reason: "io",
-            cause,
-          }),
-      });
       const staging = yield* Effect.tryPromise({
         try: () => NodeFSP.mkdtemp(NodePath.join(parent, `.${kit.id}-`)),
         catch: (cause) =>
@@ -370,17 +432,22 @@ export const make = (catalog: ReadonlyArray<GameArtKit>): GameArtKits["Service"]
               }),
           });
         }
-        // The kit directory appears whole or not at all. A rename cannot leave
-        // half a kit where Godot may import it.
+        // The kit directory appears whole or not at all. Re-check the parent
+        // and destination at the rename boundary; this is not a defense
+        // against a hostile process racing the checks.
         yield* Effect.tryPromise({
-          try: () => NodeFSP.rename(staging, destination),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "import-art-kit",
-              path: destination,
-              reason: "io",
-              cause,
-            }),
+          try: async () => {
+            const currentParent = await NodeFSP.lstat(parent);
+            if (currentParent.isSymbolicLink() || !currentParent.isDirectory())
+              throw notRealDirectory(gameRoot, parent, currentParent.isSymbolicLink());
+            if ((await lstatOrMissing(destination)) !== null)
+              throw conflict(
+                destination,
+                "The kit destination appeared while the kit was being written. Nothing was replaced.",
+              );
+            await NodeFSP.rename(staging, destination);
+          },
+          catch: (cause) => (isGameOperationError(cause) ? cause : ioFailure(destination, cause)),
         });
       }).pipe(
         Effect.ensuring(
