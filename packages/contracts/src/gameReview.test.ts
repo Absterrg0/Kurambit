@@ -9,6 +9,7 @@ import {
   GameReviewDefect,
   GameReviewDoNotRegress,
   GameReviewRound,
+  GameReviewUsage,
   GameSubmission,
   GameSubmitInput,
 } from "./gameReview.ts";
@@ -35,6 +36,28 @@ describe("review vocabulary", () => {
         }),
       ).toMatchObject({ severity });
     expect(() => decodeDefect({ severity: "fatal", what: "x", frameId: "F3", fix: "y" })).toThrow();
+  });
+
+  it("accepts a defect's optional recipe id, and old usage without a recipe count", () => {
+    const base = {
+      severity: "visible" as const,
+      what: "the jump is late",
+      frameId: "F3",
+      fix: "buffer input",
+    };
+    expect(decodeDefect(base)).not.toHaveProperty("recipeId");
+    expect(decodeDefect({ ...base, recipeId: "feel.buffer" }).recipeId).toBe("feel.buffer");
+    expect(() => decodeDefect({ ...base, recipeId: "" })).toThrow();
+    const decodeUsage = Schema.decodeUnknownSync(GameReviewUsage);
+    const old = {
+      status: "measured" as const,
+      providerTurns: 1,
+      usedTokens: 10,
+      inputTokens: 8,
+      outputTokens: 2,
+    };
+    expect(decodeUsage(old)).not.toHaveProperty("recipeCalls");
+    expect(decodeUsage({ ...old, recipeCalls: 2 }).recipeCalls).toBe(2);
   });
 
   it("keeps preservation items bound to a frame and an optional existing check", () => {

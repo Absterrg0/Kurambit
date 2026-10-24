@@ -160,6 +160,8 @@ interface Scripted {
   steps: ReadonlyArray<GamePlaytestStep>;
   tokenUsage: Record<string, { usedTokens: number; inputTokens: number; outputTokens: number }>;
   inputCalls: Record<string, number | null>;
+  /** Recipe catalog calls per role:order, as the counter would record them. */
+  recipeCalls: Record<string, number>;
   viewport: { readonly width: number; readonly height: number } | null;
   /** Runs inside the promotion, after validation and before the commit. */
   beforeCommit: Effect.Effect<void> | null;
@@ -235,6 +237,7 @@ const makeScripted = (): Scripted => ({
   steps: [{ key: "ArrowRight", holdMs: 120 }],
   tokenUsage: {},
   inputCalls: {},
+  recipeCalls: {},
   viewport: { width: 1152, height: 648 },
   beforeCommit: null,
   repairs: [],
@@ -609,6 +612,11 @@ const withLoop = <A, E>(
                       }),
                     )
                   : Effect.succeed(calls ?? 0);
+              },
+              noteRecipeCall: () => Effect.void,
+              recipeCalls: (id) => {
+                const child = [...children.values()].find((child) => child.childThreadId === id);
+                return Effect.succeed(scripted.recipeCalls[`${child?.role}:${child?.order}`] ?? 0);
               },
               tryInput: () => Effect.die("The loop fixture does not launch input experiments."),
               experiments: (input) =>
@@ -2394,6 +2402,7 @@ it.live("t50b's captured round 1 promotes with unknown preservation neutral", ()
           {
             frameIds,
             checkIds: new Set(),
+            recipeIds: new Set(),
           },
         );
         expect(critic.kind).toBe("valid");
@@ -2757,31 +2766,40 @@ it.live.each(["measured", "gap", "unknown-calls"] as const)(
               "critic:0": scenario === "unknown-calls" ? null : 3,
               "repair:0": 1,
             };
+            scripted.recipeCalls = { "critic:0": 2, "repair:0": 1 };
             yield* runToCompletion(services, fixture);
             const round = (yield* services.rounds.read(fixture.root)).rounds[0]!;
             expect(round.childUsage).toHaveLength(4);
             expect(round.childUsage?.find((child) => child.role === "critic")?.tryInputCalls).toBe(
               scenario === "unknown-calls" ? null : 3,
             );
+            expect(
+              round.childUsage?.find((child) => child.role === "critic")?.usage.recipeCalls,
+            ).toBe(2);
             expect(round.usageByRole?.critic).toMatchObject({
               status: "measured",
               usedTokens: 100,
+              recipeCalls: 2,
             });
             expect(round.usageByRole?.repair).toMatchObject({
               status: "measured",
               usedTokens: 200,
+              recipeCalls: 1,
             });
             expect(round.usageByRole?.ballot).toMatchObject({
               status: scenario === "gap" ? "unknown" : "measured",
               usedTokens: scenario === "gap" ? 30 : 70,
+              recipeCalls: 0,
             });
             expect(round.usageByRole?.["try_input-heavy"]).toMatchObject({
               status: scenario === "unknown-calls" ? "unknown" : "measured",
               usedTokens: scenario === "unknown-calls" ? 200 : 300,
+              recipeCalls: scenario === "unknown-calls" ? 1 : 3,
             });
             expect(loopRecord(yield* readLoop(services)).usage).toMatchObject({
               status: scenario === "gap" ? "unknown" : "measured",
               usedTokens: scenario === "gap" ? 330 : 370,
+              recipeCalls: 3,
             });
           }),
         ),

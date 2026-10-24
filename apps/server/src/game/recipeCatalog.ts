@@ -15,3 +15,8 @@ export const gameRecipeCatalog: ReadonlyArray<GameRecipeCatalogEntry> = gameReci
     return { recipe, adapters: [adapter] };
   },
 );
+
+/** The ids a review answer may cite; the same catalog `get` serves. */
+export const gameRecipeIds: ReadonlySet<string> = new Set(
+  gameRecipeCatalog.map((entry) => entry.recipe.id),
+);

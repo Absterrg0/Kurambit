@@ -651,16 +651,22 @@ export const layer = (options: GameRepairLoopOptions) => {
         Effect.orElseSucceed(() => null),
       );
 
-    const sumUsage = (entries: ReadonlyArray<GameReviewUsage>): GameReviewUsage => ({
-      status:
-        entries.length > 0 && entries.every((entry) => entry.status === "measured")
-          ? "measured"
-          : "unknown",
-      providerTurns: entries.reduce((sum, entry) => sum + entry.providerTurns, 0),
-      usedTokens: entries.reduce((sum, entry) => sum + entry.usedTokens, 0),
-      inputTokens: entries.reduce((sum, entry) => sum + entry.inputTokens, 0),
-      outputTokens: entries.reduce((sum, entry) => sum + entry.outputTokens, 0),
-    });
+    const sumUsage = (entries: ReadonlyArray<GameReviewUsage>): GameReviewUsage => {
+      const counted = entries.every((entry) => entry.recipeCalls !== undefined)
+        ? entries.reduce((sum, entry) => sum + (entry.recipeCalls ?? 0), 0)
+        : undefined;
+      return {
+        status:
+          entries.length > 0 && entries.every((entry) => entry.status === "measured")
+            ? "measured"
+            : "unknown",
+        providerTurns: entries.reduce((sum, entry) => sum + entry.providerTurns, 0),
+        usedTokens: entries.reduce((sum, entry) => sum + entry.usedTokens, 0),
+        inputTokens: entries.reduce((sum, entry) => sum + entry.inputTokens, 0),
+        outputTokens: entries.reduce((sum, entry) => sum + entry.outputTokens, 0),
+        ...(counted === undefined ? {} : { recipeCalls: counted }),
+      };
+    };
 
     const recordUsage = (
       task: Task,
@@ -680,6 +686,7 @@ export const layer = (options: GameRepairLoopOptions) => {
             : yield* sessions
                 .inputCalls(child.childThreadId, child.runId)
                 .pipe(Effect.orElseSucceed(() => null));
+        const recipeCalls = yield* sessions.recipeCalls(child.childThreadId);
         const round = yield* findRound(task.root, input.roundId);
         if (round === null || round.status !== "running") return;
         const entry: GameReviewChildUsage = {
@@ -688,7 +695,10 @@ export const layer = (options: GameRepairLoopOptions) => {
           childThreadId: child.childThreadId,
           runId: child.runId,
           tryInputCalls: calls,
-          usage: usage === null ? EMPTY_GAME_REVIEW_USAGE : { status: "measured", ...usage },
+          usage: {
+            ...(usage === null ? EMPTY_GAME_REVIEW_USAGE : { status: "measured", ...usage }),
+            ...(recipeCalls === null ? {} : { recipeCalls }),
+          },
         };
         const children = [
           ...(round.childUsage ?? []).filter(
@@ -1957,6 +1967,9 @@ export const layer = (options: GameRepairLoopOptions) => {
             const builderSelection = run.modelSelection ?? records.thread.modelSelection;
             const reviewSelection = input.reviewSelection ?? builderSelection;
             const at = nowIso();
+            const buildRecipeCalls = yield* sessions
+              .recipeCalls(input.threadId)
+              .pipe(Effect.orElseSucceed(() => null));
             const record: GameRepairLoopRecord = {
               schemaVersion: 2,
               id: NodeCrypto.randomUUID(),
@@ -1980,6 +1993,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               decision: skipped === null ? null : "stop",
               reason: skipped,
               usage: EMPTY_GAME_REVIEW_USAGE,
+              buildRecipeCalls,
             };
             yield* save(root, record);
             if (skipped === null) yield* start(root, record);

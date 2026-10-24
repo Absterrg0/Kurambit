@@ -39,6 +39,12 @@ export const GameReviewDefect = Schema.Struct({
   frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /** A concrete change with a yes/no completion test. */
   fix: reviewText(400),
+  /**
+   * A catalog recipe the critic fetched that explains the mechanism behind the
+   * fix. The server validates it against the shipped catalog, so a repair can
+   * fetch the exact reference instead of guessing.
+   */
+  recipeId: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))),
 });
 export type GameReviewDefect = typeof GameReviewDefect.Type;
 
@@ -407,6 +413,11 @@ export const GameReviewUsage = Schema.Struct({
   usedTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /**
+   * Recipe tool calls made by this session. Absent on records written before
+   * the count existed, which is unknown, not zero.
+   */
+  recipeCalls: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
 export type GameReviewUsage = typeof GameReviewUsage.Type;
 
@@ -480,6 +491,13 @@ export const GameRepairLoop = Schema.Struct({
   decision: Schema.NullOr(Schema.Literals(["promote", "stop", "interrupt"])),
   reason: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000))),
   usage: GameReviewUsage,
+  /**
+   * Recipe tool calls the originating build turn made before this loop opened.
+   * Absent on loops written before the count existed.
+   */
+  buildRecipeCalls: Schema.optionalKey(
+    Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  ),
 });
 export type GameRepairLoop = typeof GameRepairLoop.Type;
 

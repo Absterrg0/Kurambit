@@ -162,13 +162,12 @@ Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the engi
 
 ## Steps
 
-1. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (Web).
-2. **Show the state.** Every brief value (score, lives, turn, laps, timer...) is visible on screen (text, icon, bar or world state) and updates, and in GameState when the template has one. Win and lose end on a result screen with totals.
-3. **Playtest and look.** Run game_web_playtest through the core loop and open its screenshots. Before game_submit, test anything uncertain with game_try_input from a fresh boot and inspect its frames.
-4. **Check core play**: report broken or unreadable behaviour honestly. Do not start a repair loop; the server runs bounded review after your turn.
-5. **Submit and end your turn.** When the loop is playable, call game_submit with a one-line note and summarize with the game_preview URL. Do not start your own improvement loop.
-
-Optional: game_recipe_search and game_recipe_get return runnable references for unfamiliar mechanics. Copy the mechanism, choose presentation from BRIEF.md, tune, verify.
+1. **Search the recipes first.** Before building the core loop, game_recipe_search with your genre and core mechanic; game_recipe_get what fits and adapt the mechanism to this brief.
+2. **Core loop first.** Make the main action playable, run game_godot_check until it reports zero errors, then game_export (Web).
+3. **Show the state.** Every brief value (score, lives, turn, laps, timer...) is visible on screen (text, icon, bar or world state) and updates, and in GameState when the template has one. Win and lose end on a result screen with totals.
+4. **Playtest and look.** Run game_web_playtest through the core loop; open its screenshots. Before game_submit, test anything uncertain with game_try_input from a fresh boot and inspect its frames.
+5. **Check core play**: report broken or unreadable behaviour honestly. Do not start a repair loop; the server runs bounded review after your turn.
+6. **Submit and end your turn.** When the loop is playable, call game_submit with a one-line note and summarize with the game_preview URL.
 
 Task modes: create, feature, bugfix, polish. A focused request is not a redesign; keep the rest working. Never claim a check you did not run: say when you did not inspect frames or play it.
 

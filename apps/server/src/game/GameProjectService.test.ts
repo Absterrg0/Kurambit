@@ -296,9 +296,10 @@ it.effect(
         expect(agents).toContain("A focused request is not a redesign");
         expect(agents).toContain("Never claim a check you did not run");
         expect(agents).toContain("game_recipe_search");
-        // A weak model follows a short brief: five numbered steps, at most 350 words.
+        expect(agents).toContain("Before building the core loop, game_recipe_search");
+        // A weak model follows a short brief: six numbered steps, at most 350 words.
         expect(agents.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
-        expect(agents).toMatch(/\n1\. [\s\S]*\n5\. /);
+        expect(agents).toMatch(/\n1\. [\s\S]*\n6\. /);
         const reviewed = scaffoldFiles({
           name: "Tiny Quest",
           parentDirectory: parent,

@@ -48,6 +48,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import { gameRecordFile, realGameRoot } from "./gameRecord.ts";
+import { gameRecipeIds } from "./recipeCatalog.ts";
 import {
   type GameReviewPromptDefect,
   builderFixPrompt,
@@ -603,6 +604,8 @@ const decodeStrict = <S extends Schema.ConstraintDecoder<unknown>>(
 export interface CriticAnswerKnownIds {
   readonly frameIds: ReadonlySet<string>;
   readonly checkIds: ReadonlySet<string>;
+  /** The shipped recipe catalog; a defect may name one it fetched. */
+  readonly recipeIds: ReadonlySet<string>;
 }
 
 /** Strict critic parsing: one object, known frame/check ids only, bounded lists. */
@@ -631,6 +634,11 @@ export const parseCriticAnswer = (
       return {
         kind: "invalid",
         reason: `The critic cited frame ${defect.frameId}, which is not in its manifest.`,
+      };
+    if (defect.recipeId !== undefined && !known.recipeIds.has(defect.recipeId))
+      return {
+        kind: "invalid",
+        reason: `The critic cited recipe ${defect.recipeId}, which is not in the catalog. Call game_recipe_search first, or omit recipeId.`,
       };
   }
   for (const item of answer.doNotRegress) {
@@ -748,6 +756,14 @@ export class GameReviewSessions extends Context.Service<
       threadId: ThreadId,
       runId: RunId,
     ) => Effect.Effect<number, GameOperationError>;
+    /**
+     * Counts one recipe catalog call against the calling thread. Recipe tools
+     * stay read-only over the game; this is usage evidence for the loop, so a
+     * measurement can say whether a role asked for know-how.
+     */
+    readonly noteRecipeCall: (threadId: ThreadId) => Effect.Effect<void>;
+    /** Recipe calls recorded for a thread; null when the count could not be read. */
+    readonly recipeCalls: (threadId: ThreadId) => Effect.Effect<number | null>;
     readonly tryInput: (
       caller: GameReviewToolCaller,
       input: GameTryInput,
@@ -1548,6 +1564,37 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
     };
 
+    // One line per call: appends cannot lose a concurrent call the way a
+    // read-modify-write counter can, and a short file is cheap to count.
+    const recipeCallsFile = (threadId: ThreadId) =>
+      NodePath.join(options.stateDir, "game-recipe-calls", `${encodePart(threadId)}.jsonl`);
+    const noteRecipeCall: GameReviewSessions["Service"]["noteRecipeCall"] = (threadId) =>
+      Effect.gen(function* () {
+        const file = recipeCallsFile(threadId);
+        yield* attempt("record recipe call", file, async () => {
+          await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+          await NodeFSP.appendFile(file, `${DateTime.formatIso(DateTime.nowUnsafe())}\n`);
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("recording a recipe call failed", { threadId, cause }),
+        ),
+        Effect.asVoid,
+      );
+    const recipeCalls: GameReviewSessions["Service"]["recipeCalls"] = (threadId) => {
+      const file = recipeCallsFile(threadId);
+      return attempt("read recipe calls", file, async () => {
+        const text = await NodeFSP.readFile(file, "utf8").then(
+          (value) => value,
+          (cause: unknown) => {
+            if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+            throw cause;
+          },
+        );
+        return text === null ? 0 : text.split("\n").filter((line) => line.trim() !== "").length;
+      }).pipe(Effect.orElseSucceed(() => null));
+    };
+
     const tryInput: GameReviewSessions["Service"]["tryInput"] = (caller, input) =>
       callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
@@ -1803,6 +1850,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           const known = {
             frameIds: new Set(record.evidence?.frames.map((frame) => frame.id)),
             checkIds: new Set(record.evidence?.checks.map((check) => check.id)),
+            recipeIds: gameRecipeIds,
             itemIds: record.itemIds,
             defectIds: record.defectIds ?? [],
           };
@@ -2131,6 +2179,8 @@ export const layer = (options: { readonly stateDir: string }) => {
     return GameReviewSessions.of({
       describe,
       inputCalls,
+      noteRecipeCall,
+      recipeCalls,
       tryInput,
       start,
       toolRole,

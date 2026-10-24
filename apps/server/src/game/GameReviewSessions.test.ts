@@ -898,21 +898,26 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
   Effect.sync(() => {
     const frames = new Set(["f1", "f2"]);
     const checks = new Set(["boot", "input"]);
+    const recipeIds = new Set(["feel.buffer"]);
     const items = ["turns"];
 
     expect(
-      GameReviewSessions.parseCriticAnswer("not json", { frameIds: frames, checkIds: checks }).kind,
+      GameReviewSessions.parseCriticAnswer("not json", {
+        frameIds: frames,
+        checkIds: checks,
+        recipeIds,
+      }).kind,
     ).toBe("invalid");
     expect(
       GameReviewSessions.parseCriticAnswer(
         JSON.stringify({ defects: [], doNotRegress: [], score: 9 }),
-        { frameIds: frames, checkIds: checks },
+        { frameIds: frames, checkIds: checks, recipeIds },
       ).kind,
     ).toBe("invalid");
     expect(
       GameReviewSessions.parseCriticAnswer(
         JSON.stringify({ defects: [], doNotRegress: [{ id: "x", what: "y", frameId: "f9" }] }),
-        { frameIds: frames, checkIds: checks },
+        { frameIds: frames, checkIds: checks, recipeIds },
       ).kind,
     ).toBe("invalid");
     expect(
@@ -921,13 +926,14 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
           defects: [],
           doNotRegress: [{ id: "x", what: "y", frameId: "f1", checkId: "unmeasured" }],
         }),
-        { frameIds: frames, checkIds: checks },
+        { frameIds: frames, checkIds: checks, recipeIds },
       ).kind,
     ).toBe("invalid");
     expect(
       GameReviewSessions.parseCriticAnswer(JSON.stringify({ defects: [] }), {
         frameIds: frames,
         checkIds: checks,
+        recipeIds,
       }).kind,
     ).toBe("invalid");
 
@@ -935,14 +941,14 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
     // member erase the reported defects, so a repeat is invalid at any depth.
     const duplicateTopLevel = GameReviewSessions.parseCriticAnswer(
       '{"defects":[{"severity":"visible","what":"x","frameId":"f1","fix":"y"}],"defects":[],"doNotRegress":[]}',
-      { frameIds: frames, checkIds: checks },
+      { frameIds: frames, checkIds: checks, recipeIds },
     );
     expect(duplicateTopLevel.kind).toBe("invalid");
     if (duplicateTopLevel.kind === "invalid") expect(duplicateTopLevel.reason).toContain("repeats");
     expect(
       GameReviewSessions.parseCriticAnswer(
         '{"defects":[{"severity":"visible","what":"x","frameId":"f1","fix":"y","fix":"z"}],"doNotRegress":[]}',
-        { frameIds: frames, checkIds: checks },
+        { frameIds: frames, checkIds: checks, recipeIds },
       ).kind,
     ).toBe("invalid");
     // Deep nesting that fits the byte limit is an invalid answer, not a stack
@@ -950,14 +956,54 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
     const deep = `{"defects":${"[".repeat(8_000)}${"]".repeat(8_000)},"doNotRegress":[]}`;
     expect(Buffer.byteLength(deep, "utf8")).toBeLessThan(16 * 1024);
     expect(
-      GameReviewSessions.parseCriticAnswer(deep, { frameIds: frames, checkIds: checks }).kind,
+      GameReviewSessions.parseCriticAnswer(deep, { frameIds: frames, checkIds: checks, recipeIds })
+        .kind,
     ).toBe("invalid");
     const deepRepeat = GameReviewSessions.parseCriticAnswer(
       `{"x":${"[".repeat(8_000)}{"a":1,"a":2}${"]".repeat(8_000)}}`,
-      { frameIds: frames, checkIds: checks },
+      { frameIds: frames, checkIds: checks, recipeIds },
     );
     expect(deepRepeat.kind).toBe("invalid");
     if (deepRepeat.kind === "invalid") expect(deepRepeat.reason).toContain('"a"');
+
+    // A defect may name a recipe the critic fetched; the field is optional and
+    // only shipped ids pass, so the repair can fetch exactly that reference.
+    const withRecipe = (recipeId?: string) =>
+      JSON.stringify({
+        fundamentals,
+        defects: [
+          {
+            severity: "visible",
+            what: "The jump feels unresponsive.",
+            frameId: "f2",
+            fix: "Buffer the jump input; yes/no: a jump pressed just before landing still fires.",
+            ...(recipeId === undefined ? {} : { recipeId }),
+          },
+        ],
+        doNotRegress: [],
+      });
+    const plain = GameReviewSessions.parseCriticAnswer(withRecipe(), {
+      frameIds: frames,
+      checkIds: checks,
+      recipeIds,
+    });
+    expect(plain.kind).toBe("valid");
+    if (plain.kind === "valid") expect(plain.answer.defects[0]?.recipeId).toBeUndefined();
+    const known = GameReviewSessions.parseCriticAnswer(withRecipe("feel.buffer"), {
+      frameIds: frames,
+      checkIds: checks,
+      recipeIds,
+    });
+    expect(known.kind).toBe("valid");
+    if (known.kind === "valid") expect(known.answer.defects[0]?.recipeId).toBe("feel.buffer");
+    const unknown = GameReviewSessions.parseCriticAnswer(withRecipe("invented-recipe"), {
+      frameIds: frames,
+      checkIds: checks,
+      recipeIds,
+    });
+    expect(unknown.kind).toBe("invalid");
+    if (unknown.kind === "invalid")
+      expect(unknown.reason).toContain("recipe invented-recipe, which is not in the catalog");
 
     const ballot = (overrides: Record<string, unknown> = {}) =>
       JSON.stringify({
@@ -1017,6 +1063,19 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
       }).kind,
     ).toBe("invalid");
   }),
+);
+
+it.live("recipe catalog calls are counted per thread for review usage", () =>
+  withSession(({ service }) =>
+    Effect.gen(function* () {
+      expect(yield* service.recipeCalls(threadId)).toBe(0);
+      yield* service.noteRecipeCall(threadId);
+      yield* service.noteRecipeCall(threadId);
+      expect(yield* service.recipeCalls(threadId)).toBe(2);
+      // Another thread's calls are not this one's.
+      expect(yield* service.recipeCalls(ThreadId.make("thread:someone-else"))).toBe(0);
+    }),
+  ),
 );
 
 it.live("an oversized multibyte answer is bounded and marked truncated", () =>

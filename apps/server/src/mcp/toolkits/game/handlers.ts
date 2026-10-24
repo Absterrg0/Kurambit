@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as GameRecipes from "../../../game/GameRecipes.ts";
 import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
 import * as GameReviewApi from "../../../game/GameReviewApi.ts";
@@ -159,18 +160,30 @@ export const layerPlaytest = McpToolAccess.toLayer(GamePlaytestToolkit, playtest
 
 // A read-only toolkit over the static catalog: the transport only maps input to
 // one service method, and the service can never read the game or start work.
+// The call itself is counted against the calling thread, so loop usage can say
+// whether a role reached for know-how; a failed lookup still counts as a reach.
+const noteRecipeCall = Effect.gen(function* () {
+  const invocation = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
+  if (!Option.isSome(invocation)) return;
+  const threadId = invocation.value.thread?.threadId;
+  if (threadId === undefined) return;
+  const sessions = yield* Effect.serviceOption(GameReviewSessions.GameReviewSessions);
+  if (!Option.isSome(sessions)) return;
+  // Counting is evidence, never a reason for a retrieval to fail.
+  yield* sessions.value.noteRecipeCall(threadId).pipe(Effect.catchCause(() => Effect.void));
+});
 const recipeHandlers = {
   game_recipe_search: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const recipes = yield* GameRecipes.GameRecipes;
       return yield* recipes.search(input).pipe(Effect.mapError((error) => error.message));
-    }),
+    }).pipe(Effect.ensuring(noteRecipeCall)),
   ),
   game_recipe_get: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const recipes = yield* GameRecipes.GameRecipes;
       return yield* recipes.get(input).pipe(Effect.mapError((error) => error.message));
-    }),
+    }).pipe(Effect.ensuring(noteRecipeCall)),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameRecipeToolkit.tools>;
 export const layerRecipes = McpToolAccess.toLayer(GameRecipeToolkit, recipeHandlers);
