@@ -28,7 +28,7 @@ const inputAction = (step: GamePlaytestStep): string =>
   "holdMs" in step
     ? `held ${"keys" in step ? step.keys.join("+") : "key" in step ? step.key : "hold" in step ? step.hold : "drag"} ${step.holdMs}ms`
     : "click" in step
-      ? `clicked ${step.click} 0ms`
+      ? `clicked ${step.click}${step.x === undefined || step.y === undefined ? "" : ` at ${step.x},${step.y}`} 0ms`
       : "mouseMove" in step
         ? `mouseMove ${step.mouseMove.dx},${step.mouseMove.dy} 0ms`
         : "press" in step

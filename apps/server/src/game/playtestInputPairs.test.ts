@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { GamePlaytestStep } from "@t3tools/contracts";
-import { playtestStepWithEvidence, selectInputPairFrames } from "./playtestInputPairs.ts";
+import {
+  playtestStepAction,
+  playtestStepWithEvidence,
+  selectInputPairFrames,
+} from "./playtestInputPairs.ts";
 
 describe("input pairs", () => {
+  it("names where a click landed so a pair card shows the input", () => {
+    expect(playtestStepAction({ click: "left", x: 700, y: 120 })).toBe(
+      "clicked left at 700,120 0ms",
+    );
+    expect(playtestStepAction({ click: "left" })).toBe("clicked left 0ms");
+    expect(playtestStepAction({ keys: ["Shift", "w"], holdMs: 800 })).toBe("held Shift+w 800ms");
+    expect(playtestStepAction({ press: "Space" })).toBe("pressed Space");
+  });
+
   it("captures one before/after pair per real input and none for waits or screenshots", async () => {
     const steps: GamePlaytestStep[] = [
       { key: "ArrowRight", holdMs: 1000 },
