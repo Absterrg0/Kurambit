@@ -390,4 +390,27 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
       reference: "R4 first-person fix 5 (spec60 item 17); standard captured mouse-look controller.",
     },
   },
+  {
+    id: "look.lighting-2d",
+    version: 1,
+    title: "Give a 2D scene depth with one bounded local light",
+    genres: ["platformer", "top-down", "action"],
+    mechanics: ["lighting", "ambient-tone", "local-light"],
+    defects: ["flat-lighting", "unreadable-dark", "washed-out-world"],
+    aliases: ["2d lighting", "ambient light", "point light", "local light", "night lighting"],
+    intent:
+      "Give a 2D scene depth with a tinted ambient world, one bounded local light on the focal area, and a HUD that stays readable in the dark.",
+    why: "A warm pool over a cool ambient frame separates the player and ground from the background without flattening the screen. Use it when the brief wants night, mood or a lit focal point, not flat bright arcade art.",
+    failure:
+      "A full-screen tint that crushes detail, light with no edge, or HUD text dimmed with the world hides what the player must read.",
+    restyle:
+      "Keep the ambient tone, one bounded light and the unlit HUD. Choose this game's palette, radius and energy.",
+    verificationQuestion:
+      "With the lamp toggled off and on, does the world visibly change while the HUD stays equally readable?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference: "Godot 4 2D canvas lighting and layers; P6 lighting/look request (t80).",
+    },
+  },
 ];

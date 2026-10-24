@@ -13,6 +13,7 @@ import { loopPuzzle } from "./loop.puzzle.ts";
 import { loopRacing } from "./loop.racing.ts";
 import { loopTopDown } from "./loop.top-down.ts";
 import { loopTower } from "./loop.tower.ts";
+import { lookLighting2d } from "./look.lighting-2d.ts";
 import { readHud } from "./read.hud.ts";
 import { readOnboarding } from "./read.onboarding.ts";
 import { readSilhouette } from "./read.silhouette.ts";
@@ -49,6 +50,7 @@ export const godotRecipeAdapters: ReadonlyMap<string, GameRecipeAdapter> = new M
   ["loop.racing", adapter(loopRacing)],
   ["loop.top-down", adapter(loopTopDown)],
   ["loop.tower", adapter(loopTower)],
+  ["look.lighting-2d", adapter(lookLighting2d)],
   ["read.hud", adapter(readHud)],
   ["read.onboarding", adapter(readOnboarding)],
   ["read.silhouette", adapter(readSilhouette)],

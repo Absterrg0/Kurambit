@@ -37,6 +37,7 @@ const RECIPE_IDS = [
   "feel.hit-stop",
   "feel.pickup",
   "feel.shake",
+  "look.lighting-2d",
   "loop.card",
   "loop.dialogue",
   "loop.first-person",
@@ -71,6 +72,7 @@ const LINE_BUDGETS: Record<RecipeId, number> = {
   "loop.racing": 150,
   "loop.puzzle": 130,
   "loop.first-person": 130,
+  "look.lighting-2d": 110,
 };
 
 const workspaceRoot = (() => {
@@ -623,6 +625,18 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       );
       // The actor's fill is the advertised tunable itself, not a separate literal.
       expect(after.actor_fill).toBe("f2f2f2");
+      break;
+    case "look.lighting-2d":
+      // The first press is the baseline: the lamp is already off. The later
+      // presses bring it back and off again, so the counter records all three.
+      expect(before.lamp_on).toBe(false);
+      expect(before.toggles).toBe(1);
+      expect(after.lamp_on).toBe(false);
+      expect(after.toggles).toBe(3);
+      expect(during.some((probe) => probe.gameState.lamp_on === true)).toBe(true);
+      expect(during.some((probe) => probe.gameState.toggles === 2)).toBe(true);
+      // The boot frame was lit and the run ends dark: rendered pixels changed.
+      expect(result.responded).toBe(true);
       break;
     case "state.world":
       expect(before.locked).toBe(true);
