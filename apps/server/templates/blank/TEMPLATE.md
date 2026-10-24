@@ -51,8 +51,8 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
 
 ## Tests
 
-`game_godot_test` runs `tests/smoke_test.gd`. The shipped checks cover engine readiness
-only, so extend them with the game's actual behaviour as you build it: boot
+`game_godot_test` runs `tests/smoke_test.gd`. Keep its engine-readiness checks as you add
+a player and run values. Extend them with the game's actual behaviour as you build it: boot
 `res://scenes/main.tscn`, drive the real loop with input or physics, assert observable
 outcomes, and quit with a nonzero exit code on failure. A green smoke test on an empty
 project means the engine and the bridge work, not that a game exists.

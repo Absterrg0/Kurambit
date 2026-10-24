@@ -3,9 +3,8 @@
 ##
 ## It proves the project boots its main scene, that the GameState autoload is
 ## live, and that StudioProbe can read the real scene tree. It deliberately
-## checks no gameplay: a blank game has no player and no run values yet. When
-## you add gameplay, replace these baseline checks with checks that drive it and
-## assert observable outcomes.
+## checks no gameplay. Keep these engine checks as you add a player and run
+## values, and add checks that drive the game and assert observable outcomes.
 extends Node
 
 const MAIN_SCENE := "res://scenes/main.tscn"
@@ -73,12 +72,6 @@ func _check_probe() -> void:
 	_check(values.has("player"), "the snapshot carries player")
 	_check(values.has("hudText"), "the snapshot carries hudText")
 	_check(values.get("gameState") is Dictionary, "gameState is a Dictionary")
-	if values.get("gameState") is Dictionary:
-		_check(
-			(values["gameState"] as Dictionary).is_empty(),
-			"a blank game has no GameState values yet"
-		)
-	_check(values.get("player") == null, "a blank game has no player yet")
 	_check(values.get("hudText") is String, "hudText is a String")
 
 func _check(condition: bool, label: String) -> void:

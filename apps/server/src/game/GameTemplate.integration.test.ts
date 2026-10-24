@@ -215,6 +215,23 @@ const templateJourney = (journey: TemplateJourney) =>
             expect(playtest.blockers).toContain(
               "no gameplay baseline: the player never appeared after an input step",
             );
+
+            // Building on Blank must not invalidate its engine-readiness checks.
+            yield* Effect.promise(() =>
+              NodeFSP.appendFile(
+                NodePath.join(created.root, "godot/scripts/game_state.gd"),
+                "\nvar fixture_value := 7\n",
+              ),
+            );
+            yield* Effect.promise(() =>
+              NodeFSP.appendFile(
+                NodePath.join(created.root, "godot/scenes/main.tscn"),
+                '\n[node name="ProbeFixture" type="Node2D" parent="." groups=["player"]]\n',
+              ),
+            );
+            const extended = yield* game.test(threadId, "tests/smoke_test.gd", 60_000);
+            expect(extended.success, extended.message).toBe(true);
+            expect(extended.process?.stdout).toContain("SMOKE PASS");
           }
 
           // A second pass that stops on the pause overlay, so the evidence shows the
