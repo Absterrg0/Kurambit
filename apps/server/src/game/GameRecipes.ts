@@ -168,6 +168,9 @@ export const make = (catalog: ReadonlyArray<GameRecipeCatalogEntry>): GameRecipe
 
   const search: GameRecipes["Service"]["search"] = Effect.fn("GameRecipes.search")(
     function* (input) {
+      // `query` is the same literal alias filter as `text`; the input contract
+      // refuses two different values, so either one names the whole text filter.
+      const terms: GameRecipeSearchInput = { ...input, text: input.text ?? input.query };
       let offset = 0;
       if (input.cursor !== undefined) {
         if (!CURSOR_PATTERN.test(input.cursor)) {
@@ -181,7 +184,7 @@ export const make = (catalog: ReadonlyArray<GameRecipeCatalogEntry>): GameRecipe
       }
 
       const ranked = entries
-        .map((entry) => rankRecipe(entry, input))
+        .map((entry) => rankRecipe(entry, terms))
         .filter((ranked): ranked is RankedRecipe => ranked !== null)
         .sort(
           (left, right) =>

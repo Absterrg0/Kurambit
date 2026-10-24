@@ -199,6 +199,19 @@ it.effect("searches text as a literal, case-folded substring of aliases only", (
   ),
 );
 
+it.effect("treats query as the same literal alias filter as text", () =>
+  withRecipes(fixtureCatalog, (recipes) =>
+    Effect.gen(function* () {
+      const queried = yield* recipes.search({ query: "BUFFERING" });
+      expect(ids(queried)).toEqual(["feel.buffer"]);
+      expect(queried.recipes[0]?.matchingTags).toEqual(["jump buffering", "input buffering"]);
+
+      const none = yield* recipes.search({ query: "boost pad" });
+      expect(none).toEqual({ recipes: [], nextCursor: null });
+    }),
+  ),
+);
+
 it.effect("returns an empty page when a filter matches nothing", () =>
   withRecipes(fixtureCatalog, (recipes) =>
     Effect.gen(function* () {

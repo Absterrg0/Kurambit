@@ -234,7 +234,7 @@ const hiddenFromBallots = () => {
 };
 const GameRecipeSearchTool = Tool.make("game_recipe_search", {
   description:
-    "Search the optional game know-how catalog when an unfamiliar genre or mechanic blocks progress. genre, mechanic and defect match authored tags exactly; text matches a declared alias literally. Returns at most five ids, titles, matching tags, engines and nextCursor. Read-only; it reads no game files and starts no agent, build or model call.",
+    "Search the optional game know-how catalog when an unfamiliar genre or mechanic blocks progress. genre, mechanic and defect match authored tags exactly; text, or its synonym query, matches a declared alias literally, so a phrase with no alias match returns no recipes rather than browsing. Accepted parameters are genre, mechanic, defect, text, query and cursor; any other name is rejected. Returns at most five ids, titles, matching tags, engines and nextCursor. Read-only; it reads no game files and starts no agent, build or model call.",
   parameters: GameRecipeSearchInput,
   success: GameRecipeSearchResult,
   failure: Schema.String,
@@ -242,6 +242,8 @@ const GameRecipeSearchTool = Tool.make("game_recipe_search", {
   dependencies: recipeDependencies,
 })
   .annotate(Tool.Readonly, true)
+  // Unknown filter names must fail instead of being stripped into a browse page.
+  .annotate(Tool.Strict, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
 const GameRecipeGetTool = Tool.make("game_recipe_get", {
   description:

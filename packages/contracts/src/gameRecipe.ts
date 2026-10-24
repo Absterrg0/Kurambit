@@ -93,14 +93,30 @@ export type GameRecipeCatalogEntry = typeof GameRecipeCatalogEntry.Type;
 /** Search returns a page small enough to stay a hint, not a catalog dump. */
 export const GAME_RECIPE_PAGE_SIZE = 5;
 
+const recipeSearchText = recipeText(200);
+const foldSearchText = (value: string): string => value.trim().toLowerCase();
+
 export const GameRecipeSearchInput = Schema.Struct({
   genre: Schema.optionalKey(recipeText(48)),
   mechanic: Schema.optionalKey(recipeText(48)),
   defect: Schema.optionalKey(recipeText(48)),
   /** A literal, case-folded substring of declared aliases; never the brief. */
-  text: Schema.optionalKey(recipeText(200)),
+  text: Schema.optionalKey(recipeSearchText),
+  /**
+   * An accepted synonym for text because callers reach for `query`; it filters
+   * the same literal aliases and never becomes a browse or a semantic search.
+   */
+  query: Schema.optionalKey(recipeSearchText),
   cursor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32))),
-});
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.text === undefined ||
+      input.query === undefined ||
+      foldSearchText(input.text) === foldSearchText(input.query) ||
+      "Pass text or query for one literal alias search, not two different values.",
+  ),
+);
 export type GameRecipeSearchInput = typeof GameRecipeSearchInput.Type;
 
 export const GameRecipeSummary = Schema.Struct({

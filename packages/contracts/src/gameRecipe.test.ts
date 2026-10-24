@@ -126,6 +126,19 @@ describe("retrieval contracts", () => {
     expect(() => decodeSearch({ text: "x".repeat(201) })).toThrow();
   });
 
+  it("accepts query as the same bounded literal filter as text", () => {
+    expect(decodeSearch({ query: "dialogue" })).toEqual({ query: "dialogue" });
+    expect(decodeSearch({ text: "dialogue", query: "DIALOGUE" })).toEqual({
+      text: "dialogue",
+      query: "DIALOGUE",
+    });
+    expect(() => decodeSearch({ query: "x".repeat(201) })).toThrow();
+    expect(() => decodeSearch({ query: 7 })).toThrow();
+    expect(() => decodeSearch({ text: "jump", query: "dialogue" })).toThrow(
+      "Pass text or query for one literal alias search, not two different values.",
+    );
+  });
+
   it("defaults get's engine and reference after decoding, not in the caller", () => {
     const input = decodeGet({ id: "feel.buffer" });
     expect(input).toEqual({ id: "feel.buffer" });

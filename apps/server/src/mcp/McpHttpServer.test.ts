@@ -1243,6 +1243,46 @@ it.effect(
         expect(builderSearch).toContain('"matchingTags":["platformer","unresponsive-jump"]');
         expect(builderSearch).toContain('"engines":["godot"]');
         expect(builderSearch).toContain('"nextCursor":"5"');
+        // Actual builder calls used `query`. It is a literal alias search, so it
+        // must find the dialogue recipe instead of browsing the whole catalog.
+        const querySearch = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { query: "dialogue" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(querySearch).toContain('"id":"loop.dialogue"');
+        expect(querySearch).toContain('"matchingTags":["dialogue tree"]');
+        expect(querySearch).not.toContain('"id":"feel.buffer"');
+        // A phrase with no declared alias match is an honest empty page, not a
+        // semantic guess and not a browse.
+        const queryMiss = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { query: "dragon riding school" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(queryMiss).toContain('"recipes":[]');
+        // An unrecognized filter name is refused with the field named instead of
+        // silently dropping all search intent and returning a catalog page.
+        const misspelled = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { genere: "dialogue" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(misspelled).toContain('"code":-32602');
+        expect(misspelled).toContain("genere");
+        expect(misspelled).not.toContain('"recipes"');
+        // Two different literal searches in one call are refused, not merged or
+        // resolved by precedence.
+        const conflicting = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { text: "jump", query: "dialogue" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(conflicting).toContain("text");
+        expect(conflicting).toContain("query");
+        expect(conflicting).not.toContain('"recipes"');
+        // The corrected call still returns the recipe the caller wanted.
+        const corrected = yield* rpc("builder", builder, "tools/call", {
+          name: "game_recipe_search",
+          arguments: { genre: "dialogue" },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(corrected).toContain('"id":"loop.dialogue"');
         const builderGet = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_get",
           arguments: { id: "loop.platformer" },
