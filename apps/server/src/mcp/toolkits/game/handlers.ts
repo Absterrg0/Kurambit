@@ -152,6 +152,13 @@ const playtestHandlers = {
       return yield* game.webPlaytest(scope.thread.threadId, input);
     }),
   ),
+  game_verify: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.verify(scope.thread.threadId, input);
+    }),
+  ),
 } satisfies McpToolAccess.Handlers<typeof GamePlaytestToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
 /**

@@ -31,6 +31,9 @@ import {
   type GameArtImportResult,
   type GameOperationEvent,
   type GameProcessResult,
+  type GamePlaytestStep,
+  type GameVerifyResult,
+  type GameVerifyStage,
   type ThreadId,
   fitScreenshotsToBudget,
   gameProductionBudgetMs,
@@ -156,6 +159,15 @@ export class GameService extends Context.Service<
       experimentDirectory?: string,
       imageResponse?: "persisted",
     ) => Effect.Effect<GameWebPlaytestResult, GameOperationError>;
+    /**
+     * One complete iteration in one admitted operation: check, the canonical
+     * suite, a Web export, then a recorded playtest of those exact bytes. Stops
+     * at the first failed stage; mechanical success is not a quality verdict.
+     */
+    readonly verify: (
+      threadId: ThreadId,
+      input: GameWebPlaytestInput,
+    ) => Effect.Effect<GameVerifyResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
     readonly scenariosRun: (
       threadId: ThreadId,
@@ -221,6 +233,51 @@ const decodeText = <A>(decode: (text: string) => A, text: string | null): A | nu
   }
 };
 const isGameOperationError = Schema.is(GameOperationError);
+const isInputStep = (step: GamePlaytestStep) => !("waitMs" in step) && !("screenshot" in step);
+const verifyInputIssues = (input: GameWebPlaytestInput): readonly string[] => {
+  const issues = [...playtestInputIssues(input)];
+  if (!(input.steps ?? []).some(isInputStep))
+    issues.push(
+      "Provide at least one real input step (press, hold, key, keys, click, drag or mouseMove). A wait-only route cannot prove the game responds, and game_submit needs a playtest that dispatched input.",
+    );
+  if (input.exactSize === true)
+    issues.push(
+      "game_verify records the build's playtest, so exactSize is not accepted here; use game_web_playtest for a review-only layout capture.",
+    );
+  return issues;
+};
+const playtestCapture = (
+  baseViewport: { readonly width: number; readonly height: number },
+  input: GameWebPlaytestInput,
+) =>
+  input.exactSize === true && input.width !== undefined && input.height !== undefined
+    ? { width: input.width, height: input.height, scale: 1 }
+    : integerScaledCapture(baseViewport, {
+        width: input.width ?? PLAYTEST_DEFAULT_CAPTURE.width,
+        height: input.height ?? PLAYTEST_DEFAULT_CAPTURE.height,
+      });
+const captureIssue = (baseViewport: { readonly width: number; readonly height: number }) =>
+  `The game's base viewport (${baseViewport.width}×${baseViewport.height}) does not fit the capture bounds (${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension} px). Change display/window/size in project.godot first.`;
+const pointerIssues = (
+  input: GameWebPlaytestInput,
+  capture: { readonly width: number; readonly height: number },
+): readonly string[] => {
+  const issues: string[] = [];
+  for (const [index, step] of (input.steps ?? []).entries()) {
+    const points = "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
+    if (
+      points.some(
+        (point) =>
+          (point.x !== undefined && (point.x < 0 || point.x > capture.width)) ||
+          (point.y !== undefined && (point.y < 0 || point.y > capture.height)),
+      )
+    )
+      issues.push(
+        `Step ${index + 1} pointer coordinates exceed the frozen ${capture.width}×${capture.height} viewport.`,
+      );
+  }
+  return issues;
+};
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -1215,37 +1272,22 @@ const make = Effect.gen(function* () {
               detail:
                 "An exact-size window capture is review evidence; pass an experiment directory instead of recording it as the build's playtest.",
             });
-          const capture =
-            input.exactSize === true && input.width !== undefined && input.height !== undefined
-              ? { width: input.width, height: input.height, scale: 1 }
-              : integerScaledCapture(baseViewport, {
-                  width: input.width ?? PLAYTEST_DEFAULT_CAPTURE.width,
-                  height: input.height ?? PLAYTEST_DEFAULT_CAPTURE.height,
-                });
+          const capture = playtestCapture(baseViewport, input);
           if (capture === null)
             return yield* new GameOperationError({
               operation: "Web playtest",
               path: root,
               reason: "invalid-input",
-              detail: `The game's base viewport (${baseViewport.width}×${baseViewport.height}) does not fit the capture bounds (${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension} px). Change display/window/size in project.godot first.`,
+              detail: captureIssue(baseViewport),
             });
-          for (const [index, step] of (input.steps ?? []).entries()) {
-            const points =
-              "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
-            if (
-              points.some(
-                (point) =>
-                  (point.x !== undefined && (point.x < 0 || point.x > capture.width)) ||
-                  (point.y !== undefined && (point.y < 0 || point.y > capture.height)),
-              )
-            )
-              return yield* new GameOperationError({
-                operation: "Web playtest",
-                path: root,
-                reason: "invalid-input",
-                detail: `Step ${index + 1} pointer coordinates exceed the frozen ${capture.width}×${capture.height} viewport.`,
-              });
-          }
+          const outside = pointerIssues(input, capture);
+          if (outside.length > 0)
+            return yield* new GameOperationError({
+              operation: "Web playtest",
+              path: root,
+              reason: "invalid-input",
+              detail: outside.join("\n"),
+            });
           const result = yield* playtest.run({
             executable,
             url,
@@ -1818,6 +1860,244 @@ const make = Effect.gen(function* () {
               : "design-draft",
       });
     });
+  /**
+   * The one Web export decision for the direct tool and `game_verify`: while a
+   * round is open its export is the challenger and must not replace the build
+   * Play serves; outside one it is a normal publish. A caller that names a
+   * round fails when that round expired instead of silently publishing.
+   */
+  const webExport = (root: string, runId: string | null, roundId?: string) =>
+    Effect.gen(function* () {
+      yield* refuseWhileUnapproved(root, "export");
+      const active = yield* runningRound(root);
+      if (roundId !== undefined) {
+        if (active === null || active.id !== roundId)
+          return yield* new GameOperationError({
+            operation: "Export Web",
+            path: root,
+            reason: "invalid-input",
+            detail:
+              "That repair round is no longer running; its export was not published or recorded.",
+          });
+        return yield* exportGame(root, "Web", { mode: "candidate", roundId: active.id }, runId);
+      }
+      return yield* exportGame(
+        root,
+        "Web",
+        active === null ? { mode: "publish" } : { mode: "candidate", roundId: active.id },
+        runId,
+      );
+    });
+  /** The policy's canonical suite; only it owns the test stage. */
+  const canonicalTest = (root: string, timeoutMs = 60_000) =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(root);
+      const identity = yield* designApprovals.readPolicy(root, manifest);
+      return yield* ownStage(
+        root,
+        "test",
+        "test",
+        testGame(root, identity.policy.testSuite, timeoutMs, identity.revision),
+      );
+    });
+  /**
+   * One iteration, one lock. Every stage records its own qualification result
+   * through the same core the individual tools use; this method only sequences
+   * them and refuses to let stages that covered different sources count as one
+   * verification.
+   */
+  const verifyGame = (root: string, input: GameWebPlaytestInput, runId: string | null) =>
+    Effect.gen(function* () {
+      const issues = verifyInputIssues(input);
+      if (issues.length > 0)
+        return yield* new GameOperationError({
+          operation: "verify",
+          path: root,
+          reason: "invalid-input",
+          detail: issues.join("\n"),
+        });
+      yield* refuseWhileUnapproved(root, "verify");
+      // Pointer bounds need the base viewport. Reading project.godot costs no
+      // engine work, so a mistake here never becomes a build. The playtest
+      // rechecks the same bounds against the exported artifact.
+      const pointer = yield* Effect.gen(function* () {
+        const manifest = yield* projects.read(root);
+        const project = yield* Effect.promise(() =>
+          NodeFSP.readFile(
+            NodePath.join(root, manifest.godotProject, "project.godot"),
+            "utf8",
+          ).catch(() => null),
+        );
+        if (project === null) return [];
+        const baseViewport = parseGodotViewport(project);
+        const capture = playtestCapture(baseViewport, input);
+        return capture === null ? [captureIssue(baseViewport)] : pointerIssues(input, capture);
+      });
+      if (pointer.length > 0)
+        return yield* new GameOperationError({
+          operation: "verify",
+          path: root,
+          reason: "invalid-input",
+          detail: pointer.join("\n"),
+        });
+      const completed: GameVerifyStage[] = [];
+
+      const check = yield* checkGame(root);
+      const checkRecord = yield* qualification.stageRecord(root, "check");
+      if (!check.ok)
+        return {
+          success: false,
+          message:
+            "Stopped at the Godot check; the canonical test, Web export and playtest did not run. Check returned the exact errors.",
+          completed,
+          failedStage: "check" as const,
+          check,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      if (checkRecord === null || checkRecord.outcome !== "passed" || checkRecord.sourceId === null)
+        return {
+          success: false,
+          message: `Stopped at the Godot check: ${checkRecord?.detail ?? "its qualification record is missing, so the result cannot be tied to the current sources."} The later stages did not run.`,
+          completed,
+          failedStage: "check" as const,
+          check,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      completed.push("check");
+
+      const test = yield* canonicalTest(root);
+      const testRecord = yield* qualification.stageRecord(root, "test");
+      if (!test.success)
+        return {
+          success: false,
+          message:
+            "Stopped at the canonical test; the Web export and playtest did not run. The test result has the exact errors and log path.",
+          completed,
+          failedStage: "test" as const,
+          check,
+          test,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      if (testRecord === null || testRecord.outcome !== "passed" || testRecord.sourceId === null)
+        return {
+          success: false,
+          message: `Stopped at the canonical test: ${testRecord?.detail ?? "its qualification record is missing, so the result cannot be tied to the current sources."} The export and playtest did not run.`,
+          completed,
+          failedStage: "test" as const,
+          check,
+          test,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      if (testRecord.sourceId !== checkRecord.sourceId)
+        return {
+          success: false,
+          message:
+            "Stopped at the canonical test: the game sources changed after the check, so that check does not cover this test. The export and playtest did not run; verify again on the current sources.",
+          completed,
+          failedStage: "test" as const,
+          check,
+          test,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      completed.push("test");
+
+      const exported = yield* webExport(root, runId);
+      if (!exported.success)
+        return {
+          success: false,
+          message:
+            "Stopped at the Web export; the recorded playtest did not run. The export result has the exact errors and log path.",
+          completed,
+          failedStage: "export" as const,
+          check,
+          test,
+          export: exported,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      const exportRecord = yield* qualification.stageRecord(root, "export");
+      const build =
+        exportRecord !== null &&
+        exportRecord.outcome === "passed" &&
+        exportRecord.buildId !== null &&
+        exportRecord.buildDirectory !== undefined
+          ? {
+              buildId: exportRecord.buildId,
+              directory: exportRecord.buildDirectory,
+              path: NodePath.join(root, exportRecord.buildDirectory, "index.html"),
+            }
+          : null;
+      if (build === null || exportRecord === null)
+        return {
+          success: false,
+          message:
+            "Stopped at the Web export: the export reported success but no usable build record was written, so no playtest could be tied to its bytes.",
+          completed,
+          failedStage: "export" as const,
+          check,
+          test,
+          export: exported,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      if (exportRecord.sourceId !== checkRecord.sourceId)
+        return {
+          success: false,
+          message:
+            "Stopped at the Web export: the game sources changed after the check and canonical test, so that check does not cover this build. The recorded playtest did not run; verify again on the current sources.",
+          completed,
+          failedStage: "export" as const,
+          check,
+          test,
+          export: exported,
+          build,
+          screenshots: [],
+        } satisfies GameVerifyResult;
+      completed.push("export");
+
+      const played = yield* webPlaytest(root, input, runId, build.buildId);
+      const { screenshots, ...playtest } = played;
+      const playtestRecord = yield* qualification.stageRecord(root, "playtest");
+      // A playtest is only usable when its record names the same artifact, which
+      // is what game_submit's submission facts read.
+      if (playtestRecord === null || playtestRecord.buildId !== build.buildId)
+        return {
+          success: false,
+          message:
+            "The playtest finished but its record does not name the exported build, so submission facts cannot use it. Inspect the frames; run game_verify again.",
+          completed,
+          failedStage: "playtest" as const,
+          check,
+          test,
+          export: exported,
+          build,
+          playtest,
+          screenshots,
+        } satisfies GameVerifyResult;
+      if (!played.success)
+        return {
+          success: false,
+          message: `The recorded playtest did not pass: ${played.message}`,
+          completed,
+          failedStage: "playtest" as const,
+          check,
+          test,
+          export: exported,
+          build,
+          playtest,
+          screenshots,
+        } satisfies GameVerifyResult;
+      completed.push("playtest");
+      return {
+        success: true,
+        message: `Mechanical verification passed for build ${build.buildId}: check, canonical test, Web export and a recorded playtest of those exact bytes. This is not a quality verdict or all-criteria certification; inspect the frames, then submit the build you stand behind.`,
+        completed,
+        check,
+        test,
+        export: exported,
+        build,
+        playtest,
+        screenshots,
+      } satisfies GameVerifyResult;
+    });
   /** Runs one Godot script and returns what the test stage would record for it. */
   const testGame = (root: string, script: string, timeoutMs: number, policyRevision?: string) =>
     Effect.gen(function* () {
@@ -2058,38 +2338,15 @@ const make = Effect.gen(function* () {
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target, options) =>
       withRoot(threadId, `Export ${target}`, (root) =>
-        Effect.gen(function* () {
-          yield* refuseWhileUnapproved(root, "export");
-          // While a round runs, an export is that round's challenger: it must
-          // not replace the build Play serves. Outside a round the builder's
-          // export is the publish, so development stays immediate. A caller
-          // that names a round is telling the server which loop it belongs to;
-          // an expired round must fail rather than become a direct publication.
-          const active = target === "Web" ? yield* runningRound(root) : null;
-          const exporter = yield* exporterRun(threadId);
-          if (options?.roundId !== undefined) {
-            if (active === null || active.id !== options.roundId)
-              return yield* new GameOperationError({
-                operation: "Export Web",
-                path: root,
-                reason: "invalid-input",
-                detail:
-                  "That repair round is no longer running; its export was not published or recorded.",
-              });
-            return yield* exportGame(
-              root,
-              target,
-              { mode: "candidate", roundId: active.id },
-              exporter,
-            );
-          }
-          return yield* exportGame(
-            root,
-            target,
-            active === null ? { mode: "publish" } : { mode: "candidate", roundId: active.id },
-            exporter,
-          );
-        }),
+        target === "Web"
+          ? Effect.gen(function* () {
+              const exporter = yield* exporterRun(threadId);
+              return yield* webExport(root, exporter, options?.roundId);
+            })
+          : Effect.gen(function* () {
+              yield* refuseWhileUnapproved(root, "export");
+              return yield* exportGame(root, target, { mode: "publish" }, null);
+            }),
       ),
     native: (threadId, options) =>
       withRoot(threadId, "Native game", (root) =>
@@ -2110,6 +2367,13 @@ const make = Effect.gen(function* () {
     webPlaytestBuild: (threadId, buildId, input, experimentDirectory, imageResponse) =>
       withRoot(threadId, "Web playtest", (root) =>
         webPlaytest(root, input, null, buildId, experimentDirectory, imageResponse),
+      ),
+    verify: (threadId, input) =>
+      withRoot(threadId, "Game verify", (root) =>
+        Effect.gen(function* () {
+          const exporter = yield* exporterRun(threadId);
+          return yield* verifyGame(root, input, exporter);
+        }),
       ),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     scenariosRun: (threadId) => withRoot(threadId, "Godot scenarios", scenariosRun),

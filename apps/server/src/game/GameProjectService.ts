@@ -543,13 +543,13 @@ const make = Effect.gen(function* () {
   // treats "the usual checks" as license to drive the godot CLI by hand — which skips
   // the recorded verdicts the Game panel and the harness depend on.
   const buildAfterApproval =
-    "The design is approved. Build it by following AGENTS.md's steps. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Finish by calling game_submit and sharing the game_preview URL.";
+    "The design is approved. Build it by following AGENTS.md's steps. The approved revision binds you: implement every acceptance criterion, and never remove or weaken one silently. If scope has to change, update DESIGN.md and tell me it needs re-approval on the Design tab; staging stays locked until I approve the new revision. Use game_verify with a real input route for each complete iteration (it checks, runs the canonical suite, exports Web and records a playtest of those exact bytes); use the individual game_* tools for narrower fixes, inspect the frames, then game_submit and share the game_preview URL.";
   /** The one turn a change request sends: rewrite the contract, then stop. */
   const changeRequestMessage = (text: string) =>
     `Change requested: ${text}\n\nFirst update DESIGN.md: describe the change and add or adjust acceptance criteria that prove it. Keep every existing criterion unless the change removes that feature; if it does, say so under a "Removed:" line naming the criterion id (for example "- Removed: owl-menu-hint"), and end the turn for review. Do not build until approved.`;
   /** The turn an approved revision dispatches: implement it, then the same bar. */
   const implementChangeMessage =
-    "The change request is approved. Implement the approved revision now on the current sources by following AGENTS.md's steps, then call game_submit and report the results and the game_preview URL.";
+    "The change request is approved. Implement the approved revision now on the current sources by following AGENTS.md's steps. Use game_verify with a real input route for the complete iteration and targeted game_* tools for narrower fixes; inspect the frames, then call game_submit and report the results and the game_preview URL.";
   /**
    * Sends the approval's one build turn, reconciling the persisted attempt
    * first. The command id is the orchestration idempotency key, so after a crash

@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, RunId, ThreadId } from "./baseSchemas.ts";
@@ -847,6 +848,46 @@ export const GameCheckResult = Schema.Struct({
   durationMs: Schema.Number,
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
+/** The four stages a complete verification runs, in order. */
+export const GameVerifyStage = Schema.Literals(["check", "test", "export", "playtest"]);
+export type GameVerifyStage = typeof GameVerifyStage.Type;
+/**
+ * The playtest evidence without its frame bytes: `game_verify` returns those at
+ * the result's top level so the MCP image transport attaches them once.
+ */
+export const GameVerifyPlaytest = Schema.Struct(
+  Struct.omit(GameWebPlaytestResult.fields, ["screenshots"]),
+);
+export type GameVerifyPlaytest = typeof GameVerifyPlaytest.Type;
+/** The exported artifact a verification played, by exact recorded identity. */
+export const GameVerifyBuild = Schema.Struct({
+  buildId: Schema.String,
+  /** Game-relative immutable build directory. */
+  directory: Schema.String,
+  /** Absolute path to the build's entry document. */
+  path: Schema.String,
+});
+export type GameVerifyBuild = typeof GameVerifyBuild.Type;
+/**
+ * One complete iteration's mechanical evidence. `success` covers only the
+ * stages this call ran; quality and design acceptance remain model judgment.
+ */
+export const GameVerifyResult = Schema.Struct({
+  success: Schema.Boolean,
+  message: Schema.String,
+  /** Stages whose recorded result passed and matched the same sources, in order. */
+  completed: Schema.Array(GameVerifyStage),
+  /** The stage that stopped the run, absent only when all four passed. */
+  failedStage: Schema.optionalKey(GameVerifyStage),
+  check: Schema.optionalKey(GameCheckResult),
+  test: Schema.optionalKey(GameActionResult),
+  export: Schema.optionalKey(GameActionResult),
+  build: Schema.optionalKey(GameVerifyBuild),
+  playtest: Schema.optionalKey(GameVerifyPlaytest),
+  /** Playtest frames, kept at the top level for the image transport. */
+  screenshots: Schema.Array(GamePlaytestScreenshot),
+});
+export type GameVerifyResult = typeof GameVerifyResult.Type;
 export const GameSceneNode = Schema.Struct({
   /** Scene-relative node path; "." is the scene root. */
   path: Schema.String,

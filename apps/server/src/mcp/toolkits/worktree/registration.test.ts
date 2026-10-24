@@ -154,6 +154,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "game_godot_test",
         "game_scenarios_run",
         "game_export",
+        "game_verify",
         "game_preview",
         "game_run_native",
         "game_stop",

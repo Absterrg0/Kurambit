@@ -5,6 +5,7 @@ import {
   GameRecipeToolkit,
   GameWebPlaytestTool,
   GameTryInputTool,
+  GameVerifyTool,
   GameReviewAnswerToolkit,
 } from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
@@ -741,6 +742,20 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
     (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
     "playtest",
     (error) => (error instanceof Error ? error.message : "Game input experiment failed."),
+  );
+  yield* registerImageTool(
+    GameVerifyTool,
+    (payload) =>
+      built
+        .handle("game_verify", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "verify",
+    (error) => (error instanceof Error ? error.message : "Game verification failed."),
   );
 });
 

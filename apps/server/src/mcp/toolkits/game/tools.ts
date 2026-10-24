@@ -34,6 +34,7 @@ import {
   GameWebPlaytestInput,
   GameTryInput,
   GameWebPlaytestResult,
+  GameVerifyResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as GameRecipes from "../../../game/GameRecipes.ts";
@@ -191,6 +192,26 @@ const StopTool = Tool.make("game_stop", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, false);
+const hiddenFromReviewChildren = () => {
+  const fiber = Fiber.getCurrent();
+  if (fiber === undefined) return true;
+  const role = Context.getOrUndefined(
+    fiber.context,
+    McpInvocationContext.McpInvocationContext,
+  )?.gameReviewRole;
+  return role === null || role === undefined;
+};
+const VerifyTool = Tool.make("game_verify", {
+  description:
+    "Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, a Web export (a normal publish outside a review round, the round's candidate during one), and a recorded playtest of those exact exported bytes with the steps you supply. Give it at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only route proves nothing and game_submit needs a responding playtest. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. Inspect the returned frames, then game_submit the build you stand behind. Mechanical success is not a quality verdict or all-criteria certification. Individual game_* tools remain available for narrower fixes and diagnostics.",
+  parameters: GameWebPlaytestInput,
+  success: GameVerifyResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromReviewChildren);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description:
     "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Use this as the final web check instead of building your own browser tooling.",
@@ -203,6 +224,7 @@ const WebPlaytestTool = Tool.make("game_web_playtest", {
 }).annotate(Tool.Readonly, false);
 // Exported for the image-content transport registration in McpHttpServer.
 export const GameWebPlaytestTool = WebPlaytestTool;
+export const GameVerifyTool = VerifyTool;
 export const GameTryInputTool = Tool.make("game_try_input", {
   description:
     "Test a gameplay hypothesis from a fresh headless boot. Defaults to the frozen build under review for critics, or the current game for builders/repair children. Use press, hold + holdMs, click (+ x/y), drag {from,to} + holdMs, or waitMs. Returns labelled before/after frames, pixel deltas, bridge snapshot changes and console errors. Critic frames have citable frameId values and are recorded in the round evidence. Limits: 12 steps, 10 seconds per step, 30 seconds total, 32 frames, 6 calls per provider run; captureEveryMs defaults to 1000 and must be at least 100. Ballots cannot use this tool.",
@@ -220,7 +242,7 @@ export const GameTryInputTool = Tool.make("game_try_input", {
         ?.gameReviewRole !== "ballot"
     );
   });
-export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool, GameTryInputTool);
+export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool, GameTryInputTool, VerifyTool);
 
 const recipeDependencies = [GameRecipes.GameRecipes];
 /** Ballots keep frozen comparison context; retrieval is hidden and refused. */
@@ -259,15 +281,6 @@ const GameRecipeGetTool = Tool.make("game_recipe_get", {
 export const GameRecipeToolkit = Toolkit.make(GameRecipeSearchTool, GameRecipeGetTool);
 
 const artDependencies = [GameArtKits.GameArtKits];
-const hiddenFromReviewChildren = () => {
-  const fiber = Fiber.getCurrent();
-  if (fiber === undefined) return true;
-  const role = Context.getOrUndefined(
-    fiber.context,
-    McpInvocationContext.McpInvocationContext,
-  )?.gameReviewRole;
-  return role === null || role === undefined;
-};
 const GameArtSearchTool = Tool.make("game_art_search", {
   description:
     "Search Game Studio's optional pinned CC0 art kits before choosing art. style matches an authored tag exactly (pixel-art, top-down, dungeon, fantasy, roguelike); text matches a declared word or phrase literally. Returns stable kit ids, contents, atlas dimensions, license and source. Nothing is imported and no kit is picked for you: use a kit only when it fits BRIEF.md and the game's art direction. Read-only; reads no game files and starts no work.",

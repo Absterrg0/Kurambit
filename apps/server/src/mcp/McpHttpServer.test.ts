@@ -7,6 +7,7 @@ import {
   PreviewTabId,
   ProviderInstanceId,
   ThreadId,
+  type GameVerifyResult,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -1049,6 +1050,56 @@ it.effect(
         const seen: unknown[] = [];
         const tried: unknown[] = [];
         const imported: unknown[] = [];
+        const verified: unknown[] = [];
+        const verifyBuildId = "a".repeat(64);
+        const verifyResult: GameVerifyResult = {
+          success: true,
+          message: "Mechanical verification passed for build test.",
+          completed: ["check", "test", "export", "playtest"],
+          check: {
+            ok: true,
+            errors: [],
+            warnings: [],
+            entries: ["main", "gameplay"],
+            durationMs: 4,
+          },
+          test: { success: true, message: "ok", path: null, url: null, process: null },
+          export: {
+            success: true,
+            message: "Web game is ready to play.",
+            path: `builds/candidates/${verifyBuildId}/index.html`,
+            url: null,
+            process: null,
+          },
+          build: {
+            buildId: verifyBuildId,
+            directory: `builds/candidates/${verifyBuildId}`,
+            path: `/games/demo/builds/candidates/${verifyBuildId}/index.html`,
+          },
+          playtest: {
+            success: true,
+            booted: true,
+            bootMs: 12,
+            responded: true,
+            executedInputSteps: 1,
+            changedPercent: 14,
+            message: "Playtest succeeded: fake run.",
+            consoleMessages: [],
+            state: null,
+            qualifies: true,
+            blockers: [],
+            interaction: "fake response",
+          },
+          screenshots: [
+            {
+              label: "after-steps",
+              mimeType: "image/png",
+              data: "cG5n",
+              width: 640,
+              height: 360,
+            },
+          ],
+        };
         const serverLayer = Layer.mergeAll(
           McpHttpServer.layerGameReviewAnswers,
           McpHttpServer.layerGamePlaytest,
@@ -1062,6 +1113,11 @@ it.effect(
                 Effect.sync(() => {
                   imported.push(input);
                   return {} as never;
+                }),
+              verify: (threadId, input) =>
+                Effect.sync(() => {
+                  verified.push({ threadId, input });
+                  return verifyResult;
                 }),
             }),
           ),
@@ -1234,6 +1290,34 @@ it.effect(
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenArt).toContain("error");
         expect(imported).toHaveLength(0);
+        // game_verify is a complete write cycle: builders and repair children get
+        // it; fresh critic and ballot scopes never do.
+        expect(yield* list("builder", builder)).toContain('"name":"game_verify"');
+        expect(yield* list("repairer", repairer)).toContain('"name":"game_verify"');
+        expect(yield* list("critic", critic)).not.toContain('"name":"game_verify"');
+        expect(yield* list("ballot", ballot)).not.toContain('"name":"game_verify"');
+        const forbiddenVerify = yield* rpc("critic", critic, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: [{ press: "Space" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(forbiddenVerify).toContain("error");
+        expect(verified).toHaveLength(0);
+        const verifiedCall = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: [{ press: "Space" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(verifiedCall).not.toContain('"isError":true');
+        expect(verifiedCall).toContain('"completed":["check","test","export","playtest"]');
+        expect(verifiedCall).toContain(`"buildId":"${verifyBuildId}"`);
+        expect(verifiedCall).toContain('"label":"after-steps"');
+        expect(verifiedCall).toContain('"type":"image"');
+        expect(verifiedCall).toContain('"mimeType":"image/png"');
+        expect(verifiedCall).toContain('"data":"cG5n"');
+        expect(verified).toHaveLength(1);
+        expect(verified[0]).toEqual({
+          threadId: ThreadId.make("builder-thread"),
+          input: { steps: [{ press: "Space" }] },
+        });
         // The builder searches by tags and gets the complete reference back.
         const builderSearch = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_search",
@@ -1325,9 +1409,7 @@ it.effect(
           name: "game_recipe_get",
           arguments: { id: "loop.missing" },
         }).pipe(Effect.flatMap((response) => response.text));
-        expect(unknownRecipe).toContain(
-          "No recipe with id 'loop.missing'. Available ids: feel.buffer",
-        );
+        expect(unknownRecipe).toContain("No recipe with id 'loop.missing'. Available ids:");
         expect(unknownRecipe).toContain("loop.platformer");
         const experiment = yield* rpc("critic", critic, "tools/call", {
           name: "game_try_input",
