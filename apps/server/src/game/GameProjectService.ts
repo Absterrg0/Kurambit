@@ -1309,15 +1309,20 @@ const make = Effect.gen(function* () {
             path: newestWeb.relative,
             updatedAt: newestWeb.updatedAt,
           });
-        try {
-          const stat = await NodeFSP.stat(NodePath.join(root, "builds/linux/game.x86_64"));
-          found.push({
-            target: "Linux",
-            path: "builds/linux/game.x86_64",
-            updatedAt: stat.mtime.toISOString(),
-          });
-        } catch {
-          /* A game need not have been built yet. */
+        for (const [target, relative] of [
+          ["Linux", "builds/linux/game.x86_64"],
+          ["Windows", "builds/windows/game.exe"],
+        ] as const) {
+          try {
+            const stat = await NodeFSP.stat(NodePath.join(root, relative));
+            found.push({
+              target,
+              path: relative,
+              updatedAt: stat.mtime.toISOString(),
+            });
+          } catch {
+            /* A game need not have been built for every platform. */
+          }
         }
         return [
           designPresent ? "DESIGN.md" : null,

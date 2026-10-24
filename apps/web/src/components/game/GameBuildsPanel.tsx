@@ -4,6 +4,7 @@ import {
   DownloadIcon,
   FolderOpenIcon,
   Gamepad2Icon,
+  LaptopIcon,
   MonitorIcon,
   ScrollTextIcon,
   TriangleAlertIcon,
@@ -21,9 +22,11 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { Button } from "../ui/button";
 
 type BuildEntry = GameStatus["builds"][number];
+type ExportTarget = "Windows" | "Linux";
+const BUILD_TARGETS = ["Web", "Windows", "Linux"] as const;
 
 const BUILD_META: Record<
-  string,
+  (typeof BUILD_TARGETS)[number],
   { title: string; body: string; icon: typeof Gamepad2Icon; play: boolean }
 > = {
   Web: {
@@ -32,10 +35,16 @@ const BUILD_META: Record<
     icon: Gamepad2Icon,
     play: true,
   },
+  Windows: {
+    title: "Windows build",
+    body: "A standalone 64-bit Windows build for Windows PCs. Play still serves the Web build.",
+    icon: MonitorIcon,
+    play: false,
+  },
   Linux: {
     title: "Linux build",
-    body: "A standalone build for Linux desktops.",
-    icon: MonitorIcon,
+    body: "A standalone build for Linux desktops. Play still serves the Web build.",
+    icon: LaptopIcon,
     play: false,
   },
 };
@@ -48,7 +57,7 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay,
   canOperate,
   onPlay,
-  onExportLinux,
+  onExport,
 }: {
   threadRef: ScopedThreadRef;
   builds: readonly BuildEntry[];
@@ -57,7 +66,7 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   canOperate: boolean;
   onPlay: () => void;
-  onExportLinux: () => void;
+  onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
   const [checked, setChecked] = useState<GameStatus["sourcesDifferFromPlay"] | null>(null);
@@ -89,8 +98,8 @@ export function GameBuildsPanel({
         </Button>
         {checkError ? <span role="alert">{checkError}</span> : null}
       </div>
-      {(["Web", "Linux"] as const).map((target) => {
-        const meta = BUILD_META[target]!;
+      {BUILD_TARGETS.map((target) => {
+        const meta = BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
         const stale = target === "Web" && build !== undefined && webBuildStale;
         const Icon = meta.icon;
@@ -133,7 +142,9 @@ export function GameBuildsPanel({
                       size="sm"
                       variant="outline"
                       disabled={!canOperate}
-                      onClick={onExportLinux}
+                      onClick={() => {
+                        if (target !== "Web") onExport(target);
+                      }}
                     >
                       <DownloadIcon className="size-3.5" aria-hidden="true" />
                       Export again
@@ -153,9 +164,16 @@ export function GameBuildsPanel({
                   Build & play
                 </Button>
               ) : (
-                <Button size="sm" variant="outline" disabled={!canOperate} onClick={onExportLinux}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canOperate}
+                  onClick={() => {
+                    if (target !== "Web") onExport(target);
+                  }}
+                >
                   <DownloadIcon className="size-3.5" aria-hidden="true" />
-                  Export Linux
+                  Export {target}
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>

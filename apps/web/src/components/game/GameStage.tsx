@@ -7,6 +7,7 @@ import {
   Gamepad2Icon,
   MaximizeIcon,
   MinimizeIcon,
+  MonitorIcon,
   MonitorPlayIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
@@ -58,6 +59,7 @@ const BUSY_LABELS: Record<GameAction, string> = {
   native: "Starting the native game",
   stop: "Stopping",
   "export-linux": "Exporting the Linux build",
+  "export-windows": "Exporting the Windows build",
   verify: "Verifying game tools",
 };
 
@@ -264,7 +266,7 @@ export function GameStage({
       setError(result.value.message);
     } else {
       setMessage(result.value.message);
-      if (stageAction === "export-linux") setTab("builds");
+      if (stageAction === "export-linux" || stageAction === "export-windows") setTab("builds");
     }
     refresh();
   };
@@ -509,6 +511,13 @@ export function GameStage({
               </MenuItem>
               <MenuItem
                 disabled={!canOperate || building}
+                onClick={() => void perform("export-windows")}
+              >
+                <MonitorIcon />
+                Export Windows build
+              </MenuItem>
+              <MenuItem
+                disabled={!canOperate || building}
                 onClick={() => void perform("export-linux")}
               >
                 <DownloadIcon />
@@ -619,7 +628,9 @@ export function GameStage({
             setTab("play");
             void perform("preview");
           }}
-          onExportLinux={() => void perform("export-linux")}
+          onExport={(target) =>
+            void perform(target === "Windows" ? "export-windows" : "export-linux")
+          }
         />
       ) : null}
       {chatCollapsed || fullscreen ? null : (

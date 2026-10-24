@@ -160,8 +160,8 @@ const ScenariosTool = Tool.make("game_scenarios_run", {
 }).annotate(Tool.Readonly, false);
 const ExportTool = Tool.make("game_export", {
   description:
-    "Import and export this thread's game with the Web or Linux release preset. Verifies matching Godot export templates and nonempty build output. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
-  parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux"]) }),
+    "Import and export this thread's game with the Web, Windows or Linux release preset. Windows produces builds/windows/game.exe, a 64-bit x86_64 executable with its game data embedded; it has not been run on Windows. Linux produces builds/linux/game.x86_64. Both native targets export the current sources and never replace the Web build Play serves. Verifies matching Godot export templates and the actual artifact. Missing Windows templates are an actionable error; Install tools adds them without replacing the Godot binary. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
+  parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
   success: GameActionResult,
   failure,
   failureMode: "return",

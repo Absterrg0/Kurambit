@@ -55,6 +55,22 @@ it.effect("offers only starter templates that exist on disk with matching metada
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("ships a Windows Desktop export preset in every starter", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const templatesDirectory = yield* resolveTemplatesDirectory();
+    for (const template of GAME_TEMPLATES) {
+      const presets = yield* fs.readFileString(
+        path.join(templatesDirectory, template.id, "godot/export_presets.cfg"),
+      );
+      expect(presets).toContain('platform="Windows Desktop"');
+      expect(presets).toContain('export_path="../builds/windows/game.exe"');
+      expect(presets).toContain("binary_format/embed_pck=true");
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("ships a winning and a losing route whose actions exist in each template", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

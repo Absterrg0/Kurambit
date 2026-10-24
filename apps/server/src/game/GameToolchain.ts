@@ -187,7 +187,17 @@ const make = Effect.gen(function* () {
         Effect.flatMap((resolved) =>
           Effect.promise(async () => {
             const hasTemplates =
-              resolved.templates === null || (await hasExportTemplates(resolved.templates));
+              resolved.templates === null || (await hasBaseExportTemplates(resolved.templates));
+            // Windows is additive: a toolchain with working Web/Linux templates
+            // stays ready, but Settings must say Windows needs one extra install.
+            const hasWindows =
+              tool === "godot" &&
+              resolved.templates !== null &&
+              (await hasWindowsExportTemplates(resolved.templates));
+            const windowsNotice =
+              tool === "godot" && hasTemplates && !hasWindows
+                ? " Windows export templates are missing; Install tools adds them without replacing the Godot binary."
+                : "";
             return {
               tool,
               path: resolved.path,
@@ -195,9 +205,9 @@ const make = Effect.gen(function* () {
               ready: hasTemplates,
               verified: verified.get(resolved.path) === resolved.version && hasTemplates,
               message: hasTemplates
-                ? verified.get(resolved.path) === resolved.version
-                  ? "Ready. Real headless verification passed."
-                  : "Found. Verify to run a real headless smoke check."
+                ? (verified.get(resolved.path) === resolved.version
+                    ? "Ready. Real headless verification passed."
+                    : "Found. Verify to run a real headless smoke check.") + windowsNotice
                 : new GameOperationError({
                     operation: "Godot export templates",
                     path: resolved.templates!,
@@ -391,19 +401,17 @@ const make = Effect.gen(function* () {
           });
         }
         const godotInstall = NodePath.join(directory, `godot-${GODOT_VERSION}`);
-        if (
-          !(yield* Effect.promise(
-            async () =>
-              (await awaitExists(NodePath.join(godotInstall, godotName.slice(0, -4)))) &&
-              (await hasExportTemplates(
-                NodePath.join(
-                  godotInstall,
-                  "editor_data/export_templates",
-                  `${GODOT_VERSION}.stable`,
-                ),
-              )),
-          ))
-        ) {
+        const templatesTarget = NodePath.join(
+          godotInstall,
+          "editor_data/export_templates",
+          `${GODOT_VERSION}.stable`,
+        );
+        const godotBinary = NodePath.join(godotInstall, godotName.slice(0, -4));
+        const godotPresent = yield* Effect.promise(
+          async () =>
+            (await awaitExists(godotBinary)) && (await hasBaseExportTemplates(templatesTarget)),
+        );
+        if (!godotPresent) {
           const archive = yield* download(godotBase, godotName, "SHA512-SUMS.txt", "sha512");
           const target = NodePath.join(stage, "godot");
           yield* Effect.promise(() => NodeFSP.mkdir(target));
@@ -418,33 +426,25 @@ const make = Effect.gen(function* () {
           yield* run("unzip", [
             "-q",
             templatesArchive,
-            "templates/web_nothreads_release.zip",
-            "templates/web_nothreads_debug.zip",
-            "templates/linux_release.x86_64",
-            "templates/linux_debug.x86_64",
-            "templates/version.txt",
+            ...BASE_EXPORT_TEMPLATE_FILES.map((file) => `templates/${file}`),
+            ...WINDOWS_EXPORT_TEMPLATE_FILES.map((file) => `templates/${file}`),
             "-d",
             extractTemplates,
           ]);
-          const templatesTarget = NodePath.join(target, "editor_data/export_templates");
+          const installedTemplates = NodePath.join(target, "editor_data/export_templates");
           yield* Effect.tryPromise({
             try: async () => {
-              const templateVersion = (
-                await NodeFSP.readFile(
-                  NodePath.join(extractTemplates, "templates/version.txt"),
-                  "utf8",
-                )
-              ).trim();
+              const templateVersion = await readTemplateVersion(extractTemplates);
               if (templateVersion !== `${GODOT_VERSION}.stable`)
                 throw new GameOperationError({
                   operation: "install-templates",
                   path: templatesArchive,
                   reason: "wrong-version",
                 });
-              await NodeFSP.mkdir(templatesTarget, { recursive: true });
+              await NodeFSP.mkdir(installedTemplates, { recursive: true });
               await NodeFSP.rename(
                 NodePath.join(extractTemplates, "templates"),
-                NodePath.join(templatesTarget, templateVersion),
+                NodePath.join(installedTemplates, templateVersion),
               );
               await NodeFSP.writeFile(NodePath.join(target, "._sc_"), "");
               await NodeFSP.chmod(NodePath.join(target, godotName.slice(0, -4)), 0o755);
@@ -464,6 +464,50 @@ const make = Effect.gen(function* () {
                     cause,
                   }),
           });
+        } else if (!(yield* Effect.promise(() => hasWindowsExportTemplates(templatesTarget)))) {
+          // A working Godot binary and its Web/Linux templates stay in place;
+          // only the missing Windows x86_64 templates are added.
+          const templatesArchive = yield* download(
+            godotBase,
+            templatesName,
+            "SHA512-SUMS.txt",
+            "sha512",
+          );
+          const extractTemplates = NodePath.join(stage, "templates-extract");
+          yield* run("unzip", [
+            "-q",
+            templatesArchive,
+            ...WINDOWS_EXPORT_TEMPLATE_FILES.map((file) => `templates/${file}`),
+            "templates/version.txt",
+            "-d",
+            extractTemplates,
+          ]);
+          yield* Effect.tryPromise({
+            try: async () => {
+              const templateVersion = await readTemplateVersion(extractTemplates);
+              if (templateVersion !== `${GODOT_VERSION}.stable`)
+                throw new GameOperationError({
+                  operation: "install-templates",
+                  path: templatesArchive,
+                  reason: "wrong-version",
+                });
+              await NodeFSP.mkdir(templatesTarget, { recursive: true });
+              for (const file of WINDOWS_EXPORT_TEMPLATE_FILES)
+                await NodeFSP.rename(
+                  NodePath.join(extractTemplates, "templates", file),
+                  NodePath.join(templatesTarget, file),
+                );
+            },
+            catch: (cause) =>
+              isGameOperationError(cause)
+                ? cause
+                : new GameOperationError({
+                    operation: "install-windows-templates",
+                    path: templatesTarget,
+                    reason: "io",
+                    cause,
+                  }),
+          });
         }
         return yield* verify;
       }).pipe(
@@ -479,18 +523,43 @@ const make = Effect.gen(function* () {
   });
   return GameToolchain.of({ executable, status, verify, install });
 });
-const hasExportTemplates = async (directory: string) =>
+const BASE_EXPORT_TEMPLATE_FILES = [
+  "web_nothreads_release.zip",
+  "web_nothreads_debug.zip",
+  "linux_release.x86_64",
+  "linux_debug.x86_64",
+  "version.txt",
+] as const;
+/**
+ * Windows is a separate readiness signal: games already shipping Web and
+ * Linux must keep exporting when only these files are missing.
+ */
+const WINDOWS_EXPORT_TEMPLATE_FILES = [
+  "windows_release_x86_64.exe",
+  "windows_debug_x86_64.exe",
+  "windows_release_x86_64_console.exe",
+  "windows_debug_x86_64_console.exe",
+] as const;
+const REQUIRED_WINDOWS_EXPORT_TEMPLATE_FILES = [
+  "windows_release_x86_64.exe",
+  "windows_debug_x86_64.exe",
+] as const;
+export const hasBaseExportTemplates = async (directory: string) =>
   (
     await Promise.all(
-      [
-        "web_nothreads_release.zip",
-        "web_nothreads_debug.zip",
-        "linux_release.x86_64",
-        "linux_debug.x86_64",
-        "version.txt",
-      ].map((file) => awaitExists(NodePath.join(directory, file))),
+      BASE_EXPORT_TEMPLATE_FILES.map((file) => awaitExists(NodePath.join(directory, file))),
     )
   ).every(Boolean);
+export const hasWindowsExportTemplates = async (directory: string) =>
+  (
+    await Promise.all(
+      REQUIRED_WINDOWS_EXPORT_TEMPLATE_FILES.map((file) =>
+        awaitExists(NodePath.join(directory, file)),
+      ),
+    )
+  ).every(Boolean);
+const readTemplateVersion = async (extractDirectory: string) =>
+  (await NodeFSP.readFile(NodePath.join(extractDirectory, "templates/version.txt"), "utf8")).trim();
 const awaitExists = async (file: string) => {
   try {
     await NodeFSP.access(file);

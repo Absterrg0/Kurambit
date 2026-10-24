@@ -1757,6 +1757,7 @@ it.effect("a draft design locks staging until it is approved", () =>
           const gated: ReadonlyArray<Effect.Effect<unknown, GameOperationError>> = [
             game.action(created.threadId, "preview"),
             game.action(created.threadId, "export-linux"),
+            game.action(created.threadId, "export-windows"),
             game.action(created.threadId, "rebuild"),
             game.action(created.threadId, "native"),
             game.export(created.threadId, "Web"),
@@ -1895,6 +1896,50 @@ it.effect(
         }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
       );
     }),
+);
+
+it.effect("lists Windows and Linux builds only when their artifacts exist", () =>
+  Effect.gen(function* () {
+    const parent = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "studio-buildlist-native-")),
+      ),
+      (root) => Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+    );
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* GameProjectService.GameProjectService;
+        const game = yield* service.create({
+          name: "Native builds",
+          parentDirectory: parent,
+          brief: "Go",
+          modelSelection: selection,
+        });
+        yield* Effect.promise(() =>
+          NodeFSP.mkdir(NodePath.join(game.root, "builds/linux"), { recursive: true }),
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(game.root, "builds/linux/game.x86_64"), "linux"),
+        );
+        const before = yield* service.inventory(game.root);
+        expect(before.builds.find((build) => build.target === "Linux")?.path).toBe(
+          "builds/linux/game.x86_64",
+        );
+        expect(before.builds.find((build) => build.target === "Windows")).toBeUndefined();
+
+        yield* Effect.promise(() =>
+          NodeFSP.mkdir(NodePath.join(game.root, "builds/windows"), { recursive: true }),
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(game.root, "builds/windows/game.exe"), "windows"),
+        );
+        const after = yield* service.inventory(game.root);
+        expect(after.builds.find((build) => build.target === "Windows")?.path).toBe(
+          "builds/windows/game.exe",
+        );
+      }).pipe(Effect.provide(gameProjectLayer(fixtureState(parent)))),
+    );
+  }),
 );
 
 it.effect("reuses the inventory until the source snapshot or manifest changes", () =>

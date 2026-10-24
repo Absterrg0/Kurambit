@@ -95,8 +95,13 @@ its right.
   the stage says so and offers to rebuild.
 - **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio
   started for this game, and closes its preview server.
-- **Export Linux** writes a standalone build to `builds/linux/`. The **Builds** tab lists both
-  targets with their times, folders and logs, the last playtest's verdict and frames, and the
+- **Export Windows** writes a self-contained 64-bit build to
+  `builds/windows/game.exe`, with the game data inside the executable, so you can copy that one
+  file to a Windows PC. **Export Linux** writes a standalone build to `builds/linux/`. Both export
+  the game's current files and leave the Web build Play serves alone; Game Studio checks the Windows
+  executable it produced but does not run it, so try it on Windows before sharing it. If the Windows
+  export templates are missing, **Install tools** in Settings adds them. The **Builds** tab lists
+  every target with its time, folder and logs, the last playtest's verdict and frames, and the
   review history with decisions, reasons, defects and frame links. Stop review and Restore previous
   version are explained below.
 - **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the

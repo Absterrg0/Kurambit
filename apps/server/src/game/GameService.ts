@@ -86,6 +86,8 @@ import { satisfiedObservations } from "./playtestState.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import { productionStatus } from "./gameProduction.ts";
+import { planWindowsPreset } from "./windowsPreset.ts";
+import { inspectWindowsBuild } from "./windowsExport.ts";
 
 /**
  * The export answer the builder reads. The first accepted submit is the first
@@ -130,7 +132,7 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly export: (
       threadId: ThreadId,
-      target: "Web" | "Linux",
+      target: "Web" | "Linux" | "Windows",
       options?: { readonly roundId?: string | undefined },
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
@@ -478,6 +480,59 @@ const make = Effect.gen(function* () {
     );
   });
   /**
+   * Ensures the project has a usable Windows Desktop preset. Its text is
+   * written atomically because a half-written preset would break every later
+   * export; a preset the creator already wrote is never rewritten.
+   */
+  const ensureWindowsPreset = (presetsPath: string) =>
+    Effect.gen(function* () {
+      const existing = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            return await NodeFSP.readFile(presetsPath, "utf8");
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+            throw cause;
+          }
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "export-windows",
+            path: presetsPath,
+            reason: "io",
+            cause,
+          }),
+      });
+      const plan = planWindowsPreset(existing);
+      if (!plan.ok)
+        return yield* new GameOperationError({
+          operation: "export-windows",
+          path: presetsPath,
+          reason: "invalid-input",
+          detail: plan.detail,
+        });
+      if (plan.text !== null) {
+        const text = plan.text;
+        const temporary = `${presetsPath}.${NodeCrypto.randomUUID()}.tmp`;
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.writeFile(temporary, text, "utf8");
+            await NodeFSP.rename(temporary, presetsPath);
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "export-windows",
+              path: presetsPath,
+              reason: "io",
+              detail:
+                "The Windows export preset could not be added; existing presets were left as they were.",
+              cause,
+            }),
+        }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(temporary, { force: true }))));
+      }
+      return plan;
+    });
+  /**
    * How a successful export relates to the selected build. `publish` makes it
    * the one Play serves; `candidate` is a round's challenger and must not
    * disturb Play while it is reviewed.
@@ -488,7 +543,7 @@ const make = Effect.gen(function* () {
 
   const runExport = Effect.fnUntraced(function* (
     root: string,
-    target: "Web" | "Linux",
+    target: "Web" | "Linux" | "Windows",
     selection: ExportSelection,
   ) {
     const { godot, cwd, godotProject } = yield* engine(root);
@@ -508,12 +563,30 @@ const make = Effect.gen(function* () {
         reason: "templates-missing",
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
       });
+    const windowsTemplates = godot.templates;
+    if (
+      target === "Windows" &&
+      (windowsTemplates === null ||
+        !(yield* Effect.promise(() => GameToolchain.hasWindowsExportTemplates(windowsTemplates))))
+    )
+      return yield* new GameOperationError({
+        operation: "Godot Windows export",
+        path: godot.templates ?? godot.path,
+        reason: "templates-missing",
+        detail: `Windows x86_64 export templates for Godot ${godot.version} are missing from ${godot.templates ?? "the template directory"}. Ask the user to run Install tools in Settings > General > Game tools to add them; the Godot binary and the Web/Linux templates are reused as they are. Godot executable: ${godot.path}.`,
+      });
     // Import first: Godot's import writes engine-generated sidecars (*.import,
     // *.uid and .godot/) inside the project. The source identity is taken after
     // that import and never counts those files, so a fresh or repaired tree
     // imports cleanly and a snapshot never carries engine output.
     const imported = yield* importGame(root);
     if (!imported.success) return { value: imported, record: failedExport(null) };
+    // The preset is part of the exported sources, so it is settled before the
+    // source identity is taken. Only a Windows export touches it.
+    const windowsPreset =
+      target === "Windows"
+        ? yield* ensureWindowsPreset(NodePath.join(cwd, "export_presets.cfg"))
+        : null;
     const frozen = target === "Web" ? yield* rounds.freeze(root) : null;
     // Web exports stage in a hidden directory under the candidate root, never in
     // the served tree. A partial or failed export therefore cannot change what
@@ -534,15 +607,29 @@ const make = Effect.gen(function* () {
           );
     const frozenProject =
       sourceStaging === null ? null : NodePath.join(sourceStaging, godotProject);
+    const windowsOutput =
+      target === "Windows" ? NodePath.join(root, "builds/windows/game.exe") : null;
+    // A failed Windows export must leave the previous game.exe usable, so the
+    // engine writes beside it and the artifact is moved into place only after
+    // its PE and pack check out.
+    const windowsStaging =
+      windowsOutput === null
+        ? null
+        : NodePath.join(NodePath.dirname(windowsOutput), `.game-${NodeCrypto.randomUUID()}.exe`);
     const output =
-      staging === null
-        ? NodePath.join(root, "builds/linux/game.x86_64")
-        : NodePath.join(staging, "index.html");
+      staging !== null
+        ? NodePath.join(staging, "index.html")
+        : (windowsOutput ?? NodePath.join(root, "builds/linux/game.x86_64"));
+    const exportOutput = windowsStaging ?? output;
     const cleanedUp = Effect.ensuring(
       Effect.promise(async () => {
         if (staging !== null) await NodeFSP.rm(staging, { recursive: true, force: true });
         if (sourceStaging !== null)
           await NodeFSP.rm(sourceStaging, { recursive: true, force: true });
+        if (windowsStaging !== null) {
+          await NodeFSP.rm(windowsStaging, { force: true });
+          await NodeFSP.rm(windowsStaging.replace(/\.exe$/, ".pck"), { force: true });
+        }
       }),
     );
     return yield* Effect.gen(function* () {
@@ -579,15 +666,23 @@ const make = Effect.gen(function* () {
       const beforeSourceId =
         frozen?.sourceId ?? (before !== null && before.kind === "known" ? before.sourceId : null);
       yield* Effect.tryPromise({
-        try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
+        try: () => NodeFSP.mkdir(NodePath.dirname(exportOutput), { recursive: true }),
         catch: (cause) =>
-          new GameOperationError({ operation: "export", path: output, reason: "io", cause }),
+          new GameOperationError({ operation: "export", path: exportOutput, reason: "io", cause }),
       });
+      const exportPresetName = windowsPreset?.name ?? target;
       const result = response(
         yield* processes.run({
           root,
           executable: godot.path,
-          args: ["--headless", "--path", frozenProject ?? cwd, "--export-release", target, output],
+          args: [
+            "--headless",
+            "--path",
+            frozenProject ?? cwd,
+            "--export-release",
+            exportPresetName,
+            exportOutput,
+          ],
           operation: `export-${target.toLowerCase()}`,
           timeoutMs: 300_000,
         }),
@@ -603,7 +698,7 @@ const make = Effect.gen(function* () {
                 output.replace(/\.html$/, ".js"),
                 output.replace(/\.html$/, ".pck"),
               ]
-            : [output]) {
+            : [exportOutput]) {
             const stat = await NodeFSP.stat(file);
             if (!stat.isFile() || stat.size === 0) throw new Error(`Empty export: ${file}`);
           }
@@ -611,7 +706,7 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new GameOperationError({
             operation: "export-output",
-            path: output,
+            path: exportOutput,
             reason: "command-failed",
             detail:
               `Expected nonempty export files were missing.\n${commandDetail(result.process!)}`.slice(
@@ -620,6 +715,67 @@ const make = Effect.gen(function* () {
             cause,
           }),
       });
+      let windowsMessage: string | null = null;
+      if (windowsOutput !== null && windowsStaging !== null) {
+        const stagedPck = windowsStaging.replace(/\.exe$/, ".pck");
+        const inspection = yield* Effect.tryPromise({
+          try: async () => {
+            const executable = await NodeFSP.readFile(windowsStaging);
+            const pck = await NodeFSP.readFile(stagedPck).catch(() => null);
+            return inspectWindowsBuild({ executable, pck });
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "export-windows",
+              path: windowsStaging,
+              reason: "command-failed",
+              detail: "The exported Windows executable could not be read back.",
+              cause,
+            }),
+        });
+        if (inspection.issues.length > 0)
+          return {
+            value: {
+              ...result,
+              success: false,
+              message:
+                `The Windows export did not produce a usable x86_64 executable with the game's pack: ${inspection.issues.join(" ")}\n${commandDetail(result.process!)}`.slice(
+                  -4096,
+                ),
+            },
+            record: failedExport(beforeSourceId),
+          };
+        const finalPck = windowsOutput.replace(/\.exe$/, ".pck");
+        yield* Effect.tryPromise({
+          try: async () => {
+            if (inspection.embeddedPck) {
+              await NodeFSP.rename(windowsStaging, windowsOutput);
+              // A sidecar left by an earlier non-embedded preset would no longer
+              // describe this executable.
+              await NodeFSP.rm(finalPck, { force: true });
+            } else {
+              await NodeFSP.rename(stagedPck, finalPck);
+              await NodeFSP.rename(windowsStaging, windowsOutput);
+            }
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "export-windows",
+              path: windowsOutput,
+              reason: "io",
+              detail: "The checked Windows build could not be moved into builds/windows.",
+              cause,
+            }),
+        });
+        windowsMessage =
+          (inspection.embeddedPck
+            ? `Windows x86_64 build ready at builds/windows/game.exe with its game data embedded (${Math.round(inspection.executableBytes / (1024 * 1024))} MB).`
+            : `Windows x86_64 build ready at builds/windows/game.exe with builds/windows/game.pck beside it (${Math.round(inspection.executableBytes / (1024 * 1024))} MB). Keep both files together.`) +
+          (windowsPreset === null || windowsPreset.text === null
+            ? ""
+            : " A standard Windows export preset was added.") +
+          " This machine did not run it on Windows.";
+      }
       // Hash the staged artifact before it becomes visible. The hash is the
       // directory name, so an immutable build can never be overwritten later
       // with different bytes under the same identity.
@@ -749,7 +905,10 @@ const make = Effect.gen(function* () {
         };
       }
       return {
-        value: result,
+        value:
+          windowsMessage === null
+            ? result
+            : { ...result, path: windowsOutput ?? result.path, message: windowsMessage },
         record: {
           outcome: "passed" as const,
           sourceId: comparison.sourceId,
@@ -768,7 +927,7 @@ const make = Effect.gen(function* () {
    */
   const exportGame = (
     root: string,
-    target: "Web" | "Linux",
+    target: "Web" | "Linux" | "Windows",
     selection: ExportSelection,
     runId: string | null,
   ) =>
@@ -2162,6 +2321,8 @@ const make = Effect.gen(function* () {
           yield* refuseWhileUnapproved(root, action);
           if (action === "export-linux")
             return yield* exportGame(root, "Linux", { mode: "publish" }, null);
+          if (action === "export-windows")
+            return yield* exportGame(root, "Windows", { mode: "publish" }, null);
           // The creator's own Play may watch a native window; every agent-facing
           // run goes through the headless native method instead.
           if (action === "native") return yield* nativeGame(root, "inherit");

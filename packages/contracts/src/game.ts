@@ -67,7 +67,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     id: "blank",
     name: "Blank",
     description:
-      "An empty Godot project: a camera, a light, a live state probe and Web and Linux export presets.",
+      "An empty Godot project: a camera, a light, a live state probe and Web, Windows and Linux export presets.",
     dimension: "3d",
     testSuite: DEFAULT_GAME_TEST_SUITE,
     // Blank has no menu: its main scene is the game, and the check runs it once.
@@ -699,6 +699,7 @@ export const GameAction = Schema.Literals([
   "native",
   "stop",
   "export-linux",
+  "export-windows",
 ]);
 export type GameAction = typeof GameAction.Type;
 export const GameActionInput = Schema.Struct({ threadId: ThreadId, action: GameAction });
