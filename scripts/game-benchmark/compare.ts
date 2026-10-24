@@ -150,8 +150,6 @@ export const makeCompareReviewer = (): CompareReview => {
     );
 };
 
-// ------------------------------------------------------------------- evidence
-
 /** At most this many matched indices per comparison; each card is two frames. */
 export const MAX_COMPARE_FRAMES = 6;
 
@@ -274,8 +272,6 @@ export const matchedIndices = (
     ),
   );
 };
-
-// ------------------------------------------------------------------- judgment
 
 const promptFor = (input: {
   readonly brief: LoadedGameBenchmarkBrief;
@@ -475,8 +471,6 @@ export const summarizeComparison = (input: {
   if (first !== undefined && first === second) return { verdict: first, reasons };
   return { verdict: "split", reasons };
 };
-
-// -------------------------------------------------------------------- results
 
 export interface ComparisonReport {
   readonly schemaVersion: 1;
