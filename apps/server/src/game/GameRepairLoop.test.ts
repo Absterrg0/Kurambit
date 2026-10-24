@@ -1022,6 +1022,132 @@ it.live("keeps a better build, then stops when the critic finds no defects", () 
   ),
 );
 
+it.live(
+  "stops before a next round when the finished round took longer than the budget left",
+  () => {
+    let skewMs = 0;
+    return withLoop(
+      (fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            const { scripted, root } = fixture;
+            const repair = repairWith();
+            scripted.repairs = [
+              (input) =>
+                repair(input).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      // About thirty of the forty-five minutes are gone, so the
+                      // finished round is longer than the roughly fifteen left.
+                      skewMs = 30 * 60_000;
+                    }),
+                  ),
+                ),
+            ];
+            scripted.critic = () => criticAnswer(1);
+            scripted.ballots = [
+              ({ plan }) => ballotAnswer(plan, "promote"),
+              ({ plan }) => ballotAnswer(plan, "promote"),
+            ];
+            yield* runToCompletion(services, fixture);
+            const state = loopRecord(yield* readLoop(services));
+            expect(state.status).toBe("stopped");
+            expect(state.decision).toBe("stop");
+            expect(state.reason).toContain("budget-pacing");
+            expect(state.reason).not.toContain("deadline");
+            expect(state.promotedRounds).toHaveLength(1);
+            expect(scripted.starts.filter((child) => child.role === "critic")).toHaveLength(1);
+            const game = yield* services.rounds.read(root);
+            expect(game.selected?.roundId).toBe(state.promotedRounds[0]);
+            expect(game.selected?.buildId).not.toBe(EXPORT_BUILD_ID);
+          }),
+        ),
+      { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
+    );
+  },
+);
+
+it.live("starts the next round when the finished round fits in the budget left", () => {
+  let skewMs = 0;
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          const repair = repairWith();
+          scripted.repairs = [
+            (input) =>
+              repair(input).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    skewMs = 60_000;
+                  }),
+                ),
+              ),
+          ];
+          let reviews = 0;
+          scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.reason).toContain("zero-defects");
+          expect(state.promotedRounds).toHaveLength(1);
+          expect(scripted.starts.filter((child) => child.role === "critic")).toHaveLength(2);
+        }),
+      ),
+    { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
+  );
+});
+
+it.live.each(["zero", "negative"] as const)(
+  "a %s measured round duration never blocks the next round",
+  (kind) => {
+    let skewMs = 0;
+    const frozen = DateTime.toEpochMillis(DateTime.nowUnsafe());
+    return withLoop(
+      (fixture) =>
+        fixture.withServices((services) =>
+          Effect.gen(function* () {
+            const { scripted } = fixture;
+            const repair = repairWith();
+            scripted.repairs = [
+              (input) =>
+                repair(input).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      // The clock goes backwards here, so the measured duration
+                      // is negative rather than the elapsed round.
+                      if (kind === "negative") skewMs = -60_000;
+                    }),
+                  ),
+                ),
+            ];
+            let reviews = 0;
+            scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+            scripted.ballots = [
+              ({ plan }) => ballotAnswer(plan, "promote"),
+              ({ plan }) => ballotAnswer(plan, "promote"),
+            ];
+            yield* runToCompletion(services, fixture);
+            const state = loopRecord(yield* readLoop(services));
+            expect(state.reason).toContain("zero-defects");
+            expect(state.reason).not.toContain("budget-pacing");
+            expect(scripted.starts.filter((child) => child.role === "critic")).toHaveLength(2);
+          }),
+        ),
+      {
+        now:
+          kind === "zero"
+            ? () => frozen
+            : () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs,
+      },
+    );
+  },
+);
+
 it.live("rolls back a candidate that fails a frozen check and keeps reviewing", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>

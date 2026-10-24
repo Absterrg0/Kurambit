@@ -1709,6 +1709,8 @@ export const layer = (options: GameRepairLoopOptions) => {
     const runRounds = (task: Task, initial: GameRepairLoopRecord): Effect.Effect<void, never> =>
       Effect.gen(function* () {
         let current = initial;
+        // Zero until a round has finished, so the first round is never paced.
+        let lastRoundMs = 0;
         for (;;) {
           const latest = yield* readRecord(task.root).pipe(Effect.orElseSucceed(() => null));
           if (latest === null || latest.status !== "running") return;
@@ -1724,6 +1726,22 @@ export const layer = (options: GameRepairLoopOptions) => {
             );
             return;
           }
+          // Another round repeats the whole sequence just measured. When that
+          // round already took longer than the time left, starting it would
+          // spend the tail without a selection, so keep the selected build.
+          // Unusable clock readings leave the round admitted.
+          if (
+            Number.isFinite(lastRoundMs) &&
+            lastRoundMs > 0 &&
+            lastRoundMs > remaining.elapsedMs
+          ) {
+            yield* stop(
+              task.root,
+              "budget-pacing: the last round took longer than the remaining review budget; another round is unlikely to fit, so the selected build is kept.",
+            );
+            return;
+          }
+          const roundStartedAt = now();
           const outcome = yield* playRound(task, latest).pipe(
             Effect.catchCause((cause) =>
               finish({
@@ -1733,6 +1751,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               }).pipe(Effect.as({ record: current, done: true })),
             ),
           );
+          lastRoundMs = now() - roundStartedAt;
           current = outcome.record;
           if (outcome.done) return;
         }
