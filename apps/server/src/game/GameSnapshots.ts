@@ -282,6 +282,19 @@ export const gameSourceId = (files: readonly GameSourceFile[]): string => {
   return hash.digest("hex");
 };
 
+/**
+ * The build-input identity inside an already-read content manifest: the same
+ * engine-project boundary `snapshotBuildSource` enforces, but over hashed
+ * files, so a frozen copy whose mtimes moved stamps the same identity.
+ */
+export const buildSourceId = (
+  files: readonly GameSourceFile[],
+  projectDirectory: string,
+): string => {
+  const prefix = `${projectDirectory.replace(/\/+$/u, "")}/`;
+  return gameSourceId(files.filter((file) => file.path.startsWith(prefix)));
+};
+
 const compareFiles = (
   expected: readonly GameSourceFile[],
   current: readonly GameSourceFile[],

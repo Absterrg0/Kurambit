@@ -29,7 +29,19 @@ const withGame = <A, E>(
       const stateDir = NodePath.join(base, "state");
       yield* Effect.promise(async () => {
         await NodeFSP.mkdir(NodePath.join(root, "godot/scripts"), { recursive: true });
-        await NodeFSP.writeFile(NodePath.join(root, "game.json"), '{"name":"probe"}\n');
+        await NodeFSP.writeFile(
+          NodePath.join(root, "game.json"),
+          `${JSON.stringify({
+            schemaVersion: 1,
+            name: "probe",
+            brief: "A probe game.",
+            artDirection: "Plain.",
+            engine: { name: "godot", version: "4.7.2" },
+            godotProject: "godot",
+            assets: [],
+          })}\n`,
+        );
+        await NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Probe design\n");
         await NodeFSP.writeFile(NodePath.join(root, "godot/scripts/main.gd"), "extends Node\n");
       });
       return yield* Effect.gen(function* () {
@@ -232,7 +244,54 @@ it.live("a user edit after the repair blocks the restore and keeps the snapshot"
   ),
 );
 
-it.live("restart marks a running round interrupted and keeps the selected build", () =>
+it.live("a design-doc edit after the export does not block the promotion", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const first = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repaired\n");
+      yield* rounds.recordPostRepair(root, first.id);
+      // The export freezes the sources it builds from; those are the build inputs.
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordCandidate(root, first.id, build);
+      // The repair child updates its plan after the export. The folder identity
+      // moves, but every engine source is byte-identical, so the bytes the
+      // candidate will serve are still the ones a rebuild would produce.
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Plan after the export\n"),
+      );
+      expect((yield* snapshots.capture(root)).sourceId).not.toBe(frozen.manifest.sourceId);
+
+      const promoted = yield* rounds.promote(root, first.id);
+      expect(promoted.kind).toBe("promoted");
+      const round = (yield* rounds.read(root)).rounds.find((entry) => entry.id === first.id);
+      expect(round?.status).toBe("promoted");
+      expect((yield* rounds.read(root)).selected?.buildId).toBe(build.buildId);
+    }),
+  ),
+);
+
+it.live("an engine-source edit after the export still blocks the promotion", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const first = yield* rounds.begin(root, {});
+      yield* edit(root, "extends Node2D # repaired\n");
+      yield* rounds.recordPostRepair(root, first.id);
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordCandidate(root, first.id, build);
+      yield* edit(root, "extends Node2D # edited after the export\n");
+
+      const blocked = yield* rounds.promote(root, first.id);
+      expect(blocked.kind).toBe("blocked");
+      if (blocked.kind !== "blocked") return;
+      expect(blocked.round.reason).toContain("source-changed");
+      expect((yield* rounds.read(root)).selected).toBeNull();
+    }),
+  ),
+);
+
+it.live("a restart marks a running round interrupted and keeps the selected build", () =>
   withGame(({ root, stateDir, rounds, snapshots }) =>
     Effect.gen(function* () {
       const first = yield* rounds.begin(root, {});

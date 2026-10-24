@@ -17,6 +17,7 @@ import {
   GameReviewArtifact,
   GamePlaytestStep,
   GameViewport,
+  GameManifest,
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
   type GameReviewBudget,
@@ -119,6 +120,46 @@ const validatedArtifact = (artifact: GameReviewArtifact): GameReviewArtifact => 
     );
   return artifact;
 };
+
+const decodeGameManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
+
+/**
+ * The engine project directory an export builds from. An unreadable manifest
+ * is unknown, and an unknown project leaves the whole-folder identity in
+ * charge, because a guard that cannot name the build inputs must not forgive
+ * a change to them.
+ */
+const engineProject = (root: string): Effect.Effect<string | null> =>
+  Effect.tryPromise(() => NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")).pipe(
+    Effect.map((text) => decodeGameManifest(text).godotProject),
+    Effect.orElseSucceed(() => null),
+  );
+
+/**
+ * Whether the candidate's build still describes the current sources. A round
+ * repairs engine code; design documents and notes are never export input, so
+ * editing them after the export cannot make the bytes wrong. The whole-folder
+ * identity still governs restore and user-edit detection.
+ */
+const sameBuildInputs = (
+  snapshots: GameSnapshots.GameSnapshots["Service"],
+  input: {
+    readonly root: string;
+    readonly candidateSourceId: string;
+    readonly current: GameSnapshots.GameSourceManifest;
+  },
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const project = yield* engineProject(input.root);
+    if (project === null) return false;
+    const frozen = yield* Effect.result(snapshots.read(input.root, input.candidateSourceId));
+    const read = frozen._tag === "Success" ? frozen.success : null;
+    if (read === null) return false;
+    return (
+      GameSnapshots.buildSourceId(read.manifest.files, project) ===
+      GameSnapshots.buildSourceId(input.current.files, project)
+    );
+  });
 
 export interface GameRoundBeginInput {
   readonly threadId?: ThreadId | undefined;
@@ -876,7 +917,17 @@ export const layer = (options: { readonly stateDir: string }) => {
               const current = captured.success;
               // The candidate was built from these sources. If the folder moved
               // on, promoting would serve bytes the current game did not produce.
-              if (candidate.sourceId !== null && current.sourceId !== candidate.sourceId)
+              // Only build inputs count: a note or design edit after the export
+              // does not change a single byte a rebuild would produce.
+              if (
+                candidate.sourceId !== null &&
+                current.sourceId !== candidate.sourceId &&
+                !(yield* sameBuildInputs(snapshots, {
+                  root,
+                  candidateSourceId: candidate.sourceId,
+                  current,
+                }))
+              )
                 return yield* blocked(
                   "source-changed: the game folder changed after the candidate build; the candidate was not promoted.",
                 );
