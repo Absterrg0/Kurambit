@@ -10,7 +10,9 @@ import type {
   GameE2eProductionRead,
   GameE2eRunSummary,
   GameE2eTurnRead,
+  SelectedWebArtifact,
 } from "./artifacts.ts";
+import type { GradeTarget } from "../game-grade.ts";
 import { visualRepairDelta } from "./artifacts.ts";
 
 export const BENCHMARK_OUTCOMES = [
@@ -47,6 +49,8 @@ export interface BenchmarkGrade {
   /** The grader that actually answered, and its semantics. */
   readonly grader: { readonly provider: string; readonly model: string } | null;
   readonly graderVersion: number | null;
+  /** The directory and selected-build identity the grade actually served. */
+  readonly target: GradeTarget | null;
   readonly quick: {
     readonly booted: boolean;
     readonly consoleErrors: number;
@@ -57,6 +61,48 @@ export interface BenchmarkGrade {
   readonly control: boolean;
   readonly void: boolean;
   readonly solCalls: number;
+}
+
+const readGradeTarget = (value: unknown): GradeTarget | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    (record.kind !== "workspace" && record.kind !== "artifact") ||
+    typeof record.directory !== "string"
+  )
+    return null;
+  return {
+    kind: record.kind,
+    directory: record.directory,
+    buildId: typeof record.buildId === "string" ? record.buildId : null,
+  };
+};
+
+/**
+ * Refuses a grade that does not describe the artifact the caller requested.
+ * The grader could have written a usable document for another directory (an
+ * old workspace build, or a candidate left from a previous run), and that must
+ * never be recorded as this selection's verdict.
+ */
+export function assertGradeDescribesArtifact(
+  grade: BenchmarkGrade,
+  artifact: SelectedWebArtifact,
+): void {
+  const target = grade.target;
+  if (
+    target === null ||
+    target.kind !== "artifact" ||
+    target.directory !== artifact.absoluteDirectory ||
+    target.buildId !== artifact.buildId
+  ) {
+    const described =
+      target === null
+        ? "no target"
+        : `${target.kind} ${target.directory} (${target.buildId ?? "no build id"})`;
+    throw new Error(
+      `The grade describes ${described}, not the requested selected artifact ${artifact.buildId} at ${artifact.absoluteDirectory}.`,
+    );
+  }
 }
 
 /** A malformed or missing grade reads as absent, never as a pass. */
@@ -80,6 +126,7 @@ export function readGradeSummary(value: unknown): BenchmarkGrade | null {
         ? { provider: storedGrader.provider, model: storedGrader.model }
         : null,
     graderVersion: typeof record.graderVersion === "number" ? record.graderVersion : null,
+    target: readGradeTarget(record.target),
     quick:
       quick === null || quick === undefined
         ? null

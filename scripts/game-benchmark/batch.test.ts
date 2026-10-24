@@ -57,8 +57,44 @@ const summaryFor = (input: {
   readonly brief: LoadedGameBenchmarkBrief;
   readonly root: string;
   readonly harnessCommit: string;
+  readonly schemaVersion?: 1 | 2;
+  readonly selectedBuildId?: string;
 }): GameE2eRunSummary => ({
-  schemaVersion: 1,
+  schemaVersion: input.schemaVersion ?? 1,
+  ...(input.schemaVersion === 2 && input.selectedBuildId !== undefined
+    ? {
+        review: {
+          loop: null,
+          phase: "reviewed",
+          held: false,
+          repairsLeft: 0,
+          timeLeftMs: 0,
+          budget: { repairs: 0, elapsedMs: 1 },
+          restoreOffered: false,
+          selectedBuildFacts: {
+            buildId: input.selectedBuildId,
+            directory: `builds/candidates/${input.selectedBuildId}`,
+            checks: [{ id: "build", status: "passed" as const }],
+            passed: true,
+            reason: null,
+          },
+        },
+        loop: {
+          id: "loop",
+          status: "stopped" as const,
+          decision: "promote" as const,
+          reason: "The candidate is better.",
+          startedAt: "2026-10-24T09:00:00.000Z",
+          finishedAt: "2026-10-24T09:05:00.000Z",
+          repairsUsed: 0,
+          budget: { repairs: 1, elapsedMs: 1 },
+          rounds: [],
+          selectedBuildId: input.selectedBuildId,
+          waitedMs: 0,
+          timedOut: false,
+        },
+      }
+    : {}),
   harnessCommit: input.harnessCommit,
   startedAt: "2026-10-24T09:00:00.000Z",
   durationMs: 600_000,
@@ -78,6 +114,8 @@ const savedRow = (input: {
   readonly brief: LoadedGameBenchmarkBrief;
   readonly root: string;
   readonly harnessCommit: string;
+  readonly schemaVersion?: 1 | 2;
+  readonly selectedBuildId?: string;
 }): BenchmarkBriefResult => {
   const summary = summaryFor(input);
   return readBenchmarkResult({
@@ -91,10 +129,22 @@ const savedRow = (input: {
   });
 };
 
+/** Asserts a promise rejects with a message matching `pattern`. */
+const rejects = async (promise: Promise<unknown>, pattern: RegExp): Promise<void> => {
+  let failure: unknown = null;
+  try {
+    await promise;
+  } catch (error) {
+    failure = error;
+  }
+  assert.match(failure instanceof Error ? failure.message : String(failure), pattern);
+};
+
 const gradeFor = (model: string): BenchmarkGrade => ({
   build: "existing",
   grader: { provider: "codex", model },
   graderVersion: 3,
+  target: null,
   quick: { booted: true, consoleErrors: 0, responded: true },
   obligationIds: ["moves"],
   obligations: { yes: 1, total: 1 },
@@ -329,6 +379,135 @@ describe("runRegradeBatch", () => {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }
   });
+  it("regrades a schema-2 run from its selected artifact without needing sources", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "benchmark-artifact-"));
+    try {
+      const harnessCommit = "saved-commit";
+      const brief = briefFor("a");
+      const buildId = "a".repeat(64);
+      const gameRoot = NodePath.join(root, "games", brief.id);
+      const artifactDirectory = NodePath.join(gameRoot, "builds/candidates", buildId);
+      await NodeFSP.mkdir(artifactDirectory, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(artifactDirectory, "index.html"), "selected build\n");
+      // Deliberately no game.json and no godot/: the immutable bytes are enough.
+      const directory = NodePath.join(root, brief.id);
+      await NodeFSP.mkdir(directory, { recursive: true });
+      const savedInput = {
+        brief,
+        root: gameRoot,
+        harnessCommit,
+        schemaVersion: 2 as const,
+        selectedBuildId: buildId,
+      };
+      const summary = summaryFor(savedInput);
+      const summaryText = encodeRunSummary(summary);
+      await NodeFSP.writeFile(NodePath.join(directory, "run.json"), summaryText);
+      await NodeFSP.writeFile(
+        NodePath.join(directory, "result.json"),
+        `${JSON.stringify(savedRow(savedInput), null, 2)}\n`,
+      );
+
+      const calls: Array<{
+        readonly root: string;
+        readonly artifact: {
+          readonly buildId: string;
+          readonly directory: string;
+          readonly absoluteDirectory: string;
+        } | null;
+      }> = [];
+      const results = await runRegradeBatch({
+        runDirectory: root,
+        briefs: [brief],
+        order: [brief.id],
+        jobs: 1,
+        grade: async (input) => {
+          calls.push({ root: input.root, artifact: input.artifact });
+          await NodeFSP.mkdir(NodePath.join(input.outDirectory, "grade"), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(input.outDirectory, "grade", "grade.json"), "{}\n");
+          return {
+            ...gradeFor("artifact-grader"),
+            build: "artifact",
+            target: { kind: "artifact", directory: artifactDirectory, buildId },
+          };
+        },
+        sandbox: async () => ({ runtimeDirectory: root, environment: process.env }),
+      });
+
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0]!.root, gameRoot);
+      assert.deepEqual(calls[0]!.artifact, {
+        buildId,
+        directory: `builds/candidates/${buildId}`,
+        absoluteDirectory: artifactDirectory,
+      });
+      assert.equal(results[0]!.grade?.build, "artifact");
+      // The selected artifact and the builder's evidence are read-only here.
+      assert.equal(
+        await NodeFSP.readFile(NodePath.join(artifactDirectory, "index.html"), "utf8"),
+        "selected build\n",
+      );
+      assert.equal(
+        await NodeFSP.readFile(NodePath.join(directory, "run.json"), "utf8"),
+        summaryText,
+      );
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a schema-2 selection whose artifact is gone instead of grading the workspace", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "benchmark-missing-"));
+    try {
+      const harnessCommit = "saved-commit";
+      const brief = briefFor("a");
+      const buildId = "a".repeat(64);
+      const gameRoot = NodePath.join(root, "games", brief.id);
+      // A workspace build and sources exist, which is exactly the tempting but
+      // wrong target when the selected candidate is missing.
+      await NodeFSP.mkdir(NodePath.join(gameRoot, "builds/web"), { recursive: true });
+      await NodeFSP.mkdir(NodePath.join(gameRoot, "godot"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(gameRoot, "game.json"), "{}\n");
+      await NodeFSP.writeFile(NodePath.join(gameRoot, "godot/project.godot"), "config_version=5\n");
+      await NodeFSP.writeFile(NodePath.join(gameRoot, "builds/web/index.html"), "workspace\n");
+      const directory = NodePath.join(root, brief.id);
+      await NodeFSP.mkdir(directory, { recursive: true });
+      const savedInput = {
+        brief,
+        root: gameRoot,
+        harnessCommit,
+        schemaVersion: 2 as const,
+        selectedBuildId: buildId,
+      };
+      await NodeFSP.writeFile(
+        NodePath.join(directory, "run.json"),
+        encodeRunSummary(summaryFor(savedInput)),
+      );
+      await NodeFSP.writeFile(
+        NodePath.join(directory, "result.json"),
+        `${JSON.stringify(savedRow(savedInput), null, 2)}\n`,
+      );
+
+      let graded = 0;
+      await rejects(
+        runRegradeBatch({
+          runDirectory: root,
+          briefs: [brief],
+          order: [brief.id],
+          jobs: 1,
+          grade: async () => {
+            graded += 1;
+            return gradeFor("artifact-grader");
+          },
+          sandbox: async () => ({ runtimeDirectory: root, environment: process.env }),
+        }),
+        /missing a nonempty index\.html/,
+      );
+      assert.equal(graded, 0);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("regrades saved runs without a builder and leaves their evidence intact", async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "benchmark-regrade-"));
     try {

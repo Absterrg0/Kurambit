@@ -21,8 +21,10 @@ import {
   readObligations,
   readProductionTiming,
   readVisualJudgements,
+  resolveSelectedArtifact,
   visualRepairDelta,
   type GameBenchmarkBrief,
+  type GameE2eRunSummary,
 } from "./artifacts.ts";
 
 const briefsDirectory = NodePath.join(
@@ -272,6 +274,131 @@ describe("run summaries", () => {
   it("treats a truncated or foreign summary as unreadable", () => {
     assert.equal(decodeRunSummary('{"schemaVersion":1}'), null);
     assert.equal(decodeRunSummary("not json"), null);
+  });
+});
+
+const selectedSummary = (input: {
+  readonly buildId: string;
+  readonly directory: string;
+  readonly loopBuildId?: string | null;
+}): GameE2eRunSummary => ({
+  schemaVersion: 2,
+  review: {
+    loop: null,
+    phase: "reviewed",
+    held: false,
+    repairsLeft: 0,
+    timeLeftMs: 0,
+    budget: { repairs: 0, elapsedMs: 1 },
+    restoreOffered: false,
+    selectedBuildFacts: {
+      buildId: input.buildId,
+      directory: input.directory,
+      checks: [{ id: "build", status: "passed" }],
+      passed: true,
+      reason: null,
+    },
+  },
+  harnessCommit: "commit",
+  startedAt: "2026-10-24T00:00:00.000Z",
+  durationMs: 1,
+  phase: "done",
+  timedOut: false,
+  fixture: { id: "sokoban", checksum: "checksum" },
+  game: { name: "Crate Dock", root: "/games/crate-dock", threadId: "thread:1" },
+  turns: [],
+  qualification: null,
+  lastPlaytest: null,
+  obligations: [],
+  ...(input.loopBuildId === undefined
+    ? {}
+    : {
+        loop: {
+          id: "loop",
+          status: "stopped" as const,
+          decision: "promote" as const,
+          reason: "The candidate is better.",
+          startedAt: "2026-10-24T00:00:00.000Z",
+          finishedAt: "2026-10-24T00:05:00.000Z",
+          repairsUsed: 1,
+          budget: { repairs: 3, elapsedMs: 1 },
+          rounds: [],
+          selectedBuildId: input.loopBuildId,
+          waitedMs: 0,
+          timedOut: false,
+        },
+      }),
+  error: null,
+});
+
+/** Asserts a promise rejects with a message matching `pattern`. */
+const rejects = async (promise: Promise<unknown>, pattern: RegExp): Promise<void> => {
+  let failure: unknown = null;
+  try {
+    await promise;
+  } catch (error) {
+    failure = error;
+  }
+  assert.match(failure instanceof Error ? failure.message : String(failure), pattern);
+};
+
+describe("selected artifacts", () => {
+  const buildId = "a".repeat(64);
+  const directory = `builds/candidates/${buildId}`;
+
+  it("resolves the immutable candidate a schema-2 run selected", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "selected-artifact-"));
+    try {
+      const absolute = NodePath.join(root, directory);
+      await NodeFSP.mkdir(absolute, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(absolute, "index.html"), "selected build");
+      const summary = selectedSummary({ buildId, directory, loopBuildId: buildId });
+      assert.deepEqual(await resolveSelectedArtifact(summary, root), {
+        buildId,
+        directory,
+        absoluteDirectory: absolute,
+      });
+      // Schema 1 predates selection: its historical workspace grading stands.
+      assert.equal(await resolveSelectedArtifact({ ...summary, schemaVersion: 1 }, root), null);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a selection that names another build, another path or nothing", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "selected-artifact-"));
+    try {
+      const other = "b".repeat(64);
+      // The loop says Play serves a different build than the facts describe.
+      await rejects(
+        resolveSelectedArtifact(selectedSummary({ buildId, directory, loopBuildId: other }), root),
+        /but Play serves/,
+      );
+      // A directory must be exactly the content-addressed candidate for its id.
+      await rejects(
+        resolveSelectedArtifact(
+          selectedSummary({ buildId, directory: `builds/candidates/${other}` }),
+          root,
+        ),
+        /expected builds\/candidates/,
+      );
+      for (const escaping of [
+        `builds/candidates/../${buildId}`,
+        `/games/crate-dock/${directory}`,
+        `builds/candidates/${buildId}/nested`,
+      ])
+        await rejects(
+          resolveSelectedArtifact(selectedSummary({ buildId, directory: escaping }), root),
+          /expected builds\/candidates/,
+        );
+      // The named artifact is not on disk: refuse rather than grade sources.
+      await rejects(
+        resolveSelectedArtifact(selectedSummary({ buildId, directory }), root),
+        /missing a nonempty index\.html/,
+      );
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

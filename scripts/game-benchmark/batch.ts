@@ -10,7 +10,12 @@ import {
   type BenchmarkGrade,
   type BenchmarkLane,
 } from "./aggregate.ts";
-import { decodeRunSummary, type LoadedGameBenchmarkBrief } from "./artifacts.ts";
+import {
+  decodeRunSummary,
+  resolveSelectedArtifact,
+  type LoadedGameBenchmarkBrief,
+  type SelectedWebArtifact,
+} from "./artifacts.ts";
 import type { DisplaySandbox } from "../lib/display-sandbox.ts";
 
 /** A positive job count; `parseArgs` hands these through as strings. */
@@ -241,6 +246,8 @@ export interface SavedHarnessRunEvidence {
   readonly brief: LoadedGameBenchmarkBrief;
   readonly directory: string;
   readonly root: string;
+  /** The immutable artifact the run selected, or null for a legacy schema-1 run. */
+  readonly artifact: SelectedWebArtifact | null;
   readonly result: BenchmarkBriefResult;
 }
 
@@ -251,8 +258,9 @@ const exists = (path: string) =>
 
 /**
  * Reads the evidence a regrade may trust: the run's own summary, its saved row
- * and the game folder they name. Any mismatch is refused before a grader runs,
- * because a row from another fixture or commit cannot be relabelled.
+ * and the game folder or immutable artifact they name. Any mismatch is refused
+ * before a grader runs, because a row from another fixture or commit cannot be
+ * relabelled.
  */
 export async function readSavedHarnessRun(input: {
   readonly runDirectory: string;
@@ -299,13 +307,19 @@ export async function readSavedHarnessRun(input: {
     throw new Error(`[${input.brief.id}] the saved run never recorded a game root.`);
 
   const root = NodePath.resolve(summary.game.root);
-  if (!(await exists(NodePath.join(root, "game.json"))))
-    throw new Error(`[${input.brief.id}] the saved game root is missing game.json: ${root}.`);
-  if (!(await exists(NodePath.join(root, "godot/project.godot"))))
-    throw new Error(
-      `[${input.brief.id}] the saved game root is missing godot/project.godot: ${root}.`,
-    );
-  return { brief: input.brief, directory, root, result };
+  const artifact = await resolveSelectedArtifact(summary, root);
+  // A schema-2 selection is graded from its immutable bytes: the sources may be
+  // gone, and requiring them would invite an unwanted rebuild. A schema-1 row
+  // keeps the old contract because its grader may have to export.
+  if (artifact === null) {
+    if (!(await exists(NodePath.join(root, "game.json"))))
+      throw new Error(`[${input.brief.id}] the saved game root is missing game.json: ${root}.`);
+    if (!(await exists(NodePath.join(root, "godot/project.godot"))))
+      throw new Error(
+        `[${input.brief.id}] the saved game root is missing godot/project.godot: ${root}.`,
+      );
+  }
+  return { brief: input.brief, directory, root, artifact, result };
 }
 
 const replaceDirectory = async (input: {
@@ -343,6 +357,8 @@ const installStagedGrade = async (directory: string, stage: string): Promise<voi
 export interface GradeSavedBuildInput {
   readonly brief: LoadedGameBenchmarkBrief;
   readonly root: string;
+  /** The saved selection to serve, or null when only a legacy workspace can be graded. */
+  readonly artifact: SelectedWebArtifact | null;
   readonly outDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
@@ -418,6 +434,7 @@ export async function runRegradeBatch(
           const grade = await input.grade({
             brief: entry.brief,
             root: entry.root,
+            artifact: entry.artifact,
             outDirectory: stage,
             environment: sandbox.environment,
             signal: workerSignal,

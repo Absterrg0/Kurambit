@@ -204,9 +204,25 @@ export interface GradeQuick {
   readonly changedPercent: number;
 }
 
+/**
+ * What a grade actually served. `workspace` is the game folder's own
+ * builds/web (the historical behavior); `artifact` is a saved candidate the
+ * caller named, served read-only exactly as exported.
+ */
+export interface GradeTarget {
+  readonly kind: "workspace" | "artifact";
+  /** Absolute directory that was served. */
+  readonly directory: string;
+  /** The selected build id the caller declared for an artifact, when known. */
+  readonly buildId: string | null;
+}
+
 export interface GradeBuild {
-  /** `existing`: the game already had builds/web; `exported`: this grader built it. */
-  readonly kind: "existing" | "exported" | "no-build";
+  /**
+   * `existing`: the game already had builds/web; `artifact`: a saved candidate
+   * was served; `exported`: this grader built it.
+   */
+  readonly kind: "existing" | "exported" | "artifact" | "no-build";
   readonly detail: string | null;
 }
 
@@ -214,6 +230,11 @@ export interface GradeDocument {
   readonly schemaVersion: 1;
   readonly brief: { readonly id: string; readonly title: string; readonly checksum: string };
   readonly gameDir: string;
+  /**
+   * The directory actually served. Absent only on a vote-only re-grade of a
+   * document written before this field existed; never guessed.
+   */
+  readonly target?: GradeTarget;
   readonly model: string;
   /** Which model family graded this document, and which model answered. */
   readonly grader: { readonly provider: string; readonly model: string };
@@ -1243,11 +1264,30 @@ const defaultBrowser = async (): Promise<string> => {
 /** The parts of a previous grade a vote-only re-grade needs. */
 interface SavedGrade {
   readonly gameDir: string;
+  /** The served directory when that grade recorded one; old documents did not. */
+  readonly target: GradeTarget | null;
   readonly brief: { readonly id: string; readonly checksum: string };
   readonly build: GradeBuild;
   readonly quick: GradeQuick | null;
   readonly actions: GradeDocument["actions"];
 }
+
+const parseSavedTarget = (gradeDir: string, value: unknown): GradeTarget | null => {
+  if (value === undefined) return null;
+  if (typeof value !== "object" || value === null)
+    throw new Error(`${gradeDir}/grade.json has an unreadable target.`);
+  const record = value as Record<string, unknown>;
+  if (
+    (record.kind !== "workspace" && record.kind !== "artifact") ||
+    typeof record.directory !== "string"
+  )
+    throw new Error(`${gradeDir}/grade.json has an unreadable target.`);
+  return {
+    kind: record.kind,
+    directory: record.directory,
+    buildId: typeof record.buildId === "string" ? record.buildId : null,
+  };
+};
 
 const readSavedGrade = async (gradeDir: string): Promise<SavedGrade> => {
   const text = await NodeFSP.readFile(NodePath.join(gradeDir, "grade.json"), "utf8").catch(
@@ -1264,6 +1304,7 @@ const readSavedGrade = async (gradeDir: string): Promise<SavedGrade> => {
   if (stored.length === 0) throw new Error(`${gradeDir}/grade.json has no frames to vote over.`);
   return {
     gameDir: parsed.gameDir,
+    target: parseSavedTarget(gradeDir, parsed.target),
     brief: { id: parsed.brief?.id ?? "", checksum: parsed.brief?.checksum ?? "" },
     build: parsed.build,
     quick: parsed.quick ?? null,
@@ -1349,6 +1390,16 @@ export interface GradeOptions {
   readonly godot?: string;
   readonly maxSteps?: number;
   /**
+   * A saved web export to serve instead of `<gameDir>/builds/web`. It is never
+   * exported or modified, and a missing index.html is an error rather than a
+   * fall back to the workspace.
+   */
+  readonly artifact?: {
+    readonly directory: string;
+    /** The selected build id this artifact is claimed to be; recorded for verification. */
+    readonly buildId?: string;
+  };
+  /**
    * Vote over a previous grade's saved frames and notes instead of building and
    * playing. `gameDir` then comes from that grade.
    */
@@ -1359,6 +1410,34 @@ export interface GradeOptions {
   readonly graderModel?: string;
   readonly deps?: Partial<GradeDeps>;
 }
+
+const workspaceTarget = (gameDir: string): GradeTarget => ({
+  kind: "workspace",
+  directory: NodePath.join(gameDir, "builds/web"),
+  buildId: null,
+});
+
+/**
+ * Validates a caller-named artifact before any model call. Only a nonempty
+ * index.html is gradeable, and the directory is served read-only: a missing
+ * artifact must never turn into an export of the live sources.
+ */
+const resolveArtifactTarget = async (
+  artifact: NonNullable<GradeOptions["artifact"]>,
+): Promise<GradeTarget> => {
+  const directory = NodePath.resolve(artifact.directory);
+  const index = NodePath.join(directory, "index.html");
+  const stat = await NodeFSP.stat(index).catch(() => null);
+  if (stat === null || !stat.isFile() || stat.size === 0)
+    throw new Error(`No nonempty index.html in the artifact directory: ${directory}.`);
+  return { kind: "artifact", directory, buildId: artifact.buildId ?? null };
+};
+
+const sameArtifactTarget = (saved: GradeTarget | null, requested: GradeTarget): boolean =>
+  saved !== null &&
+  saved.kind === requested.kind &&
+  NodePath.resolve(saved.directory) === requested.directory &&
+  (requested.buildId === null || saved.buildId === requested.buildId);
 
 /**
  * Grades one game folder and writes `<out>/grade.json` plus `<out>/frames/`.
@@ -1377,6 +1456,19 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
     throw new Error(
       "Pass a game directory, or --reuse-frames <gradeDir> to vote over saved frames.",
     );
+  const requestedArtifact =
+    options.artifact === undefined ? null : await resolveArtifactTarget(options.artifact);
+  if (
+    saved !== null &&
+    requestedArtifact !== null &&
+    !sameArtifactTarget(saved.target, requestedArtifact)
+  )
+    throw new Error(
+      `--reuse-frames keeps the target recorded in ${reuseDirectory}/grade.json; it cannot be relabelled as ${requestedArtifact.directory}.`,
+    );
+  // A vote-only re-grade preserves the old document's target. An old document
+  // without one stays without one: frames cannot prove a new target.
+  const target = saved === null ? (requestedArtifact ?? workspaceTarget(gameDir)) : saved.target;
   const maxSteps = options.maxSteps ?? MAX_PLAYTESTER_STEPS;
   const exportBuild =
     options.deps?.exportBuild ??
@@ -1398,6 +1490,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
     schemaVersion: 1 as const,
     brief: { id: options.brief.id, title: options.brief.title, checksum: options.brief.checksum },
     gameDir,
+    ...(target === null ? {} : { target }),
     model: `${grader().provider}/${grader().model}`,
     grader: grader(),
     graderVersion: GRADER_VERSION,
@@ -1461,11 +1554,12 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       solCalls: 0,
     });
 
-  // 1. Build: an existing build is what the game already ships; otherwise one
-  // export attempt decides no-build.
+  // 1. Build: a named saved artifact is served as it is; otherwise an existing
+  // build is what the game already ships, and only then is one export attempted.
   const index = NodePath.join(gameDir, "builds/web/index.html");
   let build: GradeBuild;
-  if (await fileExists(index)) build = { kind: "existing", detail: null };
+  if (target?.kind === "artifact") build = { kind: "artifact", detail: null };
+  else if (await fileExists(index)) build = { kind: "existing", detail: null };
   else {
     const exported = await exportBuild(gameDir);
     build = exported.ok
@@ -1473,10 +1567,13 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       : { kind: "no-build", detail: exported.detail };
   }
   if (build.kind === "no-build") return noBuild(build.detail);
-  if (!(await fileExists(index))) return noBuild("The export wrote no index.html.");
+  if (target?.kind !== "artifact" && !(await fileExists(index)))
+    return noBuild("The export wrote no index.html.");
 
   const executable = options.browser ?? (await defaultBrowser());
-  const served = await serveBuild(NodePath.join(gameDir, "builds/web"));
+  const served = await serveBuild(
+    target?.kind === "artifact" ? target.directory : NodePath.join(gameDir, "builds/web"),
+  );
   try {
     const runPlaytest: GradeDeps["playtest"] =
       options.deps?.playtest ??
@@ -1614,12 +1711,17 @@ const main = async () => {
     console.log(
       [
         "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>",
+        "       node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir> --artifact <saved-web-dir>",
         "       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
         "",
         "Grades any folder holding a Godot project from its served pixels and console only.",
+        "--artifact serves a saved web export read-only instead of <gameDir>/builds/web,",
+        "and records that directory and --artifact-build-id in grade.json. A missing",
+        "artifact is an error; it never falls back to exporting the live sources.",
         "--reuse-frames skips the build and the playtest: it re-chooses the frames from",
         "every screenshot that grade saved and votes over them with that grade's notes,",
-        "which is the cheap way to re-read an old run.",
+        "which is the cheap way to re-read an old run. It keeps the saved target and",
+        "refuses a contradictory --artifact.",
         "--grader codex|opencode picks the model family: codex is Sol, opencode is the CLI",
         "model in --grader-model (default " + OPENCODE_GRADER_MODEL + ").",
         "Optional: --godot <godot-binary> --browser <chrome-headless-shell> --max-steps <n>",
@@ -1632,6 +1734,10 @@ const main = async () => {
   const briefPath = flag("brief");
   const out = flag("out");
   const reuseFrames = flag("reuse-frames");
+  const artifactDirectory = flag("artifact");
+  const artifactBuildId = flag("artifact-build-id");
+  if (artifactBuildId !== undefined && artifactDirectory === undefined)
+    throw new Error("--artifact-build-id needs --artifact <saved-web-dir>.");
   if (
     briefPath === undefined ||
     out === undefined ||
@@ -1649,6 +1755,14 @@ const main = async () => {
     brief,
     out,
     ...(reuseFrames === undefined ? {} : { reuseFrames }),
+    ...(artifactDirectory === undefined
+      ? {}
+      : {
+          artifact: {
+            directory: artifactDirectory,
+            ...(artifactBuildId === undefined ? {} : { buildId: artifactBuildId }),
+          },
+        }),
     ...(flag("godot") === undefined ? {} : { godot: NodePath.resolve(flag("godot")!) }),
     ...(flag("browser") === undefined ? {} : { browser: NodePath.resolve(flag("browser")!) }),
     ...(flag("max-steps") === undefined ? {} : { maxSteps: Number(flag("max-steps")) }),

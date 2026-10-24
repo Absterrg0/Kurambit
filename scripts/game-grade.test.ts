@@ -1,9 +1,10 @@
-// @effect-diagnostics nodeBuiltinImport:off -- the fixture builds a real no-build folder on disk.
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off -- the fixture serves a real loopback build and reads it back.
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { LoadedGameBenchmarkBrief } from "./game-benchmark/artifacts.ts";
+import type { GameWebPlaytestResult } from "../packages/contracts/src/index.ts";
 import {
   chooseFrames,
   clampHoldMs,
@@ -34,6 +35,30 @@ const brief: LoadedGameBenchmarkBrief = {
 };
 
 const frames = [{ id: "F1", path: "/frames/f1.png", label: "after step 1" }];
+
+/** A playtest that never boots: enough to prove which bytes the server served. */
+const unopenedPlaytest = (): GameWebPlaytestResult => ({
+  success: true,
+  booted: false,
+  bootMs: null,
+  responded: false,
+  changedPercent: 0,
+  message: "stub playtest",
+  consoleMessages: [],
+  screenshots: [],
+  state: null,
+});
+
+/** Asserts a promise rejects with a message matching `pattern`. */
+const rejects = async (promise: Promise<unknown>, pattern: RegExp): Promise<void> => {
+  let failure: unknown = null;
+  try {
+    await promise;
+  } catch (error) {
+    failure = error;
+  }
+  assert.match(failure instanceof Error ? failure.message : String(failure), pattern);
+};
 
 const reply = (verdict: "YES" | "NO") => ({
   verdict,
@@ -341,6 +366,11 @@ describe("gradeGame", () => {
       });
       assert.equal(grade.build.kind, "no-build");
       assert.equal(grade.build.detail, "no godot project");
+      assert.deepEqual(grade.target, {
+        kind: "workspace",
+        directory: NodePath.join(gameDir, "builds/web"),
+        buildId: null,
+      });
       assert.equal(grade.quick, null);
       assert.equal(grade.solCalls, 0);
       assert.equal(reviewed, false);
@@ -547,6 +577,192 @@ describe("gradeGame", () => {
       assert.match(prompts[0]!, /after step 11: drag \(10,10\)→\(20,20\) — note 11/);
       // Every screenshot comes along as evidence.
       assert.equal((await NodeFSP.readdir(NodePath.join(out, "frames"))).length, 16);
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("serves an explicit saved artifact and never exports the workspace", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const gameDir = NodePath.join(directory, "game");
+      const workspace = NodePath.join(gameDir, "builds/web");
+      const artifact = NodePath.join(directory, "saved-artifact");
+      await NodeFSP.mkdir(workspace, { recursive: true });
+      await NodeFSP.mkdir(artifact, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(workspace, "index.html"), "workspace build");
+      await NodeFSP.writeFile(NodePath.join(artifact, "index.html"), "selected build");
+      const buildId = "a".repeat(64);
+      let exported = false;
+      let served: string | null = null;
+      const out = NodePath.join(directory, "out");
+      const grade = await gradeGame({
+        gameDir,
+        brief,
+        out,
+        browser: "/browser-not-launched",
+        artifact: { directory: artifact, buildId },
+        deps: {
+          exportBuild: async () => {
+            exported = true;
+            return { ok: true, detail: null };
+          },
+          playtest: async (request) => {
+            served = await (await fetch(request.url)).text();
+            return unopenedPlaytest();
+          },
+          review: async () => reply("NO"),
+        },
+      });
+      // The selected bytes were served, not the workspace's, and no export ran.
+      assert.equal(exported, false);
+      assert.equal(served, "selected build");
+      assert.equal(grade.build.kind, "artifact");
+      assert.deepEqual(grade.target, { kind: "artifact", directory: artifact, buildId });
+      const written = JSON.parse(
+        await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
+      ) as { target: unknown };
+      assert.deepEqual(written.target, { kind: "artifact", directory: artifact, buildId });
+      // Serving is read-only: the artifact still holds exactly what it held.
+      assert.equal(
+        await NodeFSP.readFile(NodePath.join(artifact, "index.html"), "utf8"),
+        "selected build",
+      );
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a missing explicit artifact instead of falling back to the workspace", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const gameDir = NodePath.join(directory, "game");
+      await NodeFSP.mkdir(NodePath.join(gameDir, "builds/web"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(gameDir, "builds/web/index.html"), "workspace build");
+      let exported = false;
+      let reviewed = false;
+      let played = false;
+      await rejects(
+        gradeGame({
+          gameDir,
+          brief,
+          out: NodePath.join(directory, "out"),
+          artifact: { directory: NodePath.join(directory, "missing-artifact") },
+          deps: {
+            exportBuild: async () => {
+              exported = true;
+              return { ok: true, detail: null };
+            },
+            playtest: async () => {
+              played = true;
+              return unopenedPlaytest();
+            },
+            review: async () => {
+              reviewed = true;
+              return reply("YES");
+            },
+          },
+        }),
+        /No nonempty index\.html in the artifact directory/,
+      );
+      assert.equal(exported, false);
+      assert.equal(reviewed, false);
+      assert.equal(played, false);
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a saved grade's target and refuses to relabel it", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const artifact = NodePath.join(directory, "saved-artifact");
+      const otherArtifact = NodePath.join(directory, "other-artifact");
+      await NodeFSP.mkdir(artifact, { recursive: true });
+      await NodeFSP.mkdir(otherArtifact, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(artifact, "index.html"), "selected build");
+      await NodeFSP.writeFile(NodePath.join(otherArtifact, "index.html"), "other build");
+      const buildId = "a".repeat(64);
+      const target = { kind: "artifact" as const, directory: artifact, buildId };
+      const savedDir = NodePath.join(directory, "saved");
+      await NodeFSP.mkdir(NodePath.join(savedDir, "frames"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(savedDir, "frames/boot.png"), png);
+      const document = {
+        schemaVersion: 1,
+        brief: { id: brief.id, title: brief.title, checksum: brief.checksum },
+        gameDir: "/games/fixture",
+        target,
+        model: "codex/gpt-6.1-sol",
+        build: { kind: "artifact", detail: null },
+        quick: null,
+        frames: ["frames/boot.png"],
+        actions: [],
+        obligations: [],
+        control: { description: CONTROL_DESCRIPTION, yes: false, votes: [] },
+        void: false,
+        solCalls: 0,
+      };
+      await NodeFSP.writeFile(NodePath.join(savedDir, "grade.json"), JSON.stringify(document));
+      const deps = {
+        review: async () => reply("NO"),
+        playtest: async () => {
+          throw new Error("a vote-only re-grade must not playtest");
+        },
+        exportBuild: async () => {
+          throw new Error("a vote-only re-grade must not build");
+        },
+      };
+      const preserved = await gradeGame({
+        brief,
+        out: NodePath.join(directory, "out-kept"),
+        reuseFrames: savedDir,
+        deps,
+      });
+      assert.deepEqual(preserved.target, target);
+      // Naming the same artifact again is not a contradiction.
+      const matched = await gradeGame({
+        brief,
+        out: NodePath.join(directory, "out-matched"),
+        reuseFrames: savedDir,
+        artifact: { directory: artifact, buildId },
+        deps,
+      });
+      assert.deepEqual(matched.target, target);
+      await rejects(
+        gradeGame({
+          brief,
+          out: NodePath.join(directory, "out-relabelled"),
+          reuseFrames: savedDir,
+          artifact: { directory: otherArtifact },
+          deps,
+        }),
+        /cannot be relabelled/,
+      );
+      // A document from before target identity existed cannot be relabelled
+      // either: its frames do not prove which build they came from.
+      const oldSavedDir = NodePath.join(directory, "saved-old");
+      await NodeFSP.mkdir(NodePath.join(oldSavedDir, "frames"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(oldSavedDir, "frames/boot.png"), png);
+      const oldDocument: Partial<typeof document> = { ...document };
+      delete oldDocument.target;
+      await NodeFSP.writeFile(
+        NodePath.join(oldSavedDir, "grade.json"),
+        JSON.stringify(oldDocument),
+      );
+      await rejects(
+        gradeGame({
+          brief,
+          out: NodePath.join(directory, "out-old"),
+          reuseFrames: oldSavedDir,
+          artifact: { directory: artifact, buildId },
+          deps,
+        }),
+        /cannot be relabelled/,
+      );
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }

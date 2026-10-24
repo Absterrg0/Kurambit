@@ -20,6 +20,7 @@ import {
   type GameProductionStatus,
   type GameScenarioCriterionResult,
 } from "../../packages/contracts/src/index.ts";
+import { candidateBuildId } from "../../apps/server/src/game/webBuild.ts";
 
 /**
  * One promise a benchmark brief makes, frozen before an agent builds anything.
@@ -352,6 +353,56 @@ export const decodeRunSummary = (text: string): GameE2eRunSummary | null => {
     return null;
   }
 };
+
+/** The immutable web export a schema-2 run says Play served. */
+export interface SelectedWebArtifact {
+  readonly buildId: string;
+  /** Game-relative directory, exactly as the run recorded it. */
+  readonly directory: string;
+  /** The absolute directory to serve read-only. */
+  readonly absoluteDirectory: string;
+}
+
+/**
+ * Resolves the artifact a schema-2 run selected. The benchmark must grade the
+ * bytes Play served, not a fresh export of the sources: an export can differ
+ * from the accepted candidate even when the sources look the same. A schema-2
+ * run that names no usable artifact is an error, never a workspace fallback;
+ * schema 1 predates selection and returns `null` so its historical grading is
+ * unchanged.
+ */
+export async function resolveSelectedArtifact(
+  summary: GameE2eRunSummary,
+  root: string,
+): Promise<SelectedWebArtifact | null> {
+  if (summary.schemaVersion !== 2) return null;
+  const facts = summary.review?.selectedBuildFacts ?? null;
+  if (facts === null || facts.buildId === null || facts.directory === null)
+    throw new Error("The schema-2 run recorded no selected artifact (buildId/directory).");
+  const buildId = facts.buildId;
+  // The product only publishes candidates at builds/candidates/<buildId>. A
+  // different path is not the artifact the selection names, and a relative
+  // path is how traversal would enter; both are refused before any serving.
+  const claimed = candidateBuildId(facts.directory);
+  if (claimed === null || claimed !== buildId)
+    throw new Error(
+      `The selected-build facts record ${facts.directory} for build ${buildId}; expected builds/candidates/${buildId}.`,
+    );
+  const selected = summary.loop?.selectedBuildId ?? null;
+  if (selected !== null && selected !== buildId)
+    throw new Error(`The selected-build facts describe ${buildId}, but Play serves ${selected}.`);
+  const gameRoot = NodePath.resolve(root);
+  const absoluteDirectory = NodePath.resolve(gameRoot, facts.directory);
+  if (absoluteDirectory !== gameRoot && !absoluteDirectory.startsWith(`${gameRoot}${NodePath.sep}`))
+    throw new Error(`The selected artifact resolves outside the game root: ${absoluteDirectory}.`);
+  const index = NodePath.join(absoluteDirectory, "index.html");
+  const stat = await NodeFSP.stat(index).catch(() => null);
+  if (stat === null || !stat.isFile() || stat.size === 0)
+    throw new Error(
+      `The selected artifact is missing a nonempty index.html: ${absoluteDirectory}.`,
+    );
+  return { buildId, directory: facts.directory, absoluteDirectory };
+}
 
 const decodeJudgement = Schema.decodeUnknownSync(Schema.fromJsonString(GameVisualJudgement));
 

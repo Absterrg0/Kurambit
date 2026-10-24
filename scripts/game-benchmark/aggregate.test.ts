@@ -11,6 +11,7 @@ import {
   type GameSubmissionFacts,
 } from "../../packages/contracts/src/index.ts";
 import {
+  assertGradeDescribesArtifact,
   readBenchmarkResult,
   readGradeSummary,
   classifyRun,
@@ -673,6 +674,7 @@ describe("resume", () => {
       build: "existing",
       grader: { provider: "codex", model: "gpt-6.1-sol" },
       graderVersion: 3,
+      target: null,
       quick: null,
       obligationIds: [],
       obligations: { yes: 0, total: 0 },
@@ -720,6 +722,7 @@ describe("resume", () => {
       build: "existing",
       grader: { provider: "codex", model: "gpt-6.1-sol" },
       graderVersion: 3,
+      target: null,
       quick: null,
       obligationIds: [],
       obligations: { yes: 0, total: 0 },
@@ -760,6 +763,43 @@ describe("grade summaries", () => {
     assert.equal(summary?.graderVersion, 3);
     // An old grade document without the profile cannot be attributed to one.
     assert.equal(readGradeSummary({ build: { kind: "existing" } })?.graderVersion, null);
+  });
+
+  it("reads the served target and refuses a grade for another artifact", () => {
+    const buildId = "a".repeat(64);
+    const artifact = {
+      buildId,
+      directory: `builds/candidates/${buildId}`,
+      absoluteDirectory: `/games/crate-dock/builds/candidates/${buildId}`,
+    };
+    const summary = readGradeSummary({
+      build: { kind: "artifact" },
+      target: {
+        kind: "artifact",
+        directory: artifact.absoluteDirectory,
+        buildId,
+      },
+    });
+    assert.deepEqual(summary?.target, {
+      kind: "artifact",
+      directory: artifact.absoluteDirectory,
+      buildId,
+    });
+    assert.doesNotThrow(() => assertGradeDescribesArtifact(summary!, artifact));
+    assert.throws(
+      () =>
+        assertGradeDescribesArtifact(summary!, {
+          ...artifact,
+          buildId: "b".repeat(64),
+        }),
+      /not the requested selected artifact/,
+    );
+    assert.throws(
+      () => assertGradeDescribesArtifact({ ...summary!, target: null }, artifact),
+      /no target/,
+    );
+    // A grade document from before target identity existed stays targetless.
+    assert.equal(readGradeSummary({ build: { kind: "existing" } })?.target, null);
   });
 });
 

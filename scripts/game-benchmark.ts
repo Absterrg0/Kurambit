@@ -8,9 +8,12 @@ import * as NodeUtil from "node:util";
 import {
   decodeRunSummary,
   loadGameBenchmarkBriefs,
+  resolveSelectedArtifact,
   type LoadedGameBenchmarkBrief,
+  type SelectedWebArtifact,
 } from "./game-benchmark/artifacts.ts";
 import {
+  assertGradeDescribesArtifact,
   decodeBenchmarkResult,
   readBenchmarkResult,
   readGradeSummary,
@@ -106,9 +109,10 @@ if (values.help) {
       "An existing result for the same harness commit, lane, fixture checksum and evaluation profile is skipped.",
       "--reuse-raw copies a cached raw-lane build per brief and regrades it when the grader profile differs,",
       "instead of spending the agent's two-hour budget again.",
-      "--regrade <saved-run-dir> grades the game root recorded in each <brief>/run.json under that",
-      "directory, using the current frozen grader. It never asks an agent to build, refuses missing or",
-      "mismatched fixture evidence, and replaces only each row's grade and evaluation profile.",
+      "--regrade <saved-run-dir> grades the selected artifact recorded in each <brief>/run.json",
+      "(or a legacy schema-1 game root), using the current frozen grader. It never asks an",
+      "agent to build, refuses missing or mismatched fixture/artifact evidence, and replaces",
+      "only each row's grade and evaluation profile.",
       "--compare reads two lanes' already-saved grade frames and asks the frozen grader model which",
       "build reads better, in both orders plus an identical-pair control. It writes <out>/comparison.json",
       "and comparison.md and is never summed with the obligations totals.",
@@ -409,6 +413,7 @@ const gradeFinishedGame = async (
   directory: string,
   environment: NodeJS.ProcessEnv,
   abort: AbortSignal,
+  artifact: SelectedWebArtifact | null = null,
 ): Promise<BenchmarkGrade | null> => {
   if (abort.aborted) throw abortReason(abort);
   const out = NodePath.join(directory, "grade");
@@ -424,6 +429,9 @@ const gradeFinishedGame = async (
       "--grader",
       grader,
       ...(values["grader-model"] === undefined ? [] : ["--grader-model", values["grader-model"]!]),
+      ...(artifact === null
+        ? []
+        : ["--artifact", artifact.absoluteDirectory, "--artifact-build-id", artifact.buildId]),
     ],
     cwd: checkout,
     env: environment,
@@ -434,11 +442,16 @@ const gradeFinishedGame = async (
   if (abort.aborted) throw abortReason(abort);
   const text = await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8").catch(() => null);
   if (text === null) return null;
+  let grade: BenchmarkGrade | null;
   try {
-    return readGradeSummary(JSON.parse(text) as unknown);
+    grade = readGradeSummary(JSON.parse(text) as unknown);
   } catch {
     return null;
   }
+  // The grade must prove it served the requested selection. A grade for a
+  // different directory is not this run's verdict, even if its scores look sane.
+  if (grade !== null && artifact !== null) assertGradeDescribesArtifact(grade, artifact);
+  return grade;
 };
 
 /** The raw lane's scratch folder: only the blank template's project and presets. */
@@ -618,6 +631,7 @@ if (savedRunDirectory !== null) {
           input.outDirectory,
           input.environment,
           input.signal,
+          input.artifact,
         ),
       sandbox: prepareDisplaySandbox,
       signal: shutdown.signal,
@@ -717,11 +731,30 @@ const runOne = async (brief: LoadedGameBenchmarkBrief, abort: AbortSignal) => {
     });
     const observation = await runBrief(brief, directory, location, sandbox.environment, abort);
     if (abort.aborted) throw abortReason(abort);
-    const root = observation.summary?.game?.root;
-    const grade =
-      root === undefined
-        ? null
-        : await gradeFinishedGame(brief, root, directory, sandbox.environment, abort);
+    const summary = observation.summary;
+    const root = summary?.game?.root;
+    let grade: BenchmarkGrade | null = null;
+    if (root !== undefined)
+      try {
+        // A schema-2 run is graded on the artifact it selected. A schema-1 run
+        // resolves to null and keeps its historical workspace grading.
+        const artifact = summary === null ? null : await resolveSelectedArtifact(summary, root);
+        grade = await gradeFinishedGame(
+          brief,
+          root,
+          directory,
+          sandbox.environment,
+          abort,
+          artifact,
+        );
+      } catch (error) {
+        if (abort.aborted) throw abortReason(abort);
+        // The builder's row is still evidence. Never fall back to an export of
+        // the live sources when the selected artifact cannot be resolved.
+        console.warn(
+          `[${brief.id}] not graded: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     result = readBenchmarkResult({
       harnessCommit,
       brief,
