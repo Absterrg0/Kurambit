@@ -12,6 +12,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as GameQualification from "./GameQualification.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
@@ -119,6 +120,7 @@ it.live.skipIf(!available)(
           Effect.gen(function* () {
             const projects = yield* GameProjectService.GameProjectService;
             const game = yield* GameService.GameService;
+            const qualification = yield* GameQualification.GameQualification;
             const rounds = yield* GameRoundStore.GameRoundStore;
             const studio = yield* GameRepairStudio.GameRepairStudio;
             const created = yield* projects.create({
@@ -150,12 +152,20 @@ offset_right = 960.0
 offset_bottom = 540.0
 color = Color(0.08, 0.1, 0.16, 1)
 
-[node name="Box" type="ColorRect" parent="."]
-offset_left = 120.0
-offset_top = 240.0
-offset_right = 200.0
-offset_bottom = 320.0
+[node name="Player" type="Node2D" parent="." groups=["player"]]
+position = Vector2(160, 280)
+
+[node name="Body" type="Polygon2D" parent="Player"]
+polygon = PackedVector2Array(-40, -40, 40, -40, 40, 40, -40, 40)
 color = Color(0.95, 0.55, 0.2, 1)
+`,
+              );
+              await NodeFSP.writeFile(
+                NodePath.join(created.root, "godot/scripts/game_state.gd"),
+                `extends Node
+
+## A run value the probe reports; it drains while the game runs.
+var energy := 100.0
 `,
               );
               await NodeFSP.writeFile(
@@ -163,14 +173,20 @@ color = Color(0.95, 0.55, 0.2, 1)
                 `extends Node2D
 
 func _process(delta: float) -> void:
+	GameState.energy = maxf(0.0, GameState.energy - 60.0 * delta)
 	if Input.is_action_pressed("ui_right"):
-		$Box.position.x = min($Box.position.x + 260.0 * delta, 820.0)
+		$Player.position.x = min($Player.position.x + 260.0 * delta, 820.0)
 `,
               );
             });
 
             const result = yield* game.verify(created.threadId, {
-              steps: [{ key: "ArrowRight", holdMs: 1_200 }],
+              // The first hold establishes the gameplay baseline while the
+              // player exists; the second is the movement the baseline measures.
+              steps: [
+                { key: "ArrowRight", holdMs: 600 },
+                { key: "ArrowRight", holdMs: 600 },
+              ],
               bootTimeoutMs: 45_000,
             });
             expect(result.success, result.message).toBe(true);
@@ -183,6 +199,8 @@ func _process(delta: float) -> void:
             expect(result.playtest?.booted).toBe(true);
             expect(result.playtest?.responded).toBe(true);
             expect(result.playtest?.success).toBe(true);
+            expect(result.playtest?.qualifies, result.playtest?.blockers?.join("; ")).toBe(true);
+            expect(result.playtest?.state?.playerMoved ?? 0).toBeGreaterThan(0.75);
             expect(result.screenshots.length).toBeGreaterThan(0);
             expect(result.screenshots[0]?.mimeType).toBe("image/png");
             expect(result.screenshots[0]?.width).toBeGreaterThan(0);
@@ -190,9 +208,15 @@ func _process(delta: float) -> void:
 
             const state = yield* rounds.read(created.root);
             expect(state.selected?.buildId).toBe(result.build?.buildId);
+            const derived = yield* qualification.read(created.root, "godot");
+            for (const stage of ["check", "test", "export", "playtest"] as const)
+              expect(
+                derived.stages.find((entry) => entry.stage === stage)?.status,
+                `derived ${stage} status`,
+              ).toBe("passed");
             const binding = yield* rounds.exported(created.root, result.build!.buildId);
             expect(binding?.playtest?.booted).toBe(true);
-            expect(binding?.playtest?.executedInputSteps).toBe(1);
+            expect(binding?.playtest?.executedInputSteps).toBe(2);
             expect(binding?.playtest?.consoleErrors).toBe(0);
             const facts = yield* studio.submissionFacts(created.root, result.build!.buildId);
             expect(facts.passed, facts.reason ?? "").toBe(true);

@@ -403,7 +403,7 @@ it.live("runs the recorded stages in order and binds the playtest to the exact b
       expect(yield* operations).toEqual(["import", "check", "test", "import", "import", "export"]);
 
       const read = yield* qualification.read(root, "godot");
-      for (const stage of ["check", "test", "export"] as const)
+      for (const stage of ["check", "test", "export", "playtest"] as const)
         expect(read.stages.find((entry) => entry.stage === stage)?.status).toBe("passed");
       const playtestRecord = yield* qualification.stageRecord(root, "playtest");
       expect(playtestRecord?.outcome).toBe("passed");
@@ -416,6 +416,97 @@ it.live("runs the recorded stages in order and binds the playtest to the exact b
       expect(binding?.playtest?.executedInputSteps).toBe(1);
       const facts = yield* studio.submissionFacts(root, result.build!.buildId);
       expect(facts.passed, facts.reason ?? "").toBe(true);
+    }),
+  ),
+);
+
+it.live("does not pass verification when a successful capture has failed evidence", () =>
+  withFixture(
+    ({ game, root, qualification }) =>
+      Effect.gen(function* () {
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success).toBe(false);
+        expect(result.failedStage).toBe("playtest");
+        expect(result.completed).toEqual(["check", "test", "export"]);
+        expect(result.playtest?.success).toBe(true);
+        expect(result.playtest?.qualifies).toBe(false);
+        expect(result.playtest?.blockers).toContain("Required state probe missing");
+        expect(result.screenshots).not.toEqual([]);
+        expect((yield* qualification.stageRecord(root, "playtest"))?.outcome).toBe("failed");
+      }),
+    {
+      playtest: () => ({
+        ...playtestResult(),
+        qualifies: false,
+        blockers: ["Required state probe missing"],
+      }),
+    },
+  ),
+);
+
+it.live(
+  "binds an old build replay to the sources its export covered, never the edited folder",
+  () =>
+    withFixture(({ game, root, qualification, rounds }) =>
+      Effect.gen(function* () {
+        const first = yield* game.verify(threadId, { steps });
+        expect(first.success, first.message).toBe(true);
+        const exported = (yield* qualification.stageRecord(root, "export"))!;
+        expect(exported.outcome).toBe("passed");
+        expect(exported.sourceId).not.toBeNull();
+        const binding = (yield* rounds.exported(root, first.build!.buildId))!;
+
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# later edit\n"),
+        );
+        const replay = yield* game.webPlaytestBuild(threadId, first.build!.buildId, { steps });
+        expect(replay.success, replay.message).toBe(true);
+
+        // The export record still names the build that was played, so its
+        // qualification identity is the source set that export covered. The
+        // edited folder is newer, which makes the replay stale, not a pass.
+        const record = (yield* qualification.stageRecord(root, "playtest"))!;
+        expect(record.outcome).toBe("passed");
+        expect(record.buildId).toBe(first.build!.buildId);
+        expect(record.sourceId).toBe(exported.sourceId);
+        const read = yield* qualification.read(root, "godot");
+        expect(read.stages.find((stage) => stage.stage === "playtest")?.status).toBe("stale");
+        expect(read.state).toBe("unqualified");
+
+        // The round store keeps the artifact's own byte identity untouched.
+        const after = (yield* rounds.exported(root, first.build!.buildId))!;
+        expect(after.artifact.buildId).toBe(binding.artifact.buildId);
+        expect(after.artifact.sourceId).toBe(binding.artifact.sourceId);
+      }),
+    ),
+);
+
+it.live("a replay after a newer export records no source binding and cannot certify it", () =>
+  withFixture(({ game, root, qualification, rounds }) =>
+    Effect.gen(function* () {
+      const first = yield* game.verify(threadId, { steps });
+      expect(first.success, first.message).toBe(true);
+      yield* Effect.promise(() =>
+        NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# newer sources\n"),
+      );
+      const second = yield* game.export(threadId, "Web");
+      expect(second.success, second.message).toBe(true);
+      const selected = (yield* rounds.read(root)).selected!;
+      expect(selected.buildId).not.toBe(first.build!.buildId);
+
+      const replay = yield* game.webPlaytestBuild(threadId, first.build!.buildId, { steps });
+      expect(replay.success, replay.message).toBe(true);
+
+      // The current export record names another build, so there is no honest
+      // source identity for this old build's evidence. It stays unknown rather
+      // than borrowing the current folder's identity.
+      const record = (yield* qualification.stageRecord(root, "playtest"))!;
+      expect(record.outcome).toBe("passed");
+      expect(record.buildId).toBe(first.build!.buildId);
+      expect(record.sourceId).toBeNull();
+      const read = yield* qualification.read(root, "godot");
+      expect(read.stages.find((stage) => stage.stage === "playtest")?.status).toBe("unknown");
+      expect(read.state).toBe("unqualified");
     }),
   ),
 );

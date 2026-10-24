@@ -1103,7 +1103,7 @@ it.live("a candidate playtest serves evidence without changing the Play URL or i
   );
 });
 
-it.live("an export naming a stopped round fails instead of publishing directly", () => {
+it.live("an export naming a round fails instead of publishing directly", () => {
   let exports = 0;
   return withGame(
     {
@@ -1120,6 +1120,34 @@ it.live("an export naming a stopped round fails instead of publishing directly",
         const expired = yield* Effect.result(game.export(threadId, "Web", { roundId: round.id }));
         expect(expired._tag).toBe("Failure");
         if (expired._tag === "Failure") expect(expired.failure.reason).toBe("invalid-input");
+        expect(exports).toBe(0);
+        expect((yield* rounds.read(root)).selected).toBeNull();
+      }),
+  );
+});
+
+it.live("a non-Web export naming a round is refused instead of publishing", () => {
+  let exports = 0;
+  return withGame(
+    {
+      run: (input) => {
+        exports += 1;
+        return Effect.succeed(processOk(input.root));
+      },
+    },
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const round = yield* rounds.begin(root, {});
+        for (const target of ["Linux", "Windows"] as const) {
+          const refused = yield* Effect.result(
+            game.export(threadId, target, { roundId: round.id }),
+          );
+          expect(refused._tag).toBe("Failure");
+          if (refused._tag === "Failure") {
+            expect(refused.failure.reason).toBe("invalid-input");
+            expect(refused.failure.message).toContain("repair round is no longer running");
+          }
+        }
         expect(exports).toBe(0);
         expect((yield* rounds.read(root)).selected).toBeNull();
       }),

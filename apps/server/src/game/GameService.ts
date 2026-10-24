@@ -1324,6 +1324,27 @@ const make = Effect.gen(function* () {
           const missingProbe = probeRequired && result.state === null;
           const probesMissing = "StudioProbe missing — restore scripts/studio_probe.gd autoload";
           const budgeted = fitScreenshotsToBudget(result.screenshots);
+          // The playtest stage shares attribution with the export stage: a
+          // playtest of an exact recorded build names the sources that export
+          // covered. The round store's artifact id is the byte manifest, a
+          // different identity from the legacy source snapshot, so copying it
+          // into qualification made every explicit-build playtest read stale.
+          // A build the current export record no longer names has no honest
+          // source binding here, so it stays unknown instead of borrowing the
+          // editable folder's identity.
+          const exportRecord =
+            buildId === undefined ? null : yield* qualification.stageRecord(root, "export");
+          const qualificationSourceId =
+            build?.status !== "passed"
+              ? null
+              : buildId === undefined
+                ? build.sourceId
+                : exportRecord !== null &&
+                    exportRecord.outcome === "passed" &&
+                    exportRecord.buildId === buildId &&
+                    exportRecord.sourceId !== null
+                  ? exportRecord.sourceId
+                  : null;
           const droppedFrames = budgeted.dropped.length;
           const enriched = {
             ...result,
@@ -1396,7 +1417,7 @@ const make = Effect.gen(function* () {
             },
             record: {
               outcome: qualifies ? ("passed" as const) : ("failed" as const),
-              sourceId: build?.status === "passed" ? build.sourceId : null,
+              sourceId: qualificationSourceId,
               buildId: build?.status === "passed" ? build.buildId : null,
               evidenceDirectory: evidence.directory,
               probeRequired,
@@ -2072,10 +2093,16 @@ const make = Effect.gen(function* () {
           playtest,
           screenshots,
         } satisfies GameVerifyResult;
-      if (!played.success)
+      // `success` is only the capture outcome: boot, input and pixels ran. The
+      // exam's verdict lives on `qualifies`, which is what the recorded stage's
+      // outcome holds, so a capture that missed required evidence must stop here.
+      if (!played.success || played.qualifies !== true || playtestRecord.outcome !== "passed")
         return {
           success: false,
-          message: `The recorded playtest did not pass: ${played.message}`,
+          message:
+            played.success && played.qualifies !== true
+              ? `The recorded playtest did not qualify: ${played.message}`
+              : `The recorded playtest did not pass: ${played.message}`,
           completed,
           failedStage: "playtest" as const,
           check,
@@ -2345,6 +2372,17 @@ const make = Effect.gen(function* () {
             })
           : Effect.gen(function* () {
               yield* refuseWhileUnapproved(root, "export");
+              // Only a Web export can be a repair round's challenger, so a
+              // non-Web export naming one is as invalid as an expired round:
+              // never let it silently become a publish.
+              if (options?.roundId !== undefined)
+                return yield* new GameOperationError({
+                  operation: `Export ${target}`,
+                  path: root,
+                  reason: "invalid-input",
+                  detail:
+                    "That repair round is no longer running; its export was not published or recorded.",
+                });
               return yield* exportGame(root, target, { mode: "publish" }, null);
             }),
       ),
