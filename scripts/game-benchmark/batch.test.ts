@@ -431,6 +431,42 @@ describe("runRegradeBatch", () => {
       }
       const untouchedAfter = results.find((row) => row.fixtureId === "c");
       assert.deepEqual(untouchedAfter, untouchedRow);
+
+      const directory = NodePath.join(root, briefs[0]!.id);
+      const savedResult = await NodeFSP.readFile(NodePath.join(directory, "result.json"), "utf8");
+      const savedGrade = await NodeFSP.readFile(
+        NodePath.join(directory, "grade", "grade.json"),
+        "utf8",
+      );
+      let failure: unknown = null;
+      try {
+        await runRegradeBatch({
+          runDirectory: root,
+          briefs: [briefs[0]!],
+          order: ["a", "b", "c"],
+          jobs: 1,
+          grade: async (input) => {
+            await NodeFSP.mkdir(NodePath.join(input.outDirectory, "grade"));
+            await NodeFSP.writeFile(
+              NodePath.join(input.outDirectory, "grade", "grade.json"),
+              "void grade\n",
+            );
+            return { ...gradeFor("unavailable-grader"), void: true };
+          },
+          sandbox: async () => ({ runtimeDirectory: root, environment: process.env }),
+        });
+      } catch (error) {
+        failure = error;
+      }
+      assert.match(failure instanceof Error ? failure.message : String(failure), /regrade is void/);
+      assert.equal(
+        await NodeFSP.readFile(NodePath.join(directory, "result.json"), "utf8"),
+        savedResult,
+      );
+      assert.equal(
+        await NodeFSP.readFile(NodePath.join(directory, "grade", "grade.json"), "utf8"),
+        savedGrade,
+      );
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }

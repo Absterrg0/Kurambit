@@ -427,6 +427,10 @@ export async function runRegradeBatch(
             throw new Error(
               `[${entry.brief.id}] the grader wrote no grade; the saved result and grade are unchanged.`,
             );
+          if (grade.void)
+            throw new Error(
+              `[${entry.brief.id}] the regrade is void; the saved result and grade are unchanged.`,
+            );
           if (grade.grader === null || grade.graderVersion === null)
             throw new Error(
               `[${entry.brief.id}] the new grade records no grader profile; refusing to write it.`,
