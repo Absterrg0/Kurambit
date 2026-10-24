@@ -11,6 +11,7 @@ import {
   matchedIndices,
   readSavedBuild,
   renderComparisonMarkdown,
+  sideOfBuild,
   summarizeComparison,
   type BriefComparison,
   type CompareAnswer,
@@ -188,6 +189,13 @@ it("spreads matched indices over both lanes and keeps the boot and last frame", 
   // The shorter lane bounds the pairs, so no index is invented on one side.
   expect(matchedIndices(10, 3)).toEqual([0, 1, 2]);
   expect(matchedIndices(0, 4)).toEqual([]);
+});
+
+it("puts each build on the side its order names", () => {
+  expect(sideOfBuild("harness-left", "harness")).toBe("A");
+  expect(sideOfBuild("harness-left", "raw")).toBe("B");
+  expect(sideOfBuild("raw-left", "harness")).toBe("B");
+  expect(sideOfBuild("raw-left", "raw")).toBe("A");
 });
 
 it("an identical winner under both orders is an agreed winner", () =>
