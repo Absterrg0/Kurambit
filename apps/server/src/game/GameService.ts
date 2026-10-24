@@ -32,6 +32,7 @@ import {
   type GameProcessResult,
   type ThreadId,
   fitScreenshotsToBudget,
+  gameProductionBudgetMs,
   GAME_PLAYTEST_BOUNDS,
   integerScaledCapture,
   PLAYTEST_DEFAULT_CAPTURE,
@@ -82,6 +83,7 @@ import { readLastPlaytest, writePlaytestEvidence } from "./playtestEvidence.ts";
 import { satisfiedObservations } from "./playtestState.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import { productionStatus } from "./gameProduction.ts";
 
 /**
  * The export answer the builder reads. The first accepted submit is the first
@@ -1847,6 +1849,12 @@ const make = Effect.gen(function* () {
         previewUrl,
         logsDirectory: NodePath.join(root, "builds/logs"),
         lastPlaytest,
+        production: productionStatus({
+          production: roundState.production ?? null,
+          budgetMs: gameProductionBudgetMs(manifest),
+          activeRun: yield* projects.activeRun(threadId),
+          nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+        }),
         operation: operations.current(root),
       };
     }),

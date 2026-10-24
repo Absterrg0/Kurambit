@@ -95,6 +95,17 @@ function fixture(
       Layer.mergeAll(
         Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed("/games/api"),
+          read: () =>
+            Effect.succeed({
+              schemaVersion: 1 as const,
+              name: "Review probe",
+              brief: "Make a small platformer.",
+              artDirection: "",
+              engine: { name: "godot" as const, version: "4.7.2" },
+              godotProject: "godot",
+              assets: [],
+            }),
+          activeRun: () => Effect.succeed(null),
         }),
         Layer.mock(GameRoundStore.GameRoundStore)({
           read: () =>
@@ -112,6 +123,14 @@ function fixture(
                   }
                 : null,
               rounds,
+              production: {
+                firstPlayableAt: "2026-10-23T00:00:00.000Z",
+                firstPlayableBuildId: "b".repeat(64),
+                runId: null,
+                turnFirstSubmitAt: "2026-10-23T00:00:00.000Z",
+                turnLastSubmitAt: "2026-10-23T00:03:00.000Z",
+                submissions: 2,
+              },
             }),
         }),
         Layer.mock(GameReviewSessions.GameReviewSessions)({
@@ -212,6 +231,12 @@ describe("game review API", () => {
         budget: { repairs: 3, elapsedMs: 45 * 60_000 },
         restoreOffered: true,
         loop: { reviewSelection: { model: "reviewer" }, usage: { status: "unknown" } },
+        production: {
+          firstPlayableAt: "2026-10-23T00:00:00.000Z",
+          submissions: 2,
+          elapsedMs: 3 * 60_000,
+          remainingMs: DEFAULT_GAME_REVIEW_BUDGET.elapsedMs - 3 * 60_000,
+        },
       });
     }).pipe(Effect.provide(fixture({ held: true }).layer)),
   );

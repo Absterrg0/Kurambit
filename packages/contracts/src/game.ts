@@ -586,6 +586,8 @@ export const GameStatus = Schema.Struct({
   previewUrl: Schema.NullOr(Schema.String),
   logsDirectory: Schema.String,
   lastPlaytest: Schema.NullOr(GameLastPlaytest),
+  /** The builder's production phase: first playable, its declarations and time left. */
+  production: GameProductionStatus,
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,

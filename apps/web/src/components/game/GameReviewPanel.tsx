@@ -94,6 +94,19 @@ export function GameReviewPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           verified export. Play remains on the selected build during review.
         </p>
       ) : null}
+      {review?.production?.firstPlayableAt ? (
+        <p className="text-xs text-muted-foreground">
+          First playable{" "}
+          {new Date(review.production.firstPlayableAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          : {review.production.submissions} accepted submit
+          {review.production.submissions === 1 ? "" : "s"},{" "}
+          {Math.round(review.production.elapsedMs / 60_000)} of{" "}
+          {Math.round(review.production.budgetMs / 60_000)} production minutes used.
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         {review?.loop?.status === "running" || review?.held ? (
           <Button

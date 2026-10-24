@@ -681,6 +681,8 @@ export const GameReviewStatus = Schema.Struct({
   timeLeftMs: Schema.Number,
   budget: GameReviewBudget,
   restoreOffered: Schema.Boolean,
+  /** The builder's production record: first playable, its submits and budget. */
+  production: Schema.optionalKey(GameProductionStatus),
   /** Only computed when requested: hashes and checks Play's selected artifact. */
   selectedBuildFacts: Schema.optionalKey(Schema.NullOr(GameSubmissionFacts)),
 });

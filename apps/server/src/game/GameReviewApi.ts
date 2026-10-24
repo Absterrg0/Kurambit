@@ -1,5 +1,6 @@
 import {
   DEFAULT_GAME_REVIEW_BUDGET,
+  gameProductionBudgetMs,
   GameOperationError,
   type GameReviewHistory,
   type GameReviewHistoryInput,
@@ -18,6 +19,7 @@ import * as GameRepairLoop from "./GameRepairLoop.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
+import { productionStatus } from "./gameProduction.ts";
 
 export class GameReviewApi extends Context.Service<
   GameReviewApi,
@@ -56,6 +58,7 @@ const make = Effect.gen(function* () {
       const loop = yield* loops.read(threadId);
       const activity = yield* loops.activity(threadId);
       const state = yield* rounds.read(root);
+      const manifest = yield* projects.read(root);
       const budget = loop?.budget ?? DEFAULT_GAME_REVIEW_BUDGET;
       const end = loop?.finishedAt ?? DateTime.formatIso(yield* DateTime.now);
       const elapsed = loop === null ? 0 : Math.max(0, Date.parse(end) - Date.parse(loop.startedAt));
@@ -68,6 +71,12 @@ const make = Effect.gen(function* () {
                   : yield* studio.submissionFacts(root, state.selected.buildId),
             }
           : {}),
+        production: productionStatus({
+          production: state.production ?? null,
+          budgetMs: gameProductionBudgetMs(manifest),
+          activeRun: yield* projects.activeRun(threadId),
+          nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+        }),
         loop,
         held: activity.held,
         phase:
