@@ -111,16 +111,35 @@ const framesFor = (frames: ReadonlyArray<GameRepairFrame>) =>
     label: frame.label,
     sourcePath: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+    ...(frame.width === undefined ? {} : { width: frame.width }),
+    ...(frame.height === undefined ? {} : { height: frame.height }),
   }));
+
+/**
+ * Frames a budget keeps: the window-shaped evidence is never dropped, because
+ * it is the only view of how the game holds up outside the played shape. The
+ * rest keep their order, so a later pair is the one that loses its slot.
+ */
+const boundedFrames = <T extends { readonly window?: boolean }>(
+  frames: ReadonlyArray<T>,
+  limit: number,
+): ReadonlyArray<T> => {
+  const shaped = frames.filter((frame) => frame.window === true);
+  const rest = frames.filter((frame) => frame.window !== true);
+  return [...rest.slice(0, Math.max(0, limit - shaped.length)), ...shaped];
+};
 
 const criticFrames = (
   frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
 ): GameRepairFrame[] =>
-  frames.slice(0, CRITIC_FRAMES).map((frame, index) => ({
+  boundedFrames(frames, CRITIC_FRAMES).map((frame, index) => ({
     id: `f${index + 1}`,
     label: frame.label,
     path: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+    ...(frame.width === undefined ? {} : { width: frame.width }),
+    ...(frame.height === undefined ? {} : { height: frame.height }),
+    ...(frame.window === true ? { window: true } : {}),
   }));
 
 const assignmentFrames = (
@@ -133,6 +152,8 @@ const assignmentFrames = (
     sourcePath: frame.path,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
     ...(frame.pair === undefined ? {} : { pair: frame.pair }),
+    ...(frame.width === undefined ? {} : { width: frame.width }),
+    ...(frame.height === undefined ? {} : { height: frame.height }),
   }));
 
 /**
@@ -183,6 +204,8 @@ interface BallotFrame {
   readonly path: string;
   readonly inputPair?: GameRepairFrame["inputPair"];
   readonly pair?: GameReviewSessions.GameReviewFrameInput["pair"];
+  readonly width?: number;
+  readonly height?: number;
 }
 
 const inputRouteKey = (
@@ -232,6 +255,8 @@ const experimentFrames = (
       label: `experiment ${route.id}: ${observation ? "observation: " : ""}${frame.label}`,
       path: frame.path,
       ...(pair === undefined || observation ? {} : { inputPair: pair }),
+      ...(frame.width === undefined ? {} : { width: frame.width }),
+      ...(frame.height === undefined ? {} : { height: frame.height }),
     };
   });
 };
@@ -1006,15 +1031,16 @@ export const layer = (options: GameRepairLoopOptions) => {
         const replayed = new Set(experiments.map((entry) => entry.key));
         return ballotFrames([
           ...experimentFrames(side),
-          ...frozen
-            .slice(0, BALLOT_FRAMES_PER_SIDE)
-            .filter(
+          ...boundedFrames(
+            frozen.filter(
               (frame) =>
                 frame.inputPair === undefined ||
                 !replayed.has(
                   inputRouteKey(inputs.steps, frame.inputPair.stepIndex, inputs.viewport),
                 ),
             ),
+            BALLOT_FRAMES_PER_SIDE,
+          ),
         ]);
       };
       const buildChecks = (side: "incumbent" | "challenger") =>
@@ -1565,6 +1591,9 @@ export const layer = (options: GameRepairLoopOptions) => {
           label: frame.label,
           path: frame.path,
           ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+          ...(frame.width === undefined ? {} : { width: frame.width }),
+          ...(frame.height === undefined ? {} : { height: frame.height }),
+          ...(frame.window === true ? { window: true } : {}),
         }));
         const veto = mechanicalVeto(incumbent.checks, candidate.checks, review.doNotRegress);
         yield* rounds.recordReview(task.root, round.id, {

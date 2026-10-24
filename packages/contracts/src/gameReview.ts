@@ -482,6 +482,11 @@ export const GameRepairFrame = Schema.Struct({
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   /** Absolute path in server state; never inside the game. */
   path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
+  /** The capture window these pixels came from, when the run recorded it. */
+  width: Schema.optionalKey(Schema.Number),
+  height: Schema.optionalKey(Schema.Number),
+  /** True for the differently shaped window capture; never dropped by a budget. */
+  window: Schema.optionalKey(Schema.Boolean),
 });
 export type GameRepairFrame = typeof GameRepairFrame.Type;
 

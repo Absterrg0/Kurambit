@@ -79,6 +79,9 @@ export interface GameReviewFrameInput {
   readonly label: string;
   /** PNG bytes to copy into the evidence directory. */
   readonly sourcePath: string;
+  /** The capture window the source pixels came from, when the run knew it. */
+  readonly width?: number;
+  readonly height?: number;
   /**
    * When set, the writer composes both captures into one labelled side-by-side
    * card and keeps the two originals beside it; `sourcePath` is the before one.
@@ -213,6 +216,9 @@ const ReviewFrameRecord = Schema.Struct({
   file: Schema.String,
   sourceId: Schema.String,
   label: Schema.String,
+  /** The capture window, so one evidence folder can carry more than one size. */
+  width: Schema.optionalKey(Schema.Number),
+  height: Schema.optionalKey(Schema.Number),
 });
 const ReviewCheckRecord = Schema.Struct({
   id: Schema.String,
@@ -461,6 +467,8 @@ const writeEvidenceDirectory = async (input: {
     sourceId: frame.id,
     label: frame.label,
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+    ...(frame.width === undefined ? {} : { width: frame.width }),
+    ...(frame.height === undefined ? {} : { height: frame.height }),
   }));
   for (const [index, frame] of input.frames.entries()) {
     if (frame.pair === undefined) {
@@ -492,6 +500,8 @@ const writeEvidenceDirectory = async (input: {
           file: frame.file,
           label: frame.label,
           ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+          ...(frame.width === undefined ? {} : { width: frame.width }),
+          ...(frame.height === undefined ? {} : { height: frame.height }),
         })),
         checks,
       },
@@ -1762,6 +1772,8 @@ export const layer = (options: { readonly stateDir: string }) => {
             sourceId: `try-${calls + 1}-${index + 1}`,
             label: frame.label,
             ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+            width: frame.width,
+            height: frame.height,
           }));
           const nextEvidence = { ...evidence, frames: [...evidence.frames, ...frames] };
           yield* attempt("record active critic evidence", directory, async () => {

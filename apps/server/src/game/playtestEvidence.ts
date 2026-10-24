@@ -83,6 +83,21 @@ export const playedViewport = (
   return { width: base.width * captureScale, height: base.height * captureScale };
 };
 
+/** The second window shape a review check captures in. */
+export const ALTERNATE_WINDOW_SQUARE: GameViewport = { width: 900, height: 900 };
+export const ALTERNATE_WINDOW_WIDE: GameViewport = { width: 1280, height: 720 };
+
+/**
+ * A window whose shape differs from the one the route played in, so
+ * letterboxing, clipping and overflow have somewhere to show. A wide played
+ * window gets a square one; anything else gets 16:9. The played aspect decides,
+ * so a portrait game is shown a landscape window and vice versa.
+ */
+export const alternateWindow = (played: GameViewport | null): GameViewport => {
+  if (played === null) return ALTERNATE_WINDOW_WIDE;
+  return played.width >= played.height * 1.4 ? ALTERNATE_WINDOW_SQUARE : ALTERNATE_WINDOW_WIDE;
+};
+
 const slug = (label: string) => {
   const cleaned = label.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   return (cleaned || "frame").slice(0, 40);
@@ -225,6 +240,9 @@ export interface PlaytestEvidenceRun {
     readonly label: string;
     readonly inputPair?: GamePlaytestInputPair;
     readonly file: string;
+    /** The capture window, so evidence can carry more than one size. */
+    readonly width: number;
+    readonly height: number;
     readonly probe?: GamePlaytestProbe;
   }>;
   readonly state: GamePlaytestState | null;

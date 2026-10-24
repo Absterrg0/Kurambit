@@ -102,6 +102,13 @@ interface CheckRun {
   readonly inputPairs?: ReadonlyArray<GamePlaytestInputPair>;
   readonly checks: ReadonlyArray<GameReviewCheck>;
   readonly frames: ReadonlyArray<string>;
+  /** The alternate-window evidence a check returns after the played frames. */
+  readonly windowFrames?: ReadonlyArray<{
+    readonly path: string;
+    readonly label: string;
+    readonly width: number;
+    readonly height: number;
+  }>;
 }
 
 interface ChildCompletion {
@@ -670,13 +677,22 @@ const withLoop = <A, E>(
               const run = input.target === "incumbent" ? scripted.incumbent : scripted.candidate;
               return Effect.succeed({
                 checks: run.checks,
-                frames: run.frames.map((path, index) => ({
-                  label: `frame ${String(index + 1)}`,
-                  path,
-                  ...(run.inputPairs?.[index] === undefined
-                    ? {}
-                    : { inputPair: run.inputPairs[index] }),
-                })),
+                frames: [
+                  ...run.frames.map((path, index) => ({
+                    label: `frame ${String(index + 1)}`,
+                    path,
+                    ...(run.inputPairs?.[index] === undefined
+                      ? {}
+                      : { inputPair: run.inputPairs[index] }),
+                  })),
+                  ...(run.windowFrames ?? []).map((frame) => ({
+                    label: frame.label,
+                    path: frame.path,
+                    width: frame.width,
+                    height: frame.height,
+                    window: true,
+                  })),
+                ],
                 // What the run actually played at; a frozen viewport wins.
                 viewport: input.inputs.viewport ?? { width: 1280, height: 720 },
               });
@@ -1125,6 +1141,63 @@ it.live("both ballots must agree a preservation item was lost on the challenger"
         expect((yield* readLoop(services))?.promotedRounds).toHaveLength(0);
         const game = yield* services.rounds.read(root);
         expect(game.rounds.some((round) => round.reason?.includes("preservation-lost"))).toBe(true);
+      }),
+    ),
+  ),
+);
+
+it.live("both builds' window frames reach the critic and both ballots", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const directory = NodePath.join(root, "..", "window-frames");
+        yield* Effect.promise(() => NodeFSP.mkdir(directory, { recursive: true }));
+        const frame = (side: string) => ({
+          path: NodePath.join(directory, `${side}-window.png`),
+          label: "window 900x900: boot",
+          width: 900,
+          height: 900,
+        });
+        scripted.incumbent = { ...scripted.incumbent, windowFrames: [frame("incumbent")] };
+        scripted.candidate = { ...scripted.candidate, windowFrames: [frame("candidate")] };
+        scripted.repairs = [repairWith()];
+        const expected = new Map<string, string>();
+        let reviews = 0;
+        scripted.critic = () => {
+          const frames =
+            scripted.starts.find((entry) => entry.role === "critic")?.evidence?.frames ?? [];
+          const shaped = frames.filter((entry) => entry.label.includes("window 900x900"));
+          expect(shaped).toHaveLength(1);
+          expect(shaped[0]).toMatchObject({ width: 900, height: 900 });
+          expected.set("critic", shaped[0]!.sourcePath);
+          return criticAnswer(reviews++ === 0 ? 1 : 0);
+        };
+        scripted.ballots = [0, 1].map((order) => ({ plan }) => {
+          const frames =
+            scripted.starts.find((entry) => entry.role === "ballot" && entry.order === order)
+              ?.evidence?.frames ?? [];
+          for (const side of ["A", "B"]) {
+            const shaped = frames.filter(
+              (entry) =>
+                entry.label.startsWith(`${side}: `) && entry.label.includes("window 900x900"),
+            );
+            expect(shaped).toHaveLength(1);
+            expect(shaped[0]).toMatchObject({ width: 900, height: 900 });
+            expected.set(`ballot-${order}-${side}`, shaped[0]!.sourcePath);
+          }
+          return ballotAnswer(plan, "tie");
+        });
+        yield* runToCompletion(services, fixture);
+        // The critic saw the incumbent's window; each ballot saw one per build,
+        // and the pair is the same evidence on both sides of the comparison.
+        expect(expected.get("critic")).toContain("incumbent-window");
+        expect(expected.get("ballot-0-A")).not.toBe(expected.get("ballot-0-B"));
+        expect(expected.get("ballot-1-A")).not.toBe(expected.get("ballot-1-B"));
+        const sides = new Set(
+          ["ballot-0-A", "ballot-0-B", "ballot-1-A", "ballot-1-B"].map((key) => expected.get(key)),
+        );
+        expect(sides.size).toBe(2);
       }),
     ),
   ),

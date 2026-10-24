@@ -721,6 +721,13 @@ export const GameWebPlaytestInput = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * Capture at exactly width×height instead of a whole-number multiple of the
+   * game's base viewport. Review layout evidence needs a window whose shape can
+   * differ from the game's; such a run is evidence only and is never recorded
+   * as the build's playtest.
+   */
+  exactSize: Schema.optionalKey(Schema.Boolean),
   bootTimeoutMs: Schema.optionalKey(
     Schema.Number.check(
       Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),

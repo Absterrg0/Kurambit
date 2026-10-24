@@ -43,6 +43,13 @@ describe("playtestInputIssues", () => {
     );
   });
 
+  it("an exact window needs both sides", () => {
+    expect(playtestInputIssues({ exactSize: true, width: 900 })).toContain(
+      "exactSize requires both width and height.",
+    );
+    expect(playtestInputIssues({ exactSize: true, width: 900, height: 900 })).toEqual([]);
+  });
+
   it("rejects one step longer than ten seconds and a sequence longer than two minutes", () => {
     expect(playtestInputIssues({ steps: [{ waitMs: 10_001 }] })).toContain(
       "Step 1 lasts 10001 ms; one step may last at most 10000 ms.",

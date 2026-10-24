@@ -52,6 +52,8 @@ export const playtestInputIssues = (input: GameWebPlaytestInput): readonly strin
     if (value === undefined) continue;
     if (!Number.isFinite(value) || value <= 0) issues.push(`${name} must be a positive number.`);
   }
+  if (input.exactSize === true && (input.width === undefined || input.height === undefined))
+    issues.push("exactSize requires both width and height.");
   const width = input.width ?? PLAYTEST_DEFAULT_CAPTURE.width;
   const height = input.height ?? PLAYTEST_DEFAULT_CAPTURE.height;
   const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;

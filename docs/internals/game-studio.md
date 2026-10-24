@@ -214,8 +214,11 @@ The critic judges boot, input response, visible core action and state readabilit
 fundamentals. A cited negative judgment creates a blocker. Per-input before/after pairs carry
 exact steps, sampled pixel deltas and bridge changes; up to four complete pairs replace loose
 frames. Ballots see each pair as one labelled side-by-side card, while both original captures stay
-in the hashed evidence for citation. Movement, HUD text matching and scenario completion never veto
-this review loop.
+in the hashed evidence for citation. Each check also takes one boot+burst capture in a differently
+shaped window from the one the route played in (900×900 for a wide window, 1280×720 otherwise),
+labelled with its size, so letterboxing, clipping and overflow are visible; it is evidence, never a
+gate, and the evidence manifest carries every frame's capture size. Movement, HUD text matching and
+scenario completion never veto this review loop.
 A pairwise improvement does not certify every presentation claim.
 
 A review has one origin: the builder's `game_submit`. The builder names the export it stands

@@ -24,6 +24,7 @@ import * as GameService from "./GameService.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 import { selectInputPairFrames } from "./playtestInputPairs.ts";
 import {
+  alternateWindow,
   playedViewport,
   readPlaytestEvidence,
   readPlaytestEvidenceAt,
@@ -37,6 +38,11 @@ export interface GameRepairStudioFrame {
   readonly label: string;
   /** Absolute server-state path. */
   readonly path: string;
+  /** The capture window these pixels came from, when known. */
+  readonly width?: number;
+  readonly height?: number;
+  /** True for the differently shaped window capture; budgets never drop it. */
+  readonly window?: boolean;
 }
 
 export interface GameRepairStudioCheckInput {
@@ -191,6 +197,19 @@ const checkResult = (
   ];
 };
 
+/**
+ * The one extra capture a check takes: a fixed short burst in a differently
+ * shaped window, so the critic and both ballots can see letterboxing, clipping
+ * or overflow that the played window hides. The burst is deliberately not the
+ * frozen route: its pointer pixels belong to the played window, while this run
+ * is about layout, not replaying the game's own demo.
+ */
+const WINDOW_BURST: ReadonlyArray<GamePlaytestStep> = [
+  { key: "ArrowRight", holdMs: 400 },
+  { key: "Space", holdMs: 250 },
+  { click: "left" },
+];
+
 export const layer = (options: { readonly stateDir: string }) =>
   Layer.effect(
     GameRepairStudio,
@@ -208,6 +227,10 @@ export const layer = (options: { readonly stateDir: string }) =>
           readonly label: string;
           readonly inputPair?: GamePlaytestInputPair;
           readonly data: string;
+          readonly width?: number;
+          readonly height?: number;
+          /** Marks the alternate-window evidence frames. */
+          readonly window?: boolean;
         }>,
       ) =>
         Effect.gen(function* () {
@@ -238,6 +261,9 @@ export const layer = (options: { readonly stateDir: string }) =>
               label: shot.label,
               path: file,
               ...(shot.inputPair === undefined ? {} : { inputPair: shot.inputPair }),
+              ...(shot.width === undefined ? {} : { width: shot.width }),
+              ...(shot.height === undefined ? {} : { height: shot.height }),
+              ...(shot.window === true ? { window: true } : {}),
             });
           }
           return frames;
@@ -410,6 +436,113 @@ export const layer = (options: { readonly stateDir: string }) =>
           } satisfies GameReviewFrozenInputs;
         });
 
+      /**
+       * The alternate-window evidence for one build. Its own playtest writes to
+       * an isolated store and is removed after the two frames are kept, so it
+       * can never replace the build's playtest record or its history.
+       */
+      const windowEvidence = (input: {
+        readonly threadId: ThreadId;
+        readonly root: string;
+        readonly buildId: string;
+        readonly size: GameViewport;
+      }) =>
+        Effect.gen(function* () {
+          const size = `${input.size.width}x${input.size.height}`;
+          const directory = NodePath.join(
+            gameRecordFile(options.stateDir, "game-review-windows", input.root, ""),
+            NodeCrypto.randomUUID(),
+          );
+          const attempt = yield* game
+            .webPlaytestBuild(
+              input.threadId,
+              input.buildId,
+              {
+                steps: [...WINDOW_BURST],
+                width: input.size.width,
+                height: input.size.height,
+                exactSize: true,
+              },
+              directory,
+              "persisted",
+            )
+            .pipe(Effect.result);
+          if (attempt._tag === "Failure") {
+            yield* Effect.promise(() =>
+              NodeFSP.rm(directory, { recursive: true, force: true }).catch(() => undefined),
+            );
+            return {
+              frames: [] as ReadonlyArray<GameRepairStudioFrame>,
+              check: {
+                id: "window",
+                status: "failed" as const,
+                detail: `${size} window: ${attempt.failure.message.slice(0, 300)}`,
+              } satisfies GameReviewCheck,
+            };
+          }
+          // Read the run's evidence before the isolated store is removed, so a
+          // response byte cap cannot leave only the dropped frames as evidence.
+          return yield* Effect.gen(function* () {
+            const result = attempt.success;
+            const evidenceDirectory = result.evidenceDirectory;
+            const persisted =
+              evidenceDirectory === undefined
+                ? null
+                : yield* Effect.promise(() => readPlaytestEvidenceAt(evidenceDirectory));
+            const booted = persisted?.frames.find((frame) => frame.label === "booted");
+            const after = persisted?.frames.find((frame) => frame.label === "after-steps");
+            const shots =
+              persisted !== null
+                ? yield* Effect.promise(() =>
+                    Promise.all(
+                      [booted, after]
+                        .filter((frame) => frame !== undefined)
+                        .map(async (frame) => ({
+                          label: frame!.label,
+                          width: frame!.width,
+                          height: frame!.height,
+                          data: (
+                            await NodeFSP.readFile(NodePath.join(evidenceDirectory!, frame!.file))
+                          ).toString("base64"),
+                        })),
+                    ),
+                  )
+                : result.screenshots
+                    .filter((shot) => shot.label === "booted" || shot.label === "after-steps")
+                    .map((shot) => ({
+                      label: shot.label,
+                      width: shot.width,
+                      height: shot.height,
+                      data: shot.data,
+                    }));
+            const frames = yield* storeFrames(
+              input.root,
+              shots.map((shot) => ({
+                ...shot,
+                label:
+                  shot.label === "booted"
+                    ? `window ${size}: boot`
+                    : `window ${size}: after a short input burst`,
+                window: true,
+              })),
+            );
+            return {
+              frames,
+              check: {
+                id: "window",
+                status:
+                  result.booted && frames.length > 0 ? ("passed" as const) : ("failed" as const),
+                // Evidence, not a gate: FACT_CHECK_IDS does not include it.
+                detail: `${size} window${result.booted ? "" : " did not boot"}`,
+              } satisfies GameReviewCheck,
+            };
+          }).pipe(
+            Effect.ensuring(
+              Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+            ),
+          );
+        });
+
       const check: GameRepairStudio["Service"]["check"] = (input) =>
         Effect.gen(function* () {
           const { inputs } = input;
@@ -479,6 +612,8 @@ export const layer = (options: { readonly stateDir: string }) =>
                     selectInputPairFrames(persisted.frames).map(async (frame) => ({
                       label: frame.label,
                       ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+                      width: frame.width,
+                      height: frame.height,
                       data: (
                         await NodeFSP.readFile(
                           NodePath.join(input.root, result.evidenceDirectory!, frame.file),
@@ -488,9 +623,17 @@ export const layer = (options: { readonly stateDir: string }) =>
                   ),
                 );
           const frames = yield* storeFrames(input.root, selected);
+          const played =
+            playedViewport(result.baseViewport, result.captureScale) ?? inputs.viewport;
+          const window = yield* windowEvidence({
+            threadId: input.threadId,
+            root: input.root,
+            buildId: input.buildId,
+            size: alternateWindow(played),
+          });
           return {
-            checks: checkResult(result, inputs),
-            frames,
+            checks: [...checkResult(result, inputs), window.check],
+            frames: [...frames, ...window.frames],
             viewport: playedViewport(result.baseViewport, result.captureScale),
           } satisfies GameRepairStudioCheckResult;
         });

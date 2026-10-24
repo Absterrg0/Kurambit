@@ -68,6 +68,9 @@ const baseResult = (inputSteps: number | null = 1): GameWebPlaytestResult => ({
 interface Harness {
   readonly root: string;
   results: GameWebPlaytestResult;
+  /** What an exact-size window capture returns; the route runs keep `results`. */
+  windowResults: GameWebPlaytestResult;
+  windowError: GameOperationError | null;
   persistExperiment?: boolean;
   readonly calls: Array<GameWebPlaytestInput | undefined>;
   /** When set, every route run fails; boot-only runs still succeed. */
@@ -77,6 +80,16 @@ interface Harness {
   exportStage: GameQualification.QualificationStageRecord | null;
   playtestStage: GameQualification.QualificationStageRecord | null;
 }
+
+/** Two frames at the capture window, as a boot+burst run produces. */
+const windowResult = (width: number, height: number): GameWebPlaytestResult => ({
+  ...baseResult(),
+  screenshots: [
+    { label: "booted", mimeType: "image/png", data: "cG5n", width, height },
+    { label: "after-steps", mimeType: "image/png", data: "cG5n", width, height },
+  ],
+  baseViewport: { width, height },
+});
 
 /**
  * A real content-addressed build directory: the id is the hash of the files, so
@@ -127,6 +140,8 @@ const withStudio = <A, E>(
       const harness: Harness = {
         root,
         results: baseResult(),
+        windowResults: windowResult(900, 900),
+        windowError: null,
         calls: [],
         replayError: null,
         exportStage: null,
@@ -135,21 +150,24 @@ const withStudio = <A, E>(
       const game = Layer.mock(GameService.GameService)({
         webPlaytestBuild: (_thread, _buildId, input, directory) => {
           harness.calls.push(input);
-          if (harness.replayError !== null && (input?.steps?.length ?? 0) > 0)
+          const exact = input?.exactSize === true;
+          if (exact && harness.windowError !== null) return Effect.fail(harness.windowError);
+          if (harness.replayError !== null && (input?.steps?.length ?? 0) > 0 && !exact)
             return Effect.fail(harness.replayError);
           if (harness.bootError !== undefined && (input?.steps?.length ?? 0) === 0)
             return Effect.fail(harness.bootError);
+          const result = exact ? harness.windowResults : harness.results;
           if (directory !== undefined && harness.persistExperiment)
             return Effect.promise(async () => {
               const evidence = await writePlaytestEvidence({
                 root,
                 directory: NodePath.join(directory, "evidence"),
                 steps: input?.steps ?? [],
-                result: harness.results,
+                result,
               });
-              return { ...harness.results, screenshots: [], evidenceDirectory: evidence.directory };
+              return { ...result, screenshots: [], evidenceDirectory: evidence.directory };
             });
-          return Effect.succeed(harness.results);
+          return Effect.succeed(result);
         },
       });
       const projects = Layer.mock(GameProjectService.GameProjectService)({
@@ -229,10 +247,17 @@ it.live("captures the builder's route once and replays it for every later check"
         buildId: "a".repeat(64),
         inputs,
       });
-      expect(harness.calls.at(-1)).toEqual({
+      // The frozen route is the only route run; the window capture is the one
+      // fixed burst and says so with exactSize.
+      const routeCalls = harness.calls.filter((call) => call?.exactSize !== true);
+      expect(routeCalls.at(-1)).toEqual({
         steps: [{ key: "ArrowRight", holdMs: 120 }],
         width: 1152,
         height: 648,
+      });
+      expect(harness.calls.find((call) => call?.exactSize === true)).toMatchObject({
+        width: 900,
+        height: 900,
       });
 
       // A repair child writes its own, easier demo route. The loop's frozen
@@ -254,7 +279,9 @@ it.live("captures the builder's route once and replays it for every later check"
         buildId: "a".repeat(64),
         inputs,
       });
-      expect(harness.calls.at(-1)?.steps).toEqual([{ key: "ArrowRight", holdMs: 120 }]);
+      expect(harness.calls.filter((call) => call?.exactSize !== true).at(-1)?.steps).toEqual([
+        { key: "ArrowRight", holdMs: 120 },
+      ]);
     }),
   ),
 );
@@ -288,12 +315,95 @@ it.live("freezes and replays the window a scaled route was played in", () =>
         buildId: "a".repeat(64),
         inputs,
       });
-      expect(harness.calls.at(-1)).toEqual({
+      expect(harness.calls.filter((call) => call?.exactSize !== true).at(-1)).toEqual({
         steps: [{ click: "left", x: 640, y: 400 }],
         width: 1280,
         height: 720,
       });
+      // A wide played window gets a square one, the one shape it never shows.
+      expect(harness.calls.find((call) => call?.exactSize === true)).toMatchObject({
+        width: 900,
+        height: 900,
+      });
       expect(checked.viewport).toEqual({ width: 1280, height: 720 });
+      expect(checked.frames.filter((frame) => frame.window === true)).toHaveLength(2);
+    }),
+  ),
+);
+
+it.live("adds one labelled window capture per check, outside the playtest record", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId: "a".repeat(64),
+        inputs: {
+          steps: [{ press: "Space" }],
+          viewport: { width: 960, height: 540 },
+          seed: "unknown",
+        },
+      });
+      // Exactly one extra browser run per check, at a different window shape.
+      const windowCalls = harness.calls.filter((call) => call?.exactSize === true);
+      expect(windowCalls).toHaveLength(1);
+      expect(windowCalls[0]).toMatchObject({ width: 900, height: 900 });
+      expect(windowCalls[0]?.steps?.length).toBeGreaterThan(0);
+      const windowFrames = checked.frames.filter((frame) => frame.window === true);
+      expect(windowFrames).toHaveLength(2);
+      expect(windowFrames.map((frame) => frame.label)).toEqual([
+        "window 900x900: boot",
+        "window 900x900: after a short input burst",
+      ]);
+      // The manifest has the size as data, not just in the label.
+      expect(windowFrames[0]).toMatchObject({ width: 900, height: 900 });
+      expect(windowFrames[1]).toMatchObject({ width: 900, height: 900 });
+      expect(checked.checks.find((check) => check.id === "window")).toEqual({
+        id: "window",
+        status: "passed",
+        detail: "900x900 window",
+      });
+    }),
+  ),
+);
+
+it.live("a failed window capture is a failed evidence check, not a veto", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.windowError = new GameOperationError({
+        operation: "Web playtest",
+        path: harness.root,
+        reason: "command-failed",
+        detail: "The browser exited before the second frame.",
+      });
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId: "a".repeat(64),
+        inputs: {
+          steps: [{ press: "Space" }],
+          viewport: { width: 960, height: 540 },
+          seed: "unknown",
+        },
+      });
+      expect(checked.frames.every((frame) => frame.window !== true)).toBe(true);
+      const window = checked.checks.find((check) => check.id === "window");
+      expect(window).toMatchObject({ status: "failed" });
+      expect(window?.detail).toContain("900x900 window");
+      // The execution facts a promotion compares are untouched by the extra run.
+      expect(
+        checked.checks
+          .filter((check) => check.id !== "window")
+          .map(({ id, status }) => ({ id, status })),
+      ).toEqual([
+        { id: "boot", status: "passed" },
+        { id: "console", status: "passed" },
+        { id: "input", status: "passed" },
+      ]);
     }),
   ),
 );
@@ -450,6 +560,7 @@ it.live.each(["stationary card", "instant dialogue", "endless", "animated scener
           { id: "boot", status: "passed" },
           { id: "console", status: "passed" },
           { id: "input", status: "passed" },
+          { id: "window", status: "passed" },
         ]);
         expect(checked.checks.find((check) => check.id === "input")?.measurements).toEqual({
           steps: inputs.steps,
@@ -457,7 +568,9 @@ it.live.each(["stationary card", "instant dialogue", "endless", "animated scener
           state: harness.results.state,
           designObservations: [],
         });
-        expect(checked.frames).toHaveLength(1);
+        // One route frame plus the bounded boot+burst pair, never a gate.
+        expect(checked.frames.map((frame) => frame.window === true)).toEqual([false, true, true]);
+        expect(checked.frames.at(-1)?.label).toBe("window 900x900: after a short input burst");
       }),
     ),
 );
@@ -720,7 +833,16 @@ it.live(
           inputs: { steps: [{ key: "ArrowRight", holdMs: 1000 }], viewport: null, seed: null },
         });
         expect(checked.frames.map((frame) => frame.inputPair?.stepIndex)).toEqual([
-          0, 0, 1, 1, 3, 3, 4, 4,
+          0,
+          0,
+          1,
+          1,
+          3,
+          3,
+          4,
+          4,
+          undefined,
+          undefined,
         ]);
         expect(checked.frames[1]?.inputPair).toEqual(screenshots[1]?.inputPair);
         expect(yield* Effect.promise(() => NodeFSP.readFile(checked.frames[0]!.path, "utf8"))).toBe(

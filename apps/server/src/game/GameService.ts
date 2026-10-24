@@ -1014,10 +1014,25 @@ const make = Effect.gen(function* () {
               }),
           });
           const baseViewport = parseGodotViewport(projectGodot);
-          const capture = integerScaledCapture(baseViewport, {
-            width: input.width ?? PLAYTEST_DEFAULT_CAPTURE.width,
-            height: input.height ?? PLAYTEST_DEFAULT_CAPTURE.height,
-          });
+          // The review's window-shape capture asks for the window a player gets,
+          // not an integer multiple of the game's viewport: only a window whose
+          // aspect differs can show letterboxing, clipping or overflow. It is
+          // review evidence, so it can never become the build's playtest record.
+          if (input.exactSize === true && experimentDirectory === undefined)
+            return yield* new GameOperationError({
+              operation: "Web playtest",
+              path: root,
+              reason: "invalid-input",
+              detail:
+                "An exact-size window capture is review evidence; pass an experiment directory instead of recording it as the build's playtest.",
+            });
+          const capture =
+            input.exactSize === true && input.width !== undefined && input.height !== undefined
+              ? { width: input.width, height: input.height, scale: 1 }
+              : integerScaledCapture(baseViewport, {
+                  width: input.width ?? PLAYTEST_DEFAULT_CAPTURE.width,
+                  height: input.height ?? PLAYTEST_DEFAULT_CAPTURE.height,
+                });
           if (capture === null)
             return yield* new GameOperationError({
               operation: "Web playtest",

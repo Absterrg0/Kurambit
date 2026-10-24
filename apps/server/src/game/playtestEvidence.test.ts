@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import type { GameWebPlaytestResult } from "@t3tools/contracts";
 import {
+  alternateWindow,
   readLastPlaytest,
   readPlaytestRunFacts,
   writePlaytestEvidence,
@@ -334,3 +335,15 @@ it.live("records dispatched input separately from requests and pixel response", 
     }
   }).pipe(Effect.scoped),
 );
+
+it("alternates the review window's shape, never its size only", () => {
+  // A wide played window gets the square one the layout never showed.
+  expect(alternateWindow({ width: 1280, height: 720 })).toEqual({ width: 900, height: 900 });
+  expect(alternateWindow({ width: 960, height: 540 })).toEqual({ width: 900, height: 900 });
+  expect(alternateWindow({ width: 1920, height: 1080 })).toEqual({ width: 900, height: 900 });
+  // A square or tall game gets 16:9 instead.
+  expect(alternateWindow({ width: 900, height: 900 })).toEqual({ width: 1280, height: 720 });
+  expect(alternateWindow({ width: 640, height: 960 })).toEqual({ width: 1280, height: 720 });
+  // No recorded viewport: the default 16:9 window is already a different shape.
+  expect(alternateWindow(null)).toEqual({ width: 1280, height: 720 });
+});

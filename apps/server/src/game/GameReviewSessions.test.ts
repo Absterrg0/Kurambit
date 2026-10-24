@@ -625,6 +625,58 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
   ),
 );
 
+it.live("the evidence manifest carries every capture size, played and window", () =>
+  withSession(({ frames, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: {
+          frames: [
+            {
+              id: "incumbent-boot",
+              label: "boot",
+              sourcePath: frames[0]!,
+              width: 1280,
+              height: 720,
+            },
+            {
+              id: "incumbent-window",
+              label: "window 900x900: boot",
+              sourcePath: frames[1]!,
+              width: 900,
+              height: 900,
+            },
+          ],
+          checks: [],
+        },
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        order: 0,
+      });
+      const manifest = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: Array<{ id: string; width?: number; height?: number }> };
+      // One folder, two window shapes: the labels name the window and the
+      // manifest carries its numbers, so a viewer never has to guess.
+      expect(manifest.frames.map(({ width, height }) => [width, height])).toEqual([
+        [1280, 720],
+        [900, 900],
+      ]);
+    }),
+  ),
+);
+
 it.live("a review override applies to review roles only and freezes per round", () =>
   withSession(({ frames, scripted, service }) =>
     Effect.gen(function* () {

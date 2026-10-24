@@ -1520,6 +1520,74 @@ it.live("a scale-2 recorded route replays in the window it was played in", () =>
   ),
 );
 
+it.live("an exact window capture asks for that window and stays review evidence", () => {
+  const windows: Array<{ width?: number; height?: number }> = [];
+  return withGame(
+    {
+      run: (input) => {
+        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+            await NodeFSP.writeFile(
+              NodePath.join(NodePath.dirname(output), name),
+              `export ${name}`,
+            );
+          return processOk(input.root);
+        });
+      },
+      playtest: (input) => {
+        windows.push({ width: input.width, height: input.height });
+        return Effect.succeed(playtestResult);
+      },
+    },
+    ({ root, game, studio, rounds }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(
+            NodePath.join(root, "game.json"),
+            `${JSON.stringify(manifest())}\n`,
+          );
+          await NodeFSP.writeFile(
+            NodePath.join(root, "godot/project.godot"),
+            "[display]\nwindow/size/viewport_width=640\nwindow/size/viewport_height=360\n",
+          );
+        });
+        yield* game.export(threadId, "Web");
+        const build = (yield* rounds.read(root)).selected!;
+        yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
+        // Without an isolated store the exact window would become the build's
+        // playtest record, so the service refuses it outright.
+        const refused = yield* game
+          .webPlaytest(threadId, {
+            steps: [{ press: "Space" }],
+            exactSize: true,
+            width: 900,
+            height: 900,
+          })
+          .pipe(Effect.flip);
+        expect(refused.detail).toContain("review evidence");
+        const directory = NodePath.join(root, "..", "window-evidence");
+        const captured = yield* game.webPlaytestBuild(
+          threadId,
+          build.buildId,
+          { steps: [{ press: "Space" }], exactSize: true, width: 900, height: 900 },
+          directory,
+          "persisted",
+        );
+        expect(captured.success).toBe(true);
+        // The browser is asked for the requested window, not an integer scale
+        // of the game's 640×360 base.
+        expect(windows.at(-1)).toEqual({ width: 900, height: 900 });
+        // The build's recorded playtest is still the earlier one.
+        expect((yield* studio.frozenInputs(root, build.buildId)).steps).toEqual([
+          { click: "left" },
+        ]);
+      }),
+  );
+});
+
 const folderBytes = async (root: string): Promise<Record<string, string>> => {
   const bytes: Record<string, string> = {};
   for (const entry of await NodeFSP.readdir(root, { withFileTypes: true })) {
