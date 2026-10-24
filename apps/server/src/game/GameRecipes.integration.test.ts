@@ -366,6 +366,11 @@ var _stage_frames := 0
 var _damage_heard := -1
 
 func _ready() -> void:
+	# A host game can define one action without defining the other demo actions.
+	InputMap.add_action("cue_confirm")
+	var confirm := InputEventKey.new()
+	confirm.physical_keycode = KEY_J
+	InputMap.action_add_event("cue_confirm", confirm)
 	var args := OS.get_cmdline_user_args()
 	_out_dir = String(args[0]) if args.size() > 0 else "user://"
 	_rate = AudioServer.get_mix_rate()

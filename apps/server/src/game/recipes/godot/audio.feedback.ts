@@ -6,8 +6,7 @@ export const audioFeedback: GodotRecipeReference = {
   referenceCode: String.raw`extends Node2D
 ## Two short event cues from original samples generated once at boot: a rising
 ## confirmation and a falling damage buzz. Nothing plays until a real action,
-## keyboard echo is ignored, mute stops a cue already sounding, and idle frames
-## cost no process callback.
+## keyboard echo is ignored, mute stops sounding cues, and idle frames cost no callback.
 
 const RATE := 22050
 const PEAK := 0.22  # Headroom: two voices may overlap well below clipping.
@@ -24,15 +23,15 @@ var _last := "none"
 var _flash_ms := 0.0
 
 func _ready() -> void:
-	if not InputMap.has_action("cue_confirm"):
-		_add_key("cue_confirm", KEY_J)
-		_add_key("cue_damage", KEY_K)
-		_add_key("cue_mute", KEY_M)
+	_add_key("cue_confirm", KEY_J)
+	_add_key("cue_damage", KEY_K)
+	_add_key("cue_mute", KEY_M)
 	_confirm = _player(_tone(520.0, 880.0, CONFIRM_SECONDS, 0.0))
 	_damage = _player(_tone(170.0, 70.0, DAMAGE_SECONDS, 1.2))
 	set_process(false)  # Only a live flash needs frames.
 
 func _add_key(action: StringName, key: Key) -> void:
+	if InputMap.has_action(action): return
 	InputMap.add_action(action)
 	var event := InputEventKey.new()
 	event.physical_keycode = key
@@ -42,6 +41,7 @@ func _player(stream: AudioStream) -> AudioStreamPlayer:
 	var player := AudioStreamPlayer.new()
 	player.stream = stream
 	player.volume_db = VOLUME_DB
+	player.finished.connect(queue_redraw)
 	add_child(player)
 	return player
 

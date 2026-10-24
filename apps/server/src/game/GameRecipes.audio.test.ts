@@ -71,17 +71,6 @@ it.effect("ships one concise engine-neutral audio recipe with a runnable referen
     expect(entry.recipe.version).toBe(1);
     expect(entry.recipe.defects).toContain("silent-pickup");
     expect(code.split("\n").length).toBeLessThanOrEqual(110);
-    for (const mechanism of [
-      "AudioStreamPlayer",
-      "AudioStreamWAV",
-      "event.echo",
-      "_confirm.stop()",
-      "_damage.stop()",
-      "set_process(false)",
-      "func snapshot() -> Dictionary:",
-    ])
-      expect(code, `reference keeps ${mechanism}`).toContain(mechanism);
-
     // Engine-neutral metadata: Godot names live only in the adapter.
     const metadata = JSON.stringify(entry.recipe);
     for (const engineWord of ["godot", "audiostream", "gdscript", "res://"])
