@@ -51,6 +51,9 @@ export type CompareOrder = (typeof COMPARE_ORDERS)[number];
 /** Which build a side names under one order. */
 export type BuildChoice = "harness" | "raw" | "tie" | "invalid";
 
+/** A facet's agreement across both orders; `split` means they disagreed. */
+export type CompareFacetChoice = BuildChoice | "split";
+
 export const sideOfBuild = (order: CompareOrder, build: "harness" | "raw"): CompareSide => {
   const left = order === "harness-left" ? "harness" : "raw";
   return build === left ? "A" : "B";
@@ -409,7 +412,7 @@ export interface BriefComparison {
     readonly answer: CompareAnswer | null;
     readonly passed: boolean;
   };
-  readonly facets: Readonly<Record<CompareFacet, BuildChoice>>;
+  readonly facets: Readonly<Record<CompareFacet, CompareFacetChoice>>;
   readonly verdict: CompareVerdict;
   readonly reasons: ReadonlyArray<string>;
   /** Why the brief has no verdict, when it has none. */
@@ -587,7 +590,7 @@ export const compareBrief = async (input: {
     passed: controlAnswer !== null && controlAnswer.overall === "tie",
   };
   const summarized = summarizeComparison({ orders, control });
-  const facetsOf = (facet: CompareFacet): BuildChoice => {
+  const facetsOf = (facet: CompareFacet): CompareFacetChoice => {
     const choices = orders.map((order) => order.facets[facet]);
     if (choices.some((choice) => choice === "invalid")) return "invalid";
     const [first, second] = choices;
