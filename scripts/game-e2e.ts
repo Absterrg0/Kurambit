@@ -8,8 +8,10 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
+import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
@@ -1090,11 +1092,30 @@ const main = Effect.gen(function* () {
   summaryPhase = "done";
   timeline("PASS");
 });
+const program = main.pipe(Effect.timeoutOption(`${timeoutMs} millis`), Effect.scoped);
+const fiber = Effect.runFork(program);
+let stoppingSignal: NodeJS.Signals | null = null;
+const stop = (signal: NodeJS.Signals) => {
+  if (stoppingSignal !== null) return;
+  stoppingSignal = signal;
+  timeline(`Received ${signal}; stopping`);
+  // Interrupt rather than exit: the scoped finalizers stop the private server
+  // group and the game action this run started.
+  fiber.interruptUnsafe(fiber.id);
+};
+const onSigint = () => stop("SIGINT");
+const onSigterm = () => stop("SIGTERM");
+process.on("SIGINT", onSigint);
+process.on("SIGTERM", onSigterm);
 try {
-  const completed = await Effect.runPromise(
-    main.pipe(Effect.timeoutOption(`${timeoutMs} millis`), Effect.scoped),
-  );
-  if (Option.isNone(completed)) {
+  const exit = await Effect.runPromise(Fiber.await(fiber));
+  if (stoppingSignal !== null) {
+    summaryError = `Stopped by ${stoppingSignal}.`;
+    console.error(`FAIL: stopped by ${stoppingSignal}`);
+    process.exitCode = 1;
+  } else if (Exit.isFailure(exit)) {
+    throw Cause.squash(exit.cause);
+  } else if (Option.isNone(exit.value)) {
     summaryTimedOut = true;
     summaryError = `Timed out after ${timeoutMs} ms.`;
     console.error("FAIL: timed out");
@@ -1106,6 +1127,8 @@ try {
   if (gameRoot) console.error(`Game root: ${gameRoot}`);
   process.exitCode = 1;
 } finally {
+  process.off("SIGINT", onSigint);
+  process.off("SIGTERM", onSigterm);
   await writeSummary().catch((cause: unknown) => {
     console.error("Could not write --summary:", cause);
   });

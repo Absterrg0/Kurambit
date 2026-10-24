@@ -1,15 +1,36 @@
-// @effect-diagnostics nodeBuiltinImport:off -- The test inspects the spawn environment a real server would receive and seeds a temporary home.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- The test inspects the spawn environment a real server would receive and proves detached-group cleanup.
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   benchmarkServerSpawn,
   externalServerOrigin,
   seedBenchmarkProviderSettings,
+  stopBenchmarkServerAt,
   type BenchmarkServerSpawn,
 } from "./benchmark-server.ts";
 import { DISPLAY_VARIABLES, sandboxDisplayEnvironment } from "./display-sandbox.ts";
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const waitFor = async (predicate: () => boolean, attempts = 200): Promise<void> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for a process state.");
+};
 
 describe("externalServerOrigin", () => {
   it("refuses an external server unless the caller opts in", () => {
@@ -139,4 +160,88 @@ describe("benchmarkServerSpawn", () => {
       "/checkout/.t3/benchmark-server",
     ]);
   });
+});
+
+describe("stopBenchmarkServerAt", () => {
+  const withHome = async (run: (home: string) => Promise<void>) => {
+    const home = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "benchmark-server-stop-"));
+    try {
+      await run(home);
+    } finally {
+      await NodeFSP.rm(home, { recursive: true, force: true });
+    }
+  };
+
+  it("stops the detached server group left by a killed harness", () =>
+    withHome(async (home) => {
+      const checkout = NodePath.join(home, "checkout");
+      const binDirectory = NodePath.join(checkout, "apps/server/src");
+      await NodeFSP.mkdir(binDirectory, { recursive: true });
+      const stub = NodePath.join(binDirectory, "bin.ts");
+      const grandchildPidPath = NodePath.join(home, "grandchild.pid");
+      await NodeFSP.writeFile(
+        stub,
+        [
+          'import * as NodeChildProcess from "node:child_process";',
+          'import * as NodeFS from "node:fs";',
+          'const child = NodeChildProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+          "NodeFS.writeFileSync(process.env.GRANDCHILD_PID_FILE, String(child.pid));",
+          "setInterval(() => {}, 1000);",
+        ].join("\n"),
+      );
+      const server = NodeChildProcess.spawn(process.execPath, [stub, "--base-dir", home], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, GRANDCHILD_PID_FILE: grandchildPidPath },
+      });
+      const serverPid = server.pid;
+      assert.notEqual(serverPid, undefined);
+      let grandchildPid: number | undefined;
+      try {
+        await waitFor(() => NodeFS.existsSync(grandchildPidPath));
+        grandchildPid = Number((await NodeFSP.readFile(grandchildPidPath, "utf8")).trim());
+        assert.equal(isAlive(serverPid!), true);
+        assert.equal(isAlive(grandchildPid), true);
+        const logPath = NodePath.join(home, "server.log");
+        await NodeFSP.writeFile(`${logPath}.pid`, `${serverPid}\n${process.pid}\n`);
+
+        await stopBenchmarkServerAt({ logPath, homeDir: home, ownerPid: process.pid });
+
+        await waitFor(() => !isAlive(serverPid!) && !isAlive(grandchildPid!));
+        assert.equal(NodeFS.existsSync(`${logPath}.pid`), false);
+      } finally {
+        if (serverPid !== undefined && isAlive(serverPid)) process.kill(serverPid, "SIGKILL");
+        if (grandchildPid !== undefined && isAlive(grandchildPid))
+          process.kill(grandchildPid, "SIGKILL");
+      }
+    }));
+
+  it("leaves an unrelated PID alone when a stale pid file names it", () =>
+    withHome(async (home) => {
+      if (HostProcess.Platform.defaultValue() !== "linux") return;
+      const unrelated = NodeChildProcess.spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        { detached: true, stdio: "ignore" },
+      );
+      const pid = unrelated.pid;
+      assert.notEqual(pid, undefined);
+      try {
+        const logPath = NodePath.join(home, "server.log");
+        // A pid file another e2e owns is not this run's to clean.
+        await NodeFSP.writeFile(`${logPath}.pid`, `${pid}\n${process.pid + 1}\n`);
+        await stopBenchmarkServerAt({ logPath, homeDir: home, ownerPid: process.pid });
+        assert.equal(NodeFS.existsSync(`${logPath}.pid`), true);
+        assert.equal(isAlive(pid!), true);
+
+        // With this e2e as the owner, the command-line check still refuses the
+        // unrelated process and removes only the stale file.
+        await NodeFSP.writeFile(`${logPath}.pid`, `${pid}\n${process.pid}\n`);
+        await stopBenchmarkServerAt({ logPath, homeDir: home, ownerPid: process.pid });
+        assert.equal(NodeFS.existsSync(`${logPath}.pid`), false);
+        assert.equal(isAlive(pid!), true);
+      } finally {
+        if (pid !== undefined && isAlive(pid)) process.kill(pid, "SIGKILL");
+      }
+    }));
 });

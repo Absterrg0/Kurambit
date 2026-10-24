@@ -3,6 +3,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { DisplaySandbox } from "./display-sandbox.ts";
 
 /**
@@ -97,6 +98,61 @@ export async function seedBenchmarkProviderSettings(input: {
 const PAIRING_LINE = /Pairing URL:\s*(https?:\/\/\S+)/;
 const START_TIMEOUT_MS = 120_000;
 
+const pidPathOf = (logPath: string) => `${logPath}.pid`;
+
+/**
+ * The server runs in its own group so a stop can target exactly that group.
+ * The pid file closes the window where the harness itself is SIGKILLed before
+ * its Effect finalizer can stop the server: the benchmark runner, which knows
+ * the same log path, can finish the job from the captured PID.
+ */
+export async function stopBenchmarkServerAt(input: {
+  readonly logPath: string;
+  readonly homeDir: string;
+  /** The e2e process that spawned this server, when the caller knows it. */
+  readonly ownerPid?: number;
+}): Promise<void> {
+  const pidPath = pidPathOf(input.logPath);
+  const text = await NodeFSP.readFile(pidPath, "utf8").catch(() => null);
+  if (text === null) return;
+  const [pidLine, ownerLine] = text.trim().split("\n");
+  const pid = Number(pidLine);
+  const owner = Number(ownerLine);
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+    return;
+  }
+  if (
+    input.ownerPid !== undefined &&
+    Number.isSafeInteger(owner) &&
+    owner > 0 &&
+    owner !== input.ownerPid
+  )
+    return;
+  if (HostProcess.Platform.defaultValue() === "linux") {
+    // A stale pid file must never turn into a signal for an unrelated process.
+    const commandLine = await NodeFSP.readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => null);
+    if (commandLine === null) {
+      // The leader is gone. Its captured group can still hold children, so
+      // only keep going when that exact group still exists.
+      try {
+        process.kill(-pid, 0);
+      } catch {
+        await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+        return;
+      }
+    } else {
+      const args = commandLine.split("\0");
+      const isBenchmarkServer = args.some((arg) => arg.endsWith("apps/server/src/bin.ts"));
+      if (!isBenchmarkServer || !args.includes(input.homeDir)) {
+        await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+        return;
+      }
+    }
+  }
+  await stopServer(pid, pidPath);
+}
+
 /**
  * Starts a private server for one benchmark run, under the display sandbox.
  * The server is detached so stopping it takes exactly the group this call
@@ -115,12 +171,25 @@ export async function startBenchmarkServer(input: {
   const spec = benchmarkServerSpawn(input);
   await NodeFSP.mkdir(NodePath.dirname(input.logPath), { recursive: true });
   const log = NodeFS.createWriteStream(input.logPath, { flags: "w" });
+  const pidPath = pidPathOf(input.logPath);
   const child = NodeChildProcess.spawn(spec.executable, [...spec.args], {
     cwd: spec.cwd,
     env: spec.env,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (child.pid !== undefined) {
+    try {
+      // Write before awaiting the pairing line: a SIGKILL between spawn and
+      // readiness must still leave the runner a PID it may clean up. The
+      // second line scopes cleanup to the e2e process that spawned this server.
+      NodeFS.writeFileSync(pidPath, `${child.pid}\n${process.pid}\n`);
+    } catch (cause) {
+      await stopServer(child.pid);
+      log.end();
+      throw cause;
+    }
+  }
   let output = "";
   let pendingLine = "";
   const redact = (line: string) => line.replace(/^(Pairing URL:|Token:)\s*\S+/g, "$1 <redacted>");
@@ -161,7 +230,7 @@ export async function startBenchmarkServer(input: {
   try {
     url = await started;
   } catch (cause) {
-    await stopServer(child.pid);
+    await stopServer(child.pid, pidPath);
     log.end();
     throw cause;
   }
@@ -171,15 +240,18 @@ export async function startBenchmarkServer(input: {
     url,
     pid,
     stop: async () => {
-      await stopServer(pid);
+      await stopServer(pid, pidPath);
       log.end();
     },
   };
 }
 
 /** Stops only the process group this helper started, and waits for it to exit. */
-async function stopServer(pid: number | undefined): Promise<void> {
-  if (pid === undefined) return;
+async function stopServer(pid: number | undefined, pidPath?: string): Promise<void> {
+  if (pid === undefined) {
+    if (pidPath !== undefined) await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
+    return;
+  }
   const signal = (name: NodeJS.Signals) => {
     try {
       process.kill(-pid, name);
@@ -195,7 +267,7 @@ async function stopServer(pid: number | undefined): Promise<void> {
     }, 10_000);
     const check = () => {
       try {
-        process.kill(pid, 0);
+        process.kill(-pid, 0);
       } catch {
         clearTimeout(timer);
         resolve();
@@ -205,4 +277,5 @@ async function stopServer(pid: number | undefined): Promise<void> {
     };
     check();
   });
+  if (pidPath !== undefined) await NodeFSP.rm(pidPath, { force: true }).catch(() => undefined);
 }

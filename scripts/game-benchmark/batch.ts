@@ -34,10 +34,16 @@ export async function runBounded<T>(
   items: ReadonlyArray<T>,
   jobs: number,
   worker: (item: T, signal: AbortSignal) => Promise<void>,
+  parentSignal?: AbortSignal,
 ): Promise<void> {
   if (!Number.isSafeInteger(jobs) || jobs < 1)
     throw new Error(`The job count must be a positive integer, got ${jobs}.`);
   const controller = new AbortController();
+  const onParentAbort = () => controller.abort(parentSignal?.reason);
+  if (parentSignal !== undefined) {
+    if (parentSignal.aborted) controller.abort(parentSignal.reason);
+    else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+  }
   let failure: unknown = null;
   let next = 0;
   const consume = async () => {
@@ -54,8 +60,13 @@ export async function runBounded<T>(
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(jobs, items.length) }, () => consume()));
+  try {
+    await Promise.all(Array.from({ length: Math.min(jobs, items.length) }, () => consume()));
+  } finally {
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
   if (failure !== null) throw failure;
+  if (controller.signal.aborted) throw abortReason(controller.signal);
 }
 
 export interface BenchmarkJobLocation {
@@ -345,6 +356,8 @@ export interface RegradeBatchInput {
   /** The only external effect: grade a saved build. There is deliberately no builder. */
   readonly grade: (input: GradeSavedBuildInput) => Promise<BenchmarkGrade | null>;
   readonly sandbox: (directory: string) => Promise<DisplaySandbox>;
+  /** SIGINT/SIGTERM from the operator; aborts every in-flight grade. */
+  readonly signal?: AbortSignal;
   readonly log?: (line: string) => void;
 }
 
@@ -356,6 +369,8 @@ export interface RegradeBatchInput {
 export async function runRegradeBatch(
   input: RegradeBatchInput,
 ): Promise<ReadonlyArray<BenchmarkBriefResult>> {
+  const signal = input.signal;
+  if (signal?.aborted) throw abortReason(signal);
   const evidence: SavedHarnessRunEvidence[] = [];
   const problems: string[] = [];
   for (const brief of input.briefs) {
@@ -391,37 +406,42 @@ export async function runRegradeBatch(
 
   let failure: unknown = null;
   try {
-    await runBounded(evidence, input.jobs, async (entry, signal) => {
-      if (signal.aborted) throw abortReason(signal);
-      const sandbox = await input.sandbox(entry.directory);
-      const stage = await NodeFSP.mkdtemp(NodePath.join(entry.directory, ".regrade-"));
-      try {
-        input.log?.(`[${entry.brief.id}] regrading the saved build…`);
-        const grade = await input.grade({
-          brief: entry.brief,
-          root: entry.root,
-          outDirectory: stage,
-          environment: sandbox.environment,
-          signal,
-        });
-        if (signal.aborted) throw abortReason(signal);
-        if (grade === null)
-          throw new Error(
-            `[${entry.brief.id}] the grader wrote no grade; the saved result and grade are unchanged.`,
-          );
-        if (grade.grader === null || grade.graderVersion === null)
-          throw new Error(
-            `[${entry.brief.id}] the new grade records no grader profile; refusing to write it.`,
-          );
-        await installStagedGrade(entry.directory, stage);
-        const updated = replaceIndependentGrade(entry.result, grade);
-        await writeJsonAtomic(NodePath.join(entry.directory, "result.json"), updated);
-        await writer.record(updated);
-        input.log?.(`[${entry.brief.id}] ${updated.outcome} (grade replaced)`);
-      } finally {
-        await NodeFSP.rm(stage, { recursive: true, force: true }).catch(() => undefined);
-      }
-    });
+    await runBounded(
+      evidence,
+      input.jobs,
+      async (entry, workerSignal) => {
+        if (workerSignal.aborted) throw abortReason(workerSignal);
+        const sandbox = await input.sandbox(entry.directory);
+        const stage = await NodeFSP.mkdtemp(NodePath.join(entry.directory, ".regrade-"));
+        try {
+          input.log?.(`[${entry.brief.id}] regrading the saved build…`);
+          const grade = await input.grade({
+            brief: entry.brief,
+            root: entry.root,
+            outDirectory: stage,
+            environment: sandbox.environment,
+            signal: workerSignal,
+          });
+          if (workerSignal.aborted) throw abortReason(workerSignal);
+          if (grade === null)
+            throw new Error(
+              `[${entry.brief.id}] the grader wrote no grade; the saved result and grade are unchanged.`,
+            );
+          if (grade.grader === null || grade.graderVersion === null)
+            throw new Error(
+              `[${entry.brief.id}] the new grade records no grader profile; refusing to write it.`,
+            );
+          await installStagedGrade(entry.directory, stage);
+          const updated = replaceIndependentGrade(entry.result, grade);
+          await writeJsonAtomic(NodePath.join(entry.directory, "result.json"), updated);
+          await writer.record(updated);
+          input.log?.(`[${entry.brief.id}] ${updated.outcome} (grade replaced)`);
+        } finally {
+          await NodeFSP.rm(stage, { recursive: true, force: true }).catch(() => undefined);
+        }
+      },
+      input.signal,
+    );
   } catch (error) {
     failure = error;
   }

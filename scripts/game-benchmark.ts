@@ -40,7 +40,7 @@ import {
   runBounded,
   runRegradeBatch,
 } from "./game-benchmark/batch.ts";
-import { externalServerOrigin } from "./lib/benchmark-server.ts";
+import { externalServerOrigin, stopBenchmarkServerAt } from "./lib/benchmark-server.ts";
 import { prepareDisplaySandbox } from "./lib/display-sandbox.ts";
 
 const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
@@ -238,6 +238,15 @@ if (unknown.length > 0)
     `Unknown brief id(s): ${unknown.join(", ")}. Known: ${allBriefs.map((brief) => brief.id).join(", ")}`,
   );
 const briefs = allBriefs.filter((brief) => selected.includes(brief.id));
+const shutdown = new AbortController();
+const onSigint = () => shutdown.abort(new Error("Stopped by SIGINT."));
+const onSigterm = () => shutdown.abort(new Error("Stopped by SIGTERM."));
+process.once("SIGINT", onSigint);
+process.once("SIGTERM", onSigterm);
+const stopListeningForShutdown = () => {
+  process.off("SIGINT", onSigint);
+  process.off("SIGTERM", onSigterm);
+};
 const runDirectory = NodePath.join(NodePath.resolve(values.out), harnessCommit.slice(0, 8));
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "");
 const runnerPath = NodePath.resolve(values.runner);
@@ -322,6 +331,17 @@ const runBrief = async (
   clearTimeout(timer);
   abort.removeEventListener("abort", stopOnAbort);
   await log.close();
+  // game-e2e stops its private server in an Effect finalizer. If it was
+  // SIGKILLed before that ran, the pid file it left is the only captured handle
+  // to the detached server group, so finish the cleanup here.
+  if (externalServerUrl === null && child.pid !== undefined) {
+    const serverHome = NodePath.join(location.homeDir, "benchmark-server");
+    await stopBenchmarkServerAt({
+      logPath: NodePath.join(serverHome, "server.log"),
+      homeDir: serverHome,
+      ownerPid: child.pid,
+    });
+  }
   const summaryText = await NodeFSP.readFile(summaryPath, "utf8").catch(() => null);
   const summary = summaryText === null ? null : decodeRunSummary(summaryText);
   if (summaryText !== null && summary === null)
@@ -584,22 +604,28 @@ if (savedRunDirectory !== null) {
   console.log(
     `Regrading ${briefs.length} saved run(s) under ${savedRunDirectory} with up to ${jobs} at a time; no agent build.`,
   );
-  const results = await runRegradeBatch({
-    runDirectory: savedRunDirectory,
-    briefs,
-    order: allBriefs.map((brief) => brief.id),
-    jobs,
-    grade: (input) =>
-      gradeFinishedGame(
-        input.brief,
-        input.root,
-        input.outDirectory,
-        input.environment,
-        input.signal,
-      ),
-    sandbox: prepareDisplaySandbox,
-    log: (line) => console.log(line),
-  });
+  let results: ReadonlyArray<BenchmarkBriefResult>;
+  try {
+    results = await runRegradeBatch({
+      runDirectory: savedRunDirectory,
+      briefs,
+      order: allBriefs.map((brief) => brief.id),
+      jobs,
+      grade: (input) =>
+        gradeFinishedGame(
+          input.brief,
+          input.root,
+          input.outDirectory,
+          input.environment,
+          input.signal,
+        ),
+      sandbox: prepareDisplaySandbox,
+      signal: shutdown.signal,
+      log: (line) => console.log(line),
+    });
+  } finally {
+    stopListeningForShutdown();
+  }
   const totals = summarizeResults(results);
   console.log(
     `${briefs.length} saved run(s) regraded; ${totals.outcomes.passed}/${totals.attempted} rows passed; results: ${NodePath.join(savedRunDirectory, "results.md")}`,
@@ -722,9 +748,11 @@ console.log(
 );
 let failure: unknown = null;
 try {
-  await runBounded(briefs, jobs, runOne);
+  await runBounded(briefs, jobs, runOne, shutdown.signal);
 } catch (error) {
   failure = error;
+} finally {
+  stopListeningForShutdown();
 }
 try {
   // Flush even after a failure so rows that did finish are never lost.

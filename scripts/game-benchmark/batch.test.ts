@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- The batch tests write real run folders and force a completion race.
+// @effect-diagnostics nodeBuiltinImport:off -- The batch tests write real run folders and force a completion race.
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -137,6 +137,10 @@ describe("runBounded", () => {
       });
       let active = 0;
       let maxActive = 0;
+      let releaseA!: () => void;
+      const aMayFinish = new Promise<void>((resolve) => {
+        releaseA = resolve;
+      });
 
       await runBounded(briefs, 2, async (brief) => {
         const location = benchmarkJobLocation({
@@ -153,8 +157,13 @@ describe("runBounded", () => {
         // Neither job may finish before both have started: that is overlap.
         await bothStarted;
         // Force the completion order opposite the brief order.
-        if (brief.id === "a") await new Promise((resolve) => setTimeout(resolve, 10));
-        await writer.record(rawRow(brief));
+        if (brief.id === "b") {
+          await writer.record(rawRow(brief));
+          releaseA();
+        } else {
+          await aMayFinish;
+          await writer.record(rawRow(brief));
+        }
         active -= 1;
       });
       await writer.flush();
@@ -187,6 +196,52 @@ describe("runBounded", () => {
     );
   });
 
+  it("stops every worker when the operator aborts the batch", async () => {
+    const controller = new AbortController();
+    const events: string[] = [];
+    let started = 0;
+    let releaseBoth!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    const running = runBounded(
+      ["a", "b"],
+      2,
+      async (brief, signal) => {
+        events.push(`${brief}:start`);
+        const aborted = new Promise<void>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              events.push(`${brief}:abort`);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        started += 1;
+        if (started === 2) releaseBoth();
+        await bothStarted;
+        await aborted;
+        events.push(`${brief}:settled`);
+      },
+      controller.signal,
+    );
+    await bothStarted;
+    controller.abort(new Error("operator stop"));
+    let failure: unknown = null;
+    try {
+      await running;
+    } catch (error) {
+      failure = error;
+    }
+    assert.match(failure instanceof Error ? failure.message : String(failure), /operator stop/);
+    assert.deepEqual(events.slice(0, 4), ["a:start", "b:start", "a:abort", "b:abort"]);
+    assert.deepEqual(events.filter((event) => event.endsWith(":settled")).sort(), [
+      "a:settled",
+      "b:settled",
+    ]);
+  });
   it("aborts and waits for in-flight siblings when one job fails", async () => {
     const events: string[] = [];
     let started = 0;
