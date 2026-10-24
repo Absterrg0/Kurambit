@@ -146,6 +146,10 @@ interface StartedChild {
 
 interface Scripted {
   previewDirectories: string[];
+  /** The URL Play currently serves, when a test has an open preview. */
+  previewUrl: string | null;
+  /** Directories the open preview was moved to, in order. */
+  readonly previewSelections: string[];
   exportBuildId: string;
   exportRunId: string | null;
   /** The one running turn `projects.activeRun` reports; submit needs an owner. */
@@ -212,6 +216,8 @@ interface Scripted {
 
 const makeScripted = (): Scripted => ({
   previewDirectories: [],
+  previewUrl: null,
+  previewSelections: [],
   exportBuildId: EXPORT_BUILD_ID,
   exportRunId: String(builderRunId),
   activeRun: builderRunId,
@@ -913,9 +919,15 @@ const withLoop = <A, E>(
           Layer.provide(
             Layer.mock(GamePreview.GamePreview)({
               directories: () => scripted.previewDirectories,
-              url: () => null,
+              url: () => scripted.previewUrl,
               urlFor: () => null,
               serving: () => false,
+              select: (_root, directory) =>
+                Effect.sync(() => {
+                  scripted.previewSelections.push(directory);
+                  scripted.previewUrl = `http://127.0.0.1/preview/${directory}`;
+                  return scripted.previewUrl;
+                }),
             }),
           ),
           Layer.provideMerge(projects),
@@ -2180,6 +2192,72 @@ it.live("game_submit records a verified build and refuses with the exact failed 
         expect((yield* services.rounds.read(fixture.root)).submissions).toEqual([
           submitted.submission,
         ]);
+      }),
+    ),
+  ),
+);
+
+it.live("the first submit selects its build at once and opens the production turn", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        fixture.scripted.previewUrl = "http://127.0.0.1/preview/previous";
+        const submitted = yield* services.review.submit(threadId, {
+          note: "A tiny platformer about lanterns.",
+        });
+        expect(submitted.accepted).toBe(true);
+        expect(submitted.firstPlayable).toBe(true);
+        expect(submitted.production?.submissions).toBe(1);
+        expect(submitted.production?.budgetMs).toBe(45 * 60_000);
+        expect(submitted.production?.remainingMs).toBeLessThanOrEqual(45 * 60_000);
+        const state = yield* services.rounds.read(fixture.root);
+        expect(state.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(state.production?.firstPlayableBuildId).toBe(EXPORT_BUILD_ID);
+        expect(state.production?.firstPlayableAt).toBe(submitted.submission?.submittedAt);
+        expect(state.production?.turnFirstSubmitAt).toBe(submitted.submission?.submittedAt);
+        expect(state.production?.runId).toBe(builderRunId);
+        // An already-open Play follows the declaration, not just the record.
+        expect(fixture.scripted.previewSelections).toEqual([
+          `builds/candidates/${EXPORT_BUILD_ID}`,
+        ]);
+        expect(submitted.message).toContain("first playable");
+      }),
+    ),
+  ),
+);
+
+it.live("a later accepted submit moves Play and a refused one leaves it and names the fact", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const first = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(first.accepted).toBe(true);
+        const secondBuild = "b".repeat(64);
+        const second = yield* services.review.submit(threadId, {
+          buildId: secondBuild,
+          note: "Added the second owl and a hit reaction.",
+        });
+        expect(second.accepted).toBe(true);
+        expect(second.firstPlayable).toBe(false);
+        expect(second.production?.submissions).toBe(2);
+        let state = yield* services.rounds.read(fixture.root);
+        expect(state.selected?.buildId).toBe(secondBuild);
+        expect(state.production?.firstPlayableAt).toBe(first.submission?.submittedAt);
+        expect(state.production?.turnLastSubmitAt).toBe(second.submission?.submittedAt);
+
+        fixture.scripted.facts = { passed: false, reason: "console: 2 console error(s)" };
+        const thirdBuild = "c".repeat(64);
+        const refused = yield* services.review.submit(threadId, {
+          buildId: thirdBuild,
+          note: "A broken third build.",
+        });
+        expect(refused.accepted).toBe(false);
+        expect(refused.message).toContain("console: 2 console error(s)");
+        state = yield* services.rounds.read(fixture.root);
+        // Play kept the last accepted build; the refusal changed nothing.
+        expect(state.selected?.buildId).toBe(secondBuild);
+        expect(state.production?.submissions).toBe(2);
+        expect(state.production?.turnLastSubmitAt).toBe(second.submission?.submittedAt);
       }),
     ),
   ),

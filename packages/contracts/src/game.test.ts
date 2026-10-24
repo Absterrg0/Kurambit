@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { DEFAULT_GAME_TEMPLATE, GAME_TEMPLATES, GameCreateInput, GameManifest } from "./game.ts";
+import {
+  DEFAULT_GAME_PRODUCTION_MINUTES,
+  DEFAULT_GAME_TEMPLATE,
+  GAME_TEMPLATES,
+  GameCreateInput,
+  GameManifest,
+  gameProductionBudgetMs,
+} from "./game.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(GameManifest));
@@ -63,6 +70,27 @@ describe("game manifest design phase", () => {
     expect(() =>
       decodeManifest(JSON.stringify({ ...legacyManifest, design: { status: "reviewing" } })),
     ).toThrow();
+  });
+});
+
+describe("game production budget", () => {
+  it("defaults a game without a production budget to the shipped one", () => {
+    const manifest = decodeManifest(JSON.stringify(legacyManifest));
+    expect(manifest.productionMinutes).toBeUndefined();
+    expect(gameProductionBudgetMs(manifest)).toBe(DEFAULT_GAME_PRODUCTION_MINUTES * 60_000);
+  });
+
+  it("reads a per-game production budget", () => {
+    const manifest = decodeManifest(JSON.stringify({ ...legacyManifest, productionMinutes: 90 }));
+    expect(gameProductionBudgetMs(manifest)).toBe(90 * 60_000);
+    expect(encodeManifest(manifest)).toContain('"productionMinutes":90');
+  });
+
+  it("rejects a production budget outside the sane range", () => {
+    for (const minutes of [0, 4, 601])
+      expect(() =>
+        decodeManifest(JSON.stringify({ ...legacyManifest, productionMinutes: minutes })),
+      ).toThrow();
   });
 });
 

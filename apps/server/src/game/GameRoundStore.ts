@@ -18,6 +18,7 @@ import {
   GamePlaytestStep,
   GameViewport,
   GameManifest,
+  GameProduction,
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
   type GameReviewBudget,
@@ -28,6 +29,7 @@ import {
   type GameReviewRound as GameReviewRoundType,
   type GameReviewState as GameReviewStateType,
   type ModelSelection,
+  type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as GameSnapshots from "./GameSnapshots.ts";
@@ -45,6 +47,8 @@ const StoredState = Schema.Struct({
   rounds: Schema.Array(GameReviewRound),
   /** Builders' and repair children's declarations, newest last. */
   submissions: Schema.optionalKey(Schema.Array(GameSubmission)),
+  /** The game's first playable and the producing turn's declarations. */
+  production: Schema.optionalKey(Schema.NullOr(GameProduction)),
 });
 type StoredState = typeof StoredState.Type;
 const decodeState = Schema.decodeUnknownSync(Schema.fromJsonString(StoredState));
@@ -302,6 +306,16 @@ export class GameRoundStore extends Context.Service<
       root: string,
       submission: GameSubmission,
     ) => Effect.Effect<GameSubmission, GameOperationError>;
+    /**
+     * Advances the production record for one accepted builder declaration: the
+     * game's first playable is set once, and a new turn starts its own clock.
+     * Repair children never call this; their declarations are testimony for the
+     * round, not the builder's production.
+     */
+    readonly recordProduction: (
+      root: string,
+      input: { readonly runId: RunId; readonly buildId: string; readonly at: string },
+    ) => Effect.Effect<GameProduction, GameOperationError>;
     /** Export provenance survives later exports and mutable qualification records. */
     readonly recordExport: (
       root: string,
@@ -636,6 +650,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                 selected: state.selected,
                 rounds: state.rounds,
                 ...(state.submissions === undefined ? {} : { submissions: state.submissions }),
+                ...(state.production === undefined ? {} : { production: state.production }),
               };
             }),
           ),
@@ -651,6 +666,27 @@ export const layer = (options: { readonly stateDir: string }) => {
               ].slice(-MAX_STORED_SUBMISSIONS);
               yield* writeStateEffect(found.file, { ...state, submissions });
               return submission;
+            }),
+          ),
+        recordProduction: (root, input) =>
+          withLock(root, "record game production", (found) =>
+            Effect.gen(function* () {
+              const state = yield* readStateEffect(found.file);
+              const previous = state.production ?? null;
+              const sameTurn =
+                previous !== null &&
+                previous.runId !== null &&
+                String(previous.runId) === String(input.runId);
+              const production = {
+                firstPlayableAt: previous?.firstPlayableAt ?? input.at,
+                firstPlayableBuildId: previous?.firstPlayableBuildId ?? input.buildId,
+                runId: input.runId,
+                turnFirstSubmitAt: sameTurn ? previous.turnFirstSubmitAt : input.at,
+                turnLastSubmitAt: input.at,
+                submissions: sameTurn ? previous.submissions + 1 : 1,
+              } satisfies GameProduction;
+              yield* writeStateEffect(found.file, { ...state, production });
+              return production;
             }),
           ),
         recordExport: (root, artifact) =>

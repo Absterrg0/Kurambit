@@ -6,6 +6,8 @@ import {
   GamePlaytestState,
   GamePlaytestInputPair,
   GameViewport,
+  GameProductionStatus,
+  GameProduction,
 } from "./game.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
@@ -349,6 +351,10 @@ export const GameSubmitResult = Schema.Struct({
   submission: Schema.NullOr(GameSubmission),
   /** Every fact the server checked, passed or not. */
   checks: Schema.Array(GameReviewCheck),
+  /** True when this accepted submit was the game's first playable. */
+  firstPlayable: Schema.optionalKey(Schema.Boolean),
+  /** The production clock, so a refusal still shows the budget it is working in. */
+  production: Schema.optionalKey(GameProductionStatus),
 });
 export type GameSubmitResult = typeof GameSubmitResult.Type;
 
@@ -630,6 +636,8 @@ export const GameReviewState = Schema.Struct({
   rounds: Schema.Array(GameReviewRound),
   /** Builders' and repair children's submissions, newest last. */
   submissions: Schema.optionalKey(Schema.Array(GameSubmission)),
+  /** The build's first playable and the producing turn's declarations. */
+  production: Schema.optionalKey(Schema.NullOr(GameProduction)),
 });
 export type GameReviewState = typeof GameReviewState.Type;
 

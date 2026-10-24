@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectId, ThreadId } from "./baseSchemas.ts";
+import { ProjectId, RunId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
 import { GameScenarioCriterionResult, GameScenarioKindCoverage } from "./gameScenario.ts";
 
@@ -98,6 +98,13 @@ export const GameManifest = Schema.Struct({
   probe: Schema.optionalKey(Schema.Boolean),
   // Games created before the design step existed have no design key.
   design: Schema.optionalKey(GameDesign),
+  /**
+   * How long a builder turn gets to produce after its first playable. It is a
+   * time box the builder reads, not a server deadline; absent means the default.
+   */
+  productionMinutes: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(5), Schema.isLessThanOrEqualTo(600)),
+  ),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
@@ -107,6 +114,41 @@ export type GameAsset = typeof GameAsset.Type;
 /** The suite that owns the `test` qualification stage for this game. */
 export const gameTestSuite = (manifest: GameManifest): string =>
   manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE;
+/**
+ * Production is the time a builder may keep deepening the game after its first
+ * playable. The harness never ends the turn early; the model decides when the
+ * game is realised, and this is only the budget it reads in status and submit.
+ */
+export const DEFAULT_GAME_PRODUCTION_MINUTES = 45;
+export const gameProductionBudgetMs = (manifest: GameManifest): number =>
+  (manifest.productionMinutes ?? DEFAULT_GAME_PRODUCTION_MINUTES) * 60_000;
+/**
+ * What a game has produced: the first build its builder made playable, and the
+ * declarations of the turn that is producing now.
+ */
+export const GameProduction = Schema.Struct({
+  /** The game's first accepted submit, kept for the life of the game. */
+  firstPlayableAt: Schema.NullOr(Schema.String),
+  firstPlayableBuildId: Schema.NullOr(Schema.String),
+  /** The builder turn the turn fields describe; null before the first submit. */
+  runId: Schema.NullOr(RunId),
+  turnFirstSubmitAt: Schema.NullOr(Schema.String),
+  turnLastSubmitAt: Schema.NullOr(Schema.String),
+  /** Accepted declarations in that turn. Refusals are not counted. */
+  submissions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type GameProduction = typeof GameProduction.Type;
+export const GameProductionStatus = Schema.Struct({
+  ...GameProduction.fields,
+  budgetMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  /**
+   * Producing time used. It is live while the turn runs and the first-to-last
+   * submit span once the turn is over, so a finished turn never keeps counting.
+   */
+  elapsedMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  remainingMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type GameProductionStatus = typeof GameProductionStatus.Type;
 /**
  * The server-owned exam for one game. It is written at creation and changed
  * only through an explicit creator action, never by editing game.json.

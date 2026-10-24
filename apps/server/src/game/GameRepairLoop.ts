@@ -8,6 +8,8 @@ import {
   DEFAULT_GAME_REVIEW_BUDGET,
   EMPTY_GAME_REVIEW_USAGE,
   GameOperationError,
+  gameProductionBudgetMs,
+  type GameProductionStatus,
   type GameRepairFrame,
   type GamePlaytestStep,
   GameRepairLoop as GameRepairLoopSchema,
@@ -52,6 +54,7 @@ import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import { playtestIntervalObservation } from "./playtestEvidence.ts";
 import { playtestStepAction } from "./playtestInputPairs.ts";
+import { productionBudgetText, productionStatus } from "./gameProduction.ts";
 import { gameRecordLocation, readRecordText } from "./gameRecord.ts";
 
 /**
@@ -1854,16 +1857,20 @@ export const layer = (options: GameRepairLoopOptions) => {
           root,
           Effect.gen(function* () {
             const note = input.note.trim();
+            const manifest = yield* projects.read(root);
+            const budgetMs = gameProductionBudgetMs(manifest);
             const refused = (
               message: string,
               buildId: string | null,
               checks: ReadonlyArray<GameReviewCheck>,
+              production?: GameProductionStatus,
             ): GameSubmitResult => ({
               accepted: false,
               message: `Submission refused: ${message}`,
               buildId,
               submission: null,
               checks: [...checks],
+              ...(production === undefined ? {} : { production }),
             });
             if (note === "" || /[\r\n]/.test(note))
               return refused("the note must be one non-empty line on what the game is.", null, []);
@@ -1872,14 +1879,36 @@ export const layer = (options: GameRepairLoopOptions) => {
             const runId = yield* projects.activeRun(threadId);
             if (runId === null)
               return refused("no turn is running, so this submission has no owner.", null, []);
+            const productionBefore = yield* rounds.read(root).pipe(
+              Effect.map((state) =>
+                productionStatus({
+                  production: state.production ?? null,
+                  budgetMs,
+                  activeRun: runId,
+                  nowMs: now(),
+                }),
+              ),
+              Effect.orElseSucceed(() =>
+                productionStatus({
+                  production: null,
+                  budgetMs,
+                  activeRun: runId,
+                  nowMs: now(),
+                }),
+              ),
+            );
             const held = live.get(root);
             const reviewing = yield* readRecord(root);
+            // A repair child may submit inside its own round. Its declaration is
+            // testimony for the round; the selection belongs to the review, and
+            // the builder's production clock is not the child's.
+            let ownedRepair = false;
             if (held !== undefined || reviewing?.status === "running") {
               const children =
                 held === undefined
                   ? []
                   : yield* sessions.recordedChildren({ root, loopId: held.loopId });
-              const ownedRepair = children.some(
+              ownedRepair = children.some(
                 (child) =>
                   child.role === "repair" &&
                   child.childThreadId === threadId &&
@@ -1892,6 +1921,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                     : "the game is held until its review children stop; only its owned repair child can submit.",
                   input.buildId ?? null,
                   [],
+                  productionBefore,
                 );
             }
             const facts = yield* studio.submissionFacts(root, input.buildId);
@@ -1900,7 +1930,28 @@ export const layer = (options: GameRepairLoopOptions) => {
                 facts.reason ?? "the server could not verify a build.",
                 facts.buildId,
                 facts.checks,
+                productionBefore,
               );
+            // The facts proved these exact bytes and their source binding, so the
+            // exported artifact is the one Play may show. Selecting before the
+            // declaration commits nothing that a refusal could leave behind.
+            const exported = yield* rounds.exported(root, facts.buildId);
+            if (exported === null)
+              return yield* new GameOperationError({
+                operation: "submit game build",
+                path: root,
+                reason: "invalid-input",
+                detail:
+                  "The verified build has no recorded export/source binding; export the game again.",
+              });
+            if (!ownedRepair) {
+              yield* rounds.select(root, exported.artifact);
+              // A preview already open follows the declaration at once, so the
+              // creator watching Play sees the first playable without pressing
+              // anything. A closed preview stays closed until Play opens it.
+              if (preview.url(root) !== null)
+                yield* preview.select(root, exported.artifact.directory).pipe(Effect.ignore);
+            }
             const submission: GameSubmission = {
               runId,
               buildId: facts.buildId,
@@ -1908,12 +1959,41 @@ export const layer = (options: GameRepairLoopOptions) => {
               submittedAt: nowIso(),
             };
             yield* rounds.recordSubmission(root, submission);
+            const production = ownedRepair
+              ? productionStatus({
+                  production: (yield* rounds.read(root)).production ?? null,
+                  budgetMs,
+                  activeRun: runId,
+                  nowMs: now(),
+                })
+              : yield* rounds
+                  .recordProduction(root, {
+                    runId,
+                    buildId: facts.buildId,
+                    at: submission.submittedAt,
+                  })
+                  .pipe(
+                    Effect.map((recorded) =>
+                      productionStatus({
+                        production: recorded,
+                        budgetMs,
+                        activeRun: runId,
+                        nowMs: now(),
+                      }),
+                    ),
+                  );
+            const firstPlayable = !ownedRepair && productionBefore.firstPlayableAt === null;
+            const budget = productionBudgetText(production.budgetMs, production.remainingMs);
             return {
               accepted: true,
-              message: `Submitted ${facts.buildId.slice(0, 12)}: it boots, logs no console errors and responds to input. The studio reviews it after this turn ends.`,
+              message: firstPlayable
+                ? `Submitted ${facts.buildId.slice(0, 12)}: this is the first playable. Play shows it now. Production budget: ${budget}; keep deepening the game toward the brief and submit improved builds until it is realised.`
+                : `Submitted ${facts.buildId.slice(0, 12)}: Play shows this build now. ${budget}: keep producing, and end the turn when the game fully realises the brief.`,
               buildId: facts.buildId,
               submission,
               checks: [...facts.checks],
+              ...(ownedRepair ? {} : { firstPlayable }),
+              production,
             };
           }),
         );
