@@ -8,6 +8,7 @@ import {
 import {
   type GameLastPlaytest,
   type GameQualificationStageStatus,
+  type GameSubmissionFacts,
 } from "../../packages/contracts/src/index.ts";
 import {
   readBenchmarkResult,
@@ -95,6 +96,53 @@ const obligation = (
   criteria: status === "unsupported" ? [] : ["moves-count"],
 });
 
+const selectedBuildId = "a".repeat(64);
+
+const selectedBuildFacts = (overrides: Partial<GameSubmissionFacts> = {}): GameSubmissionFacts => ({
+  buildId: selectedBuildId,
+  directory: `builds/candidates/${selectedBuildId}`,
+  checks: [
+    { id: "build", status: "passed" },
+    { id: "bytes", status: "passed" },
+    { id: "sources", status: "passed" },
+    { id: "playtest", status: "passed" },
+    { id: "boot", status: "passed" },
+    { id: "console", status: "passed" },
+    { id: "input", status: "passed", detail: "4 input steps executed" },
+  ],
+  passed: true,
+  reason: null,
+  ...overrides,
+});
+
+const reviewStatus = (
+  selectedFacts: GameSubmissionFacts | null | undefined,
+): NonNullable<GameE2eRunSummary["review"]> => ({
+  loop: null,
+  phase: "interrupted",
+  held: false,
+  repairsLeft: 3,
+  timeLeftMs: 0,
+  budget: { repairs: 3, elapsedMs: 2_700_000 },
+  restoreOffered: false,
+  ...(selectedFacts === undefined ? {} : { selectedBuildFacts: selectedFacts }),
+});
+
+const selectedLoop = (buildId: string | null): NonNullable<GameE2eRunSummary["loop"]> => ({
+  id: "loop-1",
+  status: "interrupted",
+  decision: "interrupt",
+  reason: "deadline: the review did not finish within its budget.",
+  startedAt: "2026-10-21T00:00:00.000Z",
+  finishedAt: "2026-10-21T00:05:00.000Z",
+  repairsUsed: 1,
+  budget: { repairs: 3, elapsedMs: 2_700_000 },
+  rounds: [],
+  selectedBuildId: buildId,
+  waitedMs: 300_000,
+  timedOut: false,
+});
+
 const summary = (
   input: {
     readonly schemaVersion?: 1 | 2;
@@ -105,6 +153,7 @@ const summary = (
     readonly timedOut?: boolean;
     readonly lastPlaytest?: GameLastPlaytest | null;
     readonly visualJudgements?: ReadonlyArray<GameVisualJudgement>;
+    readonly review?: GameE2eRunSummary["review"];
     readonly loop?: GameE2eRunSummary["loop"];
     readonly production?: GameE2eRunSummary["production"];
   } = {},
@@ -122,6 +171,7 @@ const summary = (
   lastPlaytest: input.lastPlaytest ?? null,
   obligations: input.obligations ?? [obligation("count-move", "proven")],
   visualJudgements: input.visualJudgements ?? [],
+  review: input.review ?? null,
   loop: input.loop ?? null,
   production: input.production ?? null,
   error: input.error ?? null,
@@ -192,6 +242,151 @@ describe("classifyRun", () => {
       }),
     );
     assert.equal(verdict.outcome, "passed");
+  });
+
+  it("passes a schema 2 run on the selected build's verified facts, not stale folder stages", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        qualification: qualification({
+          completion: "incomplete",
+          mechanicsQualified: false,
+          stages: [
+            stage("export", "passed"),
+            stage("playtest", "stale", { detail: "Interaction: cards_played 0→1." }),
+            stage("state", "stale", { detail: "A stale workspace still passed every criterion." }),
+          ],
+        }),
+        review: reviewStatus(selectedBuildFacts()),
+        loop: selectedLoop(selectedBuildId),
+      }),
+    );
+    assert.equal(verdict.outcome, "passed");
+    assert.notMatch(verdict.reason, /stale/);
+  });
+
+  it("keeps schema 1's folder completion gate for a stale workspace", () => {
+    const verdict = classifyRun(
+      observe({
+        qualification: qualification({
+          completion: "incomplete",
+          mechanicsQualified: false,
+          stages: [
+            stage("playtest", "stale", { detail: "Interaction: cards_played 0→1." }),
+            stage("state", "stale", { detail: "A stale workspace still passed every criterion." }),
+          ],
+        }),
+      }),
+    );
+    assert.equal(verdict.outcome, "failed-mechanics");
+    assert.match(verdict.reason, /playtest=stale, state=stale/);
+  });
+
+  it("still fails a schema 2 run whose frozen obligation is missing, not for its stale stages", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        qualification: qualification({
+          completion: "incomplete",
+          mechanicsQualified: false,
+          stages: [stage("state", "stale")],
+        }),
+        review: reviewStatus(selectedBuildFacts()),
+        loop: selectedLoop(selectedBuildId),
+        obligations: [obligation("count-move", "proven"), obligation("enemy-hp", "missing")],
+      }),
+    );
+    assert.equal(verdict.outcome, "failed-mechanics");
+    assert.match(verdict.reason, /enemy-hp \(missing\)/);
+    assert.notMatch(verdict.reason, /stale/);
+  });
+
+  it("reports unsupported schema 2 obligations below a verified selected build", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        review: reviewStatus(selectedBuildFacts()),
+        loop: selectedLoop(selectedBuildId),
+        obligations: [
+          obligation("count-move", "proven"),
+          obligation("illegal-move", "unsupported"),
+        ],
+      }),
+    );
+    assert.equal(verdict.outcome, "unsupported");
+    assert.match(verdict.reason, /illegal-move/);
+  });
+
+  it("treats schema 2 without selected-build facts as an evidence gap, never a pass", () => {
+    const noReview = classifyRun(observe({ schemaVersion: 2, review: null }));
+    const noFacts = classifyRun(observe({ schemaVersion: 2, review: reviewStatus(null) }));
+    assert.equal(noReview.outcome, "evidence-gap");
+    assert.match(noReview.reason, /review status/);
+    assert.equal(noFacts.outcome, "evidence-gap");
+    assert.match(noFacts.reason, /submission facts/);
+  });
+
+  it("reports a selected build that failed its submission checks as failed mechanics", () => {
+    const failed = selectedBuildFacts({
+      passed: false,
+      reason: "console: 2 console error(s)",
+      checks: [
+        { id: "build", status: "passed" },
+        { id: "console", status: "failed", detail: "2 console error(s)" },
+      ],
+    });
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        review: reviewStatus(failed),
+        loop: selectedLoop(selectedBuildId),
+      }),
+    );
+    assert.equal(verdict.outcome, "failed-mechanics");
+    assert.match(verdict.reason, /selected build failed its submission checks/);
+    assert.match(verdict.reason, /2 console error/);
+  });
+
+  it("rejects selected-build facts for a different build than Play serves", () => {
+    const other = "b".repeat(64);
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        review: reviewStatus(
+          selectedBuildFacts({ buildId: other, directory: `builds/candidates/${other}` }),
+        ),
+        loop: selectedLoop(selectedBuildId),
+      }),
+    );
+    assert.equal(verdict.outcome, "evidence-gap");
+    assert.include(verdict.reason, other);
+    assert.include(verdict.reason, selectedBuildId);
+  });
+
+  it("keeps a schema 2 error after the verdict as a crash", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        review: reviewStatus(selectedBuildFacts()),
+        loop: selectedLoop(selectedBuildId),
+        error: "preview: HTTP 500",
+      }),
+    );
+    assert.equal(verdict.outcome, "crashed");
+    assert.match(verdict.reason, /after its verdict/);
+  });
+
+  it("reports a schema 2 run that errored before verification as crashed", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        phase: "qualified",
+        review: null,
+        error: "review status unavailable",
+      }),
+    );
+    assert.equal(verdict.outcome, "crashed");
+    assert.match(verdict.reason, /review status unavailable/);
   });
 
   it("reports an obligation the approved design never named as failed mechanics", () => {
@@ -574,6 +769,8 @@ it("new summaries report completion without requiring a retired visual verdict",
     qualification: qualification({
       stages: [stage("export", "passed"), stage("playtest", "passed")],
     }),
+    review: reviewStatus(selectedBuildFacts()),
+    loop: selectedLoop(selectedBuildId),
   });
   assert.equal(classifyRun(modern).outcome, "passed");
   assert.match(classifyRun(modern).reason, /Presentation quality is unmeasured/);
@@ -585,7 +782,7 @@ it("new summaries report completion without requiring a retired visual verdict",
     durationMs: 1,
     observation: modern,
   });
-  assert.equal(row.review, null);
+  assert.equal(row.review?.selectedBuildFacts?.passed, true);
   assert.equal(row.visual.status, null);
   assert.equal(row.repairDelta, null);
   assert.equal(

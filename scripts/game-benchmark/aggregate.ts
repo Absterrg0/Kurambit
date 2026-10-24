@@ -198,6 +198,54 @@ const visualReading = (summary: GameE2eRunSummary) => {
   };
 };
 
+type SelectedBuildReading =
+  | { readonly kind: "verified" }
+  | { readonly kind: "failed"; readonly detail: string }
+  | { readonly kind: "unverified"; readonly detail: string };
+
+/**
+ * Schema 2's mechanical gate is the artifact Play serves, not the folder's
+ * legacy qualification: promoting a candidate leaves the folder's playtest and
+ * state stages stale even though the runner verified the selected build. Read
+ * the same facts game-e2e gates on; only a verified artifact may reach the
+ * obligations below.
+ */
+const selectedBuildReading = (summary: GameE2eRunSummary): SelectedBuildReading => {
+  const review = summary.review ?? null;
+  if (review === null)
+    return {
+      kind: "unverified",
+      detail: "The run recorded no review status for the build Play serves.",
+    };
+  const facts = review.selectedBuildFacts;
+  if (facts == null)
+    return {
+      kind: "unverified",
+      detail: "The run recorded no submission facts for the build Play serves.",
+    };
+  if (facts.buildId === null || facts.directory === null)
+    return { kind: "unverified", detail: "The selected-build facts name no artifact." };
+  const selected = summary.loop?.selectedBuildId ?? null;
+  if (selected !== null && selected !== facts.buildId)
+    return {
+      kind: "unverified",
+      detail: `The selected-build facts describe ${facts.buildId}, but Play serves ${selected}.`,
+    };
+  if (facts.checks.length === 0)
+    return { kind: "unverified", detail: "The selected-build facts record no submission checks." };
+  const failed = facts.checks.filter((check) => check.status !== "passed");
+  if (facts.passed !== true || failed.length > 0)
+    return {
+      kind: "failed",
+      detail:
+        facts.reason ??
+        (failed.length === 0
+          ? "the facts record a failure without naming a failing check"
+          : failed.map((check) => `${check.id}=${check.status}`).join(", ")),
+    };
+  return { kind: "verified" };
+};
+
 /** The run's verdict, in the order that keeps a crash from masquerading as one. */
 export function classifyRun(observation: BenchmarkRunObservation): {
   readonly outcome: BenchmarkOutcome;
@@ -228,9 +276,28 @@ export function classifyRun(observation: BenchmarkRunObservation): {
     };
 
   const qualification = summary.qualification;
-  // Playable completion, not optional certification: a rule-following run must
-  // not fail because test/state were left out.
-  if (qualification.completion !== "complete") {
+  // Schema 2 measures the build Play serves, so the folder's stale stages cannot
+  // veto a promoted candidate. A verified artifact still has to prove the frozen
+  // obligations below.
+  if (summary.schemaVersion === 2) {
+    const selected = selectedBuildReading(summary);
+    if (selected.kind === "failed") {
+      const detail = selected.detail.endsWith(".") ? selected.detail : `${selected.detail}.`;
+      return {
+        outcome: "failed-mechanics",
+        reason: `The selected build failed its submission checks: ${detail}`,
+      };
+    }
+    if (selected.kind === "unverified")
+      return summary.error === null
+        ? { outcome: "evidence-gap", reason: selected.detail }
+        : {
+            outcome: "crashed",
+            reason: `${selected.detail} (runner: ${summary.error})`,
+          };
+  } else if (qualification.completion !== "complete") {
+    // Playable completion, not optional certification: a rule-following run must
+    // not fail because test/state were left out.
     const detail = stateDetail(summary);
     return {
       outcome: "failed-mechanics",
@@ -288,7 +355,7 @@ export function classifyRun(observation: BenchmarkRunObservation): {
     reason:
       summary.schemaVersion === 1
         ? "Mechanics, frozen obligations and visual judgement passed."
-        : "Playable completion and frozen obligations passed. Presentation quality is unmeasured by this summary; review decisions are reported separately.",
+        : "The selected build's submission checks and frozen obligations passed. Presentation quality is unmeasured by this summary; review decisions are reported separately.",
   };
 }
 
