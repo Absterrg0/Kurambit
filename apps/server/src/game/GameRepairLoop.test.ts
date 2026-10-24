@@ -2226,6 +2226,28 @@ it.live("the first submit selects its build at once and opens the production tur
   ),
 );
 
+it.live("the review starts on the last accepted submit, not the first", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const first = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(first.accepted).toBe(true);
+        const secondBuild = "d".repeat(64);
+        const second = yield* services.review.submit(threadId, {
+          buildId: secondBuild,
+          note: "The owl now reacts to being hit.",
+        });
+        expect(second.accepted).toBe(true);
+        const created = loopRecord(yield* ensureLoop(services));
+        expect(created.exportBuildId).toBe(secondBuild);
+        expect(created.submissionNote).toBe("The owl now reacts to being hit.");
+        expect((yield* services.rounds.read(fixture.root)).selected?.buildId).toBe(secondBuild);
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
 it.live("a later accepted submit moves Play and a refused one leaves it and names the fact", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>
