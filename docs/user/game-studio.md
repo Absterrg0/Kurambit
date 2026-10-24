@@ -124,8 +124,12 @@ Each game is a self-contained git repository you can move, back up, or open on a
 ## Review and restore
 
 After your agent submits a verified build (or ends a turn with a playable export), Game Studio
-reviews its frames and can attempt up to three repairs within forty-five minutes. Play keeps the selected build while
-review runs. Open Builds to read defects, suggested fixes, decisions and the frames behind them.
+reviews its frames and can attempt up to three repairs within forty-five minutes. The first
+verified submit is playable at once, and the agent keeps producing: each accepted submit replaces
+what Play shows, and review starts on the last one when the turn ends. The production phase is 45
+minutes by default; `productionMinutes` in `game.json` sets it, and the server never cuts a turn
+short. Play keeps the selected build while review runs. Open Builds to read defects, suggested
+fixes, decisions and the frames behind them.
 Review compares versions; it does not promise that every aspect of the game is correct.
 
 Choose Stop review to end it. If a repair started but its result could not be kept, or your edits

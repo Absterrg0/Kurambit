@@ -90,7 +90,7 @@ const ReviewRestoreTool = Tool.make("game_review_restore", {
 }).annotate(Tool.Readonly, false);
 const SubmitTool = Tool.make("game_submit", {
   description:
-    "Hand this game to the studio's review. When the core loop is playable, name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Accepted, the submission is recorded and the review starts on that build after your turn ends; refused, the result lists the exact failed check so you can fix it and submit again. Call it once, then end your turn; do not start your own improvement loop.",
+    "Hand a build to the studio. The first accepted submit is the game's first playable: Play shows it at once and your turn keeps going. Keep producing — deepen the game toward the brief and its art direction with recipes and game_try_input — and submit each improved build; every accepted submit replaces what Play shows, and the last one is what review starts on when your turn ends. Name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Refused, the result lists the exact failed check and Play keeps the previous build; fix it and submit again.",
   parameters: GameSubmitInput,
   success: GameSubmitResult,
   failure,
@@ -153,7 +153,7 @@ const ScenariosTool = Tool.make("game_scenarios_run", {
 }).annotate(Tool.Readonly, false);
 const ExportTool = Tool.make("game_export", {
   description:
-    "Import and export this thread's game with the Web or Linux release preset. Verifies matching Godot export templates and nonempty build output. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. Use game_preview to build and serve a playable browser URL.",
+    "Import and export this thread's game with the Web or Linux release preset. Verifies matching Godot export templates and nonempty build output. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux"]) }),
   success: GameActionResult,
   failure,

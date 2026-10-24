@@ -83,6 +83,13 @@ import { satisfiedObservations } from "./playtestState.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
+/**
+ * The export answer the builder reads. The first accepted submit is the first
+ * playable; a later accepted submit replaces it while production continues.
+ */
+const WEB_READY_MESSAGE =
+  "Web game is ready to play. Playtest it with input steps; the first game_submit makes it the first playable, and later accepted submits replace it as you keep producing.";
+
 export class GameService extends Context.Service<
   GameService,
   {
@@ -715,7 +722,7 @@ const make = Effect.gen(function* () {
             message:
               selection.mode === "candidate"
                 ? "Web game built as a candidate; Play keeps the selected build until the round promotes it."
-                : "Web game is ready to play. Playtest it with input steps, then call game_submit and end your turn; the server owns subsequent bounded review and repair.",
+                : WEB_READY_MESSAGE,
           },
           record: {
             outcome: "passed" as const,
@@ -830,8 +837,7 @@ const make = Effect.gen(function* () {
         ? exported
         : {
             ...exported,
-            message:
-              "Web game is ready to play. Playtest it with input steps, then call game_submit and end your turn; the server owns subsequent bounded review and repair.",
+            message: WEB_READY_MESSAGE,
             url: served.url,
           };
     });

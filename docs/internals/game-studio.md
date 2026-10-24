@@ -193,8 +193,12 @@ baseline. The stage stores the approved source snapshot, the approved design has
 per-criterion summary; a newly approved design revision makes the old route result stale even when
 the game sources did not change.
 
-Review is separate from mechanical qualification. The first playable build is selected before
-review starts, so model latency cannot delay Play. Reviews use the originating game's frozen
+Review is separate from mechanical qualification. The builder's first accepted `game_submit`
+publishes the first playable at once, so model latency cannot delay Play; the turn then keeps
+producing, and every later accepted submit replaces what Play shows. A refused submit changes
+nothing and names the failed fact. The production time box is advisory and per game (`game.json`'s
+`productionMinutes`, 45 by default); the server never ends a turn when it runs out, and the model
+decides when the game realises the brief. Reviews use the originating game's frozen
 provider/model by default; unavailable credentials mean unavailable review, never a substitute
 model. Critic and comparison children start with fresh evidence-only context. The critic can test
 hypotheses through bounded headless `game_try_input` calls on the frozen build and viewport.
@@ -223,10 +227,11 @@ A pairwise improvement does not certify every presentation claim.
 
 A review has one origin: the builder's `game_submit`. The builder names the export it stands
 behind (default: the latest one), and the server checks only facts before recording the
-declaration: the build directory exists, its bytes hash to the id they are addressed by, the export
-record names that build, and the playtest recorded against those exact bytes booted, logged no
-console errors and executed real input steps. A refusal lists the failed checks. When the turn ends, the
-loop starts on the submitted build. A turn with no submission falls back to its own latest export
+declaration and publishing that build: the build directory exists, its bytes hash to the id they
+are addressed by, the export record names that build, and the playtest recorded against those
+exact bytes booted, logged no console errors and executed real input steps. A refusal lists the
+failed checks and leaves the selection alone. When the turn ends, the loop starts on the turn's
+last accepted submission. A turn with no submission falls back to its own latest export
 only when the same facts pass. The derived playable completion no longer gates review; it stays a
 status display. A repair child submits the same way, and its note (which defects it believes it
 fixed) is recorded on the round for the history, not as evidence: the frozen checks and the ballots

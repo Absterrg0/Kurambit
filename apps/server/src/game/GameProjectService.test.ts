@@ -297,6 +297,10 @@ it.effect(
         expect(agents).toContain("Never claim a check you did not run");
         expect(agents).toContain("game_recipe_search");
         expect(agents).toContain("Before building the core loop, game_recipe_search");
+        // The turn continues into production after the first playable; that is
+        // the instruction t66 showed cutting the build phase short.
+        expect(agents).toContain("the first playable, not the end of your turn");
+        expect(agents).toContain("game_status shows the production budget");
         // A weak model follows a short brief: six numbered steps, at most 350 words.
         expect(agents.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
         expect(agents).toMatch(/\n1\. [\s\S]*\n6\. /);
@@ -310,6 +314,14 @@ it.effect(
         expect(reviewed).toContain("re-approve");
         expect(reviewed.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(350);
         expect(yield* readFile(NodePath.join(created.root, "CLAUDE.md"))).toBe("@AGENTS.md\n");
+        // The production time box is per game and can be read and edited in the manifest.
+        expect(
+          (
+            JSON.parse(yield* readFile(NodePath.join(created.root, "game.json"))) as {
+              productionMinutes?: number;
+            }
+          ).productionMinutes,
+        ).toBe(45);
         expect(yield* readFile(NodePath.join(created.root, "godot/project.godot"))).toContain(
           "gl_compatibility",
         );
