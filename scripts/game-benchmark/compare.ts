@@ -490,12 +490,22 @@ export interface ComparisonReport {
   readonly briefs: ReadonlyArray<BriefComparison>;
 }
 
-const emptyGrade = {
+const emptyGrade: BriefComparison["harness"] = {
   gradeDirectory: null,
   grader: null,
   graderVersion: null,
   frames: 0,
-} as const;
+};
+
+const buildSummary = (build: SavedBuild | null): BriefComparison["harness"] =>
+  build === null
+    ? emptyGrade
+    : {
+        gradeDirectory: build.gradeDirectory,
+        grader: build.grader,
+        graderVersion: build.graderVersion,
+        frames: build.frames.length,
+      };
 
 export interface RunComparisonInput {
   readonly harnessDir: string;
@@ -515,25 +525,19 @@ export const compareBrief = async (input: {
   readonly review: CompareReview;
 }): Promise<BriefComparison> => {
   const indices = matchedIndices(input.harness.frames.length, input.raw.frames.length);
-  const source = (build: SavedBuild) => ({
-    gradeDirectory: build.gradeDirectory,
-    grader: build.grader,
-    graderVersion: build.graderVersion,
-    frames: build.frames.length,
-  });
   if (indices.length === 0)
     return {
       briefId: input.brief.id,
       title: input.brief.title,
       frameCount: 0,
-      harness: source(input.harness),
-      raw: source(input.raw),
+      harness: buildSummary(input.harness),
+      raw: buildSummary(input.raw),
       orders: [],
       control: { answer: null, passed: false },
       facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
       verdict: "invalid",
       reasons: [],
-      note: "One or both lanes saved no graded frames for this brief.",
+      note: `No graded frames to compare: harness ${input.harness.frames.length}, raw ${input.raw.frames.length}.`,
     };
 
   const orders: CompareOrderResult[] = [];
@@ -600,8 +604,8 @@ export const compareBrief = async (input: {
     briefId: input.brief.id,
     title: input.brief.title,
     frameCount: indices.length,
-    harness: source(input.harness),
-    raw: source(input.raw),
+    harness: buildSummary(input.harness),
+    raw: buildSummary(input.raw),
     orders,
     control,
     facets: {
@@ -620,6 +624,15 @@ export const compareBrief = async (input: {
 };
 
 export const renderComparisonMarkdown = (report: ComparisonReport): string => {
+  // Measured briefs first: a lane that never built a brief must not lead the
+  // report with a verdict that says nothing.
+  const ordered = [...report.briefs].sort((left, right) =>
+    left.frameCount === 0 && right.frameCount > 0
+      ? 1
+      : left.frameCount > 0 && right.frameCount === 0
+        ? -1
+        : 0,
+  );
   const lines = [
     "# Blind look/feel comparison",
     "",
@@ -634,12 +647,20 @@ export const renderComparisonMarkdown = (report: ComparisonReport): string => {
     "| Brief | Cards | Verdict | works | look | feel | play | Control |",
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
-  for (const brief of report.briefs) {
+  for (const brief of ordered) {
+    const control =
+      brief.frameCount === 0
+        ? "—"
+        : brief.control.passed
+          ? "tie (pass)"
+          : brief.control.answer === null
+            ? "no answer (void)"
+            : "named a winner (void)";
     lines.push(
-      `| ${brief.briefId} | ${brief.frameCount} | ${brief.verdict} | ${brief.facets.works} | ${brief.facets.look} | ${brief.facets.feel} | ${brief.facets.play} | ${brief.control.passed ? "tie (pass)" : "named a winner (void)"} |`,
+      `| ${brief.briefId} | ${brief.frameCount} | ${brief.verdict} | ${brief.facets.works} | ${brief.facets.look} | ${brief.facets.feel} | ${brief.facets.play} | ${control} |`,
     );
   }
-  for (const brief of report.briefs) {
+  for (const brief of ordered) {
     lines.push("", `## ${brief.title} (\`${brief.briefId}\`)`, "");
     lines.push(
       `Verdict: **${brief.verdict}**. Harness grade by ${brief.harness.grader?.provider ?? "unknown"}/${brief.harness.grader?.model ?? "unknown"} v${brief.harness.graderVersion ?? "?"} (${brief.harness.frames} frames); raw grade by ${brief.raw.grader?.provider ?? "unknown"}/${brief.raw.grader?.model ?? "unknown"} v${brief.raw.graderVersion ?? "?"} (${brief.raw.frames} frames).`,
@@ -664,30 +685,35 @@ export const runComparison = async (
   for (const brief of input.briefs) {
     const harnessDirectory = await findBenchmarkBriefDirectory(input.harnessDir, brief.id);
     const rawDirectory = await findBenchmarkBriefDirectory(input.rawDir, brief.id);
-    if (harnessDirectory === null || rawDirectory === null) {
-      log(
-        `[${brief.id}] no graded frames on ${harnessDirectory === null ? "harness" : "raw"} side`,
-      );
+    const harness = harnessDirectory === null ? null : await readSavedBuild(harnessDirectory);
+    const raw = rawDirectory === null ? null : await readSavedBuild(rawDirectory);
+    if (
+      harness === null ||
+      raw === null ||
+      harness.frames.length === 0 ||
+      raw.frames.length === 0
+    ) {
+      log(`[${brief.id}] no graded frames to compare`);
       briefs.push({
         briefId: brief.id,
         title: brief.title,
         frameCount: 0,
-        harness: emptyGrade,
-        raw: emptyGrade,
+        harness: buildSummary(harness),
+        raw: buildSummary(raw),
         orders: [],
         control: { answer: null, passed: false },
         facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
         verdict: "invalid",
         reasons: [],
-        note: "One or both lanes saved no grade for this brief.",
+        note: `No graded frames to compare: harness ${harness?.frames.length ?? 0}, raw ${raw?.frames.length ?? 0}.`,
       });
       continue;
     }
     log(`[${brief.id}] comparing…`);
     const comparison = await compareBrief({
       brief,
-      harness: await readSavedBuild(harnessDirectory),
-      raw: await readSavedBuild(rawDirectory),
+      harness,
+      raw,
       cardsRoot: NodePath.join(input.out, "cards", brief.id),
       review: input.review,
     });

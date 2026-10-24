@@ -10,9 +10,12 @@ import {
   decodeCompareAnswer,
   matchedIndices,
   readSavedBuild,
+  renderComparisonMarkdown,
   summarizeComparison,
+  type BriefComparison,
   type CompareAnswer,
   type CompareReview,
+  type ComparisonReport,
   type SavedBuild,
 } from "./compare.ts";
 import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
@@ -313,4 +316,58 @@ it("an unreadable answer is invalid and can never agree with the other order", (
   });
   expect(summary.verdict).toBe("invalid");
   expect(summary.reasons[0]).toContain("no readable answer");
+});
+
+it("renders measured briefs first and gives an unmeasured one no control verdict", () => {
+  const grade = {
+    gradeDirectory: "/tmp/grade",
+    grader: { provider: "codex", model: "gpt-6.1-sol" },
+    graderVersion: 3,
+    frames: 10,
+  } as const;
+  const measured: BriefComparison = {
+    briefId: "platformer",
+    title: "Lantern Hop",
+    frameCount: 6,
+    harness: grade,
+    raw: grade,
+    orders: [],
+    control: { answer: answer("tie"), passed: true },
+    facets: { works: "harness", look: "harness", feel: "tie", play: "raw" },
+    verdict: "harness",
+    reasons: ["harness-left: harness wins overall — clearer"],
+    note: null,
+  };
+  const missing: BriefComparison = {
+    briefId: "racing",
+    title: "Ridge Circuit",
+    frameCount: 0,
+    harness: { ...grade, gradeDirectory: null, grader: null, graderVersion: null, frames: 0 },
+    raw: { ...grade, gradeDirectory: null, grader: null, graderVersion: null, frames: 0 },
+    orders: [],
+    control: { answer: null, passed: false },
+    facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
+    verdict: "invalid",
+    reasons: [],
+    note: "No graded frames to compare: harness 0, raw 0.",
+  };
+  const report: ComparisonReport = {
+    schemaVersion: 1,
+    generatedAt: "2026-10-24T00:00:00.000Z",
+    role: "look-feel-comparison",
+    grader: { provider: "codex", model: "gpt-6.1-sol" },
+    graderVersion: 3,
+    harnessDir: "/harness",
+    rawDir: "/raw",
+    briefs: [missing, measured],
+  };
+  const markdown = renderComparisonMarkdown(report);
+  expect(markdown.indexOf("Lantern Hop")).toBeLessThan(markdown.indexOf("Ridge Circuit"));
+  expect(markdown).toContain(
+    "| racing | 0 | invalid | invalid | invalid | invalid | invalid | — |",
+  );
+  expect(markdown).toContain(
+    "| platformer | 6 | harness | harness | harness | tie | raw | tie (pass) |",
+  );
+  expect(markdown).toContain("This is a ruler beside the obligations grade.");
 });
