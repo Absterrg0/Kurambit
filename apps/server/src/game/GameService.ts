@@ -87,7 +87,8 @@ import { parseGodotViewport } from "./godotViewport.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import { productionStatus } from "./gameProduction.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
-import { inspectWindowsBuild } from "./windowsExport.ts";
+import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
+import { publishWindowsBuild } from "./windowsPublication.ts";
 
 /**
  * The export answer the builder reads. The first accepted submit is the first
@@ -716,6 +717,10 @@ const make = Effect.gen(function* () {
           }),
       });
       let windowsMessage: string | null = null;
+      let checkedWindows: {
+        readonly inspection: WindowsBuildInspection;
+        readonly stagedPck: string;
+      } | null = null;
       if (windowsOutput !== null && windowsStaging !== null) {
         const stagedPck = windowsStaging.replace(/\.exe$/, ".pck");
         const inspection = yield* Effect.tryPromise({
@@ -745,36 +750,7 @@ const make = Effect.gen(function* () {
             },
             record: failedExport(beforeSourceId),
           };
-        const finalPck = windowsOutput.replace(/\.exe$/, ".pck");
-        yield* Effect.tryPromise({
-          try: async () => {
-            if (inspection.embeddedPck) {
-              await NodeFSP.rename(windowsStaging, windowsOutput);
-              // A sidecar left by an earlier non-embedded preset would no longer
-              // describe this executable.
-              await NodeFSP.rm(finalPck, { force: true });
-            } else {
-              await NodeFSP.rename(stagedPck, finalPck);
-              await NodeFSP.rename(windowsStaging, windowsOutput);
-            }
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "export-windows",
-              path: windowsOutput,
-              reason: "io",
-              detail: "The checked Windows build could not be moved into builds/windows.",
-              cause,
-            }),
-        });
-        windowsMessage =
-          (inspection.embeddedPck
-            ? `Windows x86_64 build ready at builds/windows/game.exe with its game data embedded (${Math.round(inspection.executableBytes / (1024 * 1024))} MB).`
-            : `Windows x86_64 build ready at builds/windows/game.exe with builds/windows/game.pck beside it (${Math.round(inspection.executableBytes / (1024 * 1024))} MB). Keep both files together.`) +
-          (windowsPreset === null || windowsPreset.text === null
-            ? ""
-            : " A standard Windows export preset was added.") +
-          " This machine did not run it on Windows.";
+        checkedWindows = { inspection, stagedPck };
       }
       // Hash the staged artifact before it becomes visible. The hash is the
       // directory name, so an immutable build can never be overwritten later
@@ -832,6 +808,40 @@ const make = Effect.gen(function* () {
           : legacyAfter !== null && legacyAfter.kind === "known"
             ? legacyAfter.sourceId
             : null;
+      // The checked artifact stays staged until the source comparison accepts
+      // it. Only then may it replace a build the creator already had.
+      if (windowsOutput !== null && windowsStaging !== null && checkedWindows !== null) {
+        const { inspection, stagedPck } = checkedWindows;
+        const publication = yield* Effect.tryPromise({
+          try: () =>
+            publishWindowsBuild({
+              stagedExecutable: windowsStaging,
+              stagedPck: inspection.embeddedPck ? null : stagedPck,
+              executable: windowsOutput,
+              pck: windowsOutput.replace(/\.exe$/, ".pck"),
+            }),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "export-windows",
+              path: windowsOutput,
+              reason: "io",
+              detail:
+                cause instanceof Error
+                  ? cause.message
+                  : "The checked Windows build could not be moved into builds/windows.",
+              cause,
+            }),
+        });
+        windowsMessage =
+          (inspection.embeddedPck
+            ? `Windows x86_64 build ready at builds/windows/game.exe with its game data embedded (${Math.round(inspection.executableBytes / (1024 * 1024))} MB).`
+            : `Windows x86_64 build ready at builds/windows/game.exe with builds/windows/game.pck beside it (${Math.round(inspection.executableBytes / (1024 * 1024))} MB). Keep both files together.`) +
+          (windowsPreset === null || windowsPreset.text === null
+            ? ""
+            : " A standard Windows export preset was added.") +
+          (publication.notes.length === 0 ? "" : ` ${publication.notes.join(" ")}`) +
+          " This machine did not run it on Windows.";
+      }
       const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
       if (hashed !== null && directory !== null) {
         const final = NodePath.join(root, directory);

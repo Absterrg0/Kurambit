@@ -118,8 +118,9 @@ const readPckDirectory = (
 };
 
 /**
- * `pck` is the sidecar a non-embedded export writes. An embedded export must
- * carry the pack itself, because a bare .exe is what the creator copies.
+ * `pck` is the sidecar a non-embedded export writes. The standard preset embeds
+ * the pack so one .exe is enough; a custom non-embedded preset needs both files
+ * kept together.
  */
 export const inspectWindowsBuild = (input: {
   readonly executable: Uint8Array;

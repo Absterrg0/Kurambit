@@ -39,6 +39,7 @@ import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import { playedViewport } from "./playtestEvidence.ts";
 import { admissionTestLayer, previewBrowserTestLayer } from "./gameTestLayers.ts";
+import { windowsExecutable, windowsPck } from "./windowsExport.testkit.ts";
 
 const threadId = ThreadId.make("provenance-test");
 /** Test-local gates; the tests in this file run sequentially. */
@@ -109,6 +110,8 @@ interface FixtureOptions {
   /** Replace the round store, e.g. to gate a byte capture a status read asks for. */
   readonly rounds?: (stateDir: string) => Layer.Layer<GameRoundStore.GameRoundStore>;
   readonly manifest?: Partial<GameManifest>;
+  /** Give the stub toolchain a template folder that passes the Windows check. */
+  readonly windowsTemplates?: boolean;
 }
 
 const withGame = <A, E, R = never>(
@@ -131,6 +134,7 @@ const withGame = <A, E, R = never>(
       const root = NodePath.join(base, "game");
       const stateDir = NodePath.join(base, "state");
       const executable = NodePath.join(base, "godot");
+      const windowsTemplates = options.windowsTemplates ? NodePath.join(base, "templates") : null;
       let selectedPreviewUrl: string | null = null;
       let selectedPreviewDirectory: string | null = null;
       yield* Effect.promise(async () => {
@@ -143,6 +147,11 @@ const withGame = <A, E, R = never>(
           "extends SceneTree\n",
         );
         await NodeFSP.writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        if (windowsTemplates !== null) {
+          await NodeFSP.mkdir(windowsTemplates, { recursive: true });
+          for (const file of ["windows_release_x86_64.exe", "windows_debug_x86_64.exe"])
+            await NodeFSP.writeFile(NodePath.join(windowsTemplates, file), "template");
+        }
       });
       const current = manifest(options.manifest);
       const qualificationLayer =
@@ -182,7 +191,7 @@ const withGame = <A, E, R = never>(
         Layer.provide(
           Layer.mock(GameToolchain.GameToolchain)({
             executable: () =>
-              Effect.succeed({ path: executable, version: "4.7.2", templates: null }),
+              Effect.succeed({ path: executable, version: "4.7.2", templates: windowsTemplates }),
             status: Effect.succeed({
               toolsDirectory: base,
               installing: false,
@@ -1160,6 +1169,79 @@ it.live("an export builds from frozen bytes and refuses a source edit during the
         expect(frozenPath).not.toBe(NodePath.join(root, "godot"));
         const status = yield* game.status(threadId);
         expect(status.selectedBuildId).toBeNull();
+      }),
+  );
+});
+
+it.live("a source edit during a Windows export keeps the previous exe and pck", () => {
+  const previousExe = "previous windows executable";
+  const previousPck = "previous windows pack";
+  const nextExe = windowsExecutable(windowsPck(["project.binary", "scenes/main.tscn"]));
+  return withGame(
+    {
+      windowsTemplates: true,
+      run: (input) => {
+        if (input.operation === "export-web") {
+          const output = input.args.at(-1)!;
+          return Effect.promise(async () => {
+            await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+            for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+              await NodeFSP.writeFile(
+                NodePath.join(NodePath.dirname(output), name),
+                `export ${name}`,
+              );
+            return processOk(input.root);
+          });
+        }
+        if (input.operation !== "export-windows") return Effect.succeed(processOk(input.root));
+        const output = input.args.at(-1)!;
+        return Effect.promise(async () => {
+          await NodeFSP.writeFile(output, nextExe);
+          await NodeFSP.writeFile(output.replace(/\.exe$/, ".pck"), "staged embedded sidecar");
+          // The engine exported the old script; the creator edits it before the
+          // export process returns, so the checked artifact no longer describes
+          // the current sources.
+          await NodeFSP.appendFile(
+            NodePath.join(input.root, "godot/scripts/main.gd"),
+            "# edited during export\n",
+          );
+          return processOk(input.root);
+        });
+      },
+    },
+    ({ root, game }) =>
+      Effect.gen(function* () {
+        const windowsDirectory = NodePath.join(root, "builds/windows");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(windowsDirectory, { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(windowsDirectory, "game.exe"), previousExe);
+          await NodeFSP.writeFile(NodePath.join(windowsDirectory, "game.pck"), previousPck);
+        });
+        const web = yield* game.export(threadId, "Web");
+        expect(web.success, web.message).toBe(true);
+        const selected = (yield* game.status(threadId)).selectedBuildId;
+        expect(selected).not.toBeNull();
+
+        const result = yield* game.export(threadId, "Windows");
+        expect(result.success, result.message).toBe(false);
+        expect(result.message).toContain("changed while the export ran");
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(windowsDirectory, "game.exe"), "utf8"),
+          ),
+        ).toBe(previousExe);
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(windowsDirectory, "game.pck"), "utf8"),
+          ),
+        ).toBe(previousPck);
+        const status = yield* game.status(threadId);
+        expect(status.selectedBuildId).toBe(selected);
+        expect(status.selectedArtifactUsable).toBe(true);
+        expect((yield* Effect.promise(() => NodeFSP.readdir(windowsDirectory))).sort()).toEqual([
+          "game.exe",
+          "game.pck",
+        ]);
       }),
   );
 });
