@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Pair cards read the PNG the playtest captured.
 import * as NodeFSP from "node:fs/promises";
 import { PNG } from "pngjs";
 

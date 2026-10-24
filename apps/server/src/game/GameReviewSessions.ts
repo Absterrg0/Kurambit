@@ -2018,6 +2018,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         const known = {
           frameIds: new Set(evidence.frames.map((frame) => frame.id)),
           checkIds: new Set(evidence.checks.map((check) => check.id)),
+          recipeIds: gameRecipeIds,
           itemIds: record.itemIds,
           defectIds: record.defectIds ?? [],
         };

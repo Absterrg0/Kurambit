@@ -1442,7 +1442,11 @@ it.live("a repair is a separate writable child in the game folder", () =>
 
 it.live("accepts one JSON fence and truncates prose while keeping decisions and ids strict", () =>
   Effect.sync(() => {
-    const known = { frameIds: new Set(["f1"]), checkIds: new Set(["boot"]) };
+    const known = {
+      frameIds: new Set(["f1"]),
+      checkIds: new Set(["boot"]),
+      recipeIds: new Set<string>(),
+    };
     const critic = {
       fundamentals,
       defects: [
@@ -1862,7 +1866,11 @@ it.live("accepts all cited ballot frames and bounds the evidence manifest", () =
 
 it.live("fundamentals require typed verdicts and honest frame citations", () =>
   Effect.sync(() => {
-    const known = { frameIds: new Set(["f1"]), checkIds: new Set<string>() };
+    const known = {
+      frameIds: new Set(["f1"]),
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+    };
     const answer = { fundamentals, defects: [], doNotRegress: [] };
     const parse = (judgment: unknown) =>
       GameReviewSessions.parseCriticAnswer(

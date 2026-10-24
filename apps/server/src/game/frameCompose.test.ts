@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { PNG } from "pngjs";
 
 import { composeCaption, composePairPng } from "./frameCompose.ts";
