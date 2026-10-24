@@ -213,7 +213,9 @@ is a note, and unknown is neutral.
 The critic judges boot, input response, visible core action and state readability through typed
 fundamentals. A cited negative judgment creates a blocker. Per-input before/after pairs carry
 exact steps, sampled pixel deltas and bridge changes; up to four complete pairs replace loose
-frames. Movement, HUD text matching and scenario completion never veto this review loop.
+frames. Ballots see each pair as one labelled side-by-side card, while both original captures stay
+in the hashed evidence for citation. Movement, HUD text matching and scenario completion never veto
+this review loop.
 A pairwise improvement does not certify every presentation claim.
 
 A review has one origin: the builder's `game_submit`. The builder names the export it stands
@@ -228,7 +230,10 @@ fixed) is recorded on the round for the history, not as evidence: the frozen che
 still decide. A restart does not resume unfinished work.
 
 Play serves immutable build directories. Candidate exports never replace the selected build until
-accepted. Rejection restores the pre-repair source only while it still matches the recorded
+accepted. Promotion compares the candidate's build inputs (the engine project's files) with the
+frozen export, so a design-note edit after the export does not veto a build, while an engine-source
+edit does; restore and user-edit detection still use the whole-folder identity.
+Rejection restores the pre-repair source only while it still matches the recorded
 post-repair version. User edits take precedence: a conflict stops the review and offers an explicit
 Restore previous version. Restore preserves the folder it replaces and never deletes directories
 that live previews still serve. Cancellation joins owned sessions before releasing the game;
