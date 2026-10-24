@@ -99,6 +99,18 @@ export const GAME_REVIEW_CHOICES = ["A", "B", "tie"] as const;
 export const GameReviewChoice = Schema.Literals(GAME_REVIEW_CHOICES);
 export type GameReviewChoice = typeof GameReviewChoice.Type;
 
+/**
+ * The control pair's labels: C and D are the same captured frames shown twice.
+ * A ballot that prefers one of them has failed a position check, so the answer
+ * vocabulary names the control sides rather than reusing A/B.
+ */
+export const GAME_REVIEW_CONTROL_CHOICES = ["C", "D", "tie"] as const;
+export const GameReviewControlChoice = Schema.Literals(GAME_REVIEW_CONTROL_CHOICES);
+export type GameReviewControlChoice = typeof GameReviewControlChoice.Type;
+
+/** Stored control answers from before the C/D vocabulary may still say A or B. */
+const storedControlChoice = Schema.Literals(["A", "B", "C", "D", "tie"]);
+
 export const GAME_REVIEW_PRESERVATION_VERDICTS = ["preserved", "lost", "unknown"] as const;
 export const GameReviewPreservationVerdict = Schema.Literals(GAME_REVIEW_PRESERVATION_VERDICTS);
 export type GameReviewPreservationVerdict = typeof GameReviewPreservationVerdict.Type;
@@ -111,6 +123,22 @@ export const GameReviewFacetVerdicts = Schema.Struct({
   play: GameReviewChoice,
 });
 export type GameReviewFacetVerdicts = typeof GameReviewFacetVerdicts.Type;
+
+export const GameReviewControlVerdicts = Schema.Struct({
+  works: GameReviewControlChoice,
+  look: GameReviewControlChoice,
+  feel: GameReviewControlChoice,
+  play: GameReviewControlChoice,
+});
+export type GameReviewControlVerdicts = typeof GameReviewControlVerdicts.Type;
+
+/** What storage keeps: new C/D answers and legacy A/B ones read the same way. */
+const GameReviewStoredControlVerdicts = Schema.Struct({
+  works: storedControlChoice,
+  look: storedControlChoice,
+  feel: storedControlChoice,
+  play: storedControlChoice,
+});
 
 /**
  * One preservation item judged on both sides of a ballot. `frameIds` are the
@@ -182,7 +210,7 @@ export const GameReviewBallotAnswer = Schema.Struct({
     B: Schema.Array(GameReviewRegression).check(Schema.isMaxLength(8)),
   }),
   preservation: Schema.Array(GameReviewPreservationEntry),
-  control: GameReviewFacetVerdicts,
+  control: GameReviewStoredControlVerdicts,
   reason: reviewText(2_000),
 });
 export type GameReviewBallotAnswer = typeof GameReviewBallotAnswer.Type;
@@ -195,7 +223,7 @@ export const GameReviewBallotInput = Schema.Struct({
   defects: GameReviewBallotAnswer.fields.defects,
   regressions: GameReviewBallotAnswer.fields.regressions,
   preservation: GameReviewBallotAnswer.fields.preservation,
-  control: GameReviewBallotAnswer.fields.control,
+  control: GameReviewControlVerdicts,
   reason: GameReviewBallotAnswer.fields.reason,
 });
 export type GameReviewBallotInput = typeof GameReviewBallotInput.Type;

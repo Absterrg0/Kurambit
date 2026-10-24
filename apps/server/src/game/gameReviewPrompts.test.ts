@@ -1,8 +1,14 @@
 import { expect, it } from "vitest";
 
-import { builderFixPrompt, criticPrompt } from "./gameReviewPrompts.ts";
+import { builderFixPrompt, criticPrompt, pairwisePrompt } from "./gameReviewPrompts.ts";
 
 const files = [{ path: "frames/frame-01.png", label: "f1: A: boot" }];
+
+it("the ballot is told the control pair is one capture under C and D", () => {
+  const prompt = pairwisePrompt({ files, items: [] });
+  expect(prompt).toContain("C and D are the same captured frames shown twice");
+  expect(prompt).toContain("answer them C, D or tie");
+});
 
 it("the critic is asked to name the exact recipe behind a defect", () => {
   const prompt = criticPrompt(files);

@@ -800,6 +800,58 @@ it.live("runStatus reads the bound child run, never a newer follow-up", () =>
   ),
 );
 
+it.live("the control pair is the same captured frames written twice", () =>
+  withSession(({ frames, service }) =>
+    Effect.gen(function* () {
+      const control = (id: string, label: string, path: string) => ({
+        id,
+        label,
+        sourcePath: path,
+      });
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: {
+          frames: [
+            control("c1", "C: boot", frames[0]!),
+            control("c2", "C: action", frames[1]!),
+            control("d1", "D: boot", frames[0]!),
+            control("d2", "D: action", frames[1]!),
+          ],
+          checks: [],
+        },
+        items: [],
+      });
+      expect(started.kind).toBe("started");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+      });
+      expect(directory).not.toBeNull();
+      const manifest = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: ReadonlyArray<{ label: string; file: string }> };
+      const bytes = (label: string) => {
+        const frame = manifest.frames.find((entry) => entry.label === label);
+        expect(frame).toBeDefined();
+        return NodeFSP.readFile(NodePath.join(directory!, frame!.file));
+      };
+      const [cBoot, dBoot, cAction, dAction] = yield* Effect.promise(() =>
+        Promise.all([bytes("C: boot"), bytes("D: boot"), bytes("C: action"), bytes("D: action")]),
+      );
+      // Position bias is the only difference a control ballot can be reacting to.
+      expect(cBoot.equals(dBoot)).toBe(true);
+      expect(cAction.equals(dAction)).toBe(true);
+    }),
+  ),
+);
+
 it.live("an unavailable review model is unavailable, never substituted", () =>
   withSession(({ frames, scripted, service }) =>
     Effect.gen(function* () {

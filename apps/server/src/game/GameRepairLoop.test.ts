@@ -1046,6 +1046,46 @@ it.live("a ballot that prefers a control build is discarded and the incumbent is
   ),
 );
 
+it.live("the control pair shows the same captured frames under the C and D labels", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 2 : 0);
+        const captured: Array<{
+          readonly c: ReadonlyArray<string>;
+          readonly d: ReadonlyArray<string>;
+        }> = [];
+        scripted.ballots = [0, 1].map(
+          (order) =>
+            ({ plan }: { readonly plan: GameReviewBallotPlan }) => {
+              const frames =
+                scripted.starts.find((entry) => entry.role === "ballot" && entry.order === order)
+                  ?.evidence?.frames ?? [];
+              const side = (label: "C" | "D") =>
+                frames
+                  .filter((frame) => frame.label.startsWith(`${label}: `))
+                  .map(
+                    (frame) =>
+                      `${frame.label.slice(`${label}: `.length)}\u0000${frame.sourcePath}\u0000${JSON.stringify(frame.inputPair ?? null)}`,
+                  );
+              captured.push({ c: side("C"), d: side("D") });
+              return ballotAnswer(plan, "tie");
+            },
+        );
+        yield* runToCompletion(services, fixture);
+        expect(captured).toHaveLength(2);
+        for (const pair of captured) {
+          expect(pair.c.length).toBeGreaterThan(0);
+          expect(pair.d).toEqual(pair.c);
+        }
+      }),
+    ),
+  ),
+);
+
 it.live("a tie keeps the incumbent", () =>
   withLoop((fixture) =>
     fixture.withServices((services) =>

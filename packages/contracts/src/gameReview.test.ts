@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_GAME_REVIEW_BUDGET,
   GameReviewArtifact,
+  GameReviewBallotAnswer,
+  GameReviewBallotInput,
   GameReviewBudget,
   GameReviewDefect,
   GameReviewDoNotRegress,
@@ -21,6 +23,8 @@ const decodeRound = Schema.decodeUnknownSync(GameReviewRound);
 const decodeItem = Schema.decodeUnknownSync(GameReviewDoNotRegress);
 const decodeSubmit = Schema.decodeUnknownSync(GameSubmitInput);
 const decodeSubmission = Schema.decodeUnknownSync(GameSubmission);
+const decodeBallotInput = Schema.decodeUnknownSync(GameReviewBallotInput);
+const decodeBallotAnswer = Schema.decodeUnknownSync(GameReviewBallotAnswer);
 
 const buildId = "a".repeat(64);
 
@@ -176,6 +180,44 @@ describe("round records", () => {
   it("rejects unknown states rather than recording them", () => {
     expect(() => decodeRound({ ...round, status: "winning" })).toThrow();
   });
+});
+
+it("a ballot answers the control pair in C and D, never in the main A/B", () => {
+  const ballot = {
+    overall: "tie",
+    overallReason: "Both builds read the same.",
+    works: "tie",
+    look: "tie",
+    feel: "tie",
+    play: "tie",
+    defects: [],
+    regressions: { A: [], B: [] },
+    preservation: [],
+    reason: "The pairs move alike.",
+  };
+  expect(
+    decodeBallotInput({ ...ballot, control: { works: "C", look: "tie", feel: "D", play: "tie" } })
+      .control,
+  ).toEqual({ works: "C", look: "tie", feel: "D", play: "tie" });
+  expect(() =>
+    decodeBallotInput({
+      ...ballot,
+      control: { works: "A", look: "tie", feel: "tie", play: "tie" },
+    }),
+  ).toThrow();
+  // Stored answers from before the vocabulary keep decoding, so old rounds
+  // still render their recorded judgment.
+  const legacy = decodeBallotAnswer({
+    overall: "A",
+    overallReason: "A is clearer.",
+    main: { works: "A", look: "A", feel: "tie", play: "tie" },
+    defects: [],
+    regressions: { A: [], B: [] },
+    preservation: [],
+    control: { works: "A", look: "B", feel: "tie", play: "tie" },
+    reason: "Legacy control vocabulary.",
+  });
+  expect(legacy.control).toEqual({ works: "A", look: "B", feel: "tie", play: "tie" });
 });
 
 it("bounds history pages at the transport boundary", () => {
