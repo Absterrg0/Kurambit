@@ -43,6 +43,7 @@ const withServer = <A, E, R>(
     readonly client: HttpClient.HttpClient;
     readonly secretStore: ServerSecretStore.ServerSecretStore["Service"];
   }) => Effect.Effect<A, E, R>,
+  options?: { readonly sourceScans?: { count: number } },
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -56,6 +57,26 @@ const withServer = <A, E, R>(
       // The real service resolves the game root through realpath.
       const root = yield* Effect.promise(() => NodeFSP.realpath(lexicalRoot));
 
+      const roundLayer = GameRoundStore.layer({ stateDir });
+      const roundsLayer =
+        options?.sourceScans === undefined
+          ? roundLayer
+          : roundLayer.pipe(
+              Layer.flatMap((context) => {
+                const rounds = Context.get(context, GameRoundStore.GameRoundStore);
+                return Layer.succeed(
+                  GameRoundStore.GameRoundStore,
+                  GameRoundStore.GameRoundStore.of({
+                    ...rounds,
+                    // A package download must not pay for a source-tree snapshot.
+                    sourceId: () =>
+                      Effect.sync(() => {
+                        options.sourceScans!.count += 1;
+                      }).pipe(Effect.as("scanned")),
+                  }),
+                );
+              }),
+            );
       const gameLayer = GameService.layerWithPlaytest(() =>
         Effect.die("This test provides no browser run."),
       ).pipe(
@@ -84,7 +105,7 @@ const withServer = <A, E, R>(
         ),
         Layer.provide(Layer.mock(PreviewBrowser.PreviewBrowser)({})),
         Layer.provideMerge(GameQualification.layer({ stateDir })),
-        Layer.provideMerge(GameRoundStore.layer({ stateDir })),
+        Layer.provideMerge(roundsLayer),
         Layer.provideMerge(GameDesignApproval.layer({ stateDir })),
         Layer.provideMerge(admissionTestLayer),
         Layer.provide(NodeServices.layer),
@@ -196,7 +217,7 @@ it.effect(
           "index.js",
           "index.pck",
         ]);
-        expect(packaged.notes.join(" ")).toContain("matched when packaging started");
+        expect(packaged.notes.join(" ")).toContain("does not compare them");
         expect(packaged.notes.join(" ")).toContain("file://");
         const entries = yield* Effect.promise(() => readZipArchive(packaged.archivePath));
         expect([...entries.keys()].sort()).toEqual(["index.html", "index.js", "index.pck"]);
@@ -251,6 +272,30 @@ it.effect(
       }),
     ),
 );
+
+it.effect("packages the selected bytes without walking the game's source tree", () => {
+  const sourceScans = { count: 0 };
+  return withServer(
+    ({ root, game, rounds }) =>
+      Effect.gen(function* () {
+        const fixture = yield* Effect.promise(() =>
+          writeWebBuildFixture(root, {
+            "index.html": '<html><script src="index.js"></script></html>',
+            "index.js": "selected",
+            "index.pck": "selected pck",
+          }),
+        );
+        yield* select(rounds, root, fixture.selected);
+
+        const packaged = yield* game.packageWeb(threadId);
+        expect(packaged.buildId).toBe(fixture.selected.buildId);
+        expect(sourceScans.count).toBe(0);
+        expect(packaged.notes.join(" ")).toContain("does not compare them");
+        expect(packaged.notes.join(" ")).not.toContain("matched when packaging started");
+      }),
+    { sourceScans },
+  );
+});
 
 it.effect("invalidates an old signed Web URL when a new build is selected, and bounds tokens", () =>
   withServer(({ root, game, rounds, client, secretStore }) =>

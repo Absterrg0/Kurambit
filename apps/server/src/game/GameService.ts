@@ -2541,18 +2541,10 @@ const make = Effect.gen(function* () {
               detail:
                 "No Web build is selected for Play, so there is no build to package. Build & play the game first; packaging never exports and never packages a draft, legacy or unselected build.",
             });
-          // Read the editable sources before the archive is published: a
-          // cancelled or failed comparison must not leave a package behind,
-          // and the note describes the state the creator asked to download in.
-          const sources =
-            selected.sourceId === null
-              ? ("unknown" as const)
-              : yield* rounds.sourceId(root).pipe(
-                  Effect.map((sourceId): "current" | "changed" =>
-                    sourceId === selected.sourceId ? "current" : "changed",
-                  ),
-                  Effect.catchCause(() => Effect.succeed("unknown" as const)),
-                );
+          // Packaging is a byte operation on the selected artifact. Comparing
+          // editable sources would walk and hash up to a gigabyte of art for a
+          // note, and a download must not pay that cost, so the wording below
+          // never claims the sources are current.
           const packaged = yield* Effect.tryPromise({
             try: (signal) => packageWebRelease({ root, selected, signal }),
             catch: (cause) =>
@@ -2584,12 +2576,7 @@ const make = Effect.gen(function* () {
             .split(NodePath.sep)
             .join("/");
           const build = selected.buildId.slice(0, 12);
-          const sourceNote =
-            sources === "changed"
-              ? `The ZIP is the selected Web build Play serves (${build}); your later source edits are not included, and Play keeps serving this build until a new build is selected.`
-              : sources === "current"
-                ? `The ZIP is the selected Web build Play serves (${build}); the game sources matched when packaging started, and later source edits are not included.`
-                : `The ZIP is the selected Web build Play serves (${build}); current source edits could not be compared before packaging and are not included.`;
+          const sourceNote = `The ZIP is the selected Web build Play serves (${build}); it contains those fixed bytes only, and later source edits are not included. Packaging does not compare them.`;
           return {
             archivePath: packaged.archivePath,
             fileName: packaged.fileName,
@@ -2602,7 +2589,7 @@ const make = Effect.gen(function* () {
             notes: [
               ...packaged.notes,
               sourceNote,
-              "Serve the extracted files from any static HTTP host; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP.",
+              "Serve the extracted files from an ordinary static HTTP host; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP.",
             ],
             message: `Web package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB) for selected build ${build}.`,
           };
