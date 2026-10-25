@@ -36,6 +36,7 @@ import {
   GameVerifyInput,
   GameWebPlaytestResult,
   GameVerifyResult,
+  GameWebPackage,
   GameWindowsPackage,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
@@ -175,6 +176,15 @@ const PackageWindowsTool = Tool.make("game_package_windows", {
     "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the Builds panel also receives a short-lived signed download URL. Packaging does not prove Windows booted.",
   parameters: Schema.Struct({}),
   success: GameWindowsPackage,
+  failure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Readonly, false);
+const PackageWebTool = Tool.make("game_package_web", {
+  description:
+    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft, legacy builds/web, an unselected candidate or later source edits: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root (a root-level custom HTML entry is stored as index.html without changing its bytes). The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the Builds panel also receives a short-lived signed download URL.",
+  parameters: Schema.Struct({}),
+  success: GameWebPackage,
   failure,
   failureMode: "return",
   dependencies,
@@ -344,6 +354,7 @@ export const GameToolkit = Toolkit.make(
   InspectSceneTool,
   ExportTool,
   PackageWindowsTool,
+  PackageWebTool,
   PreviewTool,
   NativeTool,
   StopTool,

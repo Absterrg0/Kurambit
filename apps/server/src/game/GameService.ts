@@ -34,6 +34,7 @@ import {
   type GameVerifyInput,
   type GameVerifyResult,
   type GameVerifyStage,
+  type GameWebPackage,
   type GameWindowsPackage,
   type ThreadId,
   fitScreenshotsToBudget,
@@ -95,6 +96,12 @@ import { productionStatus } from "./gameProduction.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
 import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
 import { publishWindowsBuild } from "./windowsPublication.ts";
+import {
+  WEB_PACKAGE_FILE,
+  packageWebRelease,
+  WebPackageError,
+  webPackageArchivePath,
+} from "./webPackage.ts";
 import {
   packageWindowsRelease,
   retireWindowsArchive,
@@ -173,6 +180,26 @@ export class GameService extends Context.Service<
     readonly packageWindows: (
       threadId: ThreadId,
     ) => Effect.Effect<GameWindowsPackage, GameOperationError>;
+    /**
+     * Packages the exact immutable Web build Play currently serves as a
+     * static-host ZIP. It never exports and never chooses another build.
+     */
+    readonly packageWeb: (threadId: ThreadId) => Effect.Effect<GameWebPackage, GameOperationError>;
+    /** The complete archive a signed download URL serves; never creates one. */
+    readonly webPackageFile: (
+      threadId: ThreadId,
+      buildId: string,
+      packageSha256: string,
+    ) => Effect.Effect<
+      {
+        readonly path: string;
+        readonly fileName: string;
+        readonly bytes: number;
+        readonly sha256: string;
+        readonly identity: { readonly device: string; readonly inode: string };
+      },
+      GameOperationError
+    >;
     /** The complete archive a signed download URL serves; never creates one. */
     readonly windowsPackageFile: (
       threadId: ThreadId,
@@ -2501,6 +2528,165 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    packageWeb: (threadId) =>
+      withRoot(threadId, "Package Web build", (root) =>
+        Effect.gen(function* () {
+          const state = yield* rounds.read(root);
+          const selected = state.selected;
+          if (selected === null)
+            return yield* new GameOperationError({
+              operation: "Package Web build",
+              path: NodePath.join(root, WEB_BUILD_DIRECTORY),
+              reason: "invalid-input",
+              detail:
+                "No Web build is selected for Play, so there is no build to package. Build & play the game first; packaging never exports and never packages a draft, legacy or unselected build.",
+            });
+          // Read the editable sources before the archive is published: a
+          // cancelled or failed comparison must not leave a package behind,
+          // and the note describes the state the creator asked to download in.
+          const sources =
+            selected.sourceId === null
+              ? ("unknown" as const)
+              : yield* rounds.sourceId(root).pipe(
+                  Effect.map((sourceId): "current" | "changed" =>
+                    sourceId === selected.sourceId ? "current" : "changed",
+                  ),
+                  Effect.catchCause(() => Effect.succeed("unknown" as const)),
+                );
+          const packaged = yield* Effect.tryPromise({
+            try: (signal) => packageWebRelease({ root, selected, signal }),
+            catch: (cause) =>
+              cause instanceof WebPackageError
+                ? new GameOperationError({
+                    operation: "Package Web build",
+                    path: cause.path,
+                    reason:
+                      cause.kind === "missing" ||
+                      cause.kind === "invalid" ||
+                      cause.kind === "changed"
+                        ? "invalid-input"
+                        : "io",
+                    detail: cause.message,
+                    cause,
+                  })
+                : new GameOperationError({
+                    operation: "Package Web build",
+                    path: NodePath.join(root, "builds/web-packages"),
+                    reason: "io",
+                    detail:
+                      cause instanceof Error
+                        ? cause.message
+                        : "The Web package could not be created.",
+                    cause,
+                  }),
+          });
+          const relative = NodePath.relative(root, packaged.archivePath)
+            .split(NodePath.sep)
+            .join("/");
+          const build = selected.buildId.slice(0, 12);
+          const sourceNote =
+            sources === "changed"
+              ? `The ZIP is the selected Web build Play serves (${build}); your later source edits are not included, and Play keeps serving this build until a new build is selected.`
+              : sources === "current"
+                ? `The ZIP is the selected Web build Play serves (${build}); the game sources matched when packaging started, and later source edits are not included.`
+                : `The ZIP is the selected Web build Play serves (${build}); current source edits could not be compared before packaging and are not included.`;
+          return {
+            archivePath: packaged.archivePath,
+            fileName: packaged.fileName,
+            buildId: packaged.buildId,
+            bytes: packaged.bytes,
+            sha256: packaged.sha256,
+            files: packaged.files,
+            entry: packaged.entry,
+            sourceEntry: packaged.sourceEntry,
+            notes: [
+              ...packaged.notes,
+              sourceNote,
+              "Serve the extracted files from any static HTTP host; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP.",
+            ],
+            message: `Web package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB) for selected build ${build}.`,
+          };
+        }),
+      ),
+    webPackageFile: (threadId, buildId, packageSha256) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        if (!/^[0-9a-f]{64}$/.test(buildId))
+          return yield* new GameOperationError({
+            operation: "Download Web package",
+            path: NodePath.join(root, "builds/web-packages"),
+            reason: "download",
+            detail:
+              "This Web package link does not name a build. Open Builds and download the selected build again.",
+          });
+        const selected = (yield* rounds.read(root)).selected;
+        const path = webPackageArchivePath(root, buildId);
+        if (selected === null || selected.buildId !== buildId)
+          return yield* new GameOperationError({
+            operation: "Download Web package",
+            path,
+            reason: "download",
+            detail:
+              "The selected Web build changed after this download link was created. Open Builds and download the package for the selected build.",
+          });
+        const opened = yield* openMediaFile(path).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "Download Web package",
+                path,
+                reason: "io",
+                detail: "The Web package could not be opened.",
+                cause,
+              }),
+          ),
+        );
+        if (opened === null)
+          return yield* new GameOperationError({
+            operation: "Download Web package",
+            path,
+            reason: "download",
+            detail:
+              "No complete Web package is ready for the selected build. Open Builds, then choose Download package on the selected Web build.",
+          });
+        const verified = yield* Effect.tryPromise({
+          try: () => hashOpenFile(opened),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "Download Web package",
+              path,
+              reason: "io",
+              detail: "The Web package could not be read.",
+              cause,
+            }),
+        });
+        const after = yield* Effect.tryPromise({
+          try: () => opened.handle.stat({ bigint: true }),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "Download Web package",
+              path,
+              reason: "io",
+              detail: "The Web package could not be checked.",
+              cause,
+            }),
+        });
+        if (BigInt(verified.bytes) !== after.size || verified.sha256 !== packageSha256)
+          return yield* new GameOperationError({
+            operation: "Download Web package",
+            path,
+            reason: "checksum",
+            detail:
+              "The Web package changed after this download link was created. Open Builds, then choose Download package again.",
+          });
+        return {
+          path,
+          fileName: WEB_PACKAGE_FILE,
+          bytes: verified.bytes,
+          sha256: verified.sha256,
+          identity: { device: after.dev.toString(), inode: after.ino.toString() },
+        };
+      }).pipe(Effect.scoped),
     windowsPackageFile: (threadId, packageSha256) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

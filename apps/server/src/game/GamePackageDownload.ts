@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- The signed URL is the native HTTP download boundary for the packaged release.
+// @effect-diagnostics nodeBuiltinImport:off -- The signed URL is the native HTTP download boundary for packaged releases.
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,16 +13,27 @@ import {
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 export const GAME_PACKAGE_ROUTE_PREFIX = "/api/game/windows-package";
+export const GAME_WEB_PACKAGE_ROUTE_PREFIX = "/api/game/web-package";
 const SECRET_NAME = "game-package-download-signing-key";
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 
+export type GamePackageKind = "windows" | "web";
+
+export const gamePackageRoutePrefix = (kind: GamePackageKind) =>
+  kind === "windows" ? GAME_PACKAGE_ROUTE_PREFIX : GAME_WEB_PACKAGE_ROUTE_PREFIX;
+
 /** The path prefix carries a signed capability, so it must not reach a trace. */
 export const isGamePackageRoutePath = (pathname: string) =>
-  pathname === GAME_PACKAGE_ROUTE_PREFIX || pathname.startsWith(`${GAME_PACKAGE_ROUTE_PREFIX}/`);
+  [GAME_PACKAGE_ROUTE_PREFIX, GAME_WEB_PACKAGE_ROUTE_PREFIX].some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
 
 const Claims = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
+  kind: Schema.Literals(["windows", "web"]),
   threadId: ThreadId,
+  /** A web package is bound to the selected build it was made from. */
+  buildId: Schema.optionalKey(Schema.String),
   packageSha256: Schema.String,
   expiresAt: Schema.Number,
 });
@@ -37,20 +48,38 @@ export interface GamePackageDownload {
   readonly expiresAt: number;
 }
 
-export const issueGamePackageDownload = Effect.fn("game.packageDownload.issue")(function* (
-  threadId: ThreadId,
-  packageSha256: string,
-  ttlMs = DEFAULT_TTL_MS,
+const issue = Effect.fn("game.packageDownload.issue")(function* (
+  claims: Omit<Claims, "version" | "expiresAt">,
+  ttlMs: number,
 ) {
   const store = yield* ServerSecretStore.ServerSecretStore;
   const secret = yield* store.getOrCreateRandom(SECRET_NAME, 32);
   const expiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
-  const payload = base64UrlEncode(encodeClaims({ version: 1, threadId, packageSha256, expiresAt }));
+  const payload = base64UrlEncode(encodeClaims({ version: 2, ...claims, expiresAt }));
   const token = `${payload}.${signPayload(payload, secret)}`;
   return {
-    path: `${GAME_PACKAGE_ROUTE_PREFIX}/${token}`,
+    path: `${gamePackageRoutePrefix(claims.kind)}/${token}`,
     expiresAt,
   } satisfies GamePackageDownload;
+});
+
+/** The Windows package capability: thread plus the exact archive hash. */
+export const issueGamePackageDownload = Effect.fn("game.packageDownload.issueWindows")(function* (
+  threadId: ThreadId,
+  packageSha256: string,
+  ttlMs = DEFAULT_TTL_MS,
+) {
+  return yield* issue({ kind: "windows", threadId, packageSha256 }, ttlMs);
+});
+
+/** The Web package capability additionally names the selected build. */
+export const issueGameWebPackageDownload = Effect.fn("game.packageDownload.issueWeb")(function* (
+  threadId: ThreadId,
+  buildId: string,
+  packageSha256: string,
+  ttlMs = DEFAULT_TTL_MS,
+) {
+  return yield* issue({ kind: "web", threadId, buildId, packageSha256 }, ttlMs);
 });
 
 /** Returns the package a download token was minted for, or null for any bad token. */

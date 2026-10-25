@@ -1781,6 +1781,31 @@ const layerWsRpc = (
               expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
             };
           }),
+        [WS_METHODS.gameWebPackage]: ({ threadId }) =>
+          Effect.gen(function* () {
+            const packaged = yield* game.packageWeb(threadId);
+            const download = yield* GamePackageDownload.issueGameWebPackageDownload(
+              threadId,
+              packaged.buildId,
+              packaged.sha256,
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "Package Web build",
+                    path: packaged.archivePath,
+                    reason: "io",
+                    detail: cause.message,
+                    cause,
+                  }),
+              ),
+            );
+            return {
+              ...packaged,
+              downloadPath: download.path,
+              expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
+            };
+          }),
         [WS_METHODS.subscribeGameEvents]: () => game.events,
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,

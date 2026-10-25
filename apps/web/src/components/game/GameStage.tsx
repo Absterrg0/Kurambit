@@ -623,6 +623,7 @@ export function GameStage({
           webBuildStale={data.webBuildStale}
           lastPlaytest={data.lastPlaytest}
           sourcesDifferFromPlay={data.sourcesDifferFromPlay}
+          selectedBuildId={data.selectedBuildId}
           canOperate={canOperate}
           onPlay={() => {
             setTab("play");

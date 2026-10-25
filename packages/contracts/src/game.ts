@@ -746,6 +746,41 @@ export const GameWindowsPackageResult = Schema.Struct({
   expiresAt: Schema.String,
 });
 export type GameWindowsPackageResult = typeof GameWindowsPackageResult.Type;
+export const GameWebPackageFile = Schema.Struct({
+  /** Path inside the ZIP, with forward slashes. */
+  path: Schema.String,
+  bytes: Schema.Number,
+  sha256: Schema.String,
+});
+export type GameWebPackageFile = typeof GameWebPackageFile.Type;
+/**
+ * The downloadable Web build. It packages the immutable build Play currently
+ * serves at that moment; it never exports and does not include later sources.
+ */
+export const GameWebPackage = Schema.Struct({
+  /** Absolute path of the complete archive on the server. */
+  archivePath: Schema.String,
+  fileName: Schema.String,
+  /** The selected build the archive was made from. */
+  buildId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  bytes: Schema.Number,
+  sha256: Schema.String,
+  files: Schema.Array(GameWebPackageFile),
+  /** The entry a static host serves at the ZIP root, normally index.html. */
+  entry: Schema.String,
+  /** The selected artifact's entry before any root mapping. */
+  sourceEntry: Schema.String,
+  notes: Schema.Array(Schema.String),
+  message: Schema.String,
+});
+export type GameWebPackage = typeof GameWebPackage.Type;
+export const GameWebPackageResult = Schema.Struct({
+  ...GameWebPackage.fields,
+  /** Signed same-origin URL path; clients join it with their server origin. */
+  downloadPath: Schema.String,
+  expiresAt: Schema.String,
+});
+export type GameWebPackageResult = typeof GameWebPackageResult.Type;
 export const GameConsoleMessage = Schema.Struct({
   level: Schema.Literals(["log", "info", "warning", "error"]),
   text: Schema.String,

@@ -18,6 +18,7 @@ import {
   GameToolchainStatus,
   GameVerificationPolicyRead,
   GameVerificationPolicyUpdateInput,
+  GameWebPackageResult,
   GameWindowsPackageResult,
 } from "./game.ts";
 import {
@@ -325,6 +326,7 @@ export const WS_METHODS = {
   gameUpdateVerificationPolicy: "game.updateVerificationPolicy",
   gameAction: "game.action",
   gameWindowsPackage: "game.windowsPackage",
+  gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
   gameVerify: "game.verify",
@@ -1399,6 +1401,11 @@ const WsGameWindowsPackageRpc = Rpc.make(WS_METHODS.gameWindowsPackage, {
   success: GameWindowsPackageResult,
   error: gameError,
 });
+const WsGameWebPackageRpc = Rpc.make(WS_METHODS.gameWebPackage, {
+  payload: GameThreadInput,
+  success: GameWebPackageResult,
+  error: gameError,
+});
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   payload: Schema.Struct({}),
   success: GameToolchainStatus,
@@ -1439,6 +1446,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameUpdateVerificationPolicyRpc,
   WsGameActionRpc,
   WsGameWindowsPackageRpc,
+  WsGameWebPackageRpc,
   WsGameToolchainStatusRpc,
   WsGameInstallRpc,
   WsGameVerifyRpc,

@@ -113,6 +113,10 @@ export const gameEnvironment = {
     label: "game:packageWindows",
     tag: WS_METHODS.gameWindowsPackage,
   }),
+  packageWeb: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:packageWeb",
+    tag: WS_METHODS.gameWebPackage,
+  }),
   install: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:install",
     tag: WS_METHODS.gameInstall,

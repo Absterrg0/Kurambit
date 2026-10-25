@@ -56,6 +56,7 @@ export function GameBuildsPanel({
   webBuildStale,
   lastPlaytest,
   sourcesDifferFromPlay,
+  selectedBuildId,
   canOperate,
   onPlay,
   onExport,
@@ -65,15 +66,18 @@ export function GameBuildsPanel({
   webBuildStale: boolean;
   lastPlaytest: GameLastPlaytest | null;
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
+  selectedBuildId: string | null;
   canOperate: boolean;
   onPlay: () => void;
   onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
   const packageWindows = useAtomCommand(gameEnvironment.packageWindows, { reportFailure: false });
+  const packageWeb = useAtomCommand(gameEnvironment.packageWeb, { reportFailure: false });
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
-  const [packaging, setPackaging] = useState(false);
+  const [packaging, setPackaging] = useState<"Windows" | "Web" | null>(null);
   const [packageNotice, setPackageNotice] = useState<{
+    readonly target: "Windows" | "Web";
     readonly buildKey: string;
     readonly status: string | null;
     readonly error: string | null;
@@ -82,15 +86,16 @@ export function GameBuildsPanel({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const windowsBuild = builds.find((entry) => entry.target === "Windows");
-  // A new Windows export removes the package. Tie the ready message to the
-  // build it described so the previous archive's notice disappears with it.
-  const windowsBuildKey = windowsBuild
-    ? `${threadRef.threadId}\n${windowsBuild.path}\n${windowsBuild.updatedAt}`
-    : null;
-  const packageNoticeForBuild =
-    packageNotice !== null && packageNotice.buildKey === windowsBuildKey ? packageNotice : null;
-  const packageStatus = packageNoticeForBuild?.status ?? null;
-  const packageError = packageNoticeForBuild?.error ?? null;
+  const webBuild = builds.find((entry) => entry.target === "Web");
+  // A new export or selection can remove the package. Tie the ready message to
+  // the build it described so the previous archive's notice disappears with it.
+  const buildKey = (build: BuildEntry | undefined) =>
+    build ? `${threadRef.threadId}\n${build.path}\n${build.updatedAt}` : null;
+  const packageNoticeFor = (target: "Windows" | "Web") => {
+    if (packageNotice === null || packageNotice.target !== target) return null;
+    const key = buildKey(target === "Windows" ? windowsBuild : webBuild);
+    return packageNotice.buildKey === key ? packageNotice : null;
+  };
   const checkSources = async () => {
     setChecking(true);
     const result = await check({
@@ -106,18 +111,25 @@ export function GameBuildsPanel({
   };
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
-  const downloadWindowsPackage = async () => {
-    const buildKey = windowsBuildKey ?? "";
-    setPackaging(true);
+  const downloadPackage = async (target: "Windows" | "Web") => {
+    const targetBuildKey = buildKey(target === "Windows" ? windowsBuild : webBuild) ?? "";
+    setPackaging(target);
     setPackageNotice(null);
-    const result = await packageWindows({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    });
-    setPackaging(false);
+    const result =
+      target === "Web"
+        ? await packageWeb({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId },
+          })
+        : await packageWindows({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId },
+          });
+    setPackaging(null);
     if (result._tag === "Failure") {
       setPackageNotice({
-        buildKey,
+        target,
+        buildKey: targetBuildKey,
         status: null,
         error: String(squashAtomCommandFailure(result)),
       });
@@ -129,7 +141,8 @@ export function GameBuildsPanel({
         : null;
     if (url === null) {
       setPackageNotice({
-        buildKey,
+        target,
+        buildKey: targetBuildKey,
         status: null,
         error: "The server address is not ready. Try the download again.",
       });
@@ -143,7 +156,8 @@ export function GameBuildsPanel({
     anchor.click();
     anchor.remove();
     setPackageNotice({
-      buildKey,
+      target,
+      buildKey: targetBuildKey,
       status: [result.value.message, ...result.value.notes].join(" "),
       error: null,
     });
@@ -163,6 +177,7 @@ export function GameBuildsPanel({
         const meta = BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
         const stale = target === "Web" && build !== undefined && webBuildStale;
+        const notice = target === "Linux" ? null : packageNoticeFor(target);
         const Icon = meta.icon;
         return (
           <section
@@ -189,40 +204,59 @@ export function GameBuildsPanel({
                   ? `${build.path} · updated ${new Date(build.updatedAt).toLocaleString()}`
                   : "Not built yet"}
               </p>
-              {target === "Windows" && packageError ? (
-                <p role="alert" className="text-xs text-destructive-foreground">
-                  {packageError}
+              {target === "Web" ? (
+                <p className="text-2xs text-muted-foreground">
+                  {selectedBuildId === null
+                    ? "Packaging needs a selected build; build & play first."
+                    : `Packages selected build ${selectedBuildId.slice(0, 12)}; later source edits are not included.`}
                 </p>
               ) : null}
-              {target === "Windows" && packageStatus ? (
-                <p className="text-xs text-muted-foreground">{packageStatus}</p>
+              {notice?.error ? (
+                <p role="alert" className="text-xs text-destructive-foreground">
+                  {notice.error}
+                </p>
+              ) : null}
+              {notice?.status ? (
+                <p className="text-xs text-muted-foreground">{notice.status}</p>
               ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
               {build ? (
                 <>
                   {meta.play ? (
-                    <Button size="sm" disabled={!canOperate} onClick={onPlay}>
-                      <Gamepad2Icon className="size-3.5" aria-hidden="true" />
-                      Play
-                    </Button>
+                    <>
+                      <Button size="sm" disabled={!canOperate} onClick={onPlay}>
+                        <Gamepad2Icon className="size-3.5" aria-hidden="true" />
+                        Play
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canOperate || packaging !== null || selectedBuildId === null}
+                        aria-busy={packaging === "Web"}
+                        onClick={() => void downloadPackage("Web")}
+                      >
+                        <DownloadIcon className="size-3.5" aria-hidden="true" />
+                        {packaging === "Web" ? "Packaging…" : "Download package"}
+                      </Button>
+                    </>
                   ) : (
                     <>
                       {target === "Windows" ? (
                         <Button
                           size="sm"
-                          disabled={!canOperate || packaging}
-                          aria-busy={packaging}
-                          onClick={() => void downloadWindowsPackage()}
+                          disabled={!canOperate || packaging !== null}
+                          aria-busy={packaging === "Windows"}
+                          onClick={() => void downloadPackage("Windows")}
                         >
                           <DownloadIcon className="size-3.5" aria-hidden="true" />
-                          {packaging ? "Packaging…" : "Download package"}
+                          {packaging === "Windows" ? "Packaging…" : "Download package"}
                         </Button>
                       ) : null}
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canOperate || packaging}
+                        disabled={!canOperate || packaging !== null}
                         onClick={() => {
                           if (target !== "Web") onExport(target);
                         }}

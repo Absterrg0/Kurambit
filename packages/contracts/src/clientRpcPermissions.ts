@@ -20,6 +20,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameReviewRestore]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameWindowsPackage]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gameWebPackage]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameInstall]: AuthSettingsWriteScope,
   [WS_METHODS.gameVerify]: AuthSettingsWriteScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,

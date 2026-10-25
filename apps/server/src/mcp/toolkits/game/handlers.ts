@@ -119,6 +119,13 @@ const handlers = {
       return yield* game.packageWindows(scope.thread.threadId);
     }),
   ),
+  game_package_web: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.packageWeb(scope.thread.threadId);
+    }),
+  ),
   game_preview: McpToolAccess.actsAsCaller(() =>
     Effect.gen(function* () {
       const scope = yield* caller;

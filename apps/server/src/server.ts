@@ -621,6 +621,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerGamePackageRoute,
+    ServerHttp.layerGameWebPackageRoute,
     ServerHttp.layerAttachmentUploadRoute,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,

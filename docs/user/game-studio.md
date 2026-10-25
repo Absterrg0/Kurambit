@@ -108,6 +108,13 @@ its right.
   tab lists every target with its time, folder and logs, the last playtest's verdict and frames,
   and the review history with decisions, reasons, defects and frame links. Stop review and Restore
   previous version are explained below.
+- **Download package** on the Web card zips the exact selected build Play serves, at
+  `builds/web-packages/<build-id>.zip`, without exporting or rebuilding. Later source edits are not
+  included; only a new selected build changes what a new package contains. Upload the extracted
+  files to any static game host and serve them over HTTP, with `.wasm` served as
+  `application/wasm`. Opening `index.html` directly from disk (`file://`) is not a supported way to
+  play a WebAssembly export. If the build declares response headers, the package notes say so;
+  configure them on the host.
 - **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
   scenes or scripts that use it.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
