@@ -17,12 +17,14 @@ import {
   type GameRecipeAdapter,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
+import * as GameArtKits from "./GameArtKits.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameRecipes from "./GameRecipes.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
+import { gameArtKitCatalog } from "./artKitCatalog.ts";
 import { gameRecipeCatalog } from "./recipeCatalog.ts";
 import { GODOT_RECIPE_ENGINE_VERSION } from "./recipes/godot/index.ts";
 
@@ -50,6 +52,7 @@ const RECIPE_IDS = [
   "read.hud",
   "read.onboarding",
   "read.silhouette",
+  "sprite.animation",
   "state.world",
 ] as const;
 type RecipeId = (typeof RECIPE_IDS)[number];
@@ -63,6 +66,7 @@ const LINE_BUDGETS: Record<RecipeId, number> = {
   "feel.shake": 60,
   "feel.pickup": 70,
   "read.silhouette": 70,
+  "sprite.animation": 120,
   "state.world": 70,
   "read.hud": 70,
   "read.onboarding": 70,
@@ -144,6 +148,44 @@ const templatesInstalled = (() => {
 const available =
   NodeFS.existsSync(godotExecutable) && browserExecutable !== null && templatesInstalled;
 const godotAvailable = NodeFS.existsSync(godotExecutable);
+
+/**
+ * A real X server is needed for pixels: Godot's headless display driver is a
+ * dummy renderer. `xvfb-run` keeps that server virtual, so no window reaches
+ * the user's desktop. The layouts match the art-kit render proof.
+ */
+const xvfbRun = (() => {
+  const candidates = [process.env.XVFB_RUN, "/usr/bin/xvfb-run", "/usr/local/bin/xvfb-run"].filter(
+    (candidate): candidate is string => candidate !== undefined,
+  );
+  for (const candidate of candidates) if (NodeFS.existsSync(candidate)) return candidate;
+  try {
+    const found = NodeChildProcess.execFileSync("/bin/sh", ["-c", "command -v xvfb-run"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (found !== "") return found;
+  } catch {
+    // Fall through to the snap layout.
+  }
+  const snapRoot = "/var/lib/snapd/snap";
+  if (NodeFS.existsSync(snapRoot)) {
+    for (const entry of NodeFS.readdirSync(snapRoot)) {
+      const revisions = NodePath.join(snapRoot, entry);
+      let children: ReadonlyArray<string> = [];
+      try {
+        children = NodeFS.readdirSync(revisions);
+      } catch {
+        continue;
+      }
+      for (const revision of children) {
+        const candidate = NodePath.join(revisions, revision, "usr/bin/xvfb-run");
+        if (NodeFS.existsSync(candidate)) return candidate;
+      }
+    }
+  }
+  return null;
+})();
 
 /** Frames stay outside the checkout for the operator and reviewer. */
 const framesRoot = () =>
@@ -1014,6 +1056,366 @@ const recipeLayer = Layer.merge(
   GamePreview.layer,
 );
 
+const SPRITE_PROJECT_GODOT = `config_version=5
+
+[application]
+
+config/name="Sprite animation native proof"
+run/main_scene="res://main.tscn"
+
+[autoload]
+
+SpriteProbe="*res://sprite_probe.gd"
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/size/window_width_override=640
+window/size/window_height_override=360
+window/stretch/mode="viewport"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=0
+2d/snap/snap_2d_transforms_to_pixel=true
+`;
+
+/**
+ * Test-only driver. It feeds ordinary physical key events through Input and
+ * reads the rendered viewport, so the reference is exercised as a player would
+ * drive it and never learns that it is being measured. The reference's own
+ * snapshot() supplies state; the image supplies what the player can see.
+ */
+const SPRITE_PROBE_GD = String.raw`extends Node
+
+const CROP := Vector2i(80, 80)
+const CHARACTER_ROWS := 68  # Above the ground strip: sky is blue there, so green is the sprite.
+
+var _scene: Node
+var _out := ""
+var _shots := {}
+var _crops := {}
+var _order: Array[String] = []
+
+func _ready() -> void:
+	var args := OS.get_cmdline_user_args()
+	_out = String(args[0]) if args.size() > 0 else "user://"
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_run()
+
+func _run() -> void:
+	_scene = get_tree().current_scene
+	if _scene == null or not _scene.has_method("snapshot"):
+		push_error("Sprite recipe scene did not boot")
+		get_tree().quit(2)
+		return
+	await _wait(30)
+	await _shot("idle")
+	_key(KEY_D, true)
+	var seen := {}
+	for _i in range(90):
+		await get_tree().physics_frame
+		var state: Dictionary = _scene.snapshot()
+		if state["anim"] != "run": continue
+		var frame := int(state["frame"])
+		if not seen.has(frame):
+			seen[frame] = true
+			await _shot("run-%d" % frame)
+		if seen.has(0) and seen.has(1): break
+	_key(KEY_D, false)
+	await _wait(10)
+	await _shot("released")
+	await _wait(20)
+	await _shot("settled")
+	_key(KEY_A, true)
+	await _wait(8)
+	_key(KEY_A, false)
+	await _wait(10)
+	await _shot("reverse")
+	_key(KEY_SPACE, true)
+	await _wait(2)
+	_key(KEY_SPACE, false)
+	await _wait(10)
+	await _shot("air")
+	await _wait(60)
+	await _shot("landed")
+	_write_report()
+	get_tree().quit()
+
+func _wait(frames: int) -> void:
+	for _i in range(frames):
+		await get_tree().physics_frame
+
+func _key(code: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = code
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+func _shot(label: String) -> void:
+	await RenderingServer.frame_post_draw
+	var state: Dictionary = _scene.snapshot()
+	var image := get_viewport().get_texture().get_image()
+	if image == null or image.get_size() != Vector2i(640, 360):
+		push_error("Viewport did not render a 640x360 frame")
+		get_tree().quit(3)
+		return
+	var at := Vector2i(int(state["player_x"]), int(state["player_y"]))
+	var crop := image.get_region(Rect2i(at.x - CROP.x / 2, at.y - 76, CROP.x, CROP.y))
+	if crop.get_size() != CROP:
+		push_error("Player crop left the frame")
+		get_tree().quit(4)
+		return
+	image.save_png(_out.path_join(label + ".png"))
+	crop.save_png(_out.path_join(label + "-crop.png"))
+	_crops[label] = crop
+	_shots[label] = {
+		"state": state,
+		"green": _count_green(crop, CHARACTER_ROWS),
+		"unique": _count_unique(crop),
+		"non_sky": _count_non_sky(crop),
+	}
+	_order.append(label)
+
+func _count_green(image: Image, rows: int) -> int:
+	var count := 0
+	for y in range(mini(rows, image.get_height())):
+		for x in range(image.get_width()):
+			var color := image.get_pixel(x, y)
+			if color.g > color.r + 0.08 and color.g > color.b + 0.02: count += 1
+	return count
+
+func _count_unique(image: Image) -> int:
+	var seen := {}
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			seen[image.get_pixel(x, y).to_rgba32()] = true
+	return seen.size()
+
+func _count_non_sky(image: Image) -> int:
+	var background := image.get_pixel(0, 0).to_rgba32()
+	var count := 0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			if image.get_pixel(x, y).to_rgba32() != background: count += 1
+	return count
+
+func _diff(left: String, right: String) -> int:
+	var a: Image = _crops[left]
+	var b: Image = _crops[right]
+	var changed := 0
+	for y in range(CROP.y):
+		for x in range(CROP.x):
+			if a.get_pixel(x, y).to_rgba32() != b.get_pixel(x, y).to_rgba32(): changed += 1
+	return changed
+
+func _write_report() -> void:
+	var pairs := [
+		["idle", "run-0"], ["idle", "run-1"], ["run-0", "run-1"],
+		["idle", "released"], ["released", "settled"], ["released", "reverse"],
+		["idle", "air"], ["idle", "landed"],
+	]
+	var diffs := {}
+	for pair in pairs:
+		if _crops.has(pair[0]) and _crops.has(pair[1]):
+			diffs["%s_%s" % pair] = _diff(pair[0], pair[1])
+	var report := {"order": _order, "shots": _shots, "crop_diff": diffs}
+	var file := FileAccess.open(_out.path_join("report.json"), FileAccess.WRITE)
+	file.store_string(JSON.stringify(report, "  "))
+	file.close()
+	print("SPRITE_RECIPE_RENDER " + JSON.stringify(report))
+`;
+
+it.live.skipIf(!godotAvailable || xvfbRun === null)(
+  "runs sprite.animation against the imported character atlas with real input",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const recipes = yield* GameRecipes.GameRecipes;
+        const entry = yield* recipes.get({ id: "sprite.animation" });
+        const adapter = entry.adapter!;
+        const parent = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-recipe-sprite-")),
+        );
+        return yield* Effect.gen(function* () {
+          const directory = NodePath.join(parent, "sprite-animation");
+          const project = NodePath.join(directory, "godot");
+          const evidence = NodePath.join(framesRoot(), "sprite.animation-native");
+          yield* Effect.promise(async () => {
+            await NodeFSP.mkdir(project, { recursive: true });
+            await NodeFSP.rm(evidence, { recursive: true, force: true });
+            await NodeFSP.mkdir(evidence, { recursive: true });
+            await NodeFSP.writeFile(NodePath.join(project, "project.godot"), SPRITE_PROJECT_GODOT);
+            await NodeFSP.writeFile(NodePath.join(project, "main.tscn"), MAIN_SCENE);
+            await NodeFSP.writeFile(NodePath.join(project, "main.gd"), adapter.referenceCode);
+            await NodeFSP.writeFile(NodePath.join(project, "sprite_probe.gd"), SPRITE_PROBE_GD);
+          });
+
+          // A real catalog install, not a copied fixture: the proof uses the
+          // same service and checked-in bytes a builder's game_art_import uses.
+          const installed = yield* GameArtKits.make(gameArtKitCatalog).install({
+            root: directory,
+            godotProject: "godot",
+            id: "kenney-pixel-platformer",
+          });
+          expect(installed.additionalSheets[0]?.imageResPath).toBe(
+            "res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png",
+          );
+          expect(installed.files.map((file) => file.path)).toContain(
+            "godot/assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png",
+          );
+
+          const imported = yield* runGodot(
+            godotExecutable,
+            ["--headless", "--path", project, "--editor", "--import"],
+            120_000,
+          );
+          expect(imported.exitCode, `${imported.output.slice(-4000)}`).toBe(0);
+
+          const rendered = yield* runGodot(
+            "/usr/bin/env",
+            [
+              "LIBGL_ALWAYS_SOFTWARE=1",
+              `PATH=${NodePath.dirname(xvfbRun!)}:${process.env.PATH ?? ""}`,
+              xvfbRun!,
+              "-a",
+              "-s",
+              "-screen 0 800x600x24",
+              godotExecutable,
+              "--path",
+              project,
+              "--",
+              evidence,
+            ],
+            180_000,
+          );
+          expectNoEngineErrors(rendered, "sprite native render");
+
+          const line = rendered.output
+            .split("\n")
+            .find((entry) => entry.startsWith("SPRITE_RECIPE_RENDER "));
+          expect(line, rendered.output).toBeDefined();
+          const report = JSON.parse(line!.slice("SPRITE_RECIPE_RENDER ".length)) as {
+            readonly order: ReadonlyArray<string>;
+            readonly shots: Readonly<
+              Record<
+                string,
+                {
+                  readonly state: Readonly<Record<string, string | number | boolean>>;
+                  readonly green: number;
+                  readonly unique: number;
+                  readonly non_sky: number;
+                }
+              >
+            >;
+            readonly crop_diff: Readonly<Record<string, number>>;
+          };
+          expect(report.order).toEqual(
+            expect.arrayContaining([
+              "idle",
+              "run-0",
+              "run-1",
+              "released",
+              "settled",
+              "reverse",
+              "air",
+              "landed",
+            ]),
+          );
+          const shot = (label: string) => {
+            const value = report.shots[label];
+            expect(value, `captured ${label}`).toBeDefined();
+            return value!;
+          };
+          const idle = shot("idle");
+          const run0 = shot("run-0");
+          const run1 = shot("run-1");
+          const released = shot("released");
+          const settled = shot("settled");
+          const reverse = shot("reverse");
+          const air = shot("air");
+          const landed = shot("landed");
+
+          // The imported sheet is on screen: green explorer pixels above the
+          // ground, a palette, and the drawn stage, not a placeholder rectangle
+          // or a blank frame.
+          for (const [label, value] of Object.entries(report.shots)) {
+            expect(value.green, `${label} shows the green explorer`).toBeGreaterThan(100);
+            expect(value.unique, `${label} renders the sprite's palette`).toBeGreaterThan(6);
+            expect(value.non_sky, `${label} has the drawn stage under the crop`).toBeGreaterThan(
+              100,
+            );
+            // Collision geometry is the same in every pose; only the visual flips.
+            expect(value.state.body_width, `${label} body width`).toBe(16);
+            expect(value.state.body_height, `${label} body height`).toBe(30);
+            expect(value.state.body_scale_x, `${label} body scale`).toBe(1);
+            expect(value.state.visual_scale_x, `${label} visual scale`).toBe(3);
+            expect(value.state.visual_offset_y, `${label} visual offset`).toBe(-36);
+          }
+
+          expect(idle.state.anim).toBe("idle");
+          expect(idle.state.grounded).toBe(true);
+          expect(idle.state.facing).toBe(1);
+          expect(idle.state.visual_flip).toBe(false);
+
+          expect(run0.state.anim).toBe("run");
+          expect(run1.state.anim).toBe("run");
+          expect(Number(run0.state.player_x)).toBeGreaterThan(Number(idle.state.player_x));
+          expect(Number(run1.state.player_x)).toBeGreaterThan(Number(run0.state.player_x));
+          // The two run frames are drawn differently, not just re-positioned.
+          expect(report.crop_diff["run-0_run-1"]).toBeGreaterThan(60);
+
+          // Release stops the body and keeps the last facing and idle pose.
+          expect(released.state.anim).toBe("idle");
+          expect(released.state.facing).toBe(1);
+          expect(released.state.visual_flip).toBe(false);
+          expect(Number(settled.state.player_x)).toBe(Number(released.state.player_x));
+          expect(report.crop_diff["released_settled"]).toBeLessThan(40);
+          expect(report.crop_diff["idle_released"]).toBeLessThan(40);
+
+          // A real left press reverses facing; the body geometry does not flip.
+          expect(reverse.state.anim).toBe("idle");
+          expect(reverse.state.facing).toBe(-1);
+          expect(reverse.state.visual_flip).toBe(true);
+          expect(reverse.state.body_scale_x).toBe(1);
+          expect(Number(reverse.state.player_x)).toBeLessThan(Number(released.state.player_x));
+          expect(report.crop_diff["released_reverse"]).toBeGreaterThan(60);
+
+          // Space leaves the floor and shows the air pose; it lands back on the
+          // same body with the left facing it held through the jump.
+          expect(air.state.anim).toBe("air");
+          expect(air.state.grounded).toBe(false);
+          expect(Number(air.state.player_y)).toBeLessThan(Number(landed.state.player_y) - 20);
+          expect(report.crop_diff["idle_air"]).toBeGreaterThan(60);
+          expect(landed.state.anim).toBe("idle");
+          expect(landed.state.grounded).toBe(true);
+          expect(landed.state.facing).toBe(-1);
+          expect(landed.state.visual_flip).toBe(true);
+          expect(Number(landed.state.player_y)).toBe(288);
+          // The pose and flip changed in the air, but the body did not drift.
+          expect(Number(landed.state.player_x)).toBe(Number(reverse.state.player_x));
+
+          yield* Effect.log(
+            `sprite.animation native proof\n  frames: ${evidence}\n  report: ${NodePath.join(evidence, "report.json")}`,
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.promise(() =>
+              process.env.GAME_STUDIO_KEEP_TEST === "1"
+                ? Promise.resolve()
+                : NodeFSP.rm(parent, { recursive: true, force: true }),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(recipeLayer)),
+  300_000,
+);
+
 const recipeJourney = (id: RecipeId) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1098,6 +1500,30 @@ it.effect("serves every reference within its line budget and at the pinned Godot
       cursor = page.nextCursor;
     }
     expect(discovered.map((recipe) => recipe.id)).toEqual([...RECIPE_IDS]);
+
+    // A builder reaches for the visible thing that looks wrong, not only the
+    // authored tag. These are the everyday words for a character sprite.
+    for (const text of ["sprite", "animation", "character", "walk", "jump", "facing"]) {
+      const found = yield* recipes.search({ text });
+      expect(
+        found.recipes.map((recipe) => recipe.id),
+        `text '${text}'`,
+      ).toContain("sprite.animation");
+    }
+    // The same everyday words also work as exact mechanic tags, so a builder
+    // who filters instead of typing a phrase still lands on the reference.
+    for (const mechanic of ["sprite", "animation", "character", "walk", "jump", "facing"]) {
+      const found = yield* recipes.search({ mechanic });
+      expect(
+        found.recipes.map((recipe) => recipe.id),
+        `mechanic '${mechanic}'`,
+      ).toContain("sprite.animation");
+    }
+    const platformerSprite = yield* recipes.search({
+      genre: "platformer",
+      mechanic: "sprite-animation",
+    });
+    expect(platformerSprite.recipes[0]?.id).toBe("sprite.animation");
 
     for (const id of RECIPE_IDS) {
       const entry = yield* recipes.get({ id });
@@ -1286,7 +1712,9 @@ it.live.skipIf(!godotAvailable)(
   240_000,
 );
 
-for (const id of RECIPE_IDS) {
+// sprite.animation starts from the pinned character sheet instead of an empty
+// project, so its native proof above installs the kit through GameArtKits.
+for (const id of RECIPE_IDS.filter((candidate) => candidate !== "sprite.animation")) {
   it.live.skipIf(!available)(
     `runs ${id} from a generated project and records its frames`,
     () => recipeJourney(id),

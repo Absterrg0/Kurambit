@@ -18,6 +18,7 @@ import { lookLighting2d } from "./look.lighting-2d.ts";
 import { readHud } from "./read.hud.ts";
 import { readOnboarding } from "./read.onboarding.ts";
 import { readSilhouette } from "./read.silhouette.ts";
+import { spriteAnimation } from "./sprite.animation.ts";
 import { stateWorld } from "./state.world.ts";
 
 /**
@@ -56,5 +57,6 @@ export const godotRecipeAdapters: ReadonlyMap<string, GameRecipeAdapter> = new M
   ["read.hud", adapter(readHud)],
   ["read.onboarding", adapter(readOnboarding)],
   ["read.silhouette", adapter(readSilhouette)],
+  ["sprite.animation", adapter(spriteAnimation)],
   ["state.world", adapter(stateWorld)],
 ]);

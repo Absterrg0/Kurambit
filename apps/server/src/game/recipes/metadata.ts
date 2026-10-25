@@ -443,4 +443,42 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
       reference: "Godot 4 2D canvas lighting and layers; P6 lighting/look request (t80).",
     },
   },
+  {
+    id: "sprite.animation",
+    version: 1,
+    title: "Animate a character from movement and facing",
+    genres: ["platformer", "action"],
+    mechanics: ["sprite-animation", "facing", "animation-state"],
+    defects: ["frozen-character", "wrong-facing", "sliding-character"],
+    aliases: [
+      "sprite animation",
+      "character animation",
+      "sprite frames",
+      "walk cycle",
+      "jump pose",
+      "facing direction",
+      "flip sprite",
+      "sprite",
+      "character",
+      "animation",
+      "walk",
+      "jump",
+      "facing",
+    ],
+    intent:
+      "Choose idle, run and air poses from the body's real input and grounded state, keep the last facing when stopped, and flip only the visual child.",
+    why: "The picture should agree with what the body is doing. A pose chosen from actual movement cannot run in mid-air, and a facing that resets on stop or carries the collision shape with it makes the character read as something else.",
+    failure:
+      "One frame for every state, a snap back to right-facing after release, or a collision box that flips with the art makes movement look and land wrong.",
+    restyle:
+      "Keep the state mapping, the persisted facing and the visual-only flip. Choose this game's sheet, frame timing and character.",
+    verificationQuestion:
+      "Do idle, run and air appear from real input and falling, does facing survive release and reverse, and does the collision shape stay put while the sprite flips?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference:
+        "Kenney Pixel Platformer 1.2 character sheet layout from the pinned kit catalog; idle/run/air roles are this recipe's authored suggestion, not upstream animation names.",
+    },
+  },
 ];
