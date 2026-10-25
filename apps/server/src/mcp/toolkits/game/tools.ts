@@ -53,167 +53,6 @@ const dependencies = [
   ThreadManagementService.ThreadManagementService,
 ];
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
-const GameStatusTool = Tool.make("game_status", {
-  description:
-    "Inspect this thread's Game Studio project: design status and the DESIGN.md/BRIEF.md paths, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory, playable preview URL, and the builder's production phase (first playable, this turn's accepted submits, budget and time left). Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
-  parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
-  success: GameStatus,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, true);
-const reviewDependencies = [...dependencies, GameReviewApi.GameReviewApi];
-const ReviewStatusTool = Tool.make("game_review_status", {
-  description:
-    "Read the current review phase, remaining repairs/time, frozen builder/reviewer models, usage, interruption and restore availability. Existing games have no review until the builder submits a verified build (or a turn ends with one). Restart never resumes a review.",
-  success: GameReviewStatus,
-  failure,
-  failureMode: "return",
-  dependencies: reviewDependencies,
-}).annotate(Tool.Readonly, true);
-const ReviewHistoryTool = Tool.make("game_review_history", {
-  description:
-    "Read a bounded page of repair rounds, defects and fixes, frozen checks, decisions and exact reasons, ballots, session IDs and evidence frame references. Use nextCursor as before for the next page.",
-  parameters: Schema.Struct({
-    before: GameReviewHistoryInput.fields.before,
-    limit: GameReviewHistoryInput.fields.limit,
-  }),
-  success: GameReviewHistory,
-  failure,
-  failureMode: "return",
-  dependencies: reviewDependencies,
-}).annotate(Tool.Readonly, true);
-const ReviewStopTool = Tool.make("game_review_stop", {
-  description:
-    "Stop this game's review and wait for its owned child sessions to stop. The selected build remains playable. Fails if a session may still write; no Resume mid-round.",
-  success: GameReviewStatus,
-  failure,
-  failureMode: "return",
-  dependencies: reviewDependencies,
-}).annotate(Tool.Readonly, false);
-const ReviewRestoreTool = Tool.make("game_review_restore", {
-  description:
-    "Explicitly restore the previous game-folder version from the latest review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
-  success: GameReviewRestoreResult,
-  failure,
-  failureMode: "return",
-  dependencies: reviewDependencies,
-}).annotate(Tool.Readonly, false);
-const SubmitTool = Tool.make("game_submit", {
-  description:
-    "Hand a build to the studio. The first accepted submit is the game's first playable: Play shows it at once and your turn keeps going. Keep producing — deepen the game toward the brief and its art direction with recipes and game_try_input — and submit each improved build; every accepted submit replaces what Play shows, and the last one is what review starts on when your turn ends. Name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Refused, the result lists the exact failed check and Play keeps the previous build; fix it and submit again.",
-  parameters: GameSubmitInput,
-  success: GameSubmitResult,
-  failure,
-  failureMode: "return",
-  dependencies: reviewDependencies,
-}).annotate(Tool.Readonly, false);
-const BlenderTool = Tool.make("game_blender_run", {
-  description:
-    "Build or revise a model in this thread's game. Supply a stable id and Python bpy script. Opens art/blender/<id>.blend if present, otherwise an empty factory scene. Set reset=true to rebuild from an empty scene at the same source/export paths; false/default modifies the existing file, so edit objects by name to avoid duplicates. Executes the script, preserves the .blend source, saves the script, exports GLB with applied modifiers to the same godot/assets/models/<id>.glb path, renders a small CPU thumbnail unless thumbnail=false, and updates game.json. Returns mesh/material counts, bounds, warnings and real output. Script exceptions return their traceback and a log path. Follow with game_godot_import.",
-  parameters: GameBlenderInput,
-  success: GameBlenderResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const ImportTool = Tool.make("game_godot_import", {
-  description:
-    "Run a real headless Godot editor import in this thread's game. Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const CheckTool = Tool.make("game_godot_check", {
-  description:
-    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
-  success: GameCheckResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const InspectSceneTool = Tool.make("game_scene_inspect", {
-  description:
-    "Dump a scene's node tree headlessly: scene-relative path, name, type, script path, groups, position, collision layer/mask and child names, capped at 400 nodes with truncation reported. Use the res:// path shown by game_status, such as res://scenes/main_menu.tscn. Read-only; use it to debug scene wiring without opening the Godot editor.",
-  parameters: GameSceneInspectInput,
-  success: GameSceneInspectResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, true);
-const TestTool = Tool.make("game_godot_test", {
-  description:
-    "Run a headless GDScript in this thread's Godot project. The script must extend SceneTree and quit explicitly, using a nonzero code for failures. Supply a Godot-project-relative .gd path, such as tests/smoke_test.gd. Use this to simulate and assert the core gameplay loop. Returns real exit status, stdout/stderr and log path. Timeout defaults to 60 seconds and is bounded at 300 seconds.",
-  parameters: Schema.Struct({
-    script: Schema.String,
-    timeoutMs: Schema.optionalKey(Schema.Number),
-  }),
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const ScenariosTool = Tool.make("game_scenarios_run", {
-  description:
-    "Run every route in godot/tests/scenarios/*.json through the real game, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation from the first sample after the route's first input, so a value already true at play start fails; records the state qualification stage with proven/failed/missing coverage per kind. Also lists the scenarios' per-criterion proving scenario and frame. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam. A run must press a control and move a player in group \"player\"; a wait-only route proves nothing.",
-  success: GameScenariosRunResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const ExportTool = Tool.make("game_export", {
-  description:
-    "Import and export this thread's game with the Web, Windows or Linux release preset. Windows produces builds/windows/game.exe, a 64-bit x86_64 executable. The standard preset embeds the game data, so the executable alone is enough; a custom preset that does not embed it also produces builds/windows/game.pck, so heed the result and copy both files together. It has not been run on Windows. Linux produces builds/linux/game.x86_64. Both native targets export the current sources and never replace the Web build Play serves. Verifies matching Godot export templates and the actual artifact. Missing Windows templates are an actionable error; Install tools adds them without replacing the Godot binary. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
-  parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const PackageWindowsTool = Tool.make("game_package_windows", {
-  description:
-    "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the Builds panel also receives a short-lived signed download URL. Packaging does not prove Windows booted.",
-  // No `parameters`: an explicit empty Schema.Struct({}) serializes to a root
-  // anyOf, which no MCP client accepts, and the whole server fails to register.
-  success: GameWindowsPackage,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const PackageWebTool = Tool.make("game_package_web", {
-  description:
-    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft, legacy builds/web, an unselected candidate or later source edits: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root (a root-level custom HTML entry is stored as index.html without changing its bytes). The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the Builds panel also receives a short-lived signed download URL.",
-  // No `parameters` here either; see game_package_windows.
-  success: GameWebPackage,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const PreviewTool = Tool.make("game_preview", {
-  description:
-    "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const NativeTool = Tool.make("game_run_native", {
-  description:
-    "Import and launch this thread's Godot game natively with a tracked PID and output log. The agent's run is headless: it opens no window and inherits no display; only the creator's own Play action may open a window. Use game_stop to stop it; unrelated processes are never terminated.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
-const StopTool = Tool.make("game_stop", {
-  description:
-    "Stop only this game's processes spawned by Game Studio, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-}).annotate(Tool.Readonly, false);
 /**
  * Critic and ballot children judge frozen evidence; they never build, edit or
  * control the review. Repair children have no review role and keep the builder
@@ -228,6 +67,203 @@ const hiddenFromCriticAndBallot = () => {
   )?.gameReviewRole;
   return role === null || role === undefined;
 };
+const GameStatusTool = Tool.make("game_status", {
+  description:
+    "Inspect this thread's Game Studio project: design status and the DESIGN.md/BRIEF.md paths, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory, playable preview URL, and the builder's production phase (first playable, this turn's accepted submits, budget and time left). Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+  parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
+  success: GameStatus,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const reviewDependencies = [...dependencies, GameReviewApi.GameReviewApi];
+const ReviewStatusTool = Tool.make("game_review_status", {
+  description:
+    "Read the current review phase, remaining repairs/time, frozen builder/reviewer models, usage, interruption and restore availability. Existing games have no review until the builder submits a verified build (or a turn ends with one). Restart never resumes a review.",
+  success: GameReviewStatus,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ReviewHistoryTool = Tool.make("game_review_history", {
+  description:
+    "Read a bounded page of repair rounds, defects and fixes, frozen checks, decisions and exact reasons, ballots, session IDs and evidence frame references. Use nextCursor as before for the next page.",
+  parameters: Schema.Struct({
+    before: GameReviewHistoryInput.fields.before,
+    limit: GameReviewHistoryInput.fields.limit,
+  }),
+  success: GameReviewHistory,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ReviewStopTool = Tool.make("game_review_stop", {
+  description:
+    "Stop this game's review and wait for its owned child sessions to stop. The selected build remains playable. Fails if a session may still write; no Resume mid-round.",
+  success: GameReviewStatus,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ReviewRestoreTool = Tool.make("game_review_restore", {
+  description:
+    "Explicitly restore the previous game-folder version from the latest review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
+  success: GameReviewRestoreResult,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const SubmitTool = Tool.make("game_submit", {
+  description:
+    "Hand a build to the studio. The first accepted submit is the game's first playable: Play shows it at once and your turn keeps going. Keep producing — deepen the game toward the brief and its art direction with recipes and game_try_input — and submit each improved build; every accepted submit replaces what Play shows, and the last one is what review starts on when your turn ends. Name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Refused, the result lists the exact failed check and Play keeps the previous build; fix it and submit again.",
+  parameters: GameSubmitInput,
+  success: GameSubmitResult,
+  failure,
+  failureMode: "return",
+  dependencies: reviewDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const BlenderTool = Tool.make("game_blender_run", {
+  description:
+    "Build or revise a model in this thread's game. Supply a stable id and Python bpy script. Opens art/blender/<id>.blend if present, otherwise an empty factory scene. Set reset=true to rebuild from an empty scene at the same source/export paths; false/default modifies the existing file, so edit objects by name to avoid duplicates. Executes the script, preserves the .blend source, saves the script, exports GLB with applied modifiers to the same godot/assets/models/<id>.glb path, renders a small CPU thumbnail unless thumbnail=false, and updates game.json. Returns mesh/material counts, bounds, warnings and real output. Script exceptions return their traceback and a log path. Follow with game_godot_import.",
+  parameters: GameBlenderInput,
+  success: GameBlenderResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ImportTool = Tool.make("game_godot_import", {
+  description:
+    "Run a real headless Godot editor import in this thread's game. Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const CheckTool = Tool.make("game_godot_check", {
+  description:
+    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
+  success: GameCheckResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const InspectSceneTool = Tool.make("game_scene_inspect", {
+  description:
+    "Dump a scene's node tree headlessly: scene-relative path, name, type, script path, groups, position, collision layer/mask and child names, capped at 400 nodes with truncation reported. Use the res:// path shown by game_status, such as res://scenes/main_menu.tscn. Read-only; use it to debug scene wiring without opening the Godot editor.",
+  parameters: GameSceneInspectInput,
+  success: GameSceneInspectResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const TestTool = Tool.make("game_godot_test", {
+  description:
+    "Run a headless GDScript in this thread's Godot project. The script must extend SceneTree and quit explicitly, using a nonzero code for failures. Supply a Godot-project-relative .gd path, such as tests/smoke_test.gd. Use this to simulate and assert the core gameplay loop. Returns real exit status, stdout/stderr and log path. Timeout defaults to 60 seconds and is bounded at 300 seconds.",
+  parameters: Schema.Struct({
+    script: Schema.String,
+    timeoutMs: Schema.optionalKey(Schema.Number),
+  }),
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ScenariosTool = Tool.make("game_scenarios_run", {
+  description:
+    "Run every route in godot/tests/scenarios/*.json through the real game, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation from the first sample after the route's first input, so a value already true at play start fails; records the state qualification stage with proven/failed/missing coverage per kind. Also lists the scenarios' per-criterion proving scenario and frame. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam. A run must press a control and move a player in group \"player\"; a wait-only route proves nothing.",
+  success: GameScenariosRunResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const ExportTool = Tool.make("game_export", {
+  description:
+    "Import and export this thread's game with the Web, Windows or Linux release preset. Windows produces builds/windows/game.exe, a 64-bit x86_64 executable. The standard preset embeds the game data, so the executable alone is enough; a custom preset that does not embed it also produces builds/windows/game.pck, so heed the result and copy both files together. It has not been run on Windows. Linux produces builds/linux/game.x86_64. Both native targets export the current sources and never replace the Web build Play serves. Verifies matching Godot export templates and the actual artifact. Missing Windows templates are an actionable error; Install tools adds them without replacing the Godot binary. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
+  parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const PackageWindowsTool = Tool.make("game_package_windows", {
+  description:
+    "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the Builds panel also receives a short-lived signed download URL. Packaging does not prove Windows booted.",
+  // No `parameters`: an explicit empty Schema.Struct({}) serializes to a root
+  // anyOf, which no MCP client accepts, and the whole server fails to register.
+  success: GameWindowsPackage,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const PackageWebTool = Tool.make("game_package_web", {
+  description:
+    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft, legacy builds/web, an unselected candidate or later source edits: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root (a root-level custom HTML entry is stored as index.html without changing its bytes). The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the Builds panel also receives a short-lived signed download URL.",
+  // No `parameters` here either; see game_package_windows.
+  success: GameWebPackage,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const PreviewTool = Tool.make("game_preview", {
+  description:
+    "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const NativeTool = Tool.make("game_run_native", {
+  description:
+    "Import and launch this thread's Godot game natively with a tracked PID and output log. The agent's run is headless: it opens no window and inherits no display; only the creator's own Play action may open a window. Use game_stop to stop it; unrelated processes are never terminated.",
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+const StopTool = Tool.make("game_stop", {
+  description:
+    "Stop only this game's processes spawned by Game Studio, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
+  success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 /** Ballots keep frozen comparison context; retrieval and play are hidden. */
 const hiddenFromBallots = () => {
   const fiber = Fiber.getCurrent();
@@ -352,27 +388,25 @@ export const GameArtToolkit = Toolkit.make(GameArtSearchTool, GameArtGetTool, Ga
  * evidence-only toolkits instead, so a fresh review is never offered a build,
  * export or review-control tool it must spend context ignoring.
  */
-const builderOnly = <T extends Tool.Any>(tool: T) =>
-  tool.annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 export const GameToolkit = Toolkit.make(
-  builderOnly(GameStatusTool),
-  builderOnly(ReviewStatusTool),
-  builderOnly(ReviewHistoryTool),
-  builderOnly(ReviewStopTool),
-  builderOnly(ReviewRestoreTool),
-  builderOnly(SubmitTool),
-  builderOnly(BlenderTool),
-  builderOnly(ImportTool),
-  builderOnly(CheckTool),
-  builderOnly(TestTool),
-  builderOnly(ScenariosTool),
-  builderOnly(InspectSceneTool),
-  builderOnly(ExportTool),
-  builderOnly(PackageWindowsTool),
-  builderOnly(PackageWebTool),
-  builderOnly(PreviewTool),
-  builderOnly(NativeTool),
-  builderOnly(StopTool),
+  GameStatusTool,
+  ReviewStatusTool,
+  ReviewHistoryTool,
+  ReviewStopTool,
+  ReviewRestoreTool,
+  SubmitTool,
+  BlenderTool,
+  ImportTool,
+  CheckTool,
+  TestTool,
+  ScenariosTool,
+  InspectSceneTool,
+  ExportTool,
+  PackageWindowsTool,
+  PackageWebTool,
+  PreviewTool,
+  NativeTool,
+  StopTool,
 );
 
 // The service validates raw calls so schema failures count toward the same retry budget.

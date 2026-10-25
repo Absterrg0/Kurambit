@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
@@ -26,8 +27,9 @@ import {
 } from "effect/http";
 
 import * as GameRecipes from "../game/GameRecipes.ts";
-import * as GameService from "../game/GameService.ts";
+import * as GameReviewApi from "../game/GameReviewApi.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
+import * as GameService from "../game/GameService.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -1100,13 +1102,10 @@ it.effect(
             },
           ],
         };
-        const serverLayer = Layer.mergeAll(
-          McpHttpServer.layerGameReviewAnswers,
-          McpHttpServer.layerGamePlaytest,
-          McpHttpServer.layerGameRecipes,
-          McpHttpServer.layerGameArt,
-        ).pipe(
+        const switchedRole = yield* Ref.make<"critic" | "ballot" | null>("critic");
+        const serverLayer = McpHttpServer.layerGameToolkit.pipe(
           Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+          Layer.provide(Layer.mock(GameReviewApi.GameReviewApi)({})),
           Layer.provide(
             Layer.mock(GameService.GameService)({
               importArtKit: (_threadId, input) =>
@@ -1166,13 +1165,15 @@ it.effect(
                   };
                 }),
               toolRole: (caller) =>
-                Effect.succeed(
-                  caller.threadId === threadId
-                    ? "critic"
-                    : caller.threadId === ThreadId.make("ballot-child")
-                      ? "ballot"
-                      : null,
-                ),
+                caller.threadId === ThreadId.make("switch-thread")
+                  ? Ref.get(switchedRole)
+                  : Effect.succeed(
+                      caller.threadId === threadId
+                        ? "critic"
+                        : caller.threadId === ThreadId.make("ballot-child")
+                          ? "ballot"
+                          : null,
+                    ),
               report: (_caller, _role, value) =>
                 Effect.sync(() => {
                   seen.push(value);
@@ -1204,7 +1205,9 @@ it.effect(
                                 ? "builder-thread"
                                 : token === "repairer"
                                   ? "repairer-thread"
-                                  : "other-thread",
+                                  : token === "switch"
+                                    ? "switch-thread"
+                                    : "other-thread",
                           ),
                   },
                 }),
@@ -1245,8 +1248,78 @@ it.effect(
         const builder = yield* connect("builder");
         const repairer = yield* connect("repairer");
         const other = yield* connect("other");
+        const switching = yield* connect("switch");
         const list = (token: string, session: string) =>
           rpc(token, session, "tools/list", {}).pipe(Effect.flatMap((response) => response.text));
+        const toolNames = (token: string, session: string) =>
+          list(token, session).pipe(
+            Effect.map((body) => {
+              const data = body
+                .split("\n")
+                .find((line) => line.startsWith("data:"))
+                ?.slice("data:".length)
+                .trim();
+              const envelope = decodeJsonText(data ?? body) as {
+                readonly result?: { readonly tools?: ReadonlyArray<{ readonly name?: unknown }> };
+              };
+              return (envelope.result?.tools ?? [])
+                .flatMap((tool) => (typeof tool.name === "string" ? [tool.name] : []))
+                .sort();
+            }),
+          );
+        // The builder toolkit is the largest catalog; a fresh review must not
+        // pay for its schemas in every code-mode search.
+        const builderTools = [
+          "game_art_get",
+          "game_art_import",
+          "game_art_search",
+          "game_blender_run",
+          "game_export",
+          "game_godot_check",
+          "game_godot_import",
+          "game_godot_test",
+          "game_package_web",
+          "game_package_windows",
+          "game_preview",
+          "game_recipe_get",
+          "game_recipe_search",
+          "game_review_history",
+          "game_review_restore",
+          "game_review_status",
+          "game_review_stop",
+          "game_run_native",
+          "game_scenarios_run",
+          "game_scene_inspect",
+          "game_status",
+          "game_stop",
+          "game_submit",
+          "game_try_input",
+          "game_verify",
+          "game_web_playtest",
+        ].sort();
+        const criticTools = [
+          "game_art_get",
+          "game_art_search",
+          "game_critic_report",
+          "game_recipe_get",
+          "game_recipe_search",
+          "game_try_input",
+          "game_web_playtest",
+        ].sort();
+        expect(yield* toolNames("builder", builder)).toEqual(builderTools);
+        expect(yield* toolNames("repairer", repairer)).toEqual(builderTools);
+        expect(yield* toolNames("critic", critic)).toEqual(criticTools);
+        expect(yield* toolNames("ballot", ballot)).toEqual(["game_ballot"]);
+        // Roles are resolved per request, not per session or server. The same
+        // MCP session must get the new catalog when the thread's review role
+        // changes, and the old one when it changes back.
+        expect(yield* toolNames("switch", switching)).toEqual(criticTools);
+        yield* Ref.set(switchedRole, "ballot");
+        expect(yield* toolNames("switch", switching)).toEqual(["game_ballot"]);
+        yield* Ref.set(switchedRole, null);
+        expect(yield* toolNames("switch", switching)).toEqual(builderTools);
+        yield* Ref.set(switchedRole, "critic");
+        expect(yield* toolNames("switch", switching)).toEqual(criticTools);
         expect(yield* list("critic", critic)).toContain('"name":"game_critic_report"');
         expect(yield* list("critic", critic)).not.toContain('"name":"game_ballot"');
         expect(yield* list("ballot", ballot)).toContain('"name":"game_ballot"');

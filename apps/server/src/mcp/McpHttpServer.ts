@@ -908,7 +908,7 @@ export const layerGamePlaytest = imageToolRegistration(
   GameHandlers.layerPlaytest,
 );
 
-const layerGameToolkit = Layer.mergeAll(
+export const layerGameToolkit = Layer.mergeAll(
   layerGameReviewAnswers,
   layerGamePlaytest,
   layerGameRecipes,
