@@ -7,6 +7,7 @@ import { PNG } from "pngjs";
 
 import {
   compareBrief,
+  COMPARE_VERSION,
   decodeCompareAnswer,
   matchedIndices,
   readSavedBuild,
@@ -390,7 +391,7 @@ it("renders measured briefs first and gives an unmeasured one no control verdict
     generatedAt: "2026-10-24T00:00:00.000Z",
     role: "look-feel-comparison",
     grader: { provider: "codex", model: "gpt-6.1-sol" },
-    graderVersion: 3,
+    comparisonVersion: COMPARE_VERSION,
     harnessDir: "/harness",
     rawDir: "/raw",
     briefs: [missing, measured],
@@ -404,4 +405,9 @@ it("renders measured briefs first and gives an unmeasured one no control verdict
     "| platformer | 6 | harness | harness | harness | tie | raw | tie (pass) |",
   );
   expect(markdown).toContain("This is a ruler beside the obligations grade.");
+  // The ruler and the source grade versions stay separately legible: the
+  // comparison never relabels a v3 frame source as v4.
+  expect(markdown).toContain("comparison ruler v1");
+  expect(markdown).toContain("Harness grade by codex/gpt-6.1-sol v3 (10 frames)");
+  expect(markdown).toContain("Source grades keep their own");
 });

@@ -14,7 +14,7 @@ import { composeSideBySidePng } from "../../apps/server/src/game/frameCompose.ts
 import { makeCodexTextGeneration } from "../../apps/server/src/textGeneration/CodexTextGeneration.ts";
 import * as TextGeneration from "../../apps/server/src/textGeneration/TextGeneration.ts";
 import * as ServerConfig from "../../apps/server/src/config.ts";
-import { CODEX_GRADER_MODEL, GRADER_VERSION } from "../game-grade.ts";
+import { CODEX_GRADER_MODEL } from "../game-grade.ts";
 import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
 
 /**
@@ -30,6 +30,14 @@ import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
 
 /** Each side of one matched card; the build behind A swaps between orders. */
 export type CompareSide = "A" | "B" | "tie";
+
+/**
+ * The comparison ruler's own semantics: this prompt, the matched cards, both
+ * orders and the identical-pair control. Deliberately not GRADER_VERSION: a
+ * comparison reads frames saved by some obligations grade, and its report
+ * records each source grade's version separately. Bump when the ruler changes.
+ */
+export const COMPARE_VERSION = 1;
 
 /** The four facets, in the order the prompt and report use them. */
 export const COMPARE_FACETS = ["works", "look", "feel", "play"] as const;
@@ -478,7 +486,8 @@ export interface ComparisonReport {
   readonly role: "look-feel-comparison";
   /** Not an obligations row: no sum here feeds results.json or results.md. */
   readonly grader: { readonly provider: "codex"; readonly model: string };
-  readonly graderVersion: number;
+  /** The comparison ruler, separate from the source grades' `graderVersion`. */
+  readonly comparisonVersion: number;
   readonly harnessDir: string;
   readonly rawDir: string;
   readonly briefs: ReadonlyArray<BriefComparison>;
@@ -631,12 +640,13 @@ export const renderComparisonMarkdown = (report: ComparisonReport): string => {
     "# Blind look/feel comparison",
     "",
     `Harness \`${report.harnessDir}\` vs raw \`${report.rawDir}\`, measured by the frozen grader`,
-    `\`${report.grader.provider}/${report.grader.model}\` (grader version ${report.graderVersion}) at`,
+    `\`${report.grader.provider}/${report.grader.model}\` with comparison ruler v${report.comparisonVersion} at`,
     `${report.generatedAt}. Two opposite-order votes and an identical-pair control per brief.`,
     "",
     "This is a ruler beside the obligations grade. Nothing here is summed with either lane's",
     "obligation count, and no winner is averaged: a brief has an agreed winner only when both",
-    "orders name the same build and the control tied.",
+    "orders name the same build and the control tied. Source grades keep their own",
+    "`graderVersion` below; this comparison neither regrades nor relabels them.",
     "",
     "| Brief | Cards | Verdict | works | look | feel | play | Control |",
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -719,7 +729,7 @@ export const runComparison = async (
     generatedAt: new Date().toISOString(),
     role: "look-feel-comparison",
     grader: { provider: "codex", model: CODEX_GRADER_MODEL },
-    graderVersion: GRADER_VERSION,
+    comparisonVersion: COMPARE_VERSION,
     harnessDir: NodePath.resolve(input.harnessDir),
     rawDir: NodePath.resolve(input.rawDir),
     briefs,
