@@ -1305,6 +1305,10 @@ it.effect(
         expect(yield* list("repairer", repairer)).toContain('"name":"game_verify"');
         expect(yield* list("critic", critic)).not.toContain('"name":"game_verify"');
         expect(yield* list("ballot", ballot)).not.toContain('"name":"game_verify"');
+        // The critic may replay a window layout; a ballot compares frozen frames
+        // only and never plays the build.
+        expect(yield* list("critic", critic)).toContain('"name":"game_web_playtest"');
+        expect(yield* list("ballot", ballot)).not.toContain('"name":"game_web_playtest"');
         const forbiddenVerify = yield* rpc("critic", critic, "tools/call", {
           name: "game_verify",
           arguments: { steps: [{ press: "Space" }] },

@@ -214,7 +214,12 @@ const StopTool = Tool.make("game_stop", {
   failureMode: "return",
   dependencies,
 }).annotate(Tool.Readonly, false);
-const hiddenFromReviewChildren = () => {
+/**
+ * Critic and ballot children judge frozen evidence; they never build, edit or
+ * control the review. Repair children have no review role and keep the builder
+ * toolkit, so this hides from those two roles only.
+ */
+const hiddenFromCriticAndBallot = () => {
   const fiber = Fiber.getCurrent();
   if (fiber === undefined) return true;
   const role = Context.getOrUndefined(
@@ -222,6 +227,15 @@ const hiddenFromReviewChildren = () => {
     McpInvocationContext.McpInvocationContext,
   )?.gameReviewRole;
   return role === null || role === undefined;
+};
+/** Ballots keep frozen comparison context; retrieval and play are hidden. */
+const hiddenFromBallots = () => {
+  const fiber = Fiber.getCurrent();
+  return (
+    fiber === undefined ||
+    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
+      ?.gameReviewRole !== "ballot"
+  );
 };
 const VerifyTool = Tool.make("game_verify", {
   description:
@@ -236,7 +250,7 @@ const VerifyTool = Tool.make("game_verify", {
   // Unknown options must fail instead of being stripped: exactSize belongs to
   // the review-only web playtest, not to a recorded verification.
   .annotate(Tool.Strict, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromReviewChildren);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description:
     "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Use this as the final web check instead of building your own browser tooling.",
@@ -246,7 +260,9 @@ const WebPlaytestTool = Tool.make("game_web_playtest", {
   // Default "error" failureMode: the HTTP transport registers this tool behind
   // McpHttpServer.registerImageTool, which turns failures into text results.
   dependencies,
-}).annotate(Tool.Readonly, false);
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
 // Exported for the image-content transport registration in McpHttpServer.
 export const GameWebPlaytestTool = WebPlaytestTool;
 export const GameVerifyTool = VerifyTool;
@@ -270,15 +286,6 @@ export const GameTryInputTool = Tool.make("game_try_input", {
 export const GamePlaytestToolkit = Toolkit.make(GameWebPlaytestTool, GameTryInputTool, VerifyTool);
 
 const recipeDependencies = [GameRecipes.GameRecipes];
-/** Ballots keep frozen comparison context; retrieval is hidden and refused. */
-const hiddenFromBallots = () => {
-  const fiber = Fiber.getCurrent();
-  return (
-    fiber === undefined ||
-    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
-      ?.gameReviewRole !== "ballot"
-  );
-};
 const GameRecipeSearchTool = Tool.make("game_recipe_search", {
   description:
     "Search the optional game know-how catalog when an unfamiliar genre or mechanic blocks progress. genre, mechanic and defect match authored tags exactly; text, or its synonym query, matches a declared alias literally, so a phrase with no alias match returns no recipes rather than browsing. Accepted parameters are genre, mechanic, defect, text, query and cursor; any other name is rejected. Returns at most five ids, titles, matching tags, engines and nextCursor. Read-only; it reads no game files and starts no agent, build or model call.",
@@ -338,27 +345,34 @@ const GameArtImportTool = Tool.make("game_art_import", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromReviewChildren);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 export const GameArtToolkit = Toolkit.make(GameArtSearchTool, GameArtGetTool, GameArtImportTool);
+/**
+ * The builder and repair toolkit. Critic and ballot children get the
+ * evidence-only toolkits instead, so a fresh review is never offered a build,
+ * export or review-control tool it must spend context ignoring.
+ */
+const builderOnly = <T extends Tool.Any>(tool: T) =>
+  tool.annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 export const GameToolkit = Toolkit.make(
-  GameStatusTool,
-  ReviewStatusTool,
-  ReviewHistoryTool,
-  ReviewStopTool,
-  ReviewRestoreTool,
-  SubmitTool,
-  BlenderTool,
-  ImportTool,
-  CheckTool,
-  TestTool,
-  ScenariosTool,
-  InspectSceneTool,
-  ExportTool,
-  PackageWindowsTool,
-  PackageWebTool,
-  PreviewTool,
-  NativeTool,
-  StopTool,
+  builderOnly(GameStatusTool),
+  builderOnly(ReviewStatusTool),
+  builderOnly(ReviewHistoryTool),
+  builderOnly(ReviewStopTool),
+  builderOnly(ReviewRestoreTool),
+  builderOnly(SubmitTool),
+  builderOnly(BlenderTool),
+  builderOnly(ImportTool),
+  builderOnly(CheckTool),
+  builderOnly(TestTool),
+  builderOnly(ScenariosTool),
+  builderOnly(InspectSceneTool),
+  builderOnly(ExportTool),
+  builderOnly(PackageWindowsTool),
+  builderOnly(PackageWebTool),
+  builderOnly(PreviewTool),
+  builderOnly(NativeTool),
+  builderOnly(StopTool),
 );
 
 // The service validates raw calls so schema failures count toward the same retry budget.
