@@ -50,6 +50,7 @@ const RECIPE_IDS = [
   "loop.top-down",
   "loop.tower",
   "read.hud",
+  "read.layout",
   "read.onboarding",
   "read.silhouette",
   "sprite.animation",
@@ -69,6 +70,7 @@ const LINE_BUDGETS: Record<RecipeId, number> = {
   "sprite.animation": 120,
   "state.world": 70,
   "read.hud": 70,
+  "read.layout": 150,
   "read.onboarding": 70,
   "loop.platformer": 130,
   "loop.top-down": 130,
@@ -227,6 +229,52 @@ const MAIN_SCENE = `[gd_scene load_steps=2 format=3]
 script = ExtResource("1_main")
 `;
 
+const CONTROL_MAIN_SCENE = `[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+`;
+
+/**
+ * The layout proof keeps the engine's stretch off, so the canvas follows the
+ * browser window and the same Control tree sees a wide and a square viewport.
+ * The shipped project can use Canvas Items and Expand just as well; both leave
+ * anchors and containers in charge of the layout.
+ */
+const LAYOUT_PROJECT_GODOT = `config_version=5
+
+[application]
+
+config/name="Recipe layout reference"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+RecipeProbe="*res://probe.gd"
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/size/window_width_override=640
+window/size/window_height_override=360
+window/stretch/mode="disabled"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+`;
+
 const EXPORT_PRESETS = `[preset.0]
 
 name="Web"
@@ -356,11 +404,16 @@ const expectNoEngineErrors = (run: GodotRun, label: string) => {
   expect(issues, `${label} printed engine errors:\n${run.output.slice(-4000)}`).toEqual([]);
 };
 
-const writeProject = async (directory: string, adapter: GameRecipeAdapter) => {
+const writeProject = async (
+  directory: string,
+  adapter: GameRecipeAdapter,
+  project = PROJECT_GODOT,
+  scene = MAIN_SCENE,
+) => {
   const godot = NodePath.join(directory, "godot");
   await NodeFSP.mkdir(godot, { recursive: true });
-  await NodeFSP.writeFile(NodePath.join(godot, "project.godot"), PROJECT_GODOT);
-  await NodeFSP.writeFile(NodePath.join(godot, "main.tscn"), MAIN_SCENE);
+  await NodeFSP.writeFile(NodePath.join(godot, "project.godot"), project);
+  await NodeFSP.writeFile(NodePath.join(godot, "main.tscn"), scene);
   await NodeFSP.writeFile(NodePath.join(godot, "main.gd"), adapter.referenceCode);
   await NodeFSP.writeFile(NodePath.join(godot, "probe.gd"), PROBE_GD);
   await NodeFSP.writeFile(NodePath.join(godot, "export_presets.cfg"), EXPORT_PRESETS);
@@ -774,6 +827,29 @@ const saveEvidence = async (id: string, result: GameWebPlaytestResult) => {
   return frames;
 };
 
+/** PNG IHDR: width and height are the first two big-endian u32s after the signature. */
+const pngSize = (file: string) => {
+  const bytes = NodeFS.readFileSync(file);
+  expect(bytes.toString("ascii", 1, 4), `${file} is a PNG`).toBe("PNG");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+};
+
+const expectControlInside = (
+  state: Record<string, GamePlaytestStateValue>,
+  name: string,
+  left: string,
+  top: string,
+  right: string,
+  bottom: string,
+) => {
+  const width = Number(state.viewport_w);
+  const height = Number(state.viewport_h);
+  expect(Number(state[left]), `${name} left`).toBeGreaterThanOrEqual(0);
+  expect(Number(state[top]), `${name} top`).toBeGreaterThanOrEqual(0);
+  expect(Number(state[right]), `${name} right`).toBeLessThanOrEqual(width);
+  expect(Number(state[bottom]), `${name} bottom`).toBeLessThanOrEqual(height);
+};
+
 /**
  * What "meaningful before/after change" means for each mechanism. The state is
  * read from the reference's own snapshot() through the bridge, so a frame that
@@ -1074,6 +1150,19 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
             Number(probe.gameState.feedback_ms) > 0 && Number(probe.gameState.hint_height) <= 40,
         ),
       ).toBe(true);
+      break;
+    case "read.layout":
+      // The baseline follows the first Tab, so no choice is selected yet. The
+      // four Tabs reach the last choice and follow_focus scrolls it in; Enter
+      // selects it, then Tab and Enter press the pinned action.
+      expect(before.selected).toBe(-1);
+      expect(before.confirmed).toBe(0);
+      expect(after.selected).toBe(3);
+      expect(after.last_choice).toBe("Walk away");
+      expect(after.confirmed).toBe(1);
+      expect(Number(after.body_lines)).toBeGreaterThan(1);
+      expect(after.action_visible).toBe(true);
+      expect(after.last_choice_visible).toBe(true);
       break;
     case "read.onboarding": {
       expect(before.prompt).toBe(false);
@@ -1499,6 +1588,148 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
   300_000,
 );
 
+/**
+ * The same reference bytes run twice: once in a wide window and once square,
+ * with the published long text. The probe reports the real Control rects, the
+ * scroll range and the counters, so the box is checked against the rendered
+ * viewport rather than against the code's intent. The square run must scroll;
+ * focus follows to the last choice and the pinned action still presses.
+ */
+it.live.skipIf(!available)(
+  "runs read.layout at wide and square viewports with long content",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const recipes = yield* GameRecipes.GameRecipes;
+        const preview = yield* GamePreview.GamePreview;
+        const entry = yield* recipes.get({ id: "read.layout" });
+        const adapter = entry.adapter!;
+        const parent = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-recipe-layout-")),
+        );
+        return yield* Effect.gen(function* () {
+          const directory = NodePath.join(parent, "read-layout");
+          yield* Effect.promise(() =>
+            writeProject(directory, adapter, LAYOUT_PROJECT_GODOT, CONTROL_MAIN_SCENE),
+          );
+          yield* checkProject(directory, parent);
+          const build = yield* exportProject(directory);
+          const url = yield* preview.open(directory, "build");
+          const runs = [
+            { label: "wide", width: 960, height: 540 },
+            { label: "square", width: 480, height: 480 },
+          ] as const;
+          for (const run of runs) {
+            const result = yield* GameWebPlaytest.playtest({
+              executable: browserExecutable!,
+              url,
+              profileDirectory: NodePath.join(parent, `browser-profile-${run.label}`),
+              width: run.width,
+              height: run.height,
+              bootTimeoutMs: 30_000,
+              steps: adapter.tryInput.steps,
+              captureAllSteps: true,
+              ...(adapter.tryInput.captureEveryMs === undefined
+                ? {}
+                : { captureEveryMs: adapter.tryInput.captureEveryMs }),
+              probeRequired: false,
+              acceptance: null,
+            });
+            const frames = yield* Effect.promise(() =>
+              saveEvidence(`read.layout-${run.label}`, result),
+            );
+            expect(result.booted, `${run.label}: ${result.message}`).toBe(true);
+            expect(result.responded, run.label).toBe(true);
+            expect(
+              result.consoleMessages.filter((message) => message.level === "error"),
+              run.label,
+            ).toEqual([]);
+            expect(result.executedInputSteps, run.label).toBe(
+              adapter.tryInput.steps.filter(
+                (step) =>
+                  "key" in step ||
+                  "keys" in step ||
+                  "press" in step ||
+                  "click" in step ||
+                  "mouseMove" in step ||
+                  "drag" in step,
+              ).length,
+            );
+            expect(result.state, run.label).not.toBeNull();
+            const before = probeState(result.state!.before);
+            const after = probeState(result.state!.after);
+            expect(after.viewport_w, `${run.label} viewport width`).toBe(run.width);
+            expect(after.viewport_h, `${run.label} viewport height`).toBe(run.height);
+            assertMechanism("read.layout", result);
+
+            // Every fixed control is inside the rendered viewport in both the
+            // baseline and the acted state; the scroll region and status sit
+            // above the action, never under it.
+            for (const [label, state] of [
+              ["baseline", before],
+              ["after", after],
+            ] as const) {
+              for (const [name, left, top, right, bottom] of [
+                ["action", "action_left", "action_top", "action_right", "action_bottom"],
+                ["scroll", "scroll_left", "scroll_top", "scroll_right", "scroll_bottom"],
+                ["status", "status_left", "status_top", "status_right", "status_bottom"],
+              ] as const)
+                expectControlInside(
+                  state,
+                  `${run.label} ${label} ${name}`,
+                  left,
+                  top,
+                  right,
+                  bottom,
+                );
+              expect(Number(state.card_left), `${run.label} card left`).toBeGreaterThanOrEqual(0);
+              expect(Number(state.card_right), `${run.label} card right`).toBeLessThanOrEqual(
+                run.width,
+              );
+              expect(Number(state.status_bottom)).toBeLessThanOrEqual(Number(state.action_top));
+              expect(Number(state.status_top)).toBeGreaterThanOrEqual(Number(state.scroll_bottom));
+            }
+            expectControlInside(
+              after,
+              `${run.label} last choice`,
+              "last_left",
+              "last_top",
+              "last_right",
+              "last_bottom",
+            );
+
+            if (run.label === "square") {
+              // The list overflows the short window, and focus reaches the last
+              // choice by scrolling rather than shrinking or clipping it.
+              expect(Number(after.scroll_max), "square content overflows").toBeGreaterThan(0);
+              expect(Number(after.scroll_vertical), "focus scrolled the list").toBeGreaterThan(0);
+              expect(after.last_choice_visible).toBe(true);
+            }
+
+            for (const file of frames) {
+              expect(pngSize(file), `${run.label} frame ${file}`).toEqual({
+                width: run.width,
+                height: run.height,
+              });
+            }
+            yield* Effect.log(
+              `read.layout ${run.label}: ${result.message}\n  frames: ${frames.join(", ")}\n  build: ${build}`,
+            );
+          }
+        }).pipe(
+          Effect.ensuring(
+            Effect.promise(() =>
+              process.env.GAME_STUDIO_KEEP_TEST === "1"
+                ? Promise.resolve()
+                : NodeFSP.rm(parent, { recursive: true, force: true }),
+            ),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(recipeLayer)),
+  300_000,
+);
+
 const recipeJourney = (id: RecipeId) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1514,7 +1745,14 @@ const recipeJourney = (id: RecipeId) =>
       );
       return yield* Effect.gen(function* () {
         const directory = NodePath.join(parent, id.replace(/\./g, "-"));
-        yield* Effect.promise(() => writeProject(directory, adapter));
+        yield* Effect.promise(() =>
+          writeProject(
+            directory,
+            adapter,
+            PROJECT_GODOT,
+            id === "read.layout" ? CONTROL_MAIN_SCENE : MAIN_SCENE,
+          ),
+        );
         if (id === "sprite.animation") {
           // The reference preloads the pinned character sheet; install and
           // import it through the same service and files a builder uses.
@@ -1626,6 +1864,35 @@ it.effect("serves every reference within its line budget and at the pinned Godot
       mechanic: "sprite-animation",
     });
     expect(platformerSprite.recipes[0]?.id).toBe("sprite.animation");
+
+    // Layout work is reached by the visible symptom, not only by a node name:
+    // a card or dialogue screen whose long text clips or whose action is off
+    // the bottom. These literal aliases and exact tags must land on one recipe.
+    for (const text of [
+      "card",
+      "dialogue",
+      "clipped text",
+      "crowded choices",
+      "crowded hud",
+      "long text",
+      "viewport layout",
+      "layout",
+    ]) {
+      const found = yield* recipes.search({ text });
+      expect(
+        found.recipes.map((recipe) => recipe.id),
+        `text '${text}'`,
+      ).toContain("read.layout");
+    }
+    for (const mechanic of ["ui-layout", "scrolling", "text-wrap", "primary-action"]) {
+      const found = yield* recipes.search({ mechanic });
+      expect(
+        found.recipes.map((recipe) => recipe.id),
+        `mechanic '${mechanic}'`,
+      ).toContain("read.layout");
+    }
+    const clippedCard = yield* recipes.search({ genre: "card", defect: "clipped-text" });
+    expect(clippedCard.recipes[0]?.id).toBe("read.layout");
 
     for (const id of RECIPE_IDS) {
       const entry = yield* recipes.get({ id });
