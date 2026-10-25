@@ -16,6 +16,7 @@ import * as TextGeneration from "../../apps/server/src/textGeneration/TextGenera
 import * as ServerConfig from "../../apps/server/src/config.ts";
 import { CODEX_GRADER_MODEL } from "../game-grade.ts";
 import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
+import type { CaptureManifest, LoadedFramePack } from "./capture.ts";
 
 /**
  * A blind look/feel comparison between two lanes' finished builds.
@@ -742,4 +743,388 @@ export const runComparison = async (
   const markdownPath = NodePath.join(input.out, "comparison.md");
   await NodeFSP.writeFile(markdownPath, renderComparisonMarkdown(report));
   return { report, markdownPath };
+};
+
+/**
+ * A captured revision comparison reads two explicit frame packs instead of two
+ * saved grade folders. It uses the same frozen prompt, matched cards, two
+ * orders and identical-pair control as `compareBrief`, but asks the control
+ * first: a control that cannot answer or names a winner stops the run before
+ * either order call. It never infers an answer for a call it did not make.
+ */
+
+export type RevisionChoice = "first" | "second" | "tie" | "invalid";
+export type RevisionFacetChoice = RevisionChoice | "split";
+export type RevisionVerdict = "first" | "second" | "tie" | "split" | "invalid" | "void";
+
+export interface RevisionArmSummary {
+  readonly label: string;
+  readonly manifestPath: string;
+  readonly manifestSha256: string;
+  readonly captureVersion: number;
+  readonly capturedAt: string;
+  readonly brief: CaptureManifest["brief"];
+  readonly artifact: CaptureManifest["artifact"];
+  readonly route: {
+    readonly label: string;
+    readonly sha256: string;
+    readonly viewport: CaptureManifest["route"]["viewport"];
+    readonly steps: number;
+  };
+  readonly capture: {
+    readonly booted: boolean;
+    readonly bootMs: number | null;
+    readonly responded: boolean;
+    readonly changedPercent: number;
+    readonly executedInputSteps: number;
+    readonly consoleErrors: number;
+    readonly qualifies: boolean | null;
+    readonly comparisonReady: boolean;
+  };
+  readonly frames: ReadonlyArray<CaptureManifest["frames"][number]>;
+}
+
+export interface RevisionOrderResult {
+  readonly order: CompareOrder;
+  readonly answer: CompareAnswer | null;
+  readonly facets: Readonly<Record<CompareFacet, RevisionChoice>>;
+  readonly overall: RevisionChoice;
+  readonly reason: string;
+}
+
+export interface RevisionComparison {
+  readonly schemaVersion: 1;
+  readonly generatedAt: string;
+  readonly role: "revision-frame-comparison";
+  readonly grader: { readonly provider: "codex"; readonly model: string };
+  /** The look/feel ruler version; capture packs carry their own captureVersion. */
+  readonly comparisonVersion: number;
+  readonly brief: {
+    readonly id: string;
+    readonly title: string;
+    readonly checksum: string;
+  };
+  readonly frameCount: number;
+  readonly first: RevisionArmSummary;
+  readonly second: RevisionArmSummary;
+  readonly orders: ReadonlyArray<RevisionOrderResult>;
+  readonly control: {
+    readonly answer: CompareAnswer | null;
+    readonly passed: boolean;
+    readonly attempted: boolean;
+    readonly error: string | null;
+  };
+  readonly facets: Readonly<Record<CompareFacet, RevisionFacetChoice>>;
+  readonly verdict: RevisionVerdict;
+  readonly reasons: ReadonlyArray<string>;
+  /** Actual model calls, in the order they were made. Skipped calls are absent. */
+  readonly attempted: ReadonlyArray<"control" | CompareOrder>;
+  readonly note: string | null;
+}
+
+const revisionChoiceOf = (choice: BuildChoice): RevisionChoice =>
+  choice === "harness" ? "first" : choice === "raw" ? "second" : choice;
+
+const revisionVerdictOf = (verdict: CompareVerdict): RevisionVerdict =>
+  verdict === "harness" ? "first" : verdict === "raw" ? "second" : verdict;
+
+const packBuild = (pack: LoadedFramePack): SavedBuild => ({
+  gradeDirectory: null,
+  grader: null,
+  graderVersion: null,
+  frames: pack.frames.map((frame) => ({ path: frame.path, label: frame.label })),
+});
+
+const armLabel = (pack: LoadedFramePack): string =>
+  pack.manifest.artifact.buildId === null
+    ? `artifact ${pack.manifest.artifact.sha256.slice(0, 12)}`
+    : `build ${pack.manifest.artifact.buildId.slice(0, 12)}`;
+
+const armSummary = (pack: LoadedFramePack): RevisionArmSummary => ({
+  label: armLabel(pack),
+  manifestPath: pack.manifestPath,
+  manifestSha256: pack.manifestSha256,
+  captureVersion: pack.manifest.captureVersion,
+  capturedAt: pack.manifest.capturedAt,
+  brief: pack.manifest.brief,
+  artifact: pack.manifest.artifact,
+  route: {
+    label: pack.manifest.route.label,
+    sha256: pack.manifest.route.sha256,
+    viewport: pack.manifest.route.viewport,
+    steps: pack.manifest.route.steps.length,
+  },
+  capture: {
+    booted: pack.manifest.capture.booted,
+    bootMs: pack.manifest.capture.bootMs,
+    responded: pack.manifest.capture.responded,
+    changedPercent: pack.manifest.capture.changedPercent,
+    executedInputSteps: pack.manifest.capture.executedInputSteps,
+    consoleErrors: pack.manifest.capture.consoleErrors,
+    qualifies: pack.manifest.capture.qualifies,
+    comparisonReady: pack.manifest.capture.comparisonReady,
+  },
+  frames: pack.manifest.frames,
+});
+
+const assertComparablePacks = (input: {
+  readonly brief: LoadedGameBenchmarkBrief;
+  readonly first: LoadedFramePack;
+  readonly second: LoadedFramePack;
+}): void => {
+  for (const [side, pack] of [
+    ["first", input.first],
+    ["second", input.second],
+  ] as const) {
+    if (
+      pack.manifest.brief.id !== input.brief.id ||
+      pack.manifest.brief.checksum !== input.brief.checksum
+    )
+      throw new Error(
+        `The ${side} pack was captured for brief ${pack.manifest.brief.id} at checksum ${pack.manifest.brief.checksum}, not ${input.brief.id} at ${input.brief.checksum}; refusing to compare.`,
+      );
+    if (!pack.manifest.capture.comparisonReady)
+      throw new Error(
+        `The ${side} pack is not comparison-ready: booted=${pack.manifest.capture.booted}, executedInputSteps=${pack.manifest.capture.executedInputSteps}, frames=${pack.manifest.frames.length}.`,
+      );
+    for (const frame of pack.manifest.frames)
+      if (
+        frame.width !== pack.manifest.route.viewport.width ||
+        frame.height !== pack.manifest.route.viewport.height
+      )
+        throw new Error(
+          `The ${side} pack frame ${frame.id} is ${frame.width}x${frame.height}, but its route recorded a ${pack.manifest.route.viewport.width}x${pack.manifest.route.viewport.height} viewport; refusing to compare unlike captures.`,
+        );
+  }
+  if (input.first.manifest.captureVersion !== input.second.manifest.captureVersion)
+    throw new Error(
+      `Capture versions differ (${input.first.manifest.captureVersion} vs ${input.second.manifest.captureVersion}); refusing to compare unlike packs.`,
+    );
+  if (input.first.manifest.route.sha256 !== input.second.manifest.route.sha256)
+    throw new Error(
+      `Capture routes differ (${input.first.manifest.route.sha256} vs ${input.second.manifest.route.sha256}); refusing to compare unlike inputs.`,
+    );
+  const firstViewport = input.first.manifest.route.viewport;
+  const secondViewport = input.second.manifest.route.viewport;
+  if (
+    firstViewport.width !== secondViewport.width ||
+    firstViewport.height !== secondViewport.height
+  )
+    throw new Error(
+      `Capture viewports differ (${firstViewport.width}x${firstViewport.height} vs ${secondViewport.width}x${secondViewport.height}); refusing to compare unlike captures.`,
+    );
+};
+
+const revisionOrderResult = (input: {
+  readonly order: CompareOrder;
+  readonly raw: unknown;
+  readonly error: string | null;
+}): RevisionOrderResult => {
+  const result = orderResult(input);
+  return {
+    order: result.order,
+    answer: result.answer,
+    facets: Object.fromEntries(
+      COMPARE_FACETS.map((facet) => [facet, revisionChoiceOf(result.facets[facet])]),
+    ) as Record<CompareFacet, RevisionChoice>,
+    overall: revisionChoiceOf(result.overall),
+    reason: result.reason,
+  };
+};
+
+const revisionOrderName = (order: CompareOrder): string =>
+  order === "harness-left" ? "first-left" : "second-left";
+
+const controlReason = (control: RevisionComparison["control"]): string => {
+  if (control.error !== null) return `control: ${control.error}`;
+  if (control.answer === null)
+    return "control: the identical pair could not answer, so this comparison is void.";
+  return `control: the identical pair named a winner (${control.answer.overall}), so this comparison is void.`;
+};
+
+export async function compareFramePacks(input: {
+  readonly brief: LoadedGameBenchmarkBrief;
+  readonly first: LoadedFramePack;
+  readonly second: LoadedFramePack;
+  readonly cardsRoot: string;
+  readonly review: CompareReview;
+}): Promise<RevisionComparison> {
+  assertComparablePacks(input);
+  const firstBuild = packBuild(input.first);
+  const secondBuild = packBuild(input.second);
+  const indices = matchedIndices(firstBuild.frames.length, secondBuild.frames.length);
+  const attempted: Array<"control" | CompareOrder> = [];
+  const base = {
+    schemaVersion: 1 as const,
+    generatedAt: new Date().toISOString(),
+    role: "revision-frame-comparison" as const,
+    grader: { provider: "codex" as const, model: CODEX_GRADER_MODEL },
+    comparisonVersion: COMPARE_VERSION,
+    brief: {
+      id: input.brief.id,
+      title: input.brief.title,
+      checksum: input.brief.checksum,
+    },
+    frameCount: indices.length,
+    first: armSummary(input.first),
+    second: armSummary(input.second),
+  };
+
+  if (indices.length === 0)
+    return {
+      ...base,
+      orders: [],
+      control: { answer: null, passed: false, attempted: false, error: null },
+      facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
+      verdict: "invalid",
+      reasons: [],
+      attempted,
+      note: `No captured frames to compare: first ${firstBuild.frames.length}, second ${secondBuild.frames.length}.`,
+    };
+
+  // The control is the cheapest call and the only one that can invalidate the
+  // whole ruler. Asking it first means a bad control costs one call, not three.
+  const controlCards = await composeControlCards({
+    directory: NodePath.join(input.cardsRoot, "control"),
+    source: firstBuild,
+    indices,
+  });
+  attempted.push("control");
+  let controlAnswer: CompareAnswer | null = null;
+  let controlError: string | null = null;
+  try {
+    controlAnswer = decodeCompareAnswer(
+      await input.review({
+        prompt: promptFor({ brief: input.brief, cards: controlCards }),
+        imagePaths: controlCards.map((card) => card.path),
+      }),
+    );
+  } catch (cause) {
+    controlError =
+      `The control call failed: ${cause instanceof Error ? cause.message : String(cause)}`.slice(
+        0,
+        400,
+      );
+  }
+  const control = {
+    answer: controlAnswer,
+    passed: controlAnswer !== null && controlAnswer.overall === "tie",
+    attempted: true,
+    error: controlError,
+  };
+  if (!control.passed)
+    return {
+      ...base,
+      orders: [],
+      control,
+      facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
+      verdict: "void",
+      reasons: [controlReason(control)],
+      attempted,
+      note: "The identical-pair control did not pass, so neither order was requested and no verdict is possible.",
+    };
+
+  const legacyOrders: CompareOrderResult[] = [];
+  const orders: RevisionOrderResult[] = [];
+  for (const order of COMPARE_ORDERS) {
+    const left: SavedBuild = order === "harness-left" ? firstBuild : secondBuild;
+    const right: SavedBuild = order === "harness-left" ? secondBuild : firstBuild;
+    const cards = await composeOrderCards({
+      directory: NodePath.join(input.cardsRoot, order),
+      left,
+      right,
+      indices,
+    });
+    attempted.push(order);
+    let raw: unknown = null;
+    let error: string | null = null;
+    try {
+      raw = await input.review({
+        prompt: promptFor({ brief: input.brief, cards }),
+        imagePaths: cards.map((card) => card.path),
+      });
+    } catch (cause) {
+      error =
+        `The model call failed: ${cause instanceof Error ? cause.message : String(cause)}`.slice(
+          0,
+          400,
+        );
+    }
+    legacyOrders.push(orderResult({ order, raw, error }));
+    orders.push(revisionOrderResult({ order, raw, error }));
+  }
+
+  const summarized = summarizeComparison({ orders: legacyOrders, control });
+  const facetsOf = (facet: CompareFacet): RevisionFacetChoice => {
+    const choices = orders.map((order) => order.facets[facet]);
+    if (choices.some((choice) => choice === "invalid")) return "invalid";
+    const [first, second] = choices;
+    return first !== undefined && first === second ? first : "split";
+  };
+  const reasons = orders.map((order) => {
+    const outcome =
+      order.overall === "invalid"
+        ? "no readable answer"
+        : order.overall === "tie"
+          ? "tie"
+          : `${order.overall === "first" ? "first" : "second"} wins overall`;
+    return `${revisionOrderName(order.order)}: ${outcome} — ${order.reason}`;
+  });
+  return {
+    ...base,
+    orders,
+    control,
+    facets: {
+      works: facetsOf("works"),
+      look: facetsOf("look"),
+      feel: facetsOf("feel"),
+      play: facetsOf("play"),
+    },
+    verdict: revisionVerdictOf(summarized.verdict),
+    reasons,
+    attempted,
+    note: null,
+  };
+}
+
+export const renderRevisionComparisonMarkdown = (report: RevisionComparison): string => {
+  const verdict =
+    report.verdict === "first"
+      ? report.first.label
+      : report.verdict === "second"
+        ? report.second.label
+        : report.verdict;
+  const lines = [
+    "# Captured revision comparison",
+    "",
+    `\`${report.first.label}\` vs \`${report.second.label}\`, measured by the frozen grader`,
+    `\`${report.grader.provider}/${report.grader.model}\` with comparison ruler v${report.comparisonVersion} at`,
+    `${report.generatedAt}. Two opposite-order votes and an identical-pair control per pair.`,
+    "",
+    "This is the same blind look/feel ruler used beside the obligations grade, fed by explicit",
+    "capture packs instead of saved grades. Each pack booted one exact exported artifact and",
+    "replayed one explicit ordinary-input route. This is not an obligations grade, not Play",
+    "acceptance, and not a substitute for mechanical checks or final independent grading.",
+    "",
+    "| Pack | Frames | Artifact sha256 | Route | Viewport | Booted | Input steps | Console errors |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    `| ${report.first.label} | ${report.first.frames.length} | ${report.first.artifact.sha256.slice(0, 12)}… | ${report.first.route.label} (${report.first.route.sha256.slice(0, 12)}…) | ${report.first.route.viewport.width}x${report.first.route.viewport.height} | ${report.first.capture.booted} | ${report.first.capture.executedInputSteps} | ${report.first.capture.consoleErrors} |`,
+    `| ${report.second.label} | ${report.second.frames.length} | ${report.second.artifact.sha256.slice(0, 12)}… | ${report.second.route.label} (${report.second.route.sha256.slice(0, 12)}…) | ${report.second.route.viewport.width}x${report.second.route.viewport.height} | ${report.second.capture.booted} | ${report.second.capture.executedInputSteps} | ${report.second.capture.consoleErrors} |`,
+    "",
+    `Verdict: **${verdict}**.`,
+    "",
+    `Calls attempted: ${report.attempted.length === 0 ? "none" : report.attempted.join(", ")}.`,
+    "",
+  ];
+  if (report.note !== null) lines.push(report.note, "");
+  for (const reason of report.reasons) lines.push(`- ${reason}`);
+  lines.push(
+    "",
+    "The two order ids keep the frozen comparison protocol's names; in this path",
+    "`harness-left` means the first pack on the left and `raw-left` the second.",
+    "Skipped calls have no answer: a failed control stops before either order, and a",
+    "missing order can never produce an agreed winner.",
+    "",
+  );
+  return lines.join("\n");
 };

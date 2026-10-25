@@ -7,6 +7,7 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import {
   decodeRunSummary,
+  loadGameBenchmarkBrief,
   loadGameBenchmarkBriefs,
   resolveSelectedArtifact,
   type LoadedGameBenchmarkBrief,
@@ -33,7 +34,17 @@ import {
   OPENCODE_GRADER_MODEL,
   defaultGodotBinary,
 } from "./game-grade.ts";
-import { makeCompareReviewer, runComparison } from "./game-benchmark/compare.ts";
+import {
+  compareFramePacks,
+  makeCompareReviewer,
+  renderRevisionComparisonMarkdown,
+  runComparison,
+} from "./game-benchmark/compare.ts";
+import {
+  captureRevisionFrames,
+  loadCaptureRoute,
+  readFramePack,
+} from "./game-benchmark/capture.ts";
 import {
   abortReason,
   benchmarkJobLocation,
@@ -79,6 +90,16 @@ const { values, positionals } = NodeUtil.parseArgs({
     "reuse-raw": { type: "string" },
     /** Compare two lanes' saved grades blindly; takes two directories as positionals. */
     compare: { type: "boolean", default: false },
+    /** Capture-only revision frames from one exact artifact and route; never grades. */
+    "capture-only": { type: "boolean", default: false },
+    /** Compare two explicit capture frame packs; takes two manifest files as positionals. */
+    "compare-frames": { type: "boolean", default: false },
+    artifact: { type: "string" },
+    "artifact-build-id": { type: "string" },
+    "artifact-sha256": { type: "string" },
+    route: { type: "string" },
+    brief: { type: "string" },
+    browser: { type: "string" },
     opencode: { type: "string", default: "opencode" },
     provider: { type: "string", default: "codex" },
     model: { type: "string", default: "gpt-6.1-sol" },
@@ -99,6 +120,8 @@ if (values.help) {
       "       [--reuse-raw <benchmark-out-dir>]",
       "       [--regrade <saved-run-dir>]",
       "       [--compare <harnessDir> <rawDir> [--out DIR]]",
+      "       [--capture-only --artifact <saved-web-dir> --brief <fixture.json> --route <route.json> --out DIR [--artifact-build-id ID] [--artifact-sha256 SHA] [--browser PATH]]",
+      "       [--compare-frames <firstFramePack> <secondFramePack> --out DIR]",
       "",
       "Runs the frozen briefs through game-e2e, up to --jobs at once. Without --url each brief starts",
       "its own private server under the display sandbox; an external server needs",
@@ -116,8 +139,86 @@ if (values.help) {
       "--compare reads two lanes' already-saved grade frames and asks the frozen grader model which",
       "build reads better, in both orders plus an identical-pair control. It writes <out>/comparison.json",
       "and comparison.md and is never summed with the obligations totals.",
+      "--capture-only boots one exact saved Web artifact, replays --route and writes frame-pack.json,",
+      "frames/ and real console/input facts. It calls no model, exports nothing and writes no grade.",
+      "The route is JSON: {schemaVersion:1,label,viewport:{width,height},steps:[playtest steps]}.",
+      "--compare-frames feeds two capture packs into the frozen look/feel comparison. The",
+      "identical-pair control is asked first, so a failed control costs one call instead of three.",
     ].join("\n"),
   );
+  process.exit(0);
+}
+if (values["capture-only"]) {
+  if (values.compare || values["compare-frames"] || values.regrade !== undefined)
+    throw new Error(
+      "--capture-only cannot be combined with --compare, --compare-frames or --regrade.",
+    );
+  const artifact = values.artifact;
+  const briefPath = values.brief;
+  const routePath = values.route;
+  if (artifact === undefined || briefPath === undefined || routePath === undefined)
+    throw new Error(
+      "--capture-only needs --artifact <saved-web-dir> --brief <fixture.json> --route <route.json>.",
+    );
+  const brief = await loadGameBenchmarkBrief(NodePath.resolve(briefPath));
+  const route = await loadCaptureRoute(NodePath.resolve(routePath));
+  const capture = await captureRevisionFrames({
+    artifact: {
+      directory: NodePath.resolve(artifact),
+      ...(values["artifact-build-id"] === undefined
+        ? {}
+        : { buildId: values["artifact-build-id"] }),
+    },
+    brief,
+    route,
+    out: NodePath.resolve(values.out),
+    ...(values.browser === undefined ? {} : { browser: NodePath.resolve(values.browser) }),
+    ...(values["artifact-sha256"] === undefined
+      ? {}
+      : { expectedArtifactSha256: values["artifact-sha256"] }),
+  });
+  console.log(
+    `capture: ${capture.manifestPath} artifact=${capture.manifest.artifact.sha256.slice(0, 12)} route=${capture.manifest.route.sha256.slice(0, 12)} frames=${capture.manifest.frames.length} booted=${capture.manifest.capture.booted} inputs=${capture.manifest.capture.executedInputSteps} consoleErrors=${capture.manifest.capture.consoleErrors} modelCalls=${capture.manifest.capture.modelCalls}`,
+  );
+  process.exit(0);
+}
+if (values["compare-frames"]) {
+  if (values.compare || values["capture-only"] || values.regrade !== undefined)
+    throw new Error(
+      "--compare-frames cannot be combined with --compare, --capture-only or --regrade.",
+    );
+  if (values.grader !== "codex")
+    throw new Error("--compare-frames measures with the frozen codex grader; drop --grader.");
+  const [firstManifest, secondManifest] = positionals;
+  if (firstManifest === undefined || secondManifest === undefined || positionals.length !== 2)
+    throw new Error("--compare-frames takes two capture frame-pack manifests.");
+  const first = await readFramePack(NodePath.resolve(firstManifest));
+  const second = await readFramePack(NodePath.resolve(secondManifest));
+  const allBriefs = await loadGameBenchmarkBriefs(
+    NodePath.join(checkout, "scripts/game-benchmark/briefs"),
+  );
+  const brief = allBriefs.find((candidate) => candidate.id === first.manifest.brief.id);
+  if (brief === undefined)
+    throw new Error(
+      `No frozen brief ${first.manifest.brief.id}; known briefs: ${allBriefs.map((candidate) => candidate.id).join(", ")}.`,
+    );
+  const comparison = await compareFramePacks({
+    brief,
+    first,
+    second,
+    cardsRoot: NodePath.join(NodePath.resolve(values.out), "cards"),
+    review: makeCompareReviewer(),
+  });
+  const out = NodePath.resolve(values.out);
+  await NodeFSP.mkdir(out, { recursive: true });
+  const jsonPath = NodePath.join(out, "revision-comparison.json");
+  const markdownPath = NodePath.join(out, "revision-comparison.md");
+  await NodeFSP.writeFile(jsonPath, `${JSON.stringify(comparison, null, 2)}\n`);
+  await NodeFSP.writeFile(markdownPath, renderRevisionComparisonMarkdown(comparison));
+  console.log(
+    `revision comparison: ${comparison.verdict} (${comparison.frameCount} cards, attempted ${comparison.attempted.join(", ") || "none"})`,
+  );
+  console.log(`comparison: ${markdownPath}`);
   process.exit(0);
 }
 if (values.compare) {
