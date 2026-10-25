@@ -32,6 +32,12 @@ interface FakeCodexInput {
   output: string;
   exitCode?: number;
   stderr?: string;
+  /** Written before the stdin echo, like Codex's startup banner. */
+  banner?: string;
+  /** Echo the prompt to stderr, as Codex does before a terminal failure. */
+  echoStdin?: boolean;
+  /** Written after the stdin echo, like the causal error line. */
+  stderrTail?: string;
   requireImage?: boolean;
   requireServiceTier?: string;
   requireReasoningEffort?: string;
@@ -55,6 +61,9 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     stdinMustNotContain: input.stdinMustNotContain ?? null,
     mcpServers: input.mcpServers ?? [],
     stderr: input.stderr ?? null,
+    banner: input.banner ?? null,
+    echoStdin: input.echoStdin ?? false,
+    stderrTail: input.stderrTail ?? null,
     output: input.output,
     exitCode: input.exitCode ?? 0,
   });
@@ -127,6 +136,9 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         '  fail("stdin contained forbidden content", 4);',
         "}",
         'if (check.stderr !== null) process.stderr.write(check.stderr + "\\n");',
+        "if (check.banner !== null) process.stderr.write(check.banner);",
+        "if (check.echoStdin) process.stderr.write(stdinContent);",
+        "if (check.stderrTail !== null) process.stderr.write(check.stderrTail);",
         'if (outputPath !== null) NodeFS.writeFileSync(outputPath, check.output + "\\n");',
         "process.exitCode = check.exitCode;",
         "",
@@ -825,8 +837,48 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
           if (Result.isFailure(result)) {
             expect(result.failure).toBeInstanceOf(TextGenerationError);
             expect(result.failure.message).toContain(
-              "Codex CLI command failed: codex execution failed",
+              "Codex CLI exited with code 1: codex execution failed",
             );
+          }
+        }),
+    ),
+  );
+
+  it.effect("keeps the terminal Codex error and exit code ahead of a long prompt echo", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ overall: "tie" }),
+        exitCode: 1,
+        banner:
+          "Reading prompt from stdin...\nOpenAI Codex v0.159.2\n--------\nworkdir: /work\nmodel: gpt-6.1-sol\n--------\nuser\n",
+        echoStdin: true,
+        stderrTail: "\nERROR: You've hit your usage limit. Try again at 15:30.\n",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const prompt = `Judge these anonymous builds. ${"Evidence without a verdict. ".repeat(600)}`;
+          const result = yield* textGeneration
+            .generateImageReview({
+              cwd: process.cwd(),
+              prompt,
+              imagePaths: ["/nonexistent/preflight-card.png"],
+              outputSchema: Schema.Struct({ overall: Schema.String }),
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(TextGenerationError);
+            const detail = (result.failure as TextGenerationError).detail;
+            // Comparison and grade reports keep only the first 400 characters,
+            // so the cause and exit code must lead, not follow a prompt echo.
+            expect(detail.slice(0, 400)).toContain("exited with code 1");
+            expect(detail.slice(0, 400)).toContain(
+              "You've hit your usage limit. Try again at 15:30.",
+            );
+            expect(detail).not.toContain(prompt);
+            expect(detail.length).toBeLessThan(3_000);
           }
         }),
     ),

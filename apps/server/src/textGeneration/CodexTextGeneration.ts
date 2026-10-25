@@ -30,6 +30,11 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const CODEX_TIMEOUT_MS = 180_000;
 const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
+// Codex prints a banner and echoes the prompt before the terminal failure, and
+// report surfaces keep only a short prefix of an error. Keep the exit code and
+// the causal last line first, then a bounded tail of each stream.
+const CODEX_DIAGNOSTIC_TAIL_CHARS = 800;
+const CODEX_DIAGNOSTIC_LAST_LINE_CHARS = 300;
 // Plugins and apps bring MCP servers of their own; the user's are listed and
 // turned off by name below. These follow the user's launch args, so they win
 // over a `-c features.plugins=true` there, which `--disable plugins` does not.
@@ -53,6 +58,44 @@ const codexMcpServersOff = (names: ReadonlyArray<string>): string | null =>
     ? null
     : `mcp_servers={${names.map((name) => `${JSON.stringify(name)}={enabled=false}`).join(",")}}`;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+// ANSI styling would otherwise leak into the saved diagnostic.
+// eslint-disable-next-line no-control-regex -- Codex's stderr is the one stream that carries ANSI escapes; strip them, not the cause.
+const ANSI_ESCAPE = new RegExp("\\u001b\\[[0-9;]*m", "g");
+const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE, "");
+const lastNonEmptyLine = (text: string): string => {
+  for (const line of text.split(/\r?\n/).toReversed()) {
+    const trimmed = stripAnsi(line).trim();
+    if (trimmed !== "") return trimmed.slice(0, CODEX_DIAGNOSTIC_LAST_LINE_CHARS);
+  }
+  return "";
+};
+const boundedTail = (text: string, prompt: string): string => {
+  const redacted = prompt.length === 0 ? text : text.split(prompt).join("[prompt]");
+  const cleaned = stripAnsi(redacted).trim();
+  return cleaned.length <= CODEX_DIAGNOSTIC_TAIL_CHARS
+    ? cleaned
+    : `…${cleaned.slice(-CODEX_DIAGNOSTIC_TAIL_CHARS)}`;
+};
+/** Codex's failure, with the cause ahead of its banner and prompt echo. */
+const codexExitDetail = (input: {
+  readonly exitCode: number;
+  readonly stderr: string;
+  readonly stdout: string;
+  readonly prompt: string;
+}): string => {
+  const stderr = input.stderr.trim();
+  const stdout = input.stdout.trim();
+  const cause = lastNonEmptyLine(stderr) || lastNonEmptyLine(stdout);
+  const tails = [
+    stderr === "" ? null : `stderr tail:\n${boundedTail(stderr, input.prompt)}`,
+    stdout === "" ? null : `stdout tail:\n${boundedTail(stdout, input.prompt)}`,
+  ].filter((tail): tail is string => tail !== null);
+  const headline =
+    cause === ""
+      ? `Codex CLI exited with code ${input.exitCode}.`
+      : `Codex CLI exited with code ${input.exitCode}: ${cause}`;
+  return tails.length === 0 ? headline : `${headline}\n\n${tails.join("\n\n")}`;
+};
 export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(function* (
   codexConfig: CodexSettings,
   environment?: NodeJS.ProcessEnv,
@@ -347,15 +390,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       );
 
       if (exitCode !== 0) {
-        const stderrDetail = stderr.trim();
-        const stdoutDetail = stdout.trim();
-        const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
         return yield* new TextGenerationError({
           operation,
-          detail:
-            detail.length > 0
-              ? `Codex CLI command failed: ${detail}`
-              : `Codex CLI command failed with code ${exitCode}.`,
+          detail: codexExitDetail({ exitCode, stderr, stdout, prompt }),
         });
       }
     });
