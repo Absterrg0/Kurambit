@@ -213,7 +213,7 @@ const templateJourney = (journey: TemplateJourney) =>
             expect(playtest.qualifies, "engine readiness is not a playability proof").toBe(false);
             expect(playtest.blockers).toContain("no input steps were given");
             expect(playtest.blockers).toContain(
-              "no gameplay baseline: no player input step found the player in play",
+              "no gameplay baseline: no player input step found the game in play",
             );
 
             // Building on Blank must not invalidate its engine-readiness checks.

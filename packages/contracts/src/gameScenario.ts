@@ -161,10 +161,11 @@ export const GameScenarioObservation = Schema.Struct({
   firstChangeFrame: Schema.NullOr(Schema.Int),
   /**
    * The value at the gameplay baseline: before the route's first non-wait
-   * input when play had already started (a player present and the state marker
-   * not 0/false), otherwise the first sample after that input in which a
-   * player exists and the game is not in its menu state. A criterion passes
-   * only when it was false here and true at a later sample.
+   * input when play had already started (an explicit typed `state` marker
+   * that is not 0/false, or, in a markerless game, a player present), otherwise
+   * the first sample after that input in which play exists and the game is not
+   * in its menu state. A criterion passes only when it was false here and true
+   * at a later sample.
    */
   baseline: Schema.NullOr(GameObservedValue),
   matches: Schema.Array(
@@ -186,9 +187,11 @@ export const GameScenarioEvidence = Schema.Struct({
   firstInputFrame: Schema.NullOr(Schema.Int),
   /**
    * Frame of the gameplay baseline: before `firstInputFrame` when play had
-   * already started, otherwise the first sample at or after it with a player
-   * present and no menu state. Without it the route never started play, so
-   * nothing can be achieved.
+   * already started, otherwise the first sample at or after it where play
+   * exists and the game is not in its menu state. Play is an explicit typed
+   * `state` marker that is not 0/false, or, in a markerless game, a player
+   * present. Without it the route never started play, so nothing can be
+   * achieved.
    */
   baselineFrame: Schema.NullOr(Schema.Int),
   /** The player group existed and its position changed from the first sample. */

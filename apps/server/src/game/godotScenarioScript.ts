@@ -124,8 +124,9 @@ func _mark_input() -> void:
 		# to absorb this press. Baseline before it, not at the next periodic
 		# sample, so the action the press causes is evidence instead of looking
 		# like a value that was already true when play started. An existing
-		# player is a markerless game's sign that play has started; the menu
-		# guard in _capture_baseline still holds its baseline back.
+		# player is a markerless game's sign that play has started; a typed
+		# play marker is the sign for a no-player UI game. The menu guard in
+		# _capture_baseline still holds its baseline back.
 		_capture_baseline(get_nodes_in_group("player"))
 
 func _run_press(action: String) -> String:
@@ -267,12 +268,17 @@ func _is_menu(value: Variant) -> bool:
 	return _is_number(value) and is_equal_approx(float(value), 0.0)
 
 func _capture_baseline(players: Array) -> void:
-	if _baseline_frame >= 0 or players.size() == 0:
+	if _baseline_frame >= 0:
 		return
 	# 0 is the shared menu state. A menu's hidden player group must not become
 	# the gameplay baseline while the route is still in the menu.
 	var marker: Variant = _state_marker()
 	if marker != null and _is_menu(marker):
+		return
+	# A markerless game needs a player to show play started. An explicit typed
+	# marker identifies play on its own, so a Control UI game with no player
+	# node can establish the baseline its approved choices are measured from.
+	if players.size() == 0 and marker == null:
 		return
 	_baseline_frame = _frame
 	for observation in _observations:
@@ -313,7 +319,7 @@ func _sample() -> void:
 		_player_last = _player
 	# The gameplay baseline is taken before the first input when play had
 	# already started, and otherwise at the first sample after real input in
-	# which the player exists. A menu, a spawn counter or a world total that is
+	# which play exists. A menu, a spawn counter or a world total that is
 	# already true there is not something the player did.
 	# A game already in play was sampled before this input by _mark_input, so
 	# its first action is not folded into the baseline.

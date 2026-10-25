@@ -57,6 +57,31 @@ window.__studioProbe = () => JSON.stringify({
 });
 console.log('Godot Engine v4 fixture');
 </script>`;
+// A Control-style UI game with no avatar: the typed play marker and the
+// accepted choice are the only evidence the click did something.
+const noPlayerHtml = `<!doctype html><canvas width="640" height="360" tabindex="0"></canvas><script>
+const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+let choices = 0;
+function paint() {
+  ctx.fillStyle = '#202020';
+  ctx.fillRect(0, 0, 640, 360);
+  ctx.fillStyle = choices === 0 ? '#ffffff' : '#7cf2a0';
+  ctx.font = '28px sans-serif';
+  ctx.fillText(choices === 0 ? 'Choose a reply' : 'Reply sent', 40, 80);
+}
+paint();
+canvas.addEventListener('mousedown', () => { choices++; paint(); });
+addEventListener('message', event => {
+  if (event.data?.type !== 'studio-visibility') return;
+  const visible = event.data.visible === true;
+  window.__studioVisibilityAck = { visible, paused: !visible, muted: !visible };
+});
+window.__studioProbe = () => JSON.stringify({
+  gameState: { state: 1, choices },
+  player: null,
+});
+console.log('Godot Engine v4 fixture');
+</script>`;
 
 it.live.skipIf(executable === null)(
   "plays presses, holds, clicks, drags and waits headlessly from a fresh boot",
@@ -194,6 +219,74 @@ it.live.skipIf(executable === null)(
         expect(result.pauseConfirmed).toBe(true);
         expect(result.screenshots[1]?.probe?.gameState.replies).toBe(0);
         expect(result.screenshots[2]?.probe?.gameState.replies).toBe(1);
+      }),
+    ),
+  180_000,
+);
+
+it.live.skipIf(executable === null)(
+  "qualifies a no-player Control UI choice from its typed play marker",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "try-input-ui-"))),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<NodeHttp.Server>((resolve) => {
+                const server = NodeHttp.createServer((_request, response) => {
+                  response.writeHead(200, { "Content-Type": "text/html" });
+                  response.end(noPlayerHtml);
+                });
+                server.listen(0, "127.0.0.1", () => resolve(server));
+              }),
+          ),
+          (server) =>
+            Effect.promise(
+              () =>
+                new Promise<void>((resolve, reject) =>
+                  server.close((error) => (error ? reject(error) : resolve())),
+                ),
+            ),
+        );
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("No loopback address");
+        const result = yield* playtest({
+          executable: executable!,
+          url: `http://127.0.0.1:${address.port}`,
+          profileDirectory: NodePath.join(directory, "profile"),
+          width: 640,
+          height: 360,
+          bootTimeoutMs: 5000,
+          probeRequired: true,
+          acceptance: [
+            {
+              id: "first-choice",
+              kind: "content",
+              text: "the first click sends a reply",
+              observe: { key: "choices", expect: ">=1" },
+            },
+          ],
+          steps: [{ click: "left" as const }],
+        });
+        expect(result.booted, result.message).toBe(true);
+        expect(result.state?.before).toMatchObject({
+          gameState: { state: 1, choices: 0 },
+          player: null,
+        });
+        expect(result.state?.after).toMatchObject({
+          gameState: { state: 1, choices: 1 },
+          player: null,
+        });
+        expect(result.state?.changes).toEqual([{ key: "choices", before: 0, after: 1 }]);
+        expect(result.state?.playerMoved).toBe(0);
+        expect(result.qualifies, result.message).toBe(true);
+        expect(result.blockers).toEqual([]);
+        expect(result.screenshots[1]?.probe?.gameState.choices).toBe(0);
+        expect(result.screenshots[2]?.probe?.gameState.choices).toBe(1);
       }),
     ),
   180_000,

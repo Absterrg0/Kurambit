@@ -44,6 +44,8 @@ interface Fixture {
   readonly mainScript?: string;
   readonly stateScript?: string;
   readonly playerScript?: string;
+  /** A Control-root game with no player node; the typed state marker is the play sign. */
+  readonly controlOnly?: boolean;
   readonly scenarios?: Readonly<Record<string, unknown>>;
   readonly criteria?: readonly GameAcceptanceCriterion[];
 }
@@ -149,7 +151,17 @@ pause={
   );
   await NodeFSP.writeFile(
     NodePath.join(godot, "main.tscn"),
-    `[gd_scene load_steps=5 format=3]
+    fixture.controlOnly === true
+      ? `[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+script = ExtResource("1_main")
+`
+      : `[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="Script" path="res://player.gd" id="2_player"]
@@ -179,16 +191,17 @@ shape = SubResource("shape_wall")
   );
   await NodeFSP.writeFile(NodePath.join(godot, "main.gd"), fixture.mainScript!);
   await NodeFSP.writeFile(NodePath.join(godot, "game_state.gd"), fixture.stateScript!);
-  await NodeFSP.writeFile(
-    NodePath.join(godot, "player.gd"),
-    fixture.playerScript ??
-      `extends CharacterBody2D
+  if (fixture.controlOnly !== true)
+    await NodeFSP.writeFile(
+      NodePath.join(godot, "player.gd"),
+      fixture.playerScript ??
+        `extends CharacterBody2D
 
 func _physics_process(_delta: float) -> void:
 \tvelocity.x = 120.0 if Input.is_action_pressed("move_right") else 0.0
 \tmove_and_slide()
 `,
-  );
+    );
   for (const [name, scenario] of Object.entries(fixture.scenarios ?? {}))
     await NodeFSP.writeFile(
       NodePath.join(godot, "tests/scenarios", `${name}.json`),
@@ -624,6 +637,62 @@ func _physics_process(_delta: float) -> void:
             ["plays-a-card", "passed"],
             ["win", "passed"],
           ]);
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "a no-player Control UI proves an approved choice without a body",
+  () =>
+    withGame(
+      {
+        name: "control only fixture",
+        planFirst: true,
+        controlOnly: true,
+        mainScript: `extends Control
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tGameState.choices += 1
+\t\tGameState.state = 3
+`,
+        stateScript: "extends Node\nvar state := 1\nvar choices := 0\n",
+        scenarios: {
+          "first-choice": { id: "first-choice", steps: [{ press: "ui_accept" }] },
+        },
+        criteria: [
+          {
+            id: "sends-a-reply",
+            kind: "content",
+            text: "The first choice sends a reply",
+            observe: { key: "choices", expect: ">=1" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "The first choice reaches the win state",
+            observe: { key: "state", expect: "==3" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          expect(result.summary).toMatchObject({
+            mode: "criteria",
+            passed: true,
+            reason: "criteria-passed",
+          });
+          expect(result.scenarios[0]?.playerMoved).toBe(false);
+          const choices = result.scenarios[0]?.observations.find(
+            (observation) => observation.key === "choices",
+          );
+          expect(choices?.baseline).toBe(0);
+          expect(choices?.last).toBe(1);
           return result;
         }),
     ),

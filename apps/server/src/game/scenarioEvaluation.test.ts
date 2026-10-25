@@ -325,7 +325,7 @@ describe("evaluateScenarios", () => {
     expect(summary.criteria[0]?.status).toBe("failed");
   });
 
-  it("fails when no route moves the player, however many criteria matched", () => {
+  it("passes approved criteria without avatar movement", () => {
     const summary = evaluateScenarios({
       mode: "criteria",
       criteria: [criterion("win", "win", { key: "state", expect: "==3" })],
@@ -344,7 +344,32 @@ describe("evaluateScenarios", () => {
         }),
       ],
     });
-    expect(summary).toMatchObject({ passed: false, reason: "no-player-movement" });
+    expect(summary).toMatchObject({
+      passed: true,
+      reason: "criteria-passed",
+    });
+  });
+
+  it("movement cannot substitute for an approved criterion that never changed", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("win", "win", { key: "state", expect: "==3" })],
+      runs: [
+        run({
+          playerMoved: true,
+          observations: [
+            observation("state", {
+              baseline: 1,
+              last: 1,
+              min: 1,
+              max: 1,
+              matches: [],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(summary).toMatchObject({ passed: false, reason: "observable-failed" });
   });
 
   it("fails the stage when a scenario reported a script error", () => {

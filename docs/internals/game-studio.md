@@ -179,21 +179,22 @@ State acceptance is a server-owned exam: `game_scenarios_run` reads pure input r
 under `--headless --fixed-fps 60`, injects input every physics frame and samples the GameState
 autoload plus the `player` group. Routes can only press actions from the InputMap. The runner never
 calls a game function or writes a property. Each run records the frame of its first non-wait input
-and the gameplay baseline: before that input when play had already started (a player present and
-the state marker not 0/false), otherwise the first sample after it where a node in group `player`
-exists and the game is not in its menu state. A state marker 0/false with a hidden player does not
-establish a baseline. A criterion passes only when it was false at that baseline and true at a
-later sample; an already-true baseline value fails with "already true when play started", and a
-route with no input has no baseline and grades every criterion failed. This is what makes content
-counts a collection (`collected >= 5`) rather than a world total (`total == 5`), and what stops a
-menu's playing state from proving a win. `win` and `lose` must observe the value the run ends at
-(not `changes`) and keep it at the final sample, so a pause cannot satisfy a win. The summary lists
-every mechanical criterion with its status, proving scenario and frame, plus proven/failed/missing
-counts per kind; the state stage passes only when every graded criterion passed and a `win` did.
-Legacy games without acceptance pass only when a route moves the player and GameState reaches its
-playing state at the baseline. The stage stores the approved source snapshot, the approved design
-hash and a per-criterion summary; a newly approved design revision makes the old route result stale
-even when the game sources did not change.
+and the gameplay baseline: before that input when play had already started, otherwise the first
+sample after it where play exists and the game is not in its menu state. Play is an explicit typed
+`state` marker that is not 0/false, or, in a markerless game, a node in group `player`. A state
+marker 0/false with a hidden player does not establish a baseline. A criterion passes only when it
+was false at that baseline and true at a later sample; an already-true baseline value fails with
+"already true when play started", and a route with no input has no baseline and grades every
+criterion failed. This is what makes content counts a collection (`collected >= 5`) rather than a
+world total (`total == 5`), and what stops a menu's playing state from proving a win. `win` and
+`lose` must observe the value the run ends at (not `changes`) and keep it at the final sample, so
+a pause cannot satisfy a win. The summary lists every mechanical criterion with its status, proving
+scenario and frame, plus proven/failed/missing counts per kind; the state stage passes only when
+every graded criterion passed and a `win` did, so an approved dialogue or puzzle game does not also
+need to move an avatar. Legacy games without acceptance pass only when a route moves the player and
+GameState reaches its playing state at the baseline. The stage stores the approved source snapshot,
+the approved design hash and a per-criterion summary; a newly approved design revision makes the old
+route result stale even when the game sources did not change.
 
 Review is separate from mechanical qualification. The builder's first accepted `game_submit`
 publishes the first playable at once, so model latency cannot delay Play; the turn then keeps
@@ -270,18 +271,19 @@ which exposes a read-only `window.__studioProbe()` snapshot (GameState's public 
 string members plus the first `player`-group position). The playtest reads it after boot, after
 every step and at the end, and reports `state: { before, after }` with a short diff such as
 `collected 0→2, player moved 312`. The baseline is the probe just before the first real input
-when the game is already in play (a player present and the typed `state` marker not 0/false),
-otherwise the first sample after that input where a player is present and the game is not in its
-menu state. The latest pre-input probe is used, not boot, so an autonomous wait or clock cannot be
-credited to the first action. A `state` marker of 0/false with a hidden player does not establish a
-baseline, and a run without real input has none; a game without that marker keeps the
-player-presence rule, so a markerless menu that shows a player is indistinguishable from play.
-With an approved design, a run passes the `playtest` stage only when the player moved from that
-baseline and at least one approved mechanic, content, win or lose observation that was false at the
-baseline came true; a win or lose has to hold where the run ended. A legacy game without acceptance
-needs movement plus a GameState change whose sampled ride is not strictly increasing, so clocks are
-excluded by shape rather than by a list of names. A failing run reports structured `blockers` and
-`interaction` beside `booted`, never only a sentence on a green success. The creation record is
+when play had already started, otherwise the first sample after that input where play exists and
+the game is not in its menu state. Play is an explicit typed `state` marker that is not 0/false,
+or, in a markerless game, a player present, so a no-player UI game can establish a baseline. The
+latest pre-input probe is used, not boot, so an autonomous wait or clock cannot be credited to the
+first action. A `state` marker of 0/false with a hidden player does not establish a baseline, and a
+run without real input has none. With an approved design, a run passes the `playtest` stage when at
+least one approved mechanic, content, win or lose observation that was false at the baseline came
+true; a win or lose has to hold where the run ended. Avatar displacement is not an extra gate,
+because dialogue, card and puzzle games may move a cursor transiently or have no player node at
+all. A legacy game without acceptance needs movement plus a GameState change whose sampled ride is
+not strictly increasing, so clocks are excluded by shape rather than by a list of names. A failing
+run reports structured `blockers` and `interaction` beside `booted`, never only a sentence on a
+green success. The creation record is
 authoritative about the obligation: templates declare `probe: true` in `template.json`, the
 scaffold copies it into `game.json` and the server-owned design-intent record, and a pre-27 game
 whose tree carries the probe adopts the obligation on first read. A game whose policy requires the
@@ -302,7 +304,7 @@ carries at most 6 MB of PNG data; frames over that budget stay on disk as eviden
 names how many were dropped. The capture size is a whole-number multiple of the project's base
 viewport (`display/window/size/viewport_width` and height) that fits the requested box, 1280×720
 by default, so a 640×360 game is recorded at a true 1280×720 rather than letterboxed. The library
-cover is the latest qualifying run's first frame whose persisted probe shows a player and an
+cover is the latest qualifying run's first frame whose persisted probe is in play and shows an
 approved criterion progressing (else a player away from the baseline), then the after-steps frame,
 then an asset thumbnail; captions never choose a cover. Screenshots are
 evidence of what happened, not a substitute for a gameplay assertion, which stays in the headless

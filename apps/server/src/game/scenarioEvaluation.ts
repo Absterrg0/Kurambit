@@ -305,11 +305,9 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
   const winPassed = criteria.some(
     (criterion) => criterion.kind === "win" && criterion.status === "passed",
   );
-  const moved = runs.some((run) => run.error === null && run.playerMoved);
-  const passed = failedRun === undefined && everyPassed && winPassed && moved;
+  const passed = failedRun === undefined && everyPassed && winPassed;
   let reason: GameScenarioStageReason = "criteria-passed";
-  let detail =
-    "Every graded criterion changed after play started, including a win, and a scenario moved the player.";
+  let detail = "Every graded criterion changed after play started, including a win.";
   if (failedRun !== undefined) {
     reason = "scenario-failed";
     detail = `Scenario "${failedRun.id}" failed: ${failedRun.error}`;
@@ -323,9 +321,6 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
     reason = "win-criterion-failed";
     detail =
       "No `win` criterion with an observe passed; reaching the win state after play starts is required.";
-  } else if (!moved) {
-    reason = "no-player-movement";
-    detail = "No scenario moved the player; a still frame is not gameplay.";
   }
   return {
     mode: "criteria",

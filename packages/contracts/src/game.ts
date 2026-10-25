@@ -328,7 +328,9 @@ export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
  * baseline (the latest gameplay sample before the first player input, or the
  * first one after it when play starts from a menu), `after` the last gameplay
  * sample; `playerMoved` and `changes` are measured against the baseline, so
- * opening the game from its menu is not mistaken for movement.
+ * opening the game from its menu is not mistaken for movement. A typed
+ * `GameState.state` marker that is not 0/false identifies play on its own, so
+ * a no-player UI game still has a baseline and `player` may be null.
  */
 export const GamePlaytestState = Schema.Struct({
   before: Schema.NullOr(GamePlaytestProbe),

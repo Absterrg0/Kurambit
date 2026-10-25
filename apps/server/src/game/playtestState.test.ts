@@ -18,6 +18,10 @@ const gameplay = (
   gameState: Record<string, number | boolean | string>,
   x = 0,
 ): GamePlaytestProbe => ({ gameState, player: { x, y: 0, z: 0 } });
+const ui = (gameState: Record<string, number | boolean | string>): GamePlaytestProbe => ({
+  gameState,
+  player: null,
+});
 const before = (probe: GamePlaytestProbe, afterInput = false) => ({ probe, afterInput });
 const played = (probe: GamePlaytestProbe) => ({ probe, afterInput: true });
 
@@ -113,6 +117,18 @@ describe("summarizePlaytestSamples", () => {
       played(gameplay({ replies: 1 }, 12)),
     ]);
     expect(state.before?.gameState).toEqual({ replies: 0 });
+    expect(state.changes).toEqual([{ key: "replies", before: 0, after: 1 }]);
+  });
+
+  it("baselines a typed in-play UI game that has no player node", () => {
+    const state = summarizePlaytestSamples([
+      before(ui({ state: 1, replies: 0 })),
+      played(ui({ state: 1, replies: 1 })),
+      played(ui({ state: 1, replies: 1 })),
+    ]);
+    expect(state.before).toEqual(ui({ state: 1, replies: 0 }));
+    expect(state.after).toEqual(ui({ state: 1, replies: 1 }));
+    expect(state.playerMoved).toBe(0);
     expect(state.changes).toEqual([{ key: "replies", before: 0, after: 1 }]);
   });
 });
@@ -267,6 +283,184 @@ describe("evaluatePlaytestRun", () => {
     expect(firstPress.achieved).toEqual(["press-reply"]);
   });
 
+  it("qualifies an approved no-player UI choice without an avatar", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const firstChoice = run({
+      acceptance: choice,
+      samples: [
+        before(ui({ state: 1, replies: 0 })),
+        played(ui({ state: 1, replies: 1 })),
+        played(ui({ state: 1, replies: 1 })),
+      ],
+    });
+    expect(firstChoice.qualifies).toBe(true);
+    expect(firstChoice.blockers).toEqual([]);
+    expect(firstChoice.achieved).toEqual(["press-reply"]);
+    expect(firstChoice.interaction).toContain("replies 0→1");
+  });
+
+  it("qualifies an approved choice whose actor ends back at the baseline position", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const returned = run({
+      acceptance: choice,
+      samples: [
+        before(gameplay({ state: 1, replies: 0 }, 0)),
+        played(gameplay({ state: 1, replies: 1 }, 25)),
+        played(gameplay({ state: 1, replies: 1 }, 0)),
+      ],
+    });
+    expect(returned.qualifies).toBe(true);
+    expect(returned.achieved).toEqual(["press-reply"]);
+  });
+
+  it("an approved movement claim still fails when its observation never changes", () => {
+    const distance: GameAcceptanceCriterion[] = [
+      {
+        id: "walk-distance",
+        kind: "mechanic",
+        text: "walk far enough",
+        observe: { key: "distance", expect: ">=10" },
+      },
+    ];
+    const movedButUnmeasured = run({
+      acceptance: distance,
+      samples: [
+        before(gameplay({ state: 1, distance: 0 }, 0)),
+        played(gameplay({ state: 1, distance: 0 }, 12)),
+        played(gameplay({ state: 1, distance: 0 }, 12)),
+      ],
+    });
+    expect(movedButUnmeasured.qualifies).toBe(false);
+    expect(movedButUnmeasured.achieved).toEqual([]);
+    expect(movedButUnmeasured.blockers).toContain("no approved criterion achieved");
+
+    const measured = run({
+      acceptance: distance,
+      samples: [
+        before(gameplay({ state: 1, distance: 0 }, 0)),
+        played(gameplay({ state: 1, distance: 12 }, 12)),
+        played(gameplay({ state: 1, distance: 12 }, 12)),
+      ],
+    });
+    expect(measured.qualifies).toBe(true);
+    expect(measured.achieved).toEqual(["walk-distance"]);
+  });
+
+  it("a markerless no-player game stays ambiguous and cannot qualify", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const markerless = run({
+      acceptance: choice,
+      samples: [before(ui({ replies: 0 })), played(ui({ replies: 1 }))],
+    });
+    expect(markerless.qualifies).toBe(false);
+    expect(markerless.blockers).toContain(
+      "no gameplay baseline: no player input step found the game in play",
+    );
+  });
+
+  it("an explicit no-player menu is not play even when values move", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const stillMenu = run({
+      acceptance: choice,
+      samples: [before(ui({ state: 0, replies: 0 })), played(ui({ state: 0, replies: 1 }))],
+    });
+    expect(stillMenu.qualifies).toBe(false);
+    expect(stillMenu.blockers).toContain(
+      "no gameplay baseline: no player input step found the game in play",
+    );
+  });
+
+  it("a no-player UI menu click cannot claim the values it created", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const started = run({
+      acceptance: choice,
+      samples: [before(ui({ state: 0, replies: 0 })), played(ui({ state: 1, replies: 1 }))],
+    });
+    expect(started.qualifies).toBe(false);
+    expect(started.achieved).toEqual([]);
+    expect(started.blockers).toContain("no approved criterion achieved");
+  });
+
+  it("a no-player UI run with no input has no baseline", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const waited = run({
+      acceptance: choice,
+      samples: [before(ui({ state: 1, replies: 0 })), before(ui({ state: 1, replies: 1 }))],
+    });
+    expect(waited.qualifies).toBe(false);
+    expect(waited.blockers).toContain(
+      "no gameplay baseline: no player input step found the game in play",
+    );
+  });
+
+  it("a no-player UI run whose approved value was already true fails", () => {
+    const choice: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const alreadyTrue = run({
+      acceptance: choice,
+      samples: [before(ui({ state: 1, replies: 1 })), played(ui({ state: 1, replies: 1 }))],
+    });
+    expect(alreadyTrue.qualifies).toBe(false);
+    expect(alreadyTrue.blockers).toContain("no approved criterion achieved");
+  });
+
+  it("a legacy no-player run still needs the player to move", () => {
+    const legacy = run({
+      acceptance: null,
+      samples: [before(ui({ state: 1, replies: 0 })), played(ui({ state: 1, replies: 1 }))],
+    });
+    expect(legacy.qualifies).toBe(false);
+    expect(legacy.blockers).toContain("the player did not move from the gameplay baseline");
+  });
+
   it("a menu click that starts play cannot claim the starting values", () => {
     const total: GameAcceptanceCriterion[] = [
       {
@@ -374,7 +568,7 @@ describe("evaluatePlaytestRun", () => {
     });
     expect(waited.qualifies).toBe(false);
     expect(waited.blockers).toContain(
-      "no gameplay baseline: no player input step found the player in play",
+      "no gameplay baseline: no player input step found the game in play",
     );
   });
 
@@ -429,7 +623,7 @@ describe("evaluatePlaytestRun", () => {
 
   it("a run whose samples never gained a gameplay baseline fails honestly", () => {
     expect(run({ samples: [before(menu)] }).blockers).toContain(
-      "no gameplay baseline: no player input step found the player in play",
+      "no gameplay baseline: no player input step found the game in play",
     );
   });
 
@@ -483,6 +677,25 @@ describe("selectPlaytestCoverFrame", () => {
         acceptance,
       ),
     ).toBeNull();
+  });
+
+  it("picks a no-player UI frame whose typed probe shows the approved progress", () => {
+    const state: GamePlaytestState = {
+      before: ui({ state: 1, collected: 0 }),
+      after: ui({ state: 1, collected: 1 }),
+      playerMoved: 0,
+      changes: [{ key: "collected", before: 0, after: 1 }],
+    };
+    const picked = selectPlaytestCoverFrame(
+      [
+        frame("booted", ui({ state: 1, collected: 0 })),
+        frame("choice", ui({ state: 1, collected: 1 })),
+        frame("after-steps", ui({ state: 1, collected: 1 })),
+      ],
+      state,
+      acceptance,
+    );
+    expect(picked?.label).toBe("choice");
   });
 
   it("falls back to movement, then the after-steps frame", () => {

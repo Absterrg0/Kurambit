@@ -53,17 +53,26 @@ const strictlyIncreasing = (values: readonly GamePlaytestStateValue[]): boolean 
 /**
  * The shared typed play marker native routes already read: `GameState.state`.
  * A boolean false or numeric zero is the menu, so a player or world the menu
- * keeps behind it cannot be mistaken for play. A missing or non-scalar marker
- * is a markerless game, where the player group itself is the only sign play
- * started; that remains ambiguous when a markerless menu shows a player.
+ * keeps behind it cannot be mistaken for play. Any other boolean or numeric
+ * marker identifies play even when the game has no player node. A missing or
+ * non-scalar marker is a markerless game, where the player group itself is the
+ * only sign play started; that remains ambiguous when a markerless menu shows
+ * a player.
  */
 const isMenu = (probe: GamePlaytestProbe): boolean => {
   const marker = probe.gameState.state;
   return marker === false || marker === 0;
 };
 
-const inPlay = (sample: GamePlaytestSample): boolean =>
-  sample.probe.player !== null && !isMenu(sample.probe);
+const hasTypedPlayMarker = (probe: GamePlaytestProbe): boolean => {
+  const marker = probe.gameState.state;
+  return typeof marker === "boolean" || typeof marker === "number";
+};
+
+const inPlayProbe = (probe: GamePlaytestProbe): boolean =>
+  hasTypedPlayMarker(probe) ? !isMenu(probe) : probe.player !== null;
+
+const inPlay = (sample: GamePlaytestSample): boolean => inPlayProbe(sample.probe);
 
 /**
  * The sample a run's states are measured against. A run already in play when
@@ -71,11 +80,12 @@ const inPlay = (sample: GamePlaytestSample): boolean =>
  * that input, so the action the input causes is evidence instead of looking
  * like a value play started with. Otherwise the baseline is the first sample
  * after input where play exists: opening the game from its menu changes the
- * scene, but the player did not play until the body existed after an input
- * step. The menu marker holds a hidden menu player back on both sides of the
- * input, and the latest pre-input probe (not boot) keeps an autonomous wait or
- * clock from being credited to the first action. A run without real input, or
- * without a player in play, has no baseline and proves nothing.
+ * scene, but the player did not play until play existed after an input step.
+ * The typed marker holds a hidden menu player back on both sides of the input,
+ * and also lets a no-player UI game identify play. The latest pre-input probe
+ * (not boot) keeps an autonomous wait or clock from being credited to the
+ * first action. A run without real input, or without play, has no baseline
+ * and proves nothing.
  */
 export const playtestBaseline = (samples: readonly GamePlaytestSample[]): number | null => {
   const firstInput = samples.findIndex((sample) => sample.afterInput);
@@ -90,7 +100,9 @@ export const playtestBaseline = (samples: readonly GamePlaytestSample[]): number
 };
 
 const lastGameplayProbe = (samples: readonly GamePlaytestSample[]): GamePlaytestProbe | null =>
-  samples.findLast((sample) => sample.probe.player !== null)?.probe ?? null;
+  samples.findLast((sample) => sample.probe.player !== null)?.probe ??
+  samples.findLast(inPlay)?.probe ??
+  null;
 
 /**
  * Turns the probe samples into the before/after picture the result reports.
@@ -313,10 +325,11 @@ export interface PlaytestQualification {
  * The playtest stage's verdict. A probe-equipped run is honest gameplay
  * evidence only through achieved play:
  *
- * - with an approved acceptance, the player must have moved away from the
- *   gameplay baseline AND at least one approved mechanic/content/win/lose
- *   criterion that was false at the baseline must have come true during the
- *   run;
+ * - with an approved acceptance, at least one approved mechanic/content/win/
+ *   lose criterion that was false at the gameplay baseline must have come true
+ *   during the run. The approved criteria are the intended behavior, so no
+ *   extra avatar displacement is required: dialogue, card and puzzle games
+ *   often keep the player node still or have none at all;
  * - without acceptance (legacy), movement plus a GameState change whose
  *   sampled ride is not strictly increasing from the baseline on, so a clock
  *   can never be the whole story;
@@ -350,15 +363,15 @@ export function evaluatePlaytestRun(input: {
   else if (input.probeRequired) {
     const startIndex = playtestBaseline(input.samples);
     if (startIndex === null) {
-      blockers.push("no gameplay baseline: no player input step found the player in play");
+      blockers.push("no gameplay baseline: no player input step found the game in play");
     } else if (state !== null) {
       const baseline = input.samples[startIndex]!.probe;
       const later = input.samples.slice(startIndex + 1).map((sample) => sample.probe);
-      if (state.playerMoved <= MIN_PLAYER_MOVEMENT)
-        blockers.push("the player did not move from the gameplay baseline");
       if (input.acceptance === null) {
         // Legacy: movement is one half. The other is a GameState value whose
         // ride, sampled from the baseline on, did not only rise.
+        if (state.playerMoved <= MIN_PLAYER_MOVEMENT)
+          blockers.push("the player did not move from the gameplay baseline");
         const turned = state.changes.some((change) => {
           const values: GamePlaytestStateValue[] = [change.before];
           for (const probe of later) {
@@ -438,10 +451,10 @@ const AFTER_STEPS_LABEL = "after-steps";
 
 /**
  * The frame that represents a run, chosen from what its persisted probe state
- * proves, not from what its screenshots are captioned: the first frame where a
- * player is present and an approved criterion moved off its baseline value,
- * else the first frame with a player away from the baseline, else the run's
- * final frame. Screens the labels could never vouch for do not feed this.
+ * proves, not from what its screenshots are captioned: the first frame in play
+ * where an approved criterion moved off its baseline value, else the first
+ * frame with a player away from the baseline, else the run's final frame.
+ * Screens the labels could never vouch for do not feed this.
  */
 export const selectPlaytestCoverFrame = (
   frames: readonly GamePlaytestFrame[],
@@ -450,24 +463,23 @@ export const selectPlaytestCoverFrame = (
 ): GamePlaytestFrame | null => {
   const baseline = state?.before ?? null;
   if (baseline !== null) {
-    const origin = baseline;
-    const originPlayer = origin.player;
+    const checks = coreChecks(acceptance ?? []);
+    const progressed = frames.find((frame) => {
+      const probe = frame.probe;
+      if (probe === undefined || !inPlayProbe(probe)) return false;
+      return checks.some((check) => {
+        const baselineValue = baseline.gameState[check.key];
+        // The transition has to start inside the observed world, the same way
+        // qualification reads it: a key the baseline never named is unproven.
+        if (baselineValue === undefined) return false;
+        if (checkSatisfiedAt(check, baseline, baselineValue)) return false;
+        return checkSatisfiedAt(check, probe, baselineValue);
+      });
+    });
+    if (progressed !== undefined) return progressed;
+    const originPlayer = baseline.player;
     if (originPlayer !== null) {
       const from: { x: number; y: number; z: number } = originPlayer;
-      const checks = coreChecks(acceptance ?? []);
-      const progressed = frames.find((frame) => {
-        const probe = frame.probe;
-        if (probe === undefined || probe.player === null) return false;
-        return checks.some((check) => {
-          const baselineValue = origin.gameState[check.key];
-          // The transition has to start inside the observed world, the same way
-          // qualification reads it: a key the baseline never named is unproven.
-          if (baselineValue === undefined) return false;
-          if (checkSatisfiedAt(check, origin, baselineValue)) return false;
-          return checkSatisfiedAt(check, probe, baselineValue);
-        });
-      });
-      if (progressed !== undefined) return progressed;
       const moved = frames.find((frame) => {
         const at = frame.probe?.player;
         if (at === null || at === undefined) return false;
