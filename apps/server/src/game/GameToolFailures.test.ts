@@ -102,6 +102,8 @@ const withFixture = <A, E, R>(
           Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
             read: () => Effect.succeed(manifest),
+            // Game status includes the current run in its production budget.
+            activeRun: () => Effect.succeed(null),
             inventory: () =>
               Effect.succeed({
                 manifest,
