@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
+  FileTextIcon,
   Gamepad2Icon,
   PlayIcon,
   RefreshCwIcon,
@@ -11,7 +12,22 @@ import {
 import type { GameViewport } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
-import type { GameStagePhase } from "./gameStageLogic";
+import type { GameDesignLock, GameStagePhase } from "./gameStageLogic";
+
+const DESIGN_LOCK_COPY: Record<GameDesignLock, { title: string; body: string }> = {
+  draft: {
+    title: "Approve the design before building",
+    body: "DESIGN.md is the contract for this game. Review it and its acceptance criteria, then approve it to start the build.",
+  },
+  changed: {
+    title: "Re-approve the changed design",
+    body: "DESIGN.md changed after approval, so building and preview are locked. Review the new acceptance scope and re-approve it to continue.",
+  },
+  "revision-pending": {
+    title: "Review the requested change",
+    body: "The agent is revising DESIGN.md for your change request. Review and approve the new design to unlock building.",
+  },
+};
 
 /**
  * The frame always keeps the game's own shape, so a state card sits exactly
@@ -50,6 +66,7 @@ export function GamePlaySurface({
   onStop,
   onAskAgent,
   onOpenTools,
+  onOpenDesign,
 }: {
   phase: GameStagePhase;
   viewport: GameViewport;
@@ -65,6 +82,7 @@ export function GamePlaySurface({
   onStop: () => void;
   onAskAgent: (error: string) => void;
   onOpenTools: () => void;
+  onOpenDesign: () => void;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameFocused, setFrameFocused] = useState(false);
@@ -171,6 +189,7 @@ export function GamePlaySurface({
             onStop={onStop}
             onAskAgent={onAskAgent}
             onOpenTools={onOpenTools}
+            onOpenDesign={onOpenDesign}
           />
         )}
       </div>
@@ -186,6 +205,7 @@ function StageStateCard({
   onStop,
   onAskAgent,
   onOpenTools,
+  onOpenDesign,
 }: {
   phase: GameStagePhase;
   canOperate: boolean;
@@ -194,6 +214,7 @@ function StageStateCard({
   onStop: () => void;
   onAskAgent: (error: string) => void;
   onOpenTools: () => void;
+  onOpenDesign: () => void;
 }) {
   if (phase.kind === "playing") return null;
   return (
@@ -209,6 +230,20 @@ function StageStateCard({
           />
           <Button size="sm" variant="outline" onClick={onOpenTools}>
             Open game tools settings
+          </Button>
+        </>
+      ) : null}
+      {phase.kind === "design-locked" ? (
+        <>
+          <StageIcon tone="quiet">
+            <FileTextIcon className="size-5" aria-hidden="true" />
+          </StageIcon>
+          <StageCopy
+            title={DESIGN_LOCK_COPY[phase.reason].title}
+            body={DESIGN_LOCK_COPY[phase.reason].body}
+          />
+          <Button size="sm" onClick={onOpenDesign}>
+            Open Design
           </Button>
         </>
       ) : null}

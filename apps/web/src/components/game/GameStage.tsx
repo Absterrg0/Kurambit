@@ -47,11 +47,19 @@ import { GamePlaySurface } from "./GamePlaySurface";
 import {
   buildFailurePrompt,
   deriveGameStagePhase,
+  gameDesignLock,
   nextGamePreviewFrame,
+  type GameDesignLock,
   type GamePreviewServe,
 } from "./gameStageLogic";
 
 type GameStageTab = "design" | "play" | "assets" | "builds";
+
+const DESIGN_LOCK_LABEL: Record<GameDesignLock, string> = {
+  draft: "Approve the design",
+  changed: "Design changed — re-approve",
+  "revision-pending": "Review requested change",
+};
 
 const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
@@ -72,8 +80,7 @@ const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
   { value: "builds", label: "Builds" },
 ];
 const DESIGN_FIRST_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
-  // While the design is a draft it is the only thing the agent may work on,
-  // so it is the tab the creator starts on.
+  // An unapproved design is what unblocks staging, so the creator starts there.
   { value: "design", label: "Design" },
   { value: "play", label: "Stage" },
   { value: "assets", label: "Assets" },
@@ -146,9 +153,14 @@ export function GameStage({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
   if (!data) return null;
-  const designDraft = data.design.state === "draft";
-  const tabs = designDraft ? DESIGN_FIRST_TABS : PLAY_TABS;
-  const activeTab = tab ?? (designDraft ? "design" : "play");
+  const designLock = gameDesignLock(data.design);
+  // A running game stays on Stage while its design is waiting for review; a
+  // stopped or never-started game opens on the Design tab that unblocks it. An
+  // auto game still starts on its draft, as before, without calling it locked.
+  const designFirst =
+    (designLock !== null || data.design.state === "draft") && data.previewUrl === null;
+  const tabs = designFirst ? DESIGN_FIRST_TABS : PLAY_TABS;
+  const activeTab = tab ?? (designFirst ? "design" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
     toolchainReady: data.toolchain.tools.every((tool) => tool.ready),
@@ -156,10 +168,17 @@ export function GameStage({
     hasWebBuild: webBuild !== undefined,
     webBuildStale: data.webBuildStale,
     previewUrl: data.previewUrl,
+    designLock,
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
   });
   const building = busy !== null || operationState === "running";
+  // Play only starts a preview when none is running; a started game can always
+  // be brought back to Stage. Every other staging action is refused by the
+  // server until a reviewed design is approved.
+  const playEnabled =
+    canOperate && (data.previewUrl !== null || (!building && designLock === null));
+  const stagingEnabled = canOperate && !building && designLock === null;
   const buildingStartedAt =
     busy?.startedAt ??
     (operationState === "running" && data.operation !== null
@@ -214,13 +233,15 @@ export function GameStage({
         ? qualification.completion === "complete"
           ? "Ready to play"
           : qualificationLabel
-        : phase.kind === "never-built"
-          ? "No build yet"
-          : phase.kind === "failed"
-            ? "Build failed"
-            : phase.kind === "tools-missing"
-              ? "Game tools missing"
-              : null;
+        : phase.kind === "design-locked"
+          ? DESIGN_LOCK_LABEL[phase.reason]
+          : phase.kind === "never-built"
+            ? "No build yet"
+            : phase.kind === "failed"
+              ? "Build failed"
+              : phase.kind === "tools-missing"
+                ? "Game tools missing"
+                : null;
   const nativeRunning = data.processes.some((process) => process.operation === "native");
   const runningSomething =
     busy !== null ||
@@ -381,10 +402,19 @@ export function GameStage({
                 <XIcon className="size-3" aria-hidden="true" />
               </Button>
             </span>
+          ) : designLock !== null && phase.kind === "playing" ? (
+            <button
+              type="button"
+              onClick={() => setTab("design")}
+              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground transition-colors hover:bg-warning/20"
+            >
+              <TriangleAlertIcon className="size-3" aria-hidden="true" />
+              {DESIGN_LOCK_LABEL[designLock]}
+            </button>
           ) : staleChipVisible ? (
             <button
               type="button"
-              disabled={!canOperate || building}
+              disabled={!stagingEnabled}
               onClick={() => void perform("rebuild")}
               className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground transition-colors hover:bg-warning/20 disabled:cursor-default"
             >
@@ -415,8 +445,8 @@ export function GameStage({
         <div className="flex shrink-0 items-center gap-1">
           <Button
             size="sm"
-            variant={designDraft ? "secondary" : "default"}
-            disabled={!canOperate || (building && data.previewUrl === null)}
+            variant={designFirst ? "secondary" : "default"}
+            disabled={!playEnabled}
             onClick={() => void perform("preview")}
           >
             <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
@@ -430,7 +460,7 @@ export function GameStage({
                   variant="ghost"
                   aria-label="Rebuild the web build"
                   className="hidden @[46rem]/stage-header:inline-flex"
-                  disabled={!canOperate || building}
+                  disabled={!stagingEnabled}
                   onClick={() => void perform("rebuild")}
                 />
               }
@@ -464,7 +494,7 @@ export function GameStage({
                   variant="ghost"
                   aria-label="Run native"
                   className="hidden @[54rem]/stage-header:inline-flex"
-                  disabled={!canOperate || building || nativeRunning}
+                  disabled={!stagingEnabled || nativeRunning}
                   onClick={() => void perform("native")}
                 />
               }
@@ -491,12 +521,12 @@ export function GameStage({
               <MoreHorizontalIcon className="size-4" aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup align="end">
-              <MenuItem disabled={!canOperate || building} onClick={() => void perform("rebuild")}>
+              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("rebuild")}>
                 <RefreshCwIcon />
                 Rebuild the web build
               </MenuItem>
               <MenuItem
-                disabled={!canOperate || building || nativeRunning}
+                disabled={!stagingEnabled || nativeRunning}
                 onClick={() => void perform("native")}
               >
                 <MonitorPlayIcon />
@@ -509,17 +539,11 @@ export function GameStage({
                 <SquareIcon />
                 Stop the game
               </MenuItem>
-              <MenuItem
-                disabled={!canOperate || building}
-                onClick={() => void perform("export-windows")}
-              >
+              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-windows")}>
                 <MonitorIcon />
                 Export Windows build
               </MenuItem>
-              <MenuItem
-                disabled={!canOperate || building}
-                onClick={() => void perform("export-linux")}
-              >
+              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
                 <DownloadIcon />
                 Export Linux build
               </MenuItem>
@@ -610,6 +634,7 @@ export function GameStage({
           onStop={() => void perform("stop")}
           onAskAgent={askAgentToFix}
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+          onOpenDesign={() => setTab("design")}
         />
       </div>
       {activeTab === "assets" ? (
@@ -625,6 +650,9 @@ export function GameStage({
           sourcesDifferFromPlay={data.sourcesDifferFromPlay}
           selectedBuildId={data.selectedBuildId}
           canOperate={canOperate}
+          stagingLocked={designLock !== null}
+          previewAvailable={data.previewUrl !== null}
+          onOpenDesign={() => setTab("design")}
           onPlay={() => {
             setTab("play");
             void perform("preview");

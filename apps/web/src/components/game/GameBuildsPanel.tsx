@@ -58,6 +58,9 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay,
   selectedBuildId,
   canOperate,
+  stagingLocked,
+  previewAvailable,
+  onOpenDesign,
   onPlay,
   onExport,
 }: {
@@ -68,6 +71,10 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   selectedBuildId: string | null;
   canOperate: boolean;
+  /** A reviewed design waits for approval, so the server refuses staging. */
+  stagingLocked: boolean;
+  previewAvailable: boolean;
+  onOpenDesign: () => void;
   onPlay: () => void;
   onExport: (target: ExportTarget) => void;
 }) {
@@ -173,6 +180,15 @@ export function GameBuildsPanel({
         </Button>
         {checkError ? <span role="alert">{checkError}</span> : null}
       </div>
+      {stagingLocked ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-surface px-3 py-2 text-xs text-warning-foreground">
+          <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span>Approve the design before rebuilding, exporting, or starting a preview.</span>
+          <Button size="xs" variant="outline" onClick={onOpenDesign}>
+            Review design
+          </Button>
+        </div>
+      ) : null}
       {BUILD_TARGETS.map((target) => {
         const meta = BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
@@ -225,7 +241,11 @@ export function GameBuildsPanel({
                 <>
                   {meta.play ? (
                     <>
-                      <Button size="sm" disabled={!canOperate} onClick={onPlay}>
+                      <Button
+                        size="sm"
+                        disabled={!canOperate || (stagingLocked && !previewAvailable)}
+                        onClick={onPlay}
+                      >
                         <Gamepad2Icon className="size-3.5" aria-hidden="true" />
                         Play
                       </Button>
@@ -256,7 +276,7 @@ export function GameBuildsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canOperate || packaging !== null}
+                        disabled={!canOperate || packaging !== null || stagingLocked}
                         onClick={() => {
                           if (target !== "Web") onExport(target);
                         }}
@@ -276,14 +296,19 @@ export function GameBuildsPanel({
                   </Button>
                 </>
               ) : meta.play ? (
-                <Button size="sm" variant="outline" disabled={!canOperate} onClick={onPlay}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canOperate || stagingLocked}
+                  onClick={onPlay}
+                >
                   Build & play
                 </Button>
               ) : (
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canOperate}
+                  disabled={!canOperate || stagingLocked}
                   onClick={() => {
                     if (target !== "Web") onExport(target);
                   }}
