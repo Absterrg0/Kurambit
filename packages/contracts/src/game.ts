@@ -760,10 +760,9 @@ export const GameTryInput = Schema.Struct({
   captureEveryMs: Schema.optionalKey(Schema.Number),
 });
 export type GameTryInput = typeof GameTryInput.Type;
-export const GameWebPlaytestInput = Schema.Struct({
+const gamePlaytestCaptureOptions = {
   captureEveryMs: Schema.optionalKey(Schema.Number),
   captureAllSteps: Schema.optionalKey(Schema.Boolean),
-  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
   width: Schema.optionalKey(
     Schema.Number.check(
       Schema.isBetween({
@@ -780,6 +779,15 @@ export const GameWebPlaytestInput = Schema.Struct({
       }),
     ),
   ),
+  bootTimeoutMs: Schema.optionalKey(
+    Schema.Number.check(
+      Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),
+    ),
+  ),
+};
+export const GameWebPlaytestInput = Schema.Struct({
+  ...gamePlaytestCaptureOptions,
+  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
   /**
    * Capture at exactly width×height instead of a whole-number multiple of the
    * game's base viewport. Review layout evidence needs a window whose shape can
@@ -787,13 +795,34 @@ export const GameWebPlaytestInput = Schema.Struct({
    * as the build's playtest.
    */
   exactSize: Schema.optionalKey(Schema.Boolean),
-  bootTimeoutMs: Schema.optionalKey(
-    Schema.Number.check(
-      Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),
-    ),
-  ),
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
+/** A route step that drives the game; waits and screenshots only gather evidence. */
+export const isGameplayInputStep = (step: GamePlaytestStep): boolean =>
+  !("waitMs" in step) && !("screenshot" in step);
+/**
+ * What a recorded verification accepts. `steps` is the required gameplay
+ * route; `exactSize` is review-only evidence and stays on
+ * `GameWebPlaytestInput` instead. The service still rejects legacy direct
+ * callers that send it.
+ */
+export const GameVerifyInput = Schema.Struct({
+  steps: Schema.Array(GamePlaytestStep)
+    .check(
+      Schema.makeFilter(
+        (steps) =>
+          steps.some(isGameplayInputStep) ||
+          "Provide at least one real input step (press, hold, key, keys, click, drag or mouseMove). Waits and screenshots cannot prove the game responds, and game_submit needs a playtest that dispatched input.",
+        { toJsonSchema: () => [{ minItems: 1 }, true] },
+      ),
+    )
+    .annotate({
+      description:
+        "Required route: at least one gameplay input step (press, hold, key/keys, click, drag or mouseMove). Waits and screenshots only gather evidence and cannot be the whole route.",
+    }),
+  ...gamePlaytestCaptureOptions,
+});
+export type GameVerifyInput = typeof GameVerifyInput.Type;
 export const GameWebPlaytestResult = Schema.Struct({
   /** Actual dispatched input steps; absent in older recordings. */
   executedInputSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),

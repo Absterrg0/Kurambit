@@ -7,12 +7,16 @@ import {
   GAME_TEMPLATES,
   GameCreateInput,
   GameManifest,
+  GameVerifyInput,
+  GameWebPlaytestInput,
   gameProductionBudgetMs,
 } from "./game.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(GameManifest));
 const decodeCreateInput = Schema.decodeUnknownSync(GameCreateInput);
+const decodeVerifyInput = Schema.decodeUnknownSync(GameVerifyInput);
+const decodeWebPlaytestInput = Schema.decodeUnknownSync(GameWebPlaytestInput);
 
 // The shape scaffold.ts wrote before starter templates existed.
 const legacyManifest = {
@@ -91,6 +95,29 @@ describe("game production budget", () => {
       expect(() =>
         decodeManifest(JSON.stringify({ ...legacyManifest, productionMinutes: minutes })),
       ).toThrow();
+  });
+});
+
+describe("game verify input", () => {
+  it("requires a route with at least one gameplay input step", () => {
+    expect(decodeVerifyInput({ steps: [{ press: "Space" }] })).toEqual({
+      steps: [{ press: "Space" }],
+    });
+    for (const input of [
+      {},
+      { steps: [] },
+      { steps: [{ waitMs: 100 }] },
+      { steps: [{ screenshot: "menu" }] },
+    ])
+      expect(() => decodeVerifyInput(input)).toThrow();
+  });
+
+  it("keeps review-only exact-size layout on the web playtest input", () => {
+    expect(decodeWebPlaytestInput({ width: 900, height: 900, exactSize: true })).toEqual({
+      width: 900,
+      height: 900,
+      exactSize: true,
+    });
   });
 });
 

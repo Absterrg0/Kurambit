@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import type * as SchemaAST from "effect/SchemaAST";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
@@ -620,30 +621,43 @@ const imageToolFailure =
     }).pipe(Effect.as(result));
   };
 
+interface ImageToolHandleResult {
+  readonly encodedResult: unknown;
+  /** Toolkit failures returned as results (failureMode "return") must not look successful. */
+  readonly isFailure?: boolean | undefined;
+}
+
 /**
  * `McpServer.toolkit` serializes every result as JSON text, which is the wrong
  * shape for a screenshot: the model needs image content.
  */
 const registerImageTool = <T extends Tool.Any, E, R>(
   tool: T,
-  handle: (payload: Tool.Parameters<T>) => Effect.Effect<{ readonly encodedResult: unknown }, E, R>,
+  handle: (
+    payload: Tool.Parameters<T>,
+    options: SchemaAST.ParseOptions,
+  ) => Effect.Effect<ImageToolHandleResult, E, R>,
   provide: (
-    effect: Effect.Effect<{ readonly encodedResult: unknown }, E, R>,
-  ) => Effect.Effect<
-    { readonly encodedResult: unknown },
-    E,
-    McpInvocationContext.McpInvocationContext
-  >,
+    effect: Effect.Effect<ImageToolHandleResult, E, R>,
+  ) => Effect.Effect<ImageToolHandleResult, E, McpInvocationContext.McpInvocationContext>,
   operation: string,
   failureText: string | ((error: E) => string),
 ) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
+    const strict = Tool.getStrictMode(tool) === true;
+    const decodeOptions: SchemaAST.ParseOptions = {
+      onExcessProperty: strict ? "error" : "ignore",
+      errors: "all",
+    };
+    const inputSchema = strict
+      ? { ...Tool.getJsonSchema(tool), additionalProperties: false }
+      : Tool.getJsonSchema(tool);
     yield* server.addTool({
       tool: new McpSchema.Tool({
         name: tool.name,
         description: Tool.getDescription(tool),
-        inputSchema: Tool.getJsonSchema(tool),
+        inputSchema,
         annotations: {
           ...Context.getOption(tool.annotations, Tool.Title).pipe(
             Option.map((title) => ({ title })),
@@ -662,11 +676,11 @@ const registerImageTool = <T extends Tool.Any, E, R>(
             fiber.context,
             McpInvocationContext.McpInvocationContext,
           );
-          return provide(handle(payload as Tool.Parameters<T>)).pipe(
+          return provide(handle(payload as Tool.Parameters<T>, decodeOptions)).pipe(
             Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
             Effect.matchCauseEffect({
               onFailure: imageToolFailure(tool.name, operation, failureText),
-              onSuccess: ({ encodedResult }) => {
+              onSuccess: ({ encodedResult, isFailure }) => {
                 const { screenshot, screenshots, ...rest } = encodedResult as ImageToolResult;
                 const frames = screenshots ?? (screenshot === undefined ? [] : [screenshot]);
                 const includeImage =
@@ -691,11 +705,11 @@ const registerImageTool = <T extends Tool.Any, E, R>(
                 };
                 return Effect.succeed(
                   new McpSchema.CallToolResult({
-                    isError: false,
+                    isError: isFailure === true,
                     structuredContent: metadata,
                     content: [
                       { type: "text", text: JSON.stringify(metadata) },
-                      ...(includeImage
+                      ...(includeImage && isFailure !== true
                         ? frames.map((frame) => ({
                             type: "image" as const,
                             data: new Uint8Array(Buffer.from(frame.data, "base64")),
@@ -721,9 +735,9 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
   const reviews = yield* GameReviewSessions.GameReviewSessions;
   yield* registerImageTool(
     GameWebPlaytestTool,
-    (payload) =>
+    (payload, options) =>
       built
-        .handle("game_web_playtest", payload)
+        .handle("game_web_playtest", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) =>
       effect.pipe(
@@ -735,9 +749,9 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
   );
   yield* registerImageTool(
     GameTryInputTool,
-    (payload) =>
+    (payload, options) =>
       built
-        .handle("game_try_input", payload)
+        .handle("game_try_input", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
     "playtest",
@@ -745,9 +759,9 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
   );
   yield* registerImageTool(
     GameVerifyTool,
-    (payload) =>
+    (payload, options) =>
       built
-        .handle("game_verify", payload)
+        .handle("game_verify", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) =>
       effect.pipe(
@@ -765,9 +779,9 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
   const built = yield* HtmlPreviewToolkit;
   yield* registerImageTool(
     HtmlPreviewTool,
-    (payload) =>
+    (payload, options) =>
       built
-        .handle("html_preview", payload)
+        .handle("html_preview", payload, undefined, options)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) =>
       effect.pipe(

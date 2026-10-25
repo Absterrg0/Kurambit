@@ -33,6 +33,7 @@ import {
   GameSubmitResult,
   GameWebPlaytestInput,
   GameTryInput,
+  GameVerifyInput,
   GameWebPlaytestResult,
   GameVerifyResult,
   OrchestratorMcpFailure,
@@ -203,14 +204,17 @@ const hiddenFromReviewChildren = () => {
 };
 const VerifyTool = Tool.make("game_verify", {
   description:
-    "Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, a Web export (a normal publish outside a review round, the round's candidate during one), and a recorded playtest of those exact exported bytes with the steps you supply. Give it at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only route proves nothing and game_submit needs a responding playtest. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. Inspect the returned frames, then game_submit the build you stand behind. Mechanical success is not a quality verdict or all-criteria certification. Individual game_* tools remain available for narrower fixes and diagnostics.",
-  parameters: GameWebPlaytestInput,
+    "Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, a Web export (a normal publish outside a review round, the round's candidate during one), and a recorded playtest of those exact exported bytes with the steps you supply. steps is required and must contain at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only or boot-only route proves nothing and game_submit needs a responding playtest. This tool records the build's playtest, so it takes no exactSize layout override; use game_web_playtest for review-only window evidence. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. Inspect the returned frames, then game_submit the build you stand behind. Mechanical success is not a quality verdict or all-criteria certification. Individual game_* tools remain available for narrower fixes and diagnostics.",
+  parameters: GameVerifyInput,
   success: GameVerifyResult,
   failure,
   failureMode: "return",
   dependencies,
 })
   .annotate(Tool.Readonly, false)
+  // Unknown options must fail instead of being stripped: exactSize belongs to
+  // the review-only web playtest, not to a recorded verification.
+  .annotate(Tool.Strict, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromReviewChildren);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description:

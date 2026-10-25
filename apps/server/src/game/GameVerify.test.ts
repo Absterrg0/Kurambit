@@ -14,7 +14,7 @@ import {
   RunId,
   ThreadId,
   type GameManifest,
-  type GameWebPlaytestInput,
+  type GameVerifyInput,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
@@ -259,11 +259,15 @@ const steps = [{ press: "Space" }] as const;
 it.live("rejects bad playtest input before any engine work", () =>
   withFixture(({ game, base, operations }) =>
     Effect.gen(function* () {
+      // A direct or legacy caller can still omit the route or ask for the
+      // review-only exact layout; the service guard must reject both.
       for (const input of [
+        {},
+        { steps: [] },
         { steps: [{ waitMs: 1_000 }] },
-        { steps: [{ press: "Space" }], exactSize: true, width: 640, height: 360 },
         { steps: [{ click: "left", x: 9_999, y: 10 }] },
-      ] satisfies ReadonlyArray<GameWebPlaytestInput>) {
+        { steps: [{ press: "Space" }], exactSize: true, width: 640, height: 360 },
+      ] as unknown as ReadonlyArray<GameVerifyInput>) {
         const attempted = yield* Effect.result(game.verify(threadId, input));
         expect(Result.isFailure(attempted)).toBe(true);
         if (Result.isFailure(attempted)) {

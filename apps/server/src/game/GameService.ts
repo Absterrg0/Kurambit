@@ -31,7 +31,7 @@ import {
   type GameArtImportResult,
   type GameOperationEvent,
   type GameProcessResult,
-  type GamePlaytestStep,
+  type GameVerifyInput,
   type GameVerifyResult,
   type GameVerifyStage,
   type ThreadId,
@@ -39,6 +39,7 @@ import {
   gameProductionBudgetMs,
   GAME_PLAYTEST_BOUNDS,
   integerScaledCapture,
+  isGameplayInputStep,
   PLAYTEST_DEFAULT_CAPTURE,
   playtestInputIssues,
 } from "@t3tools/contracts";
@@ -166,7 +167,7 @@ export class GameService extends Context.Service<
      */
     readonly verify: (
       threadId: ThreadId,
-      input: GameWebPlaytestInput,
+      input: GameVerifyInput,
     ) => Effect.Effect<GameVerifyResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
     readonly scenariosRun: (
@@ -233,14 +234,15 @@ const decodeText = <A>(decode: (text: string) => A, text: string | null): A | nu
   }
 };
 const isGameOperationError = Schema.is(GameOperationError);
-const isInputStep = (step: GamePlaytestStep) => !("waitMs" in step) && !("screenshot" in step);
-const verifyInputIssues = (input: GameWebPlaytestInput): readonly string[] => {
+const verifyInputIssues = (input: GameVerifyInput): readonly string[] => {
   const issues = [...playtestInputIssues(input)];
-  if (!(input.steps ?? []).some(isInputStep))
+  if (!(input.steps ?? []).some(isGameplayInputStep))
     issues.push(
-      "Provide at least one real input step (press, hold, key, keys, click, drag or mouseMove). A wait-only route cannot prove the game responds, and game_submit needs a playtest that dispatched input.",
+      "Provide at least one real input step (press, hold, key, keys, click, drag or mouseMove). Waits and screenshots cannot prove the game responds, and game_submit needs a playtest that dispatched input.",
     );
-  if (input.exactSize === true)
+  // The tool schema omits exactSize, but direct and legacy callers can still
+  // send it; recording it would silently change the capture they asked for.
+  if ("exactSize" in input && input.exactSize === true)
     issues.push(
       "game_verify records the build's playtest, so exactSize is not accepted here; use game_web_playtest for a review-only layout capture.",
     );
@@ -1927,7 +1929,7 @@ const make = Effect.gen(function* () {
    * them and refuses to let stages that covered different sources count as one
    * verification.
    */
-  const verifyGame = (root: string, input: GameWebPlaytestInput, runId: string | null) =>
+  const verifyGame = (root: string, input: GameVerifyInput, runId: string | null) =>
     Effect.gen(function* () {
       const issues = verifyInputIssues(input);
       if (issues.length > 0)

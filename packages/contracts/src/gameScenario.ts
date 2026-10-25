@@ -160,8 +160,10 @@ export const GameScenarioObservation = Schema.Struct({
   last: Schema.NullOr(GameObservedValue),
   firstChangeFrame: Schema.NullOr(Schema.Int),
   /**
-   * The value at the gameplay baseline: the first sample at or after the
-   * route's first non-wait input where a player existed. A criterion passes
+   * The value at the gameplay baseline: before the route's first non-wait
+   * input when play had already started (a player present and the state marker
+   * not 0/false), otherwise the first sample after that input in which a
+   * player exists and the game is not in its menu state. A criterion passes
    * only when it was false here and true at a later sample.
    */
   baseline: Schema.NullOr(GameObservedValue),
@@ -183,8 +185,10 @@ export const GameScenarioEvidence = Schema.Struct({
   /** Frame of the first press/hold step, or null when the route only waited. */
   firstInputFrame: Schema.NullOr(Schema.Int),
   /**
-   * First sample at or after `firstInputFrame` with a node in group "player".
-   * Without it the route never started play, so nothing can be achieved.
+   * Frame of the gameplay baseline: before `firstInputFrame` when play had
+   * already started, otherwise the first sample at or after it with a player
+   * present and no menu state. Without it the route never started play, so
+   * nothing can be achieved.
    */
   baselineFrame: Schema.NullOr(Schema.Int),
   /** The player group existed and its position changed from the first sample. */

@@ -1302,6 +1302,21 @@ it.effect(
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenVerify).toContain("error");
         expect(verified).toHaveLength(0);
+        // The advertised route is required, and exactSize is rejected rather
+        // than stripped into a scaled capture; neither reaches the service.
+        const missingRoute = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: {},
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(missingRoute).toContain('"isError":true');
+        expect(missingRoute).toContain("steps");
+        const layoutVerify = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: [{ press: "Space" }], width: 900, height: 900, exactSize: true },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(layoutVerify).toContain('"isError":true');
+        expect(layoutVerify).toContain("exactSize");
+        expect(verified).toHaveLength(0);
         const verifiedCall = yield* rpc("builder", builder, "tools/call", {
           name: "game_verify",
           arguments: { steps: [{ press: "Space" }] },
