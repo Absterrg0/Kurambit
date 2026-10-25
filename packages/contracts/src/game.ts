@@ -712,6 +712,40 @@ export const GameActionResult = Schema.Struct({
   process: Schema.NullOr(GameProcessResult),
 });
 export type GameActionResult = typeof GameActionResult.Type;
+export const GameWindowsPackageFile = Schema.Struct({
+  name: Schema.String,
+  bytes: Schema.Number,
+  sha256: Schema.String,
+});
+export type GameWindowsPackageFile = typeof GameWindowsPackageFile.Type;
+/**
+ * The downloadable Windows package. It describes files that were already
+ * exported and validated; packaging never exports and never proves Windows
+ * booted.
+ */
+export const GameWindowsPackage = Schema.Struct({
+  /** Absolute path of the complete archive on the server. */
+  archivePath: Schema.String,
+  fileName: Schema.String,
+  bytes: Schema.Number,
+  sha256: Schema.String,
+  files: Schema.Array(GameWindowsPackageFile),
+  embeddedPck: Schema.Boolean,
+  executableBytes: Schema.Number,
+  pckBytes: Schema.Number,
+  pckFileCount: Schema.Number,
+  notes: Schema.Array(Schema.String),
+  message: Schema.String,
+});
+export type GameWindowsPackage = typeof GameWindowsPackage.Type;
+/** The service package plus the capability URL the transports hand to a client. */
+export const GameWindowsPackageResult = Schema.Struct({
+  ...GameWindowsPackage.fields,
+  /** Signed same-origin URL path; clients join it with their server origin. */
+  downloadPath: Schema.String,
+  expiresAt: Schema.String,
+});
+export type GameWindowsPackageResult = typeof GameWindowsPackageResult.Type;
 export const GameConsoleMessage = Schema.Struct({
   level: Schema.Literals(["log", "info", "warning", "error"]),
   text: Schema.String,

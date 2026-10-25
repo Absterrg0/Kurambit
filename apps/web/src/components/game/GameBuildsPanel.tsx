@@ -17,7 +17,8 @@ import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { GameReviewPanel } from "./GameReviewPanel";
 import { gameSourceFreshnessLabel } from "./gameStageLogic";
-import { useAssetUrlState } from "../../assets/assetUrls";
+import { useAssetUrlState, resolveAssetUrl } from "../../assets/assetUrls";
+import { usePreparedConnection } from "../../state/session";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { Button } from "../ui/button";
 
@@ -69,6 +70,11 @@ export function GameBuildsPanel({
   onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
+  const packageWindows = useAtomCommand(gameEnvironment.packageWindows, { reportFailure: false });
+  const preparedConnection = usePreparedConnection(threadRef.environmentId);
+  const [packaging, setPackaging] = useState(false);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const [packageStatus, setPackageStatus] = useState<string | null>(null);
   const [checked, setChecked] = useState<GameStatus["sourcesDifferFromPlay"] | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -87,6 +93,34 @@ export function GameBuildsPanel({
   };
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
+  const downloadWindowsPackage = async () => {
+    setPackaging(true);
+    setPackageError(null);
+    setPackageStatus(null);
+    const result = await packageWindows({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    });
+    setPackaging(false);
+    if (result._tag === "Failure") {
+      setPackageError(String(squashAtomCommandFailure(result)));
+      return;
+    }
+    const url =
+      preparedConnection._tag === "Some"
+        ? resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.downloadPath)
+        : null;
+    if (url === null) {
+      setPackageError("The server address is not ready. Try the download again.");
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = result.value.fileName;
+    anchor.rel = "noopener";
+    anchor.click();
+    setPackageStatus(result.value.message);
+  };
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
       <LastPlaytestSection threadRef={threadRef} lastPlaytest={lastPlaytest} onReveal={reveal} />
@@ -128,6 +162,14 @@ export function GameBuildsPanel({
                   ? `${build.path} · updated ${new Date(build.updatedAt).toLocaleString()}`
                   : "Not built yet"}
               </p>
+              {target === "Windows" && packageError ? (
+                <p role="alert" className="text-xs text-destructive-foreground">
+                  {packageError}
+                </p>
+              ) : null}
+              {target === "Windows" && packageStatus ? (
+                <p className="text-xs text-muted-foreground">{packageStatus}</p>
+              ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
               {build ? (
@@ -138,17 +180,30 @@ export function GameBuildsPanel({
                       Play
                     </Button>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canOperate}
-                      onClick={() => {
-                        if (target !== "Web") onExport(target);
-                      }}
-                    >
-                      <DownloadIcon className="size-3.5" aria-hidden="true" />
-                      Export again
-                    </Button>
+                    <>
+                      {target === "Windows" ? (
+                        <Button
+                          size="sm"
+                          disabled={!canOperate || packaging}
+                          aria-busy={packaging}
+                          onClick={() => void downloadWindowsPackage()}
+                        >
+                          <DownloadIcon className="size-3.5" aria-hidden="true" />
+                          {packaging ? "Packaging…" : "Download package"}
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canOperate || packaging}
+                        onClick={() => {
+                          if (target !== "Web") onExport(target);
+                        }}
+                      >
+                        <DownloadIcon className="size-3.5" aria-hidden="true" />
+                        Export again
+                      </Button>
+                    </>
                   )}
                   <Button
                     size="sm"

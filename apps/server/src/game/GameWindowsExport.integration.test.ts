@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Runs the real pinned Godot toolchain and exports a real Windows executable to an isolated game folder.
 import { it, expect } from "@effect/vitest";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -7,6 +8,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Yauzl from "yauzl";
 import { DEFAULT_GAME_TEMPLATE, ProviderInstanceId } from "@t3tools/contracts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -56,6 +58,35 @@ const windowsTemplates = templateRoots.some(
 );
 const available = NodeFS.existsSync(godotExecutable) && windowsTemplates;
 const evidenceDirectory = process.env.GAME_STUDIO_WINDOWS_EVIDENCE_DIR?.trim();
+const sha256 = (bytes: Uint8Array) => NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+const readArchive = (path: string) =>
+  new Promise<Map<string, Buffer>>((resolve, reject) => {
+    Yauzl.open(path, { lazyEntries: true }, (error, zip) => {
+      if (error || !zip) {
+        reject(error ?? new Error("The package archive could not be opened."));
+        return;
+      }
+      const entries = new Map<string, Buffer>();
+      zip.on("error", reject);
+      zip.on("end", () => resolve(entries));
+      zip.on("entry", (entry: Yauzl.Entry) => {
+        zip.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) {
+            reject(streamError ?? new Error(`Could not read ${entry.fileName}.`));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          stream.on("error", reject);
+          stream.on("end", () => {
+            entries.set(entry.fileName, Buffer.concat(chunks));
+            zip.readEntry();
+          });
+        });
+      });
+      zip.readEntry();
+    });
+  });
 
 it.live.skipIf(!available)(
   "exports a real x86_64 Windows build without changing the selected Web build",
@@ -136,10 +167,12 @@ it.live.skipIf(!available)(
           expect(NodeFS.existsSync(NodePath.join(created.root, "builds/windows/game.pck"))).toBe(
             false,
           );
-          const inspection = inspectWindowsBuild({
-            executable: NodeFS.readFileSync(executablePath),
-            pck: null,
-          });
+          const inspection = yield* Effect.promise(() =>
+            inspectWindowsBuild({
+              executable: NodeFS.readFileSync(executablePath),
+              pck: null,
+            }),
+          );
           expect(inspection.issues).toEqual([]);
           expect(inspection.embeddedPck).toBe(true);
           expect(inspection.pckFileCount).toBeGreaterThan(0);
@@ -172,11 +205,39 @@ it.live.skipIf(!available)(
           const finalPresets = yield* Effect.promise(() => NodeFSP.readFile(presetsPath, "utf8"));
           expect(finalPresets).toContain('name="Store build"');
           expect(finalPresets.match(/platform="Windows Desktop"/g)).toHaveLength(1);
-          const finalInspection = inspectWindowsBuild({
-            executable: NodeFS.readFileSync(executablePath),
-            pck: null,
-          });
+          const finalInspection = yield* Effect.promise(() =>
+            inspectWindowsBuild({
+              executable: NodeFS.readFileSync(executablePath),
+              pck: null,
+            }),
+          );
           expect(finalInspection.issues).toEqual([]);
+
+          const packaged = yield* game.packageWindows(threadId);
+          expect(packaged.files.map((file) => file.name)).toEqual(["game.exe"]);
+          expect(packaged.embeddedPck).toBe(true);
+          const executableBytes = NodeFS.readFileSync(executablePath);
+          expect(packaged.files[0]?.bytes).toBe(executableBytes.byteLength);
+          expect(packaged.files[0]?.sha256).toBe(sha256(executableBytes));
+          expect(packaged.archivePath).toBe(
+            NodePath.join(created.root, "builds/windows/game-windows.zip"),
+          );
+          const archiveBytes = NodeFS.readFileSync(packaged.archivePath);
+          expect(packaged.bytes).toBe(archiveBytes.byteLength);
+          expect(packaged.sha256).toBe(sha256(archiveBytes));
+          const entries = yield* Effect.promise(() => readArchive(packaged.archivePath));
+          expect([...entries.keys()]).toEqual(["game.exe"]);
+          const archivedExecutable = entries.get("game.exe")!;
+          expect(archivedExecutable.equals(executableBytes)).toBe(true);
+          const archivedInspection = yield* Effect.promise(() =>
+            inspectWindowsBuild({ executable: archivedExecutable, pck: null }),
+          );
+          expect(archivedInspection.issues).toEqual([]);
+          expect(archivedInspection.embeddedPck).toBe(true);
+          expect(archivedInspection.pckFileCount).toBe(finalInspection.pckFileCount);
+          const afterPackageStatus = yield* game.status(threadId);
+          expect(afterPackageStatus.selectedBuildId).toBe(selectedBefore);
+          expect(afterPackageStatus.selectedArtifactUsable).toBe(true);
 
           if (evidenceDirectory !== undefined) {
             yield* Effect.promise(async () => {
@@ -186,6 +247,10 @@ it.live.skipIf(!available)(
               await NodeFSP.copyFile(presetsPath, NodePath.join(target, "export_presets.cfg"));
               if (reused.process !== null)
                 await NodeFSP.copyFile(reused.process.logPath, NodePath.join(target, "export.log"));
+              await NodeFSP.copyFile(
+                packaged.archivePath,
+                NodePath.join(target, "game-windows.zip"),
+              );
               await NodeFSP.writeFile(
                 NodePath.join(target, "inspection.json"),
                 `${JSON.stringify(
@@ -198,6 +263,17 @@ it.live.skipIf(!available)(
                     pckFileCount: finalInspection.pckFileCount,
                     selectedBuildBefore: selectedBefore,
                     selectedBuildAfter: finalStatus.selectedBuildId,
+                    package: {
+                      archive: "game-windows.zip",
+                      bytes: packaged.bytes,
+                      sha256: packaged.sha256,
+                      files: packaged.files,
+                      zipEntries: [...entries.keys()],
+                      embeddedPck: archivedInspection.embeddedPck,
+                      pckFileCount: archivedInspection.pckFileCount,
+                      executableBytesMatchExport: true,
+                      selectedBuildAfterPackage: afterPackageStatus.selectedBuildId,
+                    },
                   },
                   null,
                   2,
@@ -205,6 +281,21 @@ it.live.skipIf(!available)(
               );
             });
           }
+
+          // A package belongs to the release it was made from. Publishing a new
+          // Windows release removes it instead of leaving an old download
+          // advertised under the same name.
+          const republished = yield* game.export(threadId, "Windows");
+          expect(republished.success, republished.message).toBe(true);
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.stat(packaged.archivePath).then(
+                () => false,
+                () => true,
+              ),
+            ),
+          ).toBe(true);
+          expect((yield* game.status(threadId)).selectedBuildId).toBe(selectedBefore);
         }).pipe(Effect.provide(dependencies)),
       );
     }),

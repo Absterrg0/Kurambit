@@ -98,7 +98,9 @@ its right.
 - **Export Windows** writes a 64-bit build to `builds/windows/game.exe`. The standard preset embeds
   the game data, so you can copy that one file to a Windows PC. A game whose Windows preset does not
   embed it also gets `builds/windows/game.pck`, and both files must be copied together; the export
-  result says which files to share. **Export Linux** writes a standalone build to `builds/linux/`.
+  result says which files to share. **Download package** on the same card zips the checked release
+  files Game Studio already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
+  exporting again. **Export Linux** writes a standalone build to `builds/linux/`.
   Both export the game's current files and leave the Web build Play serves alone; Game Studio checks
   the Windows executable it produced but does not run it, so try it on Windows before sharing it. If
   the Windows export templates are missing, **Install tools** in Settings adds them. The **Builds**

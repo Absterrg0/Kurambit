@@ -109,6 +109,10 @@ export const gameEnvironment = {
     label: "game:action",
     tag: WS_METHODS.gameAction,
   }),
+  packageWindows: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:packageWindows",
+    tag: WS_METHODS.gameWindowsPackage,
+  }),
   install: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:install",
     tag: WS_METHODS.gameInstall,

@@ -39,6 +39,8 @@ import {
 } from "./assets/AttachmentUpload.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as GamePackageDownload from "./game/GamePackageDownload.ts";
+import * as GameService from "./game/GameService.ts";
 import {
   annotateEnvironmentRequest,
   failEnvironmentScopeRequired,
@@ -448,6 +450,64 @@ export const layerAssetRoute = HttpRouter.add(
       request.method === "HEAD" ? "HEAD" : "GET",
     ).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
+    );
+  }),
+);
+
+/**
+ * Serves the archive a package RPC already completed. The URL carries a signed
+ * thread capability, not a filesystem path; an expired, edited or unknown token
+ * is a 404 and a missing archive is an actionable 404. Bytes stream from disk,
+ * so a large release never enters a JSON frame or a renderer blob.
+ */
+export const layerGamePackageRoute = HttpRouter.use((router) =>
+  Effect.gen(function* () {
+    const game = yield* GameService.GameService;
+    yield* router.add(
+      "GET",
+      `${GamePackageDownload.GAME_PACKAGE_ROUTE_PREFIX}/*`,
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const url = HttpServerRequest.toURL(request);
+        if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+        const token = url.value.pathname.slice(
+          `${GamePackageDownload.GAME_PACKAGE_ROUTE_PREFIX}/`.length,
+        );
+        if (token.length === 0 || token.includes("/"))
+          return HttpServerResponse.text("Not Found", { status: 404 });
+        const claims = yield* GamePackageDownload.verifyGamePackageDownload(token).pipe(
+          Effect.catchCause(() => Effect.succeed(null)),
+        );
+        if (claims === null) return HttpServerResponse.text("Not Found", { status: 404 });
+        const file = yield* game
+          .windowsPackageFile(claims.threadId)
+          .pipe(Effect.catchCause(() => Effect.succeed(null)));
+        if (file === null)
+          return HttpServerResponse.text(
+            "No complete Windows package is ready. Open Builds and choose Download package.",
+            { status: 404 },
+          );
+        return yield* HttpServerResponse.file(file.path, {
+          headers: {
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": downloadContentDisposition(file.fileName),
+            "Content-Length": String(file.bytes),
+            "Content-Type": "application/zip",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("The Windows package download failed.", { cause }).pipe(
+            Effect.as(
+              HttpServerResponse.text(
+                "The Windows package changed before it could be downloaded. Open Builds and download it again.",
+                { status: 404 },
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }),
 );

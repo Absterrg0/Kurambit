@@ -28,6 +28,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameDiscardRevision]: "game",
   [WS_METHODS.gameUpdateVerificationPolicy]: "game",
   [WS_METHODS.gameAction]: "game",
+  [WS_METHODS.gameWindowsPackage]: "game",
   [WS_METHODS.gameToolchainStatus]: "game",
   [WS_METHODS.gameInstall]: "game",
   [WS_METHODS.gameVerify]: "game",

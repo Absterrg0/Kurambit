@@ -3,6 +3,7 @@ import * as GameReviewApi from "./game/GameReviewApi.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
+import * as GamePackageDownload from "./game/GamePackageDownload.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 
@@ -26,6 +27,7 @@ import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AcpRegistryOperationError,
   CommandId,
+  GameOperationError,
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
@@ -1755,6 +1757,27 @@ const layerWsRpc = (
             probe,
           }),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
+        [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
+          Effect.gen(function* () {
+            const packaged = yield* game.packageWindows(threadId);
+            const download = yield* GamePackageDownload.issueGamePackageDownload(threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GameOperationError({
+                    operation: "Package Windows build",
+                    path: packaged.archivePath,
+                    reason: "io",
+                    detail: cause.message,
+                    cause,
+                  }),
+              ),
+            );
+            return {
+              ...packaged,
+              downloadPath: download.path,
+              expiresAt: DateTime.formatIso(DateTime.makeUnsafe(download.expiresAt)),
+            };
+          }),
         [WS_METHODS.subscribeGameEvents]: () => game.events,
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,

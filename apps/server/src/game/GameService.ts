@@ -34,6 +34,7 @@ import {
   type GameVerifyInput,
   type GameVerifyResult,
   type GameVerifyStage,
+  type GameWindowsPackage,
   type ThreadId,
   fitScreenshotsToBudget,
   gameProductionBudgetMs,
@@ -93,6 +94,12 @@ import { productionStatus } from "./gameProduction.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
 import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
 import { publishWindowsBuild } from "./windowsPublication.ts";
+import {
+  packageWindowsRelease,
+  WindowsPackageError,
+  WINDOWS_PACKAGE_FILE,
+  windowsPackageArchivePath,
+} from "./windowsPackage.ts";
 
 /**
  * The export answer the builder reads. The first accepted submit is the first
@@ -140,6 +147,20 @@ export class GameService extends Context.Service<
       target: "Web" | "Linux" | "Windows",
       options?: { readonly roundId?: string | undefined },
     ) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Packages the already exported Windows release as a ZIP. It never exports;
+     * a missing or unusable release is an error and leaves earlier files alone.
+     */
+    readonly packageWindows: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameWindowsPackage, GameOperationError>;
+    /** The complete archive a signed download URL serves; never creates one. */
+    readonly windowsPackageFile: (
+      threadId: ThreadId,
+    ) => Effect.Effect<
+      { readonly path: string; readonly fileName: string; readonly bytes: number },
+      GameOperationError
+    >;
     /**
      * Runs the native game. The creator's own Play may watch it on their
      * display; an agent's tool always asks for `headless`.
@@ -786,7 +807,7 @@ const make = Effect.gen(function* () {
           try: async () => {
             const executable = await NodeFSP.readFile(windowsStaging);
             const pck = await NodeFSP.readFile(stagedPck).catch(() => null);
-            return inspectWindowsBuild({ executable, pck });
+            return await inspectWindowsBuild({ executable, pck });
           },
           catch: (cause) =>
             new GameOperationError({
@@ -900,6 +921,12 @@ const make = Effect.gen(function* () {
             : " A standard Windows export preset was added.") +
           (publication.notes.length === 0 ? "" : ` ${publication.notes.join(" ")}`) +
           " This machine did not run it on Windows.";
+        // A package describes one release. Once a new release is published the
+        // old archive is no longer what the Builds panel would package, so do
+        // not leave it downloadable under the old name.
+        yield* Effect.promise(() =>
+          NodeFSP.rm(windowsPackageArchivePath(root), { force: true }),
+        ).pipe(Effect.catchCause(() => Effect.void));
       }
       const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
       if (hashed !== null && directory !== null) {
@@ -2388,6 +2415,87 @@ const make = Effect.gen(function* () {
               return yield* exportGame(root, target, { mode: "publish" }, null);
             }),
       ),
+    packageWindows: (threadId) =>
+      withRoot(threadId, "Package Windows build", (root) =>
+        Effect.gen(function* () {
+          const packaged = yield* Effect.tryPromise({
+            try: (signal) => packageWindowsRelease({ root, signal }),
+            catch: (cause) =>
+              cause instanceof WindowsPackageError
+                ? new GameOperationError({
+                    operation: "Package Windows build",
+                    path: cause.path,
+                    reason:
+                      cause.kind === "missing" ||
+                      cause.kind === "invalid" ||
+                      cause.kind === "changed"
+                        ? "invalid-input"
+                        : "io",
+                    detail: cause.message,
+                    cause,
+                  })
+                : new GameOperationError({
+                    operation: "Package Windows build",
+                    path: NodePath.join(root, "builds/windows/game.exe"),
+                    reason: "io",
+                    detail:
+                      cause instanceof Error
+                        ? cause.message
+                        : "The Windows package could not be created.",
+                    cause,
+                  }),
+          });
+          const relative = NodePath.relative(root, packaged.archivePath)
+            .split(NodePath.sep)
+            .join("/");
+          return {
+            archivePath: packaged.archivePath,
+            fileName: packaged.fileName,
+            bytes: packaged.bytes,
+            sha256: packaged.sha256,
+            files: packaged.files.map((file) => ({
+              name: file.name,
+              bytes: file.bytes,
+              sha256: file.sha256,
+            })),
+            embeddedPck: packaged.embeddedPck,
+            executableBytes: packaged.executableBytes,
+            pckBytes: packaged.pckBytes,
+            pckFileCount: packaged.pckFileCount,
+            notes: [
+              ...packaged.notes,
+              `The ZIP contains the existing checked release files (${packaged.files.map((file) => file.name).join(" and ")}), not a new export. This machine did not run it on Windows.`,
+            ],
+            message: `Windows package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB).`,
+          };
+        }),
+      ),
+    windowsPackageFile: (threadId) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        const path = windowsPackageArchivePath(root);
+        const stat = yield* Effect.tryPromise({
+          try: () => NodeFSP.stat(path),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "Download Windows package",
+              path,
+              reason: "invalid-input",
+              detail:
+                "No Windows package is ready. Open Builds, then choose Download package on the Windows build.",
+              cause,
+            }),
+        });
+        if (!stat.isFile() || stat.size === 0)
+          return yield* new GameOperationError({
+            operation: "Download Windows package",
+            path,
+            reason: "invalid-input",
+            detail:
+              "The Windows package is missing or empty. Open Builds, then choose Download package again.",
+          });
+        return { path, fileName: WINDOWS_PACKAGE_FILE, bytes: stat.size };
+      }),
     native: (threadId, options) =>
       withRoot(threadId, "Native game", (root) =>
         Effect.andThen(

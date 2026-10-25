@@ -36,6 +36,7 @@ import {
   GameVerifyInput,
   GameWebPlaytestResult,
   GameVerifyResult,
+  GameWindowsPackage,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as GameRecipes from "../../../game/GameRecipes.ts";
@@ -165,6 +166,15 @@ const ExportTool = Tool.make("game_export", {
     "Import and export this thread's game with the Web, Windows or Linux release preset. Windows produces builds/windows/game.exe, a 64-bit x86_64 executable. The standard preset embeds the game data, so the executable alone is enough; a custom preset that does not embed it also produces builds/windows/game.pck, so heed the result and copy both files together. It has not been run on Windows. Linux produces builds/linux/game.x86_64. Both native targets export the current sources and never replace the Web build Play serves. Verifies matching Godot export templates and the actual artifact. Missing Windows templates are an actionable error; Install tools adds them without replacing the Godot binary. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
   success: GameActionResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Readonly, false);
+const PackageWindowsTool = Tool.make("game_package_windows", {
+  description:
+    "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and a signed same-origin download path. Packaging does not prove Windows booted.",
+  parameters: Schema.Struct({}),
+  success: GameWindowsPackage,
   failure,
   failureMode: "return",
   dependencies,
@@ -333,6 +343,7 @@ export const GameToolkit = Toolkit.make(
   ScenariosTool,
   InspectSceneTool,
   ExportTool,
+  PackageWindowsTool,
   PreviewTool,
   NativeTool,
   StopTool,
