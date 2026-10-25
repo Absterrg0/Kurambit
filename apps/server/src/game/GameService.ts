@@ -52,6 +52,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
 import { insideGame } from "./GameProjectService.ts";
+import { openMediaFile, type OpenMediaFile } from "../assets/MediaFile.ts";
 import { commandDetail } from "./commandDetail.ts";
 import {
   CANDIDATE_BUILDS_DIRECTORY,
@@ -96,6 +97,7 @@ import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExpor
 import { publishWindowsBuild } from "./windowsPublication.ts";
 import {
   packageWindowsRelease,
+  retireWindowsArchive,
   WindowsPackageError,
   WINDOWS_PACKAGE_FILE,
   windowsPackageArchivePath,
@@ -107,6 +109,23 @@ import {
  */
 const WEB_READY_MESSAGE =
   "Web game is ready to play. Playtest it with input steps; the first game_submit makes it the first playable, and later accepted submits replace it as you keep producing.";
+
+/**
+ * Hashes an already opened, identity-checked archive. A download names the
+ * archive it was minted for, so the bytes served must still be those bytes.
+ */
+const hashOpenFile = async (file: OpenMediaFile) => {
+  const hash = NodeCrypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let offset = 0;
+  for (;;) {
+    const result = await file.handle.read(buffer, 0, buffer.byteLength, offset);
+    if (result.bytesRead === 0) break;
+    hash.update(buffer.subarray(0, result.bytesRead));
+    offset += result.bytesRead;
+  }
+  return { bytes: offset, sha256: hash.digest("hex") };
+};
 
 export class GameService extends Context.Service<
   GameService,
@@ -157,8 +176,15 @@ export class GameService extends Context.Service<
     /** The complete archive a signed download URL serves; never creates one. */
     readonly windowsPackageFile: (
       threadId: ThreadId,
+      packageSha256: string,
     ) => Effect.Effect<
-      { readonly path: string; readonly fileName: string; readonly bytes: number },
+      {
+        readonly path: string;
+        readonly fileName: string;
+        readonly bytes: number;
+        readonly sha256: string;
+        readonly identity: { readonly device: string; readonly inode: string };
+      },
       GameOperationError
     >;
     /**
@@ -893,13 +919,24 @@ const make = Effect.gen(function* () {
       if (windowsOutput !== null && windowsStaging !== null && checkedWindows !== null) {
         const { inspection, stagedPck } = checkedWindows;
         const publication = yield* Effect.tryPromise({
-          try: () =>
-            publishWindowsBuild({
-              stagedExecutable: windowsStaging,
-              stagedPck: inspection.embeddedPck ? null : stagedPck,
-              executable: windowsOutput,
-              pck: windowsOutput.replace(/\.exe$/, ".pck"),
-            }),
+          try: async () => {
+            const retirement = await retireWindowsArchive({
+              archive: windowsPackageArchivePath(root),
+            });
+            try {
+              const published = await publishWindowsBuild({
+                stagedExecutable: windowsStaging,
+                stagedPck: inspection.embeddedPck ? null : stagedPck,
+                executable: windowsOutput,
+                pck: windowsOutput.replace(/\.exe$/, ".pck"),
+              });
+              const retirementNotes = retirement === null ? [] : await retirement.discard();
+              return { ...published, notes: [...published.notes, ...retirementNotes] };
+            } catch (cause) {
+              if (retirement !== null) await retirement.restore();
+              throw cause;
+            }
+          },
           catch: (cause) =>
             new GameOperationError({
               operation: "export-windows",
@@ -921,12 +958,6 @@ const make = Effect.gen(function* () {
             : " A standard Windows export preset was added.") +
           (publication.notes.length === 0 ? "" : ` ${publication.notes.join(" ")}`) +
           " This machine did not run it on Windows.";
-        // A package describes one release. Once a new release is published the
-        // old archive is no longer what the Builds panel would package, so do
-        // not leave it downloadable under the old name.
-        yield* Effect.promise(() =>
-          NodeFSP.rm(windowsPackageArchivePath(root), { force: true }),
-        ).pipe(Effect.catchCause(() => Effect.void));
       }
       const directory = hashed === null ? null : candidateBuildDirectory(hashed.buildId);
       if (hashed !== null && directory !== null) {
@@ -2470,32 +2501,68 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
-    windowsPackageFile: (threadId) =>
+    windowsPackageFile: (threadId, packageSha256) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const path = windowsPackageArchivePath(root);
-        const stat = yield* Effect.tryPromise({
-          try: () => NodeFSP.stat(path),
+        const opened = yield* openMediaFile(path).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "Download Windows package",
+                path,
+                reason: "io",
+                detail: "The Windows package could not be opened.",
+                cause,
+              }),
+          ),
+        );
+        if (opened === null)
+          return yield* new GameOperationError({
+            operation: "Download Windows package",
+            path,
+            reason: "download",
+            detail:
+              "No Windows package is ready. Open Builds, then choose Download package on the Windows build.",
+          });
+        const verified = yield* Effect.tryPromise({
+          try: () => hashOpenFile(opened),
           catch: (cause) =>
             new GameOperationError({
               operation: "Download Windows package",
               path,
-              reason: "invalid-input",
-              detail:
-                "No Windows package is ready. Open Builds, then choose Download package on the Windows build.",
+              reason: "io",
+              detail: "The Windows package could not be read.",
               cause,
             }),
         });
-        if (!stat.isFile() || stat.size === 0)
+        const after = yield* Effect.tryPromise({
+          try: () => opened.handle.stat({ bigint: true }),
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "Download Windows package",
+              path,
+              reason: "io",
+              detail: "The Windows package could not be checked.",
+              cause,
+            }),
+        });
+        if (BigInt(verified.bytes) !== after.size || verified.sha256 !== packageSha256)
           return yield* new GameOperationError({
             operation: "Download Windows package",
             path,
-            reason: "invalid-input",
+            reason: "checksum",
             detail:
-              "The Windows package is missing or empty. Open Builds, then choose Download package again.",
+              "The Windows package changed after this download link was created. Open Builds, then choose Download package again.",
           });
-        return { path, fileName: WINDOWS_PACKAGE_FILE, bytes: stat.size };
-      }),
+        return {
+          path,
+          fileName: WINDOWS_PACKAGE_FILE,
+          bytes: verified.bytes,
+          sha256: verified.sha256,
+          identity: { device: after.dev.toString(), inode: after.ino.toString() },
+        };
+      }).pipe(Effect.scoped),
     native: (threadId, options) =>
       withRoot(threadId, "Native game", (root) =>
         Effect.andThen(

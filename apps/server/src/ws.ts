@@ -1760,7 +1760,10 @@ const layerWsRpc = (
         [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
           Effect.gen(function* () {
             const packaged = yield* game.packageWindows(threadId);
-            const download = yield* GamePackageDownload.issueGamePackageDownload(threadId).pipe(
+            const download = yield* GamePackageDownload.issueGamePackageDownload(
+              threadId,
+              packaged.sha256,
+            ).pipe(
               Effect.mapError(
                 (cause) =>
                   new GameOperationError({

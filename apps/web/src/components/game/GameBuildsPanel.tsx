@@ -38,7 +38,7 @@ const BUILD_META: Record<
   },
   Windows: {
     title: "Windows build",
-    body: "A standalone 64-bit Windows build for Windows PCs. Play still serves the Web build.",
+    body: "A standalone 64-bit Windows build for Windows PCs. Download package zips this exported release, not later source edits. Play still serves the Web build.",
     icon: MonitorIcon,
     play: false,
   },
@@ -73,11 +73,24 @@ export function GameBuildsPanel({
   const packageWindows = useAtomCommand(gameEnvironment.packageWindows, { reportFailure: false });
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
   const [packaging, setPackaging] = useState(false);
-  const [packageError, setPackageError] = useState<string | null>(null);
-  const [packageStatus, setPackageStatus] = useState<string | null>(null);
+  const [packageNotice, setPackageNotice] = useState<{
+    readonly buildKey: string;
+    readonly status: string | null;
+    readonly error: string | null;
+  } | null>(null);
   const [checked, setChecked] = useState<GameStatus["sourcesDifferFromPlay"] | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const windowsBuild = builds.find((entry) => entry.target === "Windows");
+  // A new Windows export removes the package. Tie the ready message to the
+  // build it described so the previous archive's notice disappears with it.
+  const windowsBuildKey = windowsBuild
+    ? `${threadRef.threadId}\n${windowsBuild.path}\n${windowsBuild.updatedAt}`
+    : null;
+  const packageNoticeForBuild =
+    packageNotice !== null && packageNotice.buildKey === windowsBuildKey ? packageNotice : null;
+  const packageStatus = packageNoticeForBuild?.status ?? null;
+  const packageError = packageNoticeForBuild?.error ?? null;
   const checkSources = async () => {
     setChecking(true);
     const result = await check({
@@ -94,16 +107,20 @@ export function GameBuildsPanel({
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
   const downloadWindowsPackage = async () => {
+    const buildKey = windowsBuildKey ?? "";
     setPackaging(true);
-    setPackageError(null);
-    setPackageStatus(null);
+    setPackageNotice(null);
     const result = await packageWindows({
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId },
     });
     setPackaging(false);
     if (result._tag === "Failure") {
-      setPackageError(String(squashAtomCommandFailure(result)));
+      setPackageNotice({
+        buildKey,
+        status: null,
+        error: String(squashAtomCommandFailure(result)),
+      });
       return;
     }
     const url =
@@ -111,15 +128,25 @@ export function GameBuildsPanel({
         ? resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.downloadPath)
         : null;
     if (url === null) {
-      setPackageError("The server address is not ready. Try the download again.");
+      setPackageNotice({
+        buildKey,
+        status: null,
+        error: "The server address is not ready. Try the download again.",
+      });
       return;
     }
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = result.value.fileName;
     anchor.rel = "noopener";
+    document.body.appendChild(anchor);
     anchor.click();
-    setPackageStatus(result.value.message);
+    anchor.remove();
+    setPackageNotice({
+      buildKey,
+      status: [result.value.message, ...result.value.notes].join(" "),
+      error: null,
+    });
   };
   return (
     <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This route test writes a real archive in a temporary directory and reads it back over test HTTP.
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -16,26 +17,39 @@ import * as ServerHttp from "../http.ts";
 import * as GameService from "./GameService.ts";
 import { GAME_PACKAGE_ROUTE_PREFIX, issueGamePackageDownload } from "./GamePackageDownload.ts";
 
-const makeService = (file: { readonly path: string; readonly bytes: number } | null) =>
+const packageSha = "a".repeat(64);
+
+interface FakePackageFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha256?: string;
+  readonly identity?: { readonly device: string; readonly inode: string };
+}
+
+const makeService = (file: FakePackageFile | null) =>
   ({
-    windowsPackageFile: () =>
-      file === null
-        ? Effect.fail(
-            new GameOperationError({
-              operation: "Download Windows package",
-              path: "/missing/game-windows.zip",
-              reason: "invalid-input",
-              detail: "No Windows package is ready.",
-            }),
-          )
-        : Effect.succeed({
-            path: file.path,
-            fileName: "game-windows.zip",
-            bytes: file.bytes,
+    windowsPackageFile: () => {
+      if (file === null)
+        return Effect.fail(
+          new GameOperationError({
+            operation: "Download Windows package",
+            path: "/missing/game-windows.zip",
+            reason: "download",
+            detail: "No Windows package is ready.",
           }),
+        );
+      const stat = NodeFS.statSync(file.path);
+      return Effect.succeed({
+        path: file.path,
+        fileName: "game-windows.zip",
+        bytes: file.bytes,
+        sha256: file.sha256 ?? packageSha,
+        identity: file.identity ?? { device: String(stat.dev), inode: String(stat.ino) },
+      });
+    },
   }) as unknown as GameService.GameService["Service"];
 
-const layerApp = (file: { readonly path: string; readonly bytes: number } | null) =>
+const layerApp = (file: FakePackageFile | null) =>
   HttpRouter.serve(
     ServerHttp.layerGamePackageRoute.pipe(
       Layer.provideMerge(Layer.succeed(GameService.GameService, makeService(file))),
@@ -65,7 +79,7 @@ it.effect("streams only the archive a valid capability names", () =>
       const client = Context.get(services, HttpClient.HttpClient);
       const secretStore = Context.get(services, ServerSecretStore.ServerSecretStore);
       const threadId = ThreadId.make("thr_route-test");
-      const issued = yield* issueGamePackageDownload(threadId).pipe(
+      const issued = yield* issueGamePackageDownload(threadId, packageSha).pipe(
         Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
       );
 
@@ -86,6 +100,45 @@ it.effect("streams only the archive a valid capability names", () =>
   ),
 );
 
+it.effect("does not serve an archive replaced after the capability was minted", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-package-route-swap-")),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+      );
+      const path = NodePath.join(directory, "game-windows.zip");
+      const replacement = NodePath.join(directory, "replacement.zip");
+      yield* Effect.promise(() => NodeFSP.writeFile(path, "package A"));
+      const stat = NodeFS.statSync(path);
+      const services = yield* Layer.build(
+        layerApp({
+          path,
+          bytes: Buffer.byteLength("package A"),
+          sha256: packageSha,
+          identity: { device: String(stat.dev), inode: String(stat.ino) },
+        }),
+      );
+      const client = Context.get(services, HttpClient.HttpClient);
+      const secretStore = Context.get(services, ServerSecretStore.ServerSecretStore);
+      const threadId = ThreadId.make("thr_route-swap");
+      const issued = yield* issueGamePackageDownload(threadId, packageSha).pipe(
+        Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
+      );
+
+      yield* Effect.promise(() => NodeFSP.writeFile(replacement, "package B"));
+      yield* Effect.promise(() => NodeFSP.rm(path));
+      yield* Effect.promise(() => NodeFSP.rename(replacement, path));
+
+      const response = yield* client.get(issued.path);
+      expect(response.status).toBe(404);
+      expect(yield* response.text).toContain("changed before it could be downloaded");
+    }),
+  ),
+);
+
 it.effect("does not create a package when the download route finds none", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -93,7 +146,7 @@ it.effect("does not create a package when the download route finds none", () =>
       const client = Context.get(services, HttpClient.HttpClient);
       const secretStore = Context.get(services, ServerSecretStore.ServerSecretStore);
       const threadId = ThreadId.make("thr_route-missing");
-      const issued = yield* issueGamePackageDownload(threadId).pipe(
+      const issued = yield* issueGamePackageDownload(threadId, packageSha).pipe(
         Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
       );
 

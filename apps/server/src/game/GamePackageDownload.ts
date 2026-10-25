@@ -16,9 +16,14 @@ export const GAME_PACKAGE_ROUTE_PREFIX = "/api/game/windows-package";
 const SECRET_NAME = "game-package-download-signing-key";
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 
+/** The path prefix carries a signed capability, so it must not reach a trace. */
+export const isGamePackageRoutePath = (pathname: string) =>
+  pathname === GAME_PACKAGE_ROUTE_PREFIX || pathname.startsWith(`${GAME_PACKAGE_ROUTE_PREFIX}/`);
+
 const Claims = Schema.Struct({
   version: Schema.Literal(1),
   threadId: ThreadId,
+  packageSha256: Schema.String,
   expiresAt: Schema.Number,
 });
 type Claims = typeof Claims.Type;
@@ -34,12 +39,13 @@ export interface GamePackageDownload {
 
 export const issueGamePackageDownload = Effect.fn("game.packageDownload.issue")(function* (
   threadId: ThreadId,
+  packageSha256: string,
   ttlMs = DEFAULT_TTL_MS,
 ) {
   const store = yield* ServerSecretStore.ServerSecretStore;
   const secret = yield* store.getOrCreateRandom(SECRET_NAME, 32);
   const expiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
-  const payload = base64UrlEncode(encodeClaims({ version: 1, threadId, expiresAt }));
+  const payload = base64UrlEncode(encodeClaims({ version: 1, threadId, packageSha256, expiresAt }));
   const token = `${payload}.${signPayload(payload, secret)}`;
   return {
     path: `${GAME_PACKAGE_ROUTE_PREFIX}/${token}`,
@@ -47,11 +53,13 @@ export const issueGamePackageDownload = Effect.fn("game.packageDownload.issue")(
   } satisfies GamePackageDownload;
 });
 
-/** Returns the thread a download token was minted for, or null for any bad token. */
+/** Returns the package a download token was minted for, or null for any bad token. */
 export const verifyGamePackageDownload = Effect.fn("game.packageDownload.verify")(function* (
   token: string,
 ) {
-  const [payload, signature] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
   if (!payload || !signature) return null;
   const store = yield* ServerSecretStore.ServerSecretStore;
   const secret = yield* store.get(SECRET_NAME).pipe(Effect.orElseSucceed(() => Option.none()));

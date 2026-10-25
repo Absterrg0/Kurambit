@@ -7,6 +7,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
   GAME_PACKAGE_ROUTE_PREFIX,
+  isGamePackageRoutePath,
   issueGamePackageDownload,
   verifyGamePackageDownload,
 } from "./GamePackageDownload.ts";
@@ -18,25 +19,30 @@ const layer = ServerSecretStore.layer.pipe(
 
 const tokenOf = (path: string) => path.slice(`${GAME_PACKAGE_ROUTE_PREFIX}/`.length);
 
-it.effect("mints a thread-scoped download capability and refuses edited or expired tokens", () =>
+it.effect("mints a package-scoped download capability and refuses edited or expired tokens", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const threadId = ThreadId.make("thr_package-test");
-      const issued = yield* issueGamePackageDownload(threadId);
+      const packageSha256 = "a".repeat(64);
+      const issued = yield* issueGamePackageDownload(threadId, packageSha256);
       expect(issued.path.startsWith(`${GAME_PACKAGE_ROUTE_PREFIX}/`)).toBe(true);
       expect(issued.path).not.toContain("game-windows.zip");
+      expect(isGamePackageRoutePath(issued.path)).toBe(true);
+      expect(isGamePackageRoutePath(`${GAME_PACKAGE_ROUTE_PREFIX}-other/token`)).toBe(false);
 
       const token = tokenOf(issued.path);
       const claims = yield* verifyGamePackageDownload(token);
       expect(claims?.threadId).toBe(threadId);
+      expect(claims?.packageSha256).toBe(packageSha256);
       expect(claims?.expiresAt).toBe(issued.expiresAt);
 
       expect(yield* verifyGamePackageDownload(`${token}x`)).toBeNull();
+      expect(yield* verifyGamePackageDownload(`${token}.extra`)).toBeNull();
       expect(yield* verifyGamePackageDownload("not-a-token")).toBeNull();
       expect(yield* verifyGamePackageDownload("../../etc/passwd")).toBeNull();
       expect(yield* verifyGamePackageDownload(`${token}/../other`)).toBeNull();
 
-      const expired = yield* issueGamePackageDownload(threadId, -1);
+      const expired = yield* issueGamePackageDownload(threadId, packageSha256, -1);
       expect(yield* verifyGamePackageDownload(tokenOf(expired.path))).toBeNull();
     }).pipe(Effect.provide(layer)),
   ),

@@ -31,7 +31,12 @@ import { OtlpTracer, OtlpSerialization } from "effect/observability";
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
-import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
+import {
+  openMediaFile,
+  statMediaFile,
+  streamMediaFile,
+  type OpenMediaFile,
+} from "./assets/MediaFile.ts";
 import {
   ATTACHMENT_UPLOAD_ROUTE_PREFIX,
   storeAttachmentUpload,
@@ -395,8 +400,9 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_P
 const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
   const queryIndex = request.url.indexOf("?");
   const path = queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
-  // Webhook URLs carry their secret token in the path, so they never reach a trace.
-  return UNTRACED_REQUEST_PATHS.has(path);
+  // A capability URL carries its bearer token in the path, and traces record
+  // the full path, so these requests stay out of them like any other secret.
+  return UNTRACED_REQUEST_PATHS.has(path) || GamePackageDownload.isGamePackageRoutePath(path);
 });
 
 export const withUntracedRequests = Layer.provide(layerUntracedRequests);
@@ -456,9 +462,11 @@ export const layerAssetRoute = HttpRouter.add(
 
 /**
  * Serves the archive a package RPC already completed. The URL carries a signed
- * thread capability, not a filesystem path; an expired, edited or unknown token
- * is a 404 and a missing archive is an actionable 404. Bytes stream from disk,
- * so a large release never enters a JSON frame or a renderer blob.
+ * package capability naming the archive hash, not a filesystem path; an
+ * expired, edited or unknown token is a 404, and so is a package whose bytes
+ * changed after the URL was minted. Bytes stream from an identity-checked
+ * handle, so a large release never enters a JSON frame or a renderer blob and
+ * a replaced file cannot be substituted for the requested one.
  */
 export const layerGamePackageRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
@@ -480,14 +488,32 @@ export const layerGamePackageRoute = HttpRouter.use((router) =>
         );
         if (claims === null) return HttpServerResponse.text("Not Found", { status: 404 });
         const file = yield* game
-          .windowsPackageFile(claims.threadId)
+          .windowsPackageFile(claims.threadId, claims.packageSha256)
           .pipe(Effect.catchCause(() => Effect.succeed(null)));
         if (file === null)
           return HttpServerResponse.text(
             "No complete Windows package is ready. Open Builds and choose Download package.",
             { status: 404 },
           );
-        return yield* HttpServerResponse.file(file.path, {
+        const opened = yield* openMediaFile(file.path, file.identity).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (opened === null)
+          return HttpServerResponse.text(
+            "The Windows package changed before it could be downloaded. Open Builds and download it again.",
+            { status: 404 },
+          );
+        if (opened.info.size !== BigInt(file.bytes))
+          return HttpServerResponse.text(
+            "The Windows package changed before it could be downloaded. Open Builds and download it again.",
+            { status: 404 },
+          );
+        const body = streamMediaFile(opened, 0n, BigInt(file.bytes));
+        if (body === null)
+          return HttpServerResponse.text("The Windows package is too large to stream.", {
+            status: 413,
+          });
+        return HttpServerResponse.stream(body, {
           headers: {
             "Cache-Control": "private, no-store",
             "Content-Disposition": downloadContentDisposition(file.fileName),

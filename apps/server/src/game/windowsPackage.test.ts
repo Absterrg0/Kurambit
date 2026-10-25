@@ -9,6 +9,7 @@ import { windowsExecutable, windowsPck } from "./windowsExport.testkit.ts";
 import {
   packageWindowsRelease,
   publishWindowsArchive,
+  retireWindowsArchive,
   WINDOWS_PACKAGE_FILE,
   windowsPackageArchivePath,
   type WindowsPackageFileSystem,
@@ -210,4 +211,82 @@ it("restores the previous package when the replacement cannot be moved into plac
     ).rejects.toThrow("previous package was kept");
     expect(await NodeFSP.readFile(archive, "utf8")).toBe("earlier package");
     expect(await NodeFSP.readFile(staged, "utf8")).toBe("new package");
+  }));
+
+it("names the preserved backup when the previous package cannot be restored", () =>
+  withDirectory(async (root) => {
+    const archive = NodePath.join(root, "game-windows.zip");
+    const staged = NodePath.join(root, ".game-windows.zip.partial");
+    await NodeFSP.writeFile(archive, "earlier package");
+    await NodeFSP.writeFile(staged, "new package");
+    let renamedBackup = "";
+    const fileSystem: WindowsPackageFileSystem = {
+      async rename(from, to) {
+        if (from === staged) throw Object.assign(new Error("busy"), { code: "EEXIST" });
+        if (from.endsWith(".backup") && to === archive && renamedBackup !== "") {
+          throw new Error("restore blocked");
+        }
+        if (from === archive) renamedBackup = to;
+        await NodeFSP.rename(from, to);
+      },
+      rm: (path, options) => NodeFSP.rm(path, options),
+    };
+
+    const failure = await publishWindowsArchive(
+      { stagedArchive: staged, archive },
+      fileSystem,
+    ).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ name: "WindowsPackageError" });
+    expect((failure as Error).message).toContain("preserved at");
+    expect((failure as Error).message).toContain(renamedBackup);
+    expect(await NodeFSP.readFile(renamedBackup, "utf8")).toBe("earlier package");
+    await expect(NodeFSP.stat(archive)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await NodeFSP.readFile(staged, "utf8")).toBe("new package");
+  }));
+
+it("retires an incumbent package before publication and restores it on failure", () =>
+  withDirectory(async (root) => {
+    const archive = NodePath.join(root, "game-windows.zip");
+    await NodeFSP.writeFile(archive, "earlier package");
+    const retirement = await retireWindowsArchive({ archive });
+    expect(retirement).not.toBeNull();
+    await expect(NodeFSP.stat(archive)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await NodeFSP.readFile(retirement!.backup, "utf8")).toBe("earlier package");
+
+    await retirement!.restore();
+    expect(await NodeFSP.readFile(archive, "utf8")).toBe("earlier package");
+    await expect(NodeFSP.stat(retirement!.backup)).rejects.toMatchObject({ code: "ENOENT" });
+  }));
+
+it("removes the retired package after publication", () =>
+  withDirectory(async (root) => {
+    const archive = NodePath.join(root, "game-windows.zip");
+    await NodeFSP.writeFile(archive, "earlier package");
+    const retirement = await retireWindowsArchive({ archive });
+    expect(await retirement!.discard()).toEqual([]);
+    await expect(NodeFSP.stat(retirement!.backup)).rejects.toMatchObject({ code: "ENOENT" });
+  }));
+
+it("reports a retired package it cannot delete without advertising it for download", () =>
+  withDirectory(async (root) => {
+    const archive = NodePath.join(root, "game-windows.zip");
+    await NodeFSP.writeFile(archive, "earlier package");
+    const fileSystem: WindowsPackageFileSystem = {
+      rename: (from, to) => NodeFSP.rename(from, to),
+      rm: async () => {
+        throw new Error("delete blocked");
+      },
+    };
+    const retirement = await retireWindowsArchive({ archive }, fileSystem);
+    const notes = await retirement!.discard();
+    expect(notes.join(" ")).toContain(retirement!.backup);
+    expect(await NodeFSP.readFile(retirement!.backup, "utf8")).toBe("earlier package");
+    await expect(NodeFSP.stat(archive)).rejects.toMatchObject({ code: "ENOENT" });
+  }));
+
+it("does not retire a package that is not there", () =>
+  withDirectory(async (root) => {
+    expect(
+      await retireWindowsArchive({ archive: NodePath.join(root, "game-windows.zip") }),
+    ).toBeNull();
   }));

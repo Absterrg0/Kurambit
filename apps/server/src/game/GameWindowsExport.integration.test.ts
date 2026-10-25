@@ -295,6 +295,11 @@ it.live.skipIf(!available)(
               ),
             ),
           ).toBe(true);
+          expect(
+            NodeFS.readdirSync(NodePath.dirname(packaged.archivePath)).filter((name) =>
+              name.includes(".retired"),
+            ),
+          ).toEqual([]);
           expect((yield* game.status(threadId)).selectedBuildId).toBe(selectedBefore);
         }).pipe(Effect.provide(dependencies)),
       );

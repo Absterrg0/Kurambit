@@ -412,13 +412,28 @@ export const publishWindowsArchive = async (
       await fileSystem.rename(input.archive, backup);
       backedUp = true;
     } catch (error) {
-      if (!isNotFound(error)) throw cause;
+      if (!isNotFound(error))
+        throw new WindowsPackageError(
+          input.archive,
+          "io",
+          `The previous Windows package could not be moved aside, so the new one was not published: ${describe(error)}`,
+          { cause: error },
+        );
     }
     try {
       await fileSystem.rename(input.stagedArchive, input.archive);
     } catch (error) {
       if (backedUp) {
-        await fileSystem.rename(backup, input.archive).catch(() => undefined);
+        try {
+          await fileSystem.rename(backup, input.archive);
+        } catch (restoreError) {
+          throw new WindowsPackageError(
+            backup,
+            "io",
+            `The new Windows package could not be moved into place, and the previous package is preserved at ${backup} instead of ${input.archive}: ${describe(restoreError)}`,
+            { cause: restoreError },
+          );
+        }
       }
       throw new WindowsPackageError(
         input.archive,
@@ -434,6 +449,60 @@ export const publishWindowsArchive = async (
       });
     return { notes };
   }
+};
+
+export interface WindowsArchiveRetirement {
+  readonly backup: string;
+  /** Puts the incumbent archive back after a publication that did not commit. */
+  restore(): Promise<void>;
+  /** Removes the retired incumbent after the new release committed. */
+  discard(): Promise<readonly string[]>;
+}
+
+/**
+ * Moves the incumbent package out of its download path before a new Windows
+ * release is published. A publication failure restores it; a success discards
+ * it, so the package URL can never resolve to bytes from the previous release.
+ */
+export const retireWindowsArchive = async (
+  input: { readonly archive: string },
+  fileSystem: WindowsPackageFileSystem = nativeFileSystem,
+): Promise<WindowsArchiveRetirement | null> => {
+  const backup = `${input.archive}.${NodeCrypto.randomUUID()}.retired`;
+  try {
+    await fileSystem.rename(input.archive, backup);
+  } catch (cause) {
+    if (isNotFound(cause)) return null;
+    throw new WindowsPackageError(
+      input.archive,
+      "io",
+      `The previous Windows package could not be moved aside, so the new release was not published: ${describe(cause)}`,
+      { cause },
+    );
+  }
+  return {
+    backup,
+    async restore() {
+      try {
+        await fileSystem.rename(backup, input.archive);
+      } catch (cause) {
+        throw new WindowsPackageError(
+          backup,
+          "io",
+          `The previous Windows package is preserved at ${backup} but could not be restored to ${input.archive}: ${describe(cause)}`,
+          { cause },
+        );
+      }
+    },
+    async discard() {
+      try {
+        await fileSystem.rm(backup, { force: true });
+        return [];
+      } catch {
+        return [`An older Windows package remains at ${backup} because it could not be removed.`];
+      }
+    },
+  };
 };
 
 export const packageWindowsRelease = async (input: {
@@ -497,7 +566,28 @@ export const packageWindowsRelease = async (input: {
         );
     }
     throwIfAborted(input.signal);
-    const publication = await publishWindowsArchive({ stagedArchive: staged, archive });
+    const stagedPath = staged;
+    if (stagedPath === null)
+      throw new WindowsPackageError(
+        archive,
+        "io",
+        "The Windows package staging path was not created.",
+      );
+    const stagedStat = await NodeFSP.stat(stagedPath).catch((cause) => {
+      throw new WindowsPackageError(
+        stagedPath,
+        "io",
+        `The Windows package could not be read back before publication: ${describe(cause)}`,
+        { cause },
+      );
+    });
+    if (stagedStat.size !== written.bytes)
+      throw new WindowsPackageError(
+        stagedPath,
+        "io",
+        "The Windows package was not written completely. The previous package was kept; export Windows again and retry.",
+      );
+    const publication = await publishWindowsArchive({ stagedArchive: stagedPath, archive });
     staged = null;
     const archiveStat = await NodeFSP.stat(archive).catch((cause) => {
       throw new WindowsPackageError(
@@ -509,8 +599,10 @@ export const packageWindowsRelease = async (input: {
     });
     const notes = [...publication.notes];
     if (archiveStat.size !== written.bytes)
-      notes.push(
-        "The published Windows package size does not match the bytes written. Delete it and download the package again.",
+      throw new WindowsPackageError(
+        archive,
+        "io",
+        "The published Windows package size does not match the bytes written. Export Windows again and package it again.",
       );
     return {
       archivePath: archive,
