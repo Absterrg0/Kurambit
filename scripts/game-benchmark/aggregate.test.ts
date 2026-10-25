@@ -677,9 +677,12 @@ describe("resume", () => {
       target: null,
       quick: null,
       obligationIds: [],
+      unansweredIds: [],
       obligations: { yes: 0, total: 0 },
       control: false,
+      controlAnswered: true,
       void: false,
+      inconclusive: false,
       solCalls: 0,
     };
     const evaluation: BenchmarkEvaluationProfile = {
@@ -725,9 +728,12 @@ describe("resume", () => {
       target: null,
       quick: null,
       obligationIds: [],
+      unansweredIds: [],
       obligations: { yes: 0, total: 0 },
       control: false,
+      controlAnswered: true,
       void: false,
+      inconclusive: false,
       solCalls: 0,
     };
     const evaluation: BenchmarkEvaluationProfile = {
@@ -763,6 +769,71 @@ describe("grade summaries", () => {
     assert.equal(summary?.graderVersion, 3);
     // An old grade document without the profile cannot be attributed to one.
     assert.equal(readGradeSummary({ build: { kind: "existing" } })?.graderVersion, null);
+  });
+
+  it("reads a failed control call as uncalibrated and a failed vote as no answer", () => {
+    const document = {
+      build: { kind: "existing" },
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 4,
+      quick: { booted: true, consoleErrors: 0, responded: true },
+      obligations: [
+        { id: "jumps", yes: true },
+        { id: "reaches-flag", yes: null },
+        { id: "opens-door", yes: false },
+      ],
+      control: { yes: false, answered: false, votes: [] },
+      void: false,
+      inconclusive: true,
+      solCalls: 6,
+    };
+    const summary = readGradeSummary(document);
+    assert.equal(summary?.control, false);
+    assert.equal(summary?.controlAnswered, false);
+    assert.equal(summary?.inconclusive, true);
+    assert.equal(summary?.void, false);
+    assert.deepStrictEqual(summary?.obligationIds, ["jumps"]);
+    assert.deepStrictEqual(summary?.unansweredIds, ["reaches-flag"]);
+    // A v3 document never recorded control validity; keep it historical.
+    const old = readGradeSummary({
+      build: { kind: "existing" },
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 3,
+      control: { yes: false, votes: [] },
+      void: false,
+    });
+    assert.equal(old?.controlAnswered, null);
+    assert.equal(old?.inconclusive, false);
+    assert.deepStrictEqual(old?.unansweredIds, []);
+  });
+
+  it("shows an unread control and unanswered claims in the grade table", () => {
+    const grade: BenchmarkGrade = {
+      build: "existing",
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 4,
+      target: null,
+      quick: null,
+      obligationIds: [],
+      unansweredIds: ["reaches-flag"],
+      obligations: { yes: 0, total: 2 },
+      control: false,
+      controlAnswered: false,
+      void: false,
+      inconclusive: true,
+      solCalls: 6,
+    };
+    const result = readBenchmarkResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-25T00:00:00.000Z",
+      durationMs: 60_000,
+      observation: { timedOut: false, exitCode: 0, signal: null, summary: null },
+      grade,
+    });
+    const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: [result] });
+    assert.match(markdown, /0\/2 \(1 unanswered\) \| unread \| inconclusive \| 6 \|/);
   });
 
   it("reads the served target and refuses a grade for another artifact", () => {

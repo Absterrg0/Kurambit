@@ -46,8 +46,13 @@ export const CODEX_GRADER_MODEL = REVIEWER.model;
  * The grader's own semantics: rubric, frame selection and prompt. A benchmark
  * resume key includes it, so another grader version cannot silently reuse a
  * verdict earned under the old one. Bump when a grade stops being comparable.
+ *
+ * 4: a failed call or an unreadable reply is recorded as no answer (null), not
+ * as NO. Version 3 turned a dead Codex CLI call into a NO, so a v3 control
+ * could claim calibration while its votes were never obtained; v3 documents
+ * cannot be reused as v4 verdicts.
  */
-export const GRADER_VERSION = 3;
+export const GRADER_VERSION = 4;
 
 const MAX_PLAYTESTER_STEPS = 15;
 const MAX_ACTIONS_PER_STEP = 3;
@@ -174,6 +179,12 @@ export const decodeVerdict = (raw: unknown): VerdictReply => {
   });
 };
 
+/** Reads the model's YES/NO answer; anything else is no answer, not a NO. */
+const answerOf = (verdict: string): boolean | null => {
+  const normalized = verdict.trim().toUpperCase();
+  return normalized === "YES" ? true : normalized === "NO" ? false : null;
+};
+
 export interface GradeFrame {
   /** `F1`…, the name the grader cites. */
   readonly id: string;
@@ -183,7 +194,11 @@ export interface GradeFrame {
 }
 
 export interface GradeVote {
-  readonly yes: boolean;
+  /**
+   * YES/NO when the model answered. Null when the call failed or the reply was
+   * not a YES/NO: an unobserved answer is not a NO.
+   */
+  readonly yes: boolean | null;
   readonly frame: string | null;
   readonly reason: string;
 }
@@ -191,7 +206,11 @@ export interface GradeVote {
 export interface GradeObligation {
   readonly id: string;
   readonly description: string;
-  readonly yes: boolean;
+  /**
+   * YES only when every vote answered YES; NO when an answered vote said NO;
+   * null when the claim is unproven because a vote went unanswered.
+   */
+  readonly yes: boolean | null;
   readonly votes: ReadonlyArray<GradeVote>;
 }
 
@@ -251,11 +270,23 @@ export interface GradeDocument {
   readonly obligations: ReadonlyArray<GradeObligation>;
   readonly control: {
     readonly description: string;
+    /** Any YES answer: the grader imagined the absurd item. */
     readonly yes: boolean;
+    /**
+     * Every attempted control vote returned a YES/NO. False when a call failed
+     * or its reply was unreadable, which is no answer at all.
+     */
+    readonly answered: boolean;
     readonly votes: ReadonlyArray<GradeVote>;
   };
   /** The control item passed, so every verdict in this grade is untrustworthy. */
   readonly void: boolean;
+  /**
+   * A control vote was attempted but produced no usable answer, so the
+   * negative control is unread. The grade is not void (nothing was
+   * hallucinated), but it cannot claim calibration.
+   */
+  readonly inconclusive: boolean;
   /** Model calls this grade spent. */
   readonly solCalls: number;
 }
@@ -619,6 +650,7 @@ export async function judgeObligations(input: {
   readonly obligations: ReadonlyArray<GradeObligation>;
   readonly control: GradeDocument["control"];
   readonly void: boolean;
+  readonly inconclusive: boolean;
   readonly solCalls: number;
 }> {
   const items = [
@@ -646,16 +678,16 @@ export async function judgeObligations(input: {
         imagePaths: input.frames.map((frame) => frame.path),
       });
       const reply = decodeVerdict(raw);
-      const yes = reply.verdict.trim().toUpperCase() === "YES";
+      const yes = answerOf(reply.verdict);
       const cited = input.frames.find((frame) => frame.id === reply.frame.trim().toUpperCase());
       return {
         yes,
-        frame: yes ? (cited?.id ?? null) : null,
+        frame: yes === true ? (cited?.id ?? null) : null,
         reason: reply.reason.slice(0, 400),
       };
     } catch (cause) {
       return {
-        yes: false,
+        yes: null,
         frame: null,
         reason:
           `The grader call failed: ${cause instanceof Error ? cause.message : String(cause)}`.slice(
@@ -684,17 +716,31 @@ export async function judgeObligations(input: {
     .filter((item) => item.id !== "control")
     .map((item, index) => {
       const votes = votesFor(index);
-      // Conjunction: one NO vote is a NO.
-      return { ...item, yes: votes.every((entry) => entry.yes), votes };
+      // Conjunction: one answered NO is a NO. A YES needs both answers; an
+      // unanswered vote leaves the claim unproven instead of inventing a NO.
+      const yes = votes.some((entry) => entry.yes === false)
+        ? false
+        : votes.every((entry) => entry.yes === true)
+          ? true
+          : null;
+      return { ...item, yes, votes };
     });
   const controlVotes = votesFor(items.length - 1);
   // The control is absurd by construction, so any YES is a hallucination and
-  // voids the whole grade (stricter than the obligations' conjunction).
-  const controlYes = controlVotes.some((entry) => entry.yes);
+  // voids the whole grade (stricter than the obligations' conjunction). A
+  // failed call is not a NO: it leaves the control unread, not passed.
+  const controlYes = controlVotes.some((entry) => entry.yes === true);
+  const controlAnswered = controlVotes.every((entry) => entry.yes !== null);
   return {
     obligations: verdicts,
-    control: { description: CONTROL_DESCRIPTION, yes: controlYes, votes: controlVotes },
+    control: {
+      description: CONTROL_DESCRIPTION,
+      yes: controlYes,
+      answered: controlAnswered,
+      votes: controlVotes,
+    },
     void: controlYes,
+    inconclusive: !controlYes && !controlAnswered,
     solCalls: calls,
   };
 }
@@ -1532,6 +1578,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       obligations: judged.obligations,
       control: judged.control,
       void: judged.void,
+      inconclusive: judged.inconclusive,
       solCalls: judged.solCalls,
     });
   }
@@ -1549,8 +1596,9 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
         yes: false,
         votes: [],
       })),
-      control: { description: CONTROL_DESCRIPTION, yes: false, votes: [] },
+      control: { description: CONTROL_DESCRIPTION, yes: false, answered: true, votes: [] },
       void: false,
+      inconclusive: false,
       solCalls: 0,
     });
 
@@ -1691,6 +1739,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       obligations: judged.obligations,
       control: judged.control,
       void: judged.void,
+      inconclusive: judged.inconclusive,
       solCalls: calls + judged.solCalls,
     };
     return write(grade);
@@ -1777,7 +1826,9 @@ const main = async () => {
         : `${grade.quick.booted ? "booted" : "no-boot"}/${grade.quick.consoleErrors} errors/${
             grade.quick.responded ? "responded" : "no-response"
           }`
-    } obligations=${yes}/${grade.obligations.length} void=${grade.void} calls=${grade.solCalls}`,
+    } obligations=${yes}/${grade.obligations.length} void=${grade.void} inconclusive=${
+      grade.inconclusive
+    } calls=${grade.solCalls}`,
   );
   console.log(`grade: ${NodePath.join(NodePath.resolve(out), "grade.json")}`);
 };

@@ -147,9 +147,12 @@ const gradeFor = (model: string): BenchmarkGrade => ({
   target: null,
   quick: { booted: true, consoleErrors: 0, responded: true },
   obligationIds: ["moves"],
+  unansweredIds: [],
   obligations: { yes: 1, total: 1 },
   control: false,
+  controlAnswered: true,
   void: false,
+  inconclusive: false,
   solCalls: 2,
 });
 
@@ -638,6 +641,36 @@ describe("runRegradeBatch", () => {
         failure = error;
       }
       assert.match(failure instanceof Error ? failure.message : String(failure), /regrade is void/);
+      let inconclusiveFailure: unknown = null;
+      try {
+        await runRegradeBatch({
+          runDirectory: root,
+          briefs: [briefs[0]!],
+          order: ["a", "b", "c"],
+          jobs: 1,
+          grade: async (input) => {
+            await NodeFSP.mkdir(NodePath.join(input.outDirectory, "grade"));
+            await NodeFSP.writeFile(
+              NodePath.join(input.outDirectory, "grade", "grade.json"),
+              "inconclusive grade\n",
+            );
+            return {
+              ...gradeFor("unavailable-grader"),
+              controlAnswered: false,
+              inconclusive: true,
+            };
+          },
+          sandbox: async () => ({ runtimeDirectory: root, environment: process.env }),
+        });
+      } catch (error) {
+        inconclusiveFailure = error;
+      }
+      assert.match(
+        inconclusiveFailure instanceof Error
+          ? inconclusiveFailure.message
+          : String(inconclusiveFailure),
+        /regrade is inconclusive/,
+      );
       assert.equal(
         await NodeFSP.readFile(NodePath.join(directory, "result.json"), "utf8"),
         savedResult,

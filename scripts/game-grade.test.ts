@@ -207,7 +207,104 @@ describe("judgeObligations", () => {
     const judged = await judgeObligations({ brief, frames, notes: [], review: fake.review });
     assert.equal(judged.control.description, CONTROL_DESCRIPTION);
     assert.equal(judged.control.yes, true);
+    assert.equal(judged.control.answered, true);
     assert.equal(judged.void, true);
+    assert.equal(judged.inconclusive, false);
+  });
+
+  it("does not turn two failed control calls into a passed negative control", async () => {
+    // The t101 platformer grade: both control calls died in the Codex CLI, and
+    // the grader recorded each as a NO. A failed call is not an answer, so the
+    // control is unread and the grade cannot claim calibration.
+    const review: ReviewFn = async (request) => {
+      if (request.prompt.includes(CONTROL_DESCRIPTION))
+        throw new Error("Codex CLI command failed: Reading prompt from stdin...");
+      return reply("YES");
+    };
+    const judged = await judgeObligations({ brief, frames, notes: [], review });
+    assert.equal(judged.solCalls, 6);
+    assert.deepStrictEqual(
+      judged.control.votes.map((vote) => vote.yes),
+      [null, null],
+    );
+    assert.equal(judged.control.yes, false);
+    assert.equal(judged.control.answered, false);
+    assert.equal(judged.void, false);
+    assert.equal(judged.inconclusive, true);
+    for (const vote of judged.control.votes) {
+      assert.equal(vote.frame, null);
+      assert.match(vote.reason, /^The grader call failed: Codex CLI command failed/);
+    }
+    // The obligation answers were obtained, so they stay readable.
+    assert.deepStrictEqual(
+      judged.obligations.map((obligation) => obligation.yes),
+      [true, true],
+    );
+  });
+
+  it("treats a partial or unreadable control answer as no answer, not a pass", async () => {
+    let controlCalls = 0;
+    const review: ReviewFn = async (request) => {
+      if (!request.prompt.includes(CONTROL_DESCRIPTION)) return reply("YES");
+      controlCalls += 1;
+      return controlCalls === 1
+        ? { verdict: "NO", frame: "", reason: "not shown" }
+        : { verdict: "MAYBE", reason: "I am unsure" };
+    };
+    const judged = await judgeObligations({ brief, frames, notes: [], review });
+    assert.deepStrictEqual(
+      judged.control.votes.map((vote) => vote.yes),
+      [false, null],
+    );
+    assert.equal(judged.control.answered, false);
+    assert.equal(judged.void, false);
+    assert.equal(judged.inconclusive, true);
+    assert.equal(judged.control.votes[1]?.reason, "I am unsure");
+  });
+
+  it("accepts an honest NO from both control votes and stays verified", async () => {
+    const fake = scripted(["YES", "YES", "NO", "NO", "NO", "NO"]);
+    const judged = await judgeObligations({ brief, frames, notes: [], review: fake.review });
+    assert.deepStrictEqual(
+      judged.control.votes.map((vote) => vote.yes),
+      [false, false],
+    );
+    assert.equal(judged.control.answered, true);
+    assert.equal(judged.void, false);
+    assert.equal(judged.inconclusive, false);
+  });
+
+  it("leaves a claim unproven when one of its votes failed, and keeps an answered NO", async () => {
+    let reachCalls = 0;
+    let jumpCalls = 0;
+    const review: ReviewFn = async (request) => {
+      if (request.prompt.includes(CONTROL_DESCRIPTION)) return reply("NO");
+      if (request.prompt.includes("The player reaches the flag.")) {
+        reachCalls += 1;
+        if (reachCalls === 1) throw new Error("transport failed");
+        return reply("YES");
+      }
+      jumpCalls += 1;
+      if (jumpCalls === 1) return reply("NO");
+      throw new Error("transport failed");
+    };
+    const judged = await judgeObligations({ brief, frames, notes: [], review });
+    assert.equal(judged.solCalls, 6);
+    // One YES plus one failed call is not a proven claim: null, not NO.
+    assert.equal(judged.obligations[0]?.yes, null);
+    assert.deepStrictEqual(
+      judged.obligations[0]?.votes.map((vote) => vote.yes),
+      [null, true],
+    );
+    // One honest NO settles the claim even when the other call failed.
+    assert.equal(judged.obligations[1]?.yes, false);
+    assert.deepStrictEqual(
+      judged.obligations[1]?.votes.map((vote) => vote.yes),
+      [false, null],
+    );
+    // A failed obligation vote does not uncalibrate the control.
+    assert.equal(judged.control.answered, true);
+    assert.equal(judged.inconclusive, false);
   });
 
   it("asks every vote at once, six at most, and keeps each item's votes", async () => {
@@ -668,6 +765,73 @@ describe("gradeGame", () => {
       assert.equal(exported, false);
       assert.equal(reviewed, false);
       assert.equal(played, false);
+    } finally {
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("records a failed control call as an inconclusive grade, never a NO", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
+    try {
+      const savedDir = NodePath.join(directory, "saved");
+      await NodeFSP.mkdir(NodePath.join(savedDir, "frames"), { recursive: true });
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      await NodeFSP.writeFile(NodePath.join(savedDir, "frames/boot.png"), png);
+      await NodeFSP.writeFile(
+        NodePath.join(savedDir, "grade.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          brief: { id: brief.id, title: brief.title, checksum: brief.checksum },
+          gameDir: "/games/fixture",
+          model: "codex/gpt-6.1-sol",
+          build: { kind: "existing", detail: null },
+          quick: null,
+          frames: ["frames/boot.png"],
+          actions: [],
+          obligations: [],
+          control: { description: CONTROL_DESCRIPTION, yes: false, votes: [] },
+          void: false,
+          solCalls: 0,
+        }),
+      );
+      const out = NodePath.join(directory, "out");
+      const grade = await gradeGame({
+        brief,
+        out,
+        reuseFrames: savedDir,
+        deps: {
+          review: async (request) => {
+            if (request.prompt.includes(CONTROL_DESCRIPTION))
+              throw new Error("Codex CLI command failed: Reading prompt from stdin...");
+            return reply("NO");
+          },
+          playtest: async () => {
+            throw new Error("a vote-only re-grade must not playtest");
+          },
+          exportBuild: async () => {
+            throw new Error("a vote-only re-grade must not build");
+          },
+        },
+      });
+      assert.equal(grade.inconclusive, true);
+      assert.equal(grade.void, false);
+      assert.equal(grade.control.answered, false);
+      const written = JSON.parse(
+        await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
+      ) as {
+        inconclusive: boolean;
+        control: { yes: boolean; answered: boolean; votes: ReadonlyArray<{ yes: unknown }> };
+      };
+      assert.equal(written.inconclusive, true);
+      assert.equal(written.control.yes, false);
+      assert.equal(written.control.answered, false);
+      assert.deepStrictEqual(
+        written.control.votes.map((vote) => vote.yes),
+        [null, null],
+      );
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }

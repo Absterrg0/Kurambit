@@ -448,6 +448,10 @@ export async function runRegradeBatch(
             throw new Error(
               `[${entry.brief.id}] the regrade is void; the saved result and grade are unchanged.`,
             );
+          if (grade.inconclusive)
+            throw new Error(
+              `[${entry.brief.id}] the regrade is inconclusive: a control call did not answer, so it cannot replace the saved grade.`,
+            );
           if (grade.grader === null || grade.graderVersion === null)
             throw new Error(
               `[${entry.brief.id}] the new grade records no grader profile; refusing to write it.`,

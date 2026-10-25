@@ -57,9 +57,19 @@ export interface BenchmarkGrade {
     readonly responded: boolean;
   } | null;
   readonly obligationIds: ReadonlyArray<string>;
+  /**
+   * Claims whose votes did not all answer; an unanswered vote is not a NO.
+   * Absent on summaries written before votes could be unanswered.
+   */
+  readonly unansweredIds?: ReadonlyArray<string>;
   readonly obligations: { readonly yes: number; readonly total: number };
+  /** Any control YES: the grader imagined the absurd item. */
   readonly control: boolean;
+  /** False when a control call failed or answered unreadably; absent when unrecorded. */
+  readonly controlAnswered?: boolean | null;
   readonly void: boolean;
+  /** The control was attempted but unread, so calibration is unproven. */
+  readonly inconclusive?: boolean;
   readonly solCalls: number;
 }
 
@@ -115,7 +125,9 @@ export function readGradeSummary(value: unknown): BenchmarkGrade | null {
   const obligations = Array.isArray(record.obligations)
     ? (record.obligations as ReadonlyArray<Record<string, unknown>>)
     : [];
-  const control = record.control as { readonly yes?: unknown } | undefined;
+  const control = record.control as
+    | { readonly yes?: unknown; readonly answered?: unknown }
+    | undefined;
   const storedGrader = record.grader as
     | { readonly provider?: unknown; readonly model?: unknown }
     | undefined;
@@ -138,12 +150,20 @@ export function readGradeSummary(value: unknown): BenchmarkGrade | null {
     obligationIds: obligations
       .filter((obligation) => obligation.yes === true && typeof obligation.id === "string")
       .map((obligation) => obligation.id as string),
+    unansweredIds: obligations
+      .filter(
+        (obligation) =>
+          obligation.yes !== true && obligation.yes !== false && typeof obligation.id === "string",
+      )
+      .map((obligation) => obligation.id as string),
     obligations: {
       yes: obligations.filter((obligation) => obligation.yes === true).length,
       total: obligations.length,
     },
     control: control?.yes === true,
+    controlAnswered: typeof control?.answered === "boolean" ? control.answered : null,
     void: record.void === true,
+    inconclusive: record.inconclusive === true || control?.answered === false,
     solCalls: Number(record.solCalls ?? 0),
   };
 }
@@ -521,6 +541,7 @@ export function readRawResult(input: {
     : grade === null || grade.build === "no-build"
       ? "crashed"
       : "passed";
+  const unanswered = grade?.unansweredIds?.length ?? 0;
   const reason = input.timedOut
     ? "The raw agent hit its cap."
     : grade === null
@@ -531,7 +552,9 @@ export function readRawResult(input: {
             : `${grade.quick.booted ? "booted" : "no-boot"}, ${grade.quick.consoleErrors} console error(s), ${
                 grade.quick.responded ? "responded" : "no response"
               }`
-        }; obligations ${grade.obligations.yes}/${grade.obligations.total} YES; void=${grade.void}.`;
+        }; obligations ${grade.obligations.yes}/${grade.obligations.total} YES${
+          unanswered === 0 ? "" : ` (+${unanswered} unanswered)`
+        }; void=${grade.void}; inconclusive=${grade.inconclusive === true}.`;
   return {
     schemaVersion: 1,
     lane: "raw",
@@ -556,13 +579,19 @@ export function readRawResult(input: {
       status:
         grade !== null && grade.obligationIds.includes(obligation.id)
           ? ("proven" as const)
-          : ("failed" as const),
+          : grade !== null && grade.unansweredIds?.includes(obligation.id) === true
+            ? ("missing" as const)
+            : ("failed" as const),
       detail:
         grade === null
           ? "No gradable build."
           : grade.void
             ? "The grade is void: the control item passed."
-            : obligation.description,
+            : grade.inconclusive
+              ? "The grade is inconclusive: a control call did not answer."
+              : grade.unansweredIds?.includes(obligation.id) === true
+                ? "No vote answered this claim: the grader call failed or its reply was unreadable."
+                : obligation.description,
       criteria: [],
     })),
     visual: { status: null, dimensions: [], judgements: [], frames: [], detail: null },
@@ -808,18 +837,25 @@ export function renderResultsMarkdown(input: {
     "",
     "`scripts/game-grade.ts` over pixels and console only; obligations are judged from their descriptions,",
     "so the design vocabulary's `unsupported` ones are graded too. A passing control item voids the grade.",
+    "A control call that failed leaves the grade inconclusive; a failed obligation vote is missing evidence,",
+    "not a NO.",
     "",
     "| Brief | Build | Boot | Console errors | Input changed | Obligations YES | Control | Void | Sol calls |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...input.results.map((result) => {
       const grade = result.grade;
       if (grade === null) return `| ${result.fixtureId} | no grade | — | — | — | — | — | — | — |`;
+      const unanswered = grade.unansweredIds?.length ?? 0;
+      const obligations = `${grade.obligations.yes}/${grade.obligations.total}${
+        unanswered === 0 ? "" : ` (${unanswered} unanswered)`
+      }`;
+      const inconclusive = grade.inconclusive === true;
       return `| ${result.fixtureId} | ${grade.build} | ${
         grade.quick === null ? "—" : grade.quick.booted ? "booted" : "no boot"
       } | ${grade.quick === null ? "—" : grade.quick.consoleErrors} | ${
         grade.quick === null ? "—" : grade.quick.responded ? "yes" : "no"
-      } | ${grade.obligations.yes}/${grade.obligations.total} | ${grade.control ? "YES" : "no"} | ${
-        grade.void ? "VOID" : "no"
+      } | ${obligations} | ${grade.control ? "YES" : inconclusive ? "unread" : "no"} | ${
+        grade.void ? "VOID" : inconclusive ? "inconclusive" : "no"
       } | ${grade.solCalls} |`;
     }),
     "",
