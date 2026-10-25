@@ -215,6 +215,44 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
     },
   },
   {
+    id: "read.layout",
+    version: 1,
+    title: "Keep card and choice UI inside a changing viewport",
+    genres: ["card", "dialogue", "rpg", "turn-based"],
+    mechanics: ["ui-layout", "scrolling", "text-wrap", "primary-action"],
+    defects: ["clipped-text", "offscreen-action", "unreachable-choice", "overflowing-ui"],
+    aliases: [
+      "ui layout",
+      "screen layout",
+      "viewport layout",
+      "responsive layout",
+      "card layout",
+      "dialogue layout",
+      "clipped text",
+      "long text",
+      "long choices",
+      "crowded choices",
+      "crowded hud",
+      "narrow viewport",
+      "window resize",
+    ],
+    intent:
+      "Keep a card, its choices, status and primary action inside the viewport: long text wraps, the choice list scrolls, and the action stays pinned and reachable.",
+    why: "Fixed coordinates only fit the window they were authored for. Anchors and containers reflow with the viewport, and a scrolling middle gives long content room without moving the status or action off-screen.",
+    failure:
+      "Long text pushes the primary action past the bottom edge, a choice is clipped with no way to reach it, or a narrow window leaves half the action outside the frame.",
+    restyle:
+      "Keep the anchored margin, the scrolling middle, the pinned footer and the wrapped labels. Choose this game's panel style, type scale and action wording.",
+    verificationQuestion:
+      "At a wide and a narrow window with long text, are the status and primary action fully visible, and can the last choice be reached and used?",
+    source: {
+      kind: "write-original",
+      license: "MIT",
+      reference:
+        "t92 card-tactics and dialogue-management 900x900 critic reports (letterboxed playfield, shrunken HUD); Godot 4 Control anchors and containers.",
+    },
+  },
+  {
     id: "read.onboarding",
     version: 1,
     title: "Show the action prompt only while it applies",
