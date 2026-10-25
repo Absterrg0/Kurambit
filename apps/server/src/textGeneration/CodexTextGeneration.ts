@@ -62,16 +62,30 @@ const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknow
 // eslint-disable-next-line no-control-regex -- Codex's stderr is the one stream that carries ANSI escapes; strip them, not the cause.
 const ANSI_ESCAPE = new RegExp("\\u001b\\[[0-9;]*m", "g");
 const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE, "");
+const PROMPT_PLACEHOLDER = "[prompt]";
+const redactPrompt = (text: string, prompt: string): string =>
+  prompt.length === 0 ? text : text.split(prompt).join(PROMPT_PLACEHOLDER);
+/**
+ * What a stream said after Codex echoed the whole prompt. Codex prints its
+ * banner and the prompt verbatim before the terminal failure; a line from that
+ * echo is not a cause. Null means no echo was found, so the stream itself is
+ * inspectable.
+ */
+const afterLastPromptEcho = (text: string, prompt: string): string | null => {
+  if (prompt.length === 0) return null;
+  const at = text.lastIndexOf(prompt);
+  return at === -1 ? null : text.slice(at + prompt.length);
+};
 const lastNonEmptyLine = (text: string): string => {
   for (const line of text.split(/\r?\n/).toReversed()) {
-    const trimmed = stripAnsi(line).trim();
+    const trimmed = line.trim();
     if (trimmed !== "") return trimmed.slice(0, CODEX_DIAGNOSTIC_LAST_LINE_CHARS);
   }
   return "";
 };
-const boundedTail = (text: string, prompt: string): string => {
-  const redacted = prompt.length === 0 ? text : text.split(prompt).join("[prompt]");
-  const cleaned = stripAnsi(redacted).trim();
+/** The end of a cleaned stream, bounded for a report that keeps only a prefix. */
+const boundedTail = (text: string): string => {
+  const cleaned = text.trim();
   return cleaned.length <= CODEX_DIAGNOSTIC_TAIL_CHARS
     ? cleaned
     : `…${cleaned.slice(-CODEX_DIAGNOSTIC_TAIL_CHARS)}`;
@@ -83,12 +97,22 @@ const codexExitDetail = (input: {
   readonly stdout: string;
   readonly prompt: string;
 }): string => {
-  const stderr = input.stderr.trim();
-  const stdout = input.stdout.trim();
-  const cause = lastNonEmptyLine(stderr) || lastNonEmptyLine(stdout);
+  // Headline and tails read the same cleaned text: ANSI removed and the echoed
+  // prompt replaced, so a prompt line can never be reported as the cause.
+  const stderrText = stripAnsi(input.stderr);
+  const stdoutText = stripAnsi(input.stdout);
+  const cause =
+    lastNonEmptyLine(
+      redactPrompt(afterLastPromptEcho(stderrText, input.prompt) ?? stderrText, input.prompt),
+    ) ||
+    lastNonEmptyLine(
+      redactPrompt(afterLastPromptEcho(stdoutText, input.prompt) ?? stdoutText, input.prompt),
+    );
+  const stderrTail = boundedTail(redactPrompt(stderrText, input.prompt));
+  const stdoutTail = boundedTail(redactPrompt(stdoutText, input.prompt));
   const tails = [
-    stderr === "" ? null : `stderr tail:\n${boundedTail(stderr, input.prompt)}`,
-    stdout === "" ? null : `stdout tail:\n${boundedTail(stdout, input.prompt)}`,
+    stderrTail === "" ? null : `stderr tail:\n${stderrTail}`,
+    stdoutTail === "" ? null : `stdout tail:\n${stdoutTail}`,
   ].filter((tail): tail is string => tail !== null);
   const headline =
     cause === ""

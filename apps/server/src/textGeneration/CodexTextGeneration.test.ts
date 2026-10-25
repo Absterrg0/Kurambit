@@ -38,6 +38,8 @@ interface FakeCodexInput {
   echoStdin?: boolean;
   /** Written after the stdin echo, like the causal error line. */
   stderrTail?: string;
+  /** Written to stdout before exit, for failures reported on the other stream. */
+  stdout?: string;
   requireImage?: boolean;
   requireServiceTier?: string;
   requireReasoningEffort?: string;
@@ -64,6 +66,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     banner: input.banner ?? null,
     echoStdin: input.echoStdin ?? false,
     stderrTail: input.stderrTail ?? null,
+    stdout: input.stdout ?? null,
     output: input.output,
     exitCode: input.exitCode ?? 0,
   });
@@ -139,6 +142,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         "if (check.banner !== null) process.stderr.write(check.banner);",
         "if (check.echoStdin) process.stderr.write(stdinContent);",
         "if (check.stderrTail !== null) process.stderr.write(check.stderrTail);",
+        "if (check.stdout !== null) process.stdout.write(check.stdout);",
         'if (outputPath !== null) NodeFS.writeFileSync(outputPath, check.output + "\\n");',
         "process.exitCode = check.exitCode;",
         "",
@@ -879,6 +883,77 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
             );
             expect(detail).not.toContain(prompt);
             expect(detail.length).toBeLessThan(3_000);
+          }
+        }),
+    ),
+  );
+
+  it.effect("does not headline a prompt line when a failed Codex call prints only its banner", () =>
+    withFakeCodexEnv(
+      {
+        output: "",
+        exitCode: 1,
+        banner:
+          "Reading prompt from stdin...\nOpenAI Codex v0.159.2\n--------\nworkdir: /work\nmodel: gpt-6.1-sol\n--------\nuser\n",
+        echoStdin: true,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const prompt =
+            "Judge these anonymous builds.\n" +
+            `${"Evidence without a verdict. ".repeat(40)}\n` +
+            "Answer with the requested JSON only.";
+          const result = yield* textGeneration
+            .generateImageReview({
+              cwd: process.cwd(),
+              prompt,
+              imagePaths: ["/nonexistent/preflight-card.png"],
+              outputSchema: Schema.Struct({ overall: Schema.String }),
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            const detail = (result.failure as TextGenerationError).detail;
+            // The prompt echo is not a cause: without a terminal error line the
+            // headline names only the exit code, and the echo stays redacted.
+            expect(detail.slice(0, 400)).toContain("exited with code 1");
+            expect(detail.split("\n")[0]).not.toContain("Answer with the requested JSON only.");
+            expect(detail).not.toContain("Answer with the requested JSON only.");
+            expect(detail).not.toContain("Evidence without a verdict.");
+            expect(detail).not.toContain(prompt);
+            expect(detail.length).toBeLessThan(3_000);
+          }
+        }),
+    ),
+  );
+
+  it.effect("keeps a cleaned stdout cause when the failed Codex call writes no stderr", () =>
+    withFakeCodexEnv(
+      {
+        output: "",
+        exitCode: 3,
+        stdout: "\u001b[31mERROR: the model is unavailable\u001b[0m\n",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration
+            .generateImageReview({
+              cwd: process.cwd(),
+              prompt: "Judge these anonymous builds.",
+              imagePaths: ["/nonexistent/preflight-card.png"],
+              outputSchema: Schema.Struct({ overall: Schema.String }),
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            const detail = (result.failure as TextGenerationError).detail;
+            expect(detail.slice(0, 400)).toContain("exited with code 3");
+            expect(detail.slice(0, 400)).toContain("ERROR: the model is unavailable");
+            expect(detail).not.toContain("\u001b[");
           }
         }),
     ),
