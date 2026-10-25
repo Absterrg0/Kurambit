@@ -1117,7 +1117,16 @@ it.effect(
               verify: (threadId, input) =>
                 Effect.sync(() => {
                   verified.push({ threadId, input });
-                  return verifyResult;
+                  // A playtest that stops short is a result, not a toolkit
+                  // failure; its frames still belong in the tool response.
+                  return input.steps.some((step) => "press" in step && step.press === "F")
+                    ? {
+                        ...verifyResult,
+                        success: false,
+                        failedStage: "playtest" as const,
+                        message: "Stopped at the playtest.",
+                      }
+                    : verifyResult;
                 }),
             }),
           ),
@@ -1333,6 +1342,27 @@ it.effect(
           threadId: ThreadId.make("builder-thread"),
           input: { steps: [{ press: "Space" }] },
         });
+        // includeImage is transport metadata read by this registration, not a
+        // tool option; strict decoding must not turn the text-only request into
+        // an error.
+        const textOnlyVerify = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: [{ press: "Space" }], includeImage: false },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(textOnlyVerify).not.toContain('"isError":true');
+        expect(textOnlyVerify).not.toContain('"type":"image"');
+        expect(textOnlyVerify).toContain('"label":"after-steps"');
+        // A verify that stops at the playtest still has useful frames; only a
+        // declared toolkit failure is an error result.
+        const failedFrames = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: [{ press: "F" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(failedFrames).not.toContain('"isError":true');
+        expect(failedFrames).toContain('"success":false');
+        expect(failedFrames).toContain('"failedStage":"playtest"');
+        expect(failedFrames).toContain('"type":"image"');
+        expect(verified).toHaveLength(3);
         // The builder searches by tags and gets the complete reference back.
         const builderSearch = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_search",

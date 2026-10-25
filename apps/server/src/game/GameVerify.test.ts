@@ -265,6 +265,7 @@ it.live("rejects bad playtest input before any engine work", () =>
         {},
         { steps: [] },
         { steps: [{ waitMs: 1_000 }] },
+        { steps: [{ screenshot: "menu" }] },
         { steps: [{ click: "left", x: 9_999, y: 10 }] },
         { steps: [{ press: "Space" }], exactSize: true, width: 640, height: 360 },
       ] as unknown as ReadonlyArray<GameVerifyInput>) {

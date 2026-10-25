@@ -628,6 +628,17 @@ interface ImageToolHandleResult {
 }
 
 /**
+ * `includeImage` tells this registration whether to attach frame bytes to the
+ * result. It is transport metadata, not a tool parameter, so keep it out of
+ * the parameter decoder; strict tools would otherwise reject it as unknown.
+ */
+const withoutImageTransport = (payload: unknown) => {
+  if (payload === null || typeof payload !== "object") return payload;
+  const { includeImage: _includeImage, ...parameters } = payload as Record<string, unknown>;
+  return parameters;
+};
+
+/**
  * `McpServer.toolkit` serializes every result as JSON text, which is the wrong
  * shape for a screenshot: the model needs image content.
  */
@@ -676,7 +687,9 @@ const registerImageTool = <T extends Tool.Any, E, R>(
             fiber.context,
             McpInvocationContext.McpInvocationContext,
           );
-          return provide(handle(payload as Tool.Parameters<T>, decodeOptions)).pipe(
+          return provide(
+            handle(withoutImageTransport(payload) as Tool.Parameters<T>, decodeOptions),
+          ).pipe(
             Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
             Effect.matchCauseEffect({
               onFailure: imageToolFailure(tool.name, operation, failureText),
