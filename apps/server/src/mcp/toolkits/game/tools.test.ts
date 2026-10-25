@@ -23,6 +23,7 @@ interface AdvertisedInput {
 
 const reviewScope = (
   gameReviewRole: "critic" | "ballot" | null,
+  gameRepairChild = false,
 ): McpInvocationContext.McpInvocationScope => ({
   environmentId: EnvironmentId.make("environment-tool-visibility-test"),
   requestNamespace: "request-tool-visibility-test",
@@ -35,10 +36,11 @@ const reviewScope = (
   capabilities: new Set(),
   issuedAt: 1,
   gameReviewRole,
+  gameRepairChild,
 });
 
 /** Evaluate the same `tools/list` gate the MCP transport applies. */
-const visible = (tool: Tool.Any, role: "critic" | "ballot" | null) =>
+const visible = (tool: Tool.Any, role: "critic" | "ballot" | null, repairChild = false) =>
   Effect.gen(function* () {
     const enabledWhen = Context.getOrUndefined(tool.annotations, McpSchema.EnabledWhen);
     if (enabledWhen === undefined) return true;
@@ -49,7 +51,12 @@ const visible = (tool: Tool.Any, role: "critic" | "ballot" | null) =>
         clientInfo: undefined,
       }),
     );
-  }).pipe(Effect.provideService(McpInvocationContext.McpInvocationContext, reviewScope(role)));
+  }).pipe(
+    Effect.provideService(
+      McpInvocationContext.McpInvocationContext,
+      reviewScope(role, repairChild),
+    ),
+  );
 
 it("exports a top-level object input schema for every game tool", () => {
   for (const tool of Object.values(GameToolkit.tools)) {
@@ -77,23 +84,31 @@ it("keeps the review-only exact layout on game_web_playtest", () => {
   expect(schema.required ?? []).not.toContain("steps");
 });
 
-it.effect(
-  "offers the builder toolkit to builders and repairs but never to a critic or ballot",
-  () =>
-    Effect.gen(function* () {
-      for (const tool of Object.values(GameToolkit.tools)) {
-        expect(
-          yield* visible(tool, null),
-          `${tool.name} must stay available to builders and repairs`,
-        ).toBe(true);
-        expect(yield* visible(tool, "critic"), `${tool.name} must be hidden from critics`).toBe(
-          false,
-        );
-        expect(yield* visible(tool, "ballot"), `${tool.name} must be hidden from ballots`).toBe(
-          false,
-        );
-      }
-    }),
+const reviewControl = new Set([
+  "game_review_status",
+  "game_review_history",
+  "game_review_stop",
+  "game_review_restore",
+]);
+
+it.effect("offers the builder toolkit to builders and only build tools to repairs", () =>
+  Effect.gen(function* () {
+    for (const tool of Object.values(GameToolkit.tools)) {
+      expect(yield* visible(tool, null), `${tool.name} must stay available to builders`).toBe(true);
+      expect(
+        yield* visible(tool, null, true),
+        `${tool.name} must ${
+          reviewControl.has(tool.name) ? "be hidden from repairs" : "stay available to repairs"
+        }`,
+      ).toBe(!reviewControl.has(tool.name));
+      expect(yield* visible(tool, "critic"), `${tool.name} must be hidden from critics`).toBe(
+        false,
+      );
+      expect(yield* visible(tool, "ballot"), `${tool.name} must be hidden from ballots`).toBe(
+        false,
+      );
+    }
+  }),
 );
 
 it.effect("offers review children only the evidence tools their role can use", () =>
@@ -130,10 +145,11 @@ it.effect("advertises exactly the review tools each role may use", () =>
       ...Object.values(GameArtToolkit.tools),
       ...Object.values(GameReviewAnswerToolkit.tools),
     ];
-    const names = (role: "critic" | "ballot" | null) =>
+    const names = (role: "critic" | "ballot" | null, repairChild = false) =>
       Effect.gen(function* () {
         const visibleNames: string[] = [];
-        for (const tool of all) if (yield* visible(tool, role)) visibleNames.push(tool.name);
+        for (const tool of all)
+          if (yield* visible(tool, role, repairChild)) visibleNames.push(tool.name);
         return visibleNames.sort();
       });
     expect(yield* names("critic")).toEqual([
@@ -150,5 +166,15 @@ it.effect("advertises exactly the review tools each role may use", () =>
     expect(builder).toHaveLength(all.length - 2);
     expect(builder).not.toContain("game_critic_report");
     expect(builder).not.toContain("game_ballot");
+    const repair = yield* names(null, true);
+    expect(repair).toEqual(builder.filter((name) => !reviewControl.has(name)));
+    // The mutable repair route and the build tools remain; review control does not.
+    expect(repair).toContain("game_try_input");
+    expect(repair).toContain("game_verify");
+    expect(repair).toContain("game_submit");
+    expect(repair).not.toContain("game_review_status");
+    expect(repair).not.toContain("game_review_history");
+    expect(repair).not.toContain("game_review_stop");
+    expect(repair).not.toContain("game_review_restore");
   }),
 );

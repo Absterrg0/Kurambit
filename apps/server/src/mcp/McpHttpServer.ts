@@ -175,10 +175,17 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       invocation.thread !== undefined && Option.isSome(reviews)
         ? yield* reviews.value.toolRole(invocation.thread).pipe(Effect.orElseSucceed(() => null))
         : null;
+    // Catalog context is separate from the answer role: a repair has no answer
+    // tool, but its catalog must omit review control.
+    const gameRepairChild =
+      invocation.thread !== undefined && Option.isSome(reviews)
+        ? yield* reviews.value.repairChild(invocation.thread)
+        : false;
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameReviewRole,
+        gameRepairChild,
       }),
       Effect.map(normalizeMcpHttpResponse),
     );

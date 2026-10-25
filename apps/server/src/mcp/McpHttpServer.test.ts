@@ -1053,6 +1053,8 @@ it.effect(
         const tried: unknown[] = [];
         const imported: unknown[] = [];
         const verified: unknown[] = [];
+        const submitted: unknown[] = [];
+        const reviewControlCalls: unknown[] = [];
         const verifyBuildId = "a".repeat(64);
         const verifyResult: GameVerifyResult = {
           success: true,
@@ -1103,9 +1105,34 @@ it.effect(
           ],
         };
         const switchedRole = yield* Ref.make<"critic" | "ballot" | null>("critic");
+        const reducedRepairCatalog = yield* Ref.make(false);
         const serverLayer = McpHttpServer.layerGameToolkit.pipe(
           Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
-          Layer.provide(Layer.mock(GameReviewApi.GameReviewApi)({})),
+          Layer.provide(
+            Layer.mock(GameReviewApi.GameReviewApi)({
+              status: (threadId) =>
+                Effect.sync(() => {
+                  reviewControlCalls.push({ operation: "status", threadId });
+                  return {} as never;
+                }),
+              stop: (threadId) =>
+                Effect.sync(() => {
+                  reviewControlCalls.push({ operation: "stop", threadId });
+                  return {} as never;
+                }),
+              submit: (threadId, input) =>
+                Effect.sync(() => {
+                  submitted.push({ threadId, input });
+                  return {
+                    accepted: true,
+                    message: "Accepted the repair build.",
+                    buildId: null,
+                    submission: null,
+                    checks: [],
+                  };
+                }),
+            }),
+          ),
           Layer.provide(
             Layer.mock(GameService.GameService)({
               importArtKit: (_threadId, input) =>
@@ -1174,6 +1201,10 @@ it.effect(
                           ? "ballot"
                           : null,
                     ),
+              repairChild: (caller) =>
+                caller.threadId === ThreadId.make("repairer-thread")
+                  ? Ref.get(reducedRepairCatalog)
+                  : Effect.succeed(false),
               report: (_caller, _role, value) =>
                 Effect.sync(() => {
                   seen.push(value);
@@ -1306,8 +1337,30 @@ it.effect(
           "game_try_input",
           "game_web_playtest",
         ].sort();
+        const reviewControlTools = [
+          "game_review_history",
+          "game_review_restore",
+          "game_review_status",
+          "game_review_stop",
+        ];
+        const repairTools = builderTools.filter((name) => !reviewControlTools.includes(name));
+        // Before the repair flag, the repair child gets the full builder catalog.
+        // The same HTTP session then flips to the reduced catalog; bytes are the
+        // real serialized tools/list body, not a schema estimate.
+        const builderBody = yield* list("builder", builder);
+        const repairBeforeBody = yield* list("repairer", repairer);
         expect(yield* toolNames("builder", builder)).toEqual(builderTools);
         expect(yield* toolNames("repairer", repairer)).toEqual(builderTools);
+        expect(Buffer.byteLength(repairBeforeBody)).toBe(Buffer.byteLength(builderBody));
+        yield* Ref.set(reducedRepairCatalog, true);
+        const repairAfterBody = yield* list("repairer", repairer);
+        expect(yield* toolNames("repairer", repairer)).toEqual(repairTools);
+        expect(Buffer.byteLength(repairAfterBody)).toBeLessThan(
+          Buffer.byteLength(repairBeforeBody),
+        );
+        for (const name of reviewControlTools) {
+          expect(repairAfterBody).not.toContain(`"name":"${name}"`);
+        }
         expect(yield* toolNames("critic", critic)).toEqual(criticTools);
         expect(yield* toolNames("ballot", ballot)).toEqual(["game_ballot"]);
         // Roles are resolved per request, not per session or server. The same
@@ -1320,6 +1373,12 @@ it.effect(
         expect(yield* toolNames("switch", switching)).toEqual(builderTools);
         yield* Ref.set(switchedRole, "critic");
         expect(yield* toolNames("switch", switching)).toEqual(criticTools);
+        // The repair flag is request-scoped too, on the one session that has
+        // already listed both catalogs.
+        yield* Ref.set(reducedRepairCatalog, false);
+        expect(yield* toolNames("repairer", repairer)).toEqual(builderTools);
+        yield* Ref.set(reducedRepairCatalog, true);
+        expect(yield* toolNames("repairer", repairer)).toEqual(repairTools);
         expect(yield* list("critic", critic)).toContain('"name":"game_critic_report"');
         expect(yield* list("critic", critic)).not.toContain('"name":"game_ballot"');
         expect(yield* list("ballot", ballot)).toContain('"name":"game_ballot"');
@@ -1350,6 +1409,43 @@ it.effect(
           arguments: {},
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenRecipe).toContain("error");
+        // The reduced repair catalog still reaches the mutable testing and
+        // submission routes; review control is hidden and refused even by name.
+        const repairInput = yield* rpc("repairer", repairer, "tools/call", {
+          name: "game_try_input",
+          arguments: { steps: [{ press: "Space" }] },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(repairInput).not.toContain('"isError":true');
+        expect(tried).toEqual([
+          {
+            caller: {
+              threadId: ThreadId.make("repairer-thread"),
+              providerSessionId: "provider-session-mcp-test",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+            },
+            input: { steps: [{ press: "Space" }] },
+          },
+        ]);
+        const repairSubmit = yield* rpc("repairer", repairer, "tools/call", {
+          name: "game_submit",
+          arguments: { note: "Fixed the visible defect." },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(repairSubmit).not.toContain('"isError":true');
+        expect(repairSubmit).toContain('"accepted":true');
+        expect(submitted).toEqual([
+          {
+            threadId: ThreadId.make("repairer-thread"),
+            input: { note: "Fixed the visible defect." },
+          },
+        ]);
+        for (const name of ["game_review_status", "game_review_stop"]) {
+          const denied = yield* rpc("repairer", repairer, "tools/call", {
+            name,
+            arguments: {},
+          }).pipe(Effect.flatMap((response) => response.text));
+          expect(denied).toContain("error");
+        }
+        expect(reviewControlCalls).toHaveLength(0);
         // Art search/get are read-only and follow the know-how rules; import is
         // a build write, so critics and ballots never receive the tool.
         for (const [token, session] of [
@@ -1541,7 +1637,8 @@ it.effect(
         expect(experiment).toContain('"label":"input 1 after"');
         expect(experiment).toContain('"changedPercent":2');
         expect(experiment).toContain('"type":"image"');
-        expect(tried).toHaveLength(1);
+        expect(tried).toHaveLength(2);
+        expect(tried[1]).toMatchObject({ caller: { threadId } });
         expect(yield* list("other", other)).not.toContain("game_critic_report");
         const refused = yield* rpc("other", other, "tools/call", {
           name: "game_critic_report",

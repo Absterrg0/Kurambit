@@ -67,6 +67,18 @@ const hiddenFromCriticAndBallot = () => {
   )?.gameReviewRole;
   return role === null || role === undefined;
 };
+/**
+ * Review management belongs to the builder's turn. A repair child fixes the
+ * isolated game copy and must leave checks and review records alone, so those
+ * four schemas stay out of its catalog while every build tool stays in.
+ */
+const reviewControlVisible = () => {
+  const fiber = Fiber.getCurrent();
+  if (fiber === undefined) return true;
+  const scope = Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext);
+  if (scope?.gameReviewRole !== null && scope?.gameReviewRole !== undefined) return false;
+  return scope?.gameRepairChild !== true;
+};
 const GameStatusTool = Tool.make("game_status", {
   description:
     "Inspect this thread's Game Studio project: design status and the DESIGN.md/BRIEF.md paths, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory, playable preview URL, and the builder's production phase (first playable, this turn's accepted submits, budget and time left). Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
@@ -88,7 +100,7 @@ const ReviewStatusTool = Tool.make("game_review_status", {
   dependencies: reviewDependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, reviewControlVisible);
 const ReviewHistoryTool = Tool.make("game_review_history", {
   description:
     "Read a bounded page of repair rounds, defects and fixes, frozen checks, decisions and exact reasons, ballots, session IDs and evidence frame references. Use nextCursor as before for the next page.",
@@ -102,7 +114,7 @@ const ReviewHistoryTool = Tool.make("game_review_history", {
   dependencies: reviewDependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, reviewControlVisible);
 const ReviewStopTool = Tool.make("game_review_stop", {
   description:
     "Stop this game's review and wait for its owned child sessions to stop. The selected build remains playable. Fails if a session may still write; no Resume mid-round.",
@@ -112,7 +124,7 @@ const ReviewStopTool = Tool.make("game_review_stop", {
   dependencies: reviewDependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, reviewControlVisible);
 const ReviewRestoreTool = Tool.make("game_review_restore", {
   description:
     "Explicitly restore the previous game-folder version from the latest review. Stops review sessions first and preserves the folder's current version before restoring. Keeps the selected build and live preview directories. Check game_review_status for availability.",
@@ -122,7 +134,7 @@ const ReviewRestoreTool = Tool.make("game_review_restore", {
   dependencies: reviewDependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, reviewControlVisible);
 const SubmitTool = Tool.make("game_submit", {
   description:
     "Hand a build to the studio. The first accepted submit is the game's first playable: Play shows it at once and your turn keeps going. Keep producing — deepen the game toward the brief and its art direction with recipes and game_try_input — and submit each improved build; every accepted submit replaces what Play shows, and the last one is what review starts on when your turn ends. Name the Web export you stand behind (default: this game's latest export) and give a one-line note on what the game is; a repair child instead names the defects it believes it fixed. The server checks only facts: the build exists, its bytes match their hash and are the current export, and a playtest of those exact bytes booted with no console errors and responded to input. Refused, the result lists the exact failed check and Play keeps the previous build; fix it and submit again.",
@@ -384,9 +396,10 @@ const GameArtImportTool = Tool.make("game_art_import", {
   .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 export const GameArtToolkit = Toolkit.make(GameArtSearchTool, GameArtGetTool, GameArtImportTool);
 /**
- * The builder and repair toolkit. Critic and ballot children get the
- * evidence-only toolkits instead, so a fresh review is never offered a build,
- * export or review-control tool it must spend context ignoring.
+ * The builder and repair toolkit. A repair child sees every build tool but not
+ * review control. Critic and ballot children get the evidence-only toolkits
+ * instead, so a fresh review is never offered a build, export or review-control
+ * tool it must spend context ignoring.
  */
 export const GameToolkit = Toolkit.make(
   GameStatusTool,

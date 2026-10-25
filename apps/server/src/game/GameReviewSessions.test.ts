@@ -772,6 +772,50 @@ it.live("a repair uses the builder selection frozen at round start", () =>
   ),
 );
 
+it.live("marks only a repair child for the reduced catalog and keeps its input route", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const repair = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        repair: {
+          remainingBudget: "2 repairs and 11 minutes left",
+          defects: [],
+          doNotRegress: [],
+        },
+      });
+      if (repair.kind !== "started") return expect(repair.kind).toBe("started");
+      const caller = {
+        threadId: repair.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      expect(yield* service.repairChild(caller)).toBe(true);
+      // The catalog marker must not turn a repair into an answer-bearing role.
+      expect(yield* service.toolRole(caller)).toBeNull();
+      // A repair keeps the same mutable input route as a builder.
+      expect((yield* service.tryInput(caller, { steps: [{ press: "Space" }] })).success).toBe(true);
+
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (critic.kind !== "started") return expect(critic.kind).toBe("started");
+      expect(
+        yield* service.repairChild({
+          threadId: critic.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        }),
+      ).toBe(false);
+    }),
+  ),
+);
+
 it.live("a round's own frozen selections win over the session file and the thread", () =>
   withSession(({ frames, scripted, service }) =>
     Effect.gen(function* () {

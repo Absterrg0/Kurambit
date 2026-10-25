@@ -814,6 +814,12 @@ export class GameReviewSessions extends Context.Service<
     readonly toolRole: (
       caller: GameReviewToolCaller,
     ) => Effect.Effect<"critic" | "ballot" | null, GameOperationError>;
+    /**
+     * Whether this thread is a dispatched repair child. Its catalog keeps every
+     * build tool but omits review management. Read separately from `toolRole`
+     * so a repair never looks like an auditable critic or ballot.
+     */
+    readonly repairChild: (caller: GameReviewToolCaller) => Effect.Effect<boolean>;
     readonly report: (
       caller: GameReviewToolCaller,
       role: "critic" | "ballot",
@@ -913,6 +919,14 @@ export const layer = (options: { readonly stateDir: string }) => {
 
     const callerFile = (childThreadId: string) =>
       NodePath.join(options.stateDir, "game-review-callers", `${encodePart(childThreadId)}.json`);
+    // Repair children are not answer callers, so they get their own marker
+    // instead of the caller index that grants critic and ballot tools.
+    const repairCallerFile = (childThreadId: string) =>
+      NodePath.join(
+        options.stateDir,
+        "game-review-repair-callers",
+        `${encodePart(childThreadId)}.json`,
+      );
 
     const toolFile = (root: string, key: SessionKey) =>
       recordFile(root, key).pipe(
@@ -956,7 +970,12 @@ export const layer = (options: { readonly stateDir: string }) => {
     ) {
       const file = yield* recordFile(root, key);
       yield* attempt("write game review session", file, () => writeJsonAtomic(file, record));
-      if (record.role !== "repair") {
+      if (record.role === "repair") {
+        const lookup = repairCallerFile(record.childThreadId);
+        yield* attempt("index game review repair caller", lookup, () =>
+          writeJsonAtomic(lookup, { root, ...key }),
+        );
+      } else {
         const lookup = callerFile(record.childThreadId);
         yield* attempt("index game review caller", lookup, () =>
           writeJsonAtomic(lookup, { root, ...key }),
@@ -1852,6 +1871,15 @@ export const layer = (options: { readonly stateDir: string }) => {
         }),
       );
 
+    const repairChild: GameReviewSessions["Service"]["repairChild"] = (caller) =>
+      attempt("read game review repair caller", repairCallerFile(caller.threadId), () =>
+        readJson(repairCallerFile(caller.threadId)),
+      ).pipe(
+        Effect.map((record) => record !== null),
+        // Fail open: an unreadable marker must not hide build tools.
+        Effect.orElseSucceed(() => false),
+      );
+
     const report: GameReviewSessions["Service"]["report"] = (caller, role, value) =>
       callerLock(caller).withPermits(1)(
         Effect.gen(function* () {
@@ -2226,6 +2254,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       tryInput,
       start,
       toolRole,
+      repairChild,
       report,
       answer,
       experiments,

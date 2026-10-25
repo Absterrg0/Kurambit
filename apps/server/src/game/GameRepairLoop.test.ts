@@ -645,6 +645,7 @@ const withLoop = <A, E>(
                 ),
               describe: () => Effect.succeed(null),
               toolRole: () => Effect.succeed(null),
+              repairChild: () => Effect.succeed(false),
               report: () =>
                 Effect.succeed({
                   accepted: false,
