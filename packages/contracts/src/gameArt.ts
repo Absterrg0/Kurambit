@@ -58,7 +58,32 @@ export const GameArtAtlas = Schema.Struct({
 });
 export type GameArtAtlas = typeof GameArtAtlas.Type;
 
-export const GameArtKitFileRole = Schema.Literals(["atlas", "license", "provenance"]);
+/**
+ * An additional sprite sheet beyond the primary atlas. A platformer kit often
+ * separates terrain from characters, and the character sheet has its own cell
+ * size and animation frames. `use` carries the authored coordinates a caller
+ * needs; nothing here inspects the image at runtime.
+ */
+export const GameArtSheet = Schema.Struct({
+  /** Short authored name, unique within a kit. */
+  name: artText(40),
+  /** Kit-relative path of the sheet image; also one of the declared files. */
+  image: artText(160),
+  /** How to read this sheet, including named cells and frames. */
+  use: artText(700),
+  imageWidth: Schema.Int.check(Schema.isGreaterThan(0)),
+  imageHeight: Schema.Int.check(Schema.isGreaterThan(0)),
+  tileWidth: Schema.Int.check(Schema.isGreaterThan(0)),
+  tileHeight: Schema.Int.check(Schema.isGreaterThan(0)),
+  columns: Schema.Int.check(Schema.isGreaterThan(0)),
+  rows: Schema.Int.check(Schema.isGreaterThan(0)),
+  tileCount: Schema.Int.check(Schema.isGreaterThan(0)),
+  margin: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  spacing: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type GameArtSheet = typeof GameArtSheet.Type;
+
+export const GameArtKitFileRole = Schema.Literals(["atlas", "sheet", "license", "provenance"]);
 export type GameArtKitFileRole = typeof GameArtKitFileRole.Type;
 
 /**
@@ -90,6 +115,8 @@ export const GameArtKitSummary = Schema.Struct({
   license: GameArtLicense,
   source: GameArtSource,
   atlas: GameArtAtlas,
+  /** Character or background sheets the kit also ships, beyond the atlas. */
+  additionalSheets: Schema.Array(GameArtSheet),
   /** How to read the atlas, without naming an engine resource type. */
   usage: artText(700),
 });
@@ -150,6 +177,13 @@ export const GameArtImportedAtlas = Schema.Struct({
 });
 export type GameArtImportedAtlas = typeof GameArtImportedAtlas.Type;
 
+/** One additional sheet after install, with the Godot path it now has. */
+export const GameArtImportedSheet = Schema.Struct({
+  ...GameArtSheet.fields,
+  imageResPath: Schema.String,
+});
+export type GameArtImportedSheet = typeof GameArtImportedSheet.Type;
+
 /**
  * The installed result. `alreadyPresent` is true only when every declared file
  * was already there byte for byte, so a retry writes nothing.
@@ -160,6 +194,7 @@ export const GameArtImportResult = Schema.Struct({
   destination: Schema.String,
   files: Schema.Array(GameArtInstalledFile),
   atlas: GameArtImportedAtlas,
+  additionalSheets: Schema.Array(GameArtImportedSheet),
   alreadyPresent: Schema.Boolean,
   message: Schema.String,
 });

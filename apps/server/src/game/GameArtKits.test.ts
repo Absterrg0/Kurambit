@@ -34,7 +34,7 @@ const withTemporaryGame = <A, E, R>(
     }),
   );
 
-it.live("the shipped kit's bytes, atlas size and license match its catalog entry", () =>
+it.live("each shipped kit's bytes, atlas and sheet sizes and license match its catalog", () =>
   Effect.gen(function* () {
     const directory = yield* GameArtKits.resolveArtKitsDirectory(import.meta.dirname);
     for (const kit of gameArtKitCatalog) {
@@ -59,6 +59,18 @@ it.live("the shipped kit's bytes, atlas size and license match its catalog entry
           (kit.atlas.columns - 1) * kit.atlas.spacing +
           2 * kit.atlas.margin,
       );
+      for (const sheet of kit.additionalSheets) {
+        const sheetFile = kit.files.find((file) => file.path === sheet.image)!;
+        expect(sheetFile.role).toBe("sheet");
+        const sheetImage = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory, kit.id, sheet.image)),
+        );
+        expect(sheetImage.subarray(1, 4).toString("ascii")).toBe("PNG");
+        expect(sheetImage.readUInt32BE(16)).toBe(sheet.imageWidth);
+        expect(sheetImage.readUInt32BE(20)).toBe(sheet.imageHeight);
+        expect(sheetFile.width).toBe(sheet.imageWidth);
+        expect(sheetFile.height).toBe(sheet.imageHeight);
+      }
       const license = yield* Effect.promise(() =>
         NodeFSP.readFile(
           NodePath.join(directory, kit.id, kit.files.find((file) => file.role === "license")!.path),
@@ -67,8 +79,9 @@ it.live("the shipped kit's bytes, atlas size and license match its catalog entry
       );
       expect(license).toContain("Creative Commons Zero, CC0");
       expect(license).toContain("kenney.nl");
+      expect(license).toContain(kit.name.replace("Kenney ", ""));
       expect(kit.license.url).toContain("creativecommons.org/publicdomain/zero/1.0");
-      expect(kit.source.url).toContain("kenney.nl/assets/tiny-dungeon");
+      expect(kit.source.url).toContain("kenney.nl/assets/");
       expect(kit.source.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
     }
   }),
@@ -78,18 +91,36 @@ it.effect("search matches an exact style or a literal word and never guesses", (
   const kits = GameArtKits.make(gameArtKitCatalog);
   return Effect.gen(function* () {
     const pixel = yield* kits.search({ style: "pixel-art" });
-    expect(pixel.kits.map((kit) => kit.id)).toEqual(["kenney-tiny-dungeon"]);
-    expect(pixel.kits[0]?.contents.length).toBeGreaterThan(0);
-    expect(pixel.kits[0]?.atlas.tileWidth).toBe(16);
-    expect(pixel.kits[0]?.atlas.imageWidth).toBe(192);
-    expect(pixel.kits[0]?.atlas.imageHeight).toBe(176);
-    expect(pixel.kits[0]?.license.name).toBe("CC0-1.0");
-    expect(pixel.kits[0]?.source.archiveUrl).toContain("kenney_tiny-dungeon.zip");
-    expect(pixel.kits[0]?.usage).toContain("row-major");
+    expect(pixel.kits.map((kit) => kit.id)).toEqual([
+      "kenney-pixel-platformer",
+      "kenney-tiny-dungeon",
+    ]);
+    const dungeon = (yield* kits.search({ text: "dungeon" })).kits[0]!;
+    expect(dungeon.contents.length).toBeGreaterThan(0);
+    expect(dungeon.atlas.tileWidth).toBe(16);
+    expect(dungeon.atlas.imageWidth).toBe(192);
+    expect(dungeon.atlas.imageHeight).toBe(176);
+    expect(dungeon.license.name).toBe("CC0-1.0");
+    expect(dungeon.source.archiveUrl).toContain("kenney_tiny-dungeon.zip");
+    expect(dungeon.usage).toContain("row-major");
+
+    const platformer = (yield* kits.search({ style: "platformer" })).kits;
+    expect(platformer.map((kit) => kit.id)).toEqual(["kenney-pixel-platformer"]);
+    expect(platformer[0]?.additionalSheets.map((sheet) => sheet.name)).toEqual(["characters"]);
+    expect(platformer[0]?.additionalSheets[0]?.use).toContain("Rect2(col*24, row*24, 24, 24)");
+    expect((yield* kits.search({ text: "platformer" })).kits.map((kit) => kit.id)).toEqual([
+      "kenney-pixel-platformer",
+    ]);
+    expect((yield* kits.search({ text: "animation" })).kits.map((kit) => kit.id)).toEqual([
+      "kenney-pixel-platformer",
+    ]);
+    expect((yield* kits.search({ text: "top-down" })).kits.map((kit) => kit.id)).toEqual([
+      "kenney-tiny-dungeon",
+    ]);
 
     expect((yield* kits.search({ style: "photorealistic" })).kits).toEqual([]);
-    expect((yield* kits.search({ text: "kenney" })).kits).toHaveLength(1);
-    expect((yield* kits.search({ text: "dungeon" })).kits).toHaveLength(1);
+    expect((yield* kits.search({ text: "kenney" })).kits).toHaveLength(2);
+    expect((yield* kits.search({ text: "racing" })).kits).toEqual([]);
     expect((yield* kits.search({ style: "pixel-art", text: "dungeon" })).kits).toHaveLength(1);
     expect((yield* kits.search({ style: "pixel-art", text: "racing" })).kits).toEqual([]);
     expect((yield* kits.search({})).kits).toHaveLength(gameArtKitCatalog.length);
@@ -106,18 +137,53 @@ it.effect("get returns the declared files and an unknown id names the catalog", 
       "PROVENANCE.md",
     ]);
     expect(result.kit.atlas.tileCount).toBe(132);
+    expect(result.kit.additionalSheets).toEqual([]);
+
+    const platformer = yield* kits.get({ id: "kenney-pixel-platformer" });
+    expect(platformer.kit.files.map((file) => file.role)).toEqual([
+      "atlas",
+      "sheet",
+      "license",
+      "provenance",
+    ]);
+    expect(platformer.kit.atlas.tileCount).toBe(180);
+    expect(platformer.kit.additionalSheets[0]?.tileCount).toBe(27);
+    expect(platformer.kit.usage).toContain("Rect2(col*18, row*18, 18, 18)");
+    expect(platformer.kit.license.attribution).toContain("Kenney");
+
     const error = yield* kits.get({ id: "not-a-kit" }).pipe(Effect.flip);
     expect(error.message).toContain("kenney-tiny-dungeon");
+    expect(error.message).toContain("kenney-pixel-platformer");
   });
 });
 
 it("rejects a catalog whose atlas grid does not fit its declared image", () => {
-  const kit = gameArtKitCatalog[0]!;
+  const kit = gameArtKitCatalog.find((entry) => entry.id === "kenney-tiny-dungeon")!;
   expect(() => GameArtKits.make([{ ...kit, atlas: { ...kit.atlas, columns: 13 } }])).toThrow();
 });
 
+it("rejects a catalog sheet whose grid does not fit its image or file", () => {
+  const kit = gameArtKitCatalog.find((entry) => entry.id === "kenney-pixel-platformer")!;
+  expect(() =>
+    GameArtKits.make([
+      {
+        ...kit,
+        additionalSheets: [{ ...kit.additionalSheets[0]!, columns: 10 }],
+      },
+    ]),
+  ).toThrow(/sheet 'characters'/);
+  expect(() =>
+    GameArtKits.make([
+      {
+        ...kit,
+        additionalSheets: [{ ...kit.additionalSheets[0]!, image: "tilemap_packed.png" }],
+      },
+    ]),
+  ).toThrow();
+});
+
 it("rejects a catalog file path that could escape the kit directory", () => {
-  const kit = gameArtKitCatalog[0]!;
+  const kit = gameArtKitCatalog.find((entry) => entry.id === "kenney-tiny-dungeon")!;
   expect(() =>
     GameArtKits.make([
       {
@@ -172,6 +238,73 @@ it.live("install copies only the declared files and returns real resource paths"
         NodeFSP.readFile(NodePath.join(repositoryKit, "kenney-tiny-dungeon/tilemap_packed.png")),
       );
       expect(installed.equals(expected)).toBe(true);
+    }),
+  ),
+);
+
+it.live("a platformer import copies both sheets and returns their real resource paths", () =>
+  withTemporaryGame(({ root }) =>
+    Effect.gen(function* () {
+      const service = GameArtKits.make(gameArtKitCatalog);
+      const result = yield* service.install({
+        root,
+        godotProject: "godot",
+        id: "kenney-pixel-platformer",
+      });
+      expect(result.alreadyPresent).toBe(false);
+      expect(result.destination).toBe("godot/assets/art/kits/kenney-pixel-platformer");
+      expect(result.files.map((file) => file.role)).toEqual([
+        "atlas",
+        "sheet",
+        "license",
+        "provenance",
+      ]);
+      expect(result.atlas).toEqual({
+        imageResPath: "res://assets/art/kits/kenney-pixel-platformer/tilemap_packed.png",
+        imageWidth: 360,
+        imageHeight: 162,
+        tileWidth: 18,
+        tileHeight: 18,
+        columns: 20,
+        rows: 9,
+        tileCount: 180,
+        margin: 0,
+        spacing: 0,
+      });
+      expect(result.additionalSheets).toEqual([
+        expect.objectContaining({
+          name: "characters",
+          imageResPath:
+            "res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png",
+          imageWidth: 216,
+          imageHeight: 72,
+          tileWidth: 24,
+          tileHeight: 24,
+          columns: 9,
+          rows: 3,
+          tileCount: 27,
+          margin: 0,
+          spacing: 0,
+        }),
+      ]);
+      const entries = yield* Effect.promise(() =>
+        NodeFSP.readdir(NodePath.join(root, result.destination), { recursive: true }),
+      );
+      expect(entries.sort()).toEqual([
+        "License.txt",
+        "PROVENANCE.md",
+        "tilemap-characters_packed.png",
+        "tilemap_packed.png",
+      ]);
+      const installedSheet = yield* Effect.promise(() =>
+        NodeFSP.readFile(
+          NodePath.join(
+            root,
+            "godot/assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png",
+          ),
+        ),
+      );
+      expect(installedSheet).toHaveLength(1990);
     }),
   ),
 );

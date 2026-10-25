@@ -287,7 +287,7 @@ export const GameRecipeToolkit = Toolkit.make(GameRecipeSearchTool, GameRecipeGe
 const artDependencies = [GameArtKits.GameArtKits];
 const GameArtSearchTool = Tool.make("game_art_search", {
   description:
-    "Search Game Studio's optional pinned CC0 art kits before choosing art. style matches an authored tag exactly (pixel-art, top-down, dungeon, fantasy, roguelike); text matches a declared word or phrase literally. Returns stable kit ids, contents, atlas dimensions, license and source. Nothing is imported and no kit is picked for you: use a kit only when it fits BRIEF.md and the game's art direction. Read-only; reads no game files and starts no work.",
+    "Search Game Studio's optional pinned CC0 art kits before choosing art. style matches an authored tag exactly (pixel-art, top-down, dungeon, fantasy, roguelike, platformer, side-view); text matches a declared word or phrase literally. Returns stable kit ids, contents, atlas and sheet dimensions, license and source. Nothing is imported and no kit is picked for you: use a kit only when it fits BRIEF.md and the game's art direction. Read-only; reads no game files and starts no work.",
   parameters: GameArtSearchInput,
   success: GameArtSearchResult,
   failure: Schema.String,
@@ -298,7 +298,7 @@ const GameArtSearchTool = Tool.make("game_art_search", {
   .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
 const GameArtGetTool = Tool.make("game_art_get", {
   description:
-    "Read one art kit's complete declared files, byte sizes, SHA-256 hashes, atlas layout, license and source provenance before importing it. Read-only; reads no game files.",
+    "Read one art kit's complete declared files, byte sizes, SHA-256 hashes, atlas and additional sheet layouts, license and source provenance before importing it. Read-only; reads no game files.",
   parameters: GameArtGetInput,
   success: GameArtGetResult,
   failure: Schema.String,
@@ -309,7 +309,7 @@ const GameArtGetTool = Tool.make("game_art_get", {
   .annotate(McpSchema.EnabledWhen, hiddenFromBallots);
 const GameArtImportTool = Tool.make("game_art_import", {
   description:
-    "Copy one chosen art kit's declared atlas, license and provenance files into this game under godot/assets/art/kits/<kitId>/, and return exact res:// paths and atlas layout. It copies no scripts, scenes, levels or acceptance, changes no game.json and changes no mechanics. Repeated import of the unchanged kit writes nothing; if a destination file exists with different bytes it refuses and leaves every existing file untouched. Run game_godot_import afterward. Hidden from read-only critic and ballot sessions.",
+    "Copy one chosen art kit's declared atlas, additional sheets, license and provenance files into this game under godot/assets/art/kits/<kitId>/, and return exact res:// paths and atlas/sheet layouts. It copies no scripts, scenes, levels or acceptance, changes no game.json and changes no mechanics. Repeated import of the unchanged kit writes nothing; if a destination file exists with different bytes it refuses and leaves every existing file untouched. Run game_godot_import afterward. Hidden from read-only critic and ballot sessions.",
   parameters: GameArtImportInput,
   success: GameArtImportResult,
   failure,

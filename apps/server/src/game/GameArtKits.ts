@@ -166,6 +166,7 @@ const summaryOf = (kit: GameArtKit): GameArtKitSummary => ({
   license: kit.license,
   source: kit.source,
   atlas: kit.atlas,
+  additionalSheets: kit.additionalSheets,
   usage: kit.usage,
 });
 
@@ -181,12 +182,33 @@ const matchesText = (kit: GameArtKit, text: string): boolean => {
     kit.license.attribution,
     kit.source.title,
     kit.source.url,
+    ...kit.additionalSheets.flatMap((sheet) => [sheet.name, sheet.use]),
   ];
   return values.some((value) => fold(value).includes(text));
 };
 
 const sameFile = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && Buffer.from(left).equals(Buffer.from(right));
+
+type Grid = {
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly tileWidth: number;
+  readonly tileHeight: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly tileCount: number;
+  readonly margin: number;
+  readonly spacing: number;
+};
+const gridError = (grid: Grid): string | null => {
+  const width = grid.columns * grid.tileWidth + (grid.columns - 1) * grid.spacing + 2 * grid.margin;
+  const height = grid.rows * grid.tileHeight + (grid.rows - 1) * grid.spacing + 2 * grid.margin;
+  if (grid.imageWidth !== width || grid.imageHeight !== height)
+    return "layout its image cannot fit";
+  if (grid.tileCount !== grid.columns * grid.rows) return "tile count its grid cannot hold";
+  return null;
+};
 
 /**
  * A catalog mistake must fail at load, not copy an incomplete kit into a game.
@@ -223,19 +245,43 @@ const validateCatalog = (catalog: ReadonlyArray<GameArtKit>) => {
         `Art kit '${kit.id}' declares image dimensions its atlas file disagrees with.`,
       );
     }
-    const expectedWidth =
-      kit.atlas.columns * kit.atlas.tileWidth +
-      (kit.atlas.columns - 1) * kit.atlas.spacing +
-      2 * kit.atlas.margin;
-    const expectedHeight =
-      kit.atlas.rows * kit.atlas.tileHeight +
-      (kit.atlas.rows - 1) * kit.atlas.spacing +
-      2 * kit.atlas.margin;
-    if (atlas.width !== expectedWidth || atlas.height !== expectedHeight) {
-      throw new Error(`Art kit '${kit.id}' declares an atlas layout its image cannot fit.`);
+    const atlasError = gridError(kit.atlas);
+    if (atlasError !== null) {
+      throw new Error(`Art kit '${kit.id}' declares an atlas ${atlasError}.`);
     }
-    if (kit.atlas.tileCount !== kit.atlas.columns * kit.atlas.rows) {
-      throw new Error(`Art kit '${kit.id}' declares a tile count its grid cannot hold.`);
+
+    const sheets = new Set<string>();
+    const sheetFiles = new Set<string>();
+    for (const sheet of kit.additionalSheets) {
+      if (sheets.has(sheet.name)) {
+        throw new Error(`Art kit '${kit.id}' declares sheet '${sheet.name}' twice.`);
+      }
+      sheets.add(sheet.name);
+      if (sheetFiles.has(sheet.image) || sheet.image === atlas.path) {
+        throw new Error(`Art kit '${kit.id}' declares sheet image '${sheet.image}' twice.`);
+      }
+      sheetFiles.add(sheet.image);
+      const file = kit.files.find((candidate) => candidate.path === sheet.image);
+      if (file === undefined || file.role !== "sheet") {
+        throw new Error(`Art kit '${kit.id}' sheet '${sheet.name}' must declare a sheet file.`);
+      }
+      if (file.width === undefined || file.height === undefined) {
+        throw new Error(`Art kit '${kit.id}' sheet '${sheet.name}' must declare its image size.`);
+      }
+      if (sheet.imageWidth !== file.width || sheet.imageHeight !== file.height) {
+        throw new Error(
+          `Art kit '${kit.id}' sheet '${sheet.name}' disagrees with its image dimensions.`,
+        );
+      }
+      const sheetError = gridError(sheet);
+      if (sheetError !== null) {
+        throw new Error(`Art kit '${kit.id}' declares sheet '${sheet.name}' ${sheetError}.`);
+      }
+    }
+    for (const file of kit.files.filter((candidate) => candidate.role === "sheet")) {
+      if (!sheetFiles.has(file.path)) {
+        throw new Error(`Art kit '${kit.id}' ships unreferenced sheet '${file.path}'.`);
+      }
     }
   }
 };
@@ -290,6 +336,10 @@ const installedResult = (input: {
       margin: input.kit.atlas.margin,
       spacing: input.kit.atlas.spacing,
     },
+    additionalSheets: input.kit.additionalSheets.map((sheet) => ({
+      ...sheet,
+      imageResPath: `res://${input.kitRelative}/${sheet.image}`,
+    })),
     alreadyPresent: input.alreadyPresent,
     message: input.alreadyPresent
       ? `${input.kit.name} is already imported unchanged at ${input.destination}; no files were written. Run game_godot_import if needed.`
