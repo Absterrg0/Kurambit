@@ -108,6 +108,9 @@ it.effect("search matches an exact style or a literal word and never guesses", (
     expect(platformer.map((kit) => kit.id)).toEqual(["kenney-pixel-platformer"]);
     expect(platformer[0]?.additionalSheets.map((sheet) => sheet.name)).toEqual(["characters"]);
     expect(platformer[0]?.additionalSheets[0]?.use).toContain("Rect2(col*24, row*24, 24, 24)");
+    expect((yield* kits.search({ text: "stone" })).kits.map((kit) => kit.id)).toEqual([
+      "kenney-tiny-dungeon",
+    ]);
     expect((yield* kits.search({ text: "platformer" })).kits.map((kit) => kit.id)).toEqual([
       "kenney-pixel-platformer",
     ]);
@@ -149,6 +152,7 @@ it.effect("get returns the declared files and an unknown id names the catalog", 
     expect(platformer.kit.atlas.tileCount).toBe(180);
     expect(platformer.kit.additionalSheets[0]?.tileCount).toBe(27);
     expect(platformer.kit.usage).toContain("Rect2(col*18, row*18, 18, 18)");
+    expect(platformer.kit.usage).toContain("left/middle/right");
     expect(platformer.kit.license.attribution).toContain("Kenney");
 
     const error = yield* kits.get({ id: "not-a-kit" }).pipe(Effect.flip);

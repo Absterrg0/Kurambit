@@ -78,17 +78,17 @@ export const gameArtKitCatalog: ReadonlyArray<GameArtKit> = [
     version: 1,
     name: "Kenney Pixel Platformer",
     summary:
-      "A compact side-view platformer kit: 18×18 terrain, platforms, props and pickups on one atlas, plus a separate 24×24 character atlas with explorers, enemies and simple animation frames. Grass, dirt, stone and snow share one sheet, so recolor it for each game.",
+      "A compact side-view platformer kit: 18×18 terrain, platforms, props and pickups on one atlas, plus a separate 24×24 character atlas with explorers, enemies and simple animation frames. Grass, dirt and snow share one sheet, so recolor it for each game.",
     styles: ["pixel-art", "platformer", "side-view", "2d", "terrain", "characters", "animation"],
     contents: [
-      "18×18 grass, dirt, stone and snow terrain with edges and fills",
+      "18×18 grass, dirt and snow terrain with edges and fills",
       "Wooden platforms, rope bridges, ladders, fences and signs",
       "Coins, keys, hearts, gems, crates, trees, cacti, clouds and digits",
       "24×24 explorers, astronaut, box and flying enemies, robot and bat",
       "Two- and three-frame character variants for simple animation",
     ],
     usage:
-      "Tiles: 20×9 cells of 18×18 px, no margin/spacing, row-major. Cell (col,row) is Rect2(col*18, row*18, 18, 18). Grass surface row 0 cols 0–3 (0 and 3 are edges), dirt fill cols 4–5; wooden platform row 2 cols 0–3; sign row 4 col 4; coin row 7 col 11; cloud row 7 cols 13–16. Draw at a whole-number scale with nearest filtering, and tint or recolor the sheet per game. Godot 4: var cell := AtlasTexture.new(); cell.atlas = load(IMAGE); cell.region = Rect2(col*18, row*18, 18, 18); sprite.texture = cell; sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST.",
+      "Tiles: 20×9 cells of 18×18 px, no margin/spacing, row-major. Cell (col,row) is Rect2(col*18, row*18, 18, 18). Grass surface row 0: col 0 is a standalone block; cols 1–3 are left/middle/right (repeat col 2, end with col 3). Dirt fill cols 4–5. Wooden platform row 2: col 0 is a standalone block; cols 1–3 are left/middle/right. Sign row 4 col 4; coin row 7 col 11; cloud row 7 cols 13–16. Draw at a whole-number scale with nearest filtering, and tint or recolor the sheet per game. Godot 4: var cell := AtlasTexture.new(); cell.atlas = load(IMAGE); cell.region = Rect2(col*18, row*18, 18, 18); sprite.texture = cell; sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST.",
     license: {
       name: "CC0-1.0",
       url: "https://creativecommons.org/publicdomain/zero/1.0/",

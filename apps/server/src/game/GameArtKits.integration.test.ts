@@ -175,17 +175,24 @@ func _initialize() -> void:
 		return
 	var world := Node2D.new()
 	root.add_child(world)
+	# Column 0 is a standalone block; columns 1-3 are the wide surface's
+	# left/middle/right, so a long run repeats column 2.
 	for x in range(12):
-		var edge_col := 1
+		var surface_col := 2
 		if x == 0:
-			edge_col = 0
+			surface_col = 1
 		elif x == 11:
-			edge_col = 3
-		_sprite(world, _tiles, edge_col, 0, TILE, Vector2(x * TILE * SCALE, 216))
+			surface_col = 3
+		_sprite(world, _tiles, surface_col, 0, TILE, Vector2(x * TILE * SCALE, 216))
 		_sprite(world, _tiles, 4 + (x % 2), 0, TILE, Vector2(x * TILE * SCALE, 270))
 		_sprite(world, _tiles, 4 + (x % 2), 0, TILE, Vector2(x * TILE * SCALE, 324))
 	for i in range(4):
-		_sprite(world, _tiles, i, 2, TILE, Vector2(216 + i * TILE * SCALE, 108))
+		var platform_col := 2
+		if i == 0:
+			platform_col = 1
+		elif i == 3:
+			platform_col = 3
+		_sprite(world, _tiles, platform_col, 2, TILE, Vector2(216 + i * TILE * SCALE, 108))
 	_sprite(world, _tiles, 4, 4, TILE, Vector2(54, 162))
 	_sprite(world, _tiles, 11, 7, TILE, Vector2(270, 54))
 	_sprite(world, _tiles, 6, 6, TILE, Vector2(486, 162))
