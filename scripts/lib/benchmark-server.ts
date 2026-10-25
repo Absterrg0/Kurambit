@@ -100,6 +100,13 @@ const START_TIMEOUT_MS = 120_000;
 
 const pidPathOf = (logPath: string) => `${logPath}.pid`;
 
+const redactCredentialLine = (line: string) =>
+  line.replace(/^(Pairing URL:|Token:)\s*\S+/g, "$1 <redacted>");
+
+/** Startup failures need the server's own cause, but never its one-time credential. */
+const redactedTail = (output: string) =>
+  output.slice(-4_000).split("\n").map(redactCredentialLine).join("\n");
+
 /**
  * The server runs in its own group so a stop can target exactly that group.
  * The pid file closes the window where the harness itself is SIGKILLed before
@@ -166,6 +173,8 @@ export async function startBenchmarkServer(input: {
   readonly port?: number;
   /** The provider instance this benchmark asks its builder to use. */
   readonly provider: string;
+  /** Startup guards pass a short deadline so a hang fails while the caller is watching. */
+  readonly startTimeoutMs?: number;
 }): Promise<BenchmarkServer> {
   await seedBenchmarkProviderSettings({ homeDir: input.homeDir, provider: input.provider });
   const spec = benchmarkServerSpawn(input);
@@ -192,15 +201,15 @@ export async function startBenchmarkServer(input: {
   }
   let output = "";
   let pendingLine = "";
-  const redact = (line: string) => line.replace(/^(Pairing URL:|Token:)\s*\S+/g, "$1 <redacted>");
+  const startTimeoutMs = input.startTimeoutMs ?? START_TIMEOUT_MS;
   const started = new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
         new Error(
-          `The benchmark server did not print a pairing URL within ${START_TIMEOUT_MS} ms.`,
+          `The benchmark server did not print a pairing URL within ${startTimeoutMs} ms.\n${redactedTail(output)}`,
         ),
       );
-    }, START_TIMEOUT_MS);
+    }, startTimeoutMs);
     const consume = (chunk: Buffer) => {
       const text = chunk.toString();
       // The pairing URL and its token are one-time credentials; the log keeps
@@ -209,7 +218,7 @@ export async function startBenchmarkServer(input: {
       pendingLine += text;
       const lines = pendingLine.split("\n");
       pendingLine = lines.pop() ?? "";
-      for (const line of lines) log.write(`${redact(line)}\n`);
+      for (const line of lines) log.write(`${redactCredentialLine(line)}\n`);
       const match = output.match(PAIRING_LINE);
       if (match?.[1] === undefined) return;
       clearTimeout(timer);
@@ -223,7 +232,11 @@ export async function startBenchmarkServer(input: {
     });
     child.once("close", (code) => {
       clearTimeout(timer);
-      reject(new Error(`The benchmark server exited (${code ?? "signal"}) before it was ready.`));
+      reject(
+        new Error(
+          `The benchmark server exited (${code ?? "signal"}) before it was ready.\n${redactedTail(output)}`,
+        ),
+      );
     });
   });
   let url: string;
