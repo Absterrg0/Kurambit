@@ -17,7 +17,7 @@ import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GameWebPlaytest from "./GameWebPlaytest.ts";
 import { snapshotBuildSource } from "./sourceSnapshot.ts";
-import { describeWebArtifacts } from "./webBuild.ts";
+import { describeWebArtifacts, hashWebBuild } from "./webBuild.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   admissionTestLayer,
@@ -128,7 +128,12 @@ it.live.skipIf(!available)(
         );
         expect(result.booted).toBe(true);
         expect(result.bootMs).not.toBeNull();
-        expect(result.screenshots.map((shot) => shot.label)).toEqual(["booted", "after-steps"]);
+        expect(result.screenshots.map((shot) => shot.label)).toEqual([
+          "booted",
+          "input 1 before: no input",
+          "input 1 after: held ArrowUp 1500ms",
+          "after-steps",
+        ]);
         expect(result.screenshots.every((shot) => shot.width > 0 && shot.height > 0)).toBe(true);
         yield* Effect.promise(() => NodeFSP.mkdir(evidenceDirectory, { recursive: true }));
         for (const shot of result.screenshots) {
@@ -197,11 +202,13 @@ it.live.skipIf(!available || !templatesInstalled)(
             const qualification = yield* GameQualification.GameQualification;
             const snapshot = yield* Effect.promise(() => snapshotBuildSource(root, "godot"));
             if (snapshot.kind !== "known") throw new Error("Fixture sources should be known");
+            const artifact = yield* Effect.promise(() => hashWebBuild(root, "builds/web"));
+            if (artifact === null) throw new Error("Fixture build should hash");
             yield* qualification.record(root, {
               stage: "export",
               outcome: "passed",
               sourceId: snapshot.sourceId,
-              buildId: `${snapshot.sourceId}:fixture`,
+              buildId: artifact.buildId,
               evidenceDirectory: null,
               // The fixture build is the artifact the playtest must reuse; the
               // record has to name its files or the read correctly calls it stale.
@@ -217,7 +224,12 @@ it.live.skipIf(!available || !templatesInstalled)(
             // The fixture predates StudioProbe: keep the pixel rule and say so.
             expect(result.state).toBeNull();
             expect(result.message).toContain("no state probe");
-            expect(result.screenshots.map((shot) => shot.label)).toEqual(["booted", "after-steps"]);
+            expect(result.screenshots.map((shot) => shot.label)).toEqual([
+              "booted",
+              "input 1 before: no input",
+              "input 1 after: held ArrowUp 1000ms",
+              "after-steps",
+            ]);
             // Evidence is persisted and the status exposes the newest run.
             const status = yield* game.status(registered.threadId);
             expect(status.lastPlaytest).toMatchObject({
@@ -226,7 +238,7 @@ it.live.skipIf(!available || !templatesInstalled)(
               consoleErrorCount: 0,
               stale: false,
             });
-            expect(status.lastPlaytest?.frames).toHaveLength(2);
+            expect(status.lastPlaytest?.frames).toHaveLength(4);
             const evidence = NodePath.join(root, status.lastPlaytest!.directory);
             const stored = JSON.parse(
               yield* Effect.promise(() =>

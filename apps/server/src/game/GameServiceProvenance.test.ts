@@ -1832,6 +1832,218 @@ const folderBytes = async (root: string): Promise<Record<string, string>> => {
   return bytes;
 };
 
+/** The game files the exact-window tests need before any build exists. */
+const writeExactGameSources = (root: string) =>
+  Effect.promise(async () => {
+    await NodeFSP.writeFile(NodePath.join(root, "game.json"), `${JSON.stringify(manifest())}\n`);
+    await NodeFSP.writeFile(
+      NodePath.join(root, "godot/project.godot"),
+      "[display]\nwindow/size/viewport_width=640\nwindow/size/viewport_height=360\n",
+    );
+  });
+
+it.live("exact window evidence refuses an unexported game without exporting", () => {
+  const runs: string[] = [];
+  const previews: string[] = [];
+  let playtests = 0;
+  return withGame(
+    {
+      run: (input) => {
+        runs.push(input.operation);
+        return Effect.succeed(processOk(input.root));
+      },
+      preview: (directory) => {
+        previews.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${directory}`);
+      },
+      playtest: () => {
+        playtests += 1;
+        return Effect.succeed(playtestResult);
+      },
+    },
+    ({ root, stateDir, game, rounds, qualification }) =>
+      Effect.gen(function* () {
+        yield* writeExactGameSources(root);
+        yield* Effect.promise(() => NodeFSP.mkdir(stateDir, { recursive: true }));
+        const roundsBefore = yield* rounds.read(root);
+        const qualificationBefore = yield* qualification.read(root, "godot");
+        const rootBefore = yield* Effect.promise(() => folderBytes(root));
+        const stateBefore = yield* Effect.promise(() => folderBytes(stateDir));
+
+        const refused = yield* game
+          .webPlaytest(threadId, {
+            steps: [{ press: "Space" }],
+            exactSize: true,
+            width: 900,
+            height: 900,
+          })
+          .pipe(Effect.flip);
+        expect(refused).toMatchObject({ operation: "Web playtest", reason: "invalid-input" });
+        expect(refused.detail).toContain("game_export");
+        expect(refused.detail).toContain("game_verify");
+        expect(refused.detail).toContain("exactSize");
+
+        // The refusal happens before any engine, preview or browser work, and
+        // leaves the qualification and round records exactly as they were.
+        expect(runs).toEqual([]);
+        expect(previews).toEqual([]);
+        expect(playtests).toBe(0);
+        expect(yield* rounds.read(root)).toEqual(roundsBefore);
+        expect(yield* qualification.read(root, "godot")).toEqual(qualificationBefore);
+        expect(yield* Effect.promise(() => folderBytes(root))).toEqual(rootBefore);
+        expect(yield* Effect.promise(() => folderBytes(stateDir))).toEqual(stateBefore);
+      }),
+  );
+});
+
+it.live("exact window evidence refuses stale sources without re-exporting", () => {
+  const runs: string[] = [];
+  const previews: string[] = [];
+  let playtests = 0;
+  return withGame(
+    {
+      run: (input) => {
+        runs.push(input.operation);
+        return exportFakeWebBuild(input);
+      },
+      preview: (directory) => {
+        previews.push(directory);
+        return Effect.succeed(`http://127.0.0.1:9/${directory}`);
+      },
+      playtest: () => {
+        playtests += 1;
+        return Effect.succeed(playtestResult);
+      },
+    },
+    ({ root, stateDir, game, rounds, qualification }) =>
+      Effect.gen(function* () {
+        yield* writeExactGameSources(root);
+        yield* game.export(threadId, "Web");
+        const build = (yield* rounds.read(root)).selected!;
+        // The sources moved after the export, so the recorded artifact no
+        // longer describes what Play would build now.
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# newer sources\n"),
+        );
+        const stale = yield* qualification.read(root, "godot");
+        expect(stageOf(stale, "export")?.status).toBe("stale");
+        const roundsBefore = yield* rounds.read(root);
+        const bindingBefore = yield* rounds.exported(root, build.buildId);
+        const rootBefore = yield* Effect.promise(() => folderBytes(root));
+        const stateBefore = yield* Effect.promise(() => folderBytes(stateDir));
+        const runsBefore = runs.length;
+
+        const refused = yield* game
+          .webPlaytest(threadId, {
+            steps: [{ press: "Space" }],
+            exactSize: true,
+            width: 900,
+            height: 900,
+          })
+          .pipe(Effect.flip);
+        expect(refused).toMatchObject({ operation: "Web playtest", reason: "invalid-input" });
+        expect(refused.detail).toContain("current Web export");
+        expect(refused.detail).toContain("game_export");
+
+        // No export, preview or browser launch, and no record was rewritten.
+        expect(runs).toHaveLength(runsBefore);
+        expect(runs.some((operation) => operation === "export-web")).toBe(true);
+        expect(previews).toEqual([]);
+        expect(playtests).toBe(0);
+        expect(yield* rounds.read(root)).toEqual(roundsBefore);
+        expect(yield* rounds.exported(root, build.buildId)).toEqual(bindingBefore);
+        expect(yield* qualification.read(root, "godot")).toEqual(stale);
+        expect(yield* Effect.promise(() => folderBytes(root))).toEqual(rootBefore);
+        expect(yield* Effect.promise(() => folderBytes(stateDir))).toEqual(stateBefore);
+      }),
+  );
+});
+
+it.live(
+  "exact window evidence refuses missing or changed export files without re-exporting",
+  () => {
+    const runs: string[] = [];
+    const previews: string[] = [];
+    let playtests = 0;
+    return withGame(
+      {
+        run: (input) => {
+          runs.push(input.operation);
+          return exportFakeWebBuild(input);
+        },
+        preview: (directory) => {
+          previews.push(directory);
+          return Effect.succeed(`http://127.0.0.1:9/${directory}`);
+        },
+        playtest: () => {
+          playtests += 1;
+          return Effect.succeed(playtestResult);
+        },
+      },
+      ({ root, stateDir, game, rounds, qualification }) =>
+        Effect.gen(function* () {
+          yield* writeExactGameSources(root);
+          yield* game.export(threadId, "Web");
+          const build = (yield* rounds.read(root)).selected!;
+          const pck = NodePath.join(root, build.directory, "index.pck");
+          const original = yield* Effect.promise(() => NodeFSP.readFile(pck));
+          const roundsBefore = yield* rounds.read(root);
+          const bindingBefore = yield* rounds.exported(root, build.buildId);
+          const runsBefore = runs.length;
+          const refuse = () =>
+            game
+              .webPlaytest(threadId, {
+                steps: [{ press: "Space" }],
+                exactSize: true,
+                width: 900,
+                height: 900,
+              })
+              .pipe(Effect.flip);
+
+          // Missing bytes: the export record still names a file that is gone.
+          yield* Effect.promise(() => NodeFSP.rm(pck));
+          const stateAfterDelete = yield* Effect.promise(() => folderBytes(stateDir));
+          const missing = yield* refuse();
+          expect(missing).toMatchObject({ operation: "Web playtest", reason: "invalid-input" });
+          expect(missing.detail).toContain("current Web export");
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.stat(pck).then(
+                () => "present",
+                () => "missing",
+              ),
+            ),
+          ).toBe("missing");
+
+          // Changed bytes: an edited artifact invalidates the recorded export.
+          const tampered = Buffer.concat([original, Buffer.from("tampered")]);
+          yield* Effect.promise(() => NodeFSP.writeFile(pck, tampered));
+          const stale = yield* qualification.read(root, "godot");
+          expect(stageOf(stale, "export")?.status).toBe("stale");
+          const rootBefore = yield* Effect.promise(() => folderBytes(root));
+          const stateBefore = yield* Effect.promise(() => folderBytes(stateDir));
+          const changed = yield* refuse();
+          expect(changed).toMatchObject({ operation: "Web playtest", reason: "invalid-input" });
+          expect(changed.detail).toContain("current Web export");
+
+          // Neither refusal exported, served, launched the browser or touched a
+          // record; the bytes on disk are exactly what the test left there.
+          expect(runs).toHaveLength(runsBefore);
+          expect(previews).toEqual([]);
+          expect(playtests).toBe(0);
+          expect(yield* rounds.read(root)).toEqual(roundsBefore);
+          expect(yield* rounds.exported(root, build.buildId)).toEqual(bindingBefore);
+          expect(yield* qualification.read(root, "godot")).toEqual(stale);
+          expect(yield* Effect.promise(() => folderBytes(root))).toEqual(rootBefore);
+          expect(yield* Effect.promise(() => folderBytes(stateDir))).toEqual(stateBefore);
+          expect(yield* Effect.promise(() => NodeFSP.readFile(pck))).toEqual(tampered);
+          // The deleted-file refusal also wrote no record of its own.
+          expect(stateAfterDelete).toEqual(stateBefore);
+        }),
+    );
+  },
+);
+
 it.live(
   "internal experiment replay reads all persisted images beyond the tool response limit",
   () => {
@@ -1954,6 +2166,7 @@ it.live(
           const projects = Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
             activeRun: () => Effect.succeed(RunId.make("run:exporter")),
+            read: () => Effect.succeed(manifest()),
           });
           const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadRecords: () =>

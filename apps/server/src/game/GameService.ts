@@ -1270,7 +1270,6 @@ const make = Effect.gen(function* () {
         "playtest",
         Effect.gen(function* () {
           const manifest = yield* projects.read(root);
-          const identity = yield* designApprovals.readPolicy(root, manifest);
           const recorded = buildId === undefined ? null : yield* rounds.exported(root, buildId);
           if (buildId !== undefined) {
             if (recorded === null)
@@ -1293,6 +1292,17 @@ const make = Effect.gen(function* () {
           } else {
             const beforePlaytest = yield* qualification.read(root, manifest.godotProject);
             if (!(yield* webBuildIsCurrent(beforePlaytest))) {
+              // Public exact-window evidence names no build and must never buy
+              // one: exporting here would publish a build and rewrite the very
+              // qualification and round records the run promises not to touch.
+              if (reviewRoot !== null)
+                return yield* new GameOperationError({
+                  operation: "Web playtest",
+                  path: root,
+                  reason: "invalid-input",
+                  detail:
+                    "Exact-size review evidence needs a current Web export, and this game has none (it is missing, stale, or its files changed). Run game_export (or game_verify) to build the current sources, then retry game_web_playtest with exactSize.",
+                });
               const exported = yield* exportGame(root, "Web", yield* exportSelection(root), runId);
               if (!exported.success)
                 return yield* new GameOperationError({
@@ -1303,6 +1313,9 @@ const make = Effect.gen(function* () {
                 });
             }
           }
+          // Read the verification policy after the build gate: a refused
+          // exact-window request must not adopt a policy record on its way out.
+          const identity = yield* designApprovals.readPolicy(root, manifest);
           const build =
             recorded === null
               ? (yield* qualification.read(root, manifest.godotProject)).stages.find(
