@@ -829,7 +829,7 @@ export const GameTryInput = Schema.Struct({
   steps: Schema.Array(GamePlaytestStep)
     .check(Schema.isMinLength(1), Schema.isMaxLength(GAME_TRY_INPUT_BOUNDS.maxSteps))
     .annotate({
-      description: `1–${GAME_TRY_INPUT_BOUNDS.maxSteps} route steps. Each step plans 2 frames (1 for a screenshot) plus ceil(stepMs / captureEveryMs) - 1 interval frames, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
+      description: `1–${GAME_TRY_INPUT_BOUNDS.maxSteps} route steps. The plan is 2 setup frames plus 2 per step (1 for a screenshot) plus max(0, ceil(stepMs / captureEveryMs) - 1) interval frames, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
     }),
   captureEveryMs: Schema.optionalKey(
     Schema.Finite.check(
@@ -845,7 +845,7 @@ const gamePlaytestCaptureOptions = {
     Schema.Finite.check(
       Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
     ).annotate({
-      description: `Also capture a frame at this interval during held and waited steps, at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms apart. The plan is checked before the run: 2 setup frames, plus 2 per input step (1 for a screenshot; a wait adds 2 only with captureAllSteps), plus ceil(stepMs / captureEveryMs) - 1 interval frames per step, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
+      description: `Also capture a frame at this interval during held and waited steps, at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms apart. The plan is checked before the run: 2 setup frames, plus 2 per input step (1 for a screenshot; a wait adds 2 only with captureAllSteps), plus max(0, ceil(stepMs / captureEveryMs) - 1) interval frames per step, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
     }),
   ),
   captureAllSteps: Schema.optionalKey(Schema.Boolean).annotate({

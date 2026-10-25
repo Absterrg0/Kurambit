@@ -52,7 +52,7 @@ describe("playtestInputIssues", () => {
       { screenshot: "jump-works" },
     ];
     expect(playtestInputIssues({ steps, captureEveryMs: 400, captureAllSteps: true })).toContain(
-      "Interval capture requests 33 frames; limit is 32. The plan is 2 setup frames + 2 per input step (1 per screenshot; a wait adds 2 only with captureAllSteps) + ceil(stepMs / captureEveryMs) - 1 per step. Increase captureEveryMs or shorten the steps.",
+      "Interval capture requests 33 frames; limit is 32. The plan is 2 setup frames + 2 per input step (1 per screenshot; a wait adds 2 only with captureAllSteps) + max(0, ceil(stepMs / captureEveryMs) - 1) per step. Increase captureEveryMs or shorten the steps.",
     );
     expect(playtestInputIssues({ steps, captureEveryMs: 500, captureAllSteps: true })).toEqual([]);
     // Exactly 32 planned frames: 2 setup frames + 15 input pairs.

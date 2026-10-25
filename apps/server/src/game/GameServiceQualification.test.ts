@@ -170,6 +170,7 @@ const withFixture = <A, E, R>(
           Layer.mock(GameProjectService.GameProjectService)({
             resolve: () => Effect.succeed(root),
             read: () => Effect.succeed(current),
+            activeRun: () => Effect.succeed(null),
             inventory: () =>
               Effect.succeed({
                 manifest: current,

@@ -42,7 +42,7 @@ export const playtestInputIssues = (input: GameWebPlaytestInput): readonly strin
     if (captures > GAME_TRY_INPUT_BOUNDS.maxFrames)
       issues.push(
         `Interval capture requests ${captures} frames; limit is ${GAME_TRY_INPUT_BOUNDS.maxFrames}. ` +
-          "The plan is 2 setup frames + 2 per input step (1 per screenshot; a wait adds 2 only with captureAllSteps) + ceil(stepMs / captureEveryMs) - 1 per step. " +
+          "The plan is 2 setup frames + 2 per input step (1 per screenshot; a wait adds 2 only with captureAllSteps) + max(0, ceil(stepMs / captureEveryMs) - 1) per step. " +
           "Increase captureEveryMs or shorten the steps.",
       );
   }
