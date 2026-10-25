@@ -1007,6 +1007,46 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       // The boot frame was lit and the run ends dark: rendered pixels changed.
       expect(result.responded).toBe(true);
       break;
+    case "sprite.animation": {
+      // The route starts idle, runs right, reverses left, jumps and lands. The
+      // baseline follows the first D press, so read idle/run/air from the frames.
+      const runFrames = during.filter((probe) => probe.gameState.anim === "run");
+      expect(runFrames.length, "the route runs").toBeGreaterThan(0);
+      expect(runFrames.some((probe) => probe.gameState.frame === 0)).toBe(true);
+      expect(runFrames.some((probe) => probe.gameState.frame === 1)).toBe(true);
+      expect(
+        during.some((probe) => probe.gameState.anim === "idle" && probe.gameState.facing === 1),
+      ).toBe(true);
+      const airFrame = during.find(
+        (probe) => probe.gameState.anim === "air" && probe.gameState.grounded === false,
+      );
+      expect(airFrame, "the jump shows the air pose").toBeDefined();
+      expect(Number(airFrame!.gameState.player_y)).toBeLessThan(288 - 20);
+      const idleRight = during.findLast(
+        (probe) => probe.gameState.anim === "idle" && probe.gameState.facing === 1,
+      );
+      expect(idleRight, "the release keeps the right facing").toBeDefined();
+      expect(before.grounded).toBe(true);
+      expect(before.facing).toBe(1);
+      expect(before.visual_flip).toBe(false);
+      expect(after.anim).toBe("idle");
+      expect(after.grounded).toBe(true);
+      expect(after.facing).toBe(-1);
+      expect(after.visual_flip).toBe(true);
+      expect(Number(after.player_x)).toBeLessThan(Number(idleRight!.gameState.player_x));
+      // The real CollisionShape2D geometry is the same in every pose; only the
+      // visual flips.
+      for (const state of [before, after, ...during.map((probe) => probe.gameState)]) {
+        expect(state.body_width).toBe(16);
+        expect(state.body_height).toBe(30);
+        expect(state.body_offset_x).toBe(0);
+        expect(state.body_offset_y).toBe(-15);
+        expect(state.body_scale_x).toBe(1);
+        expect(state.visual_scale_x).toBe(3);
+        expect(state.visual_offset_y).toBe(-36);
+      }
+      break;
+    }
     case "state.world":
       expect(before.locked).toBe(true);
       expect(before.gate_open).toBe(false);
@@ -1126,6 +1166,12 @@ func _run() -> void:
 			seen[frame] = true
 			await _shot("run-%d" % frame)
 		if seen.has(0) and seen.has(1): break
+	# Keep holding D into the wall: the pose must settle to idle, not run in place.
+	for _i in range(240):
+		await get_tree().physics_frame
+		if int(_scene.snapshot()["player_x"]) >= 600: break
+	await _wait(3)
+	await _shot("clamp")
 	_key(KEY_D, false)
 	await _wait(10)
 	await _shot("released")
@@ -1156,6 +1202,22 @@ func _key(code: Key, pressed: bool) -> void:
 	event.pressed = pressed
 	Input.parse_input_event(event)
 
+func _find_visual(node: Node) -> AnimatedSprite2D:
+	if node is AnimatedSprite2D: return node
+	for child in node.get_children():
+		var found := _find_visual(child)
+		if found != null: return found
+	return null
+
+func _region(state: Dictionary) -> String:
+	var visual := _find_visual(_scene)
+	if visual == null: return ""
+	var texture := visual.sprite_frames.get_frame_texture(str(state["anim"]), int(state["frame"]))
+	if texture is AtlasTexture:
+		var region := (texture as AtlasTexture).region
+		return "%d,%d,%d,%d" % [int(region.position.x), int(region.position.y), int(region.size.x), int(region.size.y)]
+	return ""
+
 func _shot(label: String) -> void:
 	await RenderingServer.frame_post_draw
 	var state: Dictionary = _scene.snapshot()
@@ -1175,6 +1237,7 @@ func _shot(label: String) -> void:
 	_crops[label] = crop
 	_shots[label] = {
 		"state": state,
+		"region": _region(state),
 		"green": _count_green(crop, CHARACTER_ROWS),
 		"unique": _count_unique(crop),
 		"non_sky": _count_non_sky(crop),
@@ -1306,6 +1369,7 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
                 string,
                 {
                   readonly state: Readonly<Record<string, string | number | boolean>>;
+                  readonly region: string;
                   readonly green: number;
                   readonly unique: number;
                   readonly non_sky: number;
@@ -1319,6 +1383,7 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
               "idle",
               "run-0",
               "run-1",
+              "clamp",
               "released",
               "settled",
               "reverse",
@@ -1334,6 +1399,7 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
           const idle = shot("idle");
           const run0 = shot("run-0");
           const run1 = shot("run-1");
+          const clamp = shot("clamp");
           const released = shot("released");
           const settled = shot("settled");
           const reverse = shot("reverse");
@@ -1349,9 +1415,12 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
             expect(value.non_sky, `${label} has the drawn stage under the crop`).toBeGreaterThan(
               100,
             );
-            // Collision geometry is the same in every pose; only the visual flips.
+            // Collision geometry is read from the real shape and is the same in
+            // every pose; only the visual flips.
             expect(value.state.body_width, `${label} body width`).toBe(16);
             expect(value.state.body_height, `${label} body height`).toBe(30);
+            expect(value.state.body_offset_x, `${label} body offset x`).toBe(0);
+            expect(value.state.body_offset_y, `${label} body offset y`).toBe(-15);
             expect(value.state.body_scale_x, `${label} body scale`).toBe(1);
             expect(value.state.visual_scale_x, `${label} visual scale`).toBe(3);
             expect(value.state.visual_offset_y, `${label} visual offset`).toBe(-36);
@@ -1368,6 +1437,20 @@ it.live.skipIf(!godotAvailable || xvfbRun === null)(
           expect(Number(run1.state.player_x)).toBeGreaterThan(Number(run0.state.player_x));
           // The two run frames are drawn differently, not just re-positioned.
           expect(report.crop_diff["run-0_run-1"]).toBeGreaterThan(60);
+
+          // Holding D into the clamp stops the body; the pose must settle to idle
+          // rather than run in place.
+          expect(clamp.state.anim).toBe("idle");
+          expect(Number(clamp.state.player_x)).toBe(600);
+          expect(clamp.state.facing).toBe(1);
+          expect(clamp.state.visual_flip).toBe(false);
+
+          // The authored frame regions are the green pair, not merely green pixels.
+          expect(idle.region).toBe("0,0,24,24");
+          expect(run0.region).toBe("0,0,24,24");
+          expect(run1.region).toBe("24,0,24,24");
+          expect(air.region).toBe("24,0,24,24");
+          expect(report.crop_diff["idle_run-0"]).toBeLessThan(40);
 
           // Release stops the body and keeps the last facing and idle pose.
           expect(released.state.anim).toBe("idle");
@@ -1432,6 +1515,25 @@ const recipeJourney = (id: RecipeId) =>
       return yield* Effect.gen(function* () {
         const directory = NodePath.join(parent, id.replace(/\./g, "-"));
         yield* Effect.promise(() => writeProject(directory, adapter));
+        if (id === "sprite.animation") {
+          // The reference preloads the pinned character sheet; install and
+          // import it through the same service and files a builder uses.
+          const installed = yield* GameArtKits.make(gameArtKitCatalog).install({
+            root: directory,
+            godotProject: "godot",
+            id: "kenney-pixel-platformer",
+          });
+          expect(installed.alreadyPresent).toBe(false);
+          expect(installed.additionalSheets[0]?.imageResPath).toBe(
+            "res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png",
+          );
+          const imported = yield* runGodot(
+            godotExecutable,
+            ["--headless", "--path", NodePath.join(directory, "godot"), "--editor", "--import"],
+            120_000,
+          );
+          expect(imported.exitCode, imported.output.slice(-4000)).toBe(0);
+        }
         // 1. The real checker compiles the script, instantiates the scene and
         //    steps 120 physics frames: the reference boots, not just parses.
         yield* checkProject(directory, parent);
@@ -1712,9 +1814,7 @@ it.live.skipIf(!godotAvailable)(
   240_000,
 );
 
-// sprite.animation starts from the pinned character sheet instead of an empty
-// project, so its native proof above installs the kit through GameArtKits.
-for (const id of RECIPE_IDS.filter((candidate) => candidate !== "sprite.animation")) {
+for (const id of RECIPE_IDS) {
   it.live.skipIf(!available)(
     `runs ${id} from a generated project and records its frames`,
     () => recipeJourney(id),

@@ -2,10 +2,11 @@ import type { GodotRecipeReference } from "./reference.ts";
 
 export const spriteAnimation: GodotRecipeReference = {
   setup:
-    "Import the pinned character sheet first: game_art_import id kenney-pixel-platformer, then game_godot_import. It writes res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png (216x72, 9x3 cells of 24 px). Create an empty Node2D scene, attach this script to the root and run: A/D runs, Space jumps, and stop/run again resets. The demo builds a CharacterBody2D with a 16x30 collision shape and an AnimatedSprite2D visual child. Its SpriteFrames regions are this recipe's authored suggestion, not upstream animation names: idle holds cell (0,0), run alternates (0,0) and (1,0) at 6 fps, and air holds (1,0). Only the visual child flips or carries the offset; the body and its shape do not.\n\nOptional kit guide: for your own sheet, change SHEET and the regions in _cell(); keep idle, run and air regions at a whole-number scale with nearest filtering. The mechanism does not depend on this kit.",
+    "Import the pinned character sheet first: game_art_import id kenney-pixel-platformer, then game_godot_import. It writes res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png (216x72, 9x3 cells of 24 px). Create an empty Node2D scene, attach this script to the root and run: A/D moves the body, Space jumps, and stop/run again resets. The demo builds a CharacterBody2D with a 16x30 collision shape and an AnimatedSprite2D visual child. Its SpriteFrames regions are this recipe's authored suggestion, not upstream animation names: idle holds cell (0,0), run alternates (0,0) and (1,0) at 6 fps, and air holds (1,0). Only the visual child flips; its -36 px vertical offset centers the 72 px sprite. The collision shape keeps its own fixed -15 px offset and never flips. The body is moved by setting position directly and the floor is simulated at y=288; this is not a movement controller.\n\nOptional kit guide: for your own sheet, change SHEET and the regions in _cell(); keep idle, run and air regions at a whole-number scale with nearest filtering. The mechanism does not depend on this kit.",
   referenceCode: String.raw`extends Node2D
-## Sprite animation: actual input and the body's grounded state choose the pose;
-## the visual child carries the flip and offset, so the collision body never does.
+## Sprite animation: actual horizontal movement and the body's grounded state
+## choose the pose; the visual child flips, while the collision shape keeps its
+## fixed offset.
 
 const SHEET := preload("res://assets/art/kits/kenney-pixel-platformer/tilemap-characters_packed.png")
 const CELL := 24
@@ -18,6 +19,7 @@ const START_X := 140.0
 const BODY_SIZE := Vector2(16.0, 30.0)
 
 var _body: CharacterBody2D
+var _collision: CollisionShape2D
 var _visual: AnimatedSprite2D
 var _fall_speed := 0.0
 var _grounded := true
@@ -28,12 +30,12 @@ func _ready() -> void:
 	_body = CharacterBody2D.new()
 	_body.position = Vector2(START_X, FLOOR_Y)
 	add_child(_body)
-	var collision := CollisionShape2D.new()
+	_collision = CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
 	shape.size = BODY_SIZE
-	collision.shape = shape
-	collision.position = Vector2(0.0, -BODY_SIZE.y * 0.5)
-	_body.add_child(collision)
+	_collision.shape = shape
+	_collision.position = Vector2(0.0, -BODY_SIZE.y * 0.5)
+	_body.add_child(_collision)
 	_visual = AnimatedSprite2D.new()
 	_visual.sprite_frames = _frames()
 	_visual.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -71,8 +73,11 @@ func _cell(column: int) -> AtlasTexture:
 
 func _physics_process(delta: float) -> void:
 	var move := Input.get_axis("move_left", "move_right")
+	var moved := 0.0
 	if not is_zero_approx(move):
+		var before := _body.position.x
 		_body.position.x = clampf(_body.position.x + move * WALK_SPEED * delta, 40.0, 600.0)
+		moved = _body.position.x - before
 		var facing := 1 if move > 0.0 else -1
 		if facing != _facing:
 			_facing = facing
@@ -87,7 +92,9 @@ func _physics_process(delta: float) -> void:
 			_body.position.y = FLOOR_Y
 			_fall_speed = 0.0
 			_grounded = true
-	var next := "air" if not _grounded else ("run" if not is_zero_approx(move) else "idle")
+	# Run follows the distance actually covered, so holding into the clamp
+	# settles to idle instead of running in place.
+	var next := "air" if not _grounded else ("run" if not is_zero_approx(moved) else "idle")
 	if next != _animation:
 		_animation = next
 		_visual.play(_animation)
@@ -99,15 +106,17 @@ func _draw() -> void:
 	draw_rect(Rect2(0.0, FLOOR_Y, 640.0, 4.0), Color(0.38, 0.68, 0.36))
 	var facing_text := "right" if _facing > 0 else "left"
 	draw_string(ThemeDB.fallback_font, Vector2(20.0, 28.0), "A/D run   Space jump   pose %s   facing %s" % [_animation, facing_text], HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color(0.95, 0.97, 1.0))
-	draw_string(ThemeDB.fallback_font, Vector2(20.0, 340.0), "The body is a 16x30 collision shape; only the visual child flips.", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, Color(0.82, 0.9, 0.86))
+	draw_string(ThemeDB.fallback_font, Vector2(20.0, 340.0), "The body has a 16x30 collision shape; only the visual child flips.", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, Color(0.82, 0.9, 0.86))
 
 func snapshot() -> Dictionary:
+	var shape := _collision.shape as RectangleShape2D
 	return {
 		"player_x": roundi(_body.position.x), "player_y": roundi(_body.position.y),
 		"anim": _animation, "frame": _visual.frame, "facing": _facing,
 		"visual_flip": _visual.flip_h, "grounded": _grounded,
-		"body_width": int(BODY_SIZE.x), "body_height": int(BODY_SIZE.y),
-		"body_scale_x": _body.scale.x, "visual_scale_x": _visual.scale.x,
+		"body_width": roundi(shape.size.x), "body_height": roundi(shape.size.y),
+		"body_offset_x": roundi(_collision.position.x), "body_offset_y": roundi(_collision.position.y),
+		"body_scale_x": _collision.global_scale.x, "visual_scale_x": _visual.scale.x,
 		"visual_offset_y": roundi(_visual.position.y),
 	}
 `,

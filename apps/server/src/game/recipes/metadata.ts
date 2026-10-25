@@ -466,14 +466,14 @@ export const gameRecipeMetadata: ReadonlyArray<GameRecipe> = [
       "facing",
     ],
     intent:
-      "Choose idle, run and air poses from the body's real input and grounded state, keep the last facing when stopped, and flip only the visual child.",
-    why: "The picture should agree with what the body is doing. A pose chosen from actual movement cannot run in mid-air, and a facing that resets on stop or carries the collision shape with it makes the character read as something else.",
+      "Choose idle, run and air poses from the body's actual movement and grounded state, keep the last facing when stopped, and flip only the visual child.",
+    why: "The picture should agree with what the body is doing. A pose chosen from actual movement cannot run while pinned at a wall or in mid-air, and a facing that resets on stop or carries the collision shape makes the character read as something else.",
     failure:
       "One frame for every state, a snap back to right-facing after release, or a collision box that flips with the art makes movement look and land wrong.",
     restyle:
       "Keep the state mapping, the persisted facing and the visual-only flip. Choose this game's sheet, frame timing and character.",
     verificationQuestion:
-      "Do idle, run and air appear from real input and falling, does facing survive release and reverse, and does the collision shape stay put while the sprite flips?",
+      "Do idle, run and air appear from actual movement and falling, does facing survive release and reverse, and does the collision shape stay put while the sprite flips?",
     source: {
       kind: "write-original",
       license: "MIT",
