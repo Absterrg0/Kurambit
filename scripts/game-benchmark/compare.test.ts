@@ -272,6 +272,32 @@ it("a control that names a winner voids the comparison", () =>
     expect(comparison.reasons.at(-1)).toContain("void");
   }));
 
+it("a control that could not answer is reported as no answer, not a named winner", () => {
+  const summary = summarizeComparison({
+    orders: [
+      {
+        order: "harness-left",
+        answer: null,
+        facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
+        overall: "invalid",
+        reason: "The model call failed: Codex CLI exited with code 1.",
+      },
+      {
+        order: "raw-left",
+        answer: null,
+        facets: { works: "invalid", look: "invalid", feel: "invalid", play: "invalid" },
+        overall: "invalid",
+        reason: "The model call failed: Codex CLI exited with code 1.",
+      },
+    ],
+    control: { answer: null, passed: false },
+  });
+  expect(summary.verdict).toBe("void");
+  const controlReason = summary.reasons.at(-1) ?? "";
+  expect(controlReason).toContain("could not answer");
+  expect(controlReason).not.toContain("named a winner");
+});
+
 it("swaps the panels between orders and composes the control from one capture twice", () =>
   withGradeFolders(async ({ harness, raw, cardsRoot }) => {
     const scripted = scriptedReview([

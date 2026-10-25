@@ -460,9 +460,9 @@ export const summarizeComparison = (input: {
       verdict: "void",
       reasons: [
         ...reasons,
-        `control: the identical pair named a winner${
-          input.control.answer === null ? "" : ` (${input.control.answer.overall})`
-        }, so this comparison is void.`,
+        input.control.answer === null
+          ? "control: the identical pair could not answer, so this comparison is void."
+          : `control: the identical pair named a winner (${input.control.answer.overall}), so this comparison is void.`,
       ],
     };
   const choices = input.orders.map((order) => order.overall);
