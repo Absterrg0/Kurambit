@@ -25,7 +25,8 @@ Movement, camera and actions, with keyboard and gamepad bindings.
 
 ## Win & lose
 
-How a run ends in success and in failure, and what retrying costs. If this game truly
+How a run ends in success and in failure, and what retrying costs. A game without a win
+or without an end says so here and writes only the endings it promises. If this game truly
 has no lose state, say "no lose state" here and write that promise in Acceptance as a
 \`lose\` criterion with the text "No lose state" and no observe.
 
@@ -48,8 +49,9 @@ template's \`won\` flag (\`won == 1\`), not a \`state\` enum value that pausing 
 reach; a \`lose\` observes the value a losing run ends at (\`lives <= 0\`), not \`changes\`.
 \`presentation\` claims carry no observe. Review compares visible improvements but does not
 certify every presentation claim.
-The block needs at least one \`control\`, one \`mechanic\`, one \`win\` and one \`lose\`; cover every
-control and content count the game promises.
+The block needs at least one \`control\`, one \`mechanic\` and one \`lose\` (or the declared no-lose-state
+promise); cover every control and content count the game promises, and add a \`win\` only when the
+game actually ends in one. Never invent a win the game does not have.
 
 Examples (write 5 to 12 total for this game, not one of each; two per kind shown):
 - control: \`{ "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }\`
@@ -112,7 +114,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
     input.reviewDesign === true
       ? "Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab."
       : "Nobody has to approve it: as soon as DESIGN.md is written, build the game in this same turn by following AGENTS.md's steps.";
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Make Art direction specific to this game's brief; the starter's look is a placeholder, not a requirement. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic, one win and one lose, covering every control and content count. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1, lives <= 0 for a loss), never "changes". Presentation claims carry no observe. ${next}`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Make Art direction specific to this game's brief; the starter's look is a placeholder, not a requirement. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic and one lose (or the declared no-lose-state promise), covering every control and content count; add a win only when the game actually ends in one and never invent one. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1), a loss the value a losing run ends at (lives <= 0), never "changes". Presentation claims carry no observe. ${next}`;
 }
 
 /** The manifest a new game starts from; the creation record also reads its probe flag. */

@@ -301,26 +301,29 @@ export function evaluateScenarios(input: ScenarioEvaluationInput): GameScenarioS
     const approved = input.criteria.find((entry) => entry.id === criterion.id);
     return approved === undefined || !isNoLoseStateCriterion(approved);
   });
-  const everyPassed = blocking.every((criterion) => criterion.status === "passed");
-  const winPassed = criteria.some(
-    (criterion) => criterion.kind === "win" && criterion.status === "passed",
-  );
-  const passed = failedRun === undefined && everyPassed && winPassed;
+  // The approved typed criteria decide what this game promises. A win is not a
+  // universal requirement: endless, sandbox and exploration designs may approve
+  // only mechanics, content or a declared no-lose state. At least one
+  // applicable criterion must exist, so an empty or presentation-only exam
+  // cannot pass by vacuous truth.
+  const hasApplicable = blocking.length > 0;
+  const everyPassed = hasApplicable && blocking.every((criterion) => criterion.status === "passed");
+  const passed = failedRun === undefined && everyPassed;
   let reason: GameScenarioStageReason = "criteria-passed";
-  let detail = "Every graded criterion changed after play started, including a win.";
+  let detail = "Every applicable approved criterion was proven after play started.";
   if (failedRun !== undefined) {
     reason = "scenario-failed";
     detail = `Scenario "${failedRun.id}" failed: ${failedRun.error}`;
+  } else if (!hasApplicable) {
+    reason = "observable-failed";
+    detail =
+      "The approved design has no mechanical criterion with an observation, so this run proves no promise.";
   } else if (!everyPassed) {
     const failed = blocking.filter((criterion) => criterion.status !== "passed");
     reason = "observable-failed";
     detail = `${failed.length} acceptance criterion/criteria did not pass: ${failed
       .map((criterion) => `${criterion.id} (${criterion.status})`)
       .join(", ")}.`;
-  } else if (!winPassed) {
-    reason = "win-criterion-failed";
-    detail =
-      "No `win` criterion with an observe passed; reaching the win state after play starts is required.";
   }
   return {
     mode: "criteria",

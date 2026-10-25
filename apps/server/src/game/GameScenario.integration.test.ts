@@ -700,6 +700,98 @@ func _physics_process(_delta: float) -> void:
 );
 
 it.live.skipIf(!available)(
+  "a no-player Control UI proves an approved no-win interaction",
+  () =>
+    Effect.gen(function* () {
+      const criteria: readonly GameAcceptanceCriterion[] = [
+        {
+          id: "sends-a-reply",
+          kind: "content",
+          text: "The first choice sends a reply",
+          observe: { key: "choices", expect: ">=1" },
+        },
+      ];
+      const mainScript = `extends Control
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tGameState.choices += 1
+`;
+      const stateScript = "extends Node\nvar state := 1\nvar choices := 0\n";
+      const scenario = { "first-choice": { id: "first-choice", steps: [{ press: "ui_accept" }] } };
+
+      const passed = yield* withGame(
+        {
+          name: "no-win control fixture",
+          planFirst: true,
+          controlOnly: true,
+          mainScript,
+          stateScript,
+          scenarios: scenario,
+          criteria,
+        },
+        ({ game, threadId }) => game.scenariosRun(threadId),
+      );
+      expect(passed.errors, JSON.stringify(passed.errors)).toEqual([]);
+      expect(passed.ok, JSON.stringify(passed.summary)).toBe(true);
+      expect(passed.summary).toMatchObject({
+        mode: "criteria",
+        passed: true,
+        reason: "criteria-passed",
+      });
+      expect(passed.summary.criteria.map((entry) => [entry.id, entry.kind, entry.status])).toEqual([
+        ["sends-a-reply", "content", "passed"],
+      ]);
+      expect(passed.summary.coverage).toEqual([
+        { kind: "content", proven: 1, failed: 0, missing: 0 },
+      ]);
+      expect(passed.summary.detail).not.toContain("win");
+      expect(passed.scenarios[0]?.playerMoved).toBe(false);
+      const choices = passed.scenarios[0]?.observations.find(
+        (observation) => observation.key === "choices",
+      );
+      expect(choices?.baseline).toBe(0);
+      expect(choices?.last).toBe(1);
+
+      const waitOnly = yield* withGame(
+        {
+          name: "no-win wait-only fixture",
+          planFirst: true,
+          controlOnly: true,
+          mainScript,
+          stateScript,
+          scenarios: { "wait-only": { id: "wait-only", steps: [{ wait: 60 }] } },
+          criteria,
+        },
+        ({ game, threadId }) => game.scenariosRun(threadId),
+      );
+      expect(waitOnly.ok).toBe(false);
+      expect(waitOnly.summary.mode).toBe("criteria");
+      expect(waitOnly.summary.reason).toBe("observable-failed");
+      expect(waitOnly.summary.criteria[0]?.status).toBe("failed");
+      expect(waitOnly.summary.criteria[0]?.observed).toContain("pressed no controls");
+
+      const unachieved = yield* withGame(
+        {
+          name: "no-win unachieved fixture",
+          planFirst: true,
+          controlOnly: true,
+          mainScript: "extends Control\n",
+          stateScript,
+          scenarios: scenario,
+          criteria,
+        },
+        ({ game, threadId }) => game.scenariosRun(threadId),
+      );
+      expect(unachieved.ok).toBe(false);
+      expect(unachieved.summary.reason).toBe("observable-failed");
+      expect(unachieved.summary.criteria[0]?.status).toBe("failed");
+      expect(unachieved.summary.criteria[0]?.observed).toContain("stayed at");
+    }),
+  { timeout: 180_000 },
+);
+
+it.live.skipIf(!available)(
   "starting and pausing the game is a state change, not a win",
   () =>
     withGame(

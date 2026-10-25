@@ -280,15 +280,11 @@ export function validateDesignDocument(input: {
         `Acceptance criterion "${criterion.id}" is a ${criterion.kind} claim and needs an observe of a GameState property the player changes.`,
       );
     }
-    for (const kind of ["control", "mechanic", "win"] as const)
+    for (const kind of ["control", "mechanic"] as const)
       if (!parsed.criteria.some((criterion) => criterion.kind === kind))
         issues.push(
           `The acceptance block needs at least one \`${kind}\` criterion (${
-            kind === "control"
-              ? "the player's inputs"
-              : kind === "mechanic"
-                ? "the core thing the player does"
-                : "how the game is won"
+            kind === "control" ? "the player's inputs" : "the core thing the player does"
           }).`,
         );
     const lose = parsed.criteria.filter((criterion) => criterion.kind === "lose");

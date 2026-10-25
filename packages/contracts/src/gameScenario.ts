@@ -256,6 +256,7 @@ export type GameScenarioKindCoverage = typeof GameScenarioKindCoverage.Type;
 export const GameScenarioStageReason = Schema.Literals([
   "criteria-passed",
   "observable-failed",
+  /** Historical universal-win verdict; kept so older persisted summaries decode. */
   "win-criterion-failed",
   "no-player-movement",
   "no-acceptance",

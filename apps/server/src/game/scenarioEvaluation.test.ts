@@ -4,6 +4,7 @@ import type {
   GameScenarioEvidence,
   GameScenarioObservation,
 } from "@t3tools/contracts";
+import { NO_LOSE_STATE_TEXT } from "@t3tools/contracts";
 import {
   evaluateScenarios,
   LEGACY_PLAYING_MATCH_ID,
@@ -135,6 +136,96 @@ describe("evaluateScenarios", () => {
     ]);
   });
 
+  it("passes every approved observation without an approved win", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [
+        criterion("move", "control", { key: "jumps", expect: ">=1" }),
+        criterion("collect", "mechanic", { key: "collected", expect: ">=1" }),
+        criterion("coins", "content", { key: "collected", expect: ">=3" }),
+      ],
+      runs: [
+        run({
+          observations: [
+            observation("jumps", {
+              baseline: 0,
+              min: 0,
+              max: 1,
+              first: 0,
+              last: 1,
+              matches: [{ id: "move", frame: 72 }],
+            }),
+            observation("collected", {
+              baseline: 0,
+              min: 0,
+              max: 3,
+              first: 0,
+              last: 3,
+              matches: [
+                { id: "collect", frame: 120 },
+                { id: "coins", frame: 400 },
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(summary).toMatchObject({
+      mode: "criteria",
+      passed: true,
+      reason: "criteria-passed",
+    });
+    expect(summary.criteria.map((entry) => [entry.id, entry.status])).toEqual([
+      ["move", "passed"],
+      ["collect", "passed"],
+      ["coins", "passed"],
+    ]);
+    expect(summary.coverage).toEqual([
+      { kind: "control", proven: 1, failed: 0, missing: 0 },
+      { kind: "mechanic", proven: 1, failed: 0, missing: 0 },
+      { kind: "content", proven: 1, failed: 0, missing: 0 },
+    ]);
+    expect(summary.detail).not.toContain("win");
+  });
+
+  it("fails when an approved win is not proven even though other criteria pass", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [
+        criterion("collect", "mechanic", { key: "collected", expect: ">=1" }),
+        criterion("win", "win", { key: "state", expect: "==3" }),
+      ],
+      runs: [
+        run({
+          observations: [
+            observation("collected", {
+              baseline: 0,
+              min: 0,
+              max: 1,
+              first: 0,
+              last: 1,
+              matches: [{ id: "collect", frame: 120 }],
+            }),
+            observation("state", {
+              baseline: 1,
+              min: 1,
+              max: 1,
+              first: 1,
+              last: 1,
+              matches: [],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(summary.passed).toBe(false);
+    expect(summary.reason).toBe("observable-failed");
+    expect(summary.criteria.map((entry) => [entry.id, entry.status])).toEqual([
+      ["collect", "passed"],
+      ["win", "failed"],
+    ]);
+  });
+
   it("records the proving run's typed samples, and only for a pass", () => {
     const passing = evaluateScenarios({
       mode: "criteria",
@@ -212,6 +303,22 @@ describe("evaluateScenarios", () => {
     expect(total?.observed).toContain("observe something the player achieves");
   });
 
+  it("fails a no-win exam on a value already true when play starts", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("five-pearls", "content", { key: "total", expect: "==5" })],
+      runs: [
+        run({
+          observations: [observation("total", { baseline: 5, min: 5, max: 5, first: 5, last: 5 })],
+        }),
+      ],
+    });
+    expect(summary.passed).toBe(false);
+    expect(summary.reason).toBe("observable-failed");
+    expect(summary.criteria[0]?.status).toBe("failed");
+    expect(summary.criteria[0]?.observed).toContain("already true when play started");
+  });
+
   it("fails every criterion when the route never pressed a control", () => {
     const summary = evaluateScenarios({
       mode: "criteria",
@@ -229,6 +336,55 @@ describe("evaluateScenarios", () => {
     expect(summary.reason).toBe("observable-failed");
     expect(summary.criteria.every((entry) => entry.status === "failed")).toBe(true);
     expect(summary.detail).toContain("move");
+  });
+
+  it("fails a no-win exam when the route never pressed a control", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("collect", "mechanic", { key: "collected", expect: ">=1" })],
+      runs: [
+        run({
+          firstInputFrame: null,
+          baselineFrame: null,
+          playerMoved: true,
+          observations: [
+            observation("collected", {
+              min: 1,
+              max: 1,
+              first: 1,
+              last: 1,
+              baseline: null,
+              matches: [],
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(summary.passed).toBe(false);
+    expect(summary.reason).toBe("observable-failed");
+    expect(summary.criteria[0]?.status).toBe("failed");
+    expect(summary.criteria[0]?.observed).toContain("pressed no controls");
+  });
+
+  it("does not vacuously pass empty or ungraded-only acceptance", () => {
+    const summaries = [
+      evaluateScenarios({ mode: "criteria", criteria: [], runs: [run()] }),
+      evaluateScenarios({
+        mode: "criteria",
+        criteria: [criterion("glow", "presentation")],
+        runs: [run()],
+      }),
+      evaluateScenarios({
+        mode: "criteria",
+        criteria: [{ id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT }],
+        runs: [run()],
+      }),
+    ];
+    for (const summary of summaries) {
+      expect(summary.passed).toBe(false);
+      expect(summary.reason).toBe("observable-failed");
+      expect(summary.detail).toContain("no mechanical criterion");
+    }
   });
 
   it("measures changes from the baseline, not from boot", () => {
@@ -256,8 +412,6 @@ describe("evaluateScenarios", () => {
     const changedAfter = evaluateScenarios({
       mode: "criteria",
       criteria: [criterion("flag", "mechanic", { key: "flag", expect: "changes" })],
-      // A mechanics-only design still needs a win in the real exam; this fixture
-      // isolates the change rule.
       runs: [
         run({
           observations: [
@@ -274,8 +428,8 @@ describe("evaluateScenarios", () => {
       ],
     });
     expect(changedAfter.criteria[0]?.status).toBe("passed");
-    expect(changedAfter.passed).toBe(false); // no win criterion exists
-    expect(changedAfter.reason).toBe("win-criterion-failed");
+    expect(changedAfter.passed).toBe(true);
+    expect(changedAfter.reason).toBe("criteria-passed");
   });
 
   it("does not let a state change alone prove a win", () => {

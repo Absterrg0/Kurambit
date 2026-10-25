@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
-import { GAME_SCENARIO_LIMITS, parseGameScenario } from "./gameScenario.ts";
+import * as Schema from "effect/Schema";
+import { GAME_SCENARIO_LIMITS, GameScenarioSummary, parseGameScenario } from "./gameScenario.ts";
 
 const valid = () => ({
   id: "full-run",
   steps: [{ press: "ui_accept" }, { hold: ["move_right", "jump"], frames: 40 }, { wait: 10 }],
 });
+const decodeSummary = Schema.decodeUnknownSync(GameScenarioSummary);
 
 describe("parseGameScenario", () => {
   it("accepts a small route and counts its frames", () => {
@@ -67,5 +69,18 @@ describe("parseGameScenario", () => {
       ],
     };
     expect(parseGameScenario(manyActions).ok).toBe(false);
+  });
+});
+
+describe("GameScenarioSummary", () => {
+  it("still decodes a historical win-criterion-failed record", () => {
+    const summary = decodeSummary({
+      mode: "criteria",
+      passed: false,
+      reason: "win-criterion-failed",
+      detail: "A win was required by an older exam.",
+      criteria: [],
+    });
+    expect(summary.reason).toBe("win-criterion-failed");
   });
 });

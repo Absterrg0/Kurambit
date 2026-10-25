@@ -36,12 +36,13 @@ the agent chooses whether any kit fits.
 ## Design the game first
 
 New games start with a design, not code. The agent writes a one-page `DESIGN.md` from your brief and
-the starter template: the pitch, core loop, controls, win and lose conditions, content, art
-direction, audio, scope and milestones. It also writes an **Acceptance** section: a fenced
-`acceptance` block of 5 to 12 concrete criteria covering each control, the core mechanic, content
-counts, and how the game is won and lost. Every control, mechanic, content, win and lose criterion
-names a game value the player changes; a value that is already true when play starts does not count,
-and content counts have to be collected rather than merely exist. Presentation claims (a glow, an
+the starter template: the pitch, core loop, controls, how runs end (or why the game is endless),
+content, art direction, audio, scope and milestones. It also writes an **Acceptance** section: a
+fenced `acceptance` block of 5 to 12 concrete criteria covering each control, the core mechanic,
+content counts, and the endings the game promises. Every control, mechanic, content, win or lose
+criterion the design promises names a game value the player changes; a value that is already true
+when play starts does not count, and content counts have to be collected rather than merely exist.
+A game without a win does not invent one. Presentation claims (a glow, an
 ambience) carry no observation and are listed as not yet verified. **Plan the design first** in the
 New game dialog is on by default; turn it off to skip straight to building.
 

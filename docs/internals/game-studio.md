@@ -35,10 +35,11 @@ it dispatched or sends the same ids. A dispatch failure therefore keeps the crea
 a retry cannot create a second build message; only a failed display-mirror write, before any
 dispatch, rolls the record back. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
-block parses with at least one `control`, `mechanic`, `win` and `lose`, and every mechanical
-criterion carries an `observe`. The only exception is a design whose "Win & lose" section
-declares that there is no lose state: it writes a `lose` criterion with the text "No lose
-state" and no observe. `presentation` criteria carry no observe and remain outside mechanical certification. Creation also writes an intent record
+block parses with at least one `control`, `mechanic` and `lose`, and every mechanical
+criterion carries an `observe`. A `win` is written only when the game actually ends in one; a
+nonterminal game may approve no win. The only exception to the `lose` requirement is a design
+whose "Win & lose" section declares that there is no lose state: it writes a `lose` criterion with
+the text "No lose state" and no observe. `presentation` criteria carry no observe and remain outside mechanical certification. Creation also writes an intent record
 beside the approval: `auto` for a plan-first game (the default), `required` for one whose creator
 opted into review, `skipped` for one created without planning. An `auto` game never gates staging on
 the design: each status read records the current DESIGN.md as a server-owned revision once its
@@ -190,8 +191,10 @@ world total (`total == 5`), and what stops a menu's playing state from proving a
 `lose` must observe the value the run ends at (not `changes`) and keep it at the final sample, so
 a pause cannot satisfy a win. The summary lists every mechanical criterion with its status, proving
 scenario and frame, plus proven/failed/missing counts per kind; the state stage passes only when
-every graded criterion passed and a `win` did, so an approved dialogue or puzzle game does not also
-need to move an avatar. Legacy games without acceptance pass only when a route moves the player and
+every applicable approved criterion passed, so an approved endless, sandbox or dialogue game does
+not need a win or a moving avatar. An approved `win` or `lose` remains a hard criterion that must
+hold at the run's end. An exam with no applicable observation fails rather than passing vacuously.
+Legacy games without acceptance pass only when a route moves the player and
 GameState reaches its playing state at the baseline. The stage stores the approved source snapshot,
 the approved design hash and a per-criterion summary; a newly approved design revision makes the old
 route result stale even when the game sources did not change.

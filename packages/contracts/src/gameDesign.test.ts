@@ -215,13 +215,37 @@ describe("validateDesignDocument", () => {
     expect(thin.issues.some((issue) => issue.includes("too thin"))).toBe(true);
   });
 
-  it("requires control, mechanic, win and lose coverage", () => {
+  it("requires control, mechanic and lose coverage but not a win", () => {
     const onlyContent = designWith(
       '## Acceptance\n\n```acceptance\n[{ "id": "nine", "kind": "content", "text": "The player collects nine lanterns", "observe": { "key": "collected", "expect": ">=9" } }]\n```',
     );
     const issues = validateDesignDocument({ design: onlyContent, skeleton }).issues;
-    for (const kind of ["control", "mechanic", "win", "lose"])
+    for (const kind of ["control", "mechanic", "lose"])
       expect(issues.some((issue) => issue.includes(`\`${kind}\``))).toBe(true);
+    expect(issues.some((issue) => issue.includes("`win`"))).toBe(false);
+
+    const noWin = validDesign
+      .replace(
+        /## Win & lose[\s\S]*?(?=\n## Content)/,
+        `## Win & lose
+
+This run is endless: there is no victory state and no lose state, so the player plays on.`,
+      )
+      .replace(
+        /## Acceptance[\s\S]*?(?=\n## Milestones)/,
+        `## Acceptance
+
+The build is judged against these criteria.
+
+\`\`\`acceptance
+[
+  { "id": "move", "kind": "control", "text": "Move", "observe": { "key": "jumps", "expect": ">=1" } },
+  { "id": "paint", "kind": "mechanic", "text": "Paint the wall", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" }
+]
+\`\`\``,
+      );
+    expect(validateDesignDocument({ design: noWin, skeleton }).issues).toEqual([]);
   });
 
   it("requires an observation for every mechanical criterion and names it", () => {
