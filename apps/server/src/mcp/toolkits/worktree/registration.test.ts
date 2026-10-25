@@ -39,7 +39,10 @@ import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
   Layer.mock(GameReviewApi.GameReviewApi)({}),
-  Layer.mock(GameReviewSessions.GameReviewSessions)({ toolRole: () => Effect.succeed(null) }),
+  Layer.mock(GameReviewSessions.GameReviewSessions)({
+    toolRole: () => Effect.succeed(null),
+    repairChild: () => Effect.succeed(false),
+  }),
   Layer.mock(GameRecipes.GameRecipes)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
