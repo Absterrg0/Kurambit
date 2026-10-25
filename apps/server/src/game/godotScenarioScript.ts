@@ -123,10 +123,10 @@ func _mark_input() -> void:
 		# A game already playing when the route starts has no menu transition
 		# to absorb this press. Baseline before it, not at the next periodic
 		# sample, so the action the press causes is evidence instead of looking
-		# like a value that was already true when play started.
-		var marker: Variant = _state_marker()
-		if marker != null and _is_playing(marker):
-			_capture_baseline(get_nodes_in_group("player"))
+		# like a value that was already true when play started. An existing
+		# player is a markerless game's sign that play has started; the menu
+		# guard in _capture_baseline still holds its baseline back.
+		_capture_baseline(get_nodes_in_group("player"))
 
 func _run_press(action: String) -> String:
 	_release_all()
@@ -266,11 +266,6 @@ func _is_menu(value: Variant) -> bool:
 		return not value
 	return _is_number(value) and is_equal_approx(float(value), 0.0)
 
-func _is_playing(value: Variant) -> bool:
-	if typeof(value) == TYPE_BOOL:
-		return value
-	return _is_number(value) and is_equal_approx(float(value), 1.0)
-
 func _capture_baseline(players: Array) -> void:
 	if _baseline_frame >= 0 or players.size() == 0:
 		return
@@ -316,11 +311,12 @@ func _sample() -> void:
 		elif _player != _player_first:
 			_player_moved = true
 		_player_last = _player
-	# The gameplay baseline is the first sample after real input in which the
-	# player exists. Boot samples do not count: a menu, a spawn counter or a
-	# world total that is already true there is not something the player did.
-	# A game whose state is already playing was sampled before this input by
-	# _mark_input, so its first action is not folded into the baseline.
+	# The gameplay baseline is taken before the first input when play had
+	# already started, and otherwise at the first sample after real input in
+	# which the player exists. A menu, a spawn counter or a world total that is
+	# already true there is not something the player did.
+	# A game already in play was sampled before this input by _mark_input, so
+	# its first action is not folded into the baseline.
 	if _first_input_frame >= 0:
 		_capture_baseline(players)
 	var has_baseline := _baseline_frame >= 0

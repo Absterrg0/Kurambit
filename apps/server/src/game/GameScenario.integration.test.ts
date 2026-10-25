@@ -241,6 +241,8 @@ it.live.skipIf(!available)(
               const lose = run.scenarios.find((scenario) => scenario.id === "lose-run");
               expect(full).toMatchObject({ playerMoved: true, error: null });
               expect(full?.frames).toBeGreaterThan(500);
+              const fullState = full?.observations.find((entry) => entry.key === "state");
+              expect(fullState?.baseline, `${template}: legacy baselines at PLAYING`).toBe(1);
               expect(lose).toMatchObject({ playerMoved: true, error: null });
               expect(lose?.baselineFrame).not.toBeNull();
               const state = lose?.observations.find((entry) => entry.key === "state");
@@ -455,6 +457,70 @@ it.live.skipIf(!available)(
 );
 
 it.live.skipIf(!available)(
+  "a menu's world total does not become an achievement",
+  () =>
+    withGame(
+      {
+        name: "menu total fixture",
+        planFirst: true,
+        mainScript: `extends Node2D
+
+var menu_age := -1
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tmenu_age = 0
+\tif menu_age >= 0:
+\t\tmenu_age += 1
+\t\tif menu_age == 12:
+\t\t\tGameState.state = 1
+\t\t\tGameState.total = 5
+`,
+        stateScript: "extends Node\nvar state := 0\nvar total := 0\n",
+        playerScript: `extends CharacterBody2D
+
+func _ready() -> void:
+\tvisible = false
+
+func _physics_process(_delta: float) -> void:
+\tvelocity.x = 120.0 if Input.is_action_pressed("move_right") else 0.0
+\tmove_and_slide()
+`,
+        scenarios: {
+          "menu-total": {
+            id: "menu-total",
+            steps: [{ press: "ui_accept" }, { hold: ["move_right"], frames: 90 }],
+          },
+        },
+        criteria: [
+          {
+            id: "five-pearls",
+            kind: "content",
+            text: "Five pearls exist",
+            observe: { key: "total", expect: "==5" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "Reach the end",
+            observe: { key: "total", expect: "==5" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.ok).toBe(false);
+          const content = result.summary.criteria.find((entry) => entry.id === "five-pearls");
+          expect(content?.status).toBe("failed");
+          expect(content?.observed).toContain("already true when play started");
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
   "the first input to an already-playing game proves the action it caused",
   () =>
     withGame(
@@ -488,6 +554,62 @@ func _physics_process(_delta: float) -> void:
             kind: "win",
             text: "The run reaches the win state",
             observe: { key: "state", expect: "==3" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          expect(
+            result.summary.criteria.map((criterion) => [criterion.id, criterion.status]),
+          ).toEqual([
+            ["plays-a-card", "passed"],
+            ["win", "passed"],
+          ]);
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "a markerless game already playing proves its first input",
+  () =>
+    withGame(
+      {
+        name: "markerless first action fixture",
+        planFirst: true,
+        mainScript: `extends Node2D
+
+func _input(event: InputEvent) -> void:
+\tif event.is_action_pressed("ui_accept"):
+\t\tGameState.cards_played += 1
+\t\tGameState.won = true
+`,
+        stateScript: "extends Node\nvar cards_played := 0\nvar won := false\n",
+        playerScript: `extends CharacterBody2D
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tposition.x += 20.0
+`,
+        scenarios: {
+          "first-action": { id: "first-action", steps: [{ press: "ui_accept" }] },
+        },
+        criteria: [
+          {
+            id: "plays-a-card",
+            kind: "content",
+            text: "The first input plays a card",
+            observe: { key: "cards_played", expect: ">=1" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "The first input wins",
+            observe: { key: "won", expect: "==1" },
           },
         ],
       },
