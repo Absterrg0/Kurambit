@@ -34,6 +34,36 @@ describe("playtestInputIssues", () => {
     ).toContain("limit is 32");
   });
 
+  it("replays T115's interval route: 400 ms requests 33 frames, 500 ms is legal", () => {
+    const steps = [
+      { press: "Enter" },
+      { waitMs: 500 },
+      { hold: "ArrowRight", holdMs: 1800 },
+      { screenshot: "gap-ahead" },
+      { hold: "ArrowRight", holdMs: 600 },
+      { screenshot: "at-the-mouth" },
+      { hold: "ArrowRight", holdMs: 400 },
+      { screenshot: "falling" },
+      { waitMs: 600 },
+      { screenshot: "in-the-dark" },
+      { hold: "ArrowRight", holdMs: 1000 },
+      { screenshot: "respawned" },
+      { press: "Space" },
+      { screenshot: "jump-works" },
+    ];
+    expect(playtestInputIssues({ steps, captureEveryMs: 400, captureAllSteps: true })).toContain(
+      "Interval capture requests 33 frames; limit is 32. The plan is 2 setup frames + 2 per input step (1 per screenshot; a wait adds 2 only with captureAllSteps) + ceil(stepMs / captureEveryMs) - 1 per step. Increase captureEveryMs or shorten the steps.",
+    );
+    expect(playtestInputIssues({ steps, captureEveryMs: 500, captureAllSteps: true })).toEqual([]);
+    // Exactly 32 planned frames: 2 setup frames + 15 input pairs.
+    expect(
+      playtestInputIssues({
+        steps: Array.from({ length: 15 }, () => ({ press: "Space" })),
+        captureEveryMs: 1000,
+      }),
+    ).toEqual([]);
+  });
+
   it("rejects dimensions outside 320-1920", () => {
     expect(playtestInputIssues({ width: 319 })).toContain(
       `width must be between ${GAME_PLAYTEST_BOUNDS.minDimension} and ${GAME_PLAYTEST_BOUNDS.maxDimension} pixels.`,
@@ -153,6 +183,28 @@ describe("integerScaledCapture", () => {
 });
 
 describe("tryInputIssues", () => {
+  it("replays T115's 13-step rejection and its 12-step route", () => {
+    const steps = [
+      { press: "Enter" },
+      { waitMs: 400 },
+      { hold: "ArrowRight", holdMs: 1800 },
+      { screenshot: "mouth-ahead" },
+      { hold: "ArrowRight", holdMs: 700 },
+      { screenshot: "at-the-lip" },
+      { hold: "ArrowRight", holdMs: 400 },
+      { screenshot: "dropping" },
+      { waitMs: 700 },
+      { screenshot: "fallen-lives-2" },
+      { hold: "ArrowRight", holdMs: 900 },
+      { press: "Space" },
+      { screenshot: "jump-ok" },
+    ];
+    expect(tryInputIssues({ steps, captureEveryMs: 700 })).toContain(
+      "game_try_input requires 1–12 steps; received 13.",
+    );
+    expect(tryInputIssues({ steps: steps.slice(0, 12), captureEveryMs: 700 })).toEqual([]);
+  });
+
   it("bounds steps, total duration, capture interval and planned frame count exactly", () => {
     expect(tryInputIssues({ steps: [] })).toContain(
       "game_try_input requires 1–12 steps; received 0.",

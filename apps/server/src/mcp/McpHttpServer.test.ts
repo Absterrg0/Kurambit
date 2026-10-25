@@ -1409,6 +1409,15 @@ it.effect(
           arguments: {},
         }).pipe(Effect.flatMap((response) => response.text));
         expect(forbiddenRecipe).toContain("error");
+        // The T115 child's 13-step route is refused by the advertised schema
+        // before it reaches the review service.
+        const tooManyInputSteps = yield* rpc("repairer", repairer, "tools/call", {
+          name: "game_try_input",
+          arguments: { steps: Array.from({ length: 13 }, () => ({ press: "Space" })) },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(tooManyInputSteps).toContain('"isError":true');
+        expect(tooManyInputSteps).toContain("12");
+        expect(tried).toHaveLength(0);
         // The reduced repair catalog still reaches the mutable testing and
         // submission routes; review control is hidden and refused even by name.
         const repairInput = yield* rpc("repairer", repairer, "tools/call", {
@@ -1492,6 +1501,13 @@ it.effect(
         }).pipe(Effect.flatMap((response) => response.text));
         expect(missingRoute).toContain('"isError":true');
         expect(missingRoute).toContain("steps");
+        const tooManyVerifySteps = yield* rpc("builder", builder, "tools/call", {
+          name: "game_verify",
+          arguments: { steps: Array.from({ length: 61 }, () => ({ press: "Space" })) },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(tooManyVerifySteps).toContain('"isError":true');
+        expect(tooManyVerifySteps).toContain("60");
+        expect(verified).toHaveLength(0);
         const layoutVerify = yield* rpc("builder", builder, "tools/call", {
           name: "game_verify",
           arguments: { steps: [{ press: "Space" }], width: 900, height: 900, exactSize: true },

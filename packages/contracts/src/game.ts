@@ -801,8 +801,9 @@ export type GamePlaytestScreenshot = typeof GamePlaytestScreenshot.Type;
 /**
  * The capture envelope. A routine agent mistake must not hold the game's
  * operation lock for hours, allocate a huge result, or push an oversized frame
- * over the websocket. Step counts, per-step and total durations are enforced by
- * `playtestInputIssues` because they span the whole sequence.
+ * over the websocket. Tool schemas advertise the simple bounds; duration sums
+ * and screenshot counts stay with `playtestInputIssues` because they span the
+ * whole sequence.
  */
 export const GAME_PLAYTEST_BOUNDS = {
   minDimension: 320,
@@ -825,38 +826,68 @@ export const GAME_TRY_INPUT_BOUNDS = {
 } as const;
 export const GameTryInput = Schema.Struct({
   buildId: Schema.optionalKey(Schema.String),
-  steps: Schema.Array(GamePlaytestStep),
-  captureEveryMs: Schema.optionalKey(Schema.Number),
+  steps: Schema.Array(GamePlaytestStep)
+    .check(Schema.isMinLength(1), Schema.isMaxLength(GAME_TRY_INPUT_BOUNDS.maxSteps))
+    .annotate({
+      description: `1–${GAME_TRY_INPUT_BOUNDS.maxSteps} route steps. Each step plans 2 frames (1 for a screenshot) plus ceil(stepMs / captureEveryMs) - 1 interval frames, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
+    }),
+  captureEveryMs: Schema.optionalKey(
+    Schema.Finite.check(
+      Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
+    ).annotate({
+      description: `Interval between extra frames during a step. Defaults to 1000 and must be at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms.`,
+    }),
+  ),
 });
 export type GameTryInput = typeof GameTryInput.Type;
 const gamePlaytestCaptureOptions = {
-  captureEveryMs: Schema.optionalKey(Schema.Number),
-  captureAllSteps: Schema.optionalKey(Schema.Boolean),
+  captureEveryMs: Schema.optionalKey(
+    Schema.Finite.check(
+      Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
+    ).annotate({
+      description: `Also capture a frame at this interval during held and waited steps, at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms apart. The plan is checked before the run: 2 setup frames, plus 2 per input step (1 for a screenshot; a wait adds 2 only with captureAllSteps), plus ceil(stepMs / captureEveryMs) - 1 interval frames per step, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
+    }),
+  ),
+  captureAllSteps: Schema.optionalKey(Schema.Boolean).annotate({
+    description: `Keep before/after pair frames for wait steps too, and keep a pair when a step dispatches no input. Those frames count against the ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame plan.`,
+  }),
   width: Schema.optionalKey(
-    Schema.Number.check(
+    Schema.Finite.check(
       Schema.isBetween({
         minimum: GAME_PLAYTEST_BOUNDS.minDimension,
         maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
       }),
-    ),
+    ).annotate({
+      description: `Capture width in pixels, ${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension}.`,
+    }),
   ),
   height: Schema.optionalKey(
-    Schema.Number.check(
+    Schema.Finite.check(
       Schema.isBetween({
         minimum: GAME_PLAYTEST_BOUNDS.minDimension,
         maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
       }),
-    ),
+    ).annotate({
+      description: `Capture height in pixels, ${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension}.`,
+    }),
   ),
   bootTimeoutMs: Schema.optionalKey(
-    Schema.Number.check(
+    Schema.Finite.check(
       Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),
-    ),
+    ).annotate({
+      description: `How long to wait for Godot to boot, 1–${GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs} ms.`,
+    }),
   ),
 };
 export const GameWebPlaytestInput = Schema.Struct({
   ...gamePlaytestCaptureOptions,
-  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
+  steps: Schema.optionalKey(
+    Schema.Array(GamePlaytestStep)
+      .check(Schema.isMaxLength(GAME_PLAYTEST_BOUNDS.maxSteps))
+      .annotate({
+        description: `Optional route of at most ${GAME_PLAYTEST_BOUNDS.maxSteps} steps. The request is rejected before the browser launches if the interval capture plan exceeds ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; see captureEveryMs.`,
+      }),
+  ),
   /**
    * Capture at exactly width×height instead of a whole-number multiple of the
    * game's base viewport. Review layout evidence needs a window whose shape can
@@ -885,9 +916,9 @@ export const GameVerifyInput = Schema.Struct({
         { toJsonSchema: () => [{ minItems: 1 }, true] },
       ),
     )
+    .check(Schema.isMaxLength(GAME_PLAYTEST_BOUNDS.maxSteps))
     .annotate({
-      description:
-        "Required route: at least one gameplay input step (press, hold, key/keys, click, drag or mouseMove). Waits and screenshots only gather evidence and cannot be the whole route.",
+      description: `Required route: 1–${GAME_PLAYTEST_BOUNDS.maxSteps} steps, including at least one gameplay input step (press, hold, key/keys, click, drag or mouseMove). Waits and screenshots only gather evidence and cannot be the whole route. The request is rejected before any stage runs if the interval capture plan exceeds ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; see captureEveryMs.`,
     }),
   ...gamePlaytestCaptureOptions,
 });

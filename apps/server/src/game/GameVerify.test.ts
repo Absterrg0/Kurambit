@@ -256,6 +256,24 @@ const withFixture = <A, E, R>(
 
 const steps = [{ press: "Space" }] as const;
 
+/** The interval route T115 sent with captureEveryMs 400; the service counted 33 frames. */
+const t115IntervalSteps = [
+  { press: "Enter" },
+  { waitMs: 500 },
+  { hold: "ArrowRight", holdMs: 1800 },
+  { screenshot: "gap-ahead" },
+  { hold: "ArrowRight", holdMs: 600 },
+  { screenshot: "at-the-mouth" },
+  { hold: "ArrowRight", holdMs: 400 },
+  { screenshot: "falling" },
+  { waitMs: 600 },
+  { screenshot: "in-the-dark" },
+  { hold: "ArrowRight", holdMs: 1000 },
+  { screenshot: "respawned" },
+  { press: "Space" },
+  { screenshot: "jump-works" },
+];
+
 it.live("rejects bad playtest input before any engine work", () =>
   withFixture(({ game, base, operations }) =>
     Effect.gen(function* () {
@@ -275,6 +293,21 @@ it.live("rejects bad playtest input before any engine work", () =>
           expect(attempted.failure.reason).toBe("invalid-input");
           expect(attempted.failure.detail).toBeTruthy();
         }
+      }
+      const interval = yield* Effect.result(
+        game.verify(threadId, {
+          steps: t115IntervalSteps,
+          captureEveryMs: 400,
+          captureAllSteps: true,
+        }),
+      );
+      expect(Result.isFailure(interval)).toBe(true);
+      if (Result.isFailure(interval)) {
+        expect(interval.failure.reason).toBe("invalid-input");
+        expect(interval.failure.detail).toContain(
+          "Interval capture requests 33 frames; limit is 32.",
+        );
+        expect(interval.failure.detail).toContain("Increase captureEveryMs or shorten the steps.");
       }
       expect(yield* operations).toEqual([]);
       expect(NodeFS.existsSync(NodePath.join(base, "game/builds/candidates"))).toBe(false);

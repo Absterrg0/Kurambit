@@ -616,6 +616,32 @@ it.live("rejects an out-of-bounds capture before exporting or launching the brow
         expect(error.reason).toBe("invalid-input");
         expect(error.detail).toContain("width must be between 320 and 1920 pixels.");
         expect(error.detail).toContain("one step may last at most 10000 ms");
+        // The route T115 sent to verify; the shared guard plans 33 frames at 400 ms.
+        const interval = yield* game
+          .webPlaytest(threadId, {
+            steps: [
+              { press: "Enter" },
+              { waitMs: 500 },
+              { hold: "ArrowRight", holdMs: 1800 },
+              { screenshot: "gap-ahead" },
+              { hold: "ArrowRight", holdMs: 600 },
+              { screenshot: "at-the-mouth" },
+              { hold: "ArrowRight", holdMs: 400 },
+              { screenshot: "falling" },
+              { waitMs: 600 },
+              { screenshot: "in-the-dark" },
+              { hold: "ArrowRight", holdMs: 1000 },
+              { screenshot: "respawned" },
+              { press: "Space" },
+              { screenshot: "jump-works" },
+            ],
+            captureEveryMs: 400,
+            captureAllSteps: true,
+          })
+          .pipe(Effect.flip);
+        expect(interval.reason).toBe("invalid-input");
+        expect(interval.detail).toContain("Interval capture requests 33 frames; limit is 32.");
+        expect(interval.detail).toContain("Increase captureEveryMs or shorten the steps.");
         // The rejection lands before the stale-build export the run would need.
         const qualification = yield* GameQualification.GameQualification;
         const read = yield* qualification.read(root, "godot");

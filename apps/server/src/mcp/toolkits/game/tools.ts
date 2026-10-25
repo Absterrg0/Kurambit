@@ -3,6 +3,8 @@ import * as Context from "effect/Context";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import {
+  GAME_PLAYTEST_BOUNDS,
+  GAME_TRY_INPUT_BOUNDS,
   GameActionResult,
   GameArtGetInput,
   GameArtGetResult,
@@ -286,8 +288,7 @@ const hiddenFromBallots = () => {
   );
 };
 const VerifyTool = Tool.make("game_verify", {
-  description:
-    "Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, a Web export (a normal publish outside a review round, the round's candidate during one), and a recorded playtest of those exact exported bytes with the steps you supply. steps is required and must contain at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only or boot-only route proves nothing and game_submit needs a responding playtest. This tool records the build's playtest, so it takes no exactSize layout override; use game_web_playtest for review-only window evidence. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. Inspect the returned frames, then game_submit the build you stand behind. Mechanical success is not a quality verdict or all-criteria certification. Individual game_* tools remain available for narrower fixes and diagnostics.",
+  description: `Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, a Web export (a normal publish outside a review round, the round's candidate during one), and a recorded playtest of those exact exported bytes with the steps you supply. steps is required and must contain at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only or boot-only route proves nothing and game_submit needs a responding playtest. This tool records the build's playtest, so it takes no exactSize layout override; use game_web_playtest for review-only window evidence. Interval captures are planned before any stage runs and must fit ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; increase captureEveryMs or shorten the route instead of retrying the same plan. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. Inspect the returned frames, then game_submit the build you stand behind. Mechanical success is not a quality verdict or all-criteria certification. Individual game_* tools remain available for narrower fixes and diagnostics.`,
   parameters: GameVerifyInput,
   success: GameVerifyResult,
   failure,
@@ -300,8 +301,7 @@ const VerifyTool = Tool.make("game_verify", {
   .annotate(Tool.Strict, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
-  description:
-    "Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Use this as the final web check instead of building your own browser tooling.",
+  description: `Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Interval captures are planned before the browser launches and must fit ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; increase captureEveryMs or shorten the route instead of retrying the same plan. Use this as the final web check instead of building your own browser tooling.`,
   parameters: GameWebPlaytestInput,
   success: GameWebPlaytestResult,
   failure,
@@ -315,8 +315,7 @@ const WebPlaytestTool = Tool.make("game_web_playtest", {
 export const GameWebPlaytestTool = WebPlaytestTool;
 export const GameVerifyTool = VerifyTool;
 export const GameTryInputTool = Tool.make("game_try_input", {
-  description:
-    "Test a gameplay hypothesis from a fresh headless boot. Defaults to the frozen build under review for critics, or the current game for builders/repair children. Use press, hold + holdMs, click (+ x/y), drag {from,to} + holdMs, or waitMs. Returns labelled before/after frames, pixel deltas, bridge snapshot changes and console errors. Critic frames have citable frameId values and are recorded in the round evidence. Limits: 12 steps, 10 seconds per step, 30 seconds total, 32 frames, 6 calls per provider run; captureEveryMs defaults to 1000 and must be at least 100. Ballots cannot use this tool.",
+  description: `Test a gameplay hypothesis from a fresh headless boot. Defaults to the frozen build under review for critics, or the current game for builders/repair children. Use press, hold + holdMs, click (+ x/y), drag {from,to} + holdMs, or waitMs. Returns labelled before/after frames, pixel deltas, bridge snapshot changes and console errors. Critic frames have citable frameId values and are recorded in the round evidence. Limits: 1–${GAME_TRY_INPUT_BOUNDS.maxSteps} steps, ${GAME_PLAYTEST_BOUNDS.maxStepMs / 1000} seconds per step, ${GAME_TRY_INPUT_BOUNDS.maxSequenceMs / 1000} seconds total, ${GAME_TRY_INPUT_BOUNDS.maxFrames} planned frames (2 per step, 1 for a screenshot, plus ceil(stepMs / captureEveryMs) - 1 interval frames), ${GAME_TRY_INPUT_BOUNDS.maxCalls} calls per provider run; captureEveryMs defaults to 1000 and must be at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs}. Ballots cannot use this tool.`,
   parameters: GameTryInput,
   success: GameWebPlaytestResult,
   failure,

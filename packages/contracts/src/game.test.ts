@@ -7,6 +7,7 @@ import {
   GAME_TEMPLATES,
   GameCreateInput,
   GameManifest,
+  GameTryInput,
   GameVerifyInput,
   GameWebPlaytestInput,
   gameProductionBudgetMs,
@@ -15,8 +16,26 @@ import {
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(GameManifest));
 const decodeCreateInput = Schema.decodeUnknownSync(GameCreateInput);
+const decodeTryInput = Schema.decodeUnknownSync(GameTryInput);
 const decodeVerifyInput = Schema.decodeUnknownSync(GameVerifyInput);
 const decodeWebPlaytestInput = Schema.decodeUnknownSync(GameWebPlaytestInput);
+
+/** The 13-step route the T115 repair child sent to game_try_input. */
+const t115TryInputSteps = [
+  { press: "Enter" },
+  { waitMs: 400 },
+  { hold: "ArrowRight", holdMs: 1800 },
+  { screenshot: "mouth-ahead" },
+  { hold: "ArrowRight", holdMs: 700 },
+  { screenshot: "at-the-lip" },
+  { hold: "ArrowRight", holdMs: 400 },
+  { screenshot: "dropping" },
+  { waitMs: 700 },
+  { screenshot: "fallen-lives-2" },
+  { hold: "ArrowRight", holdMs: 900 },
+  { press: "Space" },
+  { screenshot: "jump-ok" },
+];
 
 // The shape scaffold.ts wrote before starter templates existed.
 const legacyManifest = {
@@ -118,6 +137,53 @@ describe("game verify input", () => {
       height: 900,
       exactSize: true,
     });
+  });
+});
+
+describe("game playtest input bounds", () => {
+  it("rejects the T115 13-step try_input route and accepts its 12-step retry", () => {
+    expect(() => decodeTryInput({ steps: t115TryInputSteps, captureEveryMs: 700 })).toThrow();
+    expect(
+      decodeTryInput({ steps: t115TryInputSteps.slice(0, 12), captureEveryMs: 700 }).steps,
+    ).toHaveLength(12);
+    expect(() => decodeTryInput({ steps: [] })).toThrow();
+    expect(() => decodeTryInput({ steps: [{ press: "Space" }], captureEveryMs: 99 })).toThrow();
+    expect(decodeTryInput({ steps: [{ press: "Space" }], captureEveryMs: 100 })).toEqual({
+      steps: [{ press: "Space" }],
+      captureEveryMs: 100,
+    });
+  });
+
+  it("leaves the longer game_web_playtest route and its capture bounds intact", () => {
+    const route = (length: number) => Array.from({ length }, () => ({ press: "Space" }));
+    expect(decodeWebPlaytestInput({ steps: route(12) }).steps).toHaveLength(12);
+    expect(decodeWebPlaytestInput({ steps: route(60) }).steps).toHaveLength(60);
+    expect(() => decodeWebPlaytestInput({ steps: route(61) })).toThrow();
+    expect(() => decodeWebPlaytestInput({ captureEveryMs: 99 })).toThrow();
+    expect(() => decodeWebPlaytestInput({ width: 319 })).toThrow();
+    expect(() => decodeWebPlaytestInput({ width: 1_921 })).toThrow();
+    expect(() => decodeWebPlaytestInput({ bootTimeoutMs: 120_001 })).toThrow();
+    expect(
+      decodeWebPlaytestInput({
+        width: 320,
+        height: 1_920,
+        bootTimeoutMs: 120_000,
+        captureEveryMs: 100,
+      }),
+    ).toMatchObject({ width: 320, height: 1_920, bootTimeoutMs: 120_000, captureEveryMs: 100 });
+  });
+
+  it("keeps the verify route at 60 steps with its gameplay minimum", () => {
+    expect(
+      decodeVerifyInput({ steps: Array.from({ length: 60 }, () => ({ press: "Space" })) }).steps,
+    ).toHaveLength(60);
+    expect(() =>
+      decodeVerifyInput({ steps: Array.from({ length: 61 }, () => ({ press: "Space" })) }),
+    ).toThrow();
+    expect(() =>
+      decodeVerifyInput({ steps: Array.from({ length: 60 }, () => ({ waitMs: 1 })) }),
+    ).toThrow();
+    expect(() => decodeVerifyInput({ steps: [{ press: "Space" }], captureEveryMs: 99 })).toThrow();
   });
 });
 

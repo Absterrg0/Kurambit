@@ -1,5 +1,11 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  GAME_PLAYTEST_BOUNDS,
+  GAME_TRY_INPUT_BOUNDS,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { McpSchema, Tool } from "effect/ai";
@@ -82,6 +88,47 @@ it("keeps the review-only exact layout on game_web_playtest", () => {
   const schema = Tool.getJsonSchema(GameWebPlaytestTool) as AdvertisedInput;
   expect(schema.properties).toHaveProperty("exactSize");
   expect(schema.required ?? []).not.toContain("steps");
+});
+
+it("advertises each playtest tool's own route and capture limits", () => {
+  const tryInput = Tool.getJsonSchema(GameTryInputTool) as AdvertisedInput;
+  expect(tryInput.properties?.steps).toMatchObject({
+    type: "array",
+    minItems: 1,
+    maxItems: GAME_TRY_INPUT_BOUNDS.maxSteps,
+  });
+  expect(tryInput.properties?.captureEveryMs).toMatchObject({
+    type: "number",
+    minimum: GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs,
+  });
+
+  // game_web_playtest keeps its longer route and its review layout options.
+  const playtest = Tool.getJsonSchema(GameWebPlaytestTool) as AdvertisedInput;
+  expect(playtest.properties?.steps).toMatchObject({
+    type: "array",
+    maxItems: GAME_PLAYTEST_BOUNDS.maxSteps,
+  });
+  expect(playtest.properties?.steps).not.toHaveProperty("minItems");
+  expect(playtest.properties?.captureEveryMs).toMatchObject({
+    type: "number",
+    minimum: GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs,
+  });
+  expect(playtest.properties?.width).toMatchObject({
+    type: "number",
+    minimum: GAME_PLAYTEST_BOUNDS.minDimension,
+    maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
+  });
+
+  const verify = Tool.getJsonSchema(GameVerifyTool) as AdvertisedInput;
+  expect(verify.properties?.steps).toMatchObject({
+    type: "array",
+    minItems: 1,
+    maxItems: GAME_PLAYTEST_BOUNDS.maxSteps,
+  });
+  expect(verify.properties?.captureEveryMs).toMatchObject({
+    type: "number",
+    minimum: GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs,
+  });
 });
 
 const reviewControl = new Set([
