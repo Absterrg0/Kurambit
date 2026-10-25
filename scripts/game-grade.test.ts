@@ -362,6 +362,9 @@ describe("judgeObligations", () => {
       true,
     );
     assert.equal(judged.void, false);
+    // The control was never asked: no frames is not a measured NO.
+    assert.equal(judged.control.answered, null);
+    assert.equal(judged.inconclusive, false);
   });
 
   it("drops a cited frame the grader did not send", async () => {
@@ -471,6 +474,10 @@ describe("gradeGame", () => {
       assert.equal(grade.quick, null);
       assert.equal(grade.solCalls, 0);
       assert.equal(reviewed, false);
+      // The build failure stays visible; it is not a measured negative control.
+      assert.equal(grade.control.votes.length, 0);
+      assert.equal(grade.control.answered, null);
+      assert.equal(grade.inconclusive, false);
       assert.equal(
         grade.obligations.every((obligation) => !obligation.yes),
         true,
@@ -823,7 +830,7 @@ describe("gradeGame", () => {
         await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
       ) as {
         inconclusive: boolean;
-        control: { yes: boolean; answered: boolean; votes: ReadonlyArray<{ yes: unknown }> };
+        control: { yes: boolean; answered: boolean | null; votes: ReadonlyArray<{ yes: unknown }> };
       };
       assert.equal(written.inconclusive, true);
       assert.equal(written.control.yes, false);

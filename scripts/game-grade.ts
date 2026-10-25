@@ -274,9 +274,11 @@ export interface GradeDocument {
     readonly yes: boolean;
     /**
      * Every attempted control vote returned a YES/NO. False when a call failed
-     * or its reply was unreadable, which is no answer at all.
+     * or its reply was unreadable, which is no answer at all. Null when the
+     * control was never put to the model, as with a failed build or no frames:
+     * an unattempted control is not a measured NO.
      */
-    readonly answered: boolean;
+    readonly answered: boolean | null;
     readonly votes: ReadonlyArray<GradeVote>;
   };
   /** The control item passed, so every verdict in this grade is untrustworthy. */
@@ -730,7 +732,10 @@ export async function judgeObligations(input: {
   // voids the whole grade (stricter than the obligations' conjunction). A
   // failed call is not a NO: it leaves the control unread, not passed.
   const controlYes = controlVotes.some((entry) => entry.yes === true);
-  const controlAnswered = controlVotes.every((entry) => entry.yes !== null);
+  // No frames means no control question was asked; the vote entries are
+  // synthesized "No frames were captured." NOs, not model answers.
+  const controlAnswered =
+    input.frames.length === 0 ? null : controlVotes.every((entry) => entry.yes !== null);
   return {
     obligations: verdicts,
     control: {
@@ -740,7 +745,7 @@ export async function judgeObligations(input: {
       votes: controlVotes,
     },
     void: controlYes,
-    inconclusive: !controlYes && !controlAnswered,
+    inconclusive: !controlYes && controlAnswered === false,
     solCalls: calls,
   };
 }
@@ -1596,7 +1601,9 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
         yes: false,
         votes: [],
       })),
-      control: { description: CONTROL_DESCRIPTION, yes: false, answered: true, votes: [] },
+      // Nothing was graded, so the control was never attempted. `answered:
+      // true` here would read as a measured negative calibration.
+      control: { description: CONTROL_DESCRIPTION, yes: false, answered: null, votes: [] },
       void: false,
       inconclusive: false,
       solCalls: 0,

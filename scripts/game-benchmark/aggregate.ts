@@ -65,7 +65,11 @@ export interface BenchmarkGrade {
   readonly obligations: { readonly yes: number; readonly total: number };
   /** Any control YES: the grader imagined the absurd item. */
   readonly control: boolean;
-  /** False when a control call failed or answered unreadably; absent when unrecorded. */
+  /**
+   * True when every attempted control vote answered, false when one failed or
+   * answered unreadably, null when nothing was recorded or no control was
+   * attempted. Null must never be read as a pass.
+   */
   readonly controlAnswered?: boolean | null;
   readonly void: boolean;
   /** The control was attempted but unread, so calibration is unproven. */
@@ -521,6 +525,23 @@ export function readBenchmarkResult(input: {
 }
 
 /**
+ * What a grade records about its negative control, in words a report can use.
+ * `unrecorded` is a document written before control validity was stored: it can
+ * neither claim calibration nor be called unread. `not-attempted` means no
+ * build existed to grade, so no control question was ever asked.
+ */
+const calibrationOf = (grade: BenchmarkGrade): string =>
+  grade.build === "no-build"
+    ? "not-attempted"
+    : grade.void
+      ? "void"
+      : grade.inconclusive === true
+        ? "inconclusive"
+        : grade.controlAnswered === null
+          ? "unrecorded"
+          : "verified";
+
+/**
  * The raw lane's row: there is no run summary, so the independent grade is the
  * only reading. `outcome` records whether a gradable build came out of the run,
  * not how good the game was; the obligation table carries quality.
@@ -554,7 +575,7 @@ export function readRawResult(input: {
               }`
         }; obligations ${grade.obligations.yes}/${grade.obligations.total} YES${
           unanswered === 0 ? "" : ` (+${unanswered} unanswered)`
-        }; void=${grade.void}; inconclusive=${grade.inconclusive === true}.`;
+        }; void=${grade.void}; calibration=${calibrationOf(grade)}.`;
   return {
     schemaVersion: 1,
     lane: "raw",
@@ -838,7 +859,8 @@ export function renderResultsMarkdown(input: {
     "`scripts/game-grade.ts` over pixels and console only; obligations are judged from their descriptions,",
     "so the design vocabulary's `unsupported` ones are graded too. A passing control item voids the grade.",
     "A control call that failed leaves the grade inconclusive; a failed obligation vote is missing evidence,",
-    "not a NO.",
+    "not a NO. A grade written before control validity was recorded reads `unrecorded`, not a pass; a",
+    "grade with no build reads `—`, because no control was ever attempted.",
     "",
     "| Brief | Build | Boot | Console errors | Input changed | Obligations YES | Control | Void | Sol calls |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -850,13 +872,31 @@ export function renderResultsMarkdown(input: {
         unanswered === 0 ? "" : ` (${unanswered} unanswered)`
       }`;
       const inconclusive = grade.inconclusive === true;
+      const control =
+        grade.build === "no-build"
+          ? "—"
+          : grade.control
+            ? "YES"
+            : inconclusive
+              ? "unread"
+              : grade.controlAnswered === null
+                ? "unrecorded"
+                : "no";
+      const voided =
+        grade.build === "no-build"
+          ? "—"
+          : grade.void
+            ? "VOID"
+            : inconclusive
+              ? "inconclusive"
+              : grade.controlAnswered === null
+                ? "unrecorded"
+                : "no";
       return `| ${result.fixtureId} | ${grade.build} | ${
         grade.quick === null ? "—" : grade.quick.booted ? "booted" : "no boot"
       } | ${grade.quick === null ? "—" : grade.quick.consoleErrors} | ${
         grade.quick === null ? "—" : grade.quick.responded ? "yes" : "no"
-      } | ${obligations} | ${grade.control ? "YES" : inconclusive ? "unread" : "no"} | ${
-        grade.void ? "VOID" : inconclusive ? "inconclusive" : "no"
-      } | ${grade.solCalls} |`;
+      } | ${obligations} | ${control} | ${voided} | ${grade.solCalls} |`;
     }),
     "",
     "## Judgements",

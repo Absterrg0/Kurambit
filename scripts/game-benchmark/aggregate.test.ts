@@ -14,6 +14,7 @@ import {
   assertGradeDescribesArtifact,
   readBenchmarkResult,
   readGradeSummary,
+  readRawResult,
   classifyRun,
   decodeBenchmarkResult,
   renderResultsMarkdown,
@@ -834,6 +835,64 @@ describe("grade summaries", () => {
     });
     const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: [result] });
     assert.match(markdown, /0\/2 \(1 unanswered\) \| unread \| inconclusive \| 6 \|/);
+  });
+
+  it("never reads an unattempted or unrecorded control as a measured NO", () => {
+    // A failed export: the control was never put to the model.
+    const noBuild = readGradeSummary({
+      build: { kind: "no-build" },
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 4,
+      obligations: [{ id: "count-move", yes: false }],
+      control: { yes: false, answered: null, votes: [] },
+      void: false,
+      inconclusive: false,
+      solCalls: 0,
+    });
+    assert.equal(noBuild?.controlAnswered, null);
+    assert.equal(noBuild?.inconclusive, false);
+    // A v3 document never recorded whether its control answered.
+    const old = readGradeSummary({
+      build: { kind: "existing" },
+      grader: { provider: "codex", model: "gpt-6.1-sol" },
+      graderVersion: 3,
+      obligations: [{ id: "count-move", yes: false }],
+      control: { yes: false, votes: [] },
+      void: false,
+    });
+    assert.equal(old?.controlAnswered, null);
+
+    const rows = [noBuild!, old!].map((grade, index) =>
+      readBenchmarkResult({
+        harnessCommit: "commit",
+        brief,
+        fixtureChecksum: "checksum",
+        startedAt: `2026-10-25T00:0${index}:00.000Z`,
+        durationMs: 60_000,
+        observation: { timedOut: false, exitCode: 0, signal: null, summary: null },
+        grade,
+      }),
+    );
+    const markdown = renderResultsMarkdown({ harnessCommit: "commit", results: rows });
+    assert.match(markdown, /\| no-build \| — \| — \| — \| 0\/1 \| — \| — \| 0 \|/);
+    assert.match(
+      markdown,
+      /\| existing \| — \| — \| — \| 0\/1 \| unrecorded \| unrecorded \| 0 \|/,
+    );
+    // The raw lane's one-line failure reason keeps the build failure visible and
+    // names the untouched control instead of claiming inconclusive or passed.
+    const raw = readRawResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-25T00:00:00.000Z",
+      durationMs: 1,
+      timedOut: false,
+      exitCode: 0,
+      grade: noBuild,
+    });
+    assert.match(raw.failureReason, /build=no-build/);
+    assert.match(raw.failureReason, /calibration=not-attempted/);
   });
 
   it("reads the served target and refuses a grade for another artifact", () => {
