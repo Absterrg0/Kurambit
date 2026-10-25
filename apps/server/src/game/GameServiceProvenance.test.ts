@@ -1630,29 +1630,46 @@ it.live("a scale-2 recorded route replays in the window it was played in", () =>
   ),
 );
 
-it.live("an exact window capture asks for that window and stays review evidence", () => {
+const exportFakeWebBuild = (input: {
+  readonly root: string;
+  readonly operation: string;
+  readonly args: readonly string[];
+}) =>
+  input.operation === "export-web"
+    ? Effect.promise(async () => {
+        const output = input.args.at(-1)!;
+        await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
+        for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+          await NodeFSP.writeFile(NodePath.join(NodePath.dirname(output), name), `export ${name}`);
+        return processOk(input.root);
+      })
+    : Effect.succeed(processOk(input.root));
+
+it.live("an exact window capture returns review evidence without recording a playtest", () => {
   const windows: Array<{ width?: number; height?: number }> = [];
   return withGame(
     {
-      run: (input) => {
-        if (input.operation !== "export-web") return Effect.succeed(processOk(input.root));
-        const output = input.args.at(-1)!;
-        return Effect.promise(async () => {
-          await NodeFSP.mkdir(NodePath.dirname(output), { recursive: true });
-          for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
-            await NodeFSP.writeFile(
-              NodePath.join(NodePath.dirname(output), name),
-              `export ${name}`,
-            );
-          return processOk(input.root);
-        });
-      },
+      run: exportFakeWebBuild,
       playtest: (input) => {
         windows.push({ width: input.width, height: input.height });
-        return Effect.succeed(playtestResult);
+        return Effect.succeed({
+          ...playtestResult,
+          executedInputSteps: input.steps.filter(
+            (step) => !("waitMs" in step) && !("screenshot" in step),
+          ).length,
+          screenshots: [
+            {
+              label: "after-steps",
+              mimeType: "image/png" as const,
+              data: Buffer.from(`${input.width}x${input.height}`).toString("base64"),
+              width: input.width,
+              height: input.height,
+            },
+          ],
+        });
       },
     },
-    ({ root, game, studio, rounds }) =>
+    ({ root, game, studio, rounds, qualification }) =>
       Effect.gen(function* () {
         yield* Effect.promise(async () => {
           await NodeFSP.writeFile(
@@ -1666,34 +1683,139 @@ it.live("an exact window capture asks for that window and stays review evidence"
         });
         yield* game.export(threadId, "Web");
         const build = (yield* rounds.read(root)).selected!;
-        yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
-        // Without an isolated store the exact window would become the build's
-        // playtest record, so the service refuses it outright.
-        const refused = yield* game
-          .webPlaytest(threadId, {
+        const recorded = yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
+        expect(recorded.success, recorded.message).toBe(true);
+        const canonicalBefore = yield* studio.frozenInputs(root, build.buildId);
+        const stageBefore = stageOf(yield* qualification.read(root, "godot"), "playtest");
+        const statusBefore = yield* game.status(threadId);
+        const selectedBefore = (yield* rounds.read(root)).selected!.buildId;
+
+        const captured = yield* game.webPlaytest(threadId, {
+          steps: [{ press: "Space" }],
+          exactSize: true,
+          width: 900,
+          height: 900,
+        });
+        expect(captured.success, captured.message).toBe(true);
+        // The browser is asked for the requested window, not an integer scale
+        // of the game's 640×360 base.
+        expect(windows.at(-1)).toEqual({ width: 900, height: 900 });
+        expect(captured.screenshots.map((shot) => [shot.width, shot.height])).toEqual([[900, 900]]);
+        expect(captured.evidenceDirectory).toMatch(/^builds\/review-evidence\//);
+        expect(captured.message).toContain("Review evidence only");
+        const stored = JSON.parse(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(
+              NodePath.join(root, captured.evidenceDirectory!, "result.json"),
+              "utf8",
+            ),
+          ),
+        );
+        expect(
+          stored.frames.map((frame: { width: number; height: number }) => [
+            frame.width,
+            frame.height,
+          ]),
+        ).toEqual([[900, 900]]);
+
+        // Evidence only: the selected build, the recorded playtest, its
+        // qualification stage and the newest history entry all stay put.
+        expect((yield* rounds.read(root)).selected!.buildId).toBe(selectedBefore);
+        expect((yield* studio.frozenInputs(root, build.buildId)).steps).toEqual(
+          canonicalBefore.steps,
+        );
+        expect(stageOf(yield* qualification.read(root, "godot"), "playtest")).toEqual(stageBefore);
+        expect((yield* game.status(threadId)).lastPlaytest?.directory).toBe(
+          statusBefore.lastPlaytest?.directory,
+        );
+        expect((yield* studio.submissionFacts(root, build.buildId)).passed).toBe(true);
+
+        // A direct legacy build replay without its isolated store still refuses
+        // the exact window instead of silently recording it.
+        const direct = yield* game
+          .webPlaytestBuild(threadId, build.buildId, {
             steps: [{ press: "Space" }],
             exactSize: true,
             width: 900,
             height: 900,
           })
           .pipe(Effect.flip);
-        expect(refused.detail).toContain("review evidence");
-        const directory = NodePath.join(root, "..", "window-evidence");
-        const captured = yield* game.webPlaytestBuild(
-          threadId,
-          build.buildId,
-          { steps: [{ press: "Space" }], exactSize: true, width: 900, height: 900 },
-          directory,
-          "persisted",
-        );
-        expect(captured.success).toBe(true);
-        // The browser is asked for the requested window, not an integer scale
-        // of the game's 640×360 base.
-        expect(windows.at(-1)).toEqual({ width: 900, height: 900 });
-        // The build's recorded playtest is still the earlier one.
+        expect(direct.detail).toContain("review evidence");
+
+        // An ordinary capture still records the build's playtest.
+        yield* game.webPlaytest(threadId, { steps: [{ press: "Space" }] });
         expect((yield* studio.frozenInputs(root, build.buildId)).steps).toEqual([
-          { click: "left" },
+          { press: "Space" },
         ]);
+      }),
+  );
+});
+
+it.live("an exact window capture cannot make an unqualified build submittable", () => {
+  return withGame(
+    {
+      run: exportFakeWebBuild,
+      playtest: (input) => {
+        const executedInputSteps = input.steps.filter(
+          (step) => !("waitMs" in step) && !("screenshot" in step),
+        ).length;
+        return Effect.succeed({
+          ...playtestResult,
+          responded: executedInputSteps > 0,
+          executedInputSteps,
+          qualifies: executedInputSteps > 0,
+          blockers: executedInputSteps > 0 ? [] : ["no input steps"],
+          screenshots: [
+            {
+              label: "after-steps",
+              mimeType: "image/png" as const,
+              data: Buffer.from(`${input.width}x${input.height}`).toString("base64"),
+              width: input.width,
+              height: input.height,
+            },
+          ],
+        });
+      },
+    },
+    ({ root, game, studio, rounds, qualification }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(
+            NodePath.join(root, "game.json"),
+            `${JSON.stringify(manifest())}\n`,
+          );
+          await NodeFSP.writeFile(
+            NodePath.join(root, "godot/project.godot"),
+            "[display]\nwindow/size/viewport_width=640\nwindow/size/viewport_height=360\n",
+          );
+        });
+        yield* game.export(threadId, "Web");
+        const build = (yield* rounds.read(root)).selected!;
+        // A wait-only route records a playtest with no executed input, so the
+        // build cannot be submitted.
+        yield* game.webPlaytest(threadId, { steps: [{ waitMs: 10 }] });
+        const before = yield* studio.submissionFacts(root, build.buildId);
+        expect(before.passed).toBe(false);
+        expect(before.reason).toContain("input");
+        const frozenBefore = yield* studio.frozenInputs(root, build.buildId);
+        const stageBefore = stageOf(yield* qualification.read(root, "godot"), "playtest");
+
+        const captured = yield* game.webPlaytest(threadId, {
+          steps: [{ press: "Space" }],
+          exactSize: true,
+          width: 900,
+          height: 900,
+        });
+        expect(captured.success, captured.message).toBe(true);
+        expect(captured.qualifies).toBe(true);
+        expect(captured.screenshots.map((shot) => [shot.width, shot.height])).toEqual([[900, 900]]);
+
+        // The run was honest evidence, but it is not the build's record.
+        const after = yield* studio.submissionFacts(root, build.buildId);
+        expect(after.passed).toBe(false);
+        expect(after.reason).toContain("input");
+        expect((yield* studio.frozenInputs(root, build.buildId)).steps).toEqual(frozenBefore.steps);
+        expect(stageOf(yield* qualification.read(root, "godot"), "playtest")).toEqual(stageBefore);
       }),
   );
 });

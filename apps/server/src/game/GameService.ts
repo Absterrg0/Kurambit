@@ -1203,15 +1203,22 @@ const make = Effect.gen(function* () {
       };
     });
 
+  interface WebPlaytestOptions {
+    readonly buildId?: string;
+    /** An isolated input experiment outside the game folder; never records the playtest. */
+    readonly experimentDirectory?: string;
+    /** A server-allocated, game-relative folder for review-only exact-window evidence. */
+    readonly reviewEvidenceDirectory?: string;
+    readonly imageResponse?: "persisted";
+  }
   const webPlaytest = (
     root: string,
     input: GameWebPlaytestInput,
     runId: string | null,
-    buildId?: string,
-    experimentDirectory?: string,
-    imageResponse?: "persisted",
+    options: WebPlaytestOptions = {},
   ) =>
     Effect.gen(function* () {
+      const { buildId, experimentDirectory, imageResponse } = options;
       // Reject before exporting, serving, or launching the browser: a bad capture
       // request must not cost a build or hold the game's operation lock.
       const issues = playtestInputIssues(input);
@@ -1240,6 +1247,23 @@ const make = Effect.gen(function* () {
             detail: "An isolated input experiment must name a recorded build.",
           });
       }
+      const reviewRoot =
+        options.reviewEvidenceDirectory === undefined
+          ? null
+          : NodePath.resolve(root, options.reviewEvidenceDirectory);
+      if (reviewRoot !== null) {
+        const gameRoot = NodePath.resolve(root);
+        if (reviewRoot === gameRoot || !reviewRoot.startsWith(`${gameRoot}${NodePath.sep}`))
+          return yield* new GameOperationError({
+            operation: "Web playtest",
+            path: root,
+            reason: "invalid-input",
+            detail: "Exact-window evidence must stay inside the game's evidence folder.",
+          });
+      }
+      // Evidence-only runs keep the game's qualification stage, selected build
+      // and recorded playtest untouched.
+      const evidenceOnly = experimentDirectory !== undefined || reviewRoot !== null;
       return yield* stageOrRun(
         root,
         "playtest",
@@ -1351,13 +1375,13 @@ const make = Effect.gen(function* () {
           // not an integer multiple of the game's viewport: only a window whose
           // aspect differs can show letterboxing, clipping or overflow. It is
           // review evidence, so it can never become the build's playtest record.
-          if (input.exactSize === true && experimentDirectory === undefined)
+          if (input.exactSize === true && !evidenceOnly)
             return yield* new GameOperationError({
               operation: "Web playtest",
               path: root,
               reason: "invalid-input",
               detail:
-                "An exact-size window capture is review evidence; pass an experiment directory instead of recording it as the build's playtest.",
+                "An exact-size window capture is review evidence; use game_web_playtest, which stores it as review evidence instead of recording it as the build's playtest.",
             });
           const capture = playtestCapture(baseViewport, input);
           if (capture === null)
@@ -1379,9 +1403,11 @@ const make = Effect.gen(function* () {
             executable,
             url,
             profileDirectory:
-              experimentDirectory === undefined
-                ? NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`)
-                : NodePath.join(experimentDirectory, "profile"),
+              experimentDirectory !== undefined
+                ? NodePath.join(experimentDirectory, "profile")
+                : reviewRoot !== null
+                  ? NodePath.join(reviewRoot, "profile")
+                  : NodePath.join(root, "builds/logs", `playtest-${NodeCrypto.randomUUID()}`),
             width: capture.width,
             height: capture.height,
             bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
@@ -1443,9 +1469,11 @@ const make = Effect.gen(function* () {
             try: () =>
               writePlaytestEvidence({
                 root,
-                ...(experimentDirectory === undefined
-                  ? {}
-                  : { directory: NodePath.join(experimentDirectory, "evidence") }),
+                ...(experimentDirectory !== undefined
+                  ? { directory: NodePath.join(experimentDirectory, "evidence") }
+                  : reviewRoot !== null
+                    ? { directory: NodePath.join(reviewRoot, "evidence") }
+                    : {}),
                 result: enriched,
                 steps: input.steps ?? [],
               }),
@@ -1453,27 +1481,30 @@ const make = Effect.gen(function* () {
               new GameOperationError({
                 operation: "Web playtest evidence",
                 path:
-                  experimentDirectory === undefined
-                    ? NodePath.join(root, "builds/playtests")
-                    : NodePath.join(experimentDirectory, "evidence"),
+                  experimentDirectory !== undefined
+                    ? NodePath.join(experimentDirectory, "evidence")
+                    : reviewRoot !== null
+                      ? NodePath.join(reviewRoot, "evidence")
+                      : NodePath.join(root, "builds/playtests"),
                 reason: "io",
                 cause,
               }),
           });
+          // Review evidence is game-relative so the builder can find it beside
+          // the build; an isolated experiment stays an absolute internal path.
+          const evidenceLocation =
+            reviewRoot === null ? evidence.directory : NodePath.relative(root, evidence.directory);
           if (imageResponse !== "persisted" && input.captureAllSteps && droppedFrames > 0)
             return yield* new GameOperationError({
               operation: "game_try_input",
               path: root,
               reason: "invalid-input",
-              detail: `Captured frames exceed the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes} byte response limit. All frames are stored in ${evidence.directory}; shorten the route or increase captureEveryMs.`,
+              detail: `Captured frames exceed the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes} byte response limit. All frames are stored in ${evidenceLocation}; shorten the route or increase captureEveryMs.`,
             });
-          // An experiment is reviewer evidence, never the game's playtest
-          // record: it must not replace the build binding a submission uses.
-          if (
-            experimentDirectory === undefined &&
-            build?.buildId !== null &&
-            build?.buildId !== undefined
-          )
+          // An experiment or exact-window run is reviewer evidence, never the
+          // game's playtest record: it must not replace the build binding a
+          // submission uses.
+          if (!evidenceOnly && build?.buildId !== null && build?.buildId !== undefined)
             yield* rounds.recordBuildPlaytest(root, build.buildId, {
               booted: result.booted,
               responded: result.responded,
@@ -1489,24 +1520,28 @@ const make = Effect.gen(function* () {
           const framesNote =
             droppedFrames === 0
               ? ""
-              : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidence.directory}.`;
+              : ` ${droppedFrames} frame(s) exceeded the ${GAME_PLAYTEST_BOUNDS.maxResultImageBytes / (1024 * 1024)} MB response budget; they stay in ${evidenceLocation}.`;
           const qualificationNote = qualifies
             ? ""
             : ` Qualification: this run does not count as honest gameplay evidence${
                 blockers.length === 0 ? "" : `: ${blockers.join("; ")}`
               }.${missingProbe ? ` ${probesMissing}.` : ""}`;
+          const reviewNote =
+            reviewRoot === null
+              ? ""
+              : " Review evidence only: this exact-window run was not recorded as the build's playtest and did not change qualification.";
           return {
             value: {
               ...enriched,
               screenshots: imageResponse === "persisted" ? [] : budgeted.kept,
-              message: `${result.message}${qualificationNote}${observationNote}${framesNote}`,
-              evidenceDirectory: evidence.directory,
+              message: `${result.message}${qualificationNote}${observationNote}${framesNote}${reviewNote}`,
+              evidenceDirectory: evidenceLocation,
             },
             record: {
               outcome: qualifies ? ("passed" as const) : ("failed" as const),
               sourceId: qualificationSourceId,
               buildId: build?.status === "passed" ? build.buildId : null,
-              evidenceDirectory: evidence.directory,
+              evidenceDirectory: evidenceLocation,
               probeRequired,
               detail: missingProbe
                 ? probesMissing
@@ -1516,7 +1551,7 @@ const make = Effect.gen(function* () {
             },
           };
         }),
-        experimentDirectory === undefined,
+        !evidenceOnly,
       );
     });
   /** Imports first: a fresh game has no .godot cache, so .tres files and class_names cannot resolve. */
@@ -2161,7 +2196,7 @@ const make = Effect.gen(function* () {
         } satisfies GameVerifyResult;
       completed.push("export");
 
-      const played = yield* webPlaytest(root, input, runId, build.buildId);
+      const played = yield* webPlaytest(root, input, runId, { buildId: build.buildId });
       const { screenshots, ...playtest } = played;
       const playtestRecord = yield* qualification.stageRecord(root, "playtest");
       // A playtest is only usable when its record names the same artifact, which
@@ -2749,12 +2784,30 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Web playtest", (root) =>
         Effect.andThen(
           refuseWhileUnapproved(root, "web-playtest"),
-          Effect.flatMap(exporterRun(threadId), (runId) => webPlaytest(root, input, runId)),
+          Effect.flatMap(exporterRun(threadId), (runId) =>
+            webPlaytest(
+              root,
+              input,
+              runId,
+              // The public exact-size option is review evidence, so the server
+              // allocates its folder and the run never becomes the build's
+              // recorded playtest. The caller never names a filesystem path.
+              input.exactSize === true
+                ? {
+                    reviewEvidenceDirectory: `builds/review-evidence/${NodeCrypto.randomUUID()}`,
+                  }
+                : {},
+            ),
+          ),
         ),
       ),
     webPlaytestBuild: (threadId, buildId, input, experimentDirectory, imageResponse) =>
       withRoot(threadId, "Web playtest", (root) =>
-        webPlaytest(root, input, null, buildId, experimentDirectory, imageResponse),
+        webPlaytest(root, input, null, {
+          buildId,
+          ...(experimentDirectory === undefined ? {} : { experimentDirectory }),
+          ...(imageResponse === undefined ? {} : { imageResponse }),
+        }),
       ),
     verify: (threadId, input) =>
       withRoot(threadId, "Game verify", (root) =>

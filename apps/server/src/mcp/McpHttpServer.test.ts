@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type GameVerifyResult,
+  type GameWebPlaytestResult,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -1053,6 +1054,7 @@ it.effect(
         const tried: unknown[] = [];
         const imported: unknown[] = [];
         const verified: unknown[] = [];
+        const played: unknown[] = [];
         const submitted: unknown[] = [];
         const reviewControlCalls: unknown[] = [];
         const verifyBuildId = "a".repeat(64);
@@ -1106,6 +1108,21 @@ it.effect(
         };
         const switchedRole = yield* Ref.make<"critic" | "ballot" | null>("critic");
         const reducedRepairCatalog = yield* Ref.make(false);
+        const webPlaytestResult: GameWebPlaytestResult = {
+          executedInputSteps: 1,
+          success: true,
+          booted: true,
+          bootMs: 12,
+          responded: true,
+          changedPercent: 14,
+          message: "Playtest succeeded: fake run.",
+          consoleMessages: [],
+          screenshots: [],
+          state: null,
+          qualifies: true,
+          blockers: [],
+          interaction: "fake response",
+        };
         const serverLayer = McpHttpServer.layerGameToolkit.pipe(
           Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
           Layer.provide(
@@ -1153,6 +1170,22 @@ it.effect(
                         message: "Stopped at the playtest.",
                       }
                     : verifyResult;
+                }),
+              webPlaytest: (threadId, input) =>
+                Effect.sync(() => {
+                  played.push({ threadId, input });
+                  return {
+                    ...webPlaytestResult,
+                    screenshots: [
+                      {
+                        label: "after-steps",
+                        mimeType: "image/png" as const,
+                        data: "cG5n",
+                        width: input.width ?? 640,
+                        height: input.height ?? 360,
+                      },
+                    ],
+                  };
                 }),
             }),
           ),
@@ -1515,6 +1548,31 @@ it.effect(
         expect(layoutVerify).toContain('"isError":true');
         expect(layoutVerify).toContain("exactSize");
         expect(verified).toHaveLength(0);
+        // The review-only exact window belongs to game_web_playtest; the public
+        // arguments cross decoding and reach that service method unchanged.
+        const exactPlaytest = yield* rpc("builder", builder, "tools/call", {
+          name: "game_web_playtest",
+          arguments: {
+            steps: [{ press: "Space" }],
+            exactSize: true,
+            width: 900,
+            height: 900,
+          },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(exactPlaytest).not.toContain('"isError":true');
+        expect(exactPlaytest).toContain('"type":"image"');
+        expect(exactPlaytest).toContain('"width":900');
+        expect(exactPlaytest).toContain('"height":900');
+        expect(played).toHaveLength(1);
+        expect(played[0]).toEqual({
+          threadId: ThreadId.make("builder-thread"),
+          input: {
+            steps: [{ press: "Space" }],
+            exactSize: true,
+            width: 900,
+            height: 900,
+          },
+        });
         const verifiedCall = yield* rpc("builder", builder, "tools/call", {
           name: "game_verify",
           arguments: { steps: [{ press: "Space" }] },

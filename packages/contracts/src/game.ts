@@ -894,7 +894,10 @@ export const GameWebPlaytestInput = Schema.Struct({
    * differ from the game's; such a run is evidence only and is never recorded
    * as the build's playtest.
    */
-  exactSize: Schema.optionalKey(Schema.Boolean),
+  exactSize: Schema.optionalKey(Schema.Boolean).annotate({
+    description:
+      "Capture at exactly width×height as review-only layout evidence. The run is saved under builds/review-evidence, never recorded as the build's playtest and never counted toward qualification. Both width and height are required.",
+  }),
 });
 export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
 /** A route step that drives the game; waits and screenshots only gather evidence. */
