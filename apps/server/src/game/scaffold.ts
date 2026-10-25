@@ -162,28 +162,28 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     ...(planFirst ? { "DESIGN.md": designSkeleton(manifest.name) } : {}),
     "AGENTS.md": `# Game Studio project
 
-Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the engine project; game.json the manifest. TEMPLATE.md describes the **${templateName}** starter: reuse what fits, restyle or replace the rest.${designLine}
+Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the project; game.json the manifest. TEMPLATE.md describes the **${templateName}** starter: reuse what fits, restyle or replace the rest.${designLine}
 
 ## Steps
 
-1. **Recipes first.** Before building the core loop, game_recipe_search your genre and core mechanic; game_recipe_get what fits and adapt it.
-2. **Core loop first.** Make the main action playable, then run one game_verify with a real input route (press, hold, key/keys, click, drag or mouseMove). It checks, runs the canonical suite, exports Web and records a playtest of those exact bytes; it stops at the first failing stage. Use game_godot_check or game_godot_test alone for a narrower fix or diagnostic.
-3. **Show the state.** Every brief value (score, lives, turn, timer...) is visible on screen and updates, and in GameState when it has one. Win and lose end with totals.
-4. **First playable.** Inspect game_verify's frames; test what is still uncertain with game_try_input. Then game_submit with a one-line note: the build is live on Play at once, the first playable, not the end of your turn. A submit needs a recorded playtest that dispatched real input at least once; waits and screenshots do not count, so give game_verify a route that actually drives the game rather than guessing one from prose.
-5. **Produce.** game_status shows the production budget: 45 minutes after first playable by default; game.json's productionMinutes sets it, and the server never cuts you short. Deepen it toward BRIEF.md and its art direction — content, feedback, juice, presentation, fitting any window — with recipes and game_try_input. Optional art: game_art_search, game_art_import. Use game_verify for each complete iteration, targeted game_* tools for a fix, and game_submit each improved build; a refused submit keeps the live build and gives the exact failed check.
-6. **Finish.** End the turn when the budget is used or the game fully realises the brief; do not start your own repair loop. Review starts on the last accepted submit.
+1. **Recipes first.** Before building the core loop, game_recipe_search your genre and core mechanic, then game_recipe_get to adapt what fits.
+2. **Playable core.** Make the main action playable, then game_verify with a real input route; it runs canonical checks and returns the exact failed check. Use game_godot_check or game_godot_test for narrower fixes.
+3. **Show the state.** Every brief value (score, lives, timer...) is visible and updates on screen and in GameState when it has one; games without endings need no invented win/lose totals.
+4. **First playable.** Inspect game_verify's frames; use game_try_input for what is still uncertain. Then game_submit: Play shows it at once, the first playable, not the end of your turn. A submit needs a recorded playtest that dispatched real input. After a current export, game_web_playtest exactSize:true checks another window shape as evidence only.
+5. **Produce.** game_status shows the production budget: game.json's productionMinutes, 45 by default from first playable. Deepen toward BRIEF.md and its art direction (content, feedback, juice, presentation) with recipes and game_try_input. Optional art: game_art_search, game_art_import. game_verify each iteration, targeted game_* tools for fixes, game_submit each improved build; a refused submit keeps the live build and gives the exact failed check.
+6. **Finish.** End when the budget is used or the game fully realises the brief; do not start your own repair loop. Review starts on the last accepted submit.
 
 A focused request is not a redesign; keep the rest working. Never claim a check you did not run.
 
-## Rules that prevent breakage
+## Rules
 
-- Use the game_* tools for engine work; never run godot from the shell.
-- Keep scripts/studio_probe.gd and its autoload; extend GameState, do not replace it.
-- Make models with game_blender_run: art/blender sources, godot/assets/models/*.glb exports.
-- builds/ and godot/.godot/ are generated; do not edit them.
-- Missing tool: install it in Settings > General > Game tools.
+- Use game_* tools; never run godot from the shell.
+- Keep scripts/studio_probe.gd autoload; extend GameState, do not replace it.
+- Models via game_blender_run; keep art/blender sources, godot/assets/models/*.glb exports.
+- builds/ and godot/.godot/ are generated; do not edit.
+- Missing tool: Settings > General > Game tools.
 
-Certification: game_godot_test runs tests/smoke_test.gd; game_scenarios_run replays scenarios/*.json.
+Certification: game_scenarios_run.
 `,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",
