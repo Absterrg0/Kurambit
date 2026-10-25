@@ -120,6 +120,13 @@ func _mark_input() -> void:
 	# before it is boot, and a value that was already true there proves nothing.
 	if _first_input_frame < 0:
 		_first_input_frame = _frame
+		# A game already playing when the route starts has no menu transition
+		# to absorb this press. Baseline before it, not at the next periodic
+		# sample, so the action the press causes is evidence instead of looking
+		# like a value that was already true when play started.
+		var marker: Variant = _state_marker()
+		if marker != null and _is_playing(marker):
+			_capture_baseline(get_nodes_in_group("player"))
 
 func _run_press(action: String) -> String:
 	_release_all()
@@ -243,6 +250,40 @@ func _read_json(path: String) -> Variant:
 func _game_state() -> Node:
 	return root.get_node_or_null("GameState")
 
+func _state_marker() -> Variant:
+	# Null means "no shared play marker here": an absent, null or non-numeric
+	# state keeps the player-presence baseline rule instead of blocking play.
+	var state := _game_state()
+	if state == null or not _property_exists(state, "state"):
+		return null
+	var value: Variant = state.get("state")
+	if typeof(value) == TYPE_BOOL or _is_number(value):
+		return value
+	return null
+
+func _is_menu(value: Variant) -> bool:
+	if typeof(value) == TYPE_BOOL:
+		return not value
+	return _is_number(value) and is_equal_approx(float(value), 0.0)
+
+func _is_playing(value: Variant) -> bool:
+	if typeof(value) == TYPE_BOOL:
+		return value
+	return _is_number(value) and is_equal_approx(float(value), 1.0)
+
+func _capture_baseline(players: Array) -> void:
+	if _baseline_frame >= 0 or players.size() == 0:
+		return
+	# 0 is the shared menu state. A menu's hidden player group must not become
+	# the gameplay baseline while the route is still in the menu.
+	var marker: Variant = _state_marker()
+	if marker != null and _is_menu(marker):
+		return
+	_baseline_frame = _frame
+	for observation in _observations:
+		var key := str(observation["key"])
+		_baseline_values[key] = _value(key)
+
 func _property_exists(node: Node, key: String) -> bool:
 	if _property_names.is_empty():
 		for property in node.get_property_list():
@@ -278,13 +319,11 @@ func _sample() -> void:
 	# The gameplay baseline is the first sample after real input in which the
 	# player exists. Boot samples do not count: a menu, a spawn counter or a
 	# world total that is already true there is not something the player did.
+	# A game whose state is already playing was sampled before this input by
+	# _mark_input, so its first action is not folded into the baseline.
+	if _first_input_frame >= 0:
+		_capture_baseline(players)
 	var has_baseline := _baseline_frame >= 0
-	if not has_baseline and _first_input_frame >= 0 and players.size() > 0:
-		_baseline_frame = _frame
-		has_baseline = true
-		for observation in _observations:
-			var key := str(observation["key"])
-			_baseline_values[key] = _value(key)
 	var state := _game_state()
 	if state != null:
 		for observation in _observations:

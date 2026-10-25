@@ -455,6 +455,60 @@ it.live.skipIf(!available)(
 );
 
 it.live.skipIf(!available)(
+  "the first input to an already-playing game proves the action it caused",
+  () =>
+    withGame(
+      {
+        name: "already playing first action fixture",
+        planFirst: true,
+        mainScript: `extends Node2D
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tGameState.cards_played += 1
+\tif GameState.cards_played > 0:
+\t\tGameState.state = 3
+`,
+        stateScript: "extends Node\nvar state := 1\nvar cards_played := 0\n",
+        scenarios: {
+          "first-action": {
+            id: "first-action",
+            steps: [{ press: "ui_accept" }, { hold: ["move_right"], frames: 60 }],
+          },
+        },
+        criteria: [
+          {
+            id: "plays-a-card",
+            kind: "content",
+            text: "The first input plays a card",
+            observe: { key: "cards_played", expect: ">=1" },
+          },
+          {
+            id: "win",
+            kind: "win",
+            text: "The run reaches the win state",
+            observe: { key: "state", expect: "==3" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          expect(
+            result.summary.criteria.map((criterion) => [criterion.id, criterion.status]),
+          ).toEqual([
+            ["plays-a-card", "passed"],
+            ["win", "passed"],
+          ]);
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
   "starting and pausing the game is a state change, not a win",
   () =>
     withGame(
