@@ -26,6 +26,26 @@ const before = (probe: GamePlaytestProbe, afterInput = false) => ({ probe, after
 const played = (probe: GamePlaytestProbe) => ({ probe, afterInput: true });
 
 describe("summarizePlaytestSamples", () => {
+  it("retains the last typed UI state after the player node disappears", () => {
+    const final = ui({ state: 2, replies: 1 });
+    const state = summarizePlaytestSamples([
+      before(gameplay({ state: 1, replies: 0 })),
+      played(final),
+    ]);
+    expect(state.after).toEqual(final);
+    expect(state.changes).toContainEqual({ key: "replies", before: 0, after: 1 });
+  });
+
+  it("does not replace gameplay with a menu that retains a player", () => {
+    const final = ui({ state: 2, replies: 1 });
+    const state = summarizePlaytestSamples([
+      before(gameplay({ state: 1, replies: 0 })),
+      played(final),
+      played(gameplay({ state: 0, replies: 0 })),
+    ]);
+    expect(state.after).toEqual(final);
+  });
+
   it("measures from the gameplay baseline, not from the menu", () => {
     const state = summarizePlaytestSamples([
       before(menu),

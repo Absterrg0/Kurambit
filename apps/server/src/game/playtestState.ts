@@ -100,9 +100,7 @@ export const playtestBaseline = (samples: readonly GamePlaytestSample[]): number
 };
 
 const lastGameplayProbe = (samples: readonly GamePlaytestSample[]): GamePlaytestProbe | null =>
-  samples.findLast((sample) => sample.probe.player !== null)?.probe ??
-  samples.findLast(inPlay)?.probe ??
-  null;
+  samples.findLast(inPlay)?.probe ?? null;
 
 /**
  * Turns the probe samples into the before/after picture the result reports.
