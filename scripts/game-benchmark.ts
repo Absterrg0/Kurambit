@@ -142,6 +142,8 @@ if (values.help) {
       "--capture-only boots one exact saved Web artifact, replays --route and writes frame-pack.json,",
       "frames/ and real console/input facts. It calls no model, exports nothing and writes no grade.",
       "The route is JSON: {schemaVersion:1,label,viewport:{width,height},steps:[playtest steps]}.",
+      "--artifact-sha256 is the server's build id (the same digest an export record or a candidate",
+      "directory name carries), so it refuses a stale or mutated artifact before anything is served.",
       "--compare-frames feeds two capture packs into the frozen look/feel comparison. The",
       "identical-pair control is asked first, so a failed control costs one call instead of three.",
     ].join("\n"),
@@ -180,6 +182,15 @@ if (values["capture-only"]) {
   console.log(
     `capture: ${capture.manifestPath} artifact=${capture.manifest.artifact.sha256.slice(0, 12)} route=${capture.manifest.route.sha256.slice(0, 12)} frames=${capture.manifest.frames.length} booted=${capture.manifest.capture.booted} inputs=${capture.manifest.capture.executedInputSteps} consoleErrors=${capture.manifest.capture.consoleErrors} modelCalls=${capture.manifest.capture.modelCalls}`,
   );
+  // The pack is kept either way, but a replay that did not boot or dispatch
+  // input is not a successful capture: exit nonzero so no caller mistakes it
+  // for evidence the comparison can use.
+  if (!capture.manifest.capture.comparisonReady) {
+    console.error(
+      `capture not comparison-ready: booted=${capture.manifest.capture.booted} executedInputSteps=${capture.manifest.capture.executedInputSteps} frames=${capture.manifest.frames.length}. The pack is saved as failed evidence.`,
+    );
+    process.exit(1);
+  }
   process.exit(0);
 }
 if (values["compare-frames"]) {

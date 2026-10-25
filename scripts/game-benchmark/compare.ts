@@ -913,6 +913,18 @@ const assertComparablePacks = (input: {
     throw new Error(
       `Capture viewports differ (${firstViewport.width}x${firstViewport.height} vs ${secondViewport.width}x${secondViewport.height}); refusing to compare unlike captures.`,
     );
+  // Cards pair frames by index, so the two packs must hold the same moments in
+  // the same order. A pack that lost a boot or closing frame would otherwise
+  // pair "step 1" against "boot" and read as a difference that is not visual.
+  const firstLabels = input.first.manifest.frames.map((frame) => frame.label);
+  const secondLabels = input.second.manifest.frames.map((frame) => frame.label);
+  const difference = firstLabels.findIndex((label, index) => label !== secondLabels[index]);
+  if (firstLabels.length !== secondLabels.length || difference !== -1) {
+    const at = difference === -1 ? Math.min(firstLabels.length, secondLabels.length) : difference;
+    throw new Error(
+      `The packs captured different frame sets (first ${firstLabels.length}, second ${secondLabels.length}); card ${at + 1} is ${JSON.stringify(firstLabels[at] ?? null)} vs ${JSON.stringify(secondLabels[at] ?? null)}, so paired cards would compare different moments.`,
+    );
+  }
 };
 
 const revisionOrderResult = (input: {

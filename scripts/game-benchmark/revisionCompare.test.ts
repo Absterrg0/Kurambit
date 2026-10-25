@@ -258,6 +258,56 @@ describe("compareFramePacks", () => {
       expect(calls).toBe(0);
     }));
 
+  it("refuses packs whose card frames are not the same moments, before any model call", () =>
+    withTemp(async (root) => {
+      const first = await makePack(root, "first", [
+        [200, 30, 30],
+        [120, 30, 30],
+        [80, 30, 30],
+        [40, 30, 30],
+      ]);
+      // A missing closing frame is still a comparison-ready pack, but its
+      // indices no longer name the same moments as the other arm's.
+      const artifact = NodePath.join(root, "short-artifact");
+      await NodeFSP.mkdir(artifact, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(artifact, "index.html"), "short exact export");
+      const out = NodePath.join(root, "short");
+      const complete = result(route, [
+        [30, 30, 200],
+        [30, 30, 120],
+        [30, 30, 80],
+        [30, 30, 40],
+      ]);
+      await captureRevisionFrames({
+        artifact: { directory: artifact },
+        brief,
+        route,
+        out,
+        browser: "/browser-not-launched",
+        deps: {
+          playtest: async () => ({
+            ...complete,
+            screenshots: complete.screenshots.filter((shot) => shot.label !== "after-steps"),
+          }),
+        },
+      });
+      const second = await readFramePack(NodePath.join(out, "frame-pack.json"));
+      let calls = 0;
+      await expect(
+        compareFramePacks({
+          brief,
+          first,
+          second,
+          cardsRoot: NodePath.join(root, "cards"),
+          review: async () => {
+            calls += 1;
+            return answer("tie");
+          },
+        }),
+      ).rejects.toThrow(/different frame sets/);
+      expect(calls).toBe(0);
+    }));
+
   it("refuses a manifest whose viewport does not match its frames", () =>
     withPacks(async ({ first, second, cardsRoot }) => {
       const forged = {

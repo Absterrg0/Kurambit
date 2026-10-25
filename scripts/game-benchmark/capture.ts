@@ -13,6 +13,7 @@ import {
 } from "../../packages/contracts/src/index.ts";
 import { playtest, type GameWebPlaytestInput } from "../../apps/server/src/game/GameWebPlaytest.ts";
 import { playtestStepAction } from "../../apps/server/src/game/playtestInputPairs.ts";
+import { candidateBuildId, hashWebBuildDirectory } from "../../apps/server/src/game/webBuild.ts";
 import { chooseFrames } from "../game-grade.ts";
 import { defaultHeadlessBrowser, serveWebBuild } from "../lib/web-build-server.ts";
 import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
@@ -169,50 +170,44 @@ export async function loadCaptureRoute(path: string): Promise<CaptureRoute> {
 export interface ArtifactIdentity {
   readonly directory: string;
   readonly buildId: string | null;
+  /** The server's own build id, so a saved export record can be checked byte for byte. */
   readonly sha256: string;
   readonly files: number;
   readonly bytes: number;
 }
 
 /**
- * Hashes the exact served bytes. Paths, sizes and contents all take part, so a
- * file added, removed or changed changes the identity; a symlink is refused
- * because two readers could serve different bytes from the same manifest.
+ * Hashes the exact served bytes with the product's canonical build identity
+ * (`webBuildId`): sorted `path\0size\0sha256\n`. This is the same digest the
+ * server records for a selected build and names a candidate directory with, so
+ * `--artifact-sha256` can be the value an export record already holds instead of
+ * a second, private notion of "the artifact". A symlink, an empty directory or
+ * an oversized tree has no unambiguous identity and is refused.
  */
-export async function hashArtifact(
-  directory: string,
-  buildId: string | null = null,
-): Promise<ArtifactIdentity> {
+export async function hashArtifact(directory: string): Promise<ArtifactIdentity> {
   const root = NodePath.resolve(directory);
-  const entries: Array<{ relative: string; file: string; size: number }> = [];
-  const walk = async (current: string, prefix: string): Promise<void> => {
-    const children = await NodeFSP.readdir(current, { withFileTypes: true });
-    children.sort((left, right) => left.name.localeCompare(right.name));
-    for (const child of children) {
-      const file = NodePath.join(current, child.name);
-      const relative = prefix === "" ? child.name : `${prefix}/${child.name}`;
-      if (child.isSymbolicLink())
-        throw new Error(`Artifact contains a symlink, so its bytes are ambiguous: ${file}`);
-      if (child.isDirectory()) {
-        await walk(file, relative);
-        continue;
-      }
-      if (!child.isFile()) throw new Error(`Artifact contains a non-file entry: ${file}`);
-      const stat = await NodeFSP.stat(file);
-      entries.push({ relative, file, size: stat.size });
-    }
+  const hashed = await hashWebBuildDirectory(root);
+  if (hashed === null)
+    throw new Error(
+      `Artifact ${root} has no unambiguous identity: it is empty, holds a symlink, or exceeds the build entry bound.`,
+    );
+  const bytes = hashed.files.reduce((total, file) => total + file.size, 0);
+  return {
+    directory: root,
+    buildId: hashed.buildId,
+    sha256: hashed.buildId,
+    files: hashed.files.length,
+    bytes,
   };
-  await walk(root, "");
-  const digest = NodeCrypto.createHash("sha256");
-  digest.update("revision-capture-artifact-v1\0");
-  let bytes = 0;
-  for (const entry of entries) {
-    digest.update(`${entry.relative}\0${entry.size}\0`);
-    digest.update(await NodeFSP.readFile(entry.file));
-    bytes += entry.size;
-  }
-  return { directory: root, buildId, sha256: digest.digest("hex"), files: entries.length, bytes };
 }
+
+/** The build id a candidate directory name claims, when the path is one. */
+const candidateName = (absoluteDirectory: string): string | null => {
+  const parent = NodePath.basename(NodePath.dirname(absoluteDirectory));
+  const grandparent = NodePath.basename(NodePath.dirname(NodePath.dirname(absoluteDirectory)));
+  if (parent !== "candidates" || grandparent !== "builds") return null;
+  return candidateBuildId(`builds/candidates/${NodePath.basename(absoluteDirectory)}`);
+};
 
 const isInside = (parent: string, child: string): boolean =>
   child === parent || child.startsWith(`${parent}${NodePath.sep}`);
@@ -353,14 +348,24 @@ export async function captureRevisionFrames(
     throw new Error(`No nonempty index.html in the artifact directory: ${artifactDirectory}.`);
   assertBoundedRoute(options.route);
 
-  const before = await hashArtifact(artifactDirectory, options.artifact.buildId ?? null);
+  const before = await hashArtifact(artifactDirectory);
   if (
     options.expectedArtifactSha256 !== undefined &&
     before.sha256 !== options.expectedArtifactSha256.toLowerCase()
   )
     throw new Error(
-      `Artifact bytes do not match the expected sha256: expected ${options.expectedArtifactSha256.toLowerCase()}, found ${before.sha256} at ${artifactDirectory}.`,
+      `Artifact bytes do not match the expected build id: expected ${options.expectedArtifactSha256.toLowerCase()}, found ${before.sha256} at ${artifactDirectory}.`,
     );
+  const claimedByName = candidateName(artifactDirectory);
+  if (claimedByName !== null && claimedByName !== before.sha256)
+    throw new Error(
+      `The artifact directory claims build ${claimedByName}, but its bytes hash to ${before.sha256}; it is not the build its name says.`,
+    );
+  if (options.artifact.buildId !== undefined && options.artifact.buildId !== before.sha256)
+    throw new Error(
+      `The supplied build id ${options.artifact.buildId} does not match the artifact bytes (${before.sha256}); refusing to label one build with another's id.`,
+    );
+  const identity: ArtifactIdentity = { ...before, buildId: before.sha256 };
 
   // A failed recapture must not leave an older manifest looking like this run's.
   await NodeFSP.rm(NodePath.join(out, CAPTURE_MANIFEST_FILE), { force: true });
@@ -379,7 +384,7 @@ export async function captureRevisionFrames(
       probeRequired: false,
       acceptance: null,
     });
-    const after = await hashArtifact(artifactDirectory, options.artifact.buildId ?? null);
+    const after = await hashArtifact(artifactDirectory);
     if (after.sha256 !== before.sha256)
       throw new Error(
         `The served artifact changed during capture (${before.sha256} -> ${after.sha256}); the frames are not evidence of one exact build.`,
@@ -456,7 +461,7 @@ export async function captureRevisionFrames(
         title: options.brief.title,
         checksum: options.brief.checksum,
       },
-      artifact: { kind: "artifact", ...before },
+      artifact: { kind: "artifact", ...identity },
       route: {
         version: 1,
         label: routeLabel(options.route),

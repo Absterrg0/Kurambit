@@ -151,7 +151,8 @@ describe("captureRevisionFrames", () => {
       expect(capture.manifest.capture.comparisonReady).toBe(true);
       expect(capture.manifest.route.sha256).toBe(captureRouteDigest(route));
       expect(capture.manifest.route.viewport).toEqual({ width: 960, height: 540 });
-      expect(capture.manifest.artifact.sha256).toBe((await hashArtifact(artifact, null)).sha256);
+      expect(capture.manifest.artifact.sha256).toBe((await hashArtifact(artifact)).sha256);
+      expect(capture.manifest.artifact.buildId).toBe(capture.manifest.artifact.sha256);
       expect(capture.manifest.frames.map((frame) => frame.label)).toEqual([
         "boot, no input",
         "after step 1: clicked left 0ms",
@@ -213,9 +214,96 @@ describe("captureRevisionFrames", () => {
           expectedArtifactSha256: "0".repeat(64),
           deps: { playtest },
         }),
-        /Artifact bytes do not match the expected sha256/,
+        /Artifact bytes do not match the expected build id/,
       );
       expect(played).toBe(false);
+    }));
+
+  it("accepts the server's build id as the expected digest and records it as the identity", () =>
+    withTemp(async (root) => {
+      const artifact = await writeArtifact(root);
+      const identity = await hashArtifact(artifact);
+      const capture = await captureRevisionFrames({
+        artifact: { directory: artifact, buildId: identity.sha256 },
+        brief,
+        route,
+        out: NodePath.join(root, "pack"),
+        expectedArtifactSha256: identity.sha256.toUpperCase(),
+        browser: "/browser-not-launched",
+        deps: { playtest: async () => result() },
+      });
+      expect(capture.manifest.artifact.sha256).toBe(identity.sha256);
+      expect(capture.manifest.artifact.buildId).toBe(identity.sha256);
+    }));
+
+  it("refuses a supplied build id the bytes do not hash to, before serving", () =>
+    withTemp(async (root) => {
+      const artifact = await writeArtifact(root);
+      let played = false;
+      await rejects(
+        captureRevisionFrames({
+          artifact: { directory: artifact, buildId: "a".repeat(64) },
+          brief,
+          route,
+          out: NodePath.join(root, "pack"),
+          browser: "/browser-not-launched",
+          deps: {
+            playtest: async () => {
+              played = true;
+              return result();
+            },
+          },
+        }),
+        /does not match the artifact bytes/,
+      );
+      expect(played).toBe(false);
+    }));
+
+  it("refuses a candidate directory whose name is not the hash of its bytes", () =>
+    withTemp(async (root) => {
+      const artifact = await writeArtifact(
+        root,
+        NodePath.join("builds", "candidates", "b".repeat(64)),
+      );
+      let played = false;
+      await rejects(
+        captureRevisionFrames({
+          artifact: { directory: artifact },
+          brief,
+          route,
+          out: NodePath.join(root, "pack"),
+          browser: "/browser-not-launched",
+          deps: {
+            playtest: async () => {
+              played = true;
+              return result();
+            },
+          },
+        }),
+        /The artifact directory claims build b{64}/,
+      );
+      expect(played).toBe(false);
+    }));
+
+  it("refuses an artifact that changed while the route replayed", () =>
+    withTemp(async (root) => {
+      const artifact = await writeArtifact(root);
+      await rejects(
+        captureRevisionFrames({
+          artifact: { directory: artifact },
+          brief,
+          route,
+          out: NodePath.join(root, "pack"),
+          browser: "/browser-not-launched",
+          deps: {
+            playtest: async () => {
+              await NodeFSP.writeFile(NodePath.join(artifact, "index.wasm"), "mutated bytes");
+              return result();
+            },
+          },
+        }),
+        /The served artifact changed during capture/,
+      );
     }));
 
   it("refuses a changed frame when the pack is read back", () =>
