@@ -861,10 +861,10 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
   const during = frameProbes(result.screenshots);
   switch (id) {
     case "audio.feedback":
-      // The baseline follows the first confirm press; the boot frame is silent.
+      // The markerless baseline is the silent boot board, before the first press.
       expect(before.muted).toBe(false);
-      expect(before.cues).toBe(1);
-      expect(before.last_cue).toBe("confirm");
+      expect(before.cues).toBe(0);
+      expect(before.last_cue).toBe("none");
       expect(before.voices).toBe(2);
       expect(after.muted).toBe(false);
       // Damage plus the unmuted confirm are the only other cues: the muted
@@ -888,14 +888,16 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       ).toBe(true);
       break;
     case "feel.buffer":
-      // The playtest baseline is the first sample after player input, so the
-      // first press has already produced jump 1; the buffered press adds jump 2.
-      expect(before.jumps).toBe(1);
+      // The markerless baseline is the grounded board before the first press;
+      // the first press jumps, and the second is spent on the landing.
+      expect(before.jumps).toBe(0);
+      expect(before.buffered_jumps).toBe(0);
       expect(after.jumps).toBe(2);
       expect(after.queued_ms).toBe(0);
       // The counter proves the second jump was the queued press spent on the
       // landing, not a fresh press after touchdown.
       expect(after.buffered_jumps).toBe(1);
+      expect(during.some((probe) => probe.gameState.jumps === 1)).toBe(true);
       expect(during.some((probe) => probe.gameState.jumps === 2)).toBe(true);
       break;
     case "feel.coyote":
@@ -926,8 +928,9 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       ).toBe(true);
       break;
     case "feel.shake":
-      // The baseline is the impact sample itself: it is already shaking.
-      expect(before.impacts).toBe(1);
+      // The markerless baseline is the resting board before the impact.
+      expect(before.impacts).toBe(0);
+      expect(before.amplitude).toBe(0);
       expect(during.some((probe) => Number(probe.gameState.amplitude) > 0)).toBe(true);
       expect(after.impacts).toBe(1);
       expect(after.amplitude).toBe(0);
@@ -945,7 +948,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => probe.gameState.effects === 1)).toBe(true);
       break;
     case "loop.platformer":
-      // The baseline is after the first small step: no pickup, no retry yet.
+      // The baseline is the pre-input board: no pickup, no retry yet.
       expect(before.score).toBe(0);
       expect(before.gem_present).toBe(true);
       expect(before.retries).toBe(0);
@@ -961,6 +964,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => probe.gameState.score === 1)).toBe(true);
       break;
     case "loop.top-down":
+      // The markerless baseline is the untouched target before the pointer moves.
       expect(before.target_hp).toBe(3);
       expect(before.shots).toBe(0);
       expect(after.target_hp).toBe(0);
@@ -971,7 +975,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => Number(probe.gameState.shots_in_flight) > 0)).toBe(true);
       break;
     case "loop.card":
-      // The empty click is the baseline: an untouched turn.
+      // The baseline is the untouched turn before the empty focus click.
       expect(before.energy).toBe(3);
       expect(before.turn).toBe(0);
       expect(before.enemy_hp).toBe(10);
@@ -988,7 +992,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       ).toBe(true);
       break;
     case "loop.dialogue":
-      // The first answer is the locked one: the node and its flags must not move.
+      // The baseline is the untouched start; the first answer is the locked one.
       expect(before.node).toBe("start");
       expect(before.trust).toBe(0);
       expect(before.blocked).toBe(1);
@@ -1001,12 +1005,13 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => probe.gameState.node === "reward")).toBe(true);
       break;
     case "loop.tower":
-      // The pad click is the purchase, so the baseline already paid for it; the
-      // pre-click 60 gold and zero towers live in the paired frames.
-      expect(before.gold).toBe(20);
-      expect(before.spent).toBe(40);
-      expect(before.towers).toBe(1);
+      // The baseline is the untouched board before the pad click buys the tower.
+      expect(before.gold).toBe(60);
+      expect(before.spent).toBe(0);
+      expect(before.towers).toBe(0);
       expect(before.kills).toBe(0);
+      expect(during.some((probe) => probe.gameState.gold === 20)).toBe(true);
+      expect(during.some((probe) => probe.gameState.towers === 1)).toBe(true);
       expect(after.kills).toBe(2);
       expect(after.wave).toBe(2);
       expect(after.gold).toBe(30);
@@ -1016,10 +1021,12 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => Number(probe.gameState.shots_in_flight) > 0)).toBe(true);
       break;
     case "loop.racing":
-      // The wrong-way press crosses the finish with no checkpoints: no lap.
+      // The baseline is before the wrong-way press; that press crosses the
+      // finish with no checkpoints, so it counts no lap.
       expect(before.laps).toBe(0);
-      expect(before.out_of_order).toBe(1);
+      expect(before.out_of_order).toBe(0);
       expect(before.checkpoints).toBe(0);
+      expect(during.some((probe) => probe.gameState.out_of_order === 1)).toBe(true);
       expect(after.laps).toBe(1);
       expect(after.checkpoints).toBe(3);
       expect(after.next_checkpoint).toBe(0);
@@ -1027,9 +1034,10 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(during.some((probe) => probe.gameState.laps === 1)).toBe(true);
       break;
     case "loop.puzzle":
+      // The baseline is the untouched board before the first move.
       expect(before.pushes).toBe(0);
       expect(before.box_x).toBe(3);
-      expect(before.player_cell_x).toBe(2);
+      expect(before.player_cell_x).toBe(1);
       expect(after.pushes).toBe(1);
       expect(after.undos).toBe(1);
       expect(after.blocked).toBe(1);
@@ -1046,8 +1054,8 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       ).toBe(true);
       break;
     case "loop.first-person":
-      // The click captures; the baseline is captured with the view at rest.
-      expect(before.captured).toBe(true);
+      // The baseline is the view at rest before the click captures the pointer.
+      expect(before.captured).toBe(false);
       expect(before.yaw_deg).toBe(0);
       expect(before.pitch_deg).toBe(0);
       expect(after.captured).toBe(false);
@@ -1072,10 +1080,10 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(after.actor_fill).toBe("f2f2f2");
       break;
     case "look.lighting-2d":
-      // The first press is the baseline: the lamp is already off. The later
-      // presses bring it back and off again, so the counter records all three.
-      expect(before.lamp_on).toBe(false);
-      expect(before.toggles).toBe(1);
+      // The baseline is the lit boot board; the three presses then take the
+      // lamp off, on and off again.
+      expect(before.lamp_on).toBe(true);
+      expect(before.toggles).toBe(0);
       expect(after.lamp_on).toBe(false);
       expect(after.toggles).toBe(3);
       expect(during.some((probe) => probe.gameState.lamp_on === true)).toBe(true);
@@ -1085,7 +1093,7 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       break;
     case "sprite.animation": {
       // The route starts idle, runs right, reverses left, jumps and lands. The
-      // baseline follows the first D press, so read idle/run/air from the frames.
+      // baseline is the pre-input idle pose, so read idle/run/air from the frames.
       const runFrames = during.filter((probe) => probe.gameState.anim === "run");
       expect(runFrames.length, "the route runs").toBeGreaterThan(0);
       expect(runFrames.some((probe) => probe.gameState.frame === 0)).toBe(true);
@@ -1132,9 +1140,9 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       expect(Number(after.player_x)).toBeGreaterThan(500);
       break;
     case "read.hud":
-      // The baseline follows the hit; the pre-hit 3 lives in the frames before it.
-      expect(before.health).toBe(2);
-      expect(Number(before.feedback_ms)).toBeGreaterThan(0);
+      // The baseline is the untouched board before the hit.
+      expect(before.health).toBe(3);
+      expect(before.feedback_ms).toBe(0);
       expect(after.health).toBe(2);
       expect(after.goal).toBe(2);
       expect(after.feedback_ms).toBe(0);
@@ -1152,9 +1160,9 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       ).toBe(true);
       break;
     case "read.layout":
-      // The baseline follows the first Tab, so no choice is selected yet. The
-      // four Tabs reach the last choice and follow_focus scrolls it in; Enter
-      // selects it, then Tab and Enter press the pinned action.
+      // The baseline has no choice selected yet. The four Tabs reach the last
+      // choice and follow_focus scrolls it in; Enter selects it, then Tab and
+      // Enter press the pinned action.
       expect(before.selected).toBe(-1);
       expect(before.confirmed).toBe(0);
       expect(after.selected).toBe(3);

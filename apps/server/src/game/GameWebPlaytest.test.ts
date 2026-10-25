@@ -328,7 +328,8 @@ it.live.skipIf(!available || !templatesInstalled)(
             yield* Effect.log(still.message);
             expect(still.booted, still.message).toBe(true);
             expect(still.state, still.message).not.toBeNull();
-            // The gameplay baseline: a probe taken after input with a body present.
+            // The gameplay baseline: the template starts in its menu, so the
+            // first post-input probe with a body is play.
             expect(still.state?.before?.player, still.message).not.toBeNull();
             expect(still.state?.after?.gameState.state).toBe(1);
             expect(still.state?.playerMoved ?? 0).toBeLessThan(1);

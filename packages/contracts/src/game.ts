@@ -325,9 +325,10 @@ export const GamePlaytestStateChange = Schema.Struct({
 export type GamePlaytestStateChange = typeof GamePlaytestStateChange.Type;
 /**
  * What the in-game probe saw during a playtest. `before` is the gameplay
- * baseline (the first sample a player input step set up), `after` the last
- * gameplay sample; `playerMoved` and `changes` are measured against the
- * baseline, so opening the game from its menu is not mistaken for movement.
+ * baseline (the latest gameplay sample before the first player input, or the
+ * first one after it when play starts from a menu), `after` the last gameplay
+ * sample; `playerMoved` and `changes` are measured against the baseline, so
+ * opening the game from its menu is not mistaken for movement.
  */
 export const GamePlaytestState = Schema.Struct({
   before: Schema.NullOr(GamePlaytestProbe),

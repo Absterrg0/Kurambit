@@ -51,14 +51,42 @@ const strictlyIncreasing = (values: readonly GamePlaytestStateValue[]): boolean 
 };
 
 /**
- * The sample a run's states are measured against: the first one taken after
- * input with a player present. Opening the game from its menu changes the
+ * The shared typed play marker native routes already read: `GameState.state`.
+ * A boolean false or numeric zero is the menu, so a player or world the menu
+ * keeps behind it cannot be mistaken for play. A missing or non-scalar marker
+ * is a markerless game, where the player group itself is the only sign play
+ * started; that remains ambiguous when a markerless menu shows a player.
+ */
+const isMenu = (probe: GamePlaytestProbe): boolean => {
+  const marker = probe.gameState.state;
+  return marker === false || marker === 0;
+};
+
+const inPlay = (sample: GamePlaytestSample): boolean =>
+  sample.probe.player !== null && !isMenu(sample.probe);
+
+/**
+ * The sample a run's states are measured against. A run already in play when
+ * its first real input arrives is baselined on the probe taken just before
+ * that input, so the action the input causes is evidence instead of looking
+ * like a value play started with. Otherwise the baseline is the first sample
+ * after input where play exists: opening the game from its menu changes the
  * scene, but the player did not play until the body existed after an input
- * step; a run without such a sample has no baseline and proves nothing.
+ * step. The menu marker holds a hidden menu player back on both sides of the
+ * input, and the latest pre-input probe (not boot) keeps an autonomous wait or
+ * clock from being credited to the first action. A run without real input, or
+ * without a player in play, has no baseline and proves nothing.
  */
 export const playtestBaseline = (samples: readonly GamePlaytestSample[]): number | null => {
-  const index = samples.findIndex((sample) => sample.afterInput && sample.probe.player !== null);
-  return index === -1 ? null : index;
+  const firstInput = samples.findIndex((sample) => sample.afterInput);
+  if (firstInput === -1) return null;
+  const preInput = firstInput - 1;
+  if (preInput >= 0 && inPlay(samples[preInput]!)) return preInput;
+  for (let index = firstInput; index < samples.length; index++) {
+    const sample = samples[index]!;
+    if (sample.afterInput && inPlay(sample)) return index;
+  }
+  return null;
 };
 
 const lastGameplayProbe = (samples: readonly GamePlaytestSample[]): GamePlaytestProbe | null =>
@@ -322,7 +350,7 @@ export function evaluatePlaytestRun(input: {
   else if (input.probeRequired) {
     const startIndex = playtestBaseline(input.samples);
     if (startIndex === null) {
-      blockers.push("no gameplay baseline: the player never appeared after an input step");
+      blockers.push("no gameplay baseline: no player input step found the player in play");
     } else if (state !== null) {
       const baseline = input.samples[startIndex]!.probe;
       const later = input.samples.slice(startIndex + 1).map((sample) => sample.probe);

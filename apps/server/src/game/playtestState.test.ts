@@ -69,6 +69,52 @@ describe("summarizePlaytestSamples", () => {
       { key: "run_seconds", before: 0.5, after: 9.5 },
     ]);
   });
+
+  it("baselines an already-playing run before its first input", () => {
+    const state = summarizePlaytestSamples([
+      before(gameplay({ state: 1, replies: 0 }, 0)),
+      played(gameplay({ state: 1, replies: 1 }, 20)),
+      played(gameplay({ state: 1, replies: 1 }, 20)),
+    ]);
+    expect(state.before?.gameState).toEqual({ state: 1, replies: 0 });
+    expect(state.changes).toEqual([{ key: "replies", before: 0, after: 1 }]);
+    expect(state.playerMoved).toBe(20);
+  });
+
+  it("uses the last pre-input sample, so an autonomous wait is not play", () => {
+    const state = summarizePlaytestSamples([
+      before(gameplay({ state: 1, replies: 0, run_seconds: 0.4 }, 0)),
+      before(gameplay({ state: 1, replies: 0, run_seconds: 3.0 }, 0)),
+      played(gameplay({ state: 1, replies: 1, run_seconds: 3.2 }, 0)),
+    ]);
+    // The clock moved while the route only waited; baselining at boot would
+    // report that whole ride as something the click caused.
+    expect(state.before?.gameState.run_seconds).toBe(3.0);
+    expect(state.changes).toEqual([
+      { key: "replies", before: 0, after: 1 },
+      { key: "run_seconds", before: 3.0, after: 3.2 },
+    ]);
+  });
+
+  it("does not baseline a menu that already has a player", () => {
+    const state = summarizePlaytestSamples([
+      before(gameplay({ state: 0, collected: 0 }, 0)),
+      played(gameplay({ state: 1, collected: 5 }, 10)),
+      played(gameplay({ state: 1, collected: 5 }, 10)),
+    ]);
+    expect(state.before?.gameState).toEqual({ state: 1, collected: 5 });
+    expect(state.changes).toEqual([]);
+  });
+
+  it("baselines a markerless game from the player already in play", () => {
+    const state = summarizePlaytestSamples([
+      before(gameplay({ replies: 0 }, 0)),
+      played(gameplay({ replies: 1 }, 12)),
+      played(gameplay({ replies: 1 }, 12)),
+    ]);
+    expect(state.before?.gameState).toEqual({ replies: 0 });
+    expect(state.changes).toEqual([{ key: "replies", before: 0, after: 1 }]);
+  });
 });
 
 describe("evaluatePlaytestRun", () => {
@@ -181,6 +227,157 @@ describe("evaluatePlaytestRun", () => {
     expect(preWon.blockers).toContain("no approved criterion achieved");
   });
 
+  it("qualifies an already-playing first click whose change happened in that click", () => {
+    const reply: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const firstClick = run({
+      acceptance: reply,
+      samples: [
+        before(gameplay({ state: 1, replies: 0 }, 0)),
+        played(gameplay({ state: 1, replies: 1 }, 20)),
+        played(gameplay({ state: 1, replies: 1 }, 20)),
+      ],
+    });
+    expect(firstClick.qualifies).toBe(true);
+    expect(firstClick.blockers).toEqual([]);
+    expect(firstClick.achieved).toEqual(["press-reply"]);
+    expect(firstClick.interaction).toContain("replies 0→1");
+  });
+
+  it("qualifies an already-playing markerless first press", () => {
+    const reply: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const firstPress = run({
+      acceptance: reply,
+      samples: [before(gameplay({ replies: 0 }, 0)), played(gameplay({ replies: 1 }, 20))],
+    });
+    expect(firstPress.qualifies).toBe(true);
+    expect(firstPress.achieved).toEqual(["press-reply"]);
+  });
+
+  it("a menu click that starts play cannot claim the starting values", () => {
+    const total: GameAcceptanceCriterion[] = [
+      {
+        id: "five-pearls",
+        kind: "content",
+        text: "five pearls exist",
+        observe: { key: "total", expect: "==5" },
+      },
+    ];
+    const started = run({
+      acceptance: total,
+      samples: [
+        // The menu already has a player and a world, but state 0 is the menu.
+        before(gameplay({ state: 0, total: 0 }, 0)),
+        played(gameplay({ state: 1, total: 5 }, 20)),
+        played(gameplay({ state: 1, total: 5 }, 20)),
+      ],
+    });
+    expect(started.qualifies).toBe(false);
+    expect(started.achieved).toEqual([]);
+    expect(started.blockers).toContain("no approved criterion achieved");
+  });
+
+  it("a later action still counts after the menu baseline is established", () => {
+    const total: GameAcceptanceCriterion[] = [
+      {
+        id: "six-pearls",
+        kind: "content",
+        text: "six pearls exist",
+        observe: { key: "total", expect: ">=6" },
+      },
+    ];
+    const later = run({
+      acceptance: total,
+      samples: [
+        before(gameplay({ state: 0, total: 0 }, 0)),
+        played(gameplay({ state: 1, total: 5 }, 20)),
+        played(gameplay({ state: 1, total: 6 }, 30)),
+      ],
+    });
+    expect(later.qualifies).toBe(true);
+    expect(later.achieved).toEqual(["six-pearls"]);
+  });
+
+  it("does not fall back to an earlier playing sample when the menu is latest", () => {
+    const total: GameAcceptanceCriterion[] = [
+      {
+        id: "five-pearls",
+        kind: "content",
+        text: "five pearls exist",
+        observe: { key: "total", expect: "==5" },
+      },
+    ];
+    const returnedToMenu = run({
+      acceptance: total,
+      samples: [
+        // The run booted in play, then showed its menu just before the click.
+        before(gameplay({ state: 1, total: 0 }, 0)),
+        before(gameplay({ state: 0, total: 0 }, 0)),
+        played(gameplay({ state: 1, total: 5 }, 10)),
+        played(gameplay({ state: 1, total: 5 }, 20)),
+      ],
+    });
+    expect(returnedToMenu.qualifies).toBe(false);
+    expect(returnedToMenu.achieved).toEqual([]);
+  });
+
+  it("a boolean playing=false marker with a player is still the menu", () => {
+    const total: GameAcceptanceCriterion[] = [
+      {
+        id: "five-pearls",
+        kind: "content",
+        text: "five pearls exist",
+        observe: { key: "total", expect: "==5" },
+      },
+    ];
+    const started = run({
+      acceptance: total,
+      samples: [
+        before(gameplay({ state: false, total: 0 }, 0)),
+        played(gameplay({ state: true, total: 5 }, 20)),
+        played(gameplay({ state: true, total: 5 }, 20)),
+      ],
+    });
+    expect(started.qualifies).toBe(false);
+    expect(started.achieved).toEqual([]);
+  });
+
+  it("no input cannot borrow a baseline from autonomous play", () => {
+    const reply: GameAcceptanceCriterion[] = [
+      {
+        id: "press-reply",
+        kind: "content",
+        text: "send the first reply",
+        observe: { key: "replies", expect: ">=1" },
+      },
+    ];
+    const waited = run({
+      acceptance: reply,
+      // The player exists and the world moves, but no step dispatched input.
+      samples: [
+        before(gameplay({ state: 1, replies: 0 }, 0)),
+        before(gameplay({ state: 1, replies: 1 }, 20)),
+      ],
+    });
+    expect(waited.qualifies).toBe(false);
+    expect(waited.blockers).toContain(
+      "no gameplay baseline: no player input step found the player in play",
+    );
+  });
+
   it("movement and one non-clock GameState change qualify a legacy game", () => {
     const legacy = run({
       samples: [
@@ -232,7 +429,7 @@ describe("evaluatePlaytestRun", () => {
 
   it("a run whose samples never gained a gameplay baseline fails honestly", () => {
     expect(run({ samples: [before(menu)] }).blockers).toContain(
-      "no gameplay baseline: the player never appeared after an input step",
+      "no gameplay baseline: no player input step found the player in play",
     );
   });
 

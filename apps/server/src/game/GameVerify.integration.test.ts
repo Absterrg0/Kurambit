@@ -181,8 +181,8 @@ func _process(delta: float) -> void:
             });
 
             const result = yield* game.verify(created.threadId, {
-              // The first hold establishes the gameplay baseline while the
-              // player exists; the second is the movement the baseline measures.
+              // The player already exists, so the baseline is captured before
+              // the first hold; both holds move the body it measures.
               steps: [
                 { key: "ArrowRight", holdMs: 600 },
                 { key: "ArrowRight", holdMs: 600 },

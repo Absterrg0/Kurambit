@@ -269,12 +269,17 @@ clean console. Pixels alone still are not gameplay: every starter template autol
 which exposes a read-only `window.__studioProbe()` snapshot (GameState's public numeric, boolean and
 string members plus the first `player`-group position). The playtest reads it after boot, after
 every step and at the end, and reports `state: { before, after }` with a short diff such as
-`collected 0→2, player moved 312`. The baseline is the first sample after an input step with a
-player present, so starting the game from its menu is not mistaken for play. With an approved
-design, a run passes the `playtest` stage only when the player moved from that baseline and at
-least one approved mechanic, content, win or lose observation that was false at the baseline came
-true; a win or lose has to hold where the run ended. A legacy game without acceptance needs
-movement plus a GameState change whose sampled ride is not strictly increasing, so clocks are
+`collected 0→2, player moved 312`. The baseline is the probe just before the first real input
+when the game is already in play (a player present and the typed `state` marker not 0/false),
+otherwise the first sample after that input where a player is present and the game is not in its
+menu state. The latest pre-input probe is used, not boot, so an autonomous wait or clock cannot be
+credited to the first action. A `state` marker of 0/false with a hidden player does not establish a
+baseline, and a run without real input has none; a game without that marker keeps the
+player-presence rule, so a markerless menu that shows a player is indistinguishable from play.
+With an approved design, a run passes the `playtest` stage only when the player moved from that
+baseline and at least one approved mechanic, content, win or lose observation that was false at the
+baseline came true; a win or lose has to hold where the run ended. A legacy game without acceptance
+needs movement plus a GameState change whose sampled ride is not strictly increasing, so clocks are
 excluded by shape rather than by a list of names. A failing run reports structured `blockers` and
 `interaction` beside `booted`, never only a sentence on a green success. The creation record is
 authoritative about the obligation: templates declare `probe: true` in `template.json`, the
