@@ -7686,7 +7686,7 @@ export default function ChatView(props: ChatViewProps) {
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
           rightPanelMaximized || gameChatHidden
-            ? "w-0 flex-none"
+            ? "invisible w-0 flex-none"
             : gameChatDocked
               ? "shrink-0"
               : "flex-1",
