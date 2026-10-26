@@ -7685,7 +7685,11 @@ export default function ChatView(props: ChatViewProps) {
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          gameChatHidden ? "w-0 flex-none" : gameChatDocked ? "shrink-0" : "flex-1",
+          rightPanelMaximized || gameChatHidden
+            ? "w-0 flex-none"
+            : gameChatDocked
+              ? "shrink-0"
+              : "flex-1",
         )}
         style={gameChatDocked ? { width: gameChatWidth } : undefined}
         inert={gameChatHidden}

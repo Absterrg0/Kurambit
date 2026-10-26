@@ -467,7 +467,7 @@ export function GameStage({
                   size="sm"
                   variant="ghost"
                   aria-label={`Game view: ${activeTabLabel}`}
-                  className="inline-flex @[30rem]/stage-header:hidden"
+                  className="inline-flex @[48rem]/stage-header:hidden"
                 />
               }
             >
@@ -484,7 +484,7 @@ export function GameStage({
           </Menu>
           <ToggleGroup
             aria-label="Game workspace"
-            className="hidden shrink-0 @[30rem]/stage-header:flex"
+            className="hidden shrink-0 @[48rem]/stage-header:flex"
             variant="segmented"
             value={[activeTab]}
             onValueChange={(value) => {
