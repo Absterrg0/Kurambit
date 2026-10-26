@@ -729,6 +729,7 @@ export function GameStage({
           sourcesDifferFromPlay={data.sourcesDifferFromPlay}
           selectedBuildId={data.selectedBuildId}
           canOperate={canOperate}
+          operationRunning={building}
           stagingLocked={designLock !== null}
           previewAvailable={data.previewUrl !== null}
           onOpenDesign={() => setTab("design")}

@@ -58,6 +58,7 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay,
   selectedBuildId,
   canOperate,
+  operationRunning,
   stagingLocked,
   previewAvailable,
   onOpenDesign,
@@ -71,6 +72,7 @@ export function GameBuildsPanel({
   sourcesDifferFromPlay: GameStatus["sourcesDifferFromPlay"];
   selectedBuildId: string | null;
   canOperate: boolean;
+  operationRunning: boolean;
   /** A reviewed design waits for approval, so the server refuses staging. */
   stagingLocked: boolean;
   previewAvailable: boolean;
@@ -119,6 +121,7 @@ export function GameBuildsPanel({
   const reveal = (relativePath: string) =>
     useRightPanelStore.getState().openFile(threadRef, relativePath);
   const downloadPackage = async (target: "Windows" | "Web") => {
+    if (operationRunning || packaging !== null) return;
     const targetBuildKey = buildKey(target === "Windows" ? windowsBuild : webBuild) ?? "";
     setPackaging(target);
     setPackageNotice(null);
@@ -252,7 +255,12 @@ export function GameBuildsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canOperate || packaging !== null || selectedBuildId === null}
+                        disabled={
+                          !canOperate ||
+                          operationRunning ||
+                          packaging !== null ||
+                          selectedBuildId === null
+                        }
                         aria-busy={packaging === "Web"}
                         onClick={() => void downloadPackage("Web")}
                       >
@@ -265,7 +273,7 @@ export function GameBuildsPanel({
                       {target === "Windows" ? (
                         <Button
                           size="sm"
-                          disabled={!canOperate || packaging !== null}
+                          disabled={!canOperate || operationRunning || packaging !== null}
                           aria-busy={packaging === "Windows"}
                           onClick={() => void downloadPackage("Windows")}
                         >
@@ -276,7 +284,9 @@ export function GameBuildsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canOperate || packaging !== null || stagingLocked}
+                        disabled={
+                          !canOperate || operationRunning || packaging !== null || stagingLocked
+                        }
                         onClick={() => {
                           if (target !== "Web") onExport(target);
                         }}
@@ -299,7 +309,7 @@ export function GameBuildsPanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canOperate || stagingLocked}
+                  disabled={!canOperate || operationRunning || stagingLocked}
                   onClick={onPlay}
                 >
                   Build & play
@@ -308,7 +318,7 @@ export function GameBuildsPanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canOperate || stagingLocked}
+                  disabled={!canOperate || operationRunning || packaging !== null || stagingLocked}
                   onClick={() => {
                     if (target !== "Web") onExport(target);
                   }}
