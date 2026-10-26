@@ -38,20 +38,23 @@ provides and what this game adds.
 ## Acceptance
 
 The build is judged against these, not against a summary. Write a fenced block tagged
-\`acceptance\` with 5 to 12 concrete criteria. Every criterion needs a slug id, a kind, the
-promise in plain language, and — except presentation — an \`observe\` of a GameState autoload
-property the player changes (\`state\`, \`won\`, \`collected\`, \`score\`, \`lives\`, \`health\`,
-\`level_index\`, \`jumps\`) using \`==V\`, \`>=N\`, \`<=N\` or \`changes\`. The observed value has to
-be false when play starts and become true later: observe what the player achieves, not a
-boot constant or a world total. Content counts are proven by collecting or visiting them
-(\`collected >= 5\`), never by a world total such as \`total == 5\`. A \`win\` observes the
-template's \`won\` flag (\`won == 1\`), not a \`state\` enum value that pausing could also
-reach; a \`lose\` observes the value a losing run ends at (\`lives <= 0\`), not \`changes\`.
-\`presentation\` claims carry no observe. Review compares visible improvements but does not
+\`acceptance\` with 5 to 12 concrete criteria. Every criterion needs a slug id, a kind and the
+promise in plain language. Except for \`presentation\` claims and the declared no-lose-state
+criterion, each carries an \`observe\` of a GameState autoload property the player changes
+(\`state\`, \`won\`, \`collected\`, \`score\`, \`lives\`, \`health\`, \`level_index\`, \`jumps\`) using
+\`==V\`, \`>=N\`, \`<=N\` or \`changes\`. The observed value has to be false when play starts and
+become true later: observe what the player achieves, not a boot constant or a world total.
+Content counts are proven by collecting or visiting them (\`collected >= 5\`), never by a world
+total such as \`total == 5\`. A \`win\` observes the template's \`won\` flag (\`won == 1\`), not a
+\`state\` enum value that pausing could also reach; a \`lose\` that ends a run observes the value
+the run ends at (\`lives <= 0\`), not \`changes\`. \`presentation\` claims and the declared
+no-lose-state criterion carry no observe. Review compares visible improvements but does not
 certify every presentation claim.
-The block needs at least one \`control\`, one \`mechanic\` and one \`lose\` (or the declared no-lose-state
-promise); cover every control and content count the game promises, and add a \`win\` only when the
-game actually ends in one. Never invent a win the game does not have.
+The block needs at least one \`control\`, one \`mechanic\` and one \`lose\`: a real loss, or, when
+the "Win & lose" section declares no lose state, a \`lose\` criterion with the text
+"No lose state" and no observe. Cover every control and content count the game promises, and
+add a \`win\` only when the game actually ends in one. Never invent an ending the game does
+not have.
 
 Examples (write 5 to 12 total for this game, not one of each; two per kind shown):
 - control: \`{ "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }\`
@@ -66,6 +69,10 @@ Examples (write 5 to 12 total for this game, not one of each; two per kind shown
 - lose: \`{ "id": "lava-ends-the-run", "kind": "lose", "text": "Falling in lava ends the run", "observe": { "key": "state", "expect": "==4" } }\`
 - presentation: \`{ "id": "lantern-glow", "kind": "presentation", "text": "Lit lanterns cast a warm glow" }\`
 - presentation: \`{ "id": "wind-audio", "kind": "presentation", "text": "Wind rises as the player climbs" }\`
+
+When the game declares no lose state, write it as
+\`{ "id": "no-lose", "kind": "lose", "text": "No lose state" }\` with no \`observe\`, and say
+so under "Win & lose".
 
 \`\`\`acceptance
 [
@@ -114,7 +121,7 @@ export function initialGamePrompt(input: GameCreateInput): string {
     input.reviewDesign === true
       ? "Do not build anything yet. When DESIGN.md is ready, ask me to review it on the Design tab."
       : "Nobody has to approve it: as soon as DESIGN.md is written, build the game in this same turn by following AGENTS.md's steps.";
-  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Make Art direction specific to this game's brief; the starter's look is a placeholder, not a requirement. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic and one lose (or the declared no-lose-state promise), covering every control and content count; add a win only when the game actually ends in one and never invent one. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1), a loss the value a losing run ends at (lives <= 0), never "changes". Presentation claims carry no observe. ${next}`;
+  return `${brief}\n\nRead AGENTS.md and TEMPLATE.md. Write this game's design in DESIGN.md: one page, concrete, and built on the ${templateName} template's existing systems — say what is reused and what is new. Keep the scaffold's section headings and fill each one; do not delete, rename or merge them. Make Art direction specific to this game's brief; the starter's look is a placeholder, not a requirement. Fill the Acceptance section with 5 to 12 concrete criteria in the fenced acceptance block: at least one control, one mechanic and one lose — a real loss, or, when the design's "Win & lose" section declares no lose state, a \`lose\` criterion with the text "No lose state" and no observe — covering every control and content count; add a win only when the game actually ends in one and never invent an ending the game does not have. Every control/mechanic/content/win/lose criterion needs an observe of a GameState property the player changes after play starts, except the declared no-lose-state criterion, which carries no observe; content counts are proven by collecting (collected >= N), not a world total, and a win observes the template's won flag (won == 1), a real loss the value a losing run ends at (lives <= 0), never "changes". Presentation claims carry no observe. ${next}`;
 }
 
 /** The manifest a new game starts from; the creation record also reads its probe flag. */

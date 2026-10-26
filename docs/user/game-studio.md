@@ -40,11 +40,13 @@ the starter template: the pitch, core loop, controls, how runs end (or why the g
 content, art direction, audio, scope and milestones. It also writes an **Acceptance** section: a
 fenced `acceptance` block of 5 to 12 concrete criteria covering each control, the core mechanic,
 content counts, and the endings the game promises. Every control, mechanic, content, win or lose
-criterion the design promises names a game value the player changes; a value that is already true
-when play starts does not count, and content counts have to be collected rather than merely exist.
-A game without a win does not invent one. Presentation claims (a glow, an
-ambience) carry no observation and are listed as not yet verified. **Plan the design first** in the
-New game dialog is on by default; turn it off to skip straight to building.
+criterion the design promises names a game value the player changes, except a declared no-lose
+state; a value that is already true when play starts does not count, and content counts have to be
+collected rather than merely exist. A game does not invent a win or loss it does not have. A game
+with no lose state declares that under **Win & lose** and writes a `lose` criterion with the text
+"No lose state" and no observation. Presentation claims (a glow, an ambience) carry no observation
+and are listed as not yet verified. **Plan the design first** in the New game dialog is on by
+default; turn it off to skip straight to building.
 
 By default nothing waits for you: the agent writes `DESIGN.md` and builds in the same turn, and Game
 Studio records each new version of the design as a revision. Editing prose keeps the same

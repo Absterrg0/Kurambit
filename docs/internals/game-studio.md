@@ -35,11 +35,12 @@ it dispatched or sends the same ids. A dispatch failure therefore keeps the crea
 a retry cannot create a second build message; only a failed display-mirror write, before any
 dispatch, rolls the record back. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
-block parses with at least one `control`, `mechanic` and `lose`, and every mechanical
-criterion carries an `observe`. A `win` is written only when the game actually ends in one; a
-nonterminal game may approve no win. The only exception to the `lose` requirement is a design
-whose "Win & lose" section declares that there is no lose state: it writes a `lose` criterion with
-the text "No lose state" and no observe. `presentation` criteria carry no observe and remain outside mechanical certification. Creation also writes an intent record
+block parses with at least one `control`, `mechanic` and `lose`. A `win` or a real `lose` is
+written only when the game actually has that ending; a nonterminal game may approve no win. A
+design whose "Win & lose" section declares that there is no lose state writes a `lose` criterion
+with the text "No lose state" and no observe instead of a real loss; every other mechanical
+criterion carries an `observe`. `presentation` criteria carry no observe and remain outside
+mechanical certification. Creation also writes an intent record
 beside the approval: `auto` for a plan-first game (the default), `required` for one whose creator
 opted into review, `skipped` for one created without planning. An `auto` game never gates staging on
 the design: each status read records the current DESIGN.md as a server-owned revision once its
@@ -187,13 +188,13 @@ marker 0/false with a hidden player does not establish a baseline. A criterion p
 was false at that baseline and true at a later sample; an already-true baseline value fails with
 "already true when play started", and a route with no input has no baseline and grades every
 criterion failed. This is what makes content counts a collection (`collected >= 5`) rather than a
-world total (`total == 5`), and what stops a menu's playing state from proving a win. `win` and
-`lose` must observe the value the run ends at (not `changes`) and keep it at the final sample, so
-a pause cannot satisfy a win. The summary lists every mechanical criterion with its status, proving
-scenario and frame, plus proven/failed/missing counts per kind; the state stage passes only when
-every applicable approved criterion passed, so an approved endless, sandbox or dialogue game does
-not need a win or a moving avatar. An approved `win` or `lose` remains a hard criterion that must
-hold at the run's end. An exam with no applicable observation fails rather than passing vacuously.
+world total (`total == 5`), and what stops a menu's playing state from proving a win. A real
+`win` or `lose` must observe the value the run ends at (not `changes`) and keep it at the final
+sample, so a pause cannot satisfy a win. The summary lists every mechanical criterion with its
+status, proving scenario and frame, plus proven/failed/missing counts per kind; the state stage
+passes only when every applicable approved criterion passed, so an approved endless, sandbox or
+dialogue game does not need a win or a moving avatar. An approved real `win` or `lose` remains a
+hard criterion that must hold at the run's end. An exam with no applicable observation fails rather than passing vacuously.
 Legacy games without acceptance pass only when a route moves the player and
 GameState reaches its playing state at the baseline. The stage stores the approved source snapshot,
 the approved design hash and a per-criterion summary; a newly approved design revision makes the old
