@@ -102,6 +102,8 @@ const coverageOf = (
 ): readonly GameScenarioKindCoverage[] =>
   kinds.map((kind) => {
     const ofKind = criteria.filter((criterion) => criterion.kind === kind);
+    // A declared no-loss criterion is intentionally not applicable, so it is
+    // neither a proven promise nor a missing observation.
     return {
       kind,
       proven: ofKind.filter((criterion) => criterion.status === "passed").length,
@@ -133,8 +135,9 @@ const criterionResult = (
     if (isNoLoseStateCriterion(criterion))
       return {
         ...base,
-        status: "missing",
-        observed: "The design declares no losing state; there is no lose transition to prove.",
+        status: "not-applicable",
+        observed:
+          "Not applicable: the design declares no losing state. There is no loss transition to prove, and this declaration does not certify that the game cannot be lost.",
         scenarios: [],
         provenBy: null,
       };

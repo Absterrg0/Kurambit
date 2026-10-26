@@ -507,7 +507,7 @@ export const GameQualificationStageRead = Schema.Struct({
   finishedAt: Schema.NullOr(Schema.String),
   /** The per-criterion result the state stage recorded, when there is one. */
   criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
-  /** Proven/failed/missing counts per kind for the state stage. */
+  /** Proven/failed/missing counts per kind for the state stage; not-applicable is in none. */
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
   /** Why the state stage passed or failed, including legacy rules. */
   detail: Schema.optionalKey(Schema.String),

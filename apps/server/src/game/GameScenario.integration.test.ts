@@ -850,20 +850,22 @@ func _physics_process(_delta: float) -> void:
           ).toEqual([
             ["choose-reply", "control", "passed"],
             ["reply-counter", "mechanic", "passed"],
-            ["never-fails", "lose", "missing"],
+            ["never-fails", "lose", "not-applicable"],
           ]);
           expect(result.summary.criteria.some((criterion) => criterion.kind === "win")).toBe(false);
           expect(result.summary.coverage).toEqual([
             { kind: "control", proven: 1, failed: 0, missing: 0 },
             { kind: "mechanic", proven: 1, failed: 0, missing: 0 },
-            { kind: "lose", proven: 0, failed: 0, missing: 1 },
+            { kind: "lose", proven: 0, failed: 0, missing: 0 },
           ]);
           const noLose = result.summary.criteria.find(
             (criterion) => criterion.id === "never-fails",
           );
           expect(noLose?.observed).toContain("declares no losing state");
+          expect(noLose?.observed).toContain("does not certify");
           expect(noLose?.scenarios).toEqual([]);
           expect(noLose?.provenBy).toBeNull();
+          expect(noLose?.measurement).toBeUndefined();
 
           const run = result.scenarios[0]!;
           expect(run).toMatchObject({ id: "choose-reply", error: null, playerMoved: false });
@@ -916,7 +918,7 @@ func _physics_process(_delta: float) -> void:
           expect(stateStage?.criteria).toEqual(result.summary.criteria);
           expect(
             stateStage?.criteria?.find((criterion) => criterion.id === "never-fails"),
-          ).toMatchObject({ status: "missing" });
+          ).toMatchObject({ status: "not-applicable" });
           expect(stateStage?.criteria?.some((criterion) => criterion.kind === "win")).toBe(false);
           return result;
         }),

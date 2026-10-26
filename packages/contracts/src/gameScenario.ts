@@ -207,6 +207,11 @@ export const GameScenarioCriterionStatus = Schema.Literals([
   "failed",
   "unverified",
   "missing",
+  /**
+   * The design deliberately has nothing for this stage to observe, currently
+   * only a declared no-loss state. It is neither proof nor a missing sample.
+   */
+  "not-applicable",
 ]);
 export type GameScenarioCriterionStatus = typeof GameScenarioCriterionStatus.Type;
 /**
@@ -225,8 +230,10 @@ export const GameScenarioCriterionMeasurement = Schema.Struct({
 export type GameScenarioCriterionMeasurement = typeof GameScenarioCriterionMeasurement.Type;
 /**
  * One approved criterion checked against the run. Mechanical claims without
- * `observe` are `missing` and block the stage; presentation claims never reach
- * this result and are reported by the visual stage as `missing` instead.
+ * `observe` are `missing` and block the stage, except an explicit no-loss
+ * declaration, which is `not-applicable` and does not block; presentation
+ * claims never reach this result and are reported by the visual stage as
+ * `missing` instead.
  */
 export const GameScenarioCriterionResult = Schema.Struct({
   id: Schema.String,
@@ -245,7 +252,10 @@ export const GameScenarioCriterionResult = Schema.Struct({
   measurement: Schema.optionalKey(GameScenarioCriterionMeasurement),
 });
 export type GameScenarioCriterionResult = typeof GameScenarioCriterionResult.Type;
-/** One kind's coverage in the state stage. `proven` means the criterion passed. */
+/**
+ * One kind's coverage in the state stage. `proven` means the criterion passed;
+ * a not-applicable no-loss declaration counts in none of the three counts.
+ */
 export const GameScenarioKindCoverage = Schema.Struct({
   kind: Schema.String,
   proven: Schema.Int,
@@ -276,7 +286,7 @@ export const GameScenarioSummary = Schema.Struct({
   /** A human-readable explanation of the reason, including the failing rule. */
   detail: Schema.String,
   criteria: Schema.Array(GameScenarioCriterionResult),
-  /** Proven/failed/missing counts for every kind the state stage graded. */
+  /** Proven/failed/missing counts for every kind the state stage graded; not-applicable is in none. */
   coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
 });
 export type GameScenarioSummary = typeof GameScenarioSummary.Type;

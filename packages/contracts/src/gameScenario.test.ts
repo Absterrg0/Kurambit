@@ -83,4 +83,31 @@ describe("GameScenarioSummary", () => {
     });
     expect(summary.reason).toBe("win-criterion-failed");
   });
+
+  it("decodes both an old no-loss missing result and the not-applicable result", () => {
+    const summary = (status: "missing" | "not-applicable") =>
+      decodeSummary({
+        mode: "criteria",
+        passed: true,
+        reason: "criteria-passed",
+        detail: "Every applicable approved criterion was proven after play started.",
+        criteria: [
+          {
+            id: "never-fails",
+            kind: "lose",
+            text: "The conversation never ends in failure",
+            status,
+            observed: "The design declares no losing state.",
+            scenarios: [],
+            provenBy: null,
+          },
+        ],
+        coverage: [{ kind: "lose", proven: 0, failed: 0, missing: 0 }],
+      });
+
+    // Records written before this status existed keep decoding exactly as they
+    // were stored; the stage remains a pass.
+    expect(summary("missing").criteria[0]?.status).toBe("missing");
+    expect(summary("not-applicable").criteria[0]?.status).toBe("not-applicable");
+  });
 });

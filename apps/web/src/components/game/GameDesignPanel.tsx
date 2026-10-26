@@ -7,7 +7,12 @@ import {
   PencilIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import type { GameAcceptanceCriterion, GameStatus, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  isNoLoseStateCriterion,
+  type GameAcceptanceCriterion,
+  type GameStatus,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
 import { gameEnvironment } from "../../state/game";
@@ -474,6 +479,11 @@ export function GameDesignPanel({
                   ) : criterion.kind === "presentation" ? (
                     <span className="block text-2xs text-muted-foreground">
                       Visual stage — not verified yet
+                    </span>
+                  ) : isNoLoseStateCriterion(criterion) ? (
+                    <span className="block text-2xs text-muted-foreground">
+                      Declared no losing state — no loss transition is verified, and this is not
+                      proof that the game cannot be lost.
                     </span>
                   ) : null}
                 </span>

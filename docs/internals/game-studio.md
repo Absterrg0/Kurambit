@@ -191,10 +191,12 @@ criterion failed. This is what makes content counts a collection (`collected >= 
 world total (`total == 5`), and what stops a menu's playing state from proving a win. A real
 `win` or `lose` must observe the value the run ends at (not `changes`) and keep it at the final
 sample, so a pause cannot satisfy a win. The summary lists every mechanical criterion with its
-status, proving scenario and frame, plus proven/failed/missing counts per kind; the state stage
-passes only when every applicable approved criterion passed, so an approved endless, sandbox or
-dialogue game does not need a win or a moving avatar. An approved real `win` or `lose` remains a
-hard criterion that must hold at the run's end. An exam with no applicable observation fails rather than passing vacuously.
+status, proving scenario and frame, plus proven/failed/missing counts per kind; a declared no-loss
+criterion is reported not-applicable rather than missing and counts as neither proven nor missing.
+The state stage passes only when every applicable approved criterion passed, so an approved endless,
+sandbox or dialogue game does not need a win or a moving avatar. An approved real `win` or `lose`
+remains a hard criterion that must hold at the run's end. An exam with no applicable observation
+fails rather than passing vacuously.
 Legacy games without acceptance pass only when a route moves the player and
 GameState reaches its playing state at the baseline. The stage stores the approved source snapshot,
 the approved design hash and a per-criterion summary; a newly approved design revision makes the old

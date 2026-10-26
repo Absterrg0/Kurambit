@@ -61,7 +61,7 @@ export interface QualificationStageRecord {
   readonly designHash?: string | null;
   /** The per-criterion summary for the state stage. */
   readonly criteria?: readonly GameScenarioCriterionResult[];
-  /** Proven/failed/missing counts per kind for the state stage. */
+  /** Proven/failed/missing counts per kind; not-applicable is in none of them. */
   readonly coverage?: readonly GameScenarioKindCoverage[];
   /** Why the state stage passed or failed, including legacy rules. */
   readonly detail?: string;

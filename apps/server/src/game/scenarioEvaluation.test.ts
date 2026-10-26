@@ -615,12 +615,45 @@ describe("evaluateScenarios", () => {
         ],
       });
       expect(summary.passed).toBe(true);
-      expect(summary.criteria.find((entry) => entry.id === "no-lose")?.status).toBe("missing");
+      const declared = summary.criteria.find((entry) => entry.id === "no-lose");
+      expect(declared?.status).toBe("not-applicable");
+      expect(declared?.observed).toContain("declares no losing state");
+      expect(declared?.observed).toContain("does not certify");
+      // The declaration is not a missing observation, even though nothing
+      // sampled it: see the lose kind's counts below.
       expect(summary.coverage).toEqual([
         { kind: "win", proven: 1, failed: 0, missing: 0 },
-        { kind: "lose", proven: 0, failed: 0, missing: 1 },
+        { kind: "lose", proven: 0, failed: 0, missing: 0 },
       ]);
     }
+  });
+
+  it("keeps an undeclared lose claim without observe missing and blocking", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("lose", "lose")],
+      runs: [run()],
+    });
+    expect(summary.passed).toBe(false);
+    expect(summary.reason).toBe("observable-failed");
+    expect(summary.criteria[0]?.status).toBe("missing");
+    expect(summary.criteria[0]?.observed).toContain("no observe");
+    expect(summary.coverage).toEqual([{ kind: "lose", proven: 0, failed: 0, missing: 1 }]);
+  });
+
+  it("still grades an actual loss strictly", () => {
+    const summary = evaluateScenarios({
+      mode: "criteria",
+      criteria: [criterion("lose", "lose", { key: "lives", expect: "<=0" })],
+      runs: [
+        run({
+          observations: [observation("lives", { baseline: 3, min: 1, max: 3, first: 3, last: 1 })],
+        }),
+      ],
+    });
+    expect(summary.passed).toBe(false);
+    expect(summary.criteria.map((entry) => [entry.id, entry.status])).toEqual([["lose", "failed"]]);
+    expect(summary.coverage).toEqual([{ kind: "lose", proven: 0, failed: 1, missing: 0 }]);
   });
 
   it("grades legacy games on movement and reaching play through the menu", () => {

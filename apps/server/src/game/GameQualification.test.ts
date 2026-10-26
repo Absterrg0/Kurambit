@@ -265,6 +265,89 @@ it.effect("a mechanical read never certifies presentation criteria", () =>
   ),
 );
 
+it.effect("records a declared no-loss criterion as not-applicable, not missing", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* qualification.record(root, {
+        stage: "state",
+        outcome: "passed",
+        sourceId,
+        buildId: null,
+        evidenceDirectory: "builds/logs/scenarios-1",
+        criteria: [
+          {
+            id: "never-fails",
+            kind: "lose",
+            text: "The conversation never ends in failure",
+            status: "not-applicable",
+            observed:
+              "Not applicable: the design declares no losing state. There is no loss transition to prove, and this declaration does not certify that the game cannot be lost.",
+            scenarios: [],
+            provenBy: null,
+          },
+        ],
+        coverage: [{ kind: "lose", proven: 0, failed: 0, missing: 0 }],
+        detail: "Every applicable approved criterion was proven after play started.",
+      });
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.stages.find((entry) => entry.stage === "state")).toMatchObject({
+        status: "passed",
+        criteria: [{ id: "never-fails", status: "not-applicable" }],
+        coverage: [{ kind: "lose", proven: 0, failed: 0, missing: 0 }],
+      });
+    }),
+  ),
+);
+
+it.effect("keeps an old stored no-loss missing result readable without rewriting it", () =>
+  withGame({}, ({ root, stateDir, qualification }) =>
+    Effect.gen(function* () {
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      const file = qualificationRecordPath(stateDir, root);
+      yield* Effect.promise(() => NodeFSP.mkdir(NodePath.dirname(file), { recursive: true }));
+      const stored = {
+        schemaVersion: 2,
+        game: root,
+        stages: {
+          state: {
+            outcome: "passed",
+            sourceId,
+            buildId: null,
+            finishedAt: "2026-10-20T00:00:00.000Z",
+            evidenceDirectory: "builds/logs/scenarios-old",
+            designHash: null,
+            criteria: [
+              {
+                id: "never-fails",
+                kind: "lose",
+                text: "The conversation never ends in failure",
+                status: "missing",
+                observed:
+                  "The design declares no losing state; there is no lose transition to prove.",
+                scenarios: [],
+                provenBy: null,
+              },
+            ],
+            coverage: [{ kind: "lose", proven: 0, failed: 0, missing: 1 }],
+            detail: "Every applicable approved criterion was proven after play started.",
+          },
+        },
+      };
+      const text = `${JSON.stringify(stored, null, 2)}\n`;
+      yield* Effect.promise(() => NodeFSP.writeFile(file, text));
+
+      const read = yield* qualification.read(root, "godot", "approved");
+      const state = read.stages.find((entry) => entry.stage === "state");
+      expect(state?.status).toBe("passed");
+      expect(state?.criteria?.[0]).toMatchObject({ id: "never-fails", status: "missing" });
+      expect(state?.coverage).toEqual([{ kind: "lose", proven: 0, failed: 0, missing: 1 }]);
+      // Reading history never rewrites the approved record.
+      expect(yield* Effect.promise(() => NodeFSP.readFile(file, "utf8"))).toBe(text);
+    }),
+  ),
+);
+
 it.effect("a state pass recorded before the play-start baseline is stale", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {
