@@ -792,6 +792,139 @@ func _physics_process(_delta: float) -> void:
 );
 
 it.live.skipIf(!available)(
+  "a typed no-loss declaration qualifies a no-player Control route without an invented win",
+  () =>
+    withGame(
+      {
+        name: "typed no-loss control fixture",
+        planFirst: true,
+        controlOnly: true,
+        mainScript: `extends Control
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("ui_accept"):
+\t\tGameState.choices += 1
+\t\tGameState.reply_counter += 1
+`,
+        stateScript: "extends Node\nvar state := 1\nvar choices := 0\nvar reply_counter := 0\n",
+        scenarios: {
+          "choose-reply": { id: "choose-reply", steps: [{ press: "ui_accept" }] },
+        },
+        criteria: [
+          {
+            id: "choose-reply",
+            kind: "control",
+            text: "Space chooses a reply",
+            observe: { key: "choices", expect: ">=1" },
+          },
+          {
+            id: "reply-counter",
+            kind: "mechanic",
+            text: "Each reply increments the visible reply counter",
+            observe: { key: "reply_counter", expect: ">=1" },
+          },
+          {
+            id: "never-fails",
+            kind: "lose",
+            text: "The conversation never ends in failure",
+            noLoseState: true,
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          expect(result.summary).toMatchObject({
+            mode: "criteria",
+            passed: true,
+            reason: "criteria-passed",
+          });
+          expect(
+            result.summary.criteria.map((criterion) => [
+              criterion.id,
+              criterion.kind,
+              criterion.status,
+            ]),
+          ).toEqual([
+            ["choose-reply", "control", "passed"],
+            ["reply-counter", "mechanic", "passed"],
+            ["never-fails", "lose", "missing"],
+          ]);
+          expect(result.summary.criteria.some((criterion) => criterion.kind === "win")).toBe(false);
+          expect(result.summary.coverage).toEqual([
+            { kind: "control", proven: 1, failed: 0, missing: 0 },
+            { kind: "mechanic", proven: 1, failed: 0, missing: 0 },
+            { kind: "lose", proven: 0, failed: 0, missing: 1 },
+          ]);
+          const noLose = result.summary.criteria.find(
+            (criterion) => criterion.id === "never-fails",
+          );
+          expect(noLose?.observed).toContain("declares no losing state");
+          expect(noLose?.scenarios).toEqual([]);
+          expect(noLose?.provenBy).toBeNull();
+
+          const run = result.scenarios[0]!;
+          expect(run).toMatchObject({ id: "choose-reply", error: null, playerMoved: false });
+          expect(run.frames).toBeGreaterThan(30);
+          expect(run.firstInputFrame).toBeGreaterThan(0);
+          expect(run.baselineFrame).toBe(run.firstInputFrame);
+          // The typed no-loss criterion carries no observe, so the native
+          // runner never receives it as a promise to sample.
+          expect(run.observations.map((observation) => observation.key).sort()).toEqual([
+            "choices",
+            "reply_counter",
+            "state",
+          ]);
+          expect(
+            run.observations.flatMap((observation) => observation.matches.map((match) => match.id)),
+          ).not.toContain("never-fails");
+          expect(run.observations.find((observation) => observation.key === "state")).toMatchObject(
+            { baseline: 1, last: 1 },
+          );
+          const choices = run.observations.find((observation) => observation.key === "choices");
+          expect(choices).toMatchObject({ baseline: 0, last: 1 });
+          const choicesMatch = choices?.matches.find((match) => match.id === "choose-reply");
+          expect(choicesMatch?.frame).toBeGreaterThan(run.baselineFrame!);
+          expect(choicesMatch?.value).toBe(1);
+          const counter = run.observations.find(
+            (observation) => observation.key === "reply_counter",
+          );
+          expect(counter).toMatchObject({ baseline: 0, last: 1 });
+          expect(counter?.matches.find((match) => match.id === "reply-counter")?.frame).toBe(
+            choicesMatch?.frame,
+          );
+
+          const status = yield* game.status(threadId);
+          expect(status.design.state).toBe("approved");
+          expect(
+            status.design.acceptance.find((criterion) => criterion.id === "never-fails"),
+          ).toMatchObject({
+            kind: "lose",
+            text: "The conversation never ends in failure",
+            noLoseState: true,
+          });
+          const designStage = status.qualification.stages.find((stage) => stage.stage === "design");
+          const stateStage = status.qualification.stages.find((stage) => stage.stage === "state");
+          expect(designStage?.status).toBe("passed");
+          expect(stateStage).toMatchObject({
+            status: "passed",
+            coverage: result.summary.coverage,
+            detail: result.summary.detail,
+          });
+          expect(stateStage?.criteria).toEqual(result.summary.criteria);
+          expect(
+            stateStage?.criteria?.find((criterion) => criterion.id === "never-fails"),
+          ).toMatchObject({ status: "missing" });
+          expect(stateStage?.criteria?.some((criterion) => criterion.kind === "win")).toBe(false);
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
   "starting and pausing the game is a state change, not a win",
   () =>
     withGame(
