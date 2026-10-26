@@ -648,6 +648,8 @@ export async function judgeObligations(input: {
   readonly frames: ReadonlyArray<GradeFrame>;
   readonly notes: ReadonlyArray<string>;
   readonly review: ReviewFn;
+  /** Votes in flight; the default is the cap. Lower it when the provider 429s. */
+  readonly concurrency?: number;
 }): Promise<{
   readonly obligations: ReadonlyArray<GradeObligation>;
   readonly control: GradeDocument["control"];
@@ -709,7 +711,7 @@ export async function judgeObligations(input: {
       description: item.description,
     })),
   );
-  const answers = await mapLimit(questions, VOTE_CONCURRENCY, (question) =>
+  const answers = await mapLimit(questions, input.concurrency ?? VOTE_CONCURRENCY, (question) =>
     vote(question.description),
   );
   const votesFor = (itemIndex: number): GradeVote[] =>
@@ -1401,6 +1403,8 @@ export interface GradeOptions {
   readonly grader?: GraderId;
   /** The model the opencode grader uses. */
   readonly graderModel?: string;
+  /** Votes in flight (default and cap 6). Lower it for a provider that 429s. */
+  readonly voteConcurrency?: number;
   readonly deps?: Partial<GradeDeps>;
 }
 
@@ -1515,6 +1519,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       frames,
       notes: saved.actions.map((action) => action.note),
       review,
+      ...(options.voteConcurrency === undefined ? {} : { concurrency: options.voteConcurrency }),
     });
     return write({
       ...base(),
@@ -1674,6 +1679,7 @@ export async function gradeGame(options: GradeOptions): Promise<GradeDocument> {
       frames,
       notes: actions.map((entry) => entry.note),
       review,
+      ...(options.voteConcurrency === undefined ? {} : { concurrency: options.voteConcurrency }),
     });
     const grade: GradeDocument = {
       ...base(),
@@ -1723,6 +1729,7 @@ const main = async () => {
         "--grader codex|opencode picks the model family: codex is Sol, opencode is the CLI",
         "model in --grader-model (default " + OPENCODE_GRADER_MODEL + ").",
         "Optional: --godot <godot-binary> --browser <chrome-headless-shell> --max-steps <n>",
+        "--vote-concurrency <n> lowers how many votes run at once (default and cap 6).",
       ].join("\n"),
     );
     return;
@@ -1745,6 +1752,11 @@ const main = async () => {
       "Usage: node scripts/game-grade.ts <gameDir> --brief <fixture.json> --out <dir>\n       node scripts/game-grade.ts --brief <fixture.json> --reuse-frames <gradeDir> --out <dir>",
     );
   const brief = await loadGameBenchmarkBrief(NodePath.resolve(briefPath));
+  const voteConcurrencyFlag = flag("vote-concurrency");
+  const voteConcurrency =
+    voteConcurrencyFlag === undefined ? undefined : Number(voteConcurrencyFlag);
+  if (voteConcurrency !== undefined && (!Number.isInteger(voteConcurrency) || voteConcurrency <= 0))
+    throw new Error("--vote-concurrency must be a positive integer.");
   const graderFlag = flag("grader") ?? "codex";
   if (graderFlag !== "codex" && graderFlag !== "opencode")
     throw new Error("--grader must be codex or opencode.");
@@ -1766,6 +1778,7 @@ const main = async () => {
     ...(flag("max-steps") === undefined ? {} : { maxSteps: Number(flag("max-steps")) }),
     grader: graderFlag,
     ...(flag("grader-model") === undefined ? {} : { graderModel: flag("grader-model")! }),
+    ...(voteConcurrency === undefined ? {} : { voteConcurrency }),
   });
   const yes = grade.obligations.filter((obligation) => obligation.yes).length;
   console.log(

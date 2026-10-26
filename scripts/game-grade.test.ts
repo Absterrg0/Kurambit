@@ -348,6 +348,35 @@ describe("judgeObligations", () => {
     assert.equal(judged.control.yes, false);
   });
 
+  it("runs fewer votes at once when the provider rate-limits a burst", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let calls = 0;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const review: ReviewFn = async () => {
+      calls += 1;
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      if (calls === 2) release();
+      await gate;
+      inFlight -= 1;
+      return reply("NO");
+    };
+    const judged = await judgeObligations({
+      brief,
+      frames,
+      notes: [],
+      review,
+      concurrency: 2,
+    });
+    assert.equal(calls, 6);
+    assert.equal(peak, 2);
+    assert.equal(judged.control.yes, false);
+  });
+
   it("answers NO without a model call when no frames were captured", async () => {
     let called = false;
     const review: ReviewFn = async () => {
