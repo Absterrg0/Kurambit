@@ -37,10 +37,10 @@ dispatch, rolls the record back. The
 document is valid only when every scaffold section has real content and the fenced `acceptance`
 block parses with at least one `control`, `mechanic` and `lose`. A `win` or a real `lose` is
 written only when the game actually has that ending; a nonterminal game may approve no win. A
-design whose "Win & lose" section declares that there is no lose state writes a `lose` criterion
-with the text "No lose state" and no observe instead of a real loss; every other mechanical
-criterion carries an `observe`. `presentation` criteria carry no observe and remain outside
-mechanical certification. Creation also writes an intent record
+game with no losing state writes a `lose` criterion with `"noLoseState": true` and no observe
+instead of a real loss; every other mechanical criterion carries an `observe`. `presentation`
+criteria carry no observe and remain outside mechanical certification. Creation also writes an
+intent record
 beside the approval: `auto` for a plan-first game (the default), `required` for one whose creator
 opted into review, `skipped` for one created without planning. An `auto` game never gates staging on
 the design: each status read records the current DESIGN.md as a server-owned revision once its

@@ -7,7 +7,7 @@ import type {
   GameScenarioStageReason,
   GameScenarioSummary,
 } from "@t3tools/contracts";
-import { NO_LOSE_STATE_TEXT } from "@t3tools/contracts";
+import { isNoLoseStateCriterion } from "@t3tools/contracts";
 
 /** Legacy games prove the game started by observing this synthetic promise. */
 export const LEGACY_PLAYING_MATCH_ID = "legacy-playing";
@@ -116,11 +116,6 @@ const coverageOf = (
 const MECHANICAL_KINDS = ["control", "mechanic", "content", "win", "lose"] as const;
 
 /** The declared "no lose state" promise is the one mechanical exception. */
-export const isNoLoseStateCriterion = (criterion: GameAcceptanceCriterion): boolean =>
-  criterion.kind === "lose" &&
-  criterion.observe === undefined &&
-  criterion.text.trim() === NO_LOSE_STATE_TEXT;
-
 const criterionResult = (
   runs: readonly GameScenarioEvidence[],
   criterion: GameAcceptanceCriterion,
@@ -139,7 +134,7 @@ const criterionResult = (
       return {
         ...base,
         status: "missing",
-        observed: `The design declares "${NO_LOSE_STATE_TEXT}"; there is no lose transition to prove.`,
+        observed: "The design declares no losing state; there is no lose transition to prove.",
         scenarios: [],
         provenBy: null,
       };

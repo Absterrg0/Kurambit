@@ -379,6 +379,18 @@ describe("evaluateScenarios", () => {
         criteria: [{ id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT }],
         runs: [run()],
       }),
+      evaluateScenarios({
+        mode: "criteria",
+        criteria: [
+          {
+            id: "no-lose",
+            kind: "lose",
+            text: "The run never ends in failure",
+            noLoseState: true,
+          },
+        ],
+        runs: [run()],
+      }),
     ];
     for (const summary of summaries) {
       expect(summary.passed).toBe(false);
@@ -575,33 +587,40 @@ describe("evaluateScenarios", () => {
     expect(summary.passed).toBe(false);
   });
 
-  it("lets a declared no-lose-state promise stay outside the graded set", () => {
-    const summary = evaluateScenarios({
-      mode: "criteria",
-      criteria: [
-        criterion("win", "win", { key: "state", expect: "==3" }),
-        { id: "no-lose", kind: "lose", text: "No lose state" },
-      ],
-      runs: [
-        run({
-          observations: [
-            observation("state", {
-              baseline: 1,
-              last: 3,
-              min: 1,
-              max: 3,
-              matches: [{ id: "win", frame: 800 }],
-            }),
-          ],
-        }),
-      ],
-    });
-    expect(summary.passed).toBe(true);
-    expect(summary.criteria.find((entry) => entry.id === "no-lose")?.status).toBe("missing");
-    expect(summary.coverage).toEqual([
-      { kind: "win", proven: 1, failed: 0, missing: 0 },
-      { kind: "lose", proven: 0, failed: 0, missing: 1 },
-    ]);
+  it("lets a typed or legacy no-lose declaration stay outside the graded set", () => {
+    for (const noLose of [
+      {
+        id: "no-lose",
+        kind: "lose" as const,
+        text: "The run never ends in failure",
+        noLoseState: true as const,
+      },
+      { id: "no-lose", kind: "lose" as const, text: NO_LOSE_STATE_TEXT },
+    ]) {
+      const summary = evaluateScenarios({
+        mode: "criteria",
+        criteria: [criterion("win", "win", { key: "state", expect: "==3" }), noLose],
+        runs: [
+          run({
+            observations: [
+              observation("state", {
+                baseline: 1,
+                last: 3,
+                min: 1,
+                max: 3,
+                matches: [{ id: "win", frame: 800 }],
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(summary.passed).toBe(true);
+      expect(summary.criteria.find((entry) => entry.id === "no-lose")?.status).toBe("missing");
+      expect(summary.coverage).toEqual([
+        { kind: "win", proven: 1, failed: 0, missing: 0 },
+        { kind: "lose", proven: 0, failed: 0, missing: 1 },
+      ]);
+    }
   });
 
   it("grades legacy games on movement and reaching play through the menu", () => {

@@ -211,9 +211,9 @@ boot constant. A criterion passes only when it was false at the first sample aft
 route's first input and became true later, so `total == 5` or `state == 1` proves nothing:
 `total` is the world's relic count and `state` is already PLAYING when play starts. Content
 counts are proven by collecting them (`collected >= 5`), not by the world total. A `win` or
-a real `lose` observes the value the run ends at, not `changes`; a game with no lose state
-declares that under "Win & lose" and writes a `lose` criterion with the text "No lose state"
-and no observe instead. `presentation` claims have no observe and wait for the visual stage.
+a real `lose` observes the value the run ends at, not `changes`; a game with no losing state
+writes a `lose` criterion with `"noLoseState": true` and no observe instead. `presentation`
+claims have no observe and wait for the visual stage.
 
 Two examples per kind for this template (pick 5–12 total in the real design):
 

@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { GameCreateInput, NO_LOSE_STATE_TEXT, validateDesignDocument } from "@t3tools/contracts";
+import { GameCreateInput, validateDesignDocument } from "@t3tools/contracts";
 
 import { designSkeleton, initialGamePrompt } from "./scaffold.ts";
 
@@ -20,23 +20,21 @@ const flat = (text: string) => text.replace(/\s+/g, " ");
 it("teaches the supported no-lose criterion in the creation prompt and scaffold", () => {
   const prompt = initialGamePrompt(createInput);
   const skeleton = designSkeleton(createInput.name);
-  const noLose = `\`lose\` criterion with the text "${NO_LOSE_STATE_TEXT}" and no observe`;
-  for (const text of [prompt, skeleton]) {
-    expect(flat(text)).toContain(noLose);
-    expect(flat(text)).toContain("declares no lose state");
-  }
-  expect(flat(prompt)).toContain(
-    `when the design's "Win & lose" section declares no lose state, a ${noLose}`,
+  const noLose = `\`lose\` criterion with "noLoseState": true and no observe`;
+  expect(flat(prompt)).toContain(noLose);
+  expect(flat(prompt)).toContain("no losing state");
+  expect(flat(skeleton)).toContain(
+    `\`lose\` criterion with \`"noLoseState": true\` and no observe`,
   );
-  expect(flat(prompt)).toContain(
-    "except the declared no-lose-state criterion, which carries no observe",
-  );
+  expect(flat(skeleton)).toContain("no losing state");
+  expect(flat(prompt)).toContain(`when the game has no losing state, a ${noLose}`);
+  expect(flat(prompt)).toContain("except a declared no-lose criterion, which carries no observe");
   expect(flat(prompt)).toContain("never invent an ending the game does not have");
   expect(flat(skeleton)).toContain(
-    "Except for `presentation` claims and the declared no-lose-state criterion",
+    "Except for `presentation` claims and a `lose` criterion marked",
   );
   expect(flat(skeleton)).toContain(
-    `{ "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" }`,
+    `{ "id": "no-lose", "kind": "lose", "text": "A run never ends in failure", "noLoseState": true }`,
   );
   expect(flat(skeleton)).toContain("Never invent an ending the game does not have");
 });
@@ -45,7 +43,7 @@ it.effect("tells every starter template the same no-lose criterion", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const noLose = `\`lose\` criterion with the text "${NO_LOSE_STATE_TEXT}" and no observe`;
+    const noLose = `\`lose\` criterion with \`"noLoseState": true\` and no observe`;
     // Both starter templates are read before DESIGN.md, so neither may require
     // an observed loss from a game that has none.
     for (const template of ["2d-platformer", "3d-explorer"] as const) {
@@ -53,7 +51,7 @@ it.effect("tells every starter template the same no-lose criterion", () =>
         path.join(import.meta.dirname, "../../templates", template, "TEMPLATE.md"),
       );
       expect(flat(templateText)).toContain(
-        `a game with no lose state declares that under "Win & lose" and writes a ${noLose} instead`,
+        `a game with no losing state writes a ${noLose} instead`,
       );
       expect(flat(templateText)).not.toContain("or `lose` observes the value");
     }
@@ -100,7 +98,7 @@ repeat forever.`,
 [
   { "id": "choose-a-reply", "kind": "control", "text": "Clicking a reply card speaks that reply", "observe": { "key": "replies", "expect": ">=1" } },
   { "id": "counter-climbs", "kind": "mechanic", "text": "Every reply raises the reply counter", "observe": { "key": "replies", "expect": ">=3" } },
-  { "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" }
+  { "id": "no-lose", "kind": "lose", "text": "Every reply ends in another prompt", "noLoseState": true }
 ]
 \`\`\``,
     );
@@ -125,7 +123,7 @@ This game has no win state and no lose state: the player walks the lantern path 
   { "id": "walk-and-jump", "kind": "control", "text": "A and D walk and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } },
   { "id": "lantern-lights", "kind": "mechanic", "text": "Touching a lantern lights it", "observe": { "key": "collected", "expect": ">=1" } },
   { "id": "light-every-lantern", "kind": "content", "text": "The player lights all five lanterns", "observe": { "key": "collected", "expect": ">=5" } },
-  { "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" },
+  { "id": "no-lose", "kind": "lose", "text": "The walk never ends in failure", "noLoseState": true },
   { "id": "lantern-glow", "kind": "presentation", "text": "Lit lanterns cast a warm glow" }
 ]
 \`\`\``,
@@ -133,7 +131,12 @@ This game has no win state and no lose state: the player walks the lantern path 
   const result = validateDesignDocument({ design, skeleton });
   expect(result.issues).toEqual([]);
   expect(result.acceptance.filter((criterion) => criterion.kind === "lose")).toEqual([
-    { id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT },
+    {
+      id: "no-lose",
+      kind: "lose",
+      text: "The walk never ends in failure",
+      noLoseState: true,
+    },
   ]);
   expect(result.acceptance.some((criterion) => criterion.kind === "win")).toBe(false);
 });

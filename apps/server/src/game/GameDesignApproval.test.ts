@@ -98,6 +98,80 @@ it.effect("normalizes an approved record that used the old end kind", () =>
   }),
 );
 
+it.effect("keeps a legacy no-loss approval and its build dispatch readable", () =>
+  Effect.gen(function* () {
+    const base = yield* Effect.acquireRelease(
+      Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "design-legacy-"))),
+      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+    );
+    const root = NodePath.join(base, "game");
+    const stateDir = NodePath.join(base, "state");
+    yield* Effect.promise(() => NodeFSP.mkdir(root, { recursive: true }));
+    const acceptance = [
+      {
+        id: "move-and-jump",
+        kind: "control",
+        text: "A and D move and Space jumps",
+        observe: { key: "jumps", expect: ">=1" },
+      },
+      {
+        id: "lantern-lights",
+        kind: "mechanic",
+        text: "Touching a lantern lights it",
+        observe: { key: "collected", expect: ">=1" },
+      },
+      { id: "no-lose", kind: "lose", text: "No lose state" },
+    ];
+    const design = designSkeleton(manifest.name).replace(
+      /```acceptance[\s\S]*?```/,
+      `\`\`\`acceptance\n${JSON.stringify(acceptance, null, 2)}\n\`\`\``,
+    );
+    yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), design));
+    const designHash = GameDesignApproval.designDocumentHash(design);
+    const file = GameDesignApproval.approvalRecordFile(stateDir, root);
+    const text = JSON.stringify({
+      schemaVersion: 1,
+      game: NodePath.resolve(root),
+      approvalId: "old-no-loss-approval",
+      designHash,
+      approvedAt: "2026-10-01T00:00:00.000Z",
+      acceptance,
+      buildDispatch: {
+        commandId: "old-command",
+        messageId: "old-message",
+        threadId: "old-thread",
+        state: "dispatched",
+      },
+    });
+    yield* Effect.promise(async () => {
+      await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+      await NodeFSP.writeFile(file, text);
+    });
+    const record = yield* Effect.promise(() => GameDesignApproval.readDesignApprovalRecord(file));
+    expect(record).toMatchObject({
+      approvalId: "old-no-loss-approval",
+      designHash,
+      acceptance,
+      buildDispatch: {
+        commandId: "old-command",
+        messageId: "old-message",
+        threadId: "old-thread",
+        state: "dispatched",
+      },
+    });
+    yield* Effect.gen(function* () {
+      const approvals = yield* GameDesignApproval.GameDesignApproval;
+      const read = yield* approvals.status(root, manifest);
+      expect(read.state).toBe("approved");
+      expect(read.approvedHash).toBe(designHash);
+      expect(read.acceptance).toEqual(acceptance);
+      expect(read.issues).toEqual([]);
+    }).pipe(Effect.provide(GameDesignApproval.layer({ stateDir })));
+    // Reading an old approval never rewrites its record or hashes.
+    expect(yield* Effect.promise(() => NodeFSP.readFile(file, "utf8"))).toBe(text);
+  }),
+);
+
 /** A design the validator accepts: the scaffold's sections with this game's acceptance. */
 const recordedDesign = (name: string, collected: number) => {
   const acceptance = [

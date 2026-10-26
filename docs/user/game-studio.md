@@ -43,8 +43,8 @@ content counts, and the endings the game promises. Every control, mechanic, cont
 criterion the design promises names a game value the player changes, except a declared no-lose
 state; a value that is already true when play starts does not count, and content counts have to be
 collected rather than merely exist. A game does not invent a win or loss it does not have. A game
-with no lose state declares that under **Win & lose** and writes a `lose` criterion with the text
-"No lose state" and no observation. Presentation claims (a glow, an ambience) carry no observation
+with no losing state writes a `lose` criterion with `"noLoseState": true` and no observation.
+Presentation claims (a glow, an ambience) carry no observation
 and are listed as not yet verified. **Plan the design first** in the New game dialog is on by
 default; turn it off to skip straight to building.
 

@@ -181,6 +181,23 @@ describe("acceptance compatibility", () => {
       { id: "move", kind: "control", text: "Move", observe: { key: "jumps", expect: ">=1" } },
     ]);
   });
+
+  it("keeps the typed flag and the exact legacy token through a stored record", () => {
+    expect(
+      normalizeAcceptance([
+        { id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT },
+        {
+          id: "no-failure",
+          kind: "lose",
+          text: "The run never ends in failure",
+          noLoseState: true,
+        },
+      ]),
+    ).toEqual([
+      { id: "no-lose", kind: "lose", text: NO_LOSE_STATE_TEXT },
+      { id: "no-failure", kind: "lose", text: "The run never ends in failure", noLoseState: true },
+    ]);
+  });
 });
 
 describe("validateDesignDocument", () => {
@@ -241,7 +258,7 @@ The build is judged against these criteria.
 [
   { "id": "move", "kind": "control", "text": "Move", "observe": { "key": "jumps", "expect": ">=1" } },
   { "id": "paint", "kind": "mechanic", "text": "Paint the wall", "observe": { "key": "collected", "expect": ">=1" } },
-  { "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" }
+  { "id": "no-lose", "kind": "lose", "text": "A run never ends in failure", "noLoseState": true }
 ]
 \`\`\``,
       );
@@ -267,13 +284,32 @@ The build is judged against these criteria.
     ).toBe(true);
   });
 
-  it("allows the one no-lose-state exception", () => {
+  it("accepts a typed no-lose declaration whatever the Win & lose prose says", () => {
+    // The filled design's Win & lose section promises a real failure; the
+    // typed declaration is the contract, so prose cannot veto it.
     const design = designWith(
-      `## Win & lose
+      `## Acceptance
 
-This game has no lose state: a run always ends in a win, and there is no failure screen.
+\`\`\`acceptance
+[
+  { "id": "move", "kind": "control", "text": "Move", "observe": { "key": "jumps", "expect": ">=1" } },
+  { "id": "paint", "kind": "mechanic", "text": "Paint the wall", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "win", "kind": "win", "text": "Win", "observe": { "key": "state", "expect": "==3" } },
+  { "id": "no-lose", "kind": "lose", "text": "The run never ends in failure", "noLoseState": true }
+]
+\`\`\``,
+    );
+    const result = validateDesignDocument({ design, skeleton });
+    expect(result.issues).toEqual([]);
+    expect(result.acceptance.find((criterion) => criterion.id === "no-lose")).toMatchObject({
+      kind: "lose",
+      noLoseState: true,
+    });
+  });
 
-## Acceptance
+  it("keeps the exact legacy no-loss token valid without reading the prose", () => {
+    const design = designWith(
+      `## Acceptance
 
 \`\`\`acceptance
 [
@@ -285,15 +321,94 @@ This game has no lose state: a run always ends in a win, and there is no failure
 \`\`\``,
     );
     expect(validateDesignDocument({ design, skeleton }).issues).toEqual([]);
+  });
 
-    // The declaration has to be in the design, not invented by the criterion.
-    const undeclared = design.replace(
-      "This game has no lose state: a run always ends in a win, and there is no failure screen.",
-      "A run ends in a win.",
+  it("rejects noLoseState on a non-lose claim, with an observe, or as false", () => {
+    const flagOnControl = parseAcceptance(
+      designWith(
+        `## Acceptance
+
+\`\`\`acceptance
+[
+  { "id": "move", "kind": "control", "text": "Move", "noLoseState": true }
+]
+\`\`\``,
+      ),
     );
-    expect(validateDesignDocument({ design: undeclared, skeleton }).issues).toEqual(
-      expect.arrayContaining([expect.stringContaining(NO_LOSE_STATE_TEXT)]),
+    expect(flagOnControl.ok).toBe(false);
+    if (!flagOnControl.ok)
+      expect(flagOnControl.issues.join(" ")).toContain("only on a lose criterion");
+
+    const flagWithObserve = parseAcceptance(
+      designWith(
+        `## Acceptance
+
+\`\`\`acceptance
+[
+  { "id": "no-lose", "kind": "lose", "text": "No failure", "noLoseState": true, "observe": { "key": "lives", "expect": "<0" } }
+]
+\`\`\``,
+      ),
     );
+    expect(flagWithObserve.ok).toBe(false);
+    if (!flagWithObserve.ok)
+      expect(flagWithObserve.issues.join(" ")).toContain(
+        "declares noLoseState and cannot carry observe",
+      );
+
+    const falseFlag = parseAcceptance(
+      designWith(
+        `## Acceptance
+
+\`\`\`acceptance
+[
+  { "id": "no-lose", "kind": "lose", "text": "No failure", "noLoseState": false }
+]
+\`\`\``,
+      ),
+    );
+    expect(falseFlag.ok).toBe(false);
+    if (!falseFlag.ok)
+      expect(falseFlag.issues.join(" ")).toContain("noLoseState must be true when present");
+  });
+
+  it("does not infer no-loss from arbitrary prose or a missing observation", () => {
+    const arbitraryText = designWith(
+      `## Acceptance
+
+\`\`\`acceptance
+[
+  { "id": "move", "kind": "control", "text": "Move", "observe": { "key": "jumps", "expect": ">=1" } },
+  { "id": "paint", "kind": "mechanic", "text": "Paint the wall", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "no-lose", "kind": "lose", "text": "The run never ends in failure" }
+]
+\`\`\``,
+    );
+    const issues = validateDesignDocument({ design: arbitraryText, skeleton }).issues;
+    expect(
+      issues.some((issue) => issue.includes('"no-lose"') && issue.includes("needs an observe")),
+    ).toBe(true);
+  });
+
+  it("exempts only the criterion that declares noLoseState", () => {
+    const design = designWith(
+      `## Acceptance
+
+\`\`\`acceptance
+[
+  { "id": "move", "kind": "control", "text": "Move", "observe": { "key": "jumps", "expect": ">=1" } },
+  { "id": "paint", "kind": "mechanic", "text": "Paint the wall", "observe": { "key": "collected", "expect": ">=1" } },
+  { "id": "no-lose", "kind": "lose", "text": "No failure", "noLoseState": true },
+  { "id": "out-of-lives", "kind": "lose", "text": "Losing every life ends the run" }
+]
+\`\`\``,
+    );
+    const issues = validateDesignDocument({ design, skeleton }).issues;
+    expect(
+      issues.some(
+        (issue) => issue.includes('"out-of-lives"') && issue.includes("needs an observe"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects a page that only waits or only counts the world total", () => {
@@ -400,6 +515,21 @@ describe("diffAcceptance", () => {
       expect(diff.removed).toEqual([]);
       expect(diff.added).toEqual([]);
     }
+  });
+
+  it("treats a changed noLoseState declaration as a change", () => {
+    const legacy: GameAcceptanceCriterion = {
+      id: "no-lose",
+      kind: "lose",
+      text: "No lose state",
+    };
+    const typed: GameAcceptanceCriterion = { ...legacy, noLoseState: true };
+    expect(diffAcceptance([legacy], [typed]).changed).toEqual([typed]);
+    expect(diffAcceptance([legacy], [legacy])).toEqual({
+      added: [],
+      changed: [],
+      removed: [],
+    });
   });
 });
 

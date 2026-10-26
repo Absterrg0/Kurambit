@@ -26,6 +26,11 @@ export const GameAcceptanceCriterion = Schema.Struct({
   kind: GameAcceptanceCriterionKind,
   text: Schema.String,
   observe: Schema.optionalKey(GameAcceptanceObservation),
+  /**
+   * The typed declaration that losing does not exist. Only valid on a `lose`
+   * criterion with no observe; the criterion text stays player-facing prose.
+   */
+  noLoseState: Schema.optionalKey(Schema.Literal(true)),
 });
 export type GameAcceptanceCriterion = typeof GameAcceptanceCriterion.Type;
 /**
@@ -38,6 +43,7 @@ export const StoredGameAcceptanceCriterion = Schema.Struct({
   kind: Schema.Literals(["control", "mechanic", "content", "win", "lose", "presentation", "end"]),
   text: Schema.String,
   observe: Schema.optionalKey(GameAcceptanceObservation),
+  noLoseState: Schema.optionalKey(Schema.Literal(true)),
 });
 export type StoredGameAcceptanceCriterion = typeof StoredGameAcceptanceCriterion.Type;
 
@@ -50,10 +56,18 @@ export const normalizeAcceptance = (
   );
 
 const GAME_ACCEPTANCE_HEADING = "Acceptance";
-const WIN_LOSE_HEADING = "Win & lose";
-/** The one phrase a design may use to declare that losing does not exist. */
+/**
+ * The exact text older approvals used for a no-loss criterion. It is a literal
+ * contract token, not a phrase search: a design may word the promise any way
+ * when it sets `noLoseState: true`, while an old record that already used this
+ * exact string still reads as the same declaration.
+ */
 export const NO_LOSE_STATE_TEXT = "No lose state";
-const NO_LOSE_STATE_PATTERN = /\bno\s+lose\s+state\b/i;
+/** Whether this criterion is an explicit no-loss declaration, typed or legacy. */
+export const isNoLoseStateCriterion = (criterion: GameAcceptanceCriterion): boolean =>
+  criterion.kind === "lose" &&
+  criterion.observe === undefined &&
+  (criterion.noLoseState === true || criterion.text.trim() === NO_LOSE_STATE_TEXT);
 const kindNames = "control, mechanic, content, win, lose or presentation";
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const keyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -107,6 +121,14 @@ const criterionIssues = (value: unknown, index: number): string[] => {
     issues.push(
       `${where} is a presentation claim and cannot carry observe; presentation belongs to the visual stage.`,
     );
+  if (record.noLoseState !== undefined) {
+    if (record.noLoseState !== true)
+      issues.push(`${where}'s noLoseState must be true when present; omit it for a real loss.`);
+    if (record.kind !== "lose")
+      issues.push(`${where} can declare noLoseState only on a lose criterion.`);
+    if (record.observe !== undefined)
+      issues.push(`${where} declares noLoseState and cannot carry observe.`);
+  }
   if (record.observe !== undefined) {
     const observe = record.observe;
     if (typeof observe !== "object" || observe === null || Array.isArray(observe))
@@ -249,8 +271,6 @@ export function validateDesignDocument(input: {
       "The acceptance block still holds the scaffold's example criteria; write this game's own.",
     );
   else {
-    const winLose = sectionsOf(design).get(WIN_LOSE_HEADING) ?? "";
-    const declaresNoLoseState = NO_LOSE_STATE_PATTERN.test(winLose);
     for (const criterion of parsed.criteria) {
       if (criterion.kind === "presentation") continue;
       if (criterion.observe !== undefined) {
@@ -267,15 +287,10 @@ export function validateDesignDocument(input: {
           );
         continue;
       }
-      // The single exception to the observe requirement: a game whose
-      // Win & lose section declares that it has no lose state writes that
-      // promise down instead of inventing a fake observation.
-      if (
-        criterion.kind === "lose" &&
-        criterion.text.trim() === NO_LOSE_STATE_TEXT &&
-        declaresNoLoseState
-      )
-        continue;
+      // An explicit declaration is the only exception to the observe
+      // requirement. Prose never decides this: the typed flag is authoritative,
+      // and the exact legacy token keeps approvals written before it readable.
+      if (isNoLoseStateCriterion(criterion)) continue;
       issues.push(
         `Acceptance criterion "${criterion.id}" is a ${criterion.kind} claim and needs an observe of a GameState property the player changes.`,
       );
@@ -290,19 +305,7 @@ export function validateDesignDocument(input: {
     const lose = parsed.criteria.filter((criterion) => criterion.kind === "lose");
     if (lose.length === 0)
       issues.push(
-        declaresNoLoseState
-          ? `The acceptance block needs a \`lose\` criterion with the text "${NO_LOSE_STATE_TEXT}" and no observe.`
-          : "The acceptance block needs at least one `lose` criterion (how a run ends in failure).",
-      );
-    else if (
-      lose.every(
-        (criterion) =>
-          criterion.text.trim() === NO_LOSE_STATE_TEXT && criterion.observe === undefined,
-      ) &&
-      !declaresNoLoseState
-    )
-      issues.push(
-        `The lose criterion "${lose[0]!.id}" says "${NO_LOSE_STATE_TEXT}", but the "${WIN_LOSE_HEADING}" section must also say there is no lose state.`,
+        'The acceptance block needs a `lose` criterion: a real loss, or one with `"noLoseState": true` when the game has no losing state.',
       );
   }
   return {
@@ -354,7 +357,10 @@ export const diffAcceptance = (
   const approvedById = new Map(approved.map((criterion) => [criterion.id, criterion]));
   const currentById = new Map(current.map((criterion) => [criterion.id, criterion]));
   const same = (a: GameAcceptanceCriterion, b: GameAcceptanceCriterion) =>
-    a.kind === b.kind && a.text === b.text && sameObserve(a.observe, b.observe);
+    a.kind === b.kind &&
+    a.text === b.text &&
+    a.noLoseState === b.noLoseState &&
+    sameObserve(a.observe, b.observe);
   return {
     added: current.filter((criterion) => !approvedById.has(criterion.id)),
     changed: current.filter(
