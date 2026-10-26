@@ -77,6 +77,16 @@ it("exports a top-level object input schema for every game tool", () => {
   }
 });
 
+it("teaches approved scenarios without requiring a moved player", () => {
+  const description = GameToolkit.tools.game_scenarios_run.description ?? "";
+  expect(description).toContain("With an approved design no player node or movement is required");
+  expect(description).toContain("typed GameState.state");
+  expect(description).toContain(
+    'A legacy game without an approved design instead needs a player in group "player" to move',
+  );
+  expect(description).toContain("wait-only route proves nothing");
+});
+
 it("advertises a required gameplay route for game_verify", () => {
   const schema = Tool.getJsonSchema(GameVerifyTool) as AdvertisedInput;
   expect(schema.required).toContain("steps");

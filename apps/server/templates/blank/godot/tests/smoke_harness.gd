@@ -3,7 +3,7 @@
 ##
 ## It proves the project boots its main scene, that the GameState autoload is
 ## live, and that StudioProbe can read the real scene tree. It deliberately
-## checks no gameplay. Keep these engine checks as you add a player and run
+## checks no gameplay. Keep these engine checks as you add gameplay and run
 ## values, and add checks that drive the game and assert observable outcomes.
 extends Node
 

@@ -45,6 +45,9 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
 - Add run values to `GameState` as public variables. `StudioProbe` reports up to 40
   primitive values and the position of the first node in the `player` group, so keep the
   values that matter on screen too.
+- A game with no player node marks play with a typed `GameState.state` (0/false before
+  play, another value once play starts), so scenarios and playtests can find the gameplay
+  baseline.
 - The probe also answers the stage's `studio-visibility` messages: while the stage tab
   is hidden it pauses the scene tree and mutes the master audio bus, then restores what
   it found. Keep that half of the bridge as well.
@@ -52,7 +55,7 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
 ## Tests
 
 `game_godot_test` runs `tests/smoke_test.gd`. Keep its engine-readiness checks as you add
-a player and run values. Extend them with the game's actual behaviour as you build it: boot
+gameplay and run values. Extend them with the game's actual behaviour as you build it: boot
 `res://scenes/main.tscn`, drive the real loop with input or physics, assert observable
 outcomes, and quit with a nonzero exit code on failure. A green smoke test on an empty
 project means the engine and the bridge work, not that a game exists.

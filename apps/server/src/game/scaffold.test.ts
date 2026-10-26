@@ -60,6 +60,55 @@ it.effect("tells every starter template the same no-lose criterion", () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("keeps the blank guidance open to an approved game with no player node", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const skeleton = designSkeleton(createInput.name);
+    expect(flat(skeleton)).toContain("including movement or camera only when the game has them");
+    expect(flat(skeleton)).toContain("A game with no player node marks play with a typed `state`");
+    const blank = yield* fs.readFileString(
+      path.join(import.meta.dirname, "../../templates/blank/TEMPLATE.md"),
+    );
+    expect(flat(blank)).toContain(
+      "A game with no player node marks play with a typed `GameState.state`",
+    );
+    expect(flat(blank)).not.toContain("as you add a player and run values");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it("accepts a no-player, no-movement design built from the blank guidance", () => {
+  const skeleton = designSkeleton(createInput.name);
+  const design = skeleton
+    .replace(
+      /## Controls\n\n[\s\S]*?(?=\n## Win & lose)/,
+      `## Controls
+
+The player clicks one of two reply cards or presses 1 or 2. There is no movement, no camera
+control and no player node.`,
+    )
+    .replace(
+      /## Win & lose\n\n[\s\S]*?(?=\n## Content)/,
+      `## Win & lose
+
+This game has no win state and no lose state: every reply raises the counter and the prompts
+repeat forever.`,
+    )
+    .replace(
+      /```acceptance[\s\S]*?```/,
+      `\`\`\`acceptance
+[
+  { "id": "choose-a-reply", "kind": "control", "text": "Clicking a reply card speaks that reply", "observe": { "key": "replies", "expect": ">=1" } },
+  { "id": "counter-climbs", "kind": "mechanic", "text": "Every reply raises the reply counter", "observe": { "key": "replies", "expect": ">=3" } },
+  { "id": "no-lose", "kind": "lose", "text": "${NO_LOSE_STATE_TEXT}" }
+]
+\`\`\``,
+    );
+  const result = validateDesignDocument({ design, skeleton });
+  expect(result.issues).toEqual([]);
+  expect(result.acceptance.some((criterion) => criterion.kind === "win")).toBe(false);
+});
+
 it("accepts a no-loss design built from that guidance without inventing an ending", () => {
   const skeleton = designSkeleton(createInput.name);
   const design = skeleton

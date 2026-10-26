@@ -21,7 +21,8 @@ The repeating 30 seconds: what the player does, what changes, and what pulls the
 
 ## Controls
 
-Movement, camera and actions, with keyboard and gamepad bindings.
+The player's actions and how to trigger them (keys, pointer or gamepad), including
+movement or camera only when the game has them.
 
 ## Win & lose
 
@@ -54,7 +55,9 @@ The block needs at least one \`control\`, one \`mechanic\` and one \`lose\`: a r
 the "Win & lose" section declares no lose state, a \`lose\` criterion with the text
 "No lose state" and no observe. Cover every control and content count the game promises, and
 add a \`win\` only when the game actually ends in one. Never invent an ending the game does
-not have.
+not have. A game with no player node marks play with a typed \`state\` (0/false before play,
+another value once play starts), so the scenario runner and playtest can find the gameplay
+baseline.
 
 Examples (write 5 to 12 total for this game, not one of each; two per kind shown):
 - control: \`{ "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }\`
