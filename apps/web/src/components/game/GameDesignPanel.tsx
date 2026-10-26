@@ -6,6 +6,7 @@ import {
   FileTextIcon,
   PencilIcon,
   RefreshCwIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import {
   isNoLoseStateCriterion,
@@ -20,8 +21,10 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useRightPanelStore } from "../../rightPanelStore";
 import ChatMarkdown from "../ChatMarkdown";
 import { useProjectFileQuery } from "../files/projectFilesQueryState";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { Textarea } from "../ui/textarea";
 import { useGameLibrary } from "./useGameLibrary";
 
 const approvedOn = (approvedAt: string | undefined) => {
@@ -122,6 +125,51 @@ export function GameDesignPanel({
     currentHash !== null &&
     issues.length === 0;
   const canResolveRevision = canApprove && revisionPending;
+  const stateTitle = revisionPending
+    ? "Change requested"
+    : draft
+      ? "Design draft"
+      : changed
+        ? "Design changed"
+        : approved
+          ? "Design approved"
+          : "No design contract";
+  const stateBadge: { label: string; variant: "warning" | "success" | "secondary" } =
+    revisionPending
+      ? { label: "Building locked", variant: "warning" }
+      : draft
+        ? auto
+          ? { label: "Auto revisions", variant: "secondary" }
+          : { label: "Not approved", variant: "warning" }
+        : changed
+          ? { label: "Re-approval needed", variant: "warning" }
+          : approved
+            ? { label: "Approved", variant: "success" }
+            : { label: "Planning skipped", variant: "secondary" };
+  const stateDescription = revisionPending
+    ? "The agent is rewriting DESIGN.md for this request. Export, preview, playtest and Blender stay locked until you approve the change."
+    : draft
+      ? auto
+        ? "The agent writes DESIGN.md and builds right away; nothing waits for approval."
+        : turnRunning
+          ? "The agent is writing the design. It will keep this file current until you approve it."
+          : "Ask for changes in chat, or edit DESIGN.md yourself. Approve it to start the build."
+      : changed
+        ? "DESIGN.md no longer matches the revision you approved, so the game is unqualified and staging is locked. Review the new scope and re-approve it to continue."
+        : approved
+          ? auto
+            ? "Each DESIGN.md edit is recorded as a new revision."
+            : "DESIGN.md matches the revision you approved. Scope changes need re-approval."
+          : "This game has no design contract: it was created before the design step or with planning skipped.";
+  const reviewedMeta = approved
+    ? auto
+      ? `Revision ${autoRevision}${approvedLabel ? ` · ${approvedLabel}` : ""}`
+      : approvedLabel
+        ? `Approved ${approvedLabel}`
+        : "Approved"
+    : designPath !== null
+      ? designPath
+      : "DESIGN.md";
 
   const approve = async () => {
     if (!canApprove || currentHash === null) return;
@@ -194,180 +242,165 @@ export function GameDesignPanel({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto scrollbar-gutter-both">
-      <div className="mx-auto flex w-full max-w-4xl flex-wrap items-start gap-3 px-6 pt-5">
-        <div className="min-w-0 flex-1">
-          {revisionPending ? (
-            <>
-              <p className="flex items-center gap-2 text-sm font-medium">
-                Change requested — review &amp; approve
-                <span className="rounded-full border border-border px-1.5 py-0.5 text-2xs font-normal text-muted-foreground">
-                  building locked
-                </span>
+    <div className="@container/design min-h-0 flex-1 overflow-auto scrollbar-gutter-both bg-background">
+      <div className="mx-auto w-full max-w-5xl px-4 pb-14 pt-4 sm:px-6">
+        <header className="rounded-xl border border-border/70 bg-card/40 p-4 shadow-xs @[48rem]/design:p-5">
+          <div className="flex flex-col gap-4 @[48rem]/design:flex-row @[48rem]/design:items-start @[48rem]/design:justify-between">
+            <div className="min-w-0 @[48rem]/design:max-w-2xl">
+              <p className="text-2xs font-medium uppercase tracking-widest text-muted-foreground">
+                Design review
               </p>
-              <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
-                The agent is rewriting DESIGN.md for this request. Export, preview, playtest and
-                Blender stay locked until you approve the change.
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold tracking-tight">{stateTitle}</h2>
+                <Badge size="sm" variant={stateBadge.variant}>
+                  {stateBadge.label}
+                </Badge>
+              </div>
+              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{stateDescription}</p>
+              <p className="mt-2 flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
+                {approved ? (
+                  <CheckIcon className="size-3.5 shrink-0 text-success" aria-hidden="true" />
+                ) : (
+                  <FileTextIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                )}
+                <span className="truncate">{reviewedMeta}</span>
               </p>
-            </>
-          ) : draft ? (
-            <>
-              <p className="flex items-center gap-2 text-sm font-medium">
-                Design draft
-                <span className="rounded-full border border-border px-1.5 py-0.5 text-2xs font-normal text-muted-foreground">
-                  not built yet
-                </span>
-              </p>
-              <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
-                {auto
-                  ? "The agent writes DESIGN.md and builds right away; nothing waits for approval."
-                  : turnRunning
-                    ? "The agent is writing the design. It will keep this file current until you approve it."
-                    : "Ask for changes in chat, or edit DESIGN.md yourself. Approve it to start the build."}
-              </p>
-            </>
-          ) : changed ? (
-            <>
-              <p className="text-sm font-medium">
-                Design changed since approval — review &amp; re-approve
-              </p>
-              <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
-                DESIGN.md no longer matches the revision you approved, so the game is unqualified
-                and staging is locked. Review the new scope and re-approve it to continue.
-              </p>
-            </>
-          ) : approved && auto ? (
-            <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
-              <CheckIcon className="size-3.5 text-success" aria-hidden="true" />
-              {`Revision ${autoRevision} recorded${approvedLabel ? ` ${approvedLabel}` : ""} · edits become new revisions`}
-            </p>
-          ) : approved ? (
-            <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
-              <CheckIcon className="size-3.5 text-success" aria-hidden="true" />
-              {approvedLabel
-                ? `Approved ${approvedLabel} · scope changes need re-approval`
-                : "Approved · scope changes need re-approval"}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              This game has no design contract: it was created before the design step or with
-              planning skipped.
-            </p>
-          )}
-          {revisionPending && pendingRevision ? (
-            <div className="mt-2 max-w-xl rounded-md border border-border bg-muted/40 px-3 py-2">
-              <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-                Requested change
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-xs">{pendingRevision.text}</p>
             </div>
-          ) : null}
-          {approvable && issues.length > 0 ? (
-            <div className="mt-2 max-w-xl rounded-md border border-border px-3 py-2">
-              <p className="text-xs font-medium">Not ready to approve</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                {issues.map((issue) => (
-                  <li key={issue}>{issue}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {warnings.length > 0 ? (
-            <div className="mt-2 max-w-xl rounded-md border border-border px-3 py-2">
-              <p className="text-xs font-medium">Unfinished hints (not blocking)</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                {warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {error ? (
-            <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-destructive">
-              {error}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 py-0.5">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Refresh the design"
-            disabled={approving || requesting || discarding}
-            onClick={() => {
-              onRefresh();
-              brief.refresh();
-            }}
-          >
-            <RefreshCwIcon className="size-3.5" aria-hidden="true" />
-          </Button>
-          {designPath ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => useRightPanelStore.getState().openFile(threadRef, designPath)}
-            >
-              <PencilIcon className="size-3.5" aria-hidden="true" />
-              Edit file
-            </Button>
-          ) : null}
-          {approved && !auto && !revisionPending ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={turnRunning || requesting}
-              onClick={() => setRequestOpen((open) => !open)}
-            >
-              <FilePlusIcon className="size-3.5" aria-hidden="true" />
-              Request change
-            </Button>
-          ) : null}
-          {approvable ? (
-            <Button size="sm" disabled={!canApprove} onClick={() => void approve()}>
-              {approving ? "Approving…" : changed ? "Re-approve design" : "Approve & build"}
-            </Button>
-          ) : null}
-          {revisionPending ? (
-            <>
+            <div className="flex w-full flex-wrap items-center gap-2 @[48rem]/design:w-auto @[48rem]/design:shrink-0 @[48rem]/design:justify-end">
               <Button
-                size="sm"
-                disabled={!canResolveRevision}
-                onClick={() => void approveRevisionAction()}
-              >
-                {approving ? "Approving…" : "Approve change & build"}
-              </Button>
-              <Button
-                size="sm"
+                size="icon-sm"
                 variant="ghost"
-                disabled={!canOperate || turnRunning || discarding || approving}
-                onClick={() => void discardRequest()}
+                aria-label="Refresh the design"
+                disabled={approving || requesting || discarding}
+                onClick={() => {
+                  onRefresh();
+                  brief.refresh();
+                }}
               >
-                {discarding ? "Discarding…" : "Discard request"}
+                <RefreshCwIcon className="size-3.5" aria-hidden="true" />
               </Button>
-            </>
-          ) : null}
-        </div>
-      </div>
-      {requestOpen && approved && !revisionPending ? (
-        <div className="mx-auto w-full max-w-4xl px-6">
-          <div className="ml-auto max-w-xl rounded-md border border-border p-3">
-            <label htmlFor="game-change-request" className="text-xs font-medium">
+              {designPath ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => useRightPanelStore.getState().openFile(threadRef, designPath)}
+                >
+                  <PencilIcon className="size-3.5" aria-hidden="true" />
+                  Edit file
+                </Button>
+              ) : null}
+              {approved && !auto && !revisionPending ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={turnRunning || requesting}
+                  onClick={() => setRequestOpen((open) => !open)}
+                >
+                  <FilePlusIcon className="size-3.5" aria-hidden="true" />
+                  Request change
+                </Button>
+              ) : null}
+              {approvable ? (
+                <Button size="sm" disabled={!canApprove} onClick={() => void approve()}>
+                  {approving ? "Approving…" : changed ? "Re-approve design" : "Approve & build"}
+                </Button>
+              ) : null}
+              {revisionPending ? (
+                <>
+                  <Button
+                    size="sm"
+                    disabled={!canResolveRevision}
+                    onClick={() => void approveRevisionAction()}
+                  >
+                    {approving ? "Approving…" : "Approve change & build"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!canOperate || turnRunning || discarding || approving}
+                    onClick={() => void discardRequest()}
+                  >
+                    {discarding ? "Discarding…" : "Discard request"}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {revisionPending && pendingRevision ? (
+              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Requested change
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{pendingRevision.text}</p>
+              </div>
+            ) : null}
+            {approvable && issues.length > 0 ? (
+              <div className="rounded-lg border border-warning/40 bg-warning-surface px-3 py-2.5">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-warning-foreground">
+                  <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                  Not ready to approve
+                </p>
+                <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-5 text-warning-foreground/85">
+                  {issues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {warnings.length > 0 ? (
+              <Collapsible>
+                <div className="rounded-lg border border-border/70 bg-background/50">
+                  <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                    {warnings.length === 1
+                      ? "1 scaffold hint (not blocking)"
+                      : `${warnings.length} scaffold hints (not blocking)`}
+                    <ChevronRightIcon
+                      className="ml-auto size-3.5 shrink-0 transition-transform group-data-panel-open:rotate-90"
+                      aria-hidden="true"
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsiblePanel>
+                    <ul className="list-disc space-y-1 border-t border-border/60 px-3 py-2 pl-8 text-xs leading-5 text-muted-foreground">
+                      {warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </CollapsiblePanel>
+                </div>
+              </Collapsible>
+            ) : null}
+            {error ? (
+              <p
+                role="alert"
+                className="whitespace-pre-wrap rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs leading-5 text-destructive-foreground"
+              >
+                {error}
+              </p>
+            ) : null}
+          </div>
+        </header>
+        {requestOpen && approved && !revisionPending ? (
+          <section className="mt-4 rounded-xl border border-border/70 bg-card/40 p-4 shadow-xs">
+            <label htmlFor="game-change-request" className="text-sm font-medium">
               Describe the change you want
             </label>
-            <textarea
+            <Textarea
               id="game-change-request"
+              size="sm"
               value={requestText}
               onChange={(event) => setRequestText(event.target.value)}
               rows={3}
               maxLength={4000}
               placeholder="e.g. Add a double jump and make the owls slower."
-              className="mt-2 w-full resize-y rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:border-ring"
+              className="mt-2"
             />
-            <p className="mt-1 text-2xs text-muted-foreground">
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
               This locks staging until you approve the revised design. Chat stays free-form for
               anything else.
             </p>
-            <div className="mt-2 flex justify-end gap-2">
+            <div className="mt-3 flex justify-end gap-2">
               <Button
                 size="xs"
                 variant="ghost"
@@ -384,138 +417,184 @@ export function GameDesignPanel({
                 {requesting ? "Requesting…" : "Send request"}
               </Button>
             </div>
+          </section>
+        ) : null}
+        {contents ? (
+          <article className="mt-4 overflow-hidden rounded-xl border border-border/70 bg-card/30">
+            <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5 @[48rem]/design:px-6">
+              <h3 className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <FileTextIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                Design document
+              </h3>
+              <span className="hidden shrink-0 font-mono text-2xs text-muted-foreground/70 @[30rem]/design:inline">
+                DESIGN.md
+              </span>
+            </div>
+            <ChatMarkdown
+              text={contents}
+              cwd={status.root}
+              imageBaseDir={status.root}
+              threadRef={threadRef}
+              className="mx-auto w-full max-w-3xl px-4 py-5 text-base leading-7 @[48rem]/design:px-8 @[48rem]/design:py-7"
+            />
+          </article>
+        ) : (
+          <div className="mt-4 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/80 bg-card/20 px-6 py-14 text-center">
+            <FileTextIcon className="size-5 text-muted-foreground" aria-hidden="true" />
+            <p className="text-sm font-medium">
+              {draft ? "The agent is drafting the design" : "No design document"}
+            </p>
+            <p className="max-w-sm text-xs leading-5 text-muted-foreground">
+              {draft
+                ? auto
+                  ? "DESIGN.md appears here when the agent saves it."
+                  : "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
+                : "This game has no DESIGN.md yet. Ask the agent to write one in chat."}
+            </p>
+            <Button size="xs" variant="ghost" onClick={onRefresh}>
+              Refresh
+            </Button>
           </div>
-        </div>
-      ) : null}
-      {contents ? (
-        <ChatMarkdown
-          text={contents}
-          cwd={status.root}
-          imageBaseDir={status.root}
-          threadRef={threadRef}
-          className="mx-auto max-w-4xl px-6 py-5"
-        />
-      ) : (
-        <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
-          <FileTextIcon className="size-5 text-muted-foreground" aria-hidden="true" />
-          <p className="text-sm font-medium">
-            {draft ? "The agent is drafting the design" : "No design document"}
-          </p>
-          <p className="max-w-sm text-xs text-muted-foreground">
-            {draft
-              ? auto
-                ? "DESIGN.md appears here when the agent saves it."
-                : "DESIGN.md appears here when the agent saves it. Ask for changes in chat, then review it here before building."
-              : "This game has no DESIGN.md yet. Ask the agent to write one in chat."}
-          </p>
-          <Button size="xs" variant="ghost" onClick={onRefresh}>
-            Refresh
-          </Button>
-        </div>
-      )}
-      {revisionPending && pendingRevision && !revisionDiff ? (
-        <section className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
-          <h3 className="text-sm font-medium">Acceptance</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            The criteria cannot be compared with the approved set until DESIGN.md parses cleanly;
-            fix the issues above first.
-          </p>
-        </section>
-      ) : null}
-      {revisionDiff && pendingRevision ? (
-        <section className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
-          <h3 className="text-sm font-medium">Acceptance — revision review</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            What the pending DESIGN.md changes about the approved set. Approving binds the new set
-            and starts the change's build turn; every criterion the change removes must stay
-            acknowledged under a &quot;Removed:&quot; line in DESIGN.md.
-          </p>
-          <div className="mt-3 space-y-3">
-            <AcceptanceDiffGroup
-              label="Added"
-              criteria={revisionDiff.added}
-              empty="No added criteria."
-            />
-            <AcceptanceDiffGroup
-              label="Changed"
-              criteria={revisionDiff.changed}
-              empty="No edited criteria."
-            />
-            <AcceptanceDiffGroup
-              label="Removed"
-              criteria={revisionDiff.removed}
-              empty="No removed criteria."
-            />
+        )}
+        {revisionPending && pendingRevision && !revisionDiff ? (
+          <section className="mx-auto mt-6 w-full max-w-3xl">
+            <div className="rounded-xl border border-border/70 bg-card/30 p-4">
+              <h3 className="text-sm font-semibold">Acceptance</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                The criteria cannot be compared with the approved set until DESIGN.md parses
+                cleanly; fix the issues above first.
+              </p>
+            </div>
+          </section>
+        ) : null}
+        {revisionDiff && pendingRevision ? (
+          <section className="mx-auto mt-6 w-full max-w-3xl">
+            <div className="border-b border-border/60 pb-2">
+              <h3 className="text-sm font-semibold">Acceptance — revision review</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                What the pending DESIGN.md changes about the approved set. Approving binds the new
+                set and starts the change&apos;s build turn; every criterion the change removes must
+                stay acknowledged under a &quot;Removed:&quot; line in DESIGN.md.
+              </p>
+            </div>
+            <div className="mt-3 space-y-4">
+              <AcceptanceDiffGroup
+                label="Added"
+                criteria={revisionDiff.added}
+                empty="No added criteria."
+              />
+              <AcceptanceDiffGroup
+                label="Changed"
+                criteria={revisionDiff.changed}
+                empty="No edited criteria."
+              />
+              <AcceptanceDiffGroup
+                label="Removed"
+                criteria={revisionDiff.removed}
+                empty="No removed criteria."
+              />
+            </div>
+          </section>
+        ) : null}
+        {acceptance.length > 0 && !revisionPending ? (
+          <section className="mx-auto mt-6 w-full max-w-3xl">
+            <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border/60 pb-2">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">Acceptance</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {approved && auto
+                    ? "The latest recorded revision's criteria."
+                    : approved
+                      ? "The approved revision binds the build to these."
+                      : changed && issues.length > 0
+                        ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
+                        : "These are the criteria in DESIGN.md. Approve the design to bind them."}
+                </p>
+              </div>
+              {coverage.length > 0 ? (
+                <p className="text-2xs uppercase tracking-wide text-muted-foreground">
+                  {coverage.map((entry) => `${entry.count} ${entry.kind}`).join(" · ")}
+                </p>
+              ) : null}
+            </div>
+            <ul className="mt-3 space-y-2">
+              {acceptance.map((criterion) => (
+                <AcceptanceCriterionRow key={criterion.id} criterion={criterion} />
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {briefContents ? (
+          <div className="mx-auto mt-6 w-full max-w-3xl border-t border-border/60 pt-3">
+            <Collapsible>
+              <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-1.5 py-1 text-sm font-medium">
+                <ChevronRightIcon
+                  className="size-3.5 transition-transform group-data-panel-open:rotate-90"
+                  aria-hidden="true"
+                />
+                Brief
+                <span className="text-xs font-normal text-muted-foreground">BRIEF.md</span>
+              </CollapsibleTrigger>
+              <CollapsiblePanel>
+                <ChatMarkdown
+                  text={briefContents}
+                  cwd={status.root}
+                  imageBaseDir={status.root}
+                  threadRef={threadRef}
+                  className="pt-3 text-sm leading-6"
+                />
+              </CollapsiblePanel>
+            </Collapsible>
           </div>
-        </section>
-      ) : null}
-      {acceptance.length > 0 && !revisionPending ? (
-        <section className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
-          <h3 className="text-sm font-medium">Acceptance</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {approved && auto
-              ? "The latest recorded revision's criteria."
-              : approved
-                ? "The approved revision binds the build to these."
-                : changed && issues.length > 0
-                  ? "These were bound by the last approval. Fix DESIGN.md and re-approve to bind its current criteria."
-                  : "These are the criteria in DESIGN.md. Approve the design to bind them."}
-          </p>
-          <p className="mt-1 text-2xs text-muted-foreground">
-            Coverage: {coverage.map((entry) => `${entry.count} ${entry.kind}`).join(" · ")}
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {acceptance.map((criterion) => (
-              <li key={criterion.id} className="flex items-start gap-2 text-xs">
-                <span className="mt-0.5 shrink-0 rounded-full border border-border px-1.5 py-0.5 text-2xs uppercase tracking-wide text-muted-foreground">
-                  {criterion.kind}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block">{criterion.text}</span>
-                  {criterion.observe ? (
-                    <span className="block text-2xs text-muted-foreground">
-                      {criterion.observe.key} {criterion.observe.expect}
-                    </span>
-                  ) : criterion.kind === "presentation" ? (
-                    <span className="block text-2xs text-muted-foreground">
-                      Visual stage — not verified yet
-                    </span>
-                  ) : isNoLoseStateCriterion(criterion) ? (
-                    <span className="block text-2xs text-muted-foreground">
-                      Declared no losing state — no loss transition is verified, and this is not
-                      proof that the game cannot be lost.
-                    </span>
-                  ) : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {briefContents ? (
-        <div className="mx-auto w-full max-w-4xl border-t border-border px-6 py-4">
-          <Collapsible>
-            <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-sm font-medium">
-              <ChevronRightIcon
-                className="size-3.5 transition-transform group-data-panel-open:rotate-90"
-                aria-hidden="true"
-              />
-              Brief
-              <span className="text-xs font-normal text-muted-foreground">BRIEF.md</span>
-            </CollapsibleTrigger>
-            <CollapsiblePanel>
-              <ChatMarkdown
-                text={briefContents}
-                cwd={status.root}
-                imageBaseDir={status.root}
-                threadRef={threadRef}
-                className="pt-3"
-              />
-            </CollapsiblePanel>
-          </Collapsible>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+/** One acceptance criterion, with its verification key one disclosure away. */
+function AcceptanceCriterionRow({
+  criterion,
+  showId = false,
+}: {
+  criterion: GameAcceptanceCriterion;
+  showId?: boolean;
+}) {
+  return (
+    <li className="rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <Badge size="sm" variant="outline" className="mt-0.5 shrink-0">
+          {criterion.kind}
+        </Badge>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-6 text-foreground/90">{criterion.text}</p>
+          {criterion.observe ? (
+            <details className="mt-1">
+              <summary className="w-fit cursor-pointer text-2xs text-muted-foreground/80 hover:text-foreground">
+                Verification key
+              </summary>
+              <p className="mt-1 break-words font-mono text-2xs leading-4 text-muted-foreground">
+                {criterion.observe.key} {criterion.observe.expect}
+              </p>
+            </details>
+          ) : criterion.kind === "presentation" ? (
+            <p className="mt-1 text-2xs leading-4 text-muted-foreground">
+              Visual stage — not verified yet
+            </p>
+          ) : isNoLoseStateCriterion(criterion) ? (
+            <p className="mt-1 text-2xs leading-4 text-muted-foreground">
+              Declared no losing state — no loss transition is verified, and this is not proof that
+              the game cannot be lost.
+            </p>
+          ) : null}
+          {showId ? (
+            <p className="mt-1 break-all font-mono text-2xs leading-4 text-muted-foreground/70">
+              {criterion.id}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -531,26 +610,18 @@ function AcceptanceDiffGroup({
 }) {
   return (
     <div>
-      <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div className="flex items-center gap-2">
+        <p className="text-2xs font-medium uppercase tracking-widest text-muted-foreground">
+          {label}
+        </p>
+        <span className="text-2xs text-muted-foreground/70">{criteria.length}</span>
+      </div>
       {criteria.length === 0 ? (
         <p className="mt-1 text-xs text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="mt-1 space-y-1">
+        <ul className="mt-2 space-y-2">
           {criteria.map((criterion) => (
-            <li key={criterion.id} className="flex items-start gap-2 text-xs">
-              <span className="mt-0.5 shrink-0 rounded-full border border-border px-1.5 py-0.5 text-2xs uppercase tracking-wide text-muted-foreground">
-                {criterion.kind}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block">{criterion.text}</span>
-                <span className="block text-2xs text-muted-foreground">
-                  {criterion.id}
-                  {criterion.observe
-                    ? ` · ${criterion.observe.key} ${criterion.observe.expect}`
-                    : null}
-                </span>
-              </span>
-            </li>
+            <AcceptanceCriterionRow key={criterion.id} criterion={criterion} showId />
           ))}
         </ul>
       )}

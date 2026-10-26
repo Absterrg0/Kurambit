@@ -12,6 +12,16 @@ export const GAME_CHAT_MAX_WIDTH = 760;
  * it never gets more than this share of the workspace.
  */
 export const GAME_CHAT_MAX_WORKSPACE_SHARE = 0.45;
+/**
+ * Below this workspace width (the row after the sidebar, not the window) the
+ * chat and the stage cannot both stay usable, so the workbench shows one pane
+ * at a time. The threshold leaves a docked stage at least 600px at the default
+ * chat width.
+ */
+export const GAME_WORKSPACE_DOCK_MIN_WIDTH = 960;
+
+export const isGameWorkspaceCompact = (workspaceWidth: number) =>
+  workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;
 
 export const clampGameChatWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
   Math.min(
@@ -43,6 +53,10 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setChatWidth: (width) => set({ chatWidth: clampGameChatWidth(width) }),
       fitChatWidth: (workspaceWidth) =>
         set((state) => {
+          // A compact workspace shows one pane at a time, so its narrow width
+          // says nothing about the docked width the creator chose. Fitting
+          // there would quietly rewrite the remembered preference.
+          if (isGameWorkspaceCompact(workspaceWidth)) return {};
           const fitted = clampGameChatWidth(state.chatWidth, workspaceWidth);
           return fitted === state.chatWidth ? {} : { chatWidth: fitted };
         }),

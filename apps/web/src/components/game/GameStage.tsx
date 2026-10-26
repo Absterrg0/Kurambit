@@ -3,9 +3,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import {
+  ChevronDownIcon,
   DownloadIcon,
   Gamepad2Icon,
   MaximizeIcon,
+  MessageSquareIcon,
   MinimizeIcon,
   MonitorIcon,
   MonitorPlayIcon,
@@ -96,11 +98,20 @@ export function GameStage({
   threadRef,
   turnRunning,
   onAskAgent,
+  compact = false,
+  hidden = false,
+  onShowChat,
 }: {
   threadRef: ScopedThreadRef;
   /** The thread's agent turn is running; a settled turn refreshes the stage. */
   turnRunning: boolean;
   onAskAgent: (text: string) => void;
+  /** The workbench shows a single pane, so chat is a switch rather than a dock toggle. */
+  compact?: boolean;
+  /** Another compact pane is showing; the stage stays mounted but is inert. */
+  hidden?: boolean;
+  /** Opens the compact workbench's chat pane. */
+  onShowChat?: (() => void) | undefined;
 }) {
   const navigate = useNavigate();
   const query = useIsGameThreadStatus(threadRef);
@@ -128,6 +139,14 @@ export function GameStage({
     readonly serve: GamePreviewServe;
   } | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
+  // A compact switch unmounts nothing, but focus would die with the hidden
+  // pane's button. Move it to the stage when the stage comes back.
+  const stageWasHidden = useRef(hidden);
+  useEffect(() => {
+    const wasHidden = stageWasHidden.current;
+    stageWasHidden.current = hidden;
+    if (wasHidden && !hidden) stageRef.current?.focus({ preventScroll: true });
+  }, [hidden]);
   const dragRef = useRef<{ x: number; width: number } | null>(null);
   const refresh = query.refresh;
   const data = query.data;
@@ -313,289 +332,349 @@ export function GameStage({
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  const templateName = template?.name ?? `Godot ${data.manifest.engine.version}`;
+  const stageSubtitle =
+    stagePhaseLabel === null
+      ? templateName
+      : template === undefined
+        ? stagePhaseLabel
+        : `${templateName} · ${stagePhaseLabel}`;
+  const activeTabLabel = tabs.find((entry) => entry.value === activeTab)?.label ?? "Stage";
+  const statusBanner =
+    failureVisible !== null ? (
+      <div className="flex items-center gap-2 border-t border-destructive/20 bg-destructive/8 px-3 py-1.5 text-xs text-destructive-foreground">
+        <TriangleAlertIcon className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
+        <span className="line-clamp-2 min-w-0 flex-1 break-words">
+          {failureVisible.split("\n")[0] ?? failureVisible}
+        </span>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="shrink-0"
+          onClick={() => askAgentToFix(failureVisible)}
+        >
+          Ask agent to fix
+        </Button>
+      </div>
+    ) : noticeVisible !== null ? (
+      <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1">
+          <TruncatedText text={noticeVisible} className="block" />
+        </span>
+        <Button
+          size="icon-micro"
+          variant="ghost"
+          className="shrink-0"
+          aria-label="Dismiss status"
+          onClick={() => {
+            setError(null);
+            setMessage(null);
+            setDismissedOperationAt(operation?.at ?? null);
+          }}
+        >
+          <XIcon className="size-3" aria-hidden="true" />
+        </Button>
+      </div>
+    ) : designLock !== null && phase.kind === "playing" ? (
+      <div className="border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => setTab("design")}
+          className="flex cursor-pointer items-center gap-1.5 text-xs text-warning-foreground underline-offset-2 hover:underline"
+        >
+          <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          {DESIGN_LOCK_LABEL[designLock]}
+        </button>
+      </div>
+    ) : staleChipVisible ? (
+      <div className="flex items-center gap-2 border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5 text-xs text-warning-foreground">
+        <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">This web build is older than the latest changes.</span>
+        <Button
+          size="xs"
+          variant="warning-outline"
+          disabled={!stagingEnabled}
+          onClick={() => void perform("rebuild")}
+        >
+          Rebuild
+        </Button>
+      </div>
+    ) : null;
   return (
     <section
       ref={stageRef}
       data-game-stage="true"
       aria-label={`${data.manifest.name} game stage`}
-      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      aria-hidden={hidden}
+      inert={hidden}
+      tabIndex={-1}
+      className={cn(
+        "relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
+        hidden ? "hidden" : "flex",
+      )}
     >
-      <header className="@container/stage-header flex h-12 shrink-0 items-center gap-2 border-b border-border px-2 pl-3">
-        <Gamepad2Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <h2 className="min-w-0 max-w-56 truncate text-sm font-semibold">
-          <TruncatedText text={data.manifest.name} />
-        </h2>
-        <span className="hidden shrink-0 text-xs text-muted-foreground @[56rem]/stage-header:inline">
-          {template?.name ?? `Godot ${data.manifest.engine.version}`}
-        </span>
-        <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
-        <ToggleGroup
-          aria-label="Game workspace"
-          className="hidden shrink-0 @[32rem]/stage-header:flex"
-          variant="segmented"
-          value={[activeTab]}
-          onValueChange={(value) => {
-            const next = value[0];
-            if (next === "design" || next === "play" || next === "assets" || next === "builds")
-              setTab(next);
-          }}
-        >
-          {tabs.map((entry) => (
-            <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
-              {entry.label}
-              {entry.value === "assets" && data.assets.length > 0 ? (
-                <span className="text-muted-foreground">{data.assets.length}</span>
-              ) : null}
-              {entry.value === "builds" && data.builds.length > 0 ? (
-                <span className="text-muted-foreground">{data.builds.length}</span>
-              ) : null}
-            </Toggle>
-          ))}
-        </ToggleGroup>
-        <div
-          data-game-stage-status
-          className="flex min-w-0 flex-1 items-center justify-center overflow-hidden px-1"
-        >
-          {building ? (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <RefreshCwIcon
-                className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-              <TruncatedText text={buildingMessage} className="max-w-64" />
-              {buildingStartedAt === null ? null : (
-                <GameElapsed since={buildingStartedAt} className="shrink-0" />
-              )}
-            </span>
-          ) : failureVisible !== null ? (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-destructive-foreground">
-              <TriangleAlertIcon
-                className="size-3.5 shrink-0 text-destructive"
-                aria-hidden="true"
-              />
-              <TruncatedText
-                text={failureVisible.split("\n")[0] ?? failureVisible}
-                className="max-w-64"
-              />
-              <Button
-                size="xs"
-                variant="ghost"
-                className="shrink-0"
-                onClick={() => askAgentToFix(failureVisible)}
-              >
-                Ask agent to fix
-              </Button>
-            </span>
-          ) : noticeVisible !== null ? (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <TruncatedText text={noticeVisible} className="max-w-64" />
-              <Button
-                size="icon-micro"
-                variant="ghost"
-                aria-label="Dismiss status"
-                onClick={() => {
-                  setError(null);
-                  setMessage(null);
-                  setDismissedOperationAt(operation?.at ?? null);
-                }}
-              >
-                <XIcon className="size-3" aria-hidden="true" />
-              </Button>
-            </span>
-          ) : designLock !== null && phase.kind === "playing" ? (
-            <button
-              type="button"
-              onClick={() => setTab("design")}
-              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground transition-colors hover:bg-warning/20"
-            >
-              <TriangleAlertIcon className="size-3" aria-hidden="true" />
-              {DESIGN_LOCK_LABEL[designLock]}
-            </button>
-          ) : staleChipVisible ? (
-            <button
-              type="button"
-              disabled={!stagingEnabled}
-              onClick={() => void perform("rebuild")}
-              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground transition-colors hover:bg-warning/20 disabled:cursor-default"
-            >
-              <TriangleAlertIcon className="size-3" aria-hidden="true" />
-              Rebuild to see latest changes
-            </button>
-          ) : (
-            <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground @[42rem]/stage-header:flex">
-              {stagePhaseLabel === null ? null : (
-                <>
+      <header className="@container/stage-header flex shrink-0 flex-col border-b border-border bg-background">
+        <div className="flex min-h-12 items-center gap-2 px-2 py-1.5 pl-3">
+          <Gamepad2Icon
+            className="hidden size-4 shrink-0 text-muted-foreground @[28rem]/stage-header:block"
+            aria-hidden="true"
+          />
+          <div className="flex min-w-0 flex-1 flex-col justify-center">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="min-w-0 truncate text-sm font-semibold leading-5 tracking-tight">
+                <TruncatedText text={data.manifest.name} />
+              </h2>
+            </div>
+            {building ? (
+              <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+                <RefreshCwIcon
+                  className="size-3 shrink-0 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+                <TruncatedText text={buildingMessage} />
+                {buildingStartedAt === null ? null : (
+                  <GameElapsed since={buildingStartedAt} className="shrink-0" />
+                )}
+              </span>
+            ) : stagePhaseLabel !== null ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground" />
+                  }
+                >
                   {phase.kind === "playing" && qualification.state === "qualified" ? (
                     <span
                       className="size-1.5 shrink-0 rounded-full bg-success"
                       aria-hidden="true"
                     />
                   ) : null}
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="truncate" />}>
-                      {stagePhaseLabel}
-                    </TooltipTrigger>
-                    <TooltipPopup side="bottom">{qualificationDetail}</TooltipPopup>
-                  </Tooltip>
-                </>
-              )}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            size="sm"
-            variant={designFirst ? "secondary" : "default"}
-            disabled={!playEnabled}
-            onClick={() => void perform("preview")}
-          >
-            <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-            {webBuild === undefined ? "Build & play" : "Play"}
-          </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Rebuild the web build"
-                  className="hidden @[46rem]/stage-header:inline-flex"
-                  disabled={!stagingEnabled}
-                  onClick={() => void perform("rebuild")}
-                />
-              }
-            >
-              <RefreshCwIcon className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">Rebuild the web build</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Stop the game"
-                  className="hidden @[40rem]/stage-header:inline-flex"
-                  disabled={!canOperate || !runningSomething}
-                  onClick={() => void perform("stop")}
-                />
-              }
-            >
-              <SquareIcon className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">Stop the game and its preview</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Run native"
-                  className="hidden @[54rem]/stage-header:inline-flex"
-                  disabled={!stagingEnabled || nativeRunning}
-                  onClick={() => void perform("native")}
-                />
-              }
-            >
-              <MonitorPlayIcon className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              {nativeRunning
-                ? "The native game window is already running"
-                : "Run the game in its own window"}
-            </TooltipPopup>
-          </Tooltip>
+                  <span className="truncate">{stageSubtitle}</span>
+                </TooltipTrigger>
+                <TooltipPopup side="bottom">{qualificationDetail}</TooltipPopup>
+              </Tooltip>
+            ) : (
+              <span className="truncate text-xs leading-4 text-muted-foreground">
+                {templateName}
+              </span>
+            )}
+          </div>
+          <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
           <Menu>
             <MenuTrigger
               render={
                 <Button
-                  size="icon-sm"
+                  size="sm"
                   variant="ghost"
-                  aria-label="More game actions"
-                  data-game-stage-more=""
+                  aria-label={`Game view: ${activeTabLabel}`}
+                  className="inline-flex @[30rem]/stage-header:hidden"
                 />
               }
             >
-              <MoreHorizontalIcon className="size-4" aria-hidden="true" />
+              {activeTabLabel}
+              <ChevronDownIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
-            <MenuPopup align="end">
-              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("rebuild")}>
-                <RefreshCwIcon />
-                Rebuild the web build
-              </MenuItem>
-              <MenuItem
-                disabled={!stagingEnabled || nativeRunning}
-                onClick={() => void perform("native")}
-              >
-                <MonitorPlayIcon />
-                {nativeRunning ? "Game window is running" : "Run native"}
-              </MenuItem>
-              <MenuItem
-                disabled={!canOperate || !runningSomething}
-                onClick={() => void perform("stop")}
-              >
-                <SquareIcon />
-                Stop the game
-              </MenuItem>
-              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-windows")}>
-                <MonitorIcon />
-                Export Windows build
-              </MenuItem>
-              <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
-                <DownloadIcon />
-                Export Linux build
-              </MenuItem>
-              <MenuSeparator />
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
-              <MenuRadioGroup
-                value={activeTab}
-                onValueChange={(value) => {
-                  if (
-                    value === "design" ||
-                    value === "play" ||
-                    value === "assets" ||
-                    value === "builds"
-                  )
-                    setTab(value);
-                }}
-              >
-                {tabs.map((entry) => (
-                  <MenuRadioItem key={entry.value} value={entry.value}>
-                    {entry.label}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-              <MenuSeparator />
-              <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
-                {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-                {fullscreen ? "Leave fullscreen" : "Fullscreen"}
-              </MenuItem>
-              <MenuItem
-                onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
-              >
-                <WrenchIcon />
-                Game tools settings
-              </MenuItem>
+            <MenuPopup align="start">
+              {tabs.map((entry) => (
+                <MenuItem key={entry.value} onClick={() => setTab(entry.value)}>
+                  {entry.label}
+                </MenuItem>
+              ))}
             </MenuPopup>
           </Menu>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={chatCollapsed ? "Show chat" : "Hide chat"}
-                  onClick={() => setChatCollapsed(!chatCollapsed)}
-                />
-              }
+          <ToggleGroup
+            aria-label="Game workspace"
+            className="hidden shrink-0 @[30rem]/stage-header:flex"
+            variant="segmented"
+            value={[activeTab]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "design" || next === "play" || next === "assets" || next === "builds")
+                setTab(next);
+            }}
+          >
+            {tabs.map((entry) => (
+              <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
+                {entry.label}
+                {entry.value === "assets" && data.assets.length > 0 ? (
+                  <span className="text-muted-foreground">{data.assets.length}</span>
+                ) : null}
+                {entry.value === "builds" && data.builds.length > 0 ? (
+                  <span className="text-muted-foreground">{data.builds.length}</span>
+                ) : null}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+          <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant={designFirst ? "secondary" : "default"}
+              aria-label={webBuild === undefined ? "Build and play" : "Play game"}
+              disabled={!playEnabled}
+              onClick={() => void perform("preview")}
             >
-              <PanelRightIcon className="size-3.5" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">{chatCollapsed ? "Show chat" : "Hide chat"}</TooltipPopup>
-          </Tooltip>
+              <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
+              <span className="hidden @[40rem]/stage-header:inline">
+                {webBuild === undefined ? "Build & play" : "Play"}
+              </span>
+            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Rebuild the web build"
+                    className="hidden @[46rem]/stage-header:inline-flex"
+                    disabled={!stagingEnabled}
+                    onClick={() => void perform("rebuild")}
+                  />
+                }
+              >
+                <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Rebuild the web build</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Stop the game"
+                    className="hidden @[40rem]/stage-header:inline-flex"
+                    disabled={!canOperate || !runningSomething}
+                    onClick={() => void perform("stop")}
+                  />
+                }
+              >
+                <SquareIcon className="size-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Stop the game and its preview</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Run native"
+                    className="hidden @[54rem]/stage-header:inline-flex"
+                    disabled={!stagingEnabled || nativeRunning}
+                    onClick={() => void perform("native")}
+                  />
+                }
+              >
+                <MonitorPlayIcon className="size-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                {nativeRunning
+                  ? "The native game window is already running"
+                  : "Run the game in its own window"}
+              </TooltipPopup>
+            </Tooltip>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="More game actions"
+                    data-game-stage-more=""
+                  />
+                }
+              >
+                <MoreHorizontalIcon className="size-4" aria-hidden="true" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("rebuild")}>
+                  <RefreshCwIcon />
+                  Rebuild the web build
+                </MenuItem>
+                <MenuItem
+                  disabled={!stagingEnabled || nativeRunning}
+                  onClick={() => void perform("native")}
+                >
+                  <MonitorPlayIcon />
+                  {nativeRunning ? "Game window is running" : "Run native"}
+                </MenuItem>
+                <MenuItem
+                  disabled={!canOperate || !runningSomething}
+                  onClick={() => void perform("stop")}
+                >
+                  <SquareIcon />
+                  Stop the game
+                </MenuItem>
+                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-windows")}>
+                  <MonitorIcon />
+                  Export Windows build
+                </MenuItem>
+                <MenuItem disabled={!stagingEnabled} onClick={() => void perform("export-linux")}>
+                  <DownloadIcon />
+                  Export Linux build
+                </MenuItem>
+                <MenuSeparator />
+                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">View</div>
+                <MenuRadioGroup
+                  value={activeTab}
+                  onValueChange={(value) => {
+                    if (
+                      value === "design" ||
+                      value === "play" ||
+                      value === "assets" ||
+                      value === "builds"
+                    )
+                      setTab(value);
+                  }}
+                >
+                  {tabs.map((entry) => (
+                    <MenuRadioItem key={entry.value} value={entry.value}>
+                      {entry.label}
+                    </MenuRadioItem>
+                  ))}
+                </MenuRadioGroup>
+                <MenuSeparator />
+                <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
+                  {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+                  {fullscreen ? "Leave fullscreen" : "Fullscreen"}
+                </MenuItem>
+                <MenuItem
+                  onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+                >
+                  <WrenchIcon />
+                  Game tools settings
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size={compact ? "sm" : "icon-sm"}
+                    variant="ghost"
+                    aria-label={compact || chatCollapsed ? "Show chat" : "Hide chat"}
+                    onClick={() => {
+                      if (compact) onShowChat?.();
+                      else setChatCollapsed(!chatCollapsed);
+                    }}
+                  />
+                }
+              >
+                {compact ? (
+                  <MessageSquareIcon className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <PanelRightIcon className="size-3.5" aria-hidden="true" />
+                )}
+                {compact ? <span className="hidden @[34rem]/stage-header:inline">Chat</span> : null}
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                {compact || chatCollapsed ? "Show chat" : "Hide chat"}
+              </TooltipPopup>
+            </Tooltip>
+          </div>
         </div>
+        {statusBanner}
       </header>
       {activeTab === "design" ? (
         <GameDesignPanel
@@ -627,7 +706,7 @@ export function GameStage({
           gameName={data.manifest.name}
           previewUrl={data.previewUrl}
           frameKey={frameKey}
-          hidden={activeTab !== "play"}
+          hidden={hidden || activeTab !== "play"}
           canOperate={canOperate}
           onPlay={() => void perform("preview")}
           onRebuild={() => void perform("rebuild")}
@@ -662,7 +741,7 @@ export function GameStage({
           }
         />
       ) : null}
-      {chatCollapsed || fullscreen ? null : (
+      {compact || hidden || chatCollapsed || fullscreen ? null : (
         <div
           role="separator"
           aria-orientation="vertical"

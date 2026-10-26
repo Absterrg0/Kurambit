@@ -260,6 +260,7 @@ import { PersistentThreadTerminalDrawer } from "./PersistentThreadTerminals";
 import {
   AlarmClockIcon,
   CheckCircle2Icon,
+  Gamepad2Icon,
   MessageCircleIcon,
   PaperclipIcon,
   ChevronDownIcon,
@@ -349,6 +350,8 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { useGameWorkspaceStore } from "../gameWorkspaceStore";
+import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
+import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useEnvironmentScope } from "~/state/session";
 import {
   environmentServerConfigsAtom,
@@ -1645,18 +1648,16 @@ export default function ChatView(props: ChatViewProps) {
   const isGameThread = useIsGameThread(activeThreadRef);
   const gameChatWidth = useGameWorkspaceStore((state) => state.chatWidth);
   const gameChatCollapsed = useGameWorkspaceStore((state) => state.chatCollapsed);
-  const fitGameChatWidth = useGameWorkspaceStore((state) => state.fitChatWidth);
-  // A remembered chat width may be wider than this window can spare. Fit it
-  // once per thread and whenever the workspace resizes, before the stage is
-  // laid out, so the game never starts squeezed.
-  useEffect(() => {
-    if (!isGameThread || workspaceLayoutElement === null) return;
-    fitGameChatWidth(workspaceLayoutElement.clientWidth);
-    return observeResize(workspaceLayoutElement, (entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width !== undefined && width > 0) fitGameChatWidth(width);
-    });
-  }, [isGameThread, workspaceLayoutElement, fitGameChatWidth]);
+  // A remembered dock width only means something while both panes fit. The
+  // measurement uses the workspace row after the sidebar, and stops fitting
+  // the stored width while compact so a narrow preview cannot rewrite it.
+  const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
+  const [compactGamePane, setCompactGamePane] = useCompactGamePane(gameWorkspaceCompact);
+  const showCompactGame = () => setCompactGamePane("game");
+  const showCompactChat = () => {
+    setCompactGamePane("chat");
+    window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
+  };
   const panelTerminalIds = new Set(
     rightPanelState.surfaces.flatMap((surface) =>
       surface.kind === "terminal" ? surface.terminalIds : [],
@@ -5386,6 +5387,12 @@ export default function ChatView(props: ChatViewProps) {
       "game.chat.toggle": () => {
         // Only a game thread has the stage this shortcut collapses chat for.
         if (!isGameThread) return false;
+        if (gameWorkspaceCompact) {
+          const next = compactGamePane === "chat" ? "game" : "chat";
+          if (next === "chat") showCompactChat();
+          else showCompactGame();
+          return;
+        }
         useGameWorkspaceStore.getState().toggleChat();
       },
       "rightPanel.toggleMaximized": ({ event }) => {
@@ -7642,18 +7649,27 @@ export default function ChatView(props: ChatViewProps) {
     addFolders: addDroppedFoldersToComposer,
   });
 
-  // Game threads trade the wide chat column for the stage: the chat is docked
-  // at its remembered width and the stage takes everything else.
-  const gameChatDocked =
-    isGameThread && activeThreadRef !== null && !gameChatCollapsed && !rightPanelMaximized;
-  // A collapsed chat gives the stage the whole window; the column stays mounted
-  // at zero width so the composer keeps its draft, and inert so nothing in it
-  // can take focus while it cannot be seen.
-  const gameChatHidden = isGameThread && activeThreadRef !== null && gameChatCollapsed;
+  // Game threads trade the wide chat column for the stage. A wide workspace
+  // docks the chat at its remembered width; a compact one shows a single
+  // usable pane, chosen by the Game/Chat switch, without unmounting either.
+  const gameWorkspace = resolveGameWorkspaceLayout({
+    compact: gameWorkspaceCompact,
+    compactPane: compactGamePane,
+    chatCollapsed: gameChatCollapsed,
+    rightPanelMaximized,
+  });
+  const gameChatDocked = isGameThread && activeThreadRef !== null && gameWorkspace.chatDocked;
+  // A hidden chat keeps its column mounted at zero width so the composer keeps
+  // its draft, and inert so nothing in it can take focus while unseen.
+  const gameChatHidden = isGameThread && activeThreadRef !== null && !gameWorkspace.chatVisible;
+  const gameStageHidden = isGameThread && activeThreadRef !== null && !gameWorkspace.stageVisible;
+  const compactChatVisible =
+    isGameThread && activeThreadRef !== null && gameWorkspace.compact && gameWorkspace.chatVisible;
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      data-game-workspace-compact={gameWorkspace.compact ? "true" : "false"}
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       {isGameThread && activeThreadRef ? (
@@ -7661,19 +7677,19 @@ export default function ChatView(props: ChatViewProps) {
           threadRef={activeThreadRef}
           turnRunning={phase === "running"}
           onAskAgent={askAgentToFixStable}
+          compact={gameWorkspace.compact}
+          hidden={gameStageHidden}
+          onShowChat={showCompactChat}
         />
       ) : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized || gameChatHidden
-            ? "w-0 flex-none"
-            : gameChatDocked
-              ? "shrink-0"
-              : "flex-1",
+          gameChatHidden ? "w-0 flex-none" : gameChatDocked ? "shrink-0" : "flex-1",
         )}
         style={gameChatDocked ? { width: gameChatWidth } : undefined}
         inert={gameChatHidden}
+        aria-hidden={gameChatHidden}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         data-game-chat-docked={gameChatDocked ? "true" : "false"}
       >
@@ -7698,6 +7714,14 @@ export default function ChatView(props: ChatViewProps) {
               aria-hidden
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
+          ) : null}
+          {compactChatVisible ? (
+            <div className="flex shrink-0 items-center px-1">
+              <Button size="sm" variant="ghost" onClick={showCompactGame}>
+                <Gamepad2Icon className="size-3.5" aria-hidden="true" />
+                Game
+              </Button>
+            </div>
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
