@@ -39,6 +39,19 @@ it("teaches the supported no-lose criterion in the creation prompt and scaffold"
   expect(flat(skeleton)).toContain("Never invent an ending the game does not have");
 });
 
+it("recommends a short acceptance-to-proof build plan without adding a new required section", () => {
+  const prompt = initialGamePrompt(createInput);
+  const skeleton = designSkeleton(createInput.name);
+  for (const text of [prompt, skeleton]) expect(flat(text)).toContain("3–5 step build plan");
+  expect(flat(skeleton)).toContain("Each step names the acceptance ids it proves");
+  expect(flat(skeleton)).toContain("first playable checkpoint");
+  expect(flat(prompt)).toContain("make the core loop playable first");
+  // The plan lives in the existing Milestones section: a game written before
+  // this guidance still has every heading its skeleton validates.
+  expect(skeleton).toContain("## Milestones");
+  expect(skeleton).not.toContain("## Build plan");
+});
+
 it.effect("tells every starter template the same no-lose criterion", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -46,7 +59,7 @@ it.effect("tells every starter template the same no-lose criterion", () =>
     const noLose = `\`lose\` criterion with \`"noLoseState": true\` and no observe`;
     // Both starter templates are read before DESIGN.md, so neither may require
     // an observed loss from a game that has none.
-    for (const template of ["2d-platformer", "3d-explorer"] as const) {
+    for (const template of ["2d-platformer", "3d-explorer", "2d-screen"] as const) {
       const templateText = yield* fs.readFileString(
         path.join(import.meta.dirname, "../../templates", template, "TEMPLATE.md"),
       );

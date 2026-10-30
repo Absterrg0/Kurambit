@@ -17,6 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import { PNG } from "pngjs";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import {
@@ -1045,6 +1046,208 @@ it.effect("admits provider and OAuth client credentials and points only clients 
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("keeps repeated default sequence tools image-free with stable frame paths", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const played: unknown[] = [];
+      const verified: unknown[] = [];
+      const tried: unknown[] = [];
+      const frames = (count: number, directory: string) =>
+        Array.from({ length: count }, (_, index) => ({
+          label: index === 0 ? "booted" : index === count - 1 ? "after-steps" : `frame-${index}`,
+          mimeType: "image/png" as const,
+          data: "cG5n",
+          width: 640,
+          height: 360,
+          path: `${directory}/${String(index + 1).padStart(2, "0")}-frame.png`,
+        }));
+      const playtestResult: GameWebPlaytestResult = {
+        executedInputSteps: 2,
+        success: true,
+        booted: true,
+        bootMs: 12,
+        responded: true,
+        changedPercent: 14,
+        message: "Playtest succeeded: fake run.",
+        consoleMessages: [],
+        screenshots: frames(17, "builds/playtests/run-1"),
+        state: null,
+        qualifies: true,
+        blockers: [],
+        interaction: "fake response",
+        evidenceDirectory: "builds/playtests/run-1",
+      };
+      const verifyResult: GameVerifyResult = {
+        success: true,
+        message: "Mechanical verification passed for build test.",
+        completed: ["check", "test", "export", "playtest"],
+        playtest: {
+          success: true,
+          booted: true,
+          bootMs: 12,
+          responded: true,
+          changedPercent: 14,
+          message: "Playtest succeeded: fake run.",
+          consoleMessages: [],
+          state: null,
+          qualifies: true,
+          blockers: [],
+          interaction: "fake response",
+        },
+        screenshots: frames(17, "builds/playtests/run-2"),
+      };
+      const tryResult: GameWebPlaytestResult = {
+        ...playtestResult,
+        screenshots: frames(3, "/state/game-input-experiments/exp-1/evidence"),
+        evidenceDirectory: "/state/game-input-experiments/exp-1/evidence",
+      };
+      const imageBuilderThread = ThreadId.make("image-builder-thread");
+      const serverLayer = McpHttpServer.layerGameToolkit.pipe(
+        Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+        Layer.provide(
+          Layer.mock(GameReviewApi.GameReviewApi)({
+            status: () => Effect.die("unused"),
+            stop: () => Effect.die("unused"),
+            submit: () => Effect.die("unused"),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(GameService.GameService)({
+            webPlaytest: (threadId, input) =>
+              Effect.sync(() => {
+                played.push({ threadId, input });
+                return playtestResult;
+              }),
+            verify: (threadId, input) =>
+              Effect.sync(() => {
+                verified.push({ threadId, input });
+                return verifyResult;
+              }),
+          }),
+        ),
+        Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provide(GameRecipes.layer),
+        Layer.provide(
+          Layer.mock(GameReviewSessions.GameReviewSessions)({
+            inspectDetail: () => Effect.die("unused"),
+            tryInput: (caller, input) =>
+              Effect.sync(() => {
+                tried.push({ caller, input });
+                return tryResult;
+              }),
+            toolRole: () => Effect.succeed(null),
+            repairChild: () => Effect.succeed(false),
+            report: () => Effect.die("unused"),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (token) =>
+              Effect.succeed({
+                ...invocation,
+                thread: {
+                  ...invocation.thread,
+                  threadId: token === "image-builder" ? imageBuilderThread : threadId,
+                },
+              }),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const client = yield* HttpClient.HttpClient;
+      const rpc = (sessionId: string | undefined, method: string, params: unknown) =>
+        client.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: "Bearer image-builder",
+            ...(sessionId === undefined
+              ? {}
+              : { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" }),
+          },
+          body: HttpBody.text(
+            JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+            "application/json",
+          ),
+        });
+      const session = yield* rpc(undefined, "initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "image-overflow-test", version: "1" },
+      }).pipe(Effect.map((response) => response.headers["mcp-session-id"]!));
+      const call = (name: string, args: Record<string, unknown>) =>
+        rpc(session, "tools/call", { name, arguments: args }).pipe(
+          Effect.flatMap((response) => response.text),
+        );
+      const catalog = yield* rpc(session, "tools/list", {}).pipe(
+        Effect.flatMap((response) => response.text),
+      );
+      expect(catalog).toMatch(/"includeImage":\{"type":"boolean"/);
+      const imageBlocks = (body: string) => (body.match(/"type":"image"/g) ?? []).length;
+      // Three default playtests at the diagnosis's 17 frames each: the exact
+      // 51-frame sequence that used to end the turn with 51 inline images.
+      const bodies: string[] = [];
+      for (let round = 0; round < 3; round++)
+        bodies.push(yield* call("game_web_playtest", { steps: [{ press: "Space" }] }));
+      bodies.push(yield* call("game_verify", { steps: [{ press: "Space" }] }));
+      bodies.push(yield* call("game_try_input", { steps: [{ press: "Space" }] }));
+      for (const body of bodies) {
+        expect(body).not.toContain('"isError":true');
+        expect(imageBlocks(body)).toBe(0);
+        expect(body).not.toContain('"data":"cG5n"');
+      }
+      const combined = bodies.join("\n");
+      expect(imageBlocks(combined)).toBe(0);
+      // Full evidence stays: counts, deltas, labels, per-frame paths and the
+      // evidence directories a file read starts from.
+      expect(combined).toContain('"executedInputSteps":2');
+      expect(combined).toContain('"changedPercent":14');
+      expect(combined).toContain('"label":"after-steps"');
+      expect(combined).toContain('"path":"builds/playtests/run-1/01-frame.png"');
+      expect(combined).toContain('"path":"builds/playtests/run-1/17-frame.png"');
+      expect(combined).toContain('"evidenceDirectory":"builds/playtests/run-1"');
+      expect(combined).toContain('"completed":["check","test","export","playtest"]');
+      expect(combined).toContain('"path":"builds/playtests/run-2/01-frame.png"');
+      expect(combined).toContain(
+        '"path":"/state/game-input-experiments/exp-1/evidence/03-frame.png"',
+      );
+      expect(combined).toContain(
+        '"evidenceDirectory":"/state/game-input-experiments/exp-1/evidence"',
+      );
+      // Transport metadata never reaches the service: strict decoding sees
+      // only the tool's own parameters.
+      expect(played).toHaveLength(3);
+      expect(played[0]).toEqual({
+        threadId: imageBuilderThread,
+        input: { steps: [{ press: "Space" }] },
+      });
+      expect(verified).toEqual([
+        { threadId: imageBuilderThread, input: { steps: [{ press: "Space" }] } },
+      ]);
+      // Explicit opt-in still attaches the whole kept sequence, bounded by
+      // the service's byte budget rather than the new default.
+      const explicit = yield* call("game_web_playtest", {
+        steps: [{ press: "Space" }],
+        includeImage: true,
+      });
+      expect(explicit).not.toContain('"isError":true');
+      expect(imageBlocks(explicit)).toBe(17);
+      expect(explicit).toContain('"path":"builds/playtests/run-1/01-frame.png"');
+      expect(played).toHaveLength(4);
+      // A non-boolean override fails cleanly before the service runs instead
+      // of silently attaching (or dropping) every frame.
+      const rejected = yield* call("game_web_playtest", {
+        steps: [{ press: "Space" }],
+        includeImage: "false",
+      });
+      expect(rejected).toContain('"isError":true');
+      expect(rejected).toContain("includeImage must be a boolean.");
+      expect(played).toHaveLength(4);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect(
   "only lists the matching internal review answer tool and returns validation feedback through MCP",
   () =>
@@ -1052,6 +1255,7 @@ it.effect(
       Effect.gen(function* () {
         const seen: unknown[] = [];
         const tried: unknown[] = [];
+        const inspected: unknown[] = [];
         const imported: unknown[] = [];
         const verified: unknown[] = [];
         const played: unknown[] = [];
@@ -1193,6 +1397,29 @@ it.effect(
           Layer.provide(GameRecipes.layer),
           Layer.provide(
             Layer.mock(GameReviewSessions.GameReviewSessions)({
+              inspectDetail: (caller, input) =>
+                Effect.sync(() => {
+                  inspected.push({ caller, input });
+                  return {
+                    screenshots: [
+                      {
+                        label: "detail f1",
+                        mimeType: "image/png" as const,
+                        data: PNG.sync.write(new PNG({ width: 16, height: 16 })).toString("base64"),
+                        width: 16,
+                        height: 16,
+                      },
+                    ],
+                    detail: {
+                      ...input,
+                      scale: 2,
+                      sourceWidth: 64,
+                      sourceHeight: 48,
+                      pair: false,
+                      regions: [{ name: "frame", mean: [101, 113, 175] as const, pixels: 64 }],
+                    },
+                  };
+                }),
               tryInput: (caller, input) =>
                 Effect.sync(() => {
                   tried.push({ caller, input });
@@ -1334,14 +1561,29 @@ it.effect(
         // The builder toolkit is the largest catalog; a fresh review must not
         // pay for its schemas in every code-mode search.
         const builderTools = [
+          "game_art_frames",
           "game_art_get",
           "game_art_import",
           "game_art_search",
+          "game_assets_inspect",
+          "game_audio_inspect",
           "game_blender_run",
+          "game_check",
+          "game_explore_act",
+          "game_explore_close",
+          "game_explore_replay",
+          "game_explore_start",
           "game_export",
           "game_godot_check",
+          "game_godot_api",
           "game_godot_import",
           "game_godot_test",
+          "game_import",
+          "game_library_search",
+          "game_library_get",
+          "game_library_import_model",
+          "game_library_import_material",
+          "game_native_capture",
           "game_package_web",
           "game_package_windows",
           "game_preview",
@@ -1352,11 +1594,13 @@ it.effect(
           "game_review_status",
           "game_review_stop",
           "game_run_native",
+          "game_runtime_calibrate",
           "game_scenarios_run",
           "game_scene_inspect",
           "game_status",
           "game_stop",
           "game_submit",
+          "game_test",
           "game_try_input",
           "game_verify",
           "game_web_playtest",
@@ -1365,6 +1609,9 @@ it.effect(
           "game_art_get",
           "game_art_search",
           "game_critic_report",
+          "game_review_detail",
+          "game_library_search",
+          "game_library_get",
           "game_recipe_get",
           "game_recipe_search",
           "game_try_input",
@@ -1395,13 +1642,16 @@ it.effect(
           expect(repairAfterBody).not.toContain(`"name":"${name}"`);
         }
         expect(yield* toolNames("critic", critic)).toEqual(criticTools);
-        expect(yield* toolNames("ballot", ballot)).toEqual(["game_ballot"]);
+        expect(yield* toolNames("ballot", ballot)).toEqual(["game_ballot", "game_review_detail"]);
         // Roles are resolved per request, not per session or server. The same
         // MCP session must get the new catalog when the thread's review role
         // changes, and the old one when it changes back.
         expect(yield* toolNames("switch", switching)).toEqual(criticTools);
         yield* Ref.set(switchedRole, "ballot");
-        expect(yield* toolNames("switch", switching)).toEqual(["game_ballot"]);
+        expect(yield* toolNames("switch", switching)).toEqual([
+          "game_ballot",
+          "game_review_detail",
+        ]);
         yield* Ref.set(switchedRole, null);
         expect(yield* toolNames("switch", switching)).toEqual(builderTools);
         yield* Ref.set(switchedRole, "critic");
@@ -1418,6 +1668,31 @@ it.effect(
         expect(yield* list("ballot", ballot)).not.toContain('"name":"game_try_input"');
         expect(yield* list("critic", critic)).toContain('"name":"game_try_input"');
         expect(yield* list("other", other)).toContain('"name":"game_try_input"');
+        for (const [token, session] of [
+          ["critic", critic],
+          ["ballot", ballot],
+        ] as const) {
+          const detail = yield* rpc(token, session, "tools/call", {
+            name: "game_review_detail",
+            arguments: { frameId: "f1", x: 0, y: 0, width: 8, height: 8 },
+          }).pipe(Effect.flatMap((response) => response.text));
+          expect(detail).not.toContain('"isError":true');
+          expect(detail).toContain('"type":"image"');
+          expect(detail).toContain('"mean":[101,113,175]');
+          const metadata = yield* rpc(token, session, "tools/call", {
+            name: "game_review_detail",
+            arguments: { frameId: "f1", x: 0, y: 0, width: 8, height: 8, includeImage: false },
+          }).pipe(Effect.flatMap((response) => response.text));
+          expect(metadata).not.toContain('"type":"image"');
+          expect(metadata).toContain('"mean":[101,113,175]');
+        }
+        expect(inspected).toHaveLength(4);
+        const forbiddenDetail = yield* rpc("builder", builder, "tools/call", {
+          name: "game_review_detail",
+          arguments: { frameId: "f1", x: 0, y: 0, width: 8, height: 8 },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(forbiddenDetail).toContain("error");
+        expect(inspected).toHaveLength(4);
         // The read-only know-how toolkit is listed for the three working roles and
         // hidden from ballots.
         for (const [token, session] of [
@@ -1557,6 +1832,7 @@ it.effect(
             exactSize: true,
             width: 900,
             height: 900,
+            includeImage: true,
           },
         }).pipe(Effect.flatMap((response) => response.text));
         expect(exactPlaytest).not.toContain('"isError":true');
@@ -1575,7 +1851,7 @@ it.effect(
         });
         const verifiedCall = yield* rpc("builder", builder, "tools/call", {
           name: "game_verify",
-          arguments: { steps: [{ press: "Space" }] },
+          arguments: { steps: [{ press: "Space" }], includeImage: true },
         }).pipe(Effect.flatMap((response) => response.text));
         expect(verifiedCall).not.toContain('"isError":true');
         expect(verifiedCall).toContain('"completed":["check","test","export","playtest"]');
@@ -1603,7 +1879,7 @@ it.effect(
         // declared toolkit failure is an error result.
         const failedFrames = yield* rpc("builder", builder, "tools/call", {
           name: "game_verify",
-          arguments: { steps: [{ press: "F" }] },
+          arguments: { steps: [{ press: "F" }], includeImage: true },
         }).pipe(Effect.flatMap((response) => response.text));
         expect(failedFrames).not.toContain('"isError":true');
         expect(failedFrames).toContain('"success":false');
@@ -1619,17 +1895,15 @@ it.effect(
         expect(builderSearch).toContain('"matchingTags":["platformer","unresponsive-jump"]');
         expect(builderSearch).toContain('"engines":["godot"]');
         expect(builderSearch).toContain('"nextCursor":"5"');
-        // Actual builder calls used `query`. It is a literal alias search, so it
-        // must find the dialogue recipe instead of browsing the whole catalog.
+        // Free-text intent reaches matching recipes without browsing the catalog.
         const querySearch = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_search",
           arguments: { query: "dialogue" },
         }).pipe(Effect.flatMap((response) => response.text));
         expect(querySearch).toContain('"id":"loop.dialogue"');
-        expect(querySearch).toContain('"matchingTags":["dialogue tree"]');
+        expect(querySearch).toContain('"matchingTags":["dialogue","dialogue tree"]');
         expect(querySearch).not.toContain('"id":"feel.buffer"');
-        // A phrase with no declared alias match is an honest empty page, not a
-        // semantic guess and not a browse.
+        // Unrelated intent stays an empty page.
         const queryMiss = yield* rpc("builder", builder, "tools/call", {
           name: "game_recipe_search",
           arguments: { query: "dragon riding school" },
@@ -1710,8 +1984,17 @@ it.effect(
         expect(experiment).toContain('"frameId":"try1f2"');
         expect(experiment).toContain('"label":"input 1 after"');
         expect(experiment).toContain('"changedPercent":2');
-        expect(experiment).toContain('"type":"image"');
-        expect(tried).toHaveLength(2);
+        // Sequence tools are metadata-only by default: the frame is citable
+        // and its path is present, but no image bytes ride along.
+        expect(experiment).not.toContain('"type":"image"');
+        expect(experiment).not.toContain('"data":"cG5n"');
+        const experimentImages = yield* rpc("critic", critic, "tools/call", {
+          name: "game_try_input",
+          arguments: { steps: [{ press: "Space" }], includeImage: true },
+        }).pipe(Effect.flatMap((response) => response.text));
+        expect(experimentImages).toContain('"frameId":"try1f2"');
+        expect(experimentImages).toContain('"type":"image"');
+        expect(tried).toHaveLength(3);
         expect(tried[1]).toMatchObject({ caller: { threadId } });
         expect(yield* list("other", other)).not.toContain("game_critic_report");
         const refused = yield* rpc("other", other, "tools/call", {

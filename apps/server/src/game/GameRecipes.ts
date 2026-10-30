@@ -107,9 +107,146 @@ const matchingTags = (
   return groups.flatMap((values) => values.filter((value) => fold(value) === wanted));
 };
 
-const matchingAliases = (aliases: ReadonlyArray<string>, text: string): ReadonlyArray<string> => {
-  const wanted = fold(text);
-  return aliases.filter((alias) => fold(alias).includes(wanted));
+/**
+ * Small closed stopwords for free-text queries. A query that names only these
+ * matches nothing instead of returning the whole catalog as "related".
+ */
+const RECIPE_STOPWORDS: ReadonlySet<string> = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "with",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "at",
+  "is",
+  "are",
+  "be",
+  "as",
+  "by",
+  "from",
+  "that",
+  "this",
+  "it",
+  "its",
+  "into",
+  "over",
+  "under",
+  "my",
+  "our",
+  "your",
+  "how",
+  "what",
+  "when",
+  "make",
+  "need",
+  "want",
+  "game",
+  // Negation operators never score on their own: "without", "no" and "not"
+  // name the exclusion (handled below), they do not describe a mechanism.
+  // A query of only these still matches nothing, never browses.
+  "without",
+  "no",
+  "not",
+  "never",
+  "none",
+]);
+
+const singularizeRecipeToken = (token: string): string => {
+  if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("s") && token.length > 3 && !token.endsWith("ss")) return token.slice(0, -1);
+  return token;
+};
+
+/**
+ * Bounded verb-form recall without a semantic parser: the haystack also
+ * carries the naive "doing" and "did" spellings of each catalog word, so
+ * "jumping" reaches "jump" and "pressed" reaches "press". Only plain
+ * suffixing is generated ("press" -> "pressing"); e-drop ("ride" ->
+ * "riding") and doubled-consonant ("hit" -> "hitting") forms are not, so an
+ * unrelated query can still match nothing. Query tokens are never expanded,
+ * so long-standing matched-tag reports keep working.
+ */
+const haystackForms = (token: string): ReadonlyArray<string> =>
+  token.length >= 4 ? [token, `${token}ing`, `${token}ed`] : [token];
+
+const splitRecipeTokens = (value: string): ReadonlyArray<string> =>
+  fold(value)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 2)
+    .map(singularizeRecipeToken);
+
+/** Meaningful query tokens: split, singularize, drop stopwords. Empty means no text filter. */
+const queryTextTokens = (text: string): ReadonlyArray<string> => {
+  const seen = new Set<string>();
+  for (const token of splitRecipeTokens(text)) {
+    if (RECIPE_STOPWORDS.has(token)) continue;
+    seen.add(token);
+  }
+  return [...seen];
+};
+
+/**
+ * Explicit negated technique words, bounded and honest: only "without X",
+ * "with no X", "no X", "not X" or "never X" with the single following word,
+ * matched literally against catalog vocabulary. A two-word technique is
+ * caught through its first word ("without camera shake" negates "camera",
+ * which the shake recipe names). Scope, double negation and paraphrase
+ * ("steady camera" for "without shake") are not understood: a negated word
+ * with no catalog match excludes nothing, and exclusion is deliberately
+ * broad — any recipe mentioning the negated word is filtered, even when the
+ * word is only one of its aliases.
+ */
+const NEGATION_PATTERN = /\b(?:without(?:\s+any)?|with\s+no|no|not|never)\s+([a-z][a-z0-9-]*)/g;
+
+const negatedQueryTokens = (text: string): ReadonlySet<string> => {
+  const negated = new Set<string>();
+  NEGATION_PATTERN.lastIndex = 0;
+  for (let match = NEGATION_PATTERN.exec(fold(text)); match !== null;) {
+    for (const token of splitRecipeTokens(match[1]!)) {
+      if (RECIPE_STOPWORDS.has(token)) continue;
+      negated.add(token);
+    }
+    match = NEGATION_PATTERN.exec(fold(text));
+  }
+  return negated;
+};
+
+const haystackTokens = (entry: GameRecipeCatalogEntry): ReadonlySet<string> =>
+  new Set(
+    [
+      entry.recipe.title,
+      ...entry.recipe.genres,
+      ...entry.recipe.mechanics,
+      ...entry.recipe.defects,
+      ...entry.recipe.aliases,
+      entry.recipe.intent,
+      // Deliberately not the why/failure/restyle/verification narratives:
+      // story prose ("feel like", "jumps nodes", "does the character jump",
+      // "and sound") outranks the true mechanism or breaks exact lookups.
+      // get(includeReference:false) already serves that guidance verbatim.
+    ].flatMap((value) => splitRecipeTokens(value).flatMap(haystackForms)),
+  );
+
+/**
+ * The authored tags or aliases a text query matched, for the summary. A tag
+ * matches when one of its own tokens equals a query token, so a full sentence
+ * still reports the concrete vocabulary ("jump", "coyote time") it hit.
+ */
+const matchingTextTags = (
+  recipe: GameRecipeCatalogEntry["recipe"],
+  tokens: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const wanted = new Set(tokens);
+  const tags = [...recipe.genres, ...recipe.mechanics, ...recipe.defects, ...recipe.aliases];
+  return uniqueTags(
+    tags.filter((tag) => splitRecipeTokens(tag).some((token) => wanted.has(token))),
+  );
 };
 
 interface RankedRecipe {
@@ -119,13 +256,23 @@ interface RankedRecipe {
 }
 
 /**
- * Each provided field the recipe matched adds one to the score; ties fall back
- * to the id so the same query always returns the same page order. Fields union:
- * a recipe that matches fewer filters can still surface below the best matches.
+ * Structured fields stay exact closed-vocabulary filters; free text is a
+ * ranked token overlap over titles, tags, aliases and intent, plus naive
+ * verb-form variants of those same words. Each structured field
+ * the recipe matched adds one to the score and each distinct query token it
+ * contains adds one more; ties fall back to the id so the same query always
+ * returns the same page order. Fields union: a recipe that matches fewer
+ * filters can still surface below the best matches. Explicit negated technique
+ * words ("without shake", "no jumping") filter out any recipe mentioning
+ * them, before pagination; structured filters, union and pagination are
+ * unchanged, and unknown or paraphrased negations exclude nothing. A text
+ * query with no meaningful tokens (empty or stopwords only) matches nothing,
+ * never browses.
  */
 const rankRecipe = (
   entry: GameRecipeCatalogEntry,
   input: GameRecipeSearchInput,
+  negated?: ReadonlySet<string>,
 ): RankedRecipe | null => {
   const { recipe } = entry;
   const filters = [
@@ -144,11 +291,26 @@ const rankRecipe = (
     tags.push(...found);
   }
   if (hasTerm(input.text)) {
-    const found = matchingAliases(recipe.aliases, input.text);
-    if (found.length > 0) {
-      score += 1;
-      tags.push(...found);
+    const tokens = queryTextTokens(input.text);
+    if (tokens.length === 0) {
+      if (!browsing && score === 0) return null;
+    } else {
+      const haystack = haystackTokens(entry);
+      if (negated !== undefined) {
+        for (const token of negated) {
+          if (haystack.has(token)) return null;
+        }
+      }
+      const matched = tokens.filter((token) => haystack.has(token));
+      if (matched.length === 0) {
+        if (!browsing && score === 0) return null;
+      } else {
+        score += matched.length;
+        tags.push(...matchingTextTags(recipe, matched));
+      }
     }
+    if (!browsing && score === 0) return null;
+    return { entry, score, matchingTags: uniqueTags(tags) };
   }
   if (!browsing && score === 0) return null;
   return { entry, score, matchingTags: uniqueTags(tags) };
@@ -187,7 +349,13 @@ export const make = (catalog: ReadonlyArray<GameRecipeCatalogEntry>): GameRecipe
       }
 
       const ranked = entries
-        .map((entry) => rankRecipe(entry, terms))
+        .map((entry) =>
+          rankRecipe(
+            entry,
+            terms,
+            hasTerm(terms.text) ? negatedQueryTokens(terms.text!) : undefined,
+          ),
+        )
         .filter((ranked): ranked is RankedRecipe => ranked !== null)
         .sort(
           (left, right) =>

@@ -78,7 +78,7 @@ it.live.skipIf(!available)(
             // Every starter template reaches the same bar: its own gameplay
             // entry initializes and its player (when it has one) has a usable
             // collider. Blank has no menu, so its gameplay entry is its main scene.
-            for (const template of ["2d-platformer", "blank"] as const) {
+            for (const template of ["2d-platformer", "2d-screen", "blank"] as const) {
               const other = yield* projects.create({
                 name: `Check Runner ${template}`,
                 parentDirectory: parent,

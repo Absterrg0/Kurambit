@@ -7,12 +7,33 @@
  * The runner is intentionally dumb: it starts the real main scene, injects input
  * every physics frame and samples GameState plus the "player" group. It never
  * calls a game function or writes a game property, so a passing route proves the
- * game is playable with the same input a person uses.
+ * game is playable with the same input a person uses. When the request asks
+ * for it, the runner also takes a small bounded set of layout probes near
+ * input step boundaries with the shared geometry scanner: findings are
+ * diagnostic hints for Web-frame inspection, never quality verdicts.
  */
+import { GODOT_LAYOUT_SCANNER } from "./godotLayoutScanner.ts";
+import { GODOT_SHARED_PROBE } from "./godotSharedProbe.ts";
+
 export const GODOT_SCENARIO_SCRIPT = `extends SceneTree
+
+${GODOT_LAYOUT_SCANNER}
+
+${GODOT_SHARED_PROBE}
 
 const LIMITS := {"steps": 2000, "frames": 36000}
 const MAX_ACTIONS_PER_STEP := 8
+# Bounded runtime layout probes: one boot probe plus at most three
+# step-boundary probes per scenario, so even the longest routes cannot
+# multiply the pairwise geometry comparisons without bound.
+const LAYOUT_MAX_STEP_PROBES := 3
+# Bounded runtime spatial snapshots: boot plus at most three step boundaries
+# at the same schedule. One traversal per probe, capped so the longest routes
+# stay bounded. All world-geometry reads are synchronous transforms.
+const SPATIAL_MAX_NODES := 600
+const SPATIAL_MAX_AREAS := 16
+const SPATIAL_MAX_SHAPES := 32
+const SPATIAL_MAX_SNAPSHOTS := 4
 
 var _result_path := ""
 var _request := {}
@@ -20,7 +41,38 @@ var _scenario := {}
 var _observations: Array = []
 var _sample_every := 6
 var _boot_frames := 30
+var _record_timeline := false
+var _record_runtime_state := false
+# Bounded runtime layout inspection, off unless the request asks: probes run
+# near input step boundaries and gameplay baselines, never just the menu, with
+# no injected input, no route steps and no source mutation. Probes must not
+# await extra frames: even idle-frame waits can advance game physics.
+var _record_layout := false
+var _layout_state := {"warnings": 0, "pairs": 0, "inspected": 0}
+var _layout_findings: Array = []
+var _layout_probes := 0
+var _layout_omitted := 0
+var _layout_step := -1
+var _layout_probe_steps: Array = []
+# Bounded runtime spatial snapshots, off unless the request asks: world-space
+# player origin/velocity plus Area collision-shape bounds at the same probe
+# schedule. Synchronous transform reads only, no ticks, no input, no writes.
+var _record_spatial := false
+var _spatial_snapshots: Array = []
+var _spatial_visited := 0
+var _spatial_areas := 0
+var _spatial_shapes := 0
+var _spatial_skipped_freed := 0
+var _spatial_truncated := false
+var _spatial_omitted := 0
+var _spatial_probe_steps: Array = []
+var _initial_game_state: Variant = null
+var _seed_has := false
+var _seed_value := 0
+var _expected_user_prefix := ""
+var _initial_user_data_dir := ""
 var _frame := 0
+var _timeline: Array = []
 var _held := {}
 var _stats := {}
 var _first_input_frame := -1
@@ -28,6 +80,7 @@ var _baseline_frame := -1
 var _baseline_values := {}
 var _player: Variant = null
 var _player_first: Variant = null
+var _player_baseline: Variant = null
 var _player_last: Variant = null
 var _player_moved := false
 var _player_seen := false
@@ -53,6 +106,39 @@ func _initialize() -> void:
 	_observations = _request.get("observations", [])
 	_sample_every = maxi(int(_request.get("sampleEvery", 6)), 1)
 	_boot_frames = maxi(int(_request.get("bootFrames", 30)), 0)
+	# Native capture only: the exam never sets this, so its result shape is unchanged.
+	_record_timeline = bool(_request.get("recordTimeline", false))
+	_record_runtime_state = bool(_request.get("recordRuntimeState", false))
+	# Layout probes measure at the project's logical window size, the way the
+	# checker does: a custom headless SceneTree otherwise keeps a 64x64 root.
+	# The size is only touched when layout inspection was requested, so native
+	# capture and calibration runs keep their existing behavior byte for byte.
+	_record_layout = bool(_request.get("recordLayout", false))
+	if _record_layout:
+		# Apply after Window initialization without ticking autoloads before the run.
+		root.set_deferred("size", Vector2i(int(ProjectSettings.get_setting("display/window/size/viewport_width", 1152)), int(ProjectSettings.get_setting("display/window/size/viewport_height", 648))))
+	# Spatial snapshots reuse the same schedule but never touch window size or
+	# physics: world transforms read the same frames with or without probing.
+	_record_spatial = bool(_request.get("recordSpatial", false))
+	# Calibration only: a fixed global seed applied before the main scene
+	# loads. Autoloads that already randomized, plus RandomNumberGenerator
+	# randomize/time/external state, stay outside guarantees (see warnings).
+	if _request.has("seed"):
+		_seed_has = true
+		_seed_value = int(_request.get("seed", 0))
+	# Isolation check: the service passes the per-run XDG data home it gave
+	# this child. The expected prefix is verified before the game main plays,
+	# so a user:// that escapes isolation fails closed instead of looking clean.
+	_expected_user_prefix = str(_request.get("expectedUserDataPrefix", ""))
+	_initial_user_data_dir = OS.get_user_data_dir()
+	if not _expected_user_prefix.is_empty():
+		if _initial_user_data_dir.is_empty() or not (_initial_user_data_dir == _expected_user_prefix or _initial_user_data_dir.begins_with(_expected_user_prefix.trim_suffix("/") + "/")):
+			_error = "The engine user data dir is outside the isolated per-run directory; refusing instead of claiming a clean state."
+			_write_result()
+			quit(1)
+			return
+	if _seed_has:
+		seed(_seed_value)
 	var scenario_path := str(_request.get("scenarioPath", ""))
 	_scenario = _read_json(scenario_path)
 	if typeof(_scenario) != TYPE_DICTIONARY:
@@ -85,18 +171,45 @@ func _run() -> void:
 		_error = "The main scene does not instantiate: %s" % main_path
 		return
 	root.add_child(scene)
+	# The runner starts the real main scene, so it must own it the way a
+	# normal launch does. Without current_scene the unmanaged menu is never
+	# freed when it calls change_scene_to_file: the old menu stays over the
+	# new scene's HUD/gameplay while input still moves the player. Setting
+	# current_scene makes the scene change free the menu first.
+	current_scene = scene
 	for i in _boot_frames:
 		await _tick()
 	_sample()
+	if _record_runtime_state:
+		_initial_game_state = _runtime_game_state()
+	if _record_layout:
+		_probe_layout(-1)
 	var steps: Array = _scenario.get("steps", [])
+	if _record_layout:
+		_layout_probe_steps = _probe_schedule(steps)
+	if _record_spatial:
+		_spatial_probe_steps = _probe_schedule(steps)
+		_probe_spatial(-1)
 	for index in steps.size():
 		if _finished:
 			return
 		var step: Dictionary = steps[index]
+		if _record_timeline:
+			_timeline.append({"step": index, "phase": "before", "scenarioFrame": _frame, "enginePhysicsFrame": Engine.get_physics_frames(), "renderFrame": Engine.get_process_frames()})
 		var step_error := await _run_step(step)
+		if _record_timeline:
+			_timeline.append({"step": index, "phase": "after", "scenarioFrame": _frame, "enginePhysicsFrame": Engine.get_physics_frames(), "renderFrame": Engine.get_process_frames()})
 		if not step_error.is_empty():
 			_error = "Step %d: %s" % [index + 1, step_error]
 			return
+		# A probe after a step boundary sees what that input did to the
+		# layout; a failed step ends the run instead of probing a broken game.
+		if _record_layout and _layout_probe_steps.has(index):
+			_probe_layout(index)
+		# Spatial shares the same schedule: one synchronous world-space read
+		# after the input that established the state.
+		if _record_spatial and _spatial_probe_steps.has(index):
+			_probe_spatial(index)
 	_release_all()
 	# One last sample after the final step, so a short route still has an end value.
 	_sample()
@@ -114,6 +227,330 @@ func _run_step(step: Dictionary) -> String:
 			await _tick()
 		return ""
 	return "unknown step kind"
+
+# The bounded probe schedule: the boot probe plus the first, middle and last
+# input step boundaries, deduped. Waits only gather evidence, so they never
+# earn a probe; gameplay baselines are covered because the probes run after
+# the inputs that establish them.
+func _probe_schedule(steps: Array) -> Array:
+	var inputs: Array = []
+	for index in steps.size():
+		var step = steps[index]
+		if step is Dictionary and (step.has("press") or step.has("hold")):
+			inputs.append(index)
+	if inputs.is_empty():
+		return []
+	var picked: Array = [inputs[0], inputs[inputs.size() / 2], inputs[inputs.size() - 1]]
+	var schedule: Array = []
+	for index in picked:
+		if schedule.size() >= LAYOUT_MAX_STEP_PROBES:
+			break
+		if not schedule.has(index):
+			schedule.append(index)
+	return schedule
+
+func _probe_layout(step_index: int) -> void:
+	if int(_layout_state.get("warnings", 0)) >= GS_LAYOUT_MAX_WARNINGS:
+		_layout_omitted += 1
+		return
+	_layout_step = step_index
+	_layout_probes += 1
+	var scene := current_scene
+	if scene == null or not is_instance_valid(scene):
+		return
+	gs_layout_scan_entry(scene, root, Callable(self, "_layout_finding"), _layout_state)
+
+func _layout_finding(kind: String, subject: String, detail: String, node_path: String) -> void:
+	var vp := root.size
+	_layout_findings.append({
+		"kind": kind,
+		"subject": subject,
+		"detail": detail,
+		"nodePath": node_path,
+		"scenarioFrame": _frame,
+		"step": null if _layout_step < 0 else _layout_step,
+		"viewport": {"width": vp.x, "height": vp.y},
+	})
+
+# Bounded spatial snapshots: player origin/velocity plus Area collision-shape
+# world bounds. Synchronous only, no awaits or ticks: the same physical frames
+# run with or without probing. Skips freed nodes, caps traversal, and marks
+# rotated/non-box boxes conservative. Point-in-box never means a body is fully
+# inside or any game trigger fired.
+func _probe_spatial(step_index: int) -> void:
+	if _spatial_snapshots.size() >= SPATIAL_MAX_SNAPSHOTS:
+		_spatial_omitted += 1
+		_spatial_truncated = true
+		return
+	var scene := current_scene
+	if scene == null or not is_instance_valid(scene):
+		_spatial_skipped_freed += 1
+		_spatial_truncated = true
+		_spatial_snapshots.append({
+			"scenarioFrame": _frame,
+			"step": null if step_index < 0 else step_index,
+			"player": {"present": false, "position": null, "velocity": null, "bodyKind": null},
+			"areas": [],
+		})
+		return
+	var player_info := _spatial_player_info()
+	var areas: Array = []
+	var stack: Array = [scene]
+	while not stack.is_empty():
+		if _spatial_visited >= SPATIAL_MAX_NODES or _spatial_areas + areas.size() >= SPATIAL_MAX_AREAS or _spatial_shapes >= SPATIAL_MAX_SHAPES:
+			_spatial_truncated = true
+			break
+		if stack.size() > SPATIAL_MAX_NODES * 2:
+			_spatial_truncated = true
+			break
+		var node: Node = stack.pop_back()
+		_spatial_visited += 1
+		if node == null or not is_instance_valid(node):
+			_spatial_skipped_freed += 1
+			continue
+		if node is Area2D or node is Area3D:
+			if _spatial_areas + areas.size() >= SPATIAL_MAX_AREAS:
+				_spatial_truncated = true
+				continue
+			var entry := _spatial_area_entry(node, player_info)
+			if not entry.is_empty():
+				areas.append(entry)
+		_spatial_push_children(node, stack)
+	_spatial_areas += areas.size()
+	_spatial_snapshots.append({
+		"scenarioFrame": _frame,
+		"step": null if step_index < 0 else step_index,
+		"player": {
+			"present": bool(player_info.get("present", false)),
+			"position": _encode_pos(player_info.get("pos")),
+			"velocity": _encode_pos(player_info.get("vel")),
+			"bodyKind": player_info.get("kind"),
+		},
+		"areas": areas,
+	})
+
+# Preserve scene child order while bounding the pending stack before allocation.
+func _spatial_push_children(node: Node, stack: Array) -> void:
+	var available := maxi(0, SPATIAL_MAX_NODES - _spatial_visited - stack.size())
+	var count := mini(node.get_child_count(), available)
+	if count < node.get_child_count():
+		_spatial_truncated = true
+	for index in range(count - 1, -1, -1):
+		stack.append(node.get_child(index))
+
+func _spatial_player_info() -> Dictionary:
+	var body: Variant = get_first_node_in_group("player")
+	if body == null:
+		return {"present": false, "pos": null, "vel": null, "kind": null}
+	if body == null or not is_instance_valid(body):
+		_spatial_skipped_freed += 1
+		return {"present": false, "pos": null, "vel": null, "kind": null}
+	var pos: Variant = _player_position(body)
+	var vel: Variant = null
+	if body is CharacterBody2D:
+		vel = (body as CharacterBody2D).velocity
+	elif body is CharacterBody3D:
+		vel = (body as CharacterBody3D).velocity
+	elif body is RigidBody2D:
+		vel = (body as RigidBody2D).linear_velocity
+	elif body is RigidBody3D:
+		vel = (body as RigidBody3D).linear_velocity
+	var kind: Variant = null
+	if body is Node:
+		kind = str((body as Node).get_class())
+	return {"present": true, "pos": pos, "vel": vel, "kind": kind}
+
+func _spatial_area_entry(area: Node, player_info: Dictionary) -> Dictionary:
+	if area == null or not is_instance_valid(area):
+		_spatial_skipped_freed += 1
+		return {}
+	var area_type := str(area.get_class())
+	if area_type != "Area2D" and area_type != "Area3D":
+		return {}
+	var node_path := str(root.get_path_to(area))
+	var monitoring := false
+	var monitorable := false
+	if area is Area2D:
+		monitoring = bool((area as Area2D).monitoring)
+		monitorable = bool((area as Area2D).monitorable)
+	else:
+		monitoring = bool((area as Area3D).monitoring)
+		monitorable = bool((area as Area3D).monitorable)
+	var visible := bool(area.is_visible_in_tree())
+	var shapes: Array = []
+	var child_count := area.get_child_count()
+	var inspected := 0
+	for index in range(child_count):
+		if _spatial_visited >= SPATIAL_MAX_NODES or _spatial_shapes >= SPATIAL_MAX_SHAPES:
+			_spatial_truncated = true
+			break
+		var node := area.get_child(index)
+		_spatial_visited += 1
+		inspected += 1
+		if node == null or not is_instance_valid(node):
+			_spatial_skipped_freed += 1
+			continue
+		# CollisionShape nodes configure their immediate CollisionObject parent.
+		# Descendant Areas own their own shapes, never their ancestor's shapes.
+		if node is CollisionShape2D or node is CollisionShape3D:
+			var shape_entry := _spatial_shape_entry(node, player_info)
+			if not shape_entry.is_empty():
+				shapes.append(shape_entry)
+				_spatial_shapes += 1
+	if inspected < child_count:
+		_spatial_truncated = true
+	return {
+		"nodePath": node_path,
+		"type": area_type,
+		"monitoring": monitoring,
+		"monitorable": monitorable,
+		"visible": visible,
+		"shapes": shapes,
+	}
+
+func _spatial_shape_entry(shape_node: Node, player_info: Dictionary) -> Dictionary:
+	if shape_node == null or not is_instance_valid(shape_node):
+		_spatial_skipped_freed += 1
+		return {}
+	var node_path := str(root.get_path_to(shape_node))
+	var disabled := false
+	if shape_node is CollisionShape2D:
+		disabled = bool((shape_node as CollisionShape2D).disabled)
+	elif shape_node is CollisionShape3D:
+		disabled = bool((shape_node as CollisionShape3D).disabled)
+	var bound := {"kind": "unknown", "min": null, "max": null, "conservative": true, "shapeKind": "unknown"}
+	if shape_node is CollisionShape2D:
+		bound = _spatial_shape2d_bounds(shape_node as CollisionShape2D)
+	elif shape_node is CollisionShape3D:
+		bound = _spatial_shape3d_bounds(shape_node as CollisionShape3D)
+	var contains: Variant = null
+	var player_pos: Variant = player_info.get("pos")
+	if player_pos != null and str(bound.get("kind", "unknown")) != "unknown":
+		var bmin: Variant = bound.get("min")
+		var bmax: Variant = bound.get("max")
+		if player_pos is Vector2 and bmin is Vector2 and bmax is Vector2:
+			var p := player_pos as Vector2
+			contains = p.x >= (bmin as Vector2).x and p.x <= (bmax as Vector2).x and p.y >= (bmin as Vector2).y and p.y <= (bmax as Vector2).y
+		elif player_pos is Vector3 and bmin is Vector3 and bmax is Vector3:
+			var q := player_pos as Vector3
+			contains = q.x >= (bmin as Vector3).x and q.x <= (bmax as Vector3).x and q.y >= (bmin as Vector3).y and q.y <= (bmax as Vector3).y and q.z >= (bmin as Vector3).z and q.z <= (bmax as Vector3).z
+	var encoded_min: Variant = null
+	var encoded_max: Variant = null
+	if bound.get("min") != null:
+		encoded_min = _encode_pos(bound.get("min"))
+	if bound.get("max") != null:
+		encoded_max = _encode_pos(bound.get("max"))
+	return {
+		"nodePath": node_path,
+		"shapeKind": str(bound.get("shapeKind", "unknown")),
+		"disabled": disabled,
+		"bounds": {"kind": str(bound.get("kind", "unknown")), "min": encoded_min, "max": encoded_max},
+		"conservative": bool(bound.get("conservative", true)),
+		"containsPlayerOrigin": contains,
+	}
+
+func _spatial_shape2d_bounds(shape_node: CollisionShape2D) -> Dictionary:
+	var unknown := {"kind": "unknown", "min": null, "max": null, "conservative": true, "shapeKind": "unknown"}
+	var shape: Variant = shape_node.shape
+	if shape == null or not is_instance_valid(shape):
+		return unknown
+	var kind := str((shape as Resource).get_class())
+	unknown["shapeKind"] = kind
+	if not shape.has_method("get_rect"):
+		return unknown
+	var local_rect: Rect2 = shape.get_rect()
+	if not is_finite(local_rect.position.x) or not is_finite(local_rect.position.y) or not is_finite(local_rect.size.x) or not is_finite(local_rect.size.y):
+		return unknown
+	if local_rect.size.x <= 0.0 or local_rect.size.y <= 0.0:
+		return unknown
+	var xform: Transform2D = shape_node.global_transform
+	if not is_finite(xform.x.x) or not is_finite(xform.x.y) or not is_finite(xform.y.x) or not is_finite(xform.y.y) or not is_finite(xform.origin.x) or not is_finite(xform.origin.y):
+		return unknown
+	var corners: Array = [
+		xform * local_rect.position,
+		xform * (local_rect.position + Vector2(local_rect.size.x, 0.0)),
+		xform * (local_rect.position + Vector2(0.0, local_rect.size.y)),
+		xform * (local_rect.position + local_rect.size),
+	]
+	var min_pt := corners[0] as Vector2
+	var max_pt := corners[0] as Vector2
+	for corner in corners:
+		var c := corner as Vector2
+		if not is_finite(c.x) or not is_finite(c.y):
+			return unknown
+		min_pt.x = minf(min_pt.x, c.x)
+		min_pt.y = minf(min_pt.y, c.y)
+		max_pt.x = maxf(max_pt.x, c.x)
+		max_pt.y = maxf(max_pt.y, c.y)
+	var rot := absf(float(shape_node.global_rotation))
+	var conservative := rot > 0.0001 or kind != "RectangleShape2D"
+	return {"kind": "rect2", "min": min_pt, "max": max_pt, "conservative": conservative, "shapeKind": kind}
+
+func _spatial_shape3d_bounds(shape_node: CollisionShape3D) -> Dictionary:
+	var unknown := {"kind": "unknown", "min": null, "max": null, "conservative": true, "shapeKind": "unknown"}
+	var shape: Variant = shape_node.shape
+	if shape == null or not is_instance_valid(shape):
+		return unknown
+	var kind := str((shape as Resource).get_class())
+	unknown["shapeKind"] = kind
+	if kind != "BoxShape3D" and kind != "SphereShape3D" and kind != "CapsuleShape3D" and kind != "CylinderShape3D":
+		return unknown
+	var ext := Vector3.ZERO
+	if kind == "BoxShape3D":
+		var sz: Variant = shape.get("size")
+		if not (sz is Vector3):
+			return unknown
+		var s := sz as Vector3
+		if not is_finite(s.x) or not is_finite(s.y) or not is_finite(s.z) or s.x <= 0.0 or s.y <= 0.0 or s.z <= 0.0:
+			return unknown
+		ext = s * 0.5
+	elif kind == "SphereShape3D":
+		var r: Variant = shape.get("radius")
+		if not (r is float or r is int):
+			return unknown
+		if not is_finite(float(r)) or float(r) <= 0.0:
+			return unknown
+		ext = Vector3(float(r), float(r), float(r))
+	else:
+		var rr: Variant = shape.get("radius")
+		var hh: Variant = shape.get("height")
+		if not (rr is float or rr is int) or not (hh is float or hh is int):
+			return unknown
+		if not is_finite(float(rr)) or not is_finite(float(hh)) or float(rr) <= 0.0 or float(hh) <= 0.0:
+			return unknown
+		ext = Vector3(float(rr), float(hh) * 0.5, float(rr))
+	var xform: Transform3D = shape_node.global_transform
+	var bx := xform.basis.x
+	var by := xform.basis.y
+	var bz := xform.basis.z
+	var og := xform.origin
+	if not is_finite(bx.x) or not is_finite(bx.y) or not is_finite(bx.z) or not is_finite(by.x) or not is_finite(by.y) or not is_finite(by.z) or not is_finite(bz.x) or not is_finite(bz.y) or not is_finite(bz.z) or not is_finite(og.x) or not is_finite(og.y) or not is_finite(og.z):
+		return unknown
+	var corners: Array = [
+		xform * Vector3(-ext.x, -ext.y, -ext.z),
+		xform * Vector3(ext.x, -ext.y, -ext.z),
+		xform * Vector3(-ext.x, ext.y, -ext.z),
+		xform * Vector3(ext.x, ext.y, -ext.z),
+		xform * Vector3(-ext.x, -ext.y, ext.z),
+		xform * Vector3(ext.x, -ext.y, ext.z),
+		xform * Vector3(-ext.x, ext.y, ext.z),
+		xform * Vector3(ext.x, ext.y, ext.z),
+	]
+	var min_pt := corners[0] as Vector3
+	var max_pt := corners[0] as Vector3
+	for corner in corners:
+		var c := corner as Vector3
+		if not is_finite(c.x) or not is_finite(c.y) or not is_finite(c.z):
+			return unknown
+		min_pt.x = minf(min_pt.x, c.x)
+		min_pt.y = minf(min_pt.y, c.y)
+		min_pt.z = minf(min_pt.z, c.z)
+		max_pt.x = maxf(max_pt.x, c.x)
+		max_pt.y = maxf(max_pt.y, c.y)
+		max_pt.z = maxf(max_pt.z, c.z)
+	var rot: Vector3 = (shape_node as Node3D).global_rotation
+	var conservative := rot.length() > 0.0001 or kind != "BoxShape3D"
+	return {"kind": "aabb3", "min": min_pt, "max": max_pt, "conservative": conservative, "shapeKind": kind}
 
 func _mark_input() -> void:
 	# The first non-wait step is where play could start. Everything sampled
@@ -137,18 +574,10 @@ func _run_press(action: String) -> String:
 		var key := event as InputEventKey
 		if key != null and key.physical_keycode != 0:
 			has_key = true
-			var down := InputEventKey.new()
-			down.physical_keycode = key.physical_keycode
-			down.keycode = key.keycode
-			down.pressed = true
-			Input.parse_input_event(down)
+			Input.parse_input_event(_make_key_event(key.keycode, key.physical_keycode, true))
 			Input.action_press(action)
 			await _tick()
-			var up := InputEventKey.new()
-			up.physical_keycode = key.physical_keycode
-			up.keycode = key.keycode
-			up.pressed = false
-			Input.parse_input_event(up)
+			Input.parse_input_event(_make_key_event(key.keycode, key.physical_keycode, false))
 			Input.action_release(action)
 			await _tick()
 			return ""
@@ -248,9 +677,6 @@ func _read_json(path: String) -> Variant:
 	var parsed = JSON.parse_string(text)
 	return parsed
 
-func _game_state() -> Node:
-	return root.get_node_or_null("GameState")
-
 func _state_marker() -> Variant:
 	# Null means "no shared play marker here": an absent, null or non-numeric
 	# state keeps the player-presence baseline rule instead of blocking play.
@@ -281,6 +707,10 @@ func _capture_baseline(players: Array) -> void:
 	if players.size() == 0 and marker == null:
 		return
 	_baseline_frame = _frame
+	# The physical baseline rides with the observation baseline: the player
+	# position when play started, so displacement measures what the route did.
+	if players.size() > 0:
+		_player_baseline = _player_position(players[0])
 	for observation in _observations:
 		var key := str(observation["key"])
 		_baseline_values[key] = _value(key)
@@ -419,7 +849,7 @@ func _write_result() -> void:
 	var file := FileAccess.open(_result_path, FileAccess.WRITE)
 	if file == null:
 		return
-	file.store_string(JSON.stringify({
+	var result := {
 		"id": str(_scenario.get("id", "")),
 		"frames": _frame,
 		"durationMs": Time.get_ticks_msec() - _started_ms,
@@ -429,6 +859,65 @@ func _write_result() -> void:
 		"error": null if _error.is_empty() else _error,
 		"invalidActions": _invalid_actions,
 		"observations": observations,
-	}))
+		# Isolation evidence, reported before the game main played: the engine
+		# user data dir this run actually used. The service checks it stays
+		# inside the per-run XDG trio it gave this child.
+		"userDataDir": _initial_user_data_dir,
+		# Physical state, as plain arrays: Vector2 as [x, y], Vector3 as
+		# [x, y, z], null when the player was never observed. The baseline is
+		# the position when play started; displacement is measured from it.
+		"playerFirst": _encode_pos(_player_first),
+		"playerBaseline": _encode_pos(_player_baseline),
+		"playerLast": _encode_pos(_player_last),
+		# Actual engine counters at finish, not estimates. Physics and render
+		# frames are different units from the runner's scenario frames: never
+		# compare them as one.
+		"enginePhysicsFrames": Engine.get_physics_frames(),
+		"renderFrames": Engine.get_process_frames(),
+	}
+	if _record_timeline:
+		result["timeline"] = _timeline
+		result["physicsHz"] = Engine.physics_ticks_per_second
+	if _record_runtime_state:
+		var final_state := _runtime_game_state()
+		result["gameState"] = final_state.get("values", {})
+		result["initialGameState"] = _initial_game_state.get("values", {}) if _initial_game_state is Dictionary else {}
+		result["gameStateComplete"] = bool(final_state.get("complete", false)) and _initial_game_state is Dictionary and bool(_initial_game_state.get("complete", false))
+	if _record_layout:
+		# Runtime layout is additive diagnostics, never a quality verdict:
+		# the state exam grades observations, and absence of findings never
+		# means the route was fully covered. Findings are native headless
+		# geometry at the project's logical size, not Web proof.
+		var vp := root.size
+		result["layout"] = {
+			"findings": _layout_findings,
+			"coverage": {
+				"probes": _layout_probes,
+				"omittedProbes": _layout_omitted,
+				"inspectedControls": int(_layout_state.get("inspected", 0)),
+				"pairs": int(_layout_state.get("pairs", 0)),
+				"truncated": bool(_layout_state.get("truncated", false)),
+				"viewport": {"width": vp.x, "height": vp.y},
+			},
+		}
+	if _record_spatial:
+		# Runtime spatial snapshots are additive measurements, never a verdict:
+		# the state exam grades observations, and absence of areas never means
+		# full coverage. Native headless world geometry may diverge from Web
+		# cadence and runtime. containsPlayerOrigin tests the probed origin
+		# point only, never a whole body or any game trigger.
+		result["spatial"] = {
+			"snapshots": _spatial_snapshots,
+			"coverage": {
+				"snapshots": _spatial_snapshots.size(),
+				"omittedSnapshots": _spatial_omitted,
+				"visitedNodes": _spatial_visited,
+				"areas": _spatial_areas,
+				"shapes": _spatial_shapes,
+				"skippedFreed": _spatial_skipped_freed,
+				"truncated": _spatial_truncated,
+			},
+		}
+	file.store_string(JSON.stringify(result))
 	file.close()
 `;

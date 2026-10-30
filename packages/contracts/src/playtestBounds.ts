@@ -16,6 +16,60 @@ const durationMs = (step: GamePlaytestStep) => {
 };
 
 /**
+ * Keys a web playtest can send. The browser needs a physical key or a DOM key
+ * name; a Godot InputMap action name such as `ui_accept` has neither, so it
+ * reaches the game as a key it never receives. Action names belong to
+ * game_scenarios_run.
+ */
+const BROWSER_KEY_NAMES: ReadonlySet<string> = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Space",
+  "Enter",
+  "Tab",
+  "Backspace",
+  "Escape",
+  "Shift",
+  "Control",
+  "Alt",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Insert",
+  "Delete",
+  ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
+]);
+
+const stepKeyIssues = (index: number, step: GamePlaytestStep): string[] => {
+  const fields: ReadonlyArray<readonly [string, readonly string[]]> =
+    "press" in step
+      ? [["press", [step.press]]]
+      : "hold" in step
+        ? [["hold", [step.hold]]]
+        : "keys" in step
+          ? [["keys", step.keys]]
+          : "key" in step
+            ? [["key", [step.key]]]
+            : [];
+  const issues: string[] = [];
+  for (const [field, keys] of fields)
+    for (const key of keys) {
+      if (key.length === 0 || key.length > 80) {
+        issues.push(`Step ${index + 1} ${field} must contain 1–80 characters.`);
+        continue;
+      }
+      if (key.length === 1 || BROWSER_KEY_NAMES.has(key)) continue;
+      issues.push(
+        `Step ${index + 1} ${field} "${key}" is not a browser key. Web playtests send physical keys such as "Enter", "Space", "ArrowLeft", "w" or "F1", not Godot InputMap actions; use the key project.godot binds to the action here, and use game_scenarios_run for action names.`,
+      );
+    }
+  return issues;
+};
+
+/**
  * Everything wrong with a capture request, in the order a caller should fix it.
  * Empty means the run may start. Cheap and pure, so the server rejects before
  * it exports, serves a build, or launches the browser.
@@ -78,6 +132,7 @@ export const playtestInputIssues = (input: GameWebPlaytestInput): readonly strin
       issues.push(
         `Step ${index + 1} lasts ${duration} ms; one step may last at most ${bounds.maxStepMs} ms.`,
       );
+    issues.push(...stepKeyIssues(index, step));
     if ("screenshot" in step) screenshots += 1;
     if (Number.isFinite(duration)) sequenceMs += duration;
   }
@@ -168,17 +223,46 @@ export const fitScreenshotsToBudget = <T extends { readonly data: string }>(
 /** The active critic gets a short experiment, with every requested frame accounted for. */
 export const tryInputIssues = (input: import("./game.ts").GameTryInput): readonly string[] => {
   const bounds = GAME_TRY_INPUT_BOUNDS;
-  const issues = [...playtestInputIssues(input)];
+  const setup = (input.setupSteps ?? []) as readonly import("./game.ts").GamePlaytestStep[];
+  const baseIssues = [...playtestInputIssues(input)];
+  // Combined numbering: setup occupies 1..S, observed occupies S+1... When a
+  // prelude exists, base step messages (observed-only numbering) are offset so
+  // setup+observed stay clear instead of aliasing "Step 1".
+  const issues =
+    setup.length === 0
+      ? baseIssues
+      : baseIssues.map((issue) => {
+          const match = /^Step (\d+)(.*)$/.exec(issue);
+          if (match === null) return issue;
+          return `Step ${Number(match[1]) + setup.length}${match[2]}`;
+        });
   if (input.steps.length === 0 || input.steps.length > bounds.maxSteps)
     issues.push(
       `game_try_input requires 1–${bounds.maxSteps} steps; received ${input.steps.length}.`,
     );
+  if (setup.length > bounds.maxSetupSteps)
+    issues.push(
+      `game_try_input setupSteps allow at most ${bounds.maxSetupSteps} steps; received ${setup.length}.`,
+    );
+  const combinedLength = setup.length + input.steps.length;
+  if (combinedLength > GAME_PLAYTEST_BOUNDS.maxSteps)
+    issues.push(
+      `game_try_input setup+steps allow at most ${GAME_PLAYTEST_BOUNDS.maxSteps} total; received ${combinedLength}.`,
+    );
   const interval = input.captureEveryMs ?? 1000;
   if (!Number.isFinite(interval) || interval < bounds.minCaptureEveryMs)
     issues.push(`captureEveryMs must be at least ${bounds.minCaptureEveryMs} ms.`);
-  const total = input.steps.reduce((sum, step) => sum + durationMs(step), 0);
-  if (total > bounds.maxSequenceMs)
-    issues.push(`game_try_input steps take ${total} ms; limit is ${bounds.maxSequenceMs} ms.`);
+  const observedTotal = input.steps.reduce((sum, step) => sum + durationMs(step), 0);
+  const setupTotal = setup.reduce((sum, step) => sum + durationMs(step), 0);
+  const total = observedTotal + setupTotal;
+  if (total > bounds.maxSequenceMs) {
+    if (setup.length === 0)
+      issues.push(`game_try_input steps take ${total} ms; limit is ${bounds.maxSequenceMs} ms.`);
+    else
+      issues.push(
+        `game_try_input setup+steps take ${total} ms; limit is ${bounds.maxSequenceMs} ms.`,
+      );
+  }
   const frames =
     2 +
     input.steps.reduce(
@@ -192,21 +276,27 @@ export const tryInputIssues = (input: import("./game.ts").GameTryInput): readonl
     issues.push(
       `game_try_input requests ${frames} frames; limit is ${bounds.maxFrames}. Increase captureEveryMs or shorten the steps.`,
     );
-  for (const [index, step] of input.steps.entries()) {
+  // Setup prelude: physical inputs/waits only, validated with combined
+  // zero-based indices (displayed 1-based). Screenshots are observed evidence.
+  for (const [setupIndex, step] of setup.entries()) {
+    const combined = setupIndex + 1;
+    if ("screenshot" in step) {
+      issues.push(
+        `Setup step ${combined} cannot be a screenshot; screenshots are observed evidence only.`,
+      );
+      continue;
+    }
+    const duration = durationMs(step);
+    if (!Number.isFinite(duration) || duration < 0)
+      issues.push(`Setup step ${combined} has an invalid duration.`);
+    if (Number.isFinite(duration) && duration > GAME_PLAYTEST_BOUNDS.maxStepMs)
+      issues.push(
+        `Setup step ${combined} lasts ${duration} ms; one step may last at most ${GAME_PLAYTEST_BOUNDS.maxStepMs} ms.`,
+      );
+    for (const keyIssue of stepKeyIssues(setupIndex, step))
+      issues.push(keyIssue.replace(/^Step (\d+)/, `Setup step $1`));
     if ("keys" in step && (step.keys.length === 0 || step.keys.length > 8))
-      issues.push(`Step ${index + 1} requires 1–8 keys.`);
-    const keys =
-      "keys" in step
-        ? step.keys
-        : "key" in step
-          ? [step.key]
-          : "press" in step
-            ? [step.press]
-            : "hold" in step
-              ? [step.hold]
-              : [];
-    if (keys.some((key) => key.length === 0 || key.length > 80))
-      issues.push(`Step ${index + 1} keys must contain 1–80 characters.`);
+      issues.push(`Setup step ${combined} requires 1–8 keys.`);
     const points = "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
     for (const point of points)
       if (
@@ -218,15 +308,39 @@ export const tryInputIssues = (input: import("./game.ts").GameTryInput): readonl
           (!Number.isFinite(point.y) || point.y < 0 || point.y > GAME_PLAYTEST_BOUNDS.maxDimension))
       )
         issues.push(
-          `Step ${index + 1} pointer coordinates must be finite and within the viewport.`,
+          `Setup step ${combined} pointer coordinates must be finite and within the viewport.`,
         );
     if ("click" in step && (step.x === undefined) !== (step.y === undefined))
-      issues.push(`Step ${index + 1} click requires both x and y.`);
+      issues.push(`Setup step ${combined} click requires both x and y.`);
     if (
       "mouseMove" in step &&
       (!Number.isFinite(step.mouseMove.dx) || !Number.isFinite(step.mouseMove.dy))
     )
-      issues.push(`Step ${index + 1} mouse movement must be finite.`);
+      issues.push(`Setup step ${combined} mouse movement must be finite.`);
+  }
+  for (const [index, step] of input.steps.entries()) {
+    const combined = setup.length + index + 1;
+    const label = setup.length === 0 ? `Step ${index + 1}` : `Step ${combined}`;
+    if ("keys" in step && (step.keys.length === 0 || step.keys.length > 8))
+      issues.push(`${label} requires 1–8 keys.`);
+    const points = "drag" in step ? [step.drag.from, step.drag.to] : "click" in step ? [step] : [];
+    for (const point of points)
+      if (
+        (point.x !== undefined &&
+          (!Number.isFinite(point.x) ||
+            point.x < 0 ||
+            point.x > GAME_PLAYTEST_BOUNDS.maxDimension)) ||
+        (point.y !== undefined &&
+          (!Number.isFinite(point.y) || point.y < 0 || point.y > GAME_PLAYTEST_BOUNDS.maxDimension))
+      )
+        issues.push(`${label} pointer coordinates must be finite and within the viewport.`);
+    if ("click" in step && (step.x === undefined) !== (step.y === undefined))
+      issues.push(`${label} click requires both x and y.`);
+    if (
+      "mouseMove" in step &&
+      (!Number.isFinite(step.mouseMove.dx) || !Number.isFinite(step.mouseMove.dy))
+    )
+      issues.push(`${label} mouse movement must be finite.`);
   }
   return issues;
 };

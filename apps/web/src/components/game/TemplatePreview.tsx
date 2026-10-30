@@ -12,6 +12,10 @@ const PREVIEWS: Partial<Record<GameTemplateId, { readonly src: string; readonly 
     src: "/templates/2d-platformer.webp",
     alt: "A 2D platformer level: coins and platforms under a starry night sky",
   },
+  "2d-screen": {
+    src: "/templates/2d-screen.png",
+    alt: "A night help desk: a caller panel, three reply choices and a listening prompt",
+  },
 };
 
 /**

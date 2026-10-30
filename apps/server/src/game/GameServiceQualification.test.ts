@@ -643,6 +643,14 @@ it.live("rejects an out-of-bounds capture before exporting or launching the brow
         expect(interval.reason).toBe("invalid-input");
         expect(interval.detail).toContain("Interval capture requests 33 frames; limit is 32.");
         expect(interval.detail).toContain("Increase captureEveryMs or shorten the steps.");
+        // A Godot InputMap action is not a browser key; the browser must not
+        // launch to discover that the game never received it.
+        const actionName = yield* game
+          .webPlaytest(threadId, { steps: [{ press: "ui_accept" }] })
+          .pipe(Effect.flip);
+        expect(actionName.reason).toBe("invalid-input");
+        expect(actionName.detail).toContain('"ui_accept" is not a browser key');
+        expect(actionName.detail).toContain("game_scenarios_run");
         // The rejection lands before the stale-build export the run would need.
         const qualification = yield* GameQualification.GameQualification;
         const read = yield* qualification.read(root, "godot");

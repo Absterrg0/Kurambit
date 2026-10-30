@@ -1,7 +1,16 @@
 import { expect, it } from "vite-plus/test";
 import { PNG } from "pngjs";
 
-import { composeCaption, composePairPng, composeSideBySidePng } from "./frameCompose.ts";
+import {
+  composeCaption,
+  composePairPng,
+  composeSideBySidePng,
+  cropPng,
+  deltaStats,
+  drawLabel,
+  meanColor,
+  scalePngNearest,
+} from "./frameCompose.ts";
 
 const solid = (width: number, height: number, color: readonly [number, number, number]): Buffer => {
   const png = new PNG({ width, height });
@@ -60,6 +69,14 @@ it("captions only use glyphs the card can draw", () => {
   expect(composeCaption("click (700,120) left")).toBe("CLICK (700,120) LEFT");
 });
 
+it("draws readable upright labels within each glyph's width", () => {
+  const png = PNG.sync.read(solid(40, 40, [16, 20, 24]));
+  drawLabel(png, 8, 8, "H");
+  expect(pixel(png, 8, 27)).toEqual([238, 242, 245, 255]);
+  expect(pixel(png, 19, 27)).toEqual([238, 242, 245, 255]);
+  expect(pixel(png, 20, 8)).toEqual([16, 20, 24, 255]);
+});
+
 it("labels both panels of a side-by-side card without touching their pixels", () => {
   const left = solid(120, 60, [200, 20, 20]);
   const right = solid(120, 60, [20, 20, 200]);
@@ -85,4 +102,42 @@ it("labels both panels of a side-by-side card without touching their pixels", ()
   });
   expect(swapped.png.equals(card.png)).toBe(false);
   expect(swapped.height).toBe(card.height);
+});
+
+it("crops the exact pixels of a detail region and rejects regions outside the frame", () => {
+  const png = PNG.sync.read(solid(64, 48, [101, 113, 175]));
+  const cropped = cropPng(png, { x: 8, y: 6, width: 16, height: 12 });
+  expect(cropped.width).toBe(16);
+  expect(cropped.height).toBe(12);
+  expect(pixel(cropped, 0, 0)).toEqual([101, 113, 175, 255]);
+  expect(pixel(cropped, 15, 11)).toEqual([101, 113, 175, 255]);
+  expect(() => cropPng(png, { x: 60, y: 6, width: 16, height: 12 })).toThrow(/outside/);
+  expect(() => cropPng(png, { x: 8, y: 40, width: 16, height: 12 })).toThrow(/outside/);
+  expect(() => cropPng(png, { x: 8, y: 6, width: 0, height: 12 })).toThrow(/outside/);
+});
+
+it("upscales a crop with nearest neighbour so each source pixel becomes a block", () => {
+  const png = PNG.sync.read(solid(64, 48, [184, 136, 72]));
+  const scaled = scalePngNearest(cropPng(png, { x: 0, y: 0, width: 8, height: 6 }), 3);
+  expect(scaled.width).toBe(24);
+  expect(scaled.height).toBe(18);
+  expect(pixel(scaled, 0, 0)).toEqual([184, 136, 72, 255]);
+  expect(pixel(scaled, 2, 2)).toEqual([184, 136, 72, 255]);
+  expect(pixel(scaled, 23, 17)).toEqual([184, 136, 72, 255]);
+  expect(() => scalePngNearest(png, 0)).toThrow(/positive integer/);
+});
+
+it("measures mean colour and pixel deltas instead of judging them", () => {
+  const flat = PNG.sync.read(solid(32, 32, [101, 113, 175]));
+  expect(meanColor(flat)).toEqual([101, 113, 175]);
+  const warm = PNG.sync.read(solid(32, 32, [184, 136, 72]));
+  const identical = deltaStats(flat, PNG.sync.read(solid(32, 32, [101, 113, 175])));
+  expect(identical.meanAbs).toEqual([0, 0, 0]);
+  expect(identical.changedPercent).toBe(0);
+  const delta = deltaStats(flat, warm);
+  expect(delta.meanAbs).toEqual([83, 23, 103]);
+  expect(delta.changedPercent).toBe(100);
+  expect(() => deltaStats(flat, PNG.sync.read(solid(16, 16, [101, 113, 175])))).toThrow(
+    /Cannot compare/,
+  );
 });

@@ -488,9 +488,10 @@ export const layer = (options: {
         }),
       read: (root, godotProject, designState, designHash, identity, acceptance) =>
         Effect.gen(function* () {
-          const source = yield* Effect.promise(() =>
+          const source = yield* Effect.promise((signal) =>
             snapshotBuildSource(root, godotProject, {
               maxEntries: options.maxSourceEntries,
+              signal,
             }),
           );
           const record = yield* Effect.promise(async () => {

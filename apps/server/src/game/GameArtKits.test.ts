@@ -467,3 +467,61 @@ it.live("resolves the packaged layout beside the bundle and the dev layout in th
     }),
   ),
 );
+
+it("carries authored in-grid animations on the platformer characters sheet", () => {
+  const kit = gameArtKitCatalog.find((entry) => entry.id === "kenney-pixel-platformer")!;
+  const sheet = kit.additionalSheets.find((entry) => entry.name === "characters")!;
+  expect(sheet.animations?.map((entry) => entry.name)).toEqual([
+    "explorer-green-walk",
+    "explorer-blue-walk",
+    "explorer-pink-walk",
+    "explorer-yellow-walk",
+    "astronaut-float",
+    "box-tumble",
+    "alien-walk",
+    "flying-flap",
+    "robot-stomp",
+    "bat-flap",
+  ]);
+  for (const animation of sheet.animations ?? []) {
+    expect(animation.cells.length).toBeGreaterThanOrEqual(2);
+    for (const cell of animation.cells) {
+      expect(cell.col).toBeLessThan(sheet.columns);
+      expect(cell.row).toBeLessThan(sheet.rows);
+    }
+  }
+});
+
+it("rejects authored animation cells outside the sheet grid", () => {
+  const kit = gameArtKitCatalog.find((entry) => entry.id === "kenney-pixel-platformer")!;
+  const sheet = kit.additionalSheets[0]!;
+  expect(() =>
+    GameArtKits.make([
+      {
+        ...kit,
+        additionalSheets: [
+          {
+            ...sheet,
+            animations: [{ name: "off-grid", cells: [{ col: 9, row: 0 }], fps: 6, loop: true }],
+          },
+        ],
+      },
+    ]),
+  ).toThrow(/outside its 9x3 grid/);
+  expect(() =>
+    GameArtKits.make([
+      {
+        ...kit,
+        additionalSheets: [
+          {
+            ...sheet,
+            animations: [
+              { name: "twice", cells: [{ col: 0, row: 0 }], fps: 6, loop: true },
+              { name: "twice", cells: [{ col: 1, row: 0 }], fps: 6, loop: true },
+            ],
+          },
+        ],
+      },
+    ]),
+  ).toThrow(/twice/);
+});

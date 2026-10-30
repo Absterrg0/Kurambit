@@ -52,6 +52,8 @@ const BRIEF_PLACEHOLDERS: Record<GameTemplateId, string> = {
     "A small island in a rising storm. Collect three relics from the cliffs, cross the lava, and reach the boat before the tide turns.",
   "2d-platformer":
     "A side-scrolling run across a mossy ridge. Collect coins, stomp the slimes, and reach the flag at the top.",
+  "2d-screen":
+    "A night help desk with five callers. Listen, choose replies, and keep trust above three until the shift ends.",
   blank:
     "Describe what the player does, what makes it fun, and what winning looks like. A few sentences is enough.",
 };
@@ -92,12 +94,23 @@ function GameEntryButtons({ environmentId }: { environmentId: EnvironmentId }) {
 export function GameDialogHost() {
   const environmentId = usePrimaryEnvironmentId();
   const dialog = useGameDialogStore((state) => state.dialog);
+  const initialTemplate = useGameDialogStore((state) => state.template);
   return environmentId && dialog ? (
-    <GameEntryForEnvironment key={`${environmentId}:${dialog}`} environmentId={environmentId} />
+    <GameEntryForEnvironment
+      key={`${environmentId}:${dialog}`}
+      environmentId={environmentId}
+      initialTemplate={initialTemplate}
+    />
   ) : null;
 }
 
-function GameEntryForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
+function GameEntryForEnvironment({
+  environmentId,
+  initialTemplate,
+}: {
+  environmentId: EnvironmentId;
+  initialTemplate: GameTemplateId | null;
+}) {
   const settings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentProviders().get(environmentId) ?? [];
   const entries = sortProviderInstanceEntries(
@@ -123,7 +136,9 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [step, setStep] = useState<"template" | "details">("template");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
-  const [template, setTemplate] = useState<GameTemplateId>(DEFAULT_GAME_TEMPLATE);
+  const [template, setTemplate] = useState<GameTemplateId>(
+    initialTemplate ?? DEFAULT_GAME_TEMPLATE,
+  );
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
   const [planFirst, setPlanFirst] = useState(true);
@@ -280,7 +295,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       const picked = GAME_TEMPLATES.find((entry) => entry.id === value);
                       if (picked) setTemplate(picked.id);
                     }}
-                    className="grid grid-cols-1 sm:grid-cols-3"
+                    className="grid grid-cols-1 sm:grid-cols-2"
                   >
                     {GAME_TEMPLATES.map((entry) => {
                       const selected = template === entry.id;

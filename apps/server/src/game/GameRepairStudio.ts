@@ -4,15 +4,18 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import {
-  type GameOperationError,
+  GameOperationError,
   type GameReviewCheck,
+  type GameScenarioEvidence,
   type GameSubmissionFacts,
   type GameReviewFrozenInputs,
   type GameViewport,
+  type GameWebPlaytestInput,
   type GameWebPlaytestResult,
   type GamePlaytestInputPair,
   type GamePlaytestStep,
   type ThreadId,
+  playtestInputIssues,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -21,6 +24,10 @@ import * as Layer from "effect/Layer";
 import * as GameQualification from "./GameQualification.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
+import * as GameProjectService from "./GameProjectService.ts";
+import { decodeScenarioEvidence } from "./gameScenarios.ts";
+import { formatNativeDiagnostics, selectNativeLayout } from "./scenarioLayoutDiagnostics.ts";
+import { formatNativeWorld, selectNativeSpatial } from "./scenarioSpatialDiagnostics.ts";
 import { gameRecordFile } from "./gameRecord.ts";
 import { selectInputPairFrames } from "./playtestInputPairs.ts";
 import {
@@ -29,6 +36,7 @@ import {
   readPlaytestEvidence,
   readPlaytestEvidenceAt,
   readLastPlaytest,
+  type PlaytestEvidenceRun,
 } from "./playtestEvidence.ts";
 import { candidateBuildDirectory, hashWebBuild } from "./webBuild.ts";
 
@@ -43,6 +51,8 @@ export interface GameRepairStudioFrame {
   readonly height?: number;
   /** True for the differently shaped window capture; budgets never drop it. */
   readonly window?: boolean;
+  /** Bounded numeric/boolean GameState scalars measured nearest this frame. */
+  readonly observations?: Record<string, number | boolean>;
 }
 
 export interface GameRepairStudioCheckInput {
@@ -64,6 +74,97 @@ export interface GameRepairStudioCheckResult {
   readonly frames: ReadonlyArray<GameRepairStudioFrame>;
   /** The viewport this run actually played at, when the playtest reported it. */
   readonly viewport: GameViewport | null;
+  /**
+   * Same-source native layout hints for the critic, when the frozen scenario
+   * evidence binds to this exact build. Hints name where to look with
+   * game_try_input on Web frames; they are never Web defect proof, never a
+   * repair defect, and never a gate. Absent when the state record is stale,
+   * missing or unreadable.
+   */
+  readonly nativeDiagnostics?: GameRepairStudioNativeDiagnostics;
+  /**
+   * Same-source native world measurements for the critic, when the frozen
+   * scenario evidence binds to this exact build. Portable world-space
+   * numbers only, never a verdict, gate, defect or ballot change. Absent
+   * when the state record is stale, missing, unreadable, or holds no
+   * spatial snapshots.
+   */
+  readonly nativeWorld?: GameRepairStudioNativeWorld;
+}
+
+const readNativeScenarioEvidence = async (
+  root: string,
+  relative: string,
+): Promise<GameScenarioEvidence[]> => {
+  const results: GameScenarioEvidence[] = [];
+  try {
+    const canonicalRoot = await NodeFSP.realpath(root);
+    const directory = await NodeFSP.realpath(GameProjectService.insideGame(root, relative));
+    if (!directory.startsWith(canonicalRoot + NodePath.sep)) return results;
+    const entries = await NodeFSP.opendir(directory);
+    let visited = 0;
+    let attempted = 0;
+    for await (const entry of entries) {
+      if (++visited > 64 || attempted >= 8) break;
+      if (!entry.name.endsWith(".result.json")) continue;
+      attempted += 1;
+      const file = NodePath.join(directory, entry.name);
+      const info = await NodeFSP.lstat(file);
+      if (!info.isFile() || info.size > 200_000) continue;
+      const handle = await NodeFSP.open(
+        file,
+        NodeFSP.constants.O_RDONLY |
+          (NodeFSP.constants.O_NOFOLLOW ?? 0) |
+          (NodeFSP.constants.O_NONBLOCK ?? 0),
+      );
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.size > 200_000) continue;
+        // Bound allocation and reads even if the file grows after stat.
+        const bytes = Buffer.alloc(200_001);
+        let length = 0;
+        while (length < bytes.length) {
+          const read = await handle.read(bytes, length, bytes.length - length, length);
+          if (read.bytesRead === 0) break;
+          length += read.bytesRead;
+        }
+        if (length > 200_000) continue;
+        const decoded = decodeScenarioEvidence(bytes.subarray(0, length).toString("utf8"));
+        if (decoded !== null) results.push(decoded);
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch {
+    // Optional diagnostics cannot invalidate an otherwise playable artifact.
+  }
+  return results;
+};
+
+/**
+ * Bounded native layout hints bound to the selected build's exact source.
+ * The text is critic evidence file content; the directories name the durable
+ * records it was read from.
+ */
+export interface GameRepairStudioNativeDiagnostics {
+  readonly sourceId: string;
+  /** Game-relative scenario evidence the hints were read from. */
+  readonly evidenceDirectory: string;
+  /** Bounded markdown: hints with native-geometry uncertainty, never verdicts. */
+  readonly text: string;
+}
+
+/**
+ * Bounded native world measurements bound to the selected build's exact
+ * source. The text is critic evidence file content (JSON, no code); the
+ * directories name the durable records it was read from.
+ */
+export interface GameRepairStudioNativeWorld {
+  readonly sourceId: string;
+  /** Game-relative scenario evidence the measurements were read from. */
+  readonly evidenceDirectory: string;
+  /** Bounded JSON: world-space numbers with honesty notes, never verdicts. */
+  readonly text: string;
 }
 
 /**
@@ -75,6 +176,8 @@ export interface GameRepairStudioExperimentInput {
   readonly root: string;
   readonly buildId: string;
   readonly steps: ReadonlyArray<GamePlaytestStep>;
+  /** Uncaptured prelude replayed from fresh boot before steps, when recorded. */
+  readonly setupSteps?: ReadonlyArray<GamePlaytestStep>;
   readonly captureEveryMs: number;
   readonly viewport: GameViewport | null;
 }
@@ -133,7 +236,10 @@ export class GameRepairStudio extends Context.Service<
     /**
      * Verifies the facts a submission (or the loop's fallback) must pass: the
      * build exists, hashes to its id, has recorded sources, and was played by
-     * a playtest that booted, logged no console errors and executed input.
+     * a playtest that booted, logged no console errors, executed input and,
+     * when the record measured one, passed its gameplay exam. A failed verdict
+     * on this exact build is a hard failed playtest; older records without one
+     * stay readable instead of failing for the missing field.
      */
     readonly submissionFacts: (
       root: string,
@@ -164,14 +270,38 @@ export class GameRepairStudio extends Context.Service<
   }
 >()("t3/game/GameRepairStudio") {}
 
+/**
+ * A measured gameplay verdict is a real check. It is absent from old records,
+ * which stays unknown and never becomes a pass or a failure on its own.
+ */
+const playtestCheck = (
+  qualifies: boolean | undefined,
+  blockers: readonly string[] | undefined,
+): ReadonlyArray<GameReviewCheck> =>
+  qualifies === undefined
+    ? []
+    : [
+        {
+          id: "playtest",
+          status: qualifies ? "passed" : "failed",
+          ...(qualifies
+            ? {}
+            : {
+                detail: `The build's own playtest did not qualify${
+                  blockers === undefined || blockers.length === 0 ? "." : `: ${blockers.join("; ")}`
+                }`.slice(0, 1000),
+              }),
+        },
+      ];
+
 /** Only execution facts gate the loop; measurements are evidence for the critic. */
 const checkResult = (
   result: GameWebPlaytestResult,
   inputs: GameReviewFrozenInputs,
 ): ReadonlyArray<GameReviewCheck> => {
-  const consoleErrors = result.consoleMessages.filter(
-    (message) => message.level === "error",
-  ).length;
+  const consoleErrors =
+    result.consoleErrorCount ??
+    result.consoleMessages.filter((message) => message.level === "error").length;
   const executed = result.executedInputSteps;
   return [
     { id: "boot", status: result.booted ? "passed" : "failed" },
@@ -194,7 +324,122 @@ const checkResult = (
         designObservations: [...(result.designObservations ?? [])],
       },
     },
+    ...playtestCheck(result.qualifies, result.blockers),
   ];
+};
+
+/** The same checks read from the build's own recorded playtest. */
+const storedCheckResult = (
+  playtest: {
+    readonly booted: boolean;
+    readonly responded: boolean;
+    readonly executedInputSteps?: number;
+    readonly consoleErrors: number;
+    readonly qualifies?: boolean;
+    readonly blockers?: readonly string[];
+  },
+  measurements: NonNullable<GameReviewCheck["measurements"]>,
+): ReadonlyArray<GameReviewCheck> => {
+  const executed = playtest.executedInputSteps;
+  return [
+    { id: "boot", status: playtest.booted ? "passed" : "failed" },
+    {
+      id: "console",
+      status: playtest.consoleErrors === 0 ? "passed" : "failed",
+      detail: `${playtest.consoleErrors} console errors`,
+    },
+    {
+      id: "input",
+      status: executed === undefined ? "unmeasured" : executed > 0 ? "passed" : "failed",
+      detail:
+        executed === undefined
+          ? "Input dispatch was not recorded; playtest again."
+          : `${executed} input steps executed`,
+      measurements,
+    },
+    ...playtestCheck(playtest.qualifies, playtest.blockers),
+  ];
+};
+
+const sameViewport = (left: GameViewport | null, right: GameViewport | null) =>
+  left === null || right === null
+    ? left === right
+    : left.width === right.width && left.height === right.height;
+
+/** The build's record can answer this check only for the exact frozen route. */
+const sameFrozenRoute = (
+  playtest: {
+    readonly steps: ReadonlyArray<GamePlaytestStep>;
+    readonly viewport: GameViewport | null;
+    readonly captureScale?: number;
+  },
+  inputs: GameReviewFrozenInputs,
+) =>
+  JSON.stringify(playtest.steps) === JSON.stringify(inputs.steps) &&
+  sameViewport(playedViewport(playtest.viewport, playtest.captureScale), inputs.viewport);
+
+const evidencePath = (root: string, directory: string) =>
+  NodePath.isAbsolute(directory) ? directory : NodePath.join(root, directory);
+
+const readEvidence = (root: string, directory: string) =>
+  NodePath.isAbsolute(directory)
+    ? readPlaytestEvidenceAt(directory)
+    : readPlaytestEvidence(root, directory);
+
+/** Read the stored pixels while their folder still exists; the caller copies them. */
+const readEvidenceFrames = (
+  root: string,
+  directory: string,
+  run: PlaytestEvidenceRun,
+): Effect.Effect<
+  ReadonlyArray<{
+    readonly label: string;
+    readonly inputPair?: GamePlaytestInputPair;
+    readonly data: string;
+    readonly width: number;
+    readonly height: number;
+    readonly observations?: Record<string, number | boolean>;
+  }>,
+  GameOperationError
+> =>
+  Effect.tryPromise({
+    try: () =>
+      Promise.all(
+        selectInputPairFrames(run.frames).map(async (frame) => ({
+          label: frame.label,
+          ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+          width: frame.width,
+          height: frame.height,
+          ...(frame.probe === undefined
+            ? {}
+            : { observations: studioObservations(frame.probe.gameState) }),
+          data: (
+            await NodeFSP.readFile(NodePath.join(evidencePath(root, directory), frame.file))
+          ).toString("base64"),
+        })),
+      ),
+    catch: (cause) =>
+      new GameOperationError({
+        operation: "Read review evidence",
+        path: evidencePath(root, directory),
+        reason: "io",
+        cause,
+      }),
+  });
+
+/** Preserve the probe's 40-key bound until the session can select approved keys. */
+const studioObservations = (
+  gameState: Readonly<Record<string, number | boolean | string | null | undefined>>,
+): Record<string, number | boolean> => {
+  const picked: Record<string, number | boolean> = {};
+  for (const key of Object.keys(gameState).toSorted()) {
+    if (Object.keys(picked).length >= 40) break;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    const raw = gameState[key];
+    if (typeof raw === "boolean") picked[key] = raw;
+    else if (typeof raw === "number" && Number.isFinite(raw)) picked[key] = raw;
+  }
+  return picked;
 };
 
 /**
@@ -231,6 +476,8 @@ export const layer = (options: { readonly stateDir: string }) =>
           readonly height?: number;
           /** Marks the alternate-window evidence frames. */
           readonly window?: boolean;
+          readonly observations?: Record<string, number | boolean>;
+          readonly probe?: { readonly gameState: Record<string, number | boolean | string> };
         }>,
       ) =>
         Effect.gen(function* () {
@@ -264,6 +511,13 @@ export const layer = (options: { readonly stateDir: string }) =>
               ...(shot.width === undefined ? {} : { width: shot.width }),
               ...(shot.height === undefined ? {} : { height: shot.height }),
               ...(shot.window === true ? { window: true } : {}),
+              ...(() => {
+                const direct = shot.observations;
+                if (direct !== undefined) return { observations: direct };
+                const probe = shot.probe;
+                if (probe === undefined) return {};
+                return { observations: studioObservations(probe.gameState) };
+              })(),
             });
           }
           return frames;
@@ -381,7 +635,27 @@ export const layer = (options: { readonly stateDir: string }) =>
                 "This build has no recorded playtest; playtest it before submitting.",
               ),
             ]);
-          checks.push(check("playtest", "passed"));
+          const routeIssues = playtestInputIssues({ steps: [...evidence.steps] });
+          const blockers = evidence.blockers ?? [];
+          if (routeIssues.length > 0)
+            checks.push(
+              check(
+                "playtest",
+                "failed",
+                `The recorded playtest route is not a browser route: ${routeIssues.join(" ")}`,
+              ),
+            );
+          else if (evidence.qualifies === false)
+            checks.push(
+              check(
+                "playtest",
+                "failed",
+                `The build's own playtest did not qualify${
+                  blockers.length === 0 ? "." : `: ${blockers.join("; ")}`
+                }`,
+              ),
+            );
+          else if (evidence.qualifies === true) checks.push(check("playtest", "passed"));
           const inputSteps = evidence.executedInputSteps;
           const consoleErrors = evidence.consoleErrors;
           return result(buildId, directory, [
@@ -398,12 +672,18 @@ export const layer = (options: { readonly stateDir: string }) =>
             ),
             check(
               "input",
-              inputSteps === undefined ? "unmeasured" : inputSteps > 0 ? "passed" : "failed",
+              inputSteps === undefined
+                ? "unmeasured"
+                : inputSteps > 0 && evidence.responded
+                  ? "passed"
+                  : "failed",
               inputSteps === undefined
                 ? "Input dispatch was not recorded; playtest again."
                 : inputSteps === 0
                   ? "The playtest executed no input steps; waits and screenshots do not count."
-                  : `${inputSteps} input steps executed`,
+                  : evidence.responded
+                    ? `${inputSteps} input steps executed`
+                    : "The playtest recorded no visible response to its input.",
             ),
           ]);
         });
@@ -543,6 +823,110 @@ export const layer = (options: { readonly stateDir: string }) =>
           );
         });
 
+      /**
+       * Frozen same-source scenario layout hints for the critic. Reads the
+       * state stage's durable evidence (the exact scenario result files the
+       * exam wrote) and binds them to this build's recorded source: a stale,
+       * missing or unreadable record selects nothing, honestly. Bounded: at
+       * most a few small result files, each capped in bytes.
+       */
+      const nativeDiagnosticsFor = (
+        root: string,
+        buildId: string,
+      ): Effect.Effect<GameRepairStudioNativeDiagnostics | undefined, GameOperationError> =>
+        Effect.gen(function* () {
+          const stateRecord = yield* qualification
+            .stageRecord(root, "state")
+            .pipe(Effect.orElseSucceed(() => null));
+          const stateSourceId = stateRecord?.sourceId ?? null;
+          const evidenceDirectory = stateRecord?.evidenceDirectory ?? null;
+          if (stateSourceId === null || evidenceDirectory === null) return undefined;
+          const exported = yield* rounds
+            .exported(root, buildId)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (exported === null) return undefined;
+          const exportStage = yield* qualification
+            .stageRecord(root, "export")
+            .pipe(Effect.orElseSucceed(() => null));
+          // Qualification input identities and rollback byte manifests are
+          // different namespaces. Bind through the exact build's export stage.
+          const exportInputSourceId = exportStage?.sourceId ?? null;
+          if (
+            exportStage?.outcome !== "passed" ||
+            exportStage.buildId !== buildId ||
+            exportInputSourceId === null ||
+            exportInputSourceId !== stateSourceId
+          )
+            return undefined;
+          const scenarios = yield* Effect.promise(() =>
+            readNativeScenarioEvidence(root, evidenceDirectory),
+          );
+          if (scenarios.length === 0) return undefined;
+          const selected = selectNativeLayout({
+            stateSourceId,
+            stateEvidenceDirectory: evidenceDirectory,
+            exportInputSourceId,
+            scenarios,
+          });
+          if (selected === null) return undefined;
+          return {
+            sourceId: selected.sourceId,
+            evidenceDirectory: selected.evidenceDirectory,
+            text: formatNativeDiagnostics(selected),
+          } satisfies GameRepairStudioNativeDiagnostics;
+        });
+
+      /**
+       * Frozen same-source scenario world measurements for the critic. Uses
+       * the exact source binding as the layout hints above: the state
+       * record's source must equal the passed export's source for this
+       * build, or nothing is selected, honestly. Bounded JSON, never a
+       * verdict, gate, defect or ballot change.
+       */
+      const nativeWorldFor = (
+        root: string,
+        buildId: string,
+      ): Effect.Effect<GameRepairStudioNativeWorld | undefined, GameOperationError> =>
+        Effect.gen(function* () {
+          const stateRecord = yield* qualification
+            .stageRecord(root, "state")
+            .pipe(Effect.orElseSucceed(() => null));
+          const stateSourceId = stateRecord?.sourceId ?? null;
+          const evidenceDirectory = stateRecord?.evidenceDirectory ?? null;
+          if (stateSourceId === null || evidenceDirectory === null) return undefined;
+          const exported = yield* rounds
+            .exported(root, buildId)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (exported === null) return undefined;
+          const exportStage = yield* qualification
+            .stageRecord(root, "export")
+            .pipe(Effect.orElseSucceed(() => null));
+          const exportInputSourceId = exportStage?.sourceId ?? null;
+          if (
+            exportStage?.outcome !== "passed" ||
+            exportStage.buildId !== buildId ||
+            exportInputSourceId === null ||
+            exportInputSourceId !== stateSourceId
+          )
+            return undefined;
+          const scenarios = yield* Effect.promise(() =>
+            readNativeScenarioEvidence(root, evidenceDirectory),
+          );
+          if (scenarios.length === 0) return undefined;
+          const selected = selectNativeSpatial({
+            stateSourceId,
+            stateEvidenceDirectory: evidenceDirectory,
+            exportInputSourceId,
+            scenarios,
+          });
+          if (selected === null) return undefined;
+          return {
+            sourceId: selected.sourceId,
+            evidenceDirectory: selected.evidenceDirectory,
+            text: formatNativeWorld(selected),
+          } satisfies GameRepairStudioNativeWorld;
+        });
+
       const check: GameRepairStudio["Service"]["check"] = (input) =>
         Effect.gen(function* () {
           const { inputs } = input;
@@ -550,17 +934,144 @@ export const layer = (options: { readonly stateDir: string }) =>
             inputs.viewport === null
               ? {}
               : { width: inputs.viewport.width, height: inputs.viewport.height };
-          const replay = yield* game
-            .webPlaytestBuild(input.threadId, input.buildId, {
-              steps: [...inputs.steps],
-              ...size,
-            })
-            .pipe(Effect.result);
-          if (replay._tag === "Failure") {
-            // A build that is gone or whose bytes changed cannot be reviewed.
-            // Any other failed replay is evidence, not the end of the round:
-            // the critic gets the boot frames, the exact error and its own
-            // game_try_input runs.
+          // A route a browser cannot send is not a game verdict. Reject it
+          // before any run so a boot-only fallback can never look like a pass.
+          const routeIssues = playtestInputIssues({ steps: [...inputs.steps], ...size });
+          if (routeIssues.length > 0)
+            return yield* new GameOperationError({
+              operation: "Review check",
+              path: input.root,
+              reason: "invalid-input",
+              detail: routeIssues.join("\n"),
+            });
+
+          // Frozen same-source scenario hints for the critic, when they
+          // exist: the state stage's durable evidence binds to this build's
+          // exact source, or the hints are honestly omitted. Candidate builds
+          // get none: the evidence predates the repair.
+          const native =
+            input.target === "incumbent"
+              ? yield* nativeDiagnosticsFor(input.root, input.buildId)
+              : undefined;
+          const nativeWorld =
+            input.target === "incumbent"
+              ? yield* nativeWorldFor(input.root, input.buildId)
+              : undefined;
+          const withNative = {
+            ...(native === undefined ? {} : { nativeDiagnostics: native }),
+            ...(nativeWorld === undefined ? {} : { nativeWorld }),
+          };
+          const recorded = yield* rounds.exported(input.root, input.buildId).pipe(Effect.result);
+          const playtest =
+            recorded._tag === "Success" ? (recorded.success?.playtest ?? null) : null;
+          // A failed verdict on this exact build is a hard fact even when a
+          // later replay uses a different frozen route. A passing replay must
+          // not erase the build's own failed qualification.
+          const failedBinding =
+            playtest !== null && playtest.qualifies === false
+              ? playtestCheck(false, playtest.blockers)
+              : [];
+          // Reuse the build's own run only when it measured the same exact
+          // frozen route. A different or older route must be replayed.
+          if (
+            playtest !== null &&
+            playtest.qualifies !== undefined &&
+            playtest.evidenceDirectory !== undefined &&
+            sameFrozenRoute(playtest, inputs)
+          ) {
+            const intact = yield* Effect.promise(() =>
+              hashWebBuild(input.root, candidateBuildDirectory(input.buildId)).then(
+                (hashed) => hashed?.buildId === input.buildId,
+                () => false,
+              ),
+            );
+            if (!intact)
+              return yield* new GameOperationError({
+                operation: "Review check",
+                path: input.root,
+                reason: "invalid-input",
+                detail: `Build ${input.buildId} is missing or its bytes changed after export; export the game again.`,
+              });
+            const evidence = yield* Effect.promise(() =>
+              readEvidence(input.root, playtest.evidenceDirectory!),
+            );
+            const shots =
+              evidence === null
+                ? null
+                : yield* readEvidenceFrames(input.root, playtest.evidenceDirectory!, evidence).pipe(
+                    Effect.orElseSucceed(() => null),
+                  );
+            // Wall-time evidence is not controlled-clock evidence. A stored
+            // pass from before the controlled driver must be replayed for
+            // adjudication, never reused as a controlled pass. A stored
+            // failure stays a hard failure either way, so it reuses as before.
+            const legacyPass =
+              playtest.qualifies === true && evidence?.timing !== "controlled-clock";
+            if (evidence !== null && shots !== null && shots.length > 0 && !legacyPass) {
+              const played =
+                playedViewport(playtest.viewport, playtest.captureScale) ?? inputs.viewport;
+              const checks = storedCheckResult(playtest, {
+                steps: [...inputs.steps],
+                changedPercent: evidence.changedPercent,
+                state: evidence.state,
+                designObservations: [...evidence.designObservations],
+              });
+              const frames = yield* storeFrames(input.root, shots);
+              if (playtest.qualifies === false)
+                return { checks, frames, viewport: played, ...withNative };
+              const window = yield* windowEvidence({
+                threadId: input.threadId,
+                root: input.root,
+                buildId: input.buildId,
+                size: alternateWindow(played),
+              });
+              return {
+                checks: [...checks, window.check],
+                frames: [...frames, ...window.frames],
+                viewport: played,
+                ...withNative,
+              } satisfies GameRepairStudioCheckResult;
+            }
+          }
+
+          // A review replay is evidence, never the builder's playtest record.
+          // The isolated folder also gives a response byte cap persisted frames.
+          const reviewRun = (playtestInput: GameWebPlaytestInput) =>
+            Effect.gen(function* () {
+              const directory = NodePath.join(
+                gameRecordFile(options.stateDir, "game-review-replays", input.root, ""),
+                NodeCrypto.randomUUID(),
+              );
+              return yield* Effect.gen(function* () {
+                const played = yield* game
+                  .webPlaytestBuild(input.threadId, input.buildId, playtestInput, directory)
+                  .pipe(Effect.result);
+                if (played._tag === "Failure")
+                  return { failure: played.failure, shots: [] as const };
+                const evidenceDirectory = played.success.evidenceDirectory;
+                const evidence =
+                  evidenceDirectory === undefined
+                    ? null
+                    : yield* Effect.promise(() => readEvidence(input.root, evidenceDirectory));
+                return {
+                  success: played.success,
+                  shots:
+                    evidence === null || evidenceDirectory === undefined
+                      ? played.success.screenshots
+                      : yield* readEvidenceFrames(input.root, evidenceDirectory, evidence),
+                } as const;
+              }).pipe(
+                Effect.ensuring(
+                  Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })),
+                ),
+              );
+            });
+
+          const replay = yield* reviewRun({ steps: [...inputs.steps], ...size });
+          if ("failure" in replay) {
+            // An invalid route or a changed build is the caller's to fix. A
+            // boot-only fallback here would hide that behind weaker evidence.
+            if (replay.failure.reason === "invalid-input") return yield* replay.failure;
             const intact = yield* Effect.promise(() =>
               hashWebBuild(input.root, candidateBuildDirectory(input.buildId)).then(
                 (hashed) => hashed?.buildId === input.buildId,
@@ -568,10 +1079,26 @@ export const layer = (options: { readonly stateDir: string }) =>
               ),
             );
             if (!intact) return yield* replay.failure;
-            const boot = yield* game
-              .webPlaytestBuild(input.threadId, input.buildId, size)
-              .pipe(Effect.result);
-            const booted = boot._tag === "Success" ? boot.success : null;
+            const boot = yield* reviewRun(size);
+            if ("failure" in boot)
+              return {
+                checks: [
+                  {
+                    id: "replay",
+                    status: "failed" as const,
+                    detail: replay.failure.message.slice(0, 1000),
+                  },
+                  {
+                    id: "boot",
+                    status: "failed" as const,
+                    detail: boot.failure.message.slice(0, 1000),
+                  },
+                  ...failedBinding,
+                ],
+                frames: [],
+                viewport: inputs.viewport,
+                ...withNative,
+              } satisfies GameRepairStudioCheckResult;
             return {
               checks: [
                 {
@@ -579,50 +1106,20 @@ export const layer = (options: { readonly stateDir: string }) =>
                   status: "failed" as const,
                   detail: replay.failure.message.slice(0, 1000),
                 },
-                ...(boot._tag === "Failure"
-                  ? [
-                      {
-                        id: "boot",
-                        status: "failed" as const,
-                        detail: boot.failure.message.slice(0, 1000),
-                      },
-                    ]
-                  : checkResult(boot.success, { ...inputs, steps: [] }).filter(
-                      (entry) => entry.id !== "input",
-                    )),
+                ...checkResult(boot.success, { ...inputs, steps: [] }).filter(
+                  (entry) => entry.id !== "input" && entry.id !== "playtest",
+                ),
+                ...failedBinding,
               ],
-              frames: booted === null ? [] : yield* storeFrames(input.root, booted.screenshots),
+              frames: yield* storeFrames(input.root, boot.shots),
               viewport:
-                playedViewport(booted?.baseViewport, booted?.captureScale) ?? inputs.viewport,
+                playedViewport(boot.success.baseViewport, boot.success.captureScale) ??
+                inputs.viewport,
+              ...withNative,
             } satisfies GameRepairStudioCheckResult;
           }
           const result = replay.success;
-          // Read persisted pairs so a response byte cap cannot split the critic's evidence.
-          const persisted =
-            result.evidenceDirectory === undefined
-              ? null
-              : yield* Effect.promise(() =>
-                  readPlaytestEvidence(input.root, result.evidenceDirectory!),
-                );
-          const selected =
-            persisted === null
-              ? selectInputPairFrames(result.screenshots)
-              : yield* Effect.promise(() =>
-                  Promise.all(
-                    selectInputPairFrames(persisted.frames).map(async (frame) => ({
-                      label: frame.label,
-                      ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
-                      width: frame.width,
-                      height: frame.height,
-                      data: (
-                        await NodeFSP.readFile(
-                          NodePath.join(input.root, result.evidenceDirectory!, frame.file),
-                        )
-                      ).toString("base64"),
-                    })),
-                  ),
-                );
-          const frames = yield* storeFrames(input.root, selected);
+          const frames = yield* storeFrames(input.root, replay.shots);
           const played =
             playedViewport(result.baseViewport, result.captureScale) ?? inputs.viewport;
           const window = yield* windowEvidence({
@@ -632,9 +1129,16 @@ export const layer = (options: { readonly stateDir: string }) =>
             size: alternateWindow(played),
           });
           return {
-            checks: [...checkResult(result, inputs), window.check],
+            checks: [
+              ...checkResult(result, inputs).filter(
+                (entry) => entry.id !== "playtest" || failedBinding.length === 0,
+              ),
+              ...failedBinding,
+              window.check,
+            ],
             frames: [...frames, ...window.frames],
             viewport: playedViewport(result.baseViewport, result.captureScale),
+            ...withNative,
           } satisfies GameRepairStudioCheckResult;
         });
 
@@ -642,16 +1146,20 @@ export const layer = (options: { readonly stateDir: string }) =>
         Effect.gen(function* () {
           // The route is replayed in its own experiment store. GameService
           // skips stage writes and the build playtest binding for that path.
+          // Setup+steps replay fresh with the same capture boundary, so cited
+          // step indices never alias and setup is never omitted.
           const directory = NodePath.join(
             gameRecordFile(options.stateDir, "game-review-experiments", input.root, ""),
             NodeCrypto.randomUUID(),
           );
+          const setupSteps = [...(input.setupSteps ?? [])];
+          const fullSteps = [...setupSteps, ...input.steps];
           const result = yield* game
             .webPlaytestBuild(
               input.threadId,
               input.buildId,
               {
-                steps: [...input.steps],
+                steps: fullSteps,
                 captureEveryMs: input.captureEveryMs,
                 captureAllSteps: true,
                 ...(input.viewport === null
@@ -660,6 +1168,9 @@ export const layer = (options: { readonly stateDir: string }) =>
               },
               directory,
               "persisted",
+              ...(setupSteps.length === 0
+                ? []
+                : ([{ captureFromStep: setupSteps.length }] as const)),
             )
             .pipe(
               Effect.flatMap((result) =>
@@ -679,6 +1190,9 @@ export const layer = (options: { readonly stateDir: string }) =>
                               ...(frame.inputPair === undefined
                                 ? {}
                                 : { inputPair: frame.inputPair }),
+                              ...(frame.probe === undefined
+                                ? {}
+                                : { probe: { gameState: frame.probe.gameState } }),
                               data: (
                                 await NodeFSP.readFile(
                                   NodePath.join(evidenceDirectory!, frame.file),

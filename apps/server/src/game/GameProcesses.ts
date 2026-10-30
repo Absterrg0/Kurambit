@@ -8,6 +8,7 @@ import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { GameOperationError, type GameProcessResult } from "@t3tools/contracts";
 
 interface Running {
@@ -43,6 +44,15 @@ interface ProcessInput {
    * inherit, so even that route stays isolated there.
    */
   display?: "headless" | "inherit";
+  /** Extra variables merged over the base environment for this child only; never leaked globally. */
+  env?: NodeJS.ProcessEnv | undefined;
+  /**
+   * Linux only: spawn the child as a process-group leader and signal the whole
+   * group on stop, timeout and disposal, so wrapper-spawned descendants (an
+   * xvfb-run server plus its Godot child) die with it. Defaults to
+   * direct-child signalling; never matches processes by name.
+   */
+  ownedProcessGroup?: boolean | undefined;
 }
 export class GameProcesses extends Context.Service<
   GameProcesses,
@@ -58,6 +68,7 @@ export class GameProcesses extends Context.Service<
 
 const make = Effect.gen(function* () {
   const running = new Map<number, Running>();
+  const platform = yield* HostProcess.Platform;
   const startProcess = async (
     input: Parameters<GameProcesses["Service"]["run"]>[0],
     signal?: AbortSignal,
@@ -77,14 +88,61 @@ const make = Effect.gen(function* () {
     });
     const child = NodeChildProcess.spawn(input.executable, [...input.args], {
       cwd: input.cwd ?? input.root,
-      env: input.display === "inherit" ? process.env : headlessEnvironment(process.env),
+      env: {
+        ...(input.display === "inherit" ? process.env : headlessEnvironment(process.env)),
+        ...input.env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
+      // A wrapper (xvfb-run) leaves its display server and engine child in the
+      // group; group signalling is the only way to own all of them by PID.
+      detached: input.ownedProcessGroup === true && platform === "linux" ? true : undefined,
     });
     let stdout = "",
       stderr = "",
       timedOut = false;
     let escalation: ReturnType<typeof setTimeout> | undefined;
+    const ownsGroup = input.ownedProcessGroup === true && platform === "linux";
+    const groupAlive = (): boolean => {
+      if (child.pid === undefined) return false;
+      try {
+        // Signal 0 probes the owned group by PGID only; never by name.
+        process.kill(-child.pid, 0);
+        return true;
+      } catch (error) {
+        // ESRCH means the group is gone; EPERM means it exists but this
+        // signal is not permitted, which still counts as alive for cleanup.
+        return (error as NodeJS.ErrnoException)?.code !== "ESRCH";
+      }
+    };
+    const signalGroup = (signal: NodeJS.Signals): boolean => {
+      if (child.pid === undefined) return false;
+      try {
+        process.kill(-child.pid, signal);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const stop = () => {
+      if (ownsGroup) {
+        // The wrapper (xvfb-run) may already have exited while its display
+        // server or engine child survives in the owned group. Signal the
+        // group by captured PGID regardless of the leader's exit status, so a
+        // wrapper that exits first cannot orphan a redirected child. (Once the
+        // leader's close fires the entry leaves the tracked map, and the
+        // close handler below TERMs the still-live group the same way.)
+        // Never matches processes by name; only this spawn's group.
+        if (signalGroup("SIGTERM")) {
+          escalation ??= setTimeout(() => {
+            if (groupAlive()) signalGroup("SIGKILL");
+            else if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+          }, 2_000);
+        } else if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGTERM");
+          escalation ??= setTimeout(() => child.kill("SIGKILL"), 2_000);
+        }
+        return;
+      }
       if (child.exitCode !== null || child.signalCode !== null) return;
       child.kill("SIGTERM");
       escalation ??= setTimeout(() => child.kill("SIGKILL"), 2_000);
@@ -113,7 +171,26 @@ const make = Effect.gen(function* () {
       log.on("error", () => stop());
       child.once("close", (code, exitSignal) => {
         clearTimeout(timer);
-        if (escalation) clearTimeout(escalation);
+        if (ownsGroup) {
+          // The leader closed, but the owned group may still hold the display
+          // server or engine child: the close already removed this entry from
+          // the tracked map, so a later stop() cannot reach it. TERM the
+          // still-owned group now so a wrapper that exits first cannot orphan
+          // a redirected descendant, and keep the SIGKILL escalation for a
+          // group that ignores TERM. Only a confirmed-dead group clears it.
+          if (groupAlive()) {
+            signalGroup("SIGTERM");
+            escalation ??= setTimeout(() => {
+              signalGroup("SIGKILL");
+            }, 2_000);
+          } else if (escalation) {
+            clearTimeout(escalation);
+            escalation = undefined;
+          }
+        } else if (escalation) {
+          clearTimeout(escalation);
+          escalation = undefined;
+        }
         signal?.removeEventListener("abort", abort);
         if (child.pid !== undefined) running.delete(child.pid);
         log.end(() => {

@@ -29,6 +29,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -140,7 +141,11 @@ interface StartedChild {
   readonly runId: RunId;
   readonly completion: Deferred.Deferred<ChildCompletion>;
   readonly evidence: GameReviewSessions.GameReviewEvidenceInput | null;
+  /** The repair brief this child was dispatched with, for the next-attempt test. */
+  readonly repair: GameReviewSessions.GameReviewRepairInput | null;
   readonly hung: boolean;
+  /** The loop interrupted it; its join may now observe the settlement. */
+  interrupted: boolean;
   completed: boolean;
 }
 
@@ -157,6 +162,8 @@ interface Scripted {
   /** What the studio's factual check says for every build it is asked about. */
   facts: { readonly passed: boolean; readonly reason: string | null };
   factChecks: number;
+  /** Answers already on disk while the child itself still runs, keyed role:order. */
+  pendingAnswers: Record<string, GameReviewSessions.GameReviewSessionAnswerResult>;
   incumbent: CheckRun;
   candidate: CheckRun;
   exportOutcome: {
@@ -182,8 +189,14 @@ interface Scripted {
   completeInStart: ReadonlySet<string>;
   /** This role never finishes its wait on its own. */
   hungRoles: ReadonlySet<string>;
+  /** Terminal status per role:order; defaults to completed. */
+  statuses: Record<string, string>;
+  /** Runs after a candidate check returns, still inside the check call. */
+  afterCandidateCheck: (() => void) | null;
   /** This role ignores interruptions entirely, so a supersession must fail closed. */
   ignoresInterruptRoles: ReadonlySet<string>;
+  /** Extra time the post-interrupt join takes to observe this role's stop. */
+  joinDelays: Record<string, number>;
   /** This role's dispatch commits, then its confirmation write fails. */
   failConfirmRoles: ReadonlySet<string>;
   /** While set, every child status read waits for it. */
@@ -223,6 +236,7 @@ const makeScripted = (): Scripted => ({
   activeRun: builderRunId,
   facts: { passed: true, reason: null },
   factChecks: 0,
+  pendingAnswers: {},
   incumbent: {
     checks: [
       { id: "boot", status: "passed" },
@@ -256,7 +270,10 @@ const makeScripted = (): Scripted => ({
   repairs: [],
   completeInStart: new Set(),
   hungRoles: new Set(),
+  statuses: {},
+  afterCandidateCheck: null,
   ignoresInterruptRoles: new Set(),
+  joinDelays: {},
   failConfirmRoles: new Set(),
   shellGate: null,
   runs: [
@@ -410,6 +427,12 @@ interface Fixture {
     services: Services,
     child: StartedChild,
   ) => Effect.Effect<void, GameOperationError>;
+  /** Completes a child with an explicit terminal status (a provider ended). */
+  readonly completeAs: (
+    child: StartedChild,
+    status: string,
+    answer: GameReviewSessions.GameReviewSessionAnswerResult | null,
+  ) => Effect.Effect<void>;
   /** A late child stops on its own, long after the loop let go of it. */
   readonly stopLate: (child: StartedChild) => Effect.Effect<void>;
 }
@@ -437,7 +460,15 @@ const withLoop = <A, E>(
         await NodeFSP.mkdir(NodePath.join(root, "godot/scripts"), { recursive: true });
         await NodeFSP.writeFile(
           NodePath.join(root, "game.json"),
-          `${JSON.stringify({ name: "Repair probe", brief: "Make a platformer." })}\n`,
+          `${JSON.stringify({
+            schemaVersion: 1,
+            name: "Repair probe",
+            brief: "Make a platformer.",
+            artDirection: "Warm paper colours.",
+            engine: { name: "godot", version: "4.7.2" },
+            godotProject: "godot",
+            assets: [],
+          })}\n`,
         );
         await NodeFSP.writeFile(
           NodePath.join(root, "BRIEF.md"),
@@ -489,20 +520,21 @@ const withLoop = <A, E>(
         child: StartedChild,
       ): Effect.Effect<void, GameOperationError> =>
         Effect.gen(function* () {
+          const status = scripted.statuses[`${child.role}:${child.order}`] ?? "completed";
           if (child.role === "repair") {
             const attempt = scripted.starts.filter((entry) => entry.role === "repair").length;
             const hook =
               scripted.repairs[Math.min(attempt - 1, scripted.repairs.length - 1)] ?? null;
             if (hook !== null)
               yield* hook({ root, roundId: child.roundId, rounds: services.rounds });
-            yield* finish(child, "completed", null);
+            yield* finish(child, status, null);
             return;
           }
           if (child.role === "critic") {
             const factory = scripted.critic;
             yield* finish(
               child,
-              "completed",
+              status,
               factory === null
                 ? null
                 : factory({ order: 0, round: null as never, plan: null as never }),
@@ -515,7 +547,7 @@ const withLoop = <A, E>(
           const factory = scripted.ballots[child.order];
           yield* finish(
             child,
-            "completed",
+            status,
             factory === undefined || plan === undefined || round === undefined
               ? null
               : factory({ order: child.order, round, plan }),
@@ -551,7 +583,9 @@ const withLoop = <A, E>(
                   runId: RunId.make(`run:child:${key}`),
                   completion,
                   evidence: input.evidence ?? null,
+                  repair: input.repair ?? null,
                   hung: scripted.hungRoles.has(`${input.role}:${order}`),
+                  interrupted: false,
                   completed: false,
                 };
                 children.set(key, child);
@@ -589,12 +623,18 @@ const withLoop = <A, E>(
                 const order = input.order ?? 0;
                 const child = children.get(`${input.roundId}:${input.role}:${order}`);
                 if (child === undefined) return { kind: "pending" as const };
+                // An answer written before the run ended survives the interrupt;
+                // this is what the loop may consume after a phase cap.
+                const recorded = scripted.pendingAnswers[`${input.role}:${order}`];
                 const polled = yield* Deferred.poll(child.completion);
-                if (Option.isNone(polled)) return { kind: "pending" as const };
-                const finished = yield* polled.value;
-                if (finished.answer === null)
+                if (Option.isSome(polled)) {
+                  const finished = yield* polled.value;
+                  if (finished.answer !== null) return finished.answer;
+                }
+                if (recorded !== undefined) return recorded;
+                if (Option.isSome(polled))
                   return { kind: "invalid" as const, reason: "no answer", raw: null };
-                return finished.answer;
+                return { kind: "pending" as const };
               });
             const runStatus: GameReviewSessions.GameReviewSessions["Service"]["runStatus"] = (
               input,
@@ -632,6 +672,8 @@ const withLoop = <A, E>(
                 return Effect.succeed(scripted.recipeCalls[`${child?.role}:${child?.order}`] ?? 0);
               },
               tryInput: () => Effect.die("The loop fixture does not launch input experiments."),
+              inspectDetail: () => Effect.die("The loop fixture does not crop details."),
+              detailCalls: () => Effect.succeed(0),
               experiments: (input) =>
                 Effect.succeed(
                   scripted.criticExperiments
@@ -682,6 +724,7 @@ const withLoop = <A, E>(
                 inputs: input.inputs,
               });
               const run = input.target === "incumbent" ? scripted.incumbent : scripted.candidate;
+              if (input.target === "candidate") scripted.afterCandidateCheck?.();
               return Effect.succeed({
                 checks: run.checks,
                 frames: [
@@ -884,7 +927,8 @@ const withLoop = <A, E>(
               return Effect.succeed({ type: "no_active_run" as const });
             return Effect.gen(function* () {
               // A hung child still answers an interrupt; it just never finishes
-              // on its own.
+              // on its own. The join after that interrupt sees it settle.
+              child.interrupted = true;
               yield* finish(child, "interrupted", null);
               return { type: "no_active_run" as const };
             });
@@ -895,11 +939,29 @@ const withLoop = <A, E>(
             );
             if (child === undefined)
               return Effect.succeed({ threadId: input.threadId, run: null, timedOut: true });
-            const wait = child.hung
-              ? Effect.never
-              : Deferred.await(child.completion).pipe(Effect.asVoid);
-            return wait.pipe(
-              Effect.as({ threadId: input.threadId, run: null, timedOut: false }) as never,
+            const wait =
+              child.hung && !child.interrupted
+                ? Effect.never
+                : Deferred.await(child.completion).pipe(Effect.asVoid);
+            const joinDelay = child.interrupted
+              ? (scripted.joinDelays[`${child.role}:${child.order}`] ?? 0)
+              : 0;
+            const settledWait =
+              joinDelay === 0
+                ? wait
+                : Effect.sleep(Duration.millis(joinDelay)).pipe(Effect.andThen(wait));
+            // The real service honors the caller's timeout; a hung child must
+            // return timedOut rather than hold the loop forever.
+            return settledWait.pipe(
+              Effect.timeoutOption(Duration.millis(input.timeoutMs)),
+              Effect.map(
+                (finished) =>
+                  ({
+                    threadId: input.threadId,
+                    run: null,
+                    timedOut: Option.isNone(finished),
+                  }) as never,
+              ),
             );
           },
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>);
@@ -968,6 +1030,7 @@ const withLoop = <A, E>(
         drive,
         take: Queue.take(startQueue),
         complete: settle,
+        completeAs: finish,
         stopLate: (child) => finish(child, "completed", null),
       });
     }),
@@ -1023,6 +1086,115 @@ it.live("keeps a better build, then stops when the critic finds no defects", () 
   ),
 );
 
+it.live("a server downgraded answer reaches the zero-defect path with its history intact", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.critic = () => ({
+          kind: "critic",
+          raw: "{}",
+          answer: {
+            fundamentals,
+            defects: [],
+            doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "f1" }],
+            requirements: [
+              {
+                id: "reach-roof",
+                verdict: "cannot-tell",
+                frameIds: [],
+                note: "The critic left this unseen.",
+              },
+            ],
+            downgradedRequirements: [
+              {
+                id: "reach-roof",
+                reason: "Requirement reach-roof=yes needs a matched witness.",
+              },
+            ],
+          },
+        });
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("zero-defects");
+        expect(state.reason).toContain("coverage incomplete");
+        const game = yield* services.rounds.read(fixture.root);
+        expect(game.rounds).toHaveLength(1);
+        expect(game.rounds[0]?.requirements).toEqual([
+          {
+            id: "reach-roof",
+            verdict: "cannot-tell",
+            frameIds: [],
+            note: "The critic left this unseen.",
+          },
+        ]);
+        expect(game.rounds[0]?.downgradedRequirements).toEqual([
+          { id: "reach-roof", reason: "Requirement reach-roof=yes needs a matched witness." },
+        ]);
+      }),
+    ),
+  ),
+);
+
+it.live("a server downgraded answer with a defect still reaches repair", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () =>
+          reviews++ === 0
+            ? {
+                kind: "critic",
+                raw: "{}",
+                answer: {
+                  fundamentals,
+                  defects: [
+                    {
+                      severity: "visible" as const,
+                      what: "The sign clips the gate.",
+                      frameId: "f1",
+                      fix: "Move the sign; yes/no: the gate reads fully.",
+                    },
+                  ],
+                  doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "f1" }],
+                  requirements: [
+                    {
+                      id: "reach-roof",
+                      verdict: "cannot-tell" as const,
+                      frameIds: [],
+                      note: "The critic left this unseen.",
+                    },
+                  ],
+                  downgradedRequirements: [
+                    {
+                      id: "reach-roof",
+                      reason: "Requirement reach-roof=yes needs a matched witness.",
+                    },
+                  ],
+                },
+              }
+            : criticAnswer(0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.promotedRounds).toHaveLength(1);
+        const game = yield* services.rounds.read(fixture.root);
+        const first = game.rounds.find((round) => round.id === state.promotedRounds[0]);
+        expect(first?.downgradedRequirements).toEqual([
+          { id: "reach-roof", reason: "Requirement reach-roof=yes needs a matched witness." },
+        ]);
+      }),
+    ),
+  ),
+);
+
 it.live(
   "stops before a next round when the finished round took longer than the budget left",
   () => {
@@ -1068,7 +1240,7 @@ it.live(
   },
 );
 
-it.live("starts the next round when the finished round fits in the budget left", () => {
+it.live("starts the next round after a five-minute round when forty minutes remain", () => {
   let skewMs = 0;
   return withLoop(
     (fixture) =>
@@ -1081,7 +1253,7 @@ it.live("starts the next round when the finished round fits in the budget left",
               repair(input).pipe(
                 Effect.tap(() =>
                   Effect.sync(() => {
-                    skewMs = 60_000;
+                    skewMs = 5 * 60_000;
                   }),
                 ),
               ),
@@ -1100,6 +1272,119 @@ it.live("starts the next round when the finished round fits in the budget left",
         }),
       ),
     { now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs },
+  );
+});
+
+it.live("a late critic does not start a repair that cannot leave a decision tail", () => {
+  let skewMs = 0;
+  const frozen = DateTime.toEpochMillis(DateTime.nowUnsafe());
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => {
+            // The critic used forty of the forty-five minutes.
+            skewMs = 40 * 60_000;
+            return criticAnswer(1);
+          };
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("stopped");
+          expect(state.reason).toContain("budget-admission");
+          expect(state.repairsUsed).toBe(0);
+          expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(0);
+          const game = yield* services.rounds.read(root);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { now: () => frozen + skewMs },
+  );
+});
+
+it.live("a candidate check that cannot leave both ballots is not started", () => {
+  let skewMs = 0;
+  const frozen = DateTime.toEpochMillis(DateTime.nowUnsafe());
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.repairs = [
+            (input) =>
+              repairWith()(input).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    // Only two minutes remain once the candidate is exported.
+                    skewMs = 43 * 60_000;
+                  }),
+                ),
+              ),
+          ];
+          scripted.critic = () => criticAnswer(1);
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("candidate check");
+          expect(scripted.checks.filter((check) => check.target === "candidate")).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          const game = yield* services.rounds.read(root);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { now: () => frozen + skewMs },
+  );
+});
+
+it.live("optional experiment replays are skipped to protect the ballot decision", () => {
+  let skewMs = 0;
+  const frozen = DateTime.toEpochMillis(DateTime.nowUnsafe());
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.criticExperiments = [
+            {
+              id: "try-1",
+              buildId: EXPORT_BUILD_ID,
+              steps: [{ press: "Space" }, { screenshot: "after-action" }],
+              captureEveryMs: 100,
+              viewport: null,
+              frames: [{ frameId: "try1f4", label: "after-action", stepIndex: null }],
+            },
+          ];
+          const original = criticAnswer(1);
+          scripted.critic =
+            original.kind === "critic"
+              ? () => ({
+                  ...original,
+                  answer: {
+                    ...original.answer,
+                    defects: original.answer.defects.map((defect) => ({
+                      ...defect,
+                      frameId: "try1f4",
+                    })),
+                  },
+                })
+              : null;
+          scripted.afterCandidateCheck = () => {
+            // No full experiment allowance is left, but both ballots fit.
+            skewMs = 33.5 * 60_000;
+          };
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(scripted.experiments).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(2);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    { now: () => frozen + skewMs },
   );
 });
 
@@ -1337,6 +1622,537 @@ it.live("both builds' window frames reach the critic and both ballots", () =>
           ["ballot-0-A", "ballot-0-B", "ballot-1-A", "ballot-1-B"].map((key) => expected.get(key)),
         );
         expect(sides.size).toBe(2);
+      }),
+    ),
+  ),
+);
+
+it.live("ballots keep a later cited defect pair over earlier prefix within budget", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const steps = [
+          { click: "left" },
+          { press: "Space" },
+          { key: "ArrowRight", holdMs: 1200 },
+        ] as const;
+        scripted.steps = [...steps];
+        scripted.viewport = { width: 960, height: 540 };
+        const incPaths = [0, 1, 2, 3, 4, 5].map((index) => NodePath.join(root, `inc-${index}.png`));
+        const candPaths = [0, 1, 2, 3, 4, 5].map((index) =>
+          NodePath.join(root, `cand-${index}.png`),
+        );
+        const inputPairs = [
+          {
+            phase: "before",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+        ] as const;
+        const incWindows = [
+          {
+            path: NodePath.join(root, "inc-window1.png"),
+            label: "window 900x900: boot",
+            width: 900,
+            height: 900,
+          },
+          {
+            path: NodePath.join(root, "inc-window2.png"),
+            label: "window 900x900: after a short input burst",
+            width: 900,
+            height: 900,
+          },
+        ];
+        const candWindows = [
+          {
+            path: NodePath.join(root, "cand-window1.png"),
+            label: "window 900x900: boot",
+            width: 900,
+            height: 900,
+          },
+          {
+            path: NodePath.join(root, "cand-window2.png"),
+            label: "window 900x900: after a short input burst",
+            width: 900,
+            height: 900,
+          },
+        ];
+        scripted.incumbent = {
+          ...scripted.incumbent,
+          frames: [...incPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: [...incWindows],
+        };
+        scripted.candidate = {
+          ...scripted.candidate,
+          frames: [...candPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: [...candWindows],
+        };
+        scripted.criticExperiments = [
+          {
+            id: "try-1",
+            buildId: EXPORT_BUILD_ID,
+            steps: [{ press: "r" }],
+            captureEveryMs: 100,
+            viewport: { width: 640, height: 360 },
+            frames: [{ frameId: "try1f1", label: "input 1 after", stepIndex: 0 }],
+          },
+        ];
+        let reviews = 0;
+        scripted.critic = () => {
+          if (reviews++ !== 0) return criticAnswer(0);
+          return {
+            kind: "critic" as const,
+            raw: "{}",
+            answer: {
+              fundamentals,
+              defects: [
+                {
+                  severity: "visible" as const,
+                  what: "Later move fails",
+                  frameId: "f6",
+                  fix: "Fix it; yes/no: fixed.",
+                },
+              ],
+              doNotRegress: [
+                { id: "early", what: "Early still works", frameId: "f2" },
+                { id: "retry", what: "Retry still works", frameId: "try1f1" },
+              ],
+            },
+          };
+        };
+        scripted.repairs = [repairWith()];
+        const seen: Array<{
+          readonly plan: GameReviewBallotPlan;
+          readonly frames: ReadonlyArray<{
+            readonly id: string;
+            readonly label: string;
+            readonly sourcePath: string;
+            readonly inputPair?: { readonly stepIndex: number; readonly phase: string };
+            readonly pair?: { readonly beforePath: string; readonly afterPath: string } | undefined;
+            readonly width?: number;
+            readonly height?: number;
+          }>;
+        }> = [];
+        scripted.ballots = [0, 1].map(
+          () =>
+            ({ plan, order }: { readonly plan: GameReviewBallotPlan; readonly order: number }) => {
+              const frames =
+                scripted.starts.find((entry) => entry.role === "ballot" && entry.order === order)
+                  ?.evidence?.frames ?? [];
+              seen.push({ plan, frames });
+              return ballotAnswer(plan, "tie");
+            },
+        );
+        yield* runToCompletion(services, fixture);
+        expect(seen).toHaveLength(2);
+        for (const { plan, frames } of seen) {
+          const challengerPrefix = plan.main.A === "challenger" ? "a" : "b";
+          const incumbentPrefix = challengerPrefix === "a" ? "b" : "a";
+          const sideFrames = (prefix: string) =>
+            frames.filter((frame) => frame.id.startsWith(prefix));
+          for (const [prefix, expectedBefore, expectedAfter] of [
+            [challengerPrefix, candPaths[4]!, candPaths[5]!],
+            [incumbentPrefix, incPaths[4]!, incPaths[5]!],
+          ] as const) {
+            const cards = sideFrames(prefix).filter((frame) => frame.inputPair?.stepIndex === 2);
+            expect(cards).toHaveLength(1);
+            const card = cards[0]!;
+            expect(card.inputPair?.phase).toBe("after");
+            expect(card.label).toContain("(before | after)");
+            expect(card.pair?.beforePath).toBe(expectedBefore);
+            expect(card.pair?.afterPath).toBe(expectedAfter);
+          }
+          for (const prefix of [challengerPrefix, incumbentPrefix]) {
+            const shown = new Set(
+              sideFrames(prefix).flatMap((frame) =>
+                frame.inputPair === undefined ? [] : [frame.inputPair.stepIndex],
+              ),
+            );
+            expect(shown.has(0)).toBe(true);
+            expect(shown.has(2)).toBe(true);
+            expect(shown.has(1)).toBe(false);
+          }
+          for (const prefix of ["a", "b", "c", "d"]) {
+            const shaped = sideFrames(prefix).filter((frame) =>
+              frame.label.includes("window 900x900"),
+            );
+            expect(shaped).toHaveLength(2);
+            for (const frame of shaped) expect(frame).toMatchObject({ width: 900, height: 900 });
+          }
+          const content = (prefix: string) =>
+            sideFrames(prefix).map(
+              (frame) =>
+                `${frame.label.slice(`${prefix.toUpperCase()}: `.length)}\0${frame.sourcePath}\0${JSON.stringify(frame.inputPair ?? null)}\0${JSON.stringify(frame.pair ?? null)}`,
+            );
+          expect(content("d")).toEqual(content("c"));
+          expect(content("c").length).toBeGreaterThan(0);
+          expect(
+            sideFrames(challengerPrefix).some((frame) => frame.label.includes("experiment try-1")),
+          ).toBe(true);
+        }
+      }),
+    ),
+  ),
+);
+
+it.live("many defects beyond the frozen budget show the first pairs without splitting one", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const steps = [
+          { click: "left" },
+          { press: "Space" },
+          { key: "ArrowRight", holdMs: 1200 },
+        ] as const;
+        scripted.steps = [...steps];
+        scripted.viewport = { width: 960, height: 540 };
+        const incPaths = [0, 1, 2, 3, 4, 5].map((index) =>
+          NodePath.join(root, `cap-inc-${index}.png`),
+        );
+        const candPaths = [0, 1, 2, 3, 4, 5].map((index) =>
+          NodePath.join(root, `cap-cand-${index}.png`),
+        );
+        const inputPairs = [
+          {
+            phase: "before",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+        ] as const;
+        const windows = (prefix: string) => [
+          {
+            path: NodePath.join(root, `${prefix}-window1.png`),
+            label: "window 900x900: boot",
+            width: 900,
+            height: 900,
+          },
+          {
+            path: NodePath.join(root, `${prefix}-window2.png`),
+            label: "window 900x900: after a short input burst",
+            width: 900,
+            height: 900,
+          },
+        ];
+        scripted.incumbent = {
+          ...scripted.incumbent,
+          frames: [...incPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: windows("cap-inc"),
+        };
+        scripted.candidate = {
+          ...scripted.candidate,
+          frames: [...candPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: windows("cap-cand"),
+        };
+        scripted.criticExperiments = [];
+        let reviews = 0;
+        scripted.critic = () => {
+          if (reviews++ !== 0) return criticAnswer(0);
+          return {
+            kind: "critic" as const,
+            raw: "{}",
+            answer: {
+              fundamentals,
+              defects: [
+                {
+                  severity: "visible" as const,
+                  what: "First fault",
+                  frameId: "f2",
+                  fix: "Fix it; yes/no: fixed.",
+                },
+                {
+                  severity: "visible" as const,
+                  what: "Second fault",
+                  frameId: "f4",
+                  fix: "Fix it; yes/no: fixed.",
+                },
+                {
+                  severity: "visible" as const,
+                  what: "Third fault",
+                  frameId: "f6",
+                  fix: "Fix it; yes/no: fixed.",
+                },
+              ],
+              doNotRegress: [],
+            },
+          };
+        };
+        scripted.repairs = [repairWith()];
+        const seen: Array<{
+          readonly plan: GameReviewBallotPlan;
+          readonly frames: ReadonlyArray<{
+            readonly id: string;
+            readonly inputPair?: { readonly stepIndex: number };
+          }>;
+        }> = [];
+        scripted.ballots = [0, 1].map(
+          () =>
+            ({ plan, order }: { readonly plan: GameReviewBallotPlan; readonly order: number }) => {
+              const frames =
+                scripted.starts.find((entry) => entry.role === "ballot" && entry.order === order)
+                  ?.evidence?.frames ?? [];
+              seen.push({ plan, frames });
+              return ballotAnswer(plan, "tie");
+            },
+        );
+        yield* runToCompletion(services, fixture);
+        expect(seen).toHaveLength(2);
+        const game = yield* services.rounds.read(root);
+        expect(game.rounds.some((round) => round.defects?.length === 3)).toBe(true);
+        for (const { frames } of seen) {
+          for (const prefix of ["a", "b"]) {
+            const shown = new Set(
+              frames
+                .filter((frame) => frame.id.startsWith(prefix))
+                .flatMap((frame) =>
+                  frame.inputPair === undefined ? [] : [frame.inputPair.stepIndex],
+                ),
+            );
+            expect(shown.has(0)).toBe(true);
+            expect(shown.has(1)).toBe(true);
+            expect(shown.has(2)).toBe(false);
+          }
+        }
+      }),
+    ),
+  ),
+);
+
+it.live("a defect pair still matches when the candidate keeps fewer window frames", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const steps = [
+          { click: "left" },
+          { press: "Space" },
+          { key: "ArrowRight", holdMs: 1200 },
+        ] as const;
+        scripted.steps = [...steps];
+        scripted.viewport = { width: 960, height: 540 };
+        const incPaths = [0, 1, 2, 3, 4, 5].map((index) =>
+          NodePath.join(root, `shape-inc-${index}.png`),
+        );
+        const candPaths = [0, 1, 2, 3, 4, 5].map((index) =>
+          NodePath.join(root, `shape-cand-${index}.png`),
+        );
+        const inputPairs = [
+          {
+            phase: "before",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 0,
+            input: steps[0]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 1,
+            input: steps[1]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "before",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+          {
+            phase: "after",
+            stepIndex: 2,
+            input: steps[2]!,
+            changedPercent: 10,
+            stateChanges: null,
+          },
+        ] as const;
+        scripted.incumbent = {
+          ...scripted.incumbent,
+          frames: [...incPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: [
+            {
+              path: NodePath.join(root, "shape-inc-window1.png"),
+              label: "window 900x900: boot",
+              width: 900,
+              height: 900,
+            },
+            {
+              path: NodePath.join(root, "shape-inc-window2.png"),
+              label: "window 900x900: after a short input burst",
+              width: 900,
+              height: 900,
+            },
+          ],
+        };
+        scripted.candidate = {
+          ...scripted.candidate,
+          frames: [...candPaths],
+          inputPairs: [...inputPairs],
+          windowFrames: [
+            {
+              path: NodePath.join(root, "shape-cand-window1.png"),
+              label: "window 900x900: boot",
+              width: 900,
+              height: 900,
+            },
+          ],
+        };
+        scripted.criticExperiments = [];
+        let reviews = 0;
+        scripted.critic = () => {
+          if (reviews++ !== 0) return criticAnswer(0);
+          return {
+            kind: "critic" as const,
+            raw: "{}",
+            answer: {
+              fundamentals,
+              defects: [
+                {
+                  severity: "visible" as const,
+                  what: "Later move fails",
+                  frameId: "f6",
+                  fix: "Fix it; yes/no: fixed.",
+                },
+              ],
+              doNotRegress: [],
+            },
+          };
+        };
+        scripted.repairs = [repairWith()];
+        const seen: Array<{
+          readonly plan: GameReviewBallotPlan;
+          readonly frames: ReadonlyArray<{
+            readonly id: string;
+            readonly label: string;
+            readonly sourcePath: string;
+            readonly inputPair?: { readonly stepIndex: number; readonly phase: string };
+            readonly pair?: { readonly beforePath: string; readonly afterPath: string } | undefined;
+            readonly width?: number;
+            readonly height?: number;
+          }>;
+        }> = [];
+        scripted.ballots = [0, 1].map(
+          () =>
+            ({ plan, order }: { readonly plan: GameReviewBallotPlan; readonly order: number }) => {
+              const frames =
+                scripted.starts.find((entry) => entry.role === "ballot" && entry.order === order)
+                  ?.evidence?.frames ?? [];
+              seen.push({ plan, frames });
+              return ballotAnswer(plan, "tie");
+            },
+        );
+        yield* runToCompletion(services, fixture);
+        expect(seen).toHaveLength(2);
+        for (const { plan, frames } of seen) {
+          const challengerPrefix = plan.main.A === "challenger" ? "a" : "b";
+          const incumbentPrefix = challengerPrefix === "a" ? "b" : "a";
+          const challengerDefect = frames.filter(
+            (frame) => frame.id.startsWith(challengerPrefix) && frame.inputPair?.stepIndex === 2,
+          );
+          const incumbentDefect = frames.filter(
+            (frame) => frame.id.startsWith(incumbentPrefix) && frame.inputPair?.stepIndex === 2,
+          );
+          expect(challengerDefect).toHaveLength(1);
+          expect(incumbentDefect).toHaveLength(1);
+          expect(challengerDefect[0]!.pair?.beforePath).toBe(candPaths[4]!);
+          expect(challengerDefect[0]!.pair?.afterPath).toBe(candPaths[5]!);
+          expect(incumbentDefect[0]!.pair?.beforePath).toBe(incPaths[4]!);
+          expect(incumbentDefect[0]!.pair?.afterPath).toBe(incPaths[5]!);
+        }
       }),
     ),
   ),
@@ -1671,6 +2487,288 @@ it.live("an invalid critic answer offers no Restore because no repair touched th
       }),
     ),
   ),
+);
+
+it.live("a critic that ends failed without an answer is infrastructure, not a game verdict", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.statuses = { "critic:0": "failed" };
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("interrupted");
+        expect(state.decision).toBe("interrupt");
+        expect(state.reason).toContain("review-infrastructure");
+        expect(state.reason).toContain("critic");
+        expect(state.reason).not.toContain("invalid-critic");
+        expect(state.repairsUsed).toBe(0);
+        expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(game.rounds.at(-1)?.status).toBe("stopped");
+      }),
+    ),
+  ),
+);
+
+it.live("a critic that ends cancelled is owned work, not a malformed answer", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.statuses = { "critic:0": "cancelled" };
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("interrupted");
+        expect(state.reason).toContain("cancelled");
+        expect(state.reason).not.toContain("invalid-critic");
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("an exhausted critic is invalid output with its last error, not a cancellation", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const lastError =
+          "Requirement park-in-bay challenge cannot reuse the positive experiment; cite a separate ordinary-play counterexample experiment.";
+        scripted.statuses = { "critic:0": "interrupted" };
+        scripted.critic = () => ({
+          kind: "invalid" as const,
+          reason: lastError,
+          raw: null,
+          exhausted: true,
+        });
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("invalid-critic");
+        expect(state.reason).toContain(lastError);
+        expect(state.reason).not.toContain("ended interrupted before it was judged");
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("a failed repair with no candidate is refunded, not recorded as no-output", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.statuses = { "repair:0": "failed" };
+        scripted.repairs = [];
+        scripted.critic = () => criticAnswer(1);
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("interrupted");
+        expect(state.decision).toBe("interrupt");
+        expect(state.reason).toContain("review-infrastructure");
+        expect(state.reason).toContain("refunded");
+        expect(state.reason).not.toContain("no-output");
+        expect(state.repairsUsed).toBe(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(game.rounds.at(-1)?.candidate).toBeNull();
+        expect(game.rounds.at(-1)?.status).toBe("stopped");
+        expect(game.rounds.at(-1)?.decision).toBe("stop");
+      }),
+    ),
+  ),
+);
+
+it.live("a failed repair that exported a real candidate is still judged", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.statuses = { "repair:0": "failed" };
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toHaveLength(1);
+        expect(state.repairsUsed).toBe(1);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).not.toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("a failed ballot that recorded a usable answer still counts", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.statuses = { "ballot:0": "failed" };
+        scripted.repairs = [repairWith()];
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toHaveLength(1);
+        expect(state.repairsUsed).toBe(1);
+      }),
+    ),
+  ),
+);
+
+it.live("a failed ballot without an answer stops and restores without rejecting the game", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        const source = NodePath.join(root, "godot/scripts/main.gd");
+        const before = yield* Effect.promise(() => NodeFSP.readFile(source, "utf8"));
+        scripted.statuses = { "ballot:0": "failed" };
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        scripted.ballots = [];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("interrupted");
+        expect(state.reason).toContain("review-infrastructure");
+        expect(state.reason).toContain("ballot");
+        expect(state.repairsUsed).toBe(1);
+        // The pair runs concurrently: both votes start before either verdict.
+        expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(2);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(game.rounds.at(-1)?.status).toBe("stopped");
+        expect(game.rounds.at(-1)?.decision).toBe("stop");
+        expect(yield* Effect.promise(() => NodeFSP.readFile(source, "utf8"))).toBe(before);
+        expect((yield* services.review.status(threadId)).restoreOffered).toBe(false);
+      }),
+    ),
+  ),
+);
+
+it.live("a malformed completed ballot is unusable, never a tie or a negative vote", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        scripted.ballots = [
+          () => ({
+            kind: "invalid" as const,
+            reason: "The ballot answer was cut off.",
+            raw: '{"overall":',
+          }),
+          ({ plan }) => ballotAnswer(plan, "tie"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("invalid-ballot");
+        expect(state.reason).toContain("cut off");
+        expect(state.reason).not.toContain("tie:");
+        // Both concurrent votes start; one invalid vote cannot promote.
+        expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(2);
+        expect(state.repairsUsed).toBe(1);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(game.rounds.at(-1)?.status).toBe("stopped");
+        expect(game.rounds.at(-1)?.decision).toBe("stop");
+      }),
+    ),
+  ),
+);
+
+it.live("the next repair receives the last rejected round's reason and failed checks", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.incumbent = {
+            ...scripted.incumbent,
+            checks: [...scripted.incumbent.checks, { id: "playtest", status: "passed" }],
+          };
+          const candidate = scripted.candidate;
+          scripted.repairs = ["first", "second", "third"].map((attempt): RepairHook => (input) => {
+            scripted.candidate = {
+              ...candidate,
+              checks: [
+                ...candidate.checks,
+                {
+                  id: "playtest",
+                  status: "failed",
+                  detail: `The ${attempt} playtest did not qualify.`,
+                },
+              ],
+            };
+            return repairWith({ build: attempt })(input);
+          });
+          scripted.critic = () => criticAnswer(1);
+          yield* runToCompletion(services, fixture);
+          const repairs = scripted.starts.filter((child) => child.role === "repair");
+          expect(repairs).toHaveLength(3);
+          const brief = repairs[1]?.repair?.previousRejection ?? "";
+          expect(brief).toContain("mechanical-veto");
+          expect(brief).toContain("failed check playtest");
+          expect(brief).toContain("The first playtest did not qualify.");
+          const next = repairs[2]?.repair?.previousRejection ?? "";
+          expect(next).toContain("The second playtest did not qualify.");
+          expect(next).not.toContain("The first playtest did not qualify.");
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 3 } },
+  ),
+);
+
+it.live.each(["missing", "failed"])(
+  "a non-qualifying candidate is vetoed with an incumbent playtest %s",
+  (incumbentPlaytest) =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          if (incumbentPlaytest === "failed")
+            scripted.incumbent = {
+              ...scripted.incumbent,
+              checks: [...scripted.incumbent.checks, { id: "playtest", status: "failed" }],
+            };
+          scripted.candidate = {
+            ...scripted.candidate,
+            checks: [...scripted.candidate.checks, { id: "playtest", status: "failed" }],
+          };
+          scripted.repairs = [repairWith()];
+          let reviews = 0;
+          scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(0);
+          const state = yield* services.rounds.read(root);
+          expect(state.selected?.buildId).toBe(EXPORT_BUILD_ID);
+          expect(
+            state.rounds.find((round) => round.candidateChecks !== undefined)?.reason,
+          ).toContain("playtest-failed");
+        }),
+      ),
+    ),
 );
 
 it.live("the third started repair is judged before the budget stops the loop", () =>
@@ -2031,13 +3129,12 @@ it.live("a supersede racing loop start never leaves a loop running", () =>
   ),
 );
 
-it.live("the whole-loop deadline interrupts a hung child and nothing promotes", () =>
+it.live("a phase allowance joins its child before the round is stopped", () =>
   withLoop(
     (fixture) =>
       fixture.withServices((services) =>
         Effect.gen(function* () {
           const { scripted, root } = fixture;
-          scripted.repairs = [repairWith()];
           scripted.critic = () => criticAnswer(1);
           scripted.hungRoles = new Set(["repair:0"]);
           yield* ensureLoop(services);
@@ -2045,18 +3142,367 @@ it.live("the whole-loop deadline interrupts a hung child and nothing promotes", 
           yield* fixture.complete(services, critic);
           const repair = yield* fixture.take;
           expect(repair.role).toBe("repair");
-          // Never complete it: the loop's own deadline must end the round.
+          // The child exported nothing before the cap.
           yield* services.loop.awaitIdle(threadId);
           const state = loopRecord(yield* readLoop(services));
           expect(state.status).toBe("interrupted");
-          expect(state.decision).toBe("interrupt");
-          expect(state.reason).toContain("deadline");
-          expect(scripted.interrupts.length).toBeGreaterThan(0);
+          expect(state.reason).toContain("repair used its phase allowance");
+          expect(state.repairsUsed).toBe(1);
+          // The child was interrupted and joined before the loop settled.
+          expect(scripted.interrupts.some((entry) => entry.threadId === repair.childThreadId)).toBe(
+            true,
+          );
           const game = yield* services.rounds.read(root);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+          expect(game.rounds[0]?.candidate).toBeNull();
+          expect(game.rounds[0]?.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 400 } },
+  ),
+);
+
+it.live("a phase-capped repair judges a candidate exported from the exact source it leaves", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          expect(repair.role).toBe("repair");
+          // The child exported before the cap, then stayed running until it was
+          // interrupted and joined.
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          const ballot = yield* fixture.take;
+          expect(ballot.role).toBe("ballot");
+          yield* fixture.complete(services, ballot);
+          const opposite = yield* fixture.take;
+          expect(opposite.role).toBe("ballot");
+          yield* fixture.complete(services, opposite);
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          const round = game.rounds.find((entry) => entry.loopId === state.id)!;
+          expect(round.candidate).not.toBeNull();
+          expect(round.candidateChecks?.length ?? 0).toBeGreaterThan(0);
+          expect(round.ballotAnswers).toHaveLength(2);
+          expect(game.selected?.buildId).toBe(round.candidate!.buildId);
+          expect(state.promotedRounds).toEqual([round.id]);
+          expect(scripted.interrupts.some((entry) => entry.threadId === repair.childThreadId)).toBe(
+            true,
+          );
+        }),
+      ),
+    { budget: { repairs: 1, elapsedMs: 3_000 } },
+  ),
+);
+
+it.live("a phase-capped repair keeps the build when the candidate's source changed", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.critic = () => criticAnswer(1);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          // The child kept editing after its export, so the candidate no
+          // longer describes the source the cap leaves behind.
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(
+              NodePath.join(root, "godot/scripts/main.gd"),
+              "extends Node2D # edited after export\n",
+            ),
+          );
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          const round = game.rounds[0]!;
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("repair-phase-capped");
+          expect(state.reason).toContain(round.candidate!.buildId);
+          expect(state.reason).toContain("does not match");
+          expect(state.repairsUsed).toBe(1);
+          expect(round.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
           expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
         }),
       ),
-    { budget: { repairs: 3, elapsedMs: 150 } },
+    { budget: { repairs: 3, elapsedMs: 3_000 } },
+  ),
+);
+
+it.live("a phase cap whose join did not settle the writer keeps the build", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.ignoresInterruptRoles = new Set(["repair"]);
+          scripted.critic = () => criticAnswer(1);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("did not settle");
+          expect(state.repairsUsed).toBe(1);
+          expect(game.rounds[0]?.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 1_200 } },
+  ),
+);
+
+it.live("a user stop does not judge a candidate the repair already exported", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.critic = () => criticAnswer(1);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          yield* services.loop.interrupt(threadId, "A user action superseded the review.");
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          expect(state.status).toBe("stopped");
+          expect(state.reason).toContain("superseded");
+          expect(state.repairsUsed).toBe(1);
+          expect(game.rounds[0]?.candidate).not.toBeNull();
+          expect(game.rounds[0]?.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 3_000 } },
+  ),
+);
+
+it.live("a phase cap after the total budget expired does not judge the exported candidate", () => {
+  let skewMs = 0;
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.critic = () => criticAnswer(1);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          // The phase bound was already fixed; the wall clock now says the
+          // whole budget is gone before the cap fires.
+          skewMs = 3_900;
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("budget ran out");
+          expect(state.repairsUsed).toBe(1);
+          expect(game.rounds[0]?.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    {
+      budget: { repairs: 3, elapsedMs: 4_000 },
+      now: () => DateTime.toEpochMillis(DateTime.nowUnsafe()) + skewMs,
+    },
+  );
+});
+
+it.live("the whole-loop deadline does not consume a candidate the repair already exported", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["repair:0"]);
+          scripted.joinDelays = { "repair:0": 500 };
+          scripted.critic = () => criticAnswer(1);
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* repairWith()({ root, roundId: repair.roundId, rounds: services.rounds });
+          // The phase cap's join outlasts the 300ms loop budget, so the whole
+          // loop deadline interrupts the fiber before the expiry branch.
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const game = yield* services.rounds.read(root);
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("did not finish within its");
+          expect(state.repairsUsed).toBe(1);
+          expect(game.rounds[0]?.candidateChecks ?? []).toHaveLength(0);
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 300 }, childJoinTimeoutMs: 800 },
+  ),
+);
+
+it.live("a critic cut by its phase allowance still uses an answer it recorded", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["critic:0"]);
+          scripted.pendingAnswers = { "critic:0": criticAnswer(1) };
+          scripted.repairs = [repairWith()];
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          expect(critic.role).toBe("critic");
+          const repair = yield* fixture.take;
+          expect(repair.role).toBe("repair");
+          yield* fixture.complete(services, repair);
+          const first = yield* fixture.take;
+          expect(first.role).toBe("ballot");
+          yield* fixture.complete(services, first);
+          const second = yield* fixture.take;
+          expect(second.role).toBe("ballot");
+          yield* fixture.complete(services, second);
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const round = (yield* services.rounds.read(root)).rounds[0]!;
+          expect(round.defects?.length ?? 0).toBeGreaterThan(0);
+          expect(round.ballotAnswers).toHaveLength(2);
+          expect(state.promotedRounds).toEqual([round.id]);
+          expect(scripted.interrupts.some((entry) => entry.threadId === critic.childThreadId)).toBe(
+            true,
+          );
+        }),
+      ),
+    { budget: { repairs: 1, elapsedMs: 1_500 } },
+  ),
+);
+
+it.live("a ballot cut by its phase allowance still uses an answer it recorded", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["ballot:0"]);
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          const critic = yield* fixture.take;
+          yield* fixture.complete(services, critic);
+          const repair = yield* fixture.take;
+          yield* fixture.complete(services, repair);
+          const first = yield* fixture.take;
+          expect(first.role).toBe("ballot");
+          const round = (yield* services.rounds.read(root)).rounds[0]!;
+          const plan = round.ballots!.find((entry) => entry.order === first.order)!;
+          scripted.pendingAnswers[`ballot:${first.order}`] = ballotAnswer(plan, "promote");
+          const second = yield* fixture.take;
+          expect(second.role).toBe("ballot");
+          yield* fixture.complete(services, second);
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          const played = (yield* services.rounds.read(root)).rounds[0]!;
+          expect(played.ballotAnswers).toHaveLength(2);
+          expect(played.ballotAnswers?.every((entry) => entry.outcome === "valid")).toBe(true);
+          expect(state.promotedRounds).toEqual([played.id]);
+          expect(scripted.interrupts.some((entry) => entry.threadId === first.childThreadId)).toBe(
+            true,
+          );
+        }),
+      ),
+    { budget: { repairs: 1, elapsedMs: 3_000 } },
+  ),
+);
+
+it.live("a phase-capped critic with an unusable answer stays an expiry", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.hungRoles = new Set(["critic:0"]);
+          scripted.pendingAnswers = {
+            "critic:0": { kind: "invalid", reason: "the answer was cut off.", raw: null },
+          };
+          yield* ensureLoop(services);
+          yield* services.loop.awaitIdle(threadId);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("critic used its phase allowance");
+          expect(state.reason).not.toContain("invalid-critic");
+          expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(0);
+          const game = yield* services.rounds.read(root);
+          expect(game.rounds[0]?.defects ?? []).toHaveLength(0);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { budget: { repairs: 3, elapsedMs: 1_500 } },
+  ),
+);
+
+it.effect("the whole-loop deadline interrupts a hung child and nothing promotes", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        scripted.hungRoles = new Set(["repair:0"]);
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        // Advance only after the repair starts; filesystem latency cannot
+        // expire admission before the child this test intends to interrupt.
+        yield* TestClock.adjust("45 minutes");
+        yield* services.loop.awaitIdle(threadId);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("interrupted");
+        expect(state.decision).toBe("interrupt");
+        expect(state.reason).toContain("deadline");
+        expect(scripted.interrupts.length).toBeGreaterThan(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
   ),
 );
 
@@ -2834,7 +4280,8 @@ it.effect.each([
         const game = yield* services.rounds.read(root);
         expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
         const round = game.rounds.find((entry) => entry.loopId === state.id)!;
-        expect(round.status).toBe(userEdit ? "stopped" : "rejected");
+        expect(round.status).toBe("stopped");
+        expect(round.restoredAt !== undefined).toBe(!userEdit);
         expect(round.reason).toContain(
           userEdit
             ? "changed after the repair"
@@ -3210,5 +4657,480 @@ it.live("a cited named screenshot is replayed as that observation, not replaced 
         }),
       ),
     { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("paired ballots both start before either finishes", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          yield* fixture.complete(services, yield* fixture.take);
+          yield* fixture.complete(services, yield* fixture.take);
+          // Both opposite-order votes are live together under one allowance.
+          const first = yield* fixture.take;
+          expect(first.role).toBe("ballot");
+          const second = yield* fixture.take;
+          expect(second.role).toBe("ballot");
+          expect(new Set([first.order, second.order])).toEqual(new Set([0, 1]));
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(2);
+          // Neither finished yet: no ballot answers persisted.
+          const before = yield* services.rounds.read(fixture.root);
+          expect(before.rounds[0]?.ballotAnswers ?? []).toHaveLength(0);
+          yield* fixture.complete(services, first);
+          yield* fixture.complete(services, second);
+          yield* services.loop.awaitIdle(threadId);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("out-of-order ballot completion keeps the order mapping", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          yield* fixture.complete(services, yield* fixture.take);
+          yield* fixture.complete(services, yield* fixture.take);
+          const first = yield* fixture.take;
+          const second = yield* fixture.take;
+          // Finish the higher order first; mapping stays by order, not finish time.
+          const ordered = [first, second].toSorted((a, b) => b.order - a.order);
+          yield* fixture.complete(services, ordered[0]!);
+          yield* fixture.complete(services, ordered[1]!);
+          yield* services.loop.awaitIdle(threadId);
+          const game = yield* services.rounds.read(fixture.root);
+          const answers = game.rounds[0]?.ballotAnswers ?? [];
+          expect(answers.map((entry) => entry.order)).toEqual([0, 1]);
+          expect(answers.every((entry) => entry.outcome === "valid")).toBe(true);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("one finished ballot leaves its sibling owned until it finishes", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* ensureLoop(services);
+          yield* fixture.complete(services, yield* fixture.take);
+          yield* fixture.complete(services, yield* fixture.take);
+          const first = yield* fixture.take;
+          const second = yield* fixture.take;
+          yield* fixture.complete(services, first);
+          // The sibling is still live: nothing persisted and nothing promoted yet.
+          const mid = yield* services.rounds.read(fixture.root);
+          expect(mid.rounds[0]?.ballotAnswers ?? []).toHaveLength(0);
+          expect(scripted.completed.some((entry) => entry.status === "completed")).toBe(true);
+          expect(
+            scripted.starts.filter((child) => child.role === "ballot" && !child.completed),
+          ).toHaveLength(1);
+          yield* fixture.complete(services, second);
+          yield* services.loop.awaitIdle(threadId);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("a user stop with both ballots live joins both before restore", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        yield* ensureLoop(services);
+        yield* fixture.complete(services, yield* fixture.take);
+        yield* fixture.complete(services, yield* fixture.take);
+        const first = yield* fixture.take;
+        const second = yield* fixture.take;
+        expect(first.role).toBe("ballot");
+        expect(second.role).toBe("ballot");
+        yield* services.loop.interrupt(threadId, "A user action superseded the review.");
+        const interruptedIds = new Set(scripted.interrupts.map((entry) => entry.threadId));
+        expect(interruptedIds.has(first.childThreadId)).toBe(true);
+        expect(interruptedIds.has(second.childThreadId)).toBe(true);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.promotedRounds).toHaveLength(0);
+        const game = yield* services.rounds.read(root);
+        expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("an insufficient pair budget starts neither ballot", () => {
+  let skewMs = 0;
+  const frozen = DateTime.toEpochMillis(DateTime.nowUnsafe());
+  return withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted, root } = fixture;
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.afterCandidateCheck = () => {
+            // Only ~10min remain: the 9min pair plus the 1.8min decision tail
+            // (10.8min) does not fit, so neither vote starts.
+            skewMs = 35 * 60_000;
+          };
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.status).toBe("interrupted");
+          expect(state.reason).toContain("neither ballot can be decided");
+          expect(scripted.starts.filter((child) => child.role === "ballot")).toHaveLength(0);
+          expect(state.promotedRounds).toHaveLength(0);
+          const game = yield* services.rounds.read(root);
+          expect(game.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        }),
+      ),
+    { now: () => frozen + skewMs },
+  );
+});
+
+it.live("a host-interrupted critic with its valid answer is judged, not cancelled", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.statuses = { "critic:0": "interrupted" };
+        let reviews = 0;
+        scripted.critic = () => criticAnswer(reviews++ === 0 ? 1 : 0);
+        scripted.repairs = [repairWith()];
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        // Judged, not "interrupted: the critic ended interrupted".
+        expect(state.reason).not.toContain("ended interrupted before it was judged");
+        expect(state.promotedRounds).toHaveLength(1);
+      }),
+    ),
+  ),
+);
+
+it.live("host-interrupted ballots with valid answers still promote", () =>
+  withLoop(
+    (fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          const { scripted } = fixture;
+          scripted.statuses = { "ballot:0": "interrupted", "ballot:1": "interrupted" };
+          scripted.repairs = [repairWith()];
+          scripted.critic = () => criticAnswer(1);
+          scripted.ballots = [
+            ({ plan }) => ballotAnswer(plan, "promote"),
+            ({ plan }) => ballotAnswer(plan, "promote"),
+          ];
+          yield* runToCompletion(services, fixture);
+          expect(loopRecord(yield* readLoop(services)).promotedRounds).toHaveLength(1);
+        }),
+      ),
+    { budget: { ...DEFAULT_GAME_REVIEW_BUDGET, repairs: 1 } },
+  ),
+);
+
+it.live("an interrupted ballot without a usable answer stays owned work", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted, root } = fixture;
+        scripted.statuses = { "ballot:0": "interrupted", "ballot:1": "interrupted" };
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => criticAnswer(1);
+        scripted.ballots = [];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("interrupted");
+        expect(state.reason).toContain("ballot");
+        expect(state.promotedRounds).toHaveLength(0);
+        expect((yield* services.rounds.read(root)).selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("submit refuses an old build after an engine edit and keeps the selection", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const first = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(first.accepted).toBe(true);
+        const before = yield* services.rounds.read(fixture.root);
+        expect(before.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        // The builder keeps editing after the export; the retained bytes still
+        // verify, but they no longer describe the current engine inputs.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(fixture.root, "godot/scripts/main.gd"),
+            "extends Node\n# post-export edit\n",
+          ),
+        );
+        const refused = yield* services.review.submit(threadId, {
+          buildId: EXPORT_BUILD_ID,
+          note: "Submitting the old build again.",
+        });
+        expect(refused.accepted).toBe(false);
+        expect(refused.message).toContain("sources-current");
+        expect(refused.checks.some((check) => check.id === "sources-current")).toBe(true);
+        const after = yield* services.rounds.read(fixture.root);
+        expect(after.selected?.buildId).toBe(EXPORT_BUILD_ID);
+        expect(after.submissions).toEqual(before.submissions);
+      }),
+    ),
+  ),
+);
+
+it.live("submit still accepts after a design-only edit", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const first = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(first.accepted).toBe(true);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(fixture.root, "DESIGN.md"),
+            "# Revised plan after the export\n",
+          ),
+        );
+        const second = yield* services.review.submit(threadId, {
+          buildId: EXPORT_BUILD_ID,
+          note: "Same build after a notes edit.",
+        });
+        expect(second.accepted, second.message).toBe(true);
+        expect(second.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("ensure after an engine edit starts no children and keeps the last good build", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const accepted = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(accepted.accepted).toBe(true);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(fixture.root, "godot/scripts/main.gd"),
+            "extends Node\n# edit before the turn ended\n",
+          ),
+        );
+        const record = loopRecord(yield* ensureLoop(services));
+        expect(record.status).toBe("stopped");
+        expect(record.reason).toContain("sources-current");
+        expect(record.exportBuildId).toBe(EXPORT_BUILD_ID);
+        expect(fixture.scripted.starts).toHaveLength(0);
+        expect((yield* services.rounds.read(fixture.root)).selected?.buildId).toBe(EXPORT_BUILD_ID);
+      }),
+    ),
+  ),
+);
+
+it.live("ensure after a design-only edit still reviews", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const accepted = yield* services.review.submit(threadId, { note: "First playable." });
+        expect(accepted.accepted).toBe(true);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(fixture.root, "DESIGN.md"),
+            "# Revised plan before the turn ended\n",
+          ),
+        );
+        const created = loopRecord(yield* ensureLoop(services));
+        expect(created.status).toBe("running");
+        expect(created.exportBuildId).toBe(EXPORT_BUILD_ID);
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
+  ),
+);
+
+it.live("an unmet requirement reaches repair even when defects are empty", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.repairs = [repairWith()];
+        scripted.critic = () => ({
+          kind: "critic" as const,
+          raw: "{}",
+          answer: {
+            fundamentals,
+            defects: [],
+            doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "f1" }],
+            requirements: [
+              {
+                id: "lantern-glow",
+                verdict: "no" as const,
+                frameIds: ["f1"],
+                note: "No warm glow on the roof.",
+              },
+            ],
+          },
+        });
+        scripted.ballots = [
+          ({ plan }) => ballotAnswer(plan, "promote"),
+          ({ plan }) => ballotAnswer(plan, "promote"),
+        ];
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        // The unmet promise became an actionable defect: the loop repaired
+        // instead of stopping with zero-defects.
+        expect(
+          scripted.starts.filter((child) => child.role === "repair").length,
+        ).toBeGreaterThanOrEqual(1);
+        const repairStart = scripted.starts.find((child) => child.role === "repair")!;
+        expect(
+          repairStart.repair?.defects.some((defect) => defect.what.includes("lantern-glow")),
+        ).toBe(true);
+        expect(state.reason).not.toContain("zero-defects");
+      }),
+    ),
+  ),
+);
+
+it.live(
+  "omitted requirements remain incomplete even when every supplied promise is judged yes",
+  () =>
+    withLoop((fixture) =>
+      fixture.withServices((services) =>
+        Effect.gen(function* () {
+          fixture.scripted.critic = () => ({
+            kind: "critic" as const,
+            raw: "{}",
+            answer: {
+              fundamentals,
+              defects: [],
+              doNotRegress: [],
+              requirementsIncomplete: true,
+              requirements: [
+                {
+                  id: "glow",
+                  verdict: "yes" as const,
+                  frameIds: ["f1"],
+                  note: "The supplied effect is visible.",
+                },
+              ],
+            },
+          });
+          yield* runToCompletion(services, fixture);
+          const state = loopRecord(yield* readLoop(services));
+          expect(state.reason).toContain("coverage incomplete");
+          const rounds = yield* services.rounds.read(fixture.root);
+          expect(rounds.rounds[0]?.requirementsIncomplete).toBe(true);
+          expect(rounds.rounds[0]?.requirements?.[0]?.id).toBe("glow");
+        }),
+      ),
+    ),
+);
+
+it.live("unknown requirements keep the incumbent without inventing a repair", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.critic = () => ({
+          kind: "critic" as const,
+          raw: "{}",
+          answer: {
+            fundamentals,
+            defects: [],
+            doNotRegress: [],
+            requirements: [
+              {
+                id: "lantern-glow",
+                verdict: "cannot-tell" as const,
+                frameIds: [],
+                note: "Cannot see the roof.",
+              },
+            ],
+          },
+        });
+        yield* runToCompletion(services, fixture);
+        const state = loopRecord(yield* readLoop(services));
+        expect(state.status).toBe("stopped");
+        expect(state.reason).toContain("zero-defects");
+        expect(state.reason).toContain("coverage incomplete");
+        expect(scripted.starts.filter((child) => child.role === "repair")).toHaveLength(0);
+      }),
+    ),
+  ),
+);
+it.live("an owned repair child submitting a stale build is refused", () =>
+  withLoop((fixture) =>
+    fixture.withServices((services) =>
+      Effect.gen(function* () {
+        const { scripted } = fixture;
+        scripted.critic = () => criticAnswer(1);
+        scripted.repairs = [
+          (input) =>
+            Effect.gen(function* () {
+              yield* Effect.promise(() =>
+                NodeFSP.writeFile(
+                  NodePath.join(input.root, "godot/scripts/main.gd"),
+                  "extends Node2D # repair edit\n",
+                ),
+              );
+              yield* input.rounds.recordPostRepair(input.root, input.roundId);
+            }),
+        ];
+        yield* ensureLoop(services);
+        const critic = yield* fixture.take;
+        yield* fixture.complete(services, critic);
+        const repair = yield* fixture.take;
+        expect(repair.role).toBe("repair");
+        // The repair rewrote the engine inputs without exporting; its claim on
+        // the old build no longer describes the tree it would be judged on.
+        yield* fixture.complete(services, repair);
+        scripted.activeRun = repair.runId;
+        const refused = yield* services.review.submit(repair.childThreadId, {
+          buildId: EXPORT_BUILD_ID,
+          note: "Fixed the player's speed.",
+        });
+        expect(refused.accepted).toBe(false);
+        expect(refused.message).toContain("sources-current");
+        yield* services.loop.interrupt(threadId, "Test cleanup.");
+      }),
+    ),
   ),
 );

@@ -5,11 +5,13 @@ import {
   GamePlaytestStep,
   GamePlaytestState,
   GamePlaytestInputPair,
+  GamePlaytestScreenshot,
   GameViewport,
   GameProductionStatus,
   GameProduction,
 } from "./game.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import type { GameAcceptanceCriterion } from "./gameDesign.ts";
 
 // Prose length must not discard a model's otherwise valid decision.
 const reviewText = (cap: number) =>
@@ -85,6 +87,12 @@ export const GameReviewExperimentRoute = Schema.Struct({
   /** The build the critic actually played when it recorded the route. */
   buildId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   steps: Schema.Array(GamePlaytestStep),
+  /**
+   * Uncaptured prelude replayed from fresh boot before steps, when the critic
+   * used one. Absent on legacy routes; replay runs all of setup+steps fresh
+   * with the same capture boundary so citations never alias frame indices.
+   */
+  setupSteps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
   captureEveryMs: Schema.Number,
   viewport: Schema.NullOr(GameViewport),
   /** Only the frames the critic cited; the route replays all of its steps. */
@@ -173,14 +181,258 @@ export const GameReviewFundamentals = Schema.Struct({
 export type GameReviewFundamentals = typeof GameReviewFundamentals.Type;
 
 /**
- * The critic's whole answer. The loop caps the lists in the prompt; the parser
- * enforces the same caps so a model cannot hand back more than it was asked
- * for.
+ * One approved acceptance promise the critic judged. The id binds to the
+ * frozen DESIGN_REQUIREMENTS the round started with; the verdict reuses the
+ * fundamentals' vocabulary so cannot-tell stays neutral and is never read as
+ * fulfilled. Frame citations are validated like any other evidence.
  */
+export const GameReviewRequirementChallenge = Schema.Struct({
+  /** Frames of the separate ordinary-play counterexample experiment. */
+  frameIds: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
+  /** Which missing trigger/condition the counterexample tested, in one line. */
+  note: reviewText(400),
+});
+export type GameReviewRequirementChallenge = typeof GameReviewRequirementChallenge.Type;
+
+export const GameReviewRequirementAssessment = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
+  verdict: Schema.Literals(["yes", "no", "cannot-tell"]),
+  frameIds: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16))).check(
+    Schema.isMaxLength(8),
+  ),
+  note: reviewText(400),
+  /** Separate counterexample for a frozen win/lose yes; absent on old records. */
+  challenge: Schema.optionalKey(GameReviewRequirementChallenge),
+});
+export type GameReviewRequirementAssessment = typeof GameReviewRequirementAssessment.Type;
+
+/**
+ * A server-applied downgrade of one requirement assessment. The critic's
+ * verdict stood unsupported on the last answer attempt, so the server
+ * recorded cannot-tell with the evidence rule's reason instead of losing the
+ * whole review. The id names the downgraded requirement; the reason is the
+ * refused evidence rule. Never written by the critic.
+ */
+export const GameReviewRequirementDowngrade = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
+  reason: reviewText(2000),
+});
+export type GameReviewRequirementDowngrade = typeof GameReviewRequirementDowngrade.Type;
+
+/**
+ * End-state evidence policy: a frozen win/lose yes must show its own
+ * measured transition and a separate measured counterexample. Version 1
+ * checks only the named predicate. Version 2 also requires a fully
+ * non-terminal before and challenge across all frozen predicates, and
+ * forbids reaching the opposite kind after. Opt-in: records without it
+ * skip the check and stay compatible.
+ */
+export const END_STATE_EVIDENCE_POLICY_VERSION = 2;
+
+/** Frozen win/lose promise the end-state check reads, never mutable DESIGN. */
+export const GameReviewEndStateRequirement = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
+  kind: Schema.Literals(["win", "lose"]),
+  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  expect: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+});
+export type GameReviewEndStateRequirement = typeof GameReviewEndStateRequirement.Type;
+
+/** Bounded measured scalars carried with a frozen evidence frame. */
+export const GameReviewMeasuredObservations = Schema.Record(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  Schema.Union([Schema.Finite, Schema.Boolean]),
+);
+export type GameReviewMeasuredObservations = typeof GameReviewMeasuredObservations.Type;
+
+/** Largest observation set one frozen frame carries; approved keys only. */
+export const END_STATE_OBSERVATION_MAX_KEYS = 12;
+
+/**
+ * Eligible frozen promises: win/lose kinds with a numeric observe the player
+ * reaches (==, >=, <=). Presentation, observe-less and no-lose declarations
+ * never join; a win/lose that observes `changes` is not an end state and is
+ * excluded the same way. Pure so the session freeze and the parser share one
+ * definition without heavy services.
+ */
+export const endStateEligibleRequirements = (
+  acceptance: ReadonlyArray<GameAcceptanceCriterion>,
+): ReadonlyArray<GameReviewEndStateRequirement> => {
+  const eligible: GameReviewEndStateRequirement[] = [];
+  for (const criterion of acceptance) {
+    if (criterion.kind !== "win" && criterion.kind !== "lose") continue;
+    const observe = criterion.observe;
+    if (observe === undefined) continue;
+    // A no-lose declaration carries no observe, so it never reaches here.
+    if (observe.key.trim() === "" || observe.expect === "changes") continue;
+    if (!/^(==|>=|<=)-?\d+(?:\.\d+)?$/.test(observe.expect)) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(observe.key)) continue;
+    eligible.push({
+      id: criterion.id,
+      kind: criterion.kind,
+      key: observe.key,
+      expect: observe.expect,
+    });
+  }
+  return eligible;
+};
+
+/**
+ * Whether one measured scalar satisfies an approved ==, >= or <= expect.
+ * Booleans read as 1/0 so `won ==1` matches a boolean win. `changes` never
+ * satisfies a single sample; strings and missing values never satisfy.
+ */
+export const satisfiesEndStateExpect = (
+  expect: string,
+  raw: number | boolean | null | undefined,
+): boolean => {
+  if (raw === null || raw === undefined) return false;
+  const value = typeof raw === "boolean" ? (raw ? 1 : 0) : raw;
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  const match = expect.match(/^(==|>=|<=)(-?\d+(?:\.\d+)?)$/);
+  if (match === null) return false;
+  const target = Number(match[2]);
+  if (match[1] === "==") return Math.abs(value - target) < 1e-9;
+  if (match[1] === ">=") return value >= target;
+  return value <= target;
+};
+
+/**
+ * Keeps only approved numeric/boolean scalars, bounded to the frozen keys.
+ * Strings, missing values and unapproved keys are dropped, never invented.
+ */
+export const pickEndStateObservations = (
+  gameState:
+    | Readonly<Record<string, number | boolean | string | null | undefined>>
+    | null
+    | undefined,
+  allowedKeys: ReadonlySet<string> | ReadonlyArray<string>,
+): Record<string, number | boolean> => {
+  if (gameState === null || gameState === undefined) return {};
+  const allowed = allowedKeys instanceof Set ? allowedKeys : new Set(allowedKeys);
+  const picked: Record<string, number | boolean> = {};
+  for (const key of allowed) {
+    if (Object.keys(picked).length >= END_STATE_OBSERVATION_MAX_KEYS) break;
+    const raw = gameState[key];
+    if (typeof raw === "boolean") picked[key] = raw;
+    else if (typeof raw === "number" && Number.isFinite(raw)) picked[key] = raw;
+  }
+  return picked;
+};
+
+/**
+ * Absolute quality rubric. Each review freezes its version and task text. Seven creator-relative
+ * diagnostic dimensions, deliberately not a genre checklist: art consistency
+ * (the game's own look holds across frames), animation (motion reads across
+ * frames), audio (heard effect; screenshots alone can never judge it),
+ * readability (legible and accurate state feedback), progression (goals, challenge or content change),
+ * agency (choices have visible consequences), playability (a player can act).
+ * Every dimension answers yes, no or cannot-tell; unknown stays neutral and
+ * is never averaged into a score.
+ */
+export const GAME_REVIEW_QUALITY_RUBRIC_VERSION = 2;
+export const GAME_REVIEW_QUALITY_DIMENSIONS = [
+  "artConsistency",
+  "animation",
+  "audio",
+  "readability",
+  "progression",
+  "agency",
+  "playability",
+] as const;
+export const GameReviewQualityDimension = Schema.Literals(GAME_REVIEW_QUALITY_DIMENSIONS);
+export type GameReviewQualityDimension = typeof GameReviewQualityDimension.Type;
+
+/** One dimension's judgment: a concrete subject, bounded frame evidence, a reason. */
+export const GameReviewQualityVerdict = Schema.Struct({
+  verdict: Schema.Literals(["yes", "no", "cannot-tell"]),
+  frameIds: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16))).check(
+    Schema.isMaxLength(8),
+  ),
+  note: reviewText(400),
+});
+export type GameReviewQualityVerdict = typeof GameReviewQualityVerdict.Type;
+
+export const GameReviewQuality = Schema.Struct({
+  artConsistency: GameReviewQualityVerdict,
+  animation: GameReviewQualityVerdict,
+  audio: GameReviewQualityVerdict,
+  readability: GameReviewQualityVerdict.annotate({
+    description:
+      "State, goals and action feedback must be legible, understandable and accurate. Contradictory messages and observed consequences are a defect even when the text is legible.",
+  }),
+  progression: GameReviewQualityVerdict.annotate({
+    description:
+      "Visible changes in goals, challenge or accessible content. A coin/score counter alone cannot establish progression or pacing; short pickup-only evidence is cannot-tell.",
+  }),
+  agency: GameReviewQualityVerdict,
+  playability: GameReviewQualityVerdict,
+});
+export type GameReviewQuality = typeof GameReviewQuality.Type;
+
+/** Exact coverage of one quality assessment: assessed dimensions out of the frozen rubric. */
+export const GameReviewQualityCoverage = Schema.Struct({
+  rubricVersion: Schema.Int,
+  assessed: Schema.Int,
+  total: Schema.Int,
+  unknowns: Schema.Int,
+});
+export type GameReviewQualityCoverage = typeof GameReviewQualityCoverage.Type;
+
+export const gameReviewQualityCoverage = (
+  quality: GameReviewQuality | undefined,
+  rubricVersion: number = GAME_REVIEW_QUALITY_RUBRIC_VERSION,
+): GameReviewQualityCoverage => {
+  if (quality === undefined)
+    return {
+      rubricVersion,
+      assessed: 0,
+      total: GAME_REVIEW_QUALITY_DIMENSIONS.length,
+      unknowns: GAME_REVIEW_QUALITY_DIMENSIONS.length,
+    };
+  const unknowns = GAME_REVIEW_QUALITY_DIMENSIONS.filter(
+    (dimension) => quality[dimension].verdict === "cannot-tell",
+  ).length;
+  return {
+    rubricVersion,
+    assessed: GAME_REVIEW_QUALITY_DIMENSIONS.length,
+    total: GAME_REVIEW_QUALITY_DIMENSIONS.length,
+    unknowns,
+  };
+};
 export const GameReviewCriticAnswer = Schema.Struct({
   fundamentals: GameReviewFundamentals,
   defects: Schema.Array(GameReviewDefect).check(Schema.isMaxLength(5)),
   doNotRegress: Schema.Array(GameReviewDoNotRegress).check(Schema.isMaxLength(8)),
+  /**
+   * One entry per frozen requirement when a bound design exists. Absent on
+   * legacy games and on answers written before requirements existed, which
+   * stay readable and are never treated as a decision about the design.
+   */
+  requirements: Schema.optionalKey(
+    Schema.Array(GameReviewRequirementAssessment).check(Schema.isMaxLength(12)),
+  ),
+  /**
+   * Server-applied downgrades on the last answer attempt: which requirement
+   * ids the server turned to cannot-tell and why. Absent on legacy answers
+   * and on answers the critic wrote without server help, which stay readable
+   * and are never treated as downgraded.
+   */
+  downgradedRequirements: Schema.optionalKey(
+    Schema.Array(GameReviewRequirementDowngrade).check(Schema.isMaxLength(12)),
+  ),
+  /** Server-derived: the frozen design packet omitted or shortened promises. */
+  requirementsIncomplete: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Absolute quality across the frozen rubric, one verdict per dimension.
+   * Absent on legacy answers written before the rubric existed: those stay
+   * readable and count as unknown, never as met. New sessions require
+   * exact-once coverage of every dimension.
+   */
+  quality: Schema.optionalKey(GameReviewQuality),
 });
 export type GameReviewCriticAnswer = typeof GameReviewCriticAnswer.Type;
 
@@ -235,11 +487,108 @@ export const GameReviewReportResult = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   attemptsRemaining: Schema.Number,
   ended: Schema.Boolean,
+  /** Exact absolute-quality coverage of the accepted answer, when one was accepted. */
+  qualityCoverage: Schema.optionalKey(GameReviewQualityCoverage),
 });
 export type GameReviewReportResult = typeof GameReviewReportResult.Type;
 
 /** One model answer is at most this many bytes of text, before parsing. */
 export const GAME_REVIEW_ANSWER_MAX_BYTES = 16 * 1024;
+
+/**
+ * A review child can ask for a native-resolution crop of one evidence frame
+ * it already has, instead of judging a small effect from a full-frame view.
+ * The crop and its pixel stats are read-only measurements: the evidence tree
+ * is never extended, citations still name the original frame, and no number
+ * the tool returns is a quality claim.
+ */
+export const GAME_REVIEW_DETAIL_BOUNDS = {
+  /** Smallest and largest crop edge, in frame pixels. */
+  minRegion: 8,
+  maxRegion: 480,
+  /** Integer upscale applied equally to both halves of a before/after pair. */
+  minScale: 1,
+  maxScale: 4,
+  /** Detail views per child run; each is one cropped PNG in the tool result. */
+  maxCalls: 6,
+  /** Largest cropped PNG the tool returns, in bytes. */
+  maxOutputBytes: 1_000_000,
+  /** Largest evidence PNG the tool will decode, in bytes. */
+  maxFrameBytes: 12 * 1024 * 1024,
+  /** Largest evidence dimension the tool will decode, in pixels. */
+  maxFrameDimension: 4096,
+} as const;
+
+export const GameReviewDetailInput = Schema.Struct({
+  /** A frame id from the child's evidence manifest, never a path. */
+  frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  /** Crop origin in frame pixels; the manifest's width/height are the frame size. */
+  x: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  y: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  width: Schema.Int.check(
+    Schema.isBetween({
+      minimum: GAME_REVIEW_DETAIL_BOUNDS.minRegion,
+      maximum: GAME_REVIEW_DETAIL_BOUNDS.maxRegion,
+    }),
+  ),
+  height: Schema.Int.check(
+    Schema.isBetween({
+      minimum: GAME_REVIEW_DETAIL_BOUNDS.minRegion,
+      maximum: GAME_REVIEW_DETAIL_BOUNDS.maxRegion,
+    }),
+  ),
+  /** Integer upscale so a small region stays readable; defaults to 2. */
+  scale: Schema.optionalKey(
+    Schema.Int.check(
+      Schema.isBetween({
+        minimum: GAME_REVIEW_DETAIL_BOUNDS.minScale,
+        maximum: GAME_REVIEW_DETAIL_BOUNDS.maxScale,
+      }),
+    ),
+  ),
+});
+export type GameReviewDetailInput = typeof GameReviewDetailInput.Type;
+
+const GameReviewDetailMean = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
+
+/**
+ * One scaled crop (a before/after card counts as one image), with the source
+ * frame and region it came from so the verdict can cite the original frame.
+ * Means and deltas are measurements only; the child still judges the effect.
+ */
+export const GameReviewDetailResult = Schema.Struct({
+  screenshots: Schema.Array(GamePlaytestScreenshot).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
+  ),
+  detail: Schema.Struct({
+    frameId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+    x: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    y: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    width: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    height: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    scale: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    /** The decoded source pixels the region was cut from. */
+    sourceWidth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    sourceHeight: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    /** True when the same region was cut from both halves of a pair card. */
+    pair: Schema.Boolean,
+    regions: Schema.Array(
+      Schema.Struct({
+        name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+        mean: GameReviewDetailMean,
+        pixels: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      }),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(2)),
+    delta: Schema.optionalKey(
+      Schema.Struct({
+        meanAbs: GameReviewDetailMean,
+        changedPercent: Schema.Number,
+      }),
+    ),
+  }),
+});
+export type GameReviewDetailResult = typeof GameReviewDetailResult.Type;
 
 /**
  * The loop's spend. The default is three repairs or forty-five elapsed minutes,
@@ -331,8 +680,10 @@ export type GameSubmission = typeof GameSubmission.Type;
 export const GameSubmitInput = Schema.Struct({
   /**
    * The export to stand behind; omitted means this game's latest export. The
-   * server refuses a build that is not the current export, because the repair
-   * edits the folder the current sources live in.
+   * server refuses a build whose engine inputs no longer match the current
+   * folder (check `sources-current`), because the repair edits the folder the
+   * current sources live in. Any retained export built from the current engine
+   * inputs stays eligible; design and notes edits never block.
    */
   buildId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))),
   /** One line: what the game is, or which defects a repair fixed. */
@@ -493,6 +844,8 @@ export const GameRepairFrame = Schema.Struct({
   height: Schema.optionalKey(Schema.Number),
   /** True for the differently shaped window capture; never dropped by a budget. */
   window: Schema.optionalKey(Schema.Boolean),
+  /** Bounded approved numeric/boolean scalars measured with this frame. */
+  observations: Schema.optionalKey(GameReviewMeasuredObservations),
 });
 export type GameRepairFrame = typeof GameRepairFrame.Type;
 
@@ -583,6 +936,8 @@ export const GameReviewRound = Schema.Struct({
    * so there is nothing to restore.
    */
   repairStartedAt: Schema.optionalKey(Schema.String),
+  /** The source rollback completed, so this round no longer offers Restore. */
+  restoredAt: Schema.optionalKey(Schema.String),
   /**
    * The version an explicit restore preserved before rewriting the folder, so
    * the user can return to the state they had when they asked for the restore.
@@ -601,6 +956,23 @@ export const GameReviewRound = Schema.Struct({
   childUsage: Schema.optionalKey(Schema.Array(GameReviewChildUsage)),
   usageByRole: Schema.optionalKey(GameReviewUsageByRole),
   fundamentals: Schema.optionalKey(GameReviewFundamentals),
+  requirements: Schema.optionalKey(Schema.Array(GameReviewRequirementAssessment)),
+  requirementsIncomplete: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Server-applied downgrades frozen with the round, so history and reports
+   * show which verdicts the server (not the critic) turned to cannot-tell.
+   * Absent on legacy rounds, which read as never downgraded.
+   */
+  downgradedRequirements: Schema.optionalKey(Schema.Array(GameReviewRequirementDowngrade)),
+  /**
+   * Absolute quality frozen with the round: the rubric version the critic
+   * answered against plus its per-dimension verdicts. Absent on legacy
+   * rounds, which read as unknown, never as met; a mid-round rubric edit
+   * cannot rewrite a frozen assessment.
+   */
+  quality: Schema.optionalKey(GameReviewQuality),
+  qualityRubricVersion: Schema.optionalKey(Schema.Int),
+  qualityCoverage: Schema.optionalKey(GameReviewQualityCoverage),
   defects: Schema.optionalKey(Schema.Array(GameReviewDefect)),
   doNotRegress: Schema.optionalKey(Schema.Array(GameReviewDoNotRegress)),
   /** The frozen check run the round was reviewed against. */
@@ -685,6 +1057,12 @@ export const GameReviewStatus = Schema.Struct({
   production: Schema.optionalKey(GameProductionStatus),
   /** Only computed when requested: hashes and checks Play's selected artifact. */
   selectedBuildFacts: Schema.optionalKey(Schema.NullOr(GameSubmissionFacts)),
+  /**
+   * Absolute-quality coverage of the newest round with a frozen assessment.
+   * Absent when no round assessed quality yet; unknown dimensions stay
+   * neutral and are never a score.
+   */
+  qualityCoverage: Schema.optionalKey(GameReviewQualityCoverage),
 });
 export type GameReviewStatus = typeof GameReviewStatus.Type;
 export const GameReviewRestoreResult = Schema.Struct({

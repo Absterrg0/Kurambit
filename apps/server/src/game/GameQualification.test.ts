@@ -426,6 +426,32 @@ it.effect("an edit after the stages makes them stale, so the game is unqualified
   ),
 );
 
+it.effect("a same-size edit with preserved mtime still invalidates the stages", () =>
+  withGame({}, ({ root, qualification }) =>
+    Effect.gen(function* () {
+      const target = NodePath.join(root, "godot/scripts/main.gd");
+      const pinned = 1_700_000_000;
+      yield* Effect.promise(() => NodeFSP.utimes(target, pinned, pinned));
+      const sourceId = yield* Effect.promise(() => sourceIdOf(root));
+      yield* recordAll(qualification, root, sourceId, `${sourceId}:first`);
+      expect((yield* qualification.read(root, "godot", "approved")).state).toBe("qualified");
+      // Same length, different bytes, same mtime: the weak size/mtime identity
+      // would still read this as qualified.
+      yield* Effect.promise(() => NodeFSP.writeFile(target, "extends Nope\n"));
+      yield* Effect.promise(() => NodeFSP.utimes(target, pinned, pinned));
+      const read = yield* qualification.read(root, "godot", "approved");
+      expect(read.state).toBe("unqualified");
+      expect(
+        read.stages.filter((entry) => entry.status === "stale").map((entry) => entry.stage),
+      ).toEqual(["check", "test", "export", "playtest", "state"]);
+      expect(read.sourceId).not.toBe(sourceId);
+      // Staleness never makes the served artifact unplayable: Play still shows
+      // the recorded build until a new export replaces it.
+      expect(read.servedArtifactId).not.toBeNull();
+    }),
+  ),
+);
+
 it.effect("a deletion after the stages also invalidates them", () =>
   withGame({}, ({ root, qualification }) =>
     Effect.gen(function* () {

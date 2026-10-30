@@ -64,6 +64,43 @@ describe("playtestInputIssues", () => {
     ).toEqual([]);
   });
 
+  it("rejects Godot action names in every key field and names the physical-key route", () => {
+    const issues = playtestInputIssues({
+      steps: [
+        { press: "ui_accept" },
+        { hold: "move_left", holdMs: 100 },
+        { key: "jump", holdMs: 100 },
+        { keys: ["Shift", "run"], holdMs: 100 },
+      ],
+    });
+    expect(issues).toHaveLength(4);
+    expect(issues[0]).toContain('Step 1 press "ui_accept" is not a browser key.');
+    expect(issues[0]).toContain('"Enter"');
+    expect(issues[0]).toContain("use the key project.godot binds");
+    expect(issues[0]).toContain("game_scenarios_run");
+    expect(issues[1]).toContain('Step 2 hold "move_left"');
+    expect(issues[2]).toContain('Step 3 key "jump"');
+    expect(issues[3]).toContain('Step 4 keys "run"');
+  });
+
+  it("keeps physical browser keys and single characters", () => {
+    expect(
+      playtestInputIssues({
+        steps: [
+          { press: "Enter" },
+          { press: " " },
+          { press: "/" },
+          { press: "F1" },
+          { hold: "Space", holdMs: 100 },
+          { key: "ArrowLeft", holdMs: 100 },
+          { key: "PageUp", holdMs: 100 },
+          { key: "Delete", holdMs: 100 },
+          { keys: ["Shift", "w"], holdMs: 100 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("rejects dimensions outside 320-1920", () => {
     expect(playtestInputIssues({ width: 319 })).toContain(
       `width must be between ${GAME_PLAYTEST_BOUNDS.minDimension} and ${GAME_PLAYTEST_BOUNDS.maxDimension} pixels.`,
@@ -240,6 +277,9 @@ describe("tryInputIssues", () => {
       "1–8 keys",
     );
     expect(tryInputIssues({ steps: [{ press: "" }] }).join()).toContain("1–80 characters");
+    expect(tryInputIssues({ steps: [{ press: "ui_accept" }] }).join()).toContain(
+      'press "ui_accept" is not a browser key',
+    );
     expect(tryInputIssues({ steps: [{ click: "left", x: 10 }] }).join()).toContain("both x and y");
     expect(tryInputIssues({ steps: [{ mouseMove: { dx: Infinity, dy: 0 } }] }).join()).toContain(
       "finite",

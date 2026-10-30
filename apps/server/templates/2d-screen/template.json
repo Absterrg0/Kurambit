@@ -1,0 +1,9 @@
+{
+  "id": "2d-screen",
+  "name": "2D Screen",
+  "description": "A fixed-screen dialogue and management starter: safe layout, pointer and keyboard parity, and a five-call shift.",
+  "dimension": "2d",
+  "testSuite": "res://tests/smoke_test.gd",
+  "gameplayScene": "res://scenes/game.tscn",
+  "probe": true
+}

@@ -79,6 +79,8 @@ interface Harness {
   /** The raw stage records the qualification store would report. */
   exportStage: GameQualification.QualificationStageRecord | null;
   playtestStage: GameQualification.QualificationStageRecord | null;
+  /** The frozen state-exam record the native hints bind against, when set. */
+  stateStage: GameQualification.QualificationStageRecord | null;
 }
 
 /** Two frames at the capture window, as a boot+burst run produces. */
@@ -146,6 +148,7 @@ const withStudio = <A, E>(
         replayError: null,
         exportStage: null,
         playtestStage: null,
+        stateStage: null,
       };
       const game = Layer.mock(GameService.GameService)({
         webPlaytestBuild: (_thread, _buildId, input, directory) => {
@@ -176,7 +179,15 @@ const withStudio = <A, E>(
       });
       const qualification = Layer.mock(GameQualification.GameQualification)({
         stageRecord: (_root, stage) =>
-          Effect.succeed(stage === "export" ? harness.exportStage : harness.playtestStage),
+          Effect.succeed(
+            stage === "export"
+              ? harness.exportStage
+              : stage === "playtest"
+                ? harness.playtestStage
+                : stage === "state"
+                  ? harness.stateStage
+                  : null,
+          ),
       });
       const rounds = Layer.mock(GameRoundStore.GameRoundStore)({
         exported: (_root, buildId) =>
@@ -202,6 +213,10 @@ const withStudio = <A, E>(
                   ? null
                   : {
                       ...facts,
+                      ...(played?.evidenceDirectory === null ||
+                      played?.evidenceDirectory === undefined
+                        ? {}
+                        : { evidenceDirectory: played.evidenceDirectory }),
                       steps: last?.steps ?? [],
                       viewport: last?.viewport ?? null,
                       ...(last?.captureScale === undefined
@@ -421,8 +436,8 @@ it.live("a failed frozen-route replay is evidence, not the end of the review", (
       harness.replayError = new GameOperationError({
         operation: "Web playtest",
         path: harness.root,
-        reason: "invalid-input",
-        detail: "Step 1 pointer coordinates exceed the frozen 640×360 viewport.",
+        reason: "command-failed",
+        detail: "The browser exited before the route finished.",
       });
       const checked = yield* studio.check({
         threadId,
@@ -437,7 +452,7 @@ it.live("a failed frozen-route replay is evidence, not the end of the review", (
       });
       expect(checked.checks.find((check) => check.id === "replay")).toMatchObject({
         status: "failed",
-        detail: expect.stringContaining("Step 1 pointer coordinates exceed"),
+        detail: expect.stringContaining("browser exited"),
       });
       // Boot frames still show the critic the build it is reviewing.
       expect(checked.frames.length).toBeGreaterThan(0);
@@ -455,7 +470,7 @@ it.live("a failed boot fallback returns both errors as critic evidence", () =>
       harness.replayError = new GameOperationError({
         operation: "Web playtest",
         path: harness.root,
-        reason: "invalid-input",
+        reason: "command-failed",
         detail: "The recorded route could not run.",
       });
       harness.bootError = new GameOperationError({
@@ -560,6 +575,7 @@ it.live.each(["stationary card", "instant dialogue", "endless", "animated scener
           { id: "boot", status: "passed" },
           { id: "console", status: "passed" },
           { id: "input", status: "passed" },
+          { id: "playtest", status: "failed" },
           { id: "window", status: "passed" },
         ]);
         expect(checked.checks.find((check) => check.id === "input")?.measurements).toEqual({
@@ -601,7 +617,7 @@ const passedPlaytest = (root: string, at = FIRST_EVIDENCE_AT) =>
   writePlaytestEvidence({
     root,
     steps: [{ key: "ArrowRight", holdMs: 120 }],
-    result: baseResult(),
+    result: { ...baseResult(), qualifies: true },
     at,
   });
 
@@ -703,60 +719,384 @@ it.live("submission facts refuse console errors and a playtest with no input", (
   ),
 );
 
-it.live.each([false, undefined])(
-  "submission uses raw facts when gameplay qualification is %s",
-  (qualifies) =>
-    withStudio((harness) =>
-      Effect.gen(function* () {
-        const studio = yield* GameRepairStudio.GameRepairStudio;
-        const buildId = yield* Effect.promise(() => makeBuild(harness.root));
-        const evidence = yield* Effect.promise(() =>
-          writePlaytestEvidence({
-            root: harness.root,
-            steps: [{ click: "left" }],
-            result: {
-              ...baseResult(),
-              responded: false,
-              changedPercent: 0,
-              ...(qualifies === undefined ? {} : { qualifies }),
-              blockers: ["no movement or design progress"],
-            },
-            at: FIRST_EVIDENCE_AT,
-          }),
-        );
-        harness.exportStage = stage({ buildId });
-        harness.playtestStage = {
-          ...stage({ buildId, evidenceDirectory: evidence.directory, outcome: "failed" }),
-          detail: "Interaction: none.",
-        };
-        expect((yield* studio.submissionFacts(harness.root)).passed).toBe(true);
-        yield* Effect.promise(() =>
-          writePlaytestEvidence({
-            root: harness.root,
-            steps: [{ click: "left" }],
-            result: {
-              ...baseResult(),
-              booted: false,
-              responded: false,
-              qualifies: false,
-              consoleMessages: [{ level: "error", text: "boom" }],
-            },
-            at: LATER_EVIDENCE_AT,
-          }).then((bad) => {
-            harness.playtestStage = stage({
-              buildId,
-              evidenceDirectory: bad.directory,
-              outcome: "failed",
-            });
-          }),
-        );
-        const refused = yield* studio.submissionFacts(harness.root);
-        expect(refused.reason).toContain("boot: The playtest recorded that the game did not boot.");
-        expect(refused.reason).toContain("console: 1 console error(s)");
-        expect(refused.reason).not.toContain("input:");
-        expect(refused.reason).not.toContain("qualification");
-      }),
-    ),
+it.live("a failed gameplay qualification refuses submission even when boot and input passed", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ press: "Space" }],
+          result: {
+            ...baseResult(),
+            responded: true,
+            qualifies: false,
+            blockers: ["no movement or design progress"],
+          },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({
+        buildId,
+        evidenceDirectory: evidence.directory,
+        outcome: "failed",
+      });
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed).toBe(false);
+      const byId = new Map(facts.checks.map((entry) => [entry.id, entry]));
+      expect(byId.get("boot")?.status).toBe("passed");
+      expect(byId.get("input")?.status).toBe("passed");
+      expect(byId.get("playtest")?.status).toBe("failed");
+      expect(byId.get("playtest")?.detail).toContain("no movement or design progress");
+      expect(facts.reason).toContain("playtest:");
+
+      // The review reads the same build binding: its own failed playtest is a
+      // hard failed check, never a boot/input-only pass.
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs,
+      });
+      expect(harness.calls).toEqual([]);
+      expect(checked.checks.find((entry) => entry.id === "playtest")?.status).toBe("failed");
+      expect(checked.checks.every((entry) => entry.status === "passed")).toBe(false);
+      expect(checked.checks.find((entry) => entry.id === "input")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("a build's failed playtest vetoes a passing replay of a different route", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ press: "Space" }],
+          result: {
+            ...baseResult(),
+            qualifies: false,
+            blockers: ["no movement or design progress"],
+          },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({
+        buildId,
+        evidenceDirectory: evidence.directory,
+        outcome: "failed",
+      });
+      // The frozen route is not the failed route and the replay passes. The
+      // build's own failed qualification still vetoes promotion.
+      harness.results = { ...baseResult(), qualifies: true };
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs: {
+          steps: [{ press: "Enter" }],
+          viewport: { width: 1152, height: 648 },
+          seed: "unknown",
+        },
+      });
+      expect(harness.calls.filter((call) => call?.exactSize !== true)).toHaveLength(1);
+      expect(checked.checks.find((entry) => entry.id === "playtest")).toMatchObject({
+        status: "failed",
+        detail: expect.stringContaining("no movement or design progress"),
+      });
+      expect(checked.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
+      expect(checked.checks.every((entry) => entry.status === "passed")).toBe(false);
+    }),
+  ),
+);
+
+it.live("a legacy playtest without a stored verdict is replayed, not failed for absence", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ press: "Space" }],
+          result: baseResult(),
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      expect((yield* studio.submissionFacts(harness.root)).passed).toBe(true);
+
+      // The route matches, but the old run measured no gameplay verdict. The
+      // check must replay it with the frozen route instead of treating the
+      // missing optional field as a failed game.
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      harness.results = {
+        ...baseResult(),
+        qualifies: false,
+        blockers: ["no movement or design progress"],
+      };
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs,
+      });
+      expect(harness.calls.filter((call) => call?.exactSize !== true)).toHaveLength(1);
+      expect(checked.checks.find((entry) => entry.id === "playtest")?.status).toBe("failed");
+
+      yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ press: "Space" }],
+          result: {
+            ...baseResult(),
+            booted: false,
+            responded: false,
+            qualifies: false,
+            consoleMessages: [{ level: "error", text: "boom" }],
+          },
+          at: LATER_EVIDENCE_AT,
+        }).then((bad) => {
+          harness.playtestStage = stage({
+            buildId,
+            evidenceDirectory: bad.directory,
+            outcome: "failed",
+          });
+        }),
+      );
+      const refused = yield* studio.submissionFacts(harness.root);
+      expect(refused.reason).toContain("boot: The playtest recorded that the game did not boot.");
+      expect(refused.reason).toContain("console: 1 console error(s)");
+      expect(refused.reason).toContain("playtest:");
+      expect(refused.reason).toContain("input: The playtest recorded no visible response");
+    }),
+  ),
+);
+
+it.live("a matching recorded playtest reuses gameplay and still checks the other window", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const steps = [{ key: "ArrowRight", holdMs: 120 }];
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps,
+          result: {
+            ...baseResult(),
+            qualifies: true,
+            timing: "controlled-clock",
+            designObservations: ["a reply changes trust"],
+            screenshots: [
+              {
+                label: "recorded gameplay",
+                mimeType: "image/png",
+                data: "cmVjb3JkZWQ=",
+                width: 1152,
+                height: 648,
+              },
+            ],
+          },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      expect(inputs.steps).toEqual(steps);
+      expect(inputs.viewport).toEqual({ width: 1152, height: 648 });
+
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs,
+      });
+      expect(harness.calls).toHaveLength(1);
+      expect(harness.calls[0]?.exactSize).toBe(true);
+      expect(checked.checks).toEqual([
+        { id: "boot", status: "passed" },
+        { id: "console", status: "passed", detail: "0 console errors" },
+        {
+          id: "input",
+          status: "passed",
+          detail: "1 input steps executed",
+          measurements: {
+            steps,
+            changedPercent: 12,
+            state: null,
+            designObservations: ["a reply changes trust"],
+          },
+        },
+        { id: "playtest", status: "passed" },
+        { id: "window", status: "passed", detail: "900x900 window" },
+      ]);
+      expect(
+        checked.frames.filter((frame) => frame.window !== true).map((frame) => frame.label),
+      ).toEqual(["recorded gameplay"]);
+      expect(checked.frames.filter((frame) => frame.window === true)).toHaveLength(2);
+      expect(yield* Effect.promise(() => NodeFSP.readFile(checked.frames[0]!.path, "utf8"))).toBe(
+        "recorded",
+      );
+      expect(checked.viewport).toEqual({ width: 1152, height: 648 });
+    }),
+  ),
+);
+
+it.live("a wall-time recorded pass replays instead of reusing controlled evidence", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const steps = [{ key: "ArrowRight", holdMs: 120 }];
+      // No timing marker: wall-time evidence from before the controlled
+      // driver. It must not be reused as a controlled-clock pass.
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps,
+          result: { ...baseResult(), qualifies: true },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      expect(inputs.steps).toEqual(steps);
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs,
+      });
+      // A fresh route replay plus the alternate-window burst, not a reuse.
+      expect(harness.calls.filter((call) => call?.exactSize !== true)).toHaveLength(1);
+      expect(harness.calls).toHaveLength(2);
+      expect(checked.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("missing cached pixels replay the route instead of aborting the review", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() => passedPlaytest(harness.root));
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      yield* Effect.promise(() =>
+        NodeFSP.unlink(NodePath.join(harness.root, evidence.directory, "01-after-steps.png")),
+      );
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs,
+      });
+      expect(harness.calls.filter((call) => call?.exactSize !== true)).toHaveLength(1);
+      expect(checked.frames.length).toBeGreaterThan(0);
+      expect(checked.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("a different frozen route replays instead of borrowing the builder's run", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ key: "ArrowRight", holdMs: 120 }],
+          result: { ...baseResult(), qualifies: true },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const inputs = yield* studio.frozenInputs(harness.root, buildId);
+      harness.results = {
+        ...baseResult(),
+        qualifies: false,
+        blockers: ["no movement under the frozen route"],
+      };
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId,
+        inputs: { ...inputs, steps: [{ key: "ArrowLeft", holdMs: 120 }] },
+      });
+      const routeCalls = harness.calls.filter((call) => call?.exactSize !== true);
+      expect(routeCalls).toHaveLength(1);
+      expect(routeCalls[0]?.steps).toEqual([{ key: "ArrowLeft", holdMs: 120 }]);
+      // The build's recorded pass is not evidence for this different route.
+      expect(checked.checks.find((entry) => entry.id === "playtest")?.status).toBe("failed");
+    }),
+  ),
+);
+
+it.live("an invalid browser route is rejected before any playtest launches", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const failed = yield* studio
+        .check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId: "a".repeat(64),
+          inputs: { steps: [{ press: "ui_accept" }], viewport: null, seed: "unknown" },
+        })
+        .pipe(Effect.flip);
+      expect(failed.reason).toBe("invalid-input");
+      expect(failed.detail).toContain('"ui_accept" is not a browser key');
+      expect(failed.detail).toContain("game_scenarios_run");
+      expect(harness.calls).toEqual([]);
+    }),
+  ),
+);
+
+it.live("submission names an invalid recorded route instead of passing it", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const buildId = yield* Effect.promise(() => makeBuild(harness.root));
+      const evidence = yield* Effect.promise(() =>
+        writePlaytestEvidence({
+          root: harness.root,
+          steps: [{ press: "ui_accept" }],
+          result: { ...baseResult(), qualifies: true },
+          at: FIRST_EVIDENCE_AT,
+        }),
+      );
+      harness.exportStage = stage({ buildId });
+      harness.playtestStage = stage({ buildId, evidenceDirectory: evidence.directory });
+      const facts = yield* studio.submissionFacts(harness.root);
+      expect(facts.passed).toBe(false);
+      expect(facts.reason).toContain(
+        "playtest: The recorded playtest route is not a browser route",
+      );
+      expect(facts.reason).toContain('"ui_accept" is not a browser key');
+    }),
+  ),
 );
 
 it.live("waits and screenshots cannot supply submission input, even with animated frames", () =>
@@ -869,6 +1209,522 @@ it.live("experiment replay keeps persisted frames omitted from the response befo
       expect(yield* Effect.promise(() => NodeFSP.readFile(result.frames[0]!.path, "utf8"))).toBe(
         "png",
       );
+    }),
+  ),
+);
+
+const scenarioEvidenceWithLayout = (subject: string) =>
+  JSON.stringify({
+    id: "full-run",
+    frames: 120,
+    durationMs: 2000,
+    firstInputFrame: 30,
+    baselineFrame: 36,
+    playerMoved: true,
+    error: null,
+    invalidActions: [],
+    observations: [],
+    layout: {
+      findings: [
+        {
+          kind: "overlap-risk",
+          subject,
+          detail:
+            'may be obscured by later sibling Panel "Footer" (overlap risk: 40% overlaps; visual occlusion not proven from geometry).',
+          nodePath: "Main/Serve",
+          scenarioFrame: 66,
+          step: 1,
+          viewport: { width: 1152, height: 648 },
+        },
+      ],
+      coverage: {
+        probes: 2,
+        omittedProbes: 0,
+        inspectedControls: 3,
+        pairs: 4,
+        truncated: false,
+        viewport: { width: 1152, height: 648 },
+      },
+    },
+  });
+
+const writeScenarioEvidence = (root: string, directory: string, text: string) =>
+  Effect.promise(async () => {
+    await NodeFSP.mkdir(NodePath.join(root, directory), { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(root, directory, "full-run.result.json"), text);
+  });
+
+const checkInputs = {
+  steps: [{ press: "Space" }],
+  viewport: { width: 960, height: 540 },
+  seed: "unknown",
+} as const;
+
+it.live("an incumbent check binds same-source scenario layout as critic hints", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "qualified-inputs" };
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithLayout('Button "Serve"'),
+      );
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+      });
+      // The hints ride beside the checks, never as one: no gate was added.
+      expect(checked.checks.some((check) => check.id === "native-layout")).toBe(false);
+      expect(checked.nativeDiagnostics).toMatchObject({
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      });
+      const text = checked.nativeDiagnostics!.text;
+      expect(text).toContain('Button "Serve"');
+      expect(text).toContain("full-run");
+      expect(text).toContain("route step 2");
+      expect(text).toContain("game_try_input");
+      expect(text.length).toBeLessThanOrEqual(3_000);
+    }),
+  ),
+);
+
+it.live("stale or missing scenario evidence selects no native hints", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithLayout('Button "Serve"'),
+      );
+      const inputs = { ...checkInputs, steps: [...checkInputs.steps] };
+      // Stale: the state record names other sources than the build.
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "other-sources",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      const stale = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(stale.nativeDiagnostics).toBeUndefined();
+      // Missing: no state record at all still checks the build.
+      harness.stateStage = null;
+      const missing = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(missing.nativeDiagnostics).toBeUndefined();
+      expect(missing.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("candidate checks carry no native hints even with same-source evidence", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "fixture",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithLayout('Button "Serve"'),
+      );
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId: "a".repeat(64),
+        inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+      });
+      // The evidence predates the repair, so it cannot describe the candidate.
+      expect(checked.nativeDiagnostics).toBeUndefined();
+    }),
+  ),
+);
+
+it.live("native hints never follow scenario evidence symlinks outside the game", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "fixture" };
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "fixture",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* Effect.promise(async () => {
+        const outside = NodePath.join(NodePath.dirname(harness.root), "outside.result.json");
+        await NodeFSP.writeFile(outside, scenarioEvidenceWithLayout('Button "Outside"'));
+        const directory = NodePath.join(harness.root, "builds/logs/scenarios-1");
+        await NodeFSP.mkdir(directory, { recursive: true });
+        await NodeFSP.symlink(outside, NodePath.join(directory, "full-run.result.json"));
+      });
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+      });
+      expect(checked.nativeDiagnostics).toBeUndefined();
+      expect(checked.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("native hints require the matching build's passed qualification export", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithLayout('Button "Serve"'),
+      );
+      const valid = { ...stage({ buildId: "a".repeat(64) }), sourceId: "qualified-inputs" };
+      for (const record of [
+        { ...valid, buildId: "b".repeat(64) },
+        { ...valid, sourceId: "other-inputs" },
+        { ...valid, outcome: "failed" as const },
+        null,
+      ]) {
+        harness.exportStage = record;
+        const checked = yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId: "a".repeat(64),
+          inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+        });
+        expect(checked.nativeDiagnostics).toBeUndefined();
+      }
+    }),
+  ),
+);
+
+it.live("experiment frames retain an end-state key late in the bounded probe", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const counters = Object.fromEntries(
+        Array.from({ length: 30 }, (_, index) => [`a${String(index).padStart(2, "0")}`, index]),
+      );
+      harness.persistExperiment = true;
+      harness.results = {
+        ...baseResult(),
+        screenshots: (["before", "after"] as const).map((phase) => ({
+          ...baseResult().screenshots[0]!,
+          label: phase,
+          inputPair: {
+            stepIndex: 0,
+            phase,
+            input: { press: "Space" },
+            changedPercent: 0,
+            stateChanges: [],
+          },
+          probe: { ...probe(phase), gameState: { ...counters, won: phase === "after" } },
+        })),
+      };
+      const result = yield* studio.experiment({
+        threadId,
+        root: harness.root,
+        buildId: "a".repeat(64),
+        steps: [{ press: "Space" }],
+        captureEveryMs: 1000,
+        viewport: { width: 1152, height: 648 },
+      });
+      expect(result.frames[0]?.observations?.won).toBe(false);
+      expect(result.frames[1]?.observations?.won).toBe(true);
+    }),
+  ),
+);
+
+const scenarioSpatialPayload = () => ({
+  snapshots: [
+    {
+      scenarioFrame: 30,
+      step: null,
+      player: {
+        present: true,
+        position: [100, 200],
+        velocity: [0, 0],
+        bodyKind: "CharacterBody2D",
+      },
+      areas: [
+        {
+          nodePath: "Main/Zone",
+          type: "Area2D",
+          monitoring: true,
+          monitorable: true,
+          visible: true,
+          shapes: [
+            {
+              nodePath: "Main/Zone/Shape",
+              shapeKind: "RectangleShape2D",
+              disabled: false,
+              bounds: { kind: "rect2", min: [50, 150], max: [150, 250] },
+              conservative: false,
+              containsPlayerOrigin: true,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  coverage: {
+    snapshots: 1,
+    omittedSnapshots: 0,
+    visitedNodes: 42,
+    areas: 1,
+    shapes: 1,
+    skippedFreed: 0,
+    truncated: false,
+  },
+});
+
+const scenarioEvidenceWithSpatial = () =>
+  JSON.stringify({
+    id: "full-run",
+    frames: 120,
+    durationMs: 2000,
+    firstInputFrame: 30,
+    baselineFrame: 36,
+    playerMoved: true,
+    error: null,
+    invalidActions: [],
+    observations: [],
+    spatial: scenarioSpatialPayload(),
+  });
+
+it.live("an incumbent check binds same-source spatial even with zero layout findings", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "qualified-inputs" };
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithSpatial(),
+      );
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+      });
+      // Zero layout findings still deliver the world packet, never as a gate.
+      expect(checked.checks.some((check) => check.id === "native-world")).toBe(false);
+      expect(checked.nativeDiagnostics).toBeUndefined();
+      expect(checked.nativeWorld).toMatchObject({
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      });
+      const text = checked.nativeWorld!.text;
+      expect(() => JSON.parse(text)).not.toThrow();
+      expect(text).toContain("full-run");
+      expect(text).toContain("containsPlayerOrigin");
+      expect(text).toContain("headless world measurements");
+      expect(text).toContain("never cite as proof");
+      expect(text.length).toBeLessThanOrEqual(32_768);
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(32_768);
+      expect(checked.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("candidate checks carry no native world even with same-source evidence", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "fixture" };
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "fixture",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithSpatial(),
+      );
+      const checked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "candidate",
+        buildId: "a".repeat(64),
+        inputs: { ...checkInputs, steps: [...checkInputs.steps] },
+      });
+      // The evidence predates the repair, so it cannot describe the candidate.
+      // Ballot evidence likewise never carries native files: only the
+      // incumbent check binds them, never a gate or ballot change.
+      expect(checked.nativeWorld).toBeUndefined();
+      expect(checked.nativeDiagnostics).toBeUndefined();
+      expect(checked.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+    }),
+  ),
+);
+
+it.live("mismatched source or failed export omits the world without invalidating the build", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      yield* writeScenarioEvidence(
+        harness.root,
+        "builds/logs/scenarios-1",
+        scenarioEvidenceWithSpatial(),
+      );
+      const inputs = { ...checkInputs, steps: [...checkInputs.steps] };
+      // Stale: state names other sources than the build.
+      harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "qualified-inputs" };
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "other-sources",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      expect(
+        (yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId: "a".repeat(64),
+          inputs,
+        })).nativeWorld,
+      ).toBeUndefined();
+      // Missing state record still checks the build.
+      harness.stateStage = null;
+      const missing = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(missing.nativeWorld).toBeUndefined();
+      expect(missing.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+      // The matching build needs its own passed export: different build,
+      // different source, failed outcome, or no record all omit honestly.
+      harness.stateStage = {
+        ...stage({ buildId: "a".repeat(64) }),
+        sourceId: "qualified-inputs",
+        evidenceDirectory: "builds/logs/scenarios-1",
+      };
+      const valid = { ...stage({ buildId: "a".repeat(64) }), sourceId: "qualified-inputs" };
+      for (const record of [
+        { ...valid, buildId: "b".repeat(64) },
+        { ...valid, sourceId: "other-inputs" },
+        { ...valid, outcome: "failed" as const },
+        null,
+      ]) {
+        harness.exportStage = record;
+        const checked = yield* studio.check({
+          threadId,
+          root: harness.root,
+          target: "incumbent",
+          buildId: "a".repeat(64),
+          inputs,
+        });
+        expect(checked.nativeWorld).toBeUndefined();
+        expect(checked.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+      }
+    }),
+  ),
+);
+
+it.live("unreadable, symlink or oversized scenario evidence omits the world honestly", () =>
+  withStudio((harness) =>
+    Effect.gen(function* () {
+      const studio = yield* GameRepairStudio.GameRepairStudio;
+      const inputs = { ...checkInputs, steps: [...checkInputs.steps] };
+      const bind = () => {
+        harness.exportStage = { ...stage({ buildId: "a".repeat(64) }), sourceId: "fixture" };
+        harness.stateStage = {
+          ...stage({ buildId: "a".repeat(64) }),
+          sourceId: "fixture",
+          evidenceDirectory: "builds/logs/scenarios-1",
+        };
+      };
+      // Unreadable: invalid JSON never invalidates the playable artifact.
+      bind();
+      yield* writeScenarioEvidence(harness.root, "builds/logs/scenarios-1", "not json");
+      const unreadable = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(unreadable.nativeWorld).toBeUndefined();
+      expect(unreadable.checks.find((check) => check.id === "boot")?.status).toBe("passed");
+      // Symlink outside the game is never followed.
+      bind();
+      yield* Effect.promise(async () => {
+        const outside = NodePath.join(NodePath.dirname(harness.root), "outside-world.result.json");
+        await NodeFSP.writeFile(outside, scenarioEvidenceWithSpatial());
+        const directory = NodePath.join(harness.root, "builds/logs/scenarios-1");
+        await NodeFSP.rm(directory, { recursive: true, force: true });
+        await NodeFSP.mkdir(directory, { recursive: true });
+        await NodeFSP.symlink(outside, NodePath.join(directory, "full-run.result.json"));
+      });
+      const linked = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(linked.nativeWorld).toBeUndefined();
+      expect(linked.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
+      // Oversized result files are skipped by the bounded reader.
+      bind();
+      yield* Effect.promise(async () => {
+        const directory = NodePath.join(harness.root, "builds/logs/scenarios-1");
+        await NodeFSP.rm(directory, { recursive: true, force: true });
+        await NodeFSP.mkdir(directory, { recursive: true });
+        const large = `${scenarioEvidenceWithSpatial().slice(0, -2)},"pad":"${"x".repeat(210_000)}"}`;
+        await NodeFSP.writeFile(NodePath.join(directory, "full-run.result.json"), large);
+      });
+      const oversized = yield* studio.check({
+        threadId,
+        root: harness.root,
+        target: "incumbent",
+        buildId: "a".repeat(64),
+        inputs,
+      });
+      expect(oversized.nativeWorld).toBeUndefined();
+      expect(oversized.checks.find((entry) => entry.id === "boot")?.status).toBe("passed");
     }),
   ),
 );

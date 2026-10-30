@@ -62,6 +62,10 @@ const make = Effect.gen(function* () {
       const budget = loop?.budget ?? DEFAULT_GAME_REVIEW_BUDGET;
       const end = loop?.finishedAt ?? DateTime.formatIso(yield* DateTime.now);
       const elapsed = loop === null ? 0 : Math.max(0, Date.parse(end) - Date.parse(loop.startedAt));
+      // Exact absolute-quality coverage of the newest round that froze an
+      // assessment. Unknown dimensions stay neutral; there is no score.
+      const assessed = state.rounds.filter((round) => round.qualityCoverage !== undefined);
+      const newestCovered = assessed.find((round) => loop === null || round.loopId === loop.id);
       return {
         ...(checkSelectedBuild
           ? {
@@ -71,6 +75,7 @@ const make = Effect.gen(function* () {
                   : yield* studio.submissionFacts(root, state.selected.buildId),
             }
           : {}),
+        ...(newestCovered === undefined ? {} : { qualityCoverage: newestCovered.qualityCoverage }),
         production: productionStatus({
           production: state.production ?? null,
           budgetMs: gameProductionBudgetMs(manifest),

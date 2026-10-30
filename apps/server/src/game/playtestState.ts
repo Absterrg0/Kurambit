@@ -382,7 +382,20 @@ export function evaluatePlaytestRun(input: {
           blockers.push("no GameState value changed on a ride a stopped clock would not show");
       } else {
         achieved = achievedCriteria(input.acceptance, baseline, later);
-        if (achieved.length === 0) blockers.push("no approved criterion achieved");
+        if (achieved.length === 0) {
+          blockers.push("no approved criterion achieved");
+          const alreadySatisfied = coreChecks(input.acceptance)
+            .filter(
+              (check) =>
+                check.expectation.kind !== "changes" &&
+                checkSatisfiedAt(check, baseline, baseline.gameState[check.key]),
+            )
+            .map((check) => check.id);
+          if (alreadySatisfied.length > 0)
+            blockers.push(
+              `the first gameplay sample already satisfies ${alreadySatisfied.join(", ")}; observe gameplay before attempting that target so its transition can be measured`,
+            );
+        }
       }
     }
   }

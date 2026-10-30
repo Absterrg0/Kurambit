@@ -4,7 +4,51 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, RunId, ThreadId } from "./baseSchemas.ts";
 import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
-import { GameScenarioCriterionResult, GameScenarioKindCoverage } from "./gameScenario.ts";
+import { GameArtProfile } from "./gameArt.ts";
+import { GameAssetFamily } from "./gameAssets.ts";
+import {
+  GameScenarioCriterionResult,
+  GameScenarioKindCoverage,
+  GameScenariosRunResult,
+} from "./gameScenario.ts";
+
+export const GameBlenderInputSource = Schema.Struct({
+  /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
+  name: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/)),
+  /**
+   * Where the source lives in this game: a game-relative path such as
+   * `godot/assets/library/models/crate/crate.gltf`, or a Godot resource path
+   * such as `res://assets/library/models/crate/crate.gltf`. Never a URL.
+   */
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+});
+export type GameBlenderInputSource = typeof GameBlenderInputSource.Type;
+
+/**
+ * Bounded reference inputs for one Blender run. At most a few local models
+ * and images, each small enough to stage beside the run. Supplying a source
+ * only records it on the asset; it never claims the script used it or that
+ * the result looks a certain way.
+ */
+export const GAME_BLENDER_INPUT_BOUNDS = {
+  maxInputs: 4,
+  maxFileBytes: 12_000_000,
+  maxTotalBytes: 25_000_000,
+  maxImageDimension: 8192,
+  /**
+   * Decoded pixels one staged image may hold (16 MP, e.g. 4096x4096). The
+   * 8192px dimension bound alone permits 64 MP, whose single RGBA buffer is
+   * 256 MB, so the header area rejects oversized images before any decode.
+   */
+  maxImagePixels: 16_777_216,
+  /**
+   * Decoded pixels all images in one run's named inputs may hold together
+   * (direct images, glTF dependencies/data URIs and embedded GLB textures).
+   */
+  maxTotalImagePixels: 33_554_432,
+  /** Extra files one .gltf may pull in (.bin, images); the rest is rejected. */
+  maxDependencies: 16,
+} as const;
 
 export const GameAsset = Schema.Struct({
   id: Schema.String,
@@ -13,9 +57,22 @@ export const GameAsset = Schema.Struct({
   script: Schema.String,
   export: Schema.String,
   thumbnail: Schema.optionalKey(Schema.String),
+  /**
+   * The named local sources this asset's latest run was given, as supplied
+   * paths. Recording only: a binding never proves the script imported the
+   * file or that the export looks a certain way. Absent on assets built
+   * before named inputs existed, preserved when a later revision runs
+   * without new inputs, and cleared when reset starts a fresh source.
+   */
+  inputs: Schema.optionalKey(Schema.Array(GameBlenderInputSource)),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals(["3d-explorer", "2d-platformer", "blank"]);
+export const GameTemplateId = Schema.Literals([
+  "3d-explorer",
+  "2d-platformer",
+  "2d-screen",
+  "blank",
+]);
 export type GameTemplateId = typeof GameTemplateId.Type;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
@@ -65,6 +122,16 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     probe: true,
   },
   {
+    id: "2d-screen",
+    name: "2D Screen",
+    description:
+      "A fixed-screen dialogue and management starter: safe layout, pointer and keyboard parity, and a five-call shift.",
+    dimension: "2d",
+    testSuite: DEFAULT_GAME_TEST_SUITE,
+    gameplayScene: "res://scenes/game.tscn",
+    probe: true,
+  },
+  {
     id: "blank",
     name: "Blank",
     description:
@@ -93,6 +160,12 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
+  /**
+   * The shared look this game's assets build against: palette roles and the
+   * height assets stand at. `game_blender_run` applies it and warns on drift.
+   * Absent on legacy games, which export without profile checks.
+   */
+  artProfile: Schema.optionalKey(GameArtProfile),
   // Display mirror of the server-owned verification policy. New games get it
   // from the template; old games are the one-time source the policy is adopted
   // from. Editing these keys never changes the exam.
@@ -111,6 +184,14 @@ export const GameManifest = Schema.Struct({
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
+  /**
+   * Authored asset targets this game's inventory checks against. Each entry
+   * names the files, scale/pivot conventions, animation and transition names,
+   * collision and provenance promises one family owes. Absent on legacy games,
+   * which inventory treats as having no authored requirements rather than as
+   * missing everything. At most 16 families with at most 16 paths each.
+   */
+  families: Schema.optionalKey(Schema.Array(GameAssetFamily).check(Schema.isMaxLength(16))),
 });
 export type GameManifest = typeof GameManifest.Type;
 export type GameAsset = typeof GameAsset.Type;
@@ -353,22 +434,34 @@ export const GamePlaytestState = Schema.Struct({
 export type GamePlaytestState = typeof GamePlaytestState.Type;
 const GamePointerPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 export const GamePlaytestStep = Schema.Union([
-  Schema.Struct({ press: Schema.String }),
-  Schema.Struct({ hold: Schema.String, holdMs: Schema.Number }),
+  Schema.Struct({
+    press: Schema.String.annotate({
+      description:
+        'Physical browser key to press, such as "Enter", "Space", "ArrowLeft", "w" or "F1" — not a Godot InputMap action name; use game_scenarios_run for action names.',
+    }),
+  }),
+  Schema.Struct({
+    hold: Schema.String.annotate({
+      description:
+        'Physical browser key to hold, such as "Space" or "ArrowRight" — not a Godot InputMap action name; use game_scenarios_run for action names.',
+    }),
+    holdMs: Schema.Number,
+  }),
   Schema.Struct({
     drag: Schema.Struct({ from: GamePointerPosition, to: GamePointerPosition }),
     holdMs: Schema.Number,
   }),
   Schema.Struct({
     key: Schema.String.annotate({
-      description: 'Key to hold while playing, such as "ArrowUp", "w", "Space".',
+      description:
+        'Physical browser key to hold while playing, such as "ArrowUp", "w", "Space" or "F1" — not a Godot InputMap action name; use game_scenarios_run for action names.',
     }),
     holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
   }),
   Schema.Struct({
     keys: Schema.Array(Schema.String).annotate({
       description:
-        'Keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"].',
+        'Physical browser keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"] — not Godot InputMap action names; use game_scenarios_run for action names.',
     }),
     holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
   }),
@@ -408,6 +501,17 @@ export const GamePlaytestInputPair = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * Nominal game time of the already-declared contiguous trailing wait step(s)
+   * whose realization the after capture includes. Zero/absent means the after
+   * capture ran immediately after the input with the clock still paused: an
+   * honest but unsettled observation, never proof the control is broken.
+   * The route steps themselves are unchanged; this only says where the after
+   * frame was taken.
+   */
+  observationDelayMs: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** The last trailing wait step index the after capture includes, when any. */
+  observedAfterStepIndex: Schema.optionalKey(Schema.Int),
 });
 export type GamePlaytestInputPair = typeof GamePlaytestInputPair.Type;
 export const GamePlaytestFrame = Schema.Struct({
@@ -656,6 +760,12 @@ export const GameCreateInput = Schema.Struct({
    * builds in the same turn.
    */
   reviewDesign: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Minimal instruction stack: blank start with no design stage. Absent means
+   * the default scaffold; "minimal" forces the blank template, skips DESIGN.md
+   * and acceptance, and uses the reduced prompt and AGENTS.md.
+   */
+  builder: Schema.optionalKey(Schema.Literals(["minimal"])),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
@@ -797,6 +907,17 @@ export const GamePlaytestScreenshot = Schema.Struct({
   data: Schema.String,
   width: Schema.Number,
   height: Schema.Number,
+  /**
+   * Where this frame's PNG lives for a file/image read: game-relative for
+   * recorded playtests (e.g. builds/playtests/<run>/01-booted.png),
+   * evidence-relative for critic experiments (e.g. frames/try-1-1.png), or an
+   * isolated absolute evidence path for builder experiments (which never write
+   * into the game folder). Absent when the run did not persist a readable
+   * copy. The MCP image transport strips `data` and keeps this path, so a
+   * default metadata-only result still names every frame without attaching
+   * its bytes.
+   */
+  path: Schema.optionalKey(Schema.String),
   /** The latest probe state when this frame was taken, so evidence can pair them. */
   probe: Schema.optionalKey(GamePlaytestProbe),
 });
@@ -822,6 +943,7 @@ export const GAME_PLAYTEST_BOUNDS = {
 export const GAME_TRY_INPUT_BOUNDS = {
   maxRunMs: 180_000,
   maxSteps: 12,
+  maxSetupSteps: 48,
   maxSequenceMs: 30_000,
   maxFrames: 32,
   maxCalls: 6,
@@ -834,6 +956,13 @@ export const GameTryInput = Schema.Struct({
     .annotate({
       description: `1–${GAME_TRY_INPUT_BOUNDS.maxSteps} route steps. The plan is 2 setup frames plus 2 per step (1 for a screenshot) plus max(0, ceil(stepMs / captureEveryMs) - 1) interval frames, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
     }),
+  setupSteps: Schema.optionalKey(
+    Schema.Array(GamePlaytestStep)
+      .check(Schema.isMaxLength(GAME_TRY_INPUT_BOUNDS.maxSetupSteps))
+      .annotate({
+        description: `Optional uncaptured prelude of at most ${GAME_TRY_INPUT_BOUNDS.maxSetupSteps} physical inputs/waits (no screenshots) replayed from fresh boot before steps, to reach a later question. Only steps are captured and citable; setup proves nothing alone. Combined setup+steps share ${GAME_TRY_INPUT_BOUNDS.maxSequenceMs / 1000} seconds and the ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame plan (setup adds no frames).`,
+      }),
+  ),
   captureEveryMs: Schema.optionalKey(
     Schema.Finite.check(
       Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
@@ -940,6 +1069,18 @@ export const GameWebPlaytestResult = Schema.Struct({
   changedPercent: Schema.Number,
   message: Schema.String,
   consoleMessages: Schema.Array(GameConsoleMessage),
+  /**
+   * Every console error the run observed, including ones dropped from the
+   * bounded retained text. Absent on evidence written before the counter
+   * existed; the retained messages are then the only record.
+   */
+  consoleErrorCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /**
+   * Retained console messages dropped by the bound, oldest first. Honest
+   * truncation: a nonzero count means the text above is a suffix, never the
+   * whole log.
+   */
+  consoleTruncated: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   screenshots: Schema.Array(GamePlaytestScreenshot),
   /** Null when the game has no StudioProbe (games created before the probe existed). */
   state: Schema.NullOr(GamePlaytestState),
@@ -966,6 +1107,13 @@ export const GameWebPlaytestResult = Schema.Struct({
   baseViewport: Schema.optionalKey(GameViewport),
   /** The integer multiple of the base viewport the frames were captured at. */
   captureScale: Schema.optionalKey(Schema.Number),
+  /**
+   * How the run's game time was driven. `controlled-clock` means the driver
+   * paused the page clock after boot and advanced it only with explicit
+   * nominal durations, so captures and wall-clock round trips never ran the
+   * game. Absent on wall-time evidence written before the controlled driver.
+   */
+  timing: Schema.optionalKey(Schema.Literal("controlled-clock")),
 });
 export type GameWebPlaytestResult = typeof GameWebPlaytestResult.Type;
 export const GameCheckIssue = Schema.Struct({
@@ -983,8 +1131,8 @@ export const GameCheckResult = Schema.Struct({
   durationMs: Schema.Number,
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
-/** The four stages a complete verification runs, in order. */
-export const GameVerifyStage = Schema.Literals(["check", "test", "export", "playtest"]);
+/** The five stages a complete verification runs, in order. `state` only runs for an approved design with nonempty acceptance; legacy, skipped and no-acceptance games keep the original four. */
+export const GameVerifyStage = Schema.Literals(["check", "test", "state", "export", "playtest"]);
 export type GameVerifyStage = typeof GameVerifyStage.Type;
 /**
  * The playtest evidence without its frame bytes: `game_verify` returns those at
@@ -1006,20 +1154,26 @@ export type GameVerifyBuild = typeof GameVerifyBuild.Type;
 /**
  * One complete iteration's mechanical evidence. `success` covers only the
  * stages this call ran; quality and design acceptance remain model judgment.
+ * `state` and `scenarios` are present only when an approved design with
+ * nonempty acceptance made the call run its scenario exam.
  */
 export const GameVerifyResult = Schema.Struct({
   success: Schema.Boolean,
   message: Schema.String,
   /** Stages whose recorded result passed and matched the same sources, in order. */
   completed: Schema.Array(GameVerifyStage),
-  /** The stage that stopped the run, absent only when all four passed. */
+  /** The stage that stopped the run, absent only when every stage it ran passed. */
   failedStage: Schema.optionalKey(GameVerifyStage),
   check: Schema.optionalKey(GameCheckResult),
   test: Schema.optionalKey(GameActionResult),
+  /** The refreshed scenario exam, when the approved acceptance required one. */
+  scenarios: Schema.optionalKey(GameScenariosRunResult),
   export: Schema.optionalKey(GameActionResult),
   build: Schema.optionalKey(GameVerifyBuild),
   playtest: Schema.optionalKey(GameVerifyPlaytest),
-  /** Playtest frames, kept at the top level for the image transport. */
+  /** Playtest frames, kept at the top level for the image transport. Each frame
+   * carries its persisted `path` so the default metadata-only result still
+   * names every frame; the transport attaches bytes only on explicit opt-in. */
   screenshots: Schema.Array(GamePlaytestScreenshot),
 });
 export type GameVerifyResult = typeof GameVerifyResult.Type;
@@ -1050,13 +1204,68 @@ export const GameBlenderInput = Schema.Struct({
   script: Schema.String,
   thumbnail: Schema.optionalKey(Schema.Boolean),
   reset: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Establish or replace this game's shared art profile. It is persisted on a
+   * successful export and applied to this asset; later runs reuse it until it
+   * is set again. The exporter creates one material per palette colour named
+   * `StudioPalette_<hex>` (for example `StudioPalette_ff5b3a`), so scripts
+   * assign `bpy.data.materials["StudioPalette_ff5b3a"]` instead of inventing
+   * colours per asset.
+   */
+  art: Schema.optionalKey(GameArtProfile),
+  /**
+   * Optional named local models/images this new asset reuses: up to
+   * `GAME_BLENDER_INPUT_BOUNDS.maxInputs` entries such as
+   * `{ name: "base", path: "godot/assets/library/models/crate/crate.gltf" }`
+   * or `{ name: "bark", path: "res://assets/library/materials/bark/Diffuse_1k.jpg" }`.
+   * Supported types are `.gltf` (plus its local `.bin`/image dependencies),
+   * `.glb`, `.png`, `.jpg` and `.jpeg`. The service stages each source under a
+   * scratch file and exposes the staged path as `ASSET_INPUTS[name]` to the
+   * bpy script, so `bpy.ops.import_scene.gltf(filepath=ASSET_INPUTS["base"])`
+   * or `bpy.data.images.load(ASSET_INPUTS["bark"])` reuses geometry, UVs,
+   * textures or clips. Images are packed into the saved `.blend`, so removing
+   * scratch files never breaks later revisions. Bindings are recorded on the
+   * asset; supplying a name never proves the script used it. A revision
+   * without new inputs keeps the previous bindings, while reset without new
+   * inputs clears them for the fresh source. Images are bounded per file and
+   * in decoded pixels (see `GAME_BLENDER_INPUT_BOUNDS`); oversized sources
+   * are rejected before Blender launches.
+   */
+  inputs: Schema.optionalKey(
+    Schema.Array(GameBlenderInputSource).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(GAME_BLENDER_INPUT_BOUNDS.maxInputs),
+    ),
+  ),
 });
+/** One material the export reported, with its base colour as linear RGB. */
+export const GameBlenderMaterial = Schema.Struct({
+  name: Schema.String,
+  color: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+});
+export type GameBlenderMaterial = typeof GameBlenderMaterial.Type;
 export const GameBlenderResult = Schema.Struct({
   asset: GameAsset,
   objects: Schema.Number,
   meshes: Schema.Number,
   materials: Schema.Number,
+  /** Every material on the export, so callers see which palette entries bound. */
+  materialDetails: Schema.Array(GameBlenderMaterial),
+  /** Actions on the export; glTF animations come from these. */
+  animations: Schema.Number,
+  /** Estimated triangles across all meshes. */
+  triangles: Schema.Number,
   dimensions: Schema.Array(Schema.Number),
+  /**
+   * How far the mesh bounds' bottom-centre sits from the world origin, in
+   * metres as [x, y, z]. Assets stand on the ground when this is near zero.
+   */
+  originOffset: Schema.Array(Schema.Number),
   warnings: Schema.Array(Schema.String),
+  /**
+   * Game-relative contact sheet comparing every asset thumbnail, refreshed on
+   * this export. Absent when no asset has a thumbnail yet.
+   */
+  contactSheet: Schema.optionalKey(Schema.String),
   process: GameProcessResult,
 });

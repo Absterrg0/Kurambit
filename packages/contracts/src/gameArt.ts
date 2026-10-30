@@ -14,6 +14,26 @@ export type GameArtKitId = typeof GameArtKitId.Type;
 const artText = (cap: number) =>
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(cap));
 const artHash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+const artHexColor = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));
+
+/**
+ * The shared look one game's assets are built against. It is a small,
+ * optional convention, not a mandatory style schema: legacy games and games
+ * whose brief needs no palette work without one. `game_blender_run` applies
+ * the profile when it exports and warns when an asset drifts from it, so
+ * related assets share choices instead of sharing only a prompt.
+ */
+export const GameArtProfile = Schema.Struct({
+  /** Palette roles as hex colours; the exporter ensures a material per entry. */
+  palette: Schema.optionalKey(
+    Schema.Array(artHexColor).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  ),
+  /** The height in metres assets should stand at; exports warn past 20% drift. */
+  targetHeight: Schema.optionalKey(
+    Schema.Number.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
+  ),
+});
+export type GameArtProfile = typeof GameArtProfile.Type;
 
 /** The license the kit is actually distributed under. */
 export const GameArtLicense = Schema.Struct({
@@ -59,10 +79,33 @@ export const GameArtAtlas = Schema.Struct({
 export type GameArtAtlas = typeof GameArtAtlas.Type;
 
 /**
+ * One authored animation on a sprite sheet: named cells on the sheet grid plus
+ * the playback the game uses. Agents build SpriteFrames from these entries
+ * with game_art_frames instead of guessing cell positions or frame rates.
+ */
+export const GameArtAnimation = Schema.Struct({
+  /** Animation name used for the SpriteFrames entry. */
+  name: artText(40),
+  /** Sheet cells in playback order, in grid coordinates. */
+  cells: Schema.Array(
+    Schema.Struct({
+      col: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      row: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  /** Frames per second. */
+  fps: Schema.Number.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(60)),
+  /** Whether the animation loops. */
+  loop: Schema.Boolean,
+});
+export type GameArtAnimation = typeof GameArtAnimation.Type;
+
+/**
  * An additional sprite sheet beyond the primary atlas. A platformer kit often
  * separates terrain from characters, and the character sheet has its own cell
  * size and animation frames. `use` carries the authored coordinates a caller
- * needs; nothing here inspects the image at runtime.
+ * needs; `animations` names the playback the sheet was drawn for, so a caller
+ * never invents frame ranges.
  */
 export const GameArtSheet = Schema.Struct({
   /** Short authored name, unique within a kit. */
@@ -80,6 +123,8 @@ export const GameArtSheet = Schema.Struct({
   tileCount: Schema.Int.check(Schema.isGreaterThan(0)),
   margin: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   spacing: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Authored animations on this sheet; absent on sheets with no animation. */
+  animations: Schema.optionalKey(Schema.Array(GameArtAnimation)),
 });
 export type GameArtSheet = typeof GameArtSheet.Type;
 
@@ -199,3 +244,48 @@ export const GameArtImportResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameArtImportResult = typeof GameArtImportResult.Type;
+
+export const GameArtFramesInput = Schema.Struct({
+  id: GameArtKitId,
+  /** The sheet name from the kit catalog, such as "characters". */
+  sheet: artText(40),
+  /**
+   * Animation names from the sheet's authored list. Defaults to every entry;
+   * unknown names fail instead of building a partial set.
+   */
+  animations: Schema.optionalKey(
+    Schema.Array(artText(40)).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+  ),
+});
+export type GameArtFramesInput = typeof GameArtFramesInput.Type;
+
+/** One animation the frames resource carries. */
+export const GameArtFramesAnimation = Schema.Struct({
+  name: Schema.String,
+  frames: Schema.Int.check(Schema.isGreaterThan(0)),
+  fps: Schema.Number,
+  loop: Schema.Boolean,
+});
+export type GameArtFramesAnimation = typeof GameArtFramesAnimation.Type;
+
+/**
+ * A generated Godot SpriteFrames resource built from a kit sheet's authored
+ * grid and animations. Matching requests reuse an existing resource; subsets
+ * have separate paths and modified resources are not overwritten.
+ * The license and source travel with the result so the reuse terms stay with
+ * the builder and repair, not only in the kit folder.
+ */
+export const GameArtFramesResult = Schema.Struct({
+  kit: GameArtKitSummary,
+  /** The sheet the frames were built from. */
+  sheet: Schema.String,
+  /** Game-relative path of the generated resource, using forward slashes. */
+  framesPath: Schema.String,
+  /** The same resource as a Godot resource path. */
+  framesResPath: Schema.String,
+  animations: Schema.Array(GameArtFramesAnimation),
+  license: GameArtLicense,
+  source: GameArtSource,
+  message: Schema.String,
+});
+export type GameArtFramesResult = typeof GameArtFramesResult.Type;

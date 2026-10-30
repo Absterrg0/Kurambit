@@ -31,7 +31,20 @@ headless gameplay test, and checks the web build in a headless browser before it
 When an optional pinned art kit fits the game's art direction, ask the agent to use it: it can
 search the shipped CC0 kits and import one into `godot/assets/art/kits/`. A kit adds only its own
 image, license and provenance files; it never changes the game's scripts, scenes or mechanics, and
-the agent chooses whether any kit fits.
+the agent chooses whether any kit fits. For a kit sheet with authored animations, the agent can
+also build a Godot SpriteFrames resource from the catalog's cells instead of guessing frame ranges.
+Animation subsets use separate resources, and rebuilding preserves resources you have edited.
+
+For existing 3D props or surface finishes, ask the agent to search Poly Haven. It can bring in
+CC0 models and reusable materials with their source credit, using small 1k downloads by default.
+Several objects can share the same material. Choose assets that fit your art direction; realistic
+scanned surfaces may look out of place in a stylised game. Reimporting preserves your edits and
+reports a conflict when the imported files have changed.
+
+For a consistent set of 3D assets, give the agent a shared palette and a reference height in metres.
+It can reuse those choices across models and report scale or origin differences to correct.
+The generated contact sheet in `art/previews/contact_sheet.png` helps compare the set. Failed
+generation keeps the previous asset available while the agent repairs the problem.
 
 ## Design the game first
 
@@ -133,6 +146,25 @@ Each turn ends with a one-line summary of what changed in the game, such as "Cha
 
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
+
+## Check the finished game
+
+Ask the agent to check a family of assets against shared scale, pivot, animation and collision
+targets. It can inspect Godot resources and whether files are included in the recorded Web export.
+Inclusion does not prove that an asset appears during play; incomplete checks stay unknown.
+
+For an unfamiliar control sequence, ask the agent to explore the game in short steps and replay
+its saved trace independently. Exploration sessions close after five idle minutes. On Linux, ask
+it to compare the same route at several frame rates with fresh saved state when investigating
+timing problems. This reports differences without changing the game's frame rate or declaring it
+deterministic.
+
+Review also assesses art consistency, animation, audio, readability, progression, meaningful
+choices and playability. A missing observation stays unknown, and screenshots cannot establish
+audio quality. The agent can measure audio levels, silence and stereo cancellation separately;
+those measurements do not replace listening to the game.
+Audio measurements require FFmpeg and ffprobe installed locally. On Linux, a short native gameplay
+clip of a saved route also requires Xvfb.
 
 ## What is in a game folder
 

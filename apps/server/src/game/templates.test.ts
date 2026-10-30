@@ -76,7 +76,7 @@ it.effect("ships a winning and a losing route whose actions exist in each templa
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const templatesDirectory = yield* resolveTemplatesDirectory();
-    for (const template of ["2d-platformer", "3d-explorer"] as const) {
+    for (const template of ["2d-platformer", "3d-explorer", "2d-screen"] as const) {
       const root = path.join(templatesDirectory, template, "godot");
       const actions = parseProjectInputActions(
         yield* fs.readFileString(path.join(root, "project.godot")),
@@ -99,6 +99,48 @@ it.effect("ships a winning and a losing route whose actions exist in each templa
         ).toBe(true);
         expect(scenarioActionIssues(parsed.scenario, actions)).toEqual([]);
       }
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("states the verification authority so small games can adapt fixtures", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const templatesDirectory = yield* resolveTemplatesDirectory();
+    for (const template of ["2d-platformer", "3d-explorer", "2d-screen"] as const) {
+      const document = yield* fs.readFileString(
+        path.join(templatesDirectory, template, "TEMPLATE.md"),
+      );
+      const flat = document.replace(/\s+/g, " ");
+      // The old wording called the shipped routes server-owned and demanded they
+      // be preserved; the server owns the policy and the approved exam instead.
+      expect(flat, `${template} names no server-owned route`).not.toContain(
+        "server-owned completion route",
+      );
+      expect(flat, `${template} names no server-owned route`).not.toContain("server-owned route");
+      expect(flat).toContain("game-owned route data");
+      expect(flat).toContain("canonical `res://tests/smoke_test.gd` suite path");
+      expect(flat).toContain("approved DESIGN.md observations");
+      expect(flat).toContain("Adapt the routes to this game's scope");
+      expect(flat).toContain("keep meaningful coverage of everything retained and promised");
+      expect(flat).toContain("Never weaken a route or lower a threshold to make green");
+      expect(flat).toContain("tie every change to DESIGN.md acceptance");
+      expect(flat).toContain("reference implementation");
+      const harness = yield* fs.readFileString(
+        path.join(templatesDirectory, template, "godot/tests/smoke_harness.gd"),
+      );
+      const harnessFlat = harness.replace(/#/g, "").replace(/\s+/g, " ");
+      expect(harnessFlat).toContain("Reference-");
+      expect(harnessFlat).toContain("adapts this file to its DESIGN.md scope");
+      expect(harnessFlat).toContain("The server only requires that the canonical suite exits 0");
+    }
+    // Example counts are labelled as the reference game's, not as requirements.
+    for (const template of ["2d-platformer", "3d-explorer", "2d-screen"] as const) {
+      const document = yield* fs.readFileString(
+        path.join(templatesDirectory, template, "TEMPLATE.md"),
+      );
+      expect(document).toContain("not requirements");
     }
   }).pipe(Effect.provide(NodeServices.layer)),
 );

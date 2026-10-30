@@ -60,6 +60,7 @@ describe("gameTemplateAppearance", () => {
   it("gives every template a distinct, quiet identity and a readable name", () => {
     expect(gameTemplateAppearance("3d-explorer").label).toBe("3D Explorer");
     expect(gameTemplateAppearance("2d-platformer").label).toBe("2D Platformer");
+    expect(gameTemplateAppearance("2d-screen").label).toBe("2D Screen");
     expect(gameTemplateAppearance(null).label).toBe("Blank");
     expect(gameTemplateAppearance("3d-explorer").initialClassName).not.toBe(
       gameTemplateAppearance("2d-platformer").initialClassName,

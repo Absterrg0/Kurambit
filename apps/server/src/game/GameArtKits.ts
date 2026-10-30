@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { PNG } from "pngjs";
 
 import {
   GameOperationError,
@@ -277,6 +278,24 @@ const validateCatalog = (catalog: ReadonlyArray<GameArtKit>) => {
       if (sheetError !== null) {
         throw new Error(`Art kit '${kit.id}' declares sheet '${sheet.name}' ${sheetError}.`);
       }
+      // Authored animation cells must name real grid cells, so the frames a
+      // game builds from them never read outside the sheet.
+      const animationNames = new Set<string>();
+      for (const animation of sheet.animations ?? []) {
+        if (animationNames.has(animation.name)) {
+          throw new Error(
+            `Art kit '${kit.id}' declares sheet '${sheet.name}' animation '${animation.name}' twice.`,
+          );
+        }
+        animationNames.add(animation.name);
+        for (const cell of animation.cells) {
+          if (cell.col >= sheet.columns || cell.row >= sheet.rows) {
+            throw new Error(
+              `Art kit '${kit.id}' sheet '${sheet.name}' animation '${animation.name}' names cell (${cell.col}, ${cell.row}) outside its ${sheet.columns}x${sheet.rows} grid.`,
+            );
+          }
+        }
+      }
     }
     for (const file of kit.files.filter((candidate) => candidate.role === "sheet")) {
       if (!sheetFiles.has(file.path)) {
@@ -305,6 +324,33 @@ const readCatalogFile = (source: string, file: GameArtKitFile) =>
         reason: "art-kit-corrupt",
         detail: `The shipped ${file.path} does not match its catalog entry (${bytes.byteLength} bytes).`,
       });
+    // The catalog's grids and the shipped PNGs must agree, or every region the
+    // tools derive from the grid reads the wrong pixels.
+    if (
+      (file.role === "atlas" || file.role === "sheet") &&
+      file.path.endsWith(".png") &&
+      file.width !== undefined &&
+      file.height !== undefined
+    ) {
+      const decoded = yield* Effect.try({
+        try: () => PNG.sync.read(Buffer.from(bytes)),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "read-art-kit",
+            path: source,
+            reason: "art-kit-corrupt",
+            detail: `The shipped ${file.path} does not decode as a PNG.`,
+            cause,
+          }),
+      });
+      if (decoded.width !== file.width || decoded.height !== file.height)
+        return yield* new GameOperationError({
+          operation: "read-art-kit",
+          path: source,
+          reason: "art-kit-corrupt",
+          detail: `The shipped ${file.path} is ${decoded.width}x${decoded.height} but the catalog declares ${file.width}x${file.height}.`,
+        });
+    }
     return bytes;
   });
 
@@ -343,7 +389,7 @@ const installedResult = (input: {
     alreadyPresent: input.alreadyPresent,
     message: input.alreadyPresent
       ? `${input.kit.name} is already imported unchanged at ${input.destination}; no files were written. Run game_godot_import if needed.`
-      : `Imported ${input.kit.name} into ${input.destination}. Run game_godot_import before using it.`,
+      : `Imported ${input.kit.name} into ${input.destination}. License: ${input.kit.license.name} — ${input.kit.license.attribution}. Source: ${input.kit.source.title} (${input.kit.source.url}). Run game_godot_import before using it.`,
   };
 };
 

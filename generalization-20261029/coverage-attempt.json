@@ -1,0 +1,92 @@
+{
+  "artifact": "coverage-attempt",
+  "task": "server-enforced one-attempt work rule for frozen critic sessions with eligible cannot-tell",
+  "source": "late-evidence-kitchen-review zero-defect unknown with zero game_try_input calls (6 requirement unknowns incl win/all3/loss, stopped after 105s despite budget)",
+  "policy": {
+    "flag": "coverageAttemptPolicyVersion=1 frozen with session like temporalPolicyVersion",
+    "eligibility": "frozen temporalRequirementIds only (stateful control/mechanic/content/win/lose with observe); presentation and observe-less never eligible",
+    "trigger": "critic role, frozen flag present, eligible cannot-tell non-empty, fundamentals.boots=yes, no defects, no requirement no, no quality no, no fundamental no, zero server-owned attempts",
+    "satisfaction": "inputCalls(childThreadId, runId) > 0 OR recorded try* evidence frames; one attempt satisfies every unknown",
+    "preflight": "invalid preflight requests never increment inputCalls and do not count",
+    "failed": "reserved-but-failed (e.g. empty screenshots, engine failure after reserve) still counts as work and may abstain; honest narrow rule, no retries forced",
+    "caps": "no new calls/time/images; existing 6 calls, 180s maxRunMs and overall loop deadline still own the cost",
+    "paths": "same guard in report-tool and terminal-answer, retaining <=3 attempts and run/evidence hash bindings",
+    "refusal": "names exact unknown ids, orders one focused game_try_input play attempt (setupSteps from fresh boot, report observation), preserves cannot-tell when attempt cannot show claim",
+    "skips": [
+      "legacy/unapproved/no-stateful",
+      "non-booting/broken",
+      "already actionable (defects/requirement no/quality no/fundamental no)"
+    ]
+  },
+  "bounds": {
+    "maxCalls": 6,
+    "maxRunMs": 180000,
+    "maxFrames": 32,
+    "addedCalls": 0,
+    "addedTime": 0,
+    "addedImages": 0
+  },
+  "noChanges": [
+    "GameService",
+    "drivers",
+    "contracts",
+    "templates",
+    "e2e",
+    "games",
+    "RPC",
+    "scopes",
+    "UI",
+    "tools",
+    "deps",
+    "budgets",
+    "qualification"
+  ],
+  "files": [
+    "apps/server/src/game/GameReviewSessions.ts",
+    "apps/server/src/game/GameReviewSessions.test.ts",
+    "apps/server/src/game/gameReviewPrompts.ts",
+    "apps/server/src/game/gameReviewPrompts.test.ts"
+  ],
+  "commands": [
+    {
+      "command": "vp test run --config ../../vite.config.ts --dir src src/GameReviewSessions.test.ts src/gameReviewPrompts.test.ts --maxWorkers=1 --no-file-parallelism",
+      "workdir": "apps/server",
+      "env": "TMPDIR=/home/abstergo/.gs-tmp NODE_OPTIONS=--max-old-space-size=1536 RAYON_NUM_THREADS=2",
+      "result": "87 passed"
+    },
+    {
+      "command": "vp run --filter @t3tools/contracts typecheck",
+      "workdir": "repo root",
+      "result": "clean (suggestions only)"
+    },
+    {
+      "command": "vp run --filter t3 typecheck",
+      "workdir": "repo root",
+      "result": "clean (suggestions only)"
+    },
+    {
+      "command": "vp lint <4 touched files>",
+      "workdir": "repo root",
+      "result": "clean"
+    },
+    {
+      "command": "vp fmt <4 touched files>",
+      "workdir": "repo root",
+      "result": "applied"
+    }
+  ],
+  "tests": [
+    "static no-defect unknown refused then accepted after one real try_input (tool path)",
+    "terminal text path enforces same rule with same unknown ids",
+    "empty-screenshot bounded attempt still abstains (reserved counts)",
+    "presentation-only cannot-tell does not force play",
+    "boots cannot-tell skips",
+    "defects skip; requirement no skips; quality no skips; fundamental no skips",
+    "legacy without frozen flag stays compatible",
+    "flag freezes across approval edit and restart",
+    "invalid preflight (13 steps) does not count; tries stay 0 and refusal persists",
+    "prompt addendum names focused attempt, setupSteps, keep cannot-tell"
+  ],
+  "notRun": ["live engines", "browsers", "models", "devservers", "fullchecks"],
+  "parent": "runs unchanged-game Muse re-review to measure autonomous use, not declared from unit tests"
+}

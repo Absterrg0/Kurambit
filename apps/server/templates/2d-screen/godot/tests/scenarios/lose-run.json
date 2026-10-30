@@ -1,0 +1,20 @@
+{
+  "id": "lose-run",
+  "steps": [
+    { "press": "ui_accept" },
+    { "wait": 8 },
+    { "hold": ["listen"], "frames": 50 },
+    { "press": "choose_3" },
+    { "wait": 3 },
+    { "press": "ui_accept" },
+    { "wait": 4 },
+    { "press": "choose_3" },
+    { "wait": 3 },
+    { "press": "ui_accept" },
+    { "wait": 4 },
+    { "press": "choose_3" },
+    { "wait": 3 },
+    { "press": "ui_accept" },
+    { "wait": 10 }
+  ]
+}

@@ -182,19 +182,44 @@ it.effect("compares tags and aliases case-folded, but never guesses related tags
   ),
 );
 
-it.effect("searches text as a literal, case-folded substring of aliases only", () =>
+it.effect("searches text as ranked token overlap over titles, tags, aliases and intent", () =>
   withRecipes(fixtureCatalog, (recipes) =>
     Effect.gen(function* () {
       const buffered = yield* recipes.search({ text: "BUFFERING" });
       expect(ids(buffered)).toEqual(["feel.buffer"]);
       expect(buffered.recipes[0]?.matchingTags).toEqual(["jump buffering", "input buffering"]);
 
-      // "jump" is a mechanic of both feel recipes but only an alias of feel.buffer.
+      // "jump" is a mechanic of both feel recipes, so free text ranks both.
       const jump = yield* recipes.search({ text: "jump" });
-      expect(ids(jump)).toEqual(["feel.buffer"]);
+      expect(ids(jump)).toEqual(["feel.buffer", "feel.coyote"]);
+
+      // Plurals reach the same mechanism: "jumps" still means "jump".
+      const jumps = yield* recipes.search({ text: "jumps" });
+      expect(ids(jumps)).toEqual(["feel.buffer", "feel.coyote"]);
 
       const none = yield* recipes.search({ text: "boost pad" });
       expect(none).toEqual({ recipes: [], nextCursor: null });
+
+      // Stopwords alone name no mechanism, so they match nothing.
+      for (const stopwords of ["the and with", "a", "make my game"]) {
+        const stopworded = yield* recipes.search({ text: stopwords });
+        expect(stopworded, `text '${stopwords}'`).toEqual({ recipes: [], nextCursor: null });
+      }
+    }),
+  ),
+);
+
+it.effect("retrieves jump feel from a full-sentence brief phrase", () =>
+  withRecipes(fixtureCatalog, (recipes) =>
+    Effect.gen(function* () {
+      const sentence = yield* recipes.search({
+        text: "responsive platformer jumps with coyote time and input buffering",
+      });
+      expect(ids(sentence)).toEqual(["feel.buffer", "feel.coyote", "read.silhouette"]);
+      expect(ids(sentence).slice(0, 2)).toEqual(["feel.buffer", "feel.coyote"]);
+
+      const unrelated = yield* recipes.search({ text: "underwater stealth submarine sonar" });
+      expect(unrelated).toEqual({ recipes: [], nextCursor: null });
     }),
   ),
 );

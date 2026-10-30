@@ -7,13 +7,21 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId, type GamePlaytestStep, type GameTemplateId } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  type GameAcceptanceCriterion,
+  type GamePlaytestState,
+  type GamePlaytestStep,
+  type GameTemplateId,
+} from "@t3tools/contracts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameService from "./GameService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
+import { designSkeleton } from "./scaffold.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   admissionTestLayer,
@@ -95,7 +103,16 @@ interface TemplateJourney {
   readonly name: string;
   readonly brief: string;
   readonly steps: readonly GamePlaytestStep[];
+  /** Named frames this journey requires, in order; input evidence may sit between them. */
   readonly expectedScreenshots: readonly string[];
+  /** Most journeys skip design; a no-player screen opts in to approve observations. */
+  readonly planFirst?: boolean;
+  /** Criteria to approve before the playtest, for a no-player screen game. */
+  readonly acceptance?: readonly GameAcceptanceCriterion[];
+  /** The run must qualify, not just boot and respond. */
+  readonly expectQualified?: boolean;
+  /** Extra proof from the final probe once the run has qualified. */
+  readonly assertFinalState?: (state: GamePlaytestState) => void;
   /** Optional second pass that ends on a menu, saved as `<template>-pause.png`. */
   readonly pauseSteps?: readonly GamePlaytestStep[];
   /** Runs the Godot check before the smoke test, for the template's entry scenes. */
@@ -111,6 +128,23 @@ const readLog = (logPath: string | undefined) =>
   Effect.promise(() =>
     logPath === undefined ? Promise.resolve("") : NodeFSP.readFile(logPath, "utf8").catch(() => ""),
   );
+
+/**
+ * Every dispatched input adds a before/after evidence pair, so the journey's named
+ * frames arrive inside a longer list. Require the boot frame first, the after-steps
+ * frame last, and the named frames in their intended order; input pairs are the
+ * only frames allowed in between.
+ */
+const expectJourneyScreenshots = (actual: readonly string[], expected: readonly string[]) => {
+  expect(actual[0], "the boot frame leads the evidence").toBe("booted");
+  expect(actual.at(-1), "after-steps closes the evidence").toBe("after-steps");
+  expect(actual.filter((label) => expected.includes(label))).toEqual(expected);
+  expect(
+    actual.filter(
+      (label) => !expected.includes(label) && !/^input \d+ (?:before|after): /u.test(label),
+    ),
+  ).toEqual([]);
+};
 
 /**
  * Takes a game from a clean import through its optional Godot check, its smoke test,
@@ -147,13 +181,13 @@ const templateJourney = (journey: TemplateJourney) =>
         Effect.gen(function* () {
           const projects = yield* GameProjectService.GameProjectService;
           const game = yield* GameService.GameService;
+          const approvals = yield* GameDesignApproval.GameDesignApproval;
           const created = yield* projects.create({
             name: journey.name,
             parentDirectory: parent,
             template: journey.template,
             brief: journey.brief,
-            // The template journey is the build bar, not the design phase.
-            planFirst: false,
+            planFirst: journey.planFirst ?? false,
             modelSelection: {
               instanceId: ProviderInstanceId.make("codex"),
               model: "gpt-6.1-sol",
@@ -161,6 +195,27 @@ const templateJourney = (journey: TemplateJourney) =>
           });
           expect((yield* projects.read(created.root)).template).toBe(journey.template);
           const threadId = created.threadId;
+          if (journey.acceptance !== undefined) {
+            // A no-player Control game needs approved observations rather than a
+            // moving avatar for its playtest to prove real play. Write the same
+            // record a creator approval would, before the build starts.
+            const criteria = JSON.stringify(journey.acceptance, null, 2);
+            const design = designSkeleton(journey.name).replace(
+              /```acceptance[\s\S]*?```/,
+              `\`\`\`acceptance\n${criteria}\n\`\`\``,
+            );
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(NodePath.join(created.root, "DESIGN.md"), design),
+            );
+            yield* approvals.write(created.root, {
+              schemaVersion: 1,
+              game: created.root,
+              approvalId: "template-approval",
+              designHash: GameDesignApproval.designDocumentHash(design),
+              approvedAt: "2026-10-26T00:00:00.000Z",
+              acceptance: journey.acceptance,
+            });
+          }
 
           // 1. Import: the template's own scenes and scripts must compile untouched.
           const imported = yield* game.import(threadId);
@@ -197,7 +252,14 @@ const templateJourney = (journey: TemplateJourney) =>
           });
           expect(playtest.booted, playtest.message).toBe(true);
           expect(playtest.success, playtest.message).toBe(true);
-          expect(playtest.screenshots.map((shot) => shot.label)).toEqual(
+          if (journey.expectQualified === true)
+            expect(playtest.qualifies, playtest.message).toBe(true);
+          if (journey.assertFinalState !== undefined) {
+            expect(playtest.state, "the StudioProbe reported the finished run").not.toBeNull();
+            journey.assertFinalState(playtest.state!);
+          }
+          expectJourneyScreenshots(
+            playtest.screenshots.map((shot) => shot.label),
             journey.expectedScreenshots,
           );
           if (journey.engineReadinessOnly === true) {
@@ -358,6 +420,99 @@ it.live.skipIf(!available)(
         { key: "Escape", holdMs: 80 },
         { waitMs: 400 },
       ],
+    }),
+  900_000,
+);
+
+it.live.skipIf(!available)(
+  "takes a game created from the 2d-screen template from a clean import to a qualified web playtest",
+  () =>
+    templateJourney({
+      template: "2d-screen",
+      name: "Night Desk",
+      brief: "Five callers, a trust budget and a desk that has to stay open.",
+      planFirst: true,
+      acceptance: [
+        {
+          id: "choose-reply",
+          kind: "control",
+          text: "Keys 1 to 3 choose a reply",
+          observe: { key: "choices", expect: ">=1" },
+        },
+        {
+          id: "hear-them-out",
+          kind: "control",
+          text: "Holding L hears the caller out",
+          observe: { key: "listened", expect: ">=1" },
+        },
+        {
+          id: "warm-trust",
+          kind: "mechanic",
+          text: "A warm reply raises trust",
+          observe: { key: "trust", expect: ">=3" },
+        },
+        {
+          id: "answer-all",
+          kind: "content",
+          text: "All five callers are answered",
+          observe: { key: "calls", expect: ">=5" },
+        },
+        {
+          id: "hold-the-shift",
+          kind: "win",
+          text: "The shift ends with trust intact",
+          observe: { key: "won", expect: "==1" },
+        },
+        {
+          id: "three-colds",
+          kind: "lose",
+          text: "Three cold replies end the shift",
+          observe: { key: "state", expect: "==4" },
+        },
+      ],
+      // A corner click focuses the canvas without pressing Play; Enter then
+      // starts the shift from the focused title button.
+      steps: [
+        { x: 940, y: 500, click: "left" },
+        { waitMs: 300 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 600 },
+        { key: "l", holdMs: 900 },
+        { waitMs: 100 },
+        { key: "1", holdMs: 80 },
+        { waitMs: 100 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 200 },
+        { key: "1", holdMs: 80 },
+        { waitMs: 100 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 200 },
+        { key: "1", holdMs: 80 },
+        { waitMs: 100 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 200 },
+        { key: "1", holdMs: 80 },
+        { waitMs: 100 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 200 },
+        { key: "1", holdMs: 80 },
+        { waitMs: 100 },
+        { key: "Enter", holdMs: 80 },
+        { waitMs: 400 },
+      ],
+      expectedScreenshots: ["booted", "after-steps"],
+      checkScene: true,
+      expectQualified: true,
+      // Qualification can be earned by a clean boot and a response; these values
+      // prove the shift actually ran to its WON ending.
+      assertFinalState: (state) => {
+        const after = state.after?.gameState;
+        expect(after?.state, "the shift ended in its WON state").toBe(3);
+        expect(after?.won, "the shift was won").toBe(true);
+        expect(after?.calls, "all five callers were answered").toBe(5);
+        expect(after?.choices, "every caller got one reply").toBe(5);
+        expect(Number(after?.listened), "the L press was heard").toBeGreaterThanOrEqual(1);
+      },
     }),
   900_000,
 );

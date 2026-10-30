@@ -22,13 +22,19 @@ export const substituteGameName = (text: string, gameName: string): string =>
     .replaceAll(gameNameEscapedPlaceholder, JSON.stringify(gameName).slice(1, -1))
     .replaceAll(gameNamePlaceholder, gameName);
 
+export const templateDirectoryCandidates = (
+  dirname: string,
+  join: (left: string, right: string) => string,
+): readonly [string, string] => [join(dirname, "templates"), join(dirname, "../../templates")];
+
 export const resolveTemplatesDirectory = Effect.fn("GameTemplates.resolveDirectory")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   // The packed server ships templates beside its bundle (dist/templates); in the
   // dev tree this module lives in src/game, with templates at apps/server/templates.
-  const bundled = path.join(import.meta.dirname, "templates");
-  const monorepo = path.join(import.meta.dirname, "../../templates");
+  const [bundled, monorepo] = templateDirectoryCandidates(import.meta.dirname, (left, right) =>
+    path.join(left, right),
+  );
   for (const candidate of [bundled, monorepo])
     if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) return candidate;
   return yield* new GameOperationError({

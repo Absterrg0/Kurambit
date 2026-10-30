@@ -11,6 +11,7 @@ import {
 } from "./aggregate.ts";
 import {
   benchmarkJobLocation,
+  benchmarkRunLayout,
   createBenchmarkAggregateWriter,
   parseJobCount,
   runBounded,
@@ -166,6 +167,42 @@ describe("parseJobCount", () => {
   it("refuses zero, negatives, fractions and non-numbers", () => {
     for (const value of ["0", "-1", "1.5", "two", "", " 2", "02"])
       assert.throws(() => parseJobCount(value), /positive integer/);
+  });
+});
+
+describe("benchmarkRunLayout", () => {
+  it("reuses the commit directory and resume only for a clean runner", () => {
+    const layout = benchmarkRunLayout({
+      out: "/runs",
+      harnessCommit: "abcdef123456",
+      dirty: false,
+      nonce: "ignored",
+    });
+    assert.deepEqual(layout, {
+      runDirectory: NodePath.join(NodePath.resolve("/runs"), "abcdef12"),
+      resume: true,
+    });
+  });
+
+  it("gives each dirty invocation its own directory and no resume", () => {
+    const first = benchmarkRunLayout({
+      out: "/runs",
+      harnessCommit: "abcdef123456",
+      dirty: true,
+      nonce: "one",
+    });
+    const second = benchmarkRunLayout({
+      out: "/runs",
+      harnessCommit: "abcdef123456",
+      dirty: true,
+      nonce: "two",
+    });
+    const clean = NodePath.join(NodePath.resolve("/runs"), "abcdef12");
+    assert.equal(first.runDirectory, `${clean}-dirty-one`);
+    assert.equal(second.runDirectory, `${clean}-dirty-two`);
+    assert.notEqual(first.runDirectory, second.runDirectory);
+    assert.equal(first.resume, false);
+    assert.equal(second.resume, false);
   });
 });
 

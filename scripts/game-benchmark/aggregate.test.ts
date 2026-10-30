@@ -20,6 +20,7 @@ import {
   renderResultsMarkdown,
   shouldRegradeReusedRaw,
   shouldResume,
+  summarizeResults,
 } from "./aggregate.ts";
 import type { BenchmarkEvaluationProfile, BenchmarkGrade } from "./aggregate.ts";
 import type {
@@ -503,6 +504,58 @@ describe("classifyRun", () => {
     assert.equal(verdict.outcome, "crashed");
     assert.match(verdict.reason, /after its verdict/);
   });
+
+  it("reports a qualified booting build without complete review evidence as review-incomplete", () => {
+    const verdict = classifyRun(
+      observe({
+        error: "review-incomplete: Review loop loop-1 did not record complete judgment evidence.",
+      }),
+    );
+    assert.equal(verdict.outcome, "review-incomplete");
+    assert.match(verdict.reason, /did not record complete judgment evidence/);
+  });
+
+  it("reports a schema 2 verified build without complete review evidence as review-incomplete", () => {
+    const verdict = classifyRun(
+      observe({
+        schemaVersion: 2,
+        review: reviewStatus(selectedBuildFacts()),
+        loop: selectedLoop(selectedBuildId),
+        error: "review-incomplete: The review loop did not record complete evidence.",
+      }),
+    );
+    assert.equal(verdict.outcome, "review-incomplete");
+  });
+
+  it("keeps failed mechanics ahead of the review-incomplete marker", () => {
+    const verdict = classifyRun(
+      observe({
+        obligations: [obligation("count-move", "missing")],
+        error: "review-incomplete: Review loop loop-1 did not record complete judgment evidence.",
+      }),
+    );
+    assert.equal(verdict.outcome, "failed-mechanics");
+  });
+
+  it("keeps failed mechanics ahead of the review-incomplete marker", () => {
+    const incomplete = classifyRun(
+      observe({
+        qualification: qualification({
+          completion: "incomplete",
+          mechanicsQualified: false,
+        }),
+        error: "review-incomplete: Review loop loop-1 did not record complete judgment evidence.",
+      }),
+    );
+    assert.equal(incomplete.outcome, "failed-mechanics");
+  });
+
+  it("keeps a real crash before any build was graded crashed", () => {
+    const early = classifyRun(
+      observe({ qualification: null, phase: "design", error: "Turn ended failed" }),
+    );
+    assert.equal(early.outcome, "crashed");
+  });
 });
 
 describe("benchmark results", () => {
@@ -551,6 +604,32 @@ describe("benchmark results", () => {
     // A crashed row still names every frozen promise rather than dropping it.
     assert.match(markdown, /Unsupported obligations/);
     assert.match(markdown, /illegal-move — No invariance check\./);
+  });
+
+  it("carries a review-incomplete row in result.json, results.md and totals", () => {
+    const incomplete = readBenchmarkResult({
+      harnessCommit: "commit",
+      brief,
+      fixtureChecksum: "checksum",
+      startedAt: "2026-10-21T00:01:00.000Z",
+      durationMs: 5_000,
+      observation: observe({
+        error: "review-incomplete: Review loop loop-1 did not record complete judgment evidence.",
+      }),
+    });
+    assert.equal(incomplete.outcome, "review-incomplete");
+    assert.match(incomplete.failureReason, /did not record complete judgment evidence/);
+    const markdown = renderResultsMarkdown({
+      harnessCommit: "commit",
+      results: [passed, incomplete],
+    });
+    assert.match(markdown, /1 review-incomplete/);
+    assert.match(markdown, /\| sokoban \| review-incomplete \|/);
+    assert.match(markdown, /review-incomplete.*did not record complete judgment evidence/);
+    const totals = summarizeResults([passed, incomplete]);
+    assert.equal(totals.outcomes["review-incomplete"], 1);
+    assert.equal(totals.outcomes.crashed, 0);
+    assert.equal(totals.outcomes.passed, 1);
   });
 
   it("carries the review loop's rounds, decisions and selected build into the result", () => {
@@ -719,6 +798,24 @@ describe("resume", () => {
       shouldResume({ harnessCommit: "commit", fixtureChecksum: "checksum", grade: null }, expected),
       true,
     );
+  });
+
+  it("retries a crashed or timed-out row instead of reusing it", () => {
+    const expected = { harnessCommit: "commit", checksum: "checksum" };
+    const base = {
+      harnessCommit: "commit",
+      fixtureChecksum: "checksum",
+      grade: null,
+      evaluation: null,
+    };
+    // A crash is not a finished attempt: rerunning the command must rebuild it
+    // rather than report the old failure as this run's result.
+    assert.equal(shouldResume({ ...base, outcome: "crashed" as const }, expected), false);
+    assert.equal(shouldResume({ ...base, outcome: "timeout" as const }, expected), false);
+    // A completed build that only lacks a grade keeps its build; --regrade fixes the grade.
+    assert.equal(shouldResume({ ...base, outcome: "passed" as const }, expected), true);
+    // Incomplete review evidence is a finished measurement, not a crash to retry.
+    assert.equal(shouldResume({ ...base, outcome: "review-incomplete" as const }, expected), true);
   });
 
   it("reuses a pre-profile raw row's build and regrades it", () => {

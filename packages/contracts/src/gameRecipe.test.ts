@@ -135,7 +135,7 @@ describe("retrieval contracts", () => {
     expect(() => decodeSearch({ query: "x".repeat(201) })).toThrow();
     expect(() => decodeSearch({ query: 7 })).toThrow();
     expect(() => decodeSearch({ text: "jump", query: "dialogue" })).toThrow(
-      "Pass text or query for one literal alias search, not two different values.",
+      "Pass text or query for one recipe search, not two different values.",
     );
   });
 

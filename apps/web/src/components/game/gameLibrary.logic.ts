@@ -14,6 +14,12 @@ export const gameTemplateAppearance = (template: GameTemplateId | null): GameTem
         initialClassName: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
         coverClassName: "from-sky-500/25 via-indigo-400/10 to-transparent",
       };
+    case "2d-screen":
+      return {
+        label: "2D Screen",
+        initialClassName: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+        coverClassName: "from-teal-500/25 via-amber-400/10 to-transparent",
+      };
     case "blank":
       return {
         label: "Blank",

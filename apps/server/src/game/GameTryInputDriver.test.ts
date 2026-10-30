@@ -291,3 +291,100 @@ it.live.skipIf(executable === null)(
     ),
   180_000,
 );
+
+it.live.skipIf(executable === null)(
+  "attributes release-queued effects to declared waits without stretching holds or inventing time",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "release-observation-")),
+          ),
+          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+        );
+        const pageHtml = `<!doctype html><canvas width="640" height="360" tabindex="0"></canvas><script>
+      const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+      let accepted = 0, pending = false, down = -1, up = -1;
+      function paint() { ctx.fillStyle = accepted ? '#ffffff' : '#000000'; ctx.fillRect(0, 0, 640, 360); }
+      function tick() { if (pending) { accepted++; pending = false; paint(); } requestAnimationFrame(tick); }
+      paint(); requestAnimationFrame(tick);
+      addEventListener('keydown', () => { down = performance.now(); });
+      addEventListener('keyup', e => { up = performance.now(); if (e.code === 'Space') pending = true; });
+      addEventListener('message', e => { if (e.data?.type === 'studio-visibility') window.__studioVisibilityAck = { visible:e.data.visible, paused:!e.data.visible, muted:!e.data.visible }; });
+      window.__studioProbe = () => JSON.stringify({ gameState: { state:1, accepted, down, up, now:performance.now() }, player:null });
+      console.log('Godot Engine v4 fixture');
+    </script>`;
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<NodeHttp.Server>((resolve) => {
+                const server = NodeHttp.createServer((_request, response) => {
+                  response.writeHead(200, { "Content-Type": "text/html" });
+                  response.end(pageHtml);
+                });
+                server.listen(0, "127.0.0.1", () => resolve(server));
+              }),
+          ),
+          (server) =>
+            Effect.promise(
+              () =>
+                new Promise<void>((resolve, reject) =>
+                  server.close((e) => (e ? reject(e) : resolve())),
+                ),
+            ),
+        );
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("No loopback address");
+        for (const mode of ["delayed", "broken", "immediate", "all-steps"] as const) {
+          const result = yield* playtest({
+            executable: executable!,
+            url: `http://127.0.0.1:${address.port}`,
+            profileDirectory: NodePath.join(directory, mode),
+            width: 640,
+            height: 360,
+            bootTimeoutMs: 5000,
+            probeRequired: true,
+            acceptance: null,
+            ...(mode === "all-steps" ? { captureAllSteps: true } : {}),
+            steps: [
+              { key: mode === "broken" ? "q" : "Space", holdMs: 80 },
+              ...(mode === "immediate" ? [] : [{ waitMs: 200 }]),
+            ],
+          });
+          expect(result.booted, mode).toBe(true);
+          const before = result.screenshots.find(
+            (frame) => frame.inputPair?.stepIndex === 0 && frame.inputPair.phase === "before",
+          )!;
+          const after = result.screenshots.find(
+            (frame) => frame.inputPair?.stepIndex === 0 && frame.inputPair.phase === "after",
+          )!;
+          const end = result.screenshots.at(-1)!.probe!.gameState;
+          expect(Number(end.up) - Number(end.down), mode).toBeCloseTo(80, 2);
+          expect(Number(end.now) - Number(before.probe!.gameState.now), mode).toBeCloseTo(
+            mode === "immediate" ? 80 : 280,
+            2,
+          );
+          expect(result.executedInputSteps, mode).toBe(1);
+          expect(after.probe!.gameState.accepted, mode).toBe(mode === "delayed" ? 1 : 0);
+          expect(end.accepted, mode).toBe(mode === "delayed" || mode === "all-steps" ? 1 : 0);
+          expect(after.inputPair?.observationDelayMs, mode).toBe(
+            mode === "delayed" || mode === "broken" ? 200 : undefined,
+          );
+          if (mode === "delayed") {
+            expect(after.inputPair?.observedAfterStepIndex).toBe(1);
+            expect(after.inputPair?.stateChanges).toContainEqual({
+              key: "state.accepted",
+              before: 0,
+              after: 1,
+            });
+          }
+          if (mode === "broken")
+            expect(
+              after.inputPair?.stateChanges?.some((change) => change.key === "state.accepted"),
+            ).toBe(false);
+        }
+      }),
+    ),
+  120_000,
+);

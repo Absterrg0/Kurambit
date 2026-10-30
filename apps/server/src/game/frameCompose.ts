@@ -102,11 +102,11 @@ const fill = (png: PNG, x: number, y: number, width: number, height: number, col
 const drawText = (png: PNG, x: number, y: number, text: string, color: Rgba): void => {
   let cursor = x;
   for (const character of text) {
-    const columns = glyph(character);
-    if (columns !== null) {
-      for (const [column, bits] of columns.entries()) {
-        for (let row = 0; row < GLYPH_HEIGHT; row += 1) {
-          if ((bits & (1 << row)) === 0) continue;
+    const rows = glyph(character);
+    if (rows !== null) {
+      for (const [row, bits] of rows.entries()) {
+        for (let column = 0; column < GLYPH_WIDTH; column += 1) {
+          if ((bits & (1 << (GLYPH_WIDTH - column - 1))) === 0) continue;
           fill(png, cursor + column * SCALE, y + row * SCALE, SCALE, SCALE, color);
         }
       }
@@ -122,6 +122,27 @@ export const composeCaption = (text: string): string =>
     .replace(/[^A-Z0-9 ,.:/+\-()]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+/** The height in pixels one drawn label line occupies. */
+export const LABEL_LINE_HEIGHT = LINE_HEIGHT;
+
+/** Draws one sanitized label line onto an existing PNG at the given origin. */
+export const drawLabel = (
+  png: PNG,
+  x: number,
+  y: number,
+  text: string,
+  maxWidth?: number,
+): void => {
+  const caption = composeCaption(text);
+  const capacity =
+    maxWidth === undefined ? caption.length : Math.max(0, Math.floor(maxWidth / GLYPH_ADVANCE));
+  const visible =
+    caption.length <= capacity
+      ? caption
+      : `${caption.slice(0, Math.max(0, capacity - 3))}${".".repeat(Math.min(3, capacity))}`;
+  drawText(png, x, y, visible, LABEL);
+};
 
 const blit = (target: PNG, source: PNG, x: number, y: number): void => {
   for (let row = 0; row < source.height; row += 1) {
@@ -210,4 +231,117 @@ export const composePairFiles = async (input: {
     NodeFSP.readFile(input.afterPath),
   ]);
   return composePairPng({ before, after, caption: input.caption }).png;
+};
+
+/** A pixel region inside one evidence frame, in that frame's own pixels. */
+export interface DetailRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * A channel difference this small is sub-perceptual dither, not an observed
+ * effect. PNG evidence is lossless, so anything above it is a real pixel
+ * change the reviewer can be shown as a number, never as a verdict.
+ */
+export const DETAIL_DELTA_THRESHOLD = 4;
+
+/** Exact pixels of one region; throws when the region leaves the image. */
+export const cropPng = (source: PNG, region: DetailRegion): PNG => {
+  if (
+    !Number.isInteger(region.x) ||
+    !Number.isInteger(region.y) ||
+    !Number.isInteger(region.width) ||
+    !Number.isInteger(region.height) ||
+    region.x < 0 ||
+    region.y < 0 ||
+    region.width <= 0 ||
+    region.height <= 0 ||
+    region.x + region.width > source.width ||
+    region.y + region.height > source.height
+  )
+    throw new Error(
+      `Region ${region.width}x${region.height} at ${region.x},${region.y} is outside the ${source.width}x${source.height} frame.`,
+    );
+  const cropped = new PNG({ width: region.width, height: region.height });
+  for (let row = 0; row < region.height; row += 1) {
+    const from = ((region.y + row) * source.width + region.x) * 4;
+    const to = row * region.width * 4;
+    source.data.copy(cropped.data, to, from, from + region.width * 4);
+  }
+  return cropped;
+};
+
+/** Integer nearest-neighbour upscale, so a small effect stays exactly its pixels. */
+export const scalePngNearest = (source: PNG, scale: number): PNG => {
+  if (!Number.isInteger(scale) || scale < 1)
+    throw new Error(`Scale must be a positive integer; received ${scale}.`);
+  if (scale === 1) return source;
+  const scaled = new PNG({ width: source.width * scale, height: source.height * scale });
+  for (let row = 0; row < scaled.height; row += 1) {
+    const sourceRow = Math.floor(row / scale);
+    for (let column = 0; column < scaled.width; column += 1) {
+      const sourceColumn = Math.floor(column / scale);
+      const from = (sourceRow * source.width + sourceColumn) * 4;
+      const to = (row * scaled.width + column) * 4;
+      scaled.data[to] = source.data[from]!;
+      scaled.data[to + 1] = source.data[from + 1]!;
+      scaled.data[to + 2] = source.data[from + 2]!;
+      scaled.data[to + 3] = source.data[from + 3]!;
+    }
+  }
+  return scaled;
+};
+
+export type RgbMean = readonly [number, number, number];
+
+const rounded = (value: number): number => Math.round(value * 10) / 10;
+
+/** Mean RGB of every pixel, to one decimal: a measurement, never a verdict. */
+export const meanColor = (source: PNG): RgbMean => {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  const pixels = source.width * source.height;
+  for (let at = 0; at < source.data.length; at += 4) {
+    red += source.data[at]!;
+    green += source.data[at + 1]!;
+    blue += source.data[at + 2]!;
+  }
+  return [rounded(red / pixels), rounded(green / pixels), rounded(blue / pixels)];
+};
+
+export interface RegionDelta {
+  /** Mean per-channel absolute difference, to one decimal. */
+  readonly meanAbs: RgbMean;
+  /** Share of pixels whose strongest channel differs past the dither threshold. */
+  readonly changedPercent: number;
+}
+
+/** Pixel comparison of two equal-size crops; throws when the sizes differ. */
+export const deltaStats = (left: PNG, right: PNG): RegionDelta => {
+  if (left.width !== right.width || left.height !== right.height)
+    throw new Error(
+      `Cannot compare a ${left.width}x${left.height} crop with a ${right.width}x${right.height} crop.`,
+    );
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let changed = 0;
+  const pixels = left.width * left.height;
+  for (let at = 0; at < left.data.length; at += 4) {
+    const dr = Math.abs(left.data[at]! - right.data[at]!);
+    const dg = Math.abs(left.data[at + 1]! - right.data[at + 1]!);
+    const db = Math.abs(left.data[at + 2]! - right.data[at + 2]!);
+    red += dr;
+    green += dg;
+    blue += db;
+    if (Math.max(dr, dg, db) > DETAIL_DELTA_THRESHOLD) changed += 1;
+  }
+  return {
+    meanAbs: [rounded(red / pixels), rounded(green / pixels), rounded(blue / pixels)],
+    changedPercent: rounded((changed / pixels) * 100),
+  };
 };

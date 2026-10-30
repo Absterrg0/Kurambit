@@ -24,7 +24,7 @@ leaves an ordinary in-flight attempt alone.
 The [registry](../../packages/client-runtime/src/connection/registry.ts) scopes
 connections by environment. An involuntary disconnect retains the registration
 and cached data. Explicit removal closes the scope and clears credentials,
-projections, and platform-owned state such as drafts. 
+projections, and platform-owned state such as drafts.
 
 ## HTTP authorization
 

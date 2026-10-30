@@ -1,5 +1,10 @@
 ## The real smoke-test checks, loaded at runtime by `tests/smoke_test.gd`.
 ##
+## Reference-game assertions: coin/slime totals, wall jump, sprint, stomp, one-way
+## and both-level flow test the shipped two-level game. A new game adapts this file
+## to its DESIGN.md scope (rewrite counts, drop checks for cut mechanics) and keeps
+## meaningful checks for everything retained and promised. The server only requires
+## that the canonical suite exits 0; these numbers are not server-owned law.
 ## It boots the game scene and drives the real physics loop with synthetic input and
 ## teleports: running, jumping, a wall jump off both sides, a one-way platform, coins,
 ## a stomp, spikes, a fall, the pause loop, a restart, restarting during a pending

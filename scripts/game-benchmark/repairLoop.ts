@@ -15,6 +15,8 @@ import type { GameE2eRepairLoopRead } from "./artifacts.ts";
  */
 export interface RepairLoopView {
   readonly id: string;
+  /** The builder run whose completed turn opened this loop. */
+  readonly originatingRunId: string;
   readonly status: GameRepairLoopStatus;
   readonly startedAt: string;
   readonly finishedAt: string | null;
@@ -44,19 +46,32 @@ export interface WatchRepairLoopInput<E> {
   >;
   readonly now?: Effect.Effect<number> | undefined;
   readonly sleep?: Effect.Effect<void> | undefined;
+  /** Only a loop opened by this builder run is this turn's loop. */
+  readonly forRunId?: string | undefined;
   /** How long the loop has to appear after the builder turn ends. */
   readonly startGraceMs?: number | undefined;
   /** Slack over the loop's own budget before a hung loop stops the wait. */
   readonly marginMs?: number | undefined;
   readonly pollMs?: number | undefined;
+  /**
+   * The caller's absolute hard stop. The wait never plans past it, so a phase
+   * cannot promise time the process will not get.
+   */
+  readonly deadlineMs?: number | undefined;
+  /** Time kept before `deadlineMs` for the caller to record what exists. */
+  readonly deadlineReserveMs?: number | undefined;
   readonly onWait?: ((message: string) => void) | undefined;
 }
+
+export type RepairLoopTimeoutBound = "loop-budget" | "harness-deadline";
 
 export interface WatchedRepairLoop {
   readonly loop: RepairLoopView;
   readonly rounds: ReadonlyArray<RepairRoundView>;
   readonly waitedMs: number;
   readonly timedOut: boolean;
+  /** Which bound ended the wait; null when the loop ended on its own. */
+  readonly timedOutBy: RepairLoopTimeoutBound | null;
 }
 
 /**
@@ -72,12 +87,19 @@ export const DEFAULT_REPAIR_LOOP_START_GRACE_MS = 60_000;
  */
 export const DEFAULT_REPAIR_LOOP_MARGIN_MS = 5 * 60_000;
 export const DEFAULT_REPAIR_LOOP_POLL_MS = 5_000;
+/**
+ * The run summary is written after this wait returns. One minute is enough for
+ * the status reads that fill it and keeps the caller's cap honest.
+ */
+export const DEFAULT_HARNESS_DEADLINE_RESERVE_MS = 60_000;
 
 /**
  * Waits for the review loop the builder turn started, then until that loop is
  * terminal. The wait is bounded by the loop's own budget plus a shutdown
- * margin: a loop that never opens returns `null` after the start grace, and a
- * loop that outlives its bound returns `timedOut` rather than hanging a run.
+ * margin and, when the caller supplies one, by the caller's hard stop minus a
+ * reporting reserve. A loop that never opens returns `null` after the start
+ * grace; a loop that outlives its bound returns `timedOut` with the bound that
+ * ended it, rather than hanging a run or promising time the caller lacks.
  *
  * Terminal must be observed before completion is asserted: a running repair can
  * legitimately make the sources stale while it writes, and stopping the server
@@ -92,34 +114,71 @@ export const watchRepairLoop = <E>(
     const sleep = input.sleep ?? Effect.sleep(Duration.millis(pollMs));
     const startGraceMs = input.startGraceMs ?? DEFAULT_REPAIR_LOOP_START_GRACE_MS;
     const marginMs = input.marginMs ?? DEFAULT_REPAIR_LOOP_MARGIN_MS;
+    const reserveMs = input.deadlineReserveMs ?? DEFAULT_HARNESS_DEADLINE_RESERVE_MS;
+    const harnessDeadlineMs =
+      input.deadlineMs === undefined ? null : input.deadlineMs - Math.max(0, reserveMs);
+    const forRunId = input.forRunId;
+
+    // A revision build turn can finish while the previous build's stopped loop
+    // is still the newest record. That loop is not this turn's: accepting it
+    // would grade mid-repair and report a review that never ran.
+    const forThisTurn = (candidate: RepairLoopView | null): RepairLoopView | null =>
+      candidate === null ||
+      forRunId === undefined ||
+      String(candidate.originatingRunId) === String(forRunId)
+        ? candidate
+        : null;
 
     const started = yield* now;
-    let loop = (yield* input.status).loop;
+    let loop = forThisTurn((yield* input.status).loop);
     while (loop === null) {
-      if ((yield* now) - started >= startGraceMs) return null;
+      const current = yield* now;
+      if (current - started >= startGraceMs) return null;
+      // A loop that has not opened yet cannot justify spending the last of the
+      // caller's budget; the caller reports what the build already submitted.
+      if (harnessDeadlineMs !== null && current >= harnessDeadlineMs) return null;
       yield* sleep;
-      loop = (yield* input.status).loop;
+      loop = forThisTurn((yield* input.status).loop);
     }
 
     // A loop already terminal on the first read needs no wait at all.
     const loopStartedAt = Date.parse(loop.startedAt);
-    const deadline =
+    const loopDeadlineMs =
       (Number.isFinite(loopStartedAt) ? loopStartedAt : started) + loop.budget.elapsedMs + marginMs;
+    const deadlineMs =
+      harnessDeadlineMs === null ? loopDeadlineMs : Math.min(loopDeadlineMs, harnessDeadlineMs);
+    const bound: RepairLoopTimeoutBound =
+      harnessDeadlineMs !== null && harnessDeadlineMs < loopDeadlineMs
+        ? "harness-deadline"
+        : "loop-budget";
+    const boundName = bound === "harness-deadline" ? "the run timeout" : "the loop's bound";
     let timedOut = false;
+    let timedOutBy: RepairLoopTimeoutBound | null = null;
     if (loop.status === "running") {
+      const nowMs = yield* now;
+      const waitMs = Math.max(0, deadlineMs - nowMs);
       input.onWait?.(
-        `Review loop ${loop.id} is running; waiting up to ${Math.round(
-          Math.max(0, deadline - (yield* now)) / 60_000,
-        )} more minute(s) for it to finish.`,
+        waitMs <= 0
+          ? `Review loop ${loop.id} is running; no time is left before ${boundName}.`
+          : `Review loop ${loop.id} is running; waiting up to ${Math.ceil(
+              waitMs / 60_000,
+            )} more minute(s), limited by ${boundName}${
+              bound === "harness-deadline"
+                ? ` (the loop's own bound allowed ${Math.ceil(
+                    Math.max(0, loopDeadlineMs - nowMs) / 60_000,
+                  )} more minute(s))`
+                : ""
+            }.`,
       );
       while (loop.status === "running") {
-        if ((yield* now) >= deadline) {
+        if ((yield* now) >= deadlineMs) {
           timedOut = true;
+          timedOutBy = bound;
           break;
         }
         yield* sleep;
         // A read that briefly reports no loop (a restart) keeps the last one.
-        loop = (yield* input.status).loop ?? loop;
+        loop = forThisTurn((yield* input.status).loop) ?? loop;
       }
     }
 
@@ -132,6 +191,7 @@ export const watchRepairLoop = <E>(
       rounds,
       waitedMs: (yield* now) - started,
       timedOut,
+      timedOutBy,
     };
   });
 
@@ -161,4 +221,5 @@ export const summarizeRepairLoop = (input: {
   selectedBuildId: input.selectedBuildId,
   waitedMs: input.watched.waitedMs,
   timedOut: input.watched.timedOut,
+  timedOutBy: input.watched.timedOutBy,
 });

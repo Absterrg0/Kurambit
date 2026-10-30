@@ -177,6 +177,49 @@ describe("evaluatePlaytestRun", () => {
     });
   };
 
+  it("explains a route sampled only after its approved targets were already reached", () => {
+    const acceptance: GameAcceptanceCriterion[] = [
+      {
+        id: "deliver",
+        kind: "win",
+        text: "Finish the delivery",
+        observe: { key: "won", expect: "==1" },
+      },
+    ];
+    const missed = run({
+      acceptance,
+      samples: [
+        before(gameplay({ state: 0, won: false }, 0)),
+        played(gameplay({ state: 0, won: false }, 0)),
+        played(gameplay({ state: 3, won: true }, 20)),
+        played(gameplay({ state: 3, won: true }, 20)),
+      ],
+    });
+    expect(missed.qualifies).toBe(false);
+    expect(missed.achieved).toEqual([]);
+    expect(missed.blockers).toContain(
+      "the first gameplay sample already satisfies deliver; observe gameplay before attempting that target so its transition can be measured",
+    );
+    const observed = run({
+      acceptance,
+      samples: [
+        before(gameplay({ state: 0, won: false }, 0)),
+        played(gameplay({ state: 1, won: false }, 0)),
+        played(gameplay({ state: 3, won: true }, 20)),
+      ],
+    });
+    expect(observed.qualifies).toBe(true);
+    expect(observed.achieved).toEqual(["deliver"]);
+  });
+
+  it("rejects a late engine error even after forty ordinary logs", () => {
+    // The console collector counts every error across the run, not just the
+    // retained suffix: an error emitted after forty ordinary logs still fails.
+    const lateError = run({ consoleErrors: 1 });
+    expect(lateError.qualifies).toBe(false);
+    expect(lateError.blockers).toContain("1 console error(s)");
+  });
+
   it("rejects a run where only a clock moved", () => {
     const clockOnly = run({});
     expect(clockOnly.qualifies).toBe(false);

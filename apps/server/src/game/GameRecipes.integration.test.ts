@@ -995,12 +995,20 @@ const assertMechanism = (id: RecipeId, result: GameWebPlaytestResult) => {
       // The baseline is the untouched start; the first answer is the locked one.
       expect(before.node).toBe("start");
       expect(before.trust).toBe(0);
-      expect(before.blocked).toBe(1);
+      expect(before.blocked).toBe(0);
       expect(after.node).toBe("end");
       expect(after.trust).toBe(1);
       expect(after.lantern).toBe(true);
       expect(after.rope).toBe(false);
       expect(after.blocked).toBe(1);
+      expect(
+        during.some(
+          (probe) =>
+            probe.gameState.blocked === 1 &&
+            probe.gameState.node === "start" &&
+            probe.gameState.choices_taken === 0,
+        ),
+      ).toBe(true);
       expect(during.some((probe) => probe.gameState.node === "help")).toBe(true);
       expect(during.some((probe) => probe.gameState.node === "reward")).toBe(true);
       break;
@@ -1901,6 +1909,21 @@ it.effect("serves every reference within its line budget and at the pinned Godot
     }
     const clippedCard = yield* recipes.search({ genre: "card", defect: "clipped-text" });
     expect(clippedCard.recipes[0]?.id).toBe("read.layout");
+
+    // A builder writes the brief's sentence, not the tag. The full-sentence
+    // query ranks the two jump-feel references first; an unrelated sentence
+    // and a stopword-only query match nothing instead of guessing.
+    const sentence = yield* recipes.search({
+      text: "responsive platformer jumps with coyote time and input buffering",
+    });
+    expect(sentence.recipes.slice(0, 2).map((recipe) => recipe.id)).toEqual([
+      "feel.buffer",
+      "feel.coyote",
+    ]);
+    const unrelated = yield* recipes.search({ text: "underwater stealth submarine sonar" });
+    expect(unrelated).toEqual({ recipes: [], nextCursor: null });
+    const stopwords = yield* recipes.search({ text: "the and with" });
+    expect(stopwords).toEqual({ recipes: [], nextCursor: null });
 
     for (const id of RECIPE_IDS) {
       const entry = yield* recipes.get({ id });

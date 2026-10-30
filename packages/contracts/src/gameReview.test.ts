@@ -4,16 +4,23 @@ import * as Schema from "effect/Schema";
 
 import {
   DEFAULT_GAME_REVIEW_BUDGET,
+  END_STATE_EVIDENCE_POLICY_VERSION,
+  endStateEligibleRequirements,
   GameReviewArtifact,
   GameReviewBallotAnswer,
   GameReviewBallotInput,
   GameReviewBudget,
+  GameReviewCriticAnswer,
   GameReviewDefect,
   GameReviewDoNotRegress,
+  GameReviewRequirementAssessment,
+  GameReviewRequirementDowngrade,
   GameReviewRound,
   GameReviewUsage,
   GameSubmission,
   GameSubmitInput,
+  pickEndStateObservations,
+  satisfiesEndStateExpect,
 } from "./gameReview.ts";
 
 const decodeDefect = Schema.decodeUnknownSync(GameReviewDefect);
@@ -231,4 +238,131 @@ it("truncates a long submission note with a marker and keeps build ids strict", 
   expect(input.note).toHaveLength(500);
   expect(input.note).toMatch(/\[truncated\]$/);
   expect(() => decodeSubmit({ note: "n".repeat(501), buildId: "x".repeat(65) })).toThrow();
+});
+
+describe("end-state requirements", () => {
+  const decodeRequirement = Schema.decodeUnknownSync(GameReviewRequirementAssessment);
+  const base = { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f3", "f4"], note: "Win." };
+
+  it("keeps the challenge optional so old records still decode", () => {
+    expect(decodeRequirement(base)).not.toHaveProperty("challenge");
+    expect(
+      decodeRequirement({
+        ...base,
+        challenge: { frameIds: ["try1f1", "try1f2"], note: "Drove without parking." },
+      }).challenge,
+    ).toEqual({ frameIds: ["try1f1", "try1f2"], note: "Drove without parking." });
+    expect(() =>
+      decodeRequirement({ ...base, challenge: { frameIds: [], note: "Empty." } }),
+    ).toThrow();
+  });
+
+  it("freezes only win/lose with numeric expects, never presentation or no-lose", () => {
+    expect(
+      endStateEligibleRequirements([
+        { id: "win-bay", kind: "win", text: "Win", observe: { key: "won", expect: "==1" } },
+        { id: "lose-wall", kind: "lose", text: "Lose", observe: { key: "lives", expect: "<=0" } },
+        {
+          id: "drive",
+          kind: "control",
+          text: "Drive",
+          observe: { key: "collected", expect: ">=1" },
+        },
+        { id: "look", kind: "presentation", text: "Look" },
+        { id: "free", kind: "lose", text: "No lose state" },
+        { id: "win-changes", kind: "win", text: "Win", observe: { key: "won", expect: "changes" } },
+      ]),
+    ).toEqual([
+      { id: "win-bay", kind: "win", key: "won", expect: "==1" },
+      { id: "lose-wall", kind: "lose", key: "lives", expect: "<=0" },
+    ]);
+    expect(END_STATE_EVIDENCE_POLICY_VERSION).toBe(2);
+  });
+
+  it("satisfies ==, >= and <= on numbers and booleans, never on missing values", () => {
+    expect(satisfiesEndStateExpect("==1", 1)).toBe(true);
+    expect(satisfiesEndStateExpect("==1", true)).toBe(true);
+    expect(satisfiesEndStateExpect("==1", 0)).toBe(false);
+    expect(satisfiesEndStateExpect(">=2", 2)).toBe(true);
+    expect(satisfiesEndStateExpect("<=0", 0)).toBe(true);
+    expect(satisfiesEndStateExpect("==1", null)).toBe(false);
+    expect(satisfiesEndStateExpect("==1", undefined)).toBe(false);
+  });
+
+  it("keeps only approved numeric/boolean scalars, bounded and without invention", () => {
+    expect(
+      pickEndStateObservations(
+        { won: 1, collected: 2, label: "win", missing: null },
+        new Set(["won", "collected", "absent"]),
+      ),
+    ).toEqual({ won: 1, collected: 2 });
+    expect(pickEndStateObservations({ won: "1" as unknown as number }, ["won"])).toEqual({});
+    expect(pickEndStateObservations(null, ["won"])).toEqual({});
+  });
+});
+
+describe("server downgraded requirements", () => {
+  const decodeAnswer = Schema.decodeUnknownSync(GameReviewCriticAnswer);
+  const minimalRound = () => ({
+    schemaVersion: 1 as const,
+    id: "round-1",
+    threadId: null,
+    status: "running" as const,
+    startedAt: "2026-10-30T00:00:00.000Z",
+    finishedAt: null,
+    incumbentSnapshotId: "source-incumbent",
+    incumbentSourceId: "source-incumbent",
+    incumbentBuildId: null,
+    postRepairSourceId: null,
+    candidate: null,
+    budget: DEFAULT_GAME_REVIEW_BUDGET,
+  });
+  const fundamental = (verdict: "yes" | "no" | "cannot-tell" = "yes") => ({
+    verdict,
+    frameIds: verdict === "cannot-tell" ? [] : ["f1"],
+    note: "Observed.",
+  });
+  const base = {
+    fundamentals: {
+      boots: fundamental(),
+      respondsToInput: fundamental(),
+      coreActionVisible: fundamental(),
+      stateReadable: fundamental(),
+    },
+    defects: [],
+    doNotRegress: [],
+    requirements: [
+      { id: "reach-roof", verdict: "cannot-tell" as const, frameIds: [], note: "Unseen." },
+    ],
+  };
+
+  it("reads legacy answers without the server-applied list", () => {
+    expect(decodeAnswer(base)).not.toHaveProperty("downgradedRequirements");
+  });
+
+  it("keeps the server-applied downgrade list with its reasons", () => {
+    const downgradedRequirements = [
+      { id: "reach-roof", reason: "Requirement reach-roof=yes needs a matched witness." },
+    ];
+    expect(decodeAnswer({ ...base, downgradedRequirements }).downgradedRequirements).toEqual(
+      downgradedRequirements,
+    );
+  });
+
+  it("reads legacy rounds without the server-applied list", () => {
+    expect(decodeRound(minimalRound())).not.toHaveProperty("downgradedRequirements");
+  });
+
+  it("keeps the server-applied downgrade list on the round", () => {
+    const downgradedRequirements = [{ id: "reach-roof", reason: "No matched witness." }];
+    expect(
+      decodeRound({ ...minimalRound(), downgradedRequirements }).downgradedRequirements,
+    ).toEqual(downgradedRequirements);
+  });
+
+  it("rejects a downgrade entry without an id or reason", () => {
+    const decodeDowngrade = Schema.decodeUnknownSync(GameReviewRequirementDowngrade);
+    expect(() => decodeDowngrade({ id: "", reason: "No matched witness." })).toThrow();
+    expect(() => decodeDowngrade({ id: "reach-roof", reason: "" })).toThrow();
+  });
 });

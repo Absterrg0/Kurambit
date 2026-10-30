@@ -61,7 +61,8 @@ export function GamesHome() {
     }
     void handleNewThread(scopeProjectRef(card.game.environmentId, card.game.projectId));
   };
-  const newGame = () => useGameDialogStore.getState().show("create");
+  const newGame = (template?: GameTemplateId) =>
+    useGameDialogStore.getState().show("create", template);
   const openGameFolder = () => useGameDialogStore.getState().show("open");
 
   return (
@@ -89,7 +90,7 @@ export function GamesHome() {
                   <FolderOpenIcon aria-hidden />
                   Open game
                 </Button>
-                <Button onClick={newGame}>
+                <Button onClick={() => newGame()}>
                   <PlusIcon aria-hidden />
                   New game
                 </Button>
@@ -163,7 +164,7 @@ function GameGrid({
   environmentId: EnvironmentId;
   cards: readonly GameCard[];
   onOpen: (card: GameCard) => void;
-  onNewGame: () => void;
+  onNewGame: (template?: GameTemplateId) => void;
 }) {
   const resources = cards.flatMap((card) =>
     card.game.coverImagePath !== null && card.latestThread !== null
@@ -197,7 +198,7 @@ function GameGrid({
       ))}
       <button
         type="button"
-        onClick={onNewGame}
+        onClick={() => onNewGame()}
         className="group flex min-h-56 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 p-6 text-center transition-colors hover:border-foreground/25 hover:bg-accent/40"
       >
         <span className="flex size-11 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors group-hover:text-foreground">
@@ -289,10 +290,15 @@ function GamesEmptyState({
   onNewGame,
   onOpenGame,
 }: {
-  onNewGame: () => void;
+  onNewGame: (template?: GameTemplateId) => void;
   onOpenGame: () => void;
 }) {
-  const starters: readonly GameTemplateId[] = ["3d-explorer", "2d-platformer"];
+  const starters: readonly GameTemplateId[] = ["3d-explorer", "2d-platformer", "2d-screen"];
+  const starterCopy: Partial<Record<GameTemplateId, string>> = {
+    "3d-explorer": "Explore, collect, and reach the goal in a fully playable 3D level.",
+    "2d-platformer": "Run, jump, stomp slimes, and collect every coin under a starry sky.",
+    "2d-screen": "Take a five-call night shift where the replies you choose decide the ending.",
+  };
   return (
     <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:py-10">
       <div className="flex min-w-0 flex-col items-start gap-4">
@@ -308,7 +314,7 @@ function GamesEmptyState({
           design, watch the agent work, and play every revision right here.
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="lg" onClick={onNewGame}>
+          <Button size="lg" onClick={() => onNewGame()}>
             <PlusIcon aria-hidden />
             New game
           </Button>
@@ -332,14 +338,14 @@ function GamesEmptyState({
           ))}
         </ol>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {starters.map((template) => {
           const appearance = gameTemplateAppearance(template);
           return (
             <button
               key={template}
               type="button"
-              onClick={onNewGame}
+              onClick={() => onNewGame(template)}
               className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-xs transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md"
             >
               <span className="block aspect-video overflow-hidden border-b border-border bg-muted">
@@ -354,9 +360,7 @@ function GamesEmptyState({
                   />
                 </span>
                 <span className="text-xs leading-snug text-muted-foreground">
-                  {template === "3d-explorer"
-                    ? "Explore, collect, and reach the goal in a fully playable 3D level."
-                    : "Run, jump, stomp slimes, and collect every coin under a starry sky."}
+                  {starterCopy[template]}
                 </span>
               </span>
             </button>

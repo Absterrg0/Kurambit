@@ -16,6 +16,7 @@ import {
   GamePlaytestToolkit,
   GameRecipeToolkit,
   GameReviewAnswerToolkit,
+  GameReviewDetailTool,
   GameToolkit,
   GameTryInputTool,
   GameVerifyTool,
@@ -148,6 +149,39 @@ const reviewControl = new Set([
   "game_review_restore",
 ]);
 
+it.effect("offers the native diagnostic clip to builders and repairs, never to reviewers", () =>
+  Effect.gen(function* () {
+    const tool = GameToolkit.tools.game_native_capture;
+    expect(yield* visible(tool, null)).toBe(true);
+    expect(yield* visible(tool, null, true)).toBe(true);
+    expect(yield* visible(tool, "critic")).toBe(false);
+    expect(yield* visible(tool, "ballot")).toBe(false);
+    const description = tool.description ?? "";
+    expect(description).toContain("never proves gameplay");
+    const schema = Tool.getJsonSchema(tool) as AdvertisedInput;
+    expect(schema.required).toContain("scenarioId");
+    expect(schema.properties?.fps).toBeDefined();
+  }),
+);
+
+it.effect("offers runtime calibration to builders and repairs, never to reviewers", () =>
+  Effect.gen(function* () {
+    const tool = GameToolkit.tools.game_runtime_calibrate;
+    expect(yield* visible(tool, null)).toBe(true);
+    expect(yield* visible(tool, null, true)).toBe(true);
+    expect(yield* visible(tool, "critic")).toBe(false);
+    expect(yield* visible(tool, "ballot")).toBe(false);
+    const description = tool.description ?? "";
+    // Honest framing: measured equivalence for the tested settings, physical
+    // displacement rather than counters alone, unknown rather than equivalent
+    // when anything is missing.
+    expect(description).toContain("tested route and settings only");
+    expect(description).toContain("unknown, never equivalent");
+    const schema = Tool.getJsonSchema(tool) as AdvertisedInput;
+    expect(schema.required).toContain("scenarioId");
+  }),
+);
+
 it.effect("offers the builder toolkit to builders and only build tools to repairs", () =>
   Effect.gen(function* () {
     for (const tool of Object.values(GameToolkit.tools)) {
@@ -182,10 +216,20 @@ it.effect("offers review children only the evidence tools their role can use", (
     expect(yield* visible(GameArtToolkit.tools.game_art_get, "critic")).toBe(true);
     expect(yield* visible(GameArtToolkit.tools.game_art_import, "critic")).toBe(false);
     expect(yield* visible(GameArtToolkit.tools.game_art_search, "ballot")).toBe(false);
+    expect(yield* visible(GameArtToolkit.tools.game_library_search, "critic")).toBe(true);
+    expect(yield* visible(GameArtToolkit.tools.game_library_get, "critic")).toBe(true);
+    expect(yield* visible(GameArtToolkit.tools.game_library_import_model, "critic")).toBe(false);
+    expect(yield* visible(GameArtToolkit.tools.game_library_import_material, "critic")).toBe(false);
+    expect(yield* visible(GameArtToolkit.tools.game_library_search, "ballot")).toBe(false);
+    expect(yield* visible(GameArtToolkit.tools.game_library_get, "ballot")).toBe(false);
     expect(yield* visible(GameTryInputTool, "critic")).toBe(true);
     expect(yield* visible(GameTryInputTool, "ballot")).toBe(false);
     expect(yield* visible(GameWebPlaytestTool, "critic")).toBe(true);
     expect(yield* visible(GameWebPlaytestTool, "ballot")).toBe(false);
+    expect(yield* visible(GameReviewDetailTool, "critic")).toBe(true);
+    expect(yield* visible(GameReviewDetailTool, "ballot")).toBe(true);
+    expect(yield* visible(GameReviewDetailTool, null)).toBe(false);
+    expect(yield* visible(GameReviewDetailTool, null, true)).toBe(false);
     expect(yield* visible(GameReviewAnswerToolkit.tools.game_critic_report, "critic")).toBe(true);
     expect(yield* visible(GameReviewAnswerToolkit.tools.game_critic_report, "ballot")).toBe(false);
     expect(yield* visible(GameReviewAnswerToolkit.tools.game_ballot, "ballot")).toBe(true);
@@ -213,16 +257,24 @@ it.effect("advertises exactly the review tools each role may use", () =>
       "game_art_get",
       "game_art_search",
       "game_critic_report",
+      "game_library_get",
+      "game_library_search",
       "game_recipe_get",
       "game_recipe_search",
+      "game_review_detail",
       "game_try_input",
       "game_web_playtest",
     ]);
-    expect(yield* names("ballot")).toEqual(["game_ballot"]);
+    expect(yield* names("ballot")).toEqual(["game_ballot", "game_review_detail"]);
     const builder = yield* names(null);
-    expect(builder).toHaveLength(all.length - 2);
+    expect(builder).toHaveLength(all.length - 3);
     expect(builder).not.toContain("game_critic_report");
     expect(builder).not.toContain("game_ballot");
+    // The engine reflection query is builder/repair documentation, never
+    // review evidence: critics and ballots must judge frozen frames, not fetch APIs.
+    expect(builder).toContain("game_godot_api");
+    expect(yield* names("critic")).not.toContain("game_godot_api");
+    expect(yield* names("ballot")).not.toContain("game_godot_api");
     const repair = yield* names(null, true);
     expect(repair).toEqual(builder.filter((name) => !reviewControl.has(name)));
     // The mutable repair route and the build tools remain; review control does not.
@@ -233,5 +285,50 @@ it.effect("advertises exactly the review tools each role may use", () =>
     expect(repair).not.toContain("game_review_history");
     expect(repair).not.toContain("game_review_stop");
     expect(repair).not.toContain("game_review_restore");
+  }),
+);
+
+it.effect(
+  "offers neutral import/check/test names with the same gates as their legacy aliases",
+  () =>
+    Effect.gen(function* () {
+      const pairs = [
+        ["game_import", "game_godot_import"],
+        ["game_check", "game_godot_check"],
+        ["game_test", "game_godot_test"],
+      ] as const;
+      for (const [neutral, legacy] of pairs) {
+        for (const name of [neutral, legacy] as const) {
+          const tool = GameToolkit.tools[name];
+          expect(yield* visible(tool, null), `${name} must stay available to builders`).toBe(true);
+          expect(yield* visible(tool, null, true), `${name} must stay available to repairs`).toBe(
+            true,
+          );
+          expect(yield* visible(tool, "critic"), `${name} must be hidden from critics`).toBe(false);
+          expect(yield* visible(tool, "ballot"), `${name} must be hidden from ballots`).toBe(false);
+        }
+        // The neutral tool names the legacy engine-named spelling as its alias.
+        expect(GameToolkit.tools[neutral].description).toContain("legacy alias");
+        expect(GameToolkit.tools[neutral].description).toContain(legacy);
+      }
+    }),
+);
+
+it.effect("offers persistent exploration to builders and repairs, never to reviewers", () =>
+  Effect.gen(function* () {
+    // One live session per host, traces replayed fresh: exploration is a
+    // builder/repair loop aid, never frozen review evidence.
+    for (const name of [
+      "game_explore_start",
+      "game_explore_act",
+      "game_explore_close",
+      "game_explore_replay",
+    ] as const) {
+      const tool = GameToolkit.tools[name];
+      expect(yield* visible(tool, null), `${name} must stay available to builders`).toBe(true);
+      expect(yield* visible(tool, null, true), `${name} must stay available to repairs`).toBe(true);
+      expect(yield* visible(tool, "critic"), `${name} must be hidden from critics`).toBe(false);
+      expect(yield* visible(tool, "ballot"), `${name} must be hidden from ballots`).toBe(false);
+    }
   }),
 );

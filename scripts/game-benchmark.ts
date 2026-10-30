@@ -33,12 +33,14 @@ import {
   GRADER_VERSION,
   OPENCODE_GRADER_MODEL,
   defaultGodotBinary,
+  makeOpenCodeCompareReviewer,
 } from "./game-grade.ts";
 import {
   compareFramePacks,
   makeCompareReviewer,
   renderRevisionComparisonMarkdown,
   runComparison,
+  type CompareReview,
 } from "./game-benchmark/compare.ts";
 import {
   captureRevisionFrames,
@@ -48,6 +50,7 @@ import {
 import {
   abortReason,
   benchmarkJobLocation,
+  benchmarkRunLayout,
   createBenchmarkAggregateWriter,
   parseJobCount,
   readSavedBenchmarkRows,
@@ -101,6 +104,8 @@ const { values, positionals } = NodeUtil.parseArgs({
     brief: { type: "string" },
     browser: { type: "string" },
     opencode: { type: "string", default: "opencode" },
+    /** Minimal instruction stack: blank start with no design stage. Omit for default. */
+    builder: { type: "string" },
     provider: { type: "string", default: "codex" },
     model: { type: "string", default: "gpt-6.1-sol" },
     "reasoning-effort": { type: "string", default: "medium" },
@@ -128,24 +133,27 @@ if (values.help) {
       "--allow-external-server and cannot be used with --jobs above 1.",
       "The raw lane (--lane raw) lets the bare agent build one in a scratch folder; either way the",
       "finished game is graded by scripts/game-grade.ts. Results are written to",
-      "<out>/<harness-commit>/<brief>/result.json plus results.json/.md.",
-      "An existing result for the same harness commit, lane, fixture checksum and evaluation profile is skipped.",
+      "<out>/<harness-commit>/<brief>/result.json plus results.json/.md. Any uncommitted",
+      "checkout change writes a fresh <out>/<harness-commit>-dirty-<nonce>/ and never resumes.",
+      "An existing completed result for the same harness commit, lane, fixture checksum and evaluation profile is skipped; a crashed or timed-out row is retried.",
       "--reuse-raw copies a cached raw-lane build per brief and regrades it when the grader profile differs,",
       "instead of spending the agent's two-hour budget again.",
       "--regrade <saved-run-dir> grades the selected artifact recorded in each <brief>/run.json",
       "(or a legacy schema-1 game root), using the current frozen grader. It never asks an",
       "agent to build, refuses missing or mismatched fixture/artifact evidence, and replaces",
       "only each row's grade and evaluation profile.",
-      "--compare reads two lanes' already-saved grade frames and asks the frozen grader model which",
+      "--compare reads two lanes' already-saved grade frames and asks the grader model which",
       "build reads better, in both orders plus an identical-pair control. It writes <out>/comparison.json",
       "and comparison.md and is never summed with the obligations totals.",
+      "Codex is the default; --grader opencode --grader-model <model> swaps only the model route.",
       "--capture-only boots one exact saved Web artifact, replays --route and writes frame-pack.json,",
       "frames/ and real console/input facts. It calls no model, exports nothing and writes no grade.",
       "The route is JSON: {schemaVersion:1,label,viewport:{width,height},steps:[playtest steps]}.",
       "--artifact-sha256 is the server's build id (the same digest an export record or a candidate",
       "directory name carries), so it refuses a stale or mutated artifact before anything is served.",
-      "--compare-frames feeds two capture packs into the frozen look/feel comparison. The",
+      "--compare-frames feeds two capture packs into the look/feel comparison. The",
       "identical-pair control is asked first, so a failed control costs one call instead of three.",
+      "Codex is the default; --grader opencode --grader-model <model> swaps only the model route.",
     ].join("\n"),
   );
   process.exit(0);
@@ -198,8 +206,20 @@ if (values["compare-frames"]) {
     throw new Error(
       "--compare-frames cannot be combined with --compare, --capture-only or --regrade.",
     );
-  if (values.grader !== "codex")
-    throw new Error("--compare-frames measures with the frozen codex grader; drop --grader.");
+  const graderName = values.grader as string;
+  if (graderName !== "codex" && graderName !== "opencode")
+    throw new Error("--grader must be codex or opencode.");
+  let review: CompareReview;
+  let grader: { readonly provider: string; readonly model: string };
+  if (graderName === "opencode") {
+    const model = (values["grader-model"] as string | undefined) ?? OPENCODE_GRADER_MODEL;
+    const opencode = makeOpenCodeCompareReviewer({ model });
+    review = opencode.review;
+    grader = { provider: "opencode", model: opencode.usedModel() };
+  } else {
+    review = makeCompareReviewer();
+    grader = { provider: "codex", model: CODEX_GRADER_MODEL };
+  }
   const [firstManifest, secondManifest] = positionals;
   if (firstManifest === undefined || secondManifest === undefined || positionals.length !== 2)
     throw new Error("--compare-frames takes two capture frame-pack manifests.");
@@ -218,7 +238,8 @@ if (values["compare-frames"]) {
     first,
     second,
     cardsRoot: NodePath.join(NodePath.resolve(values.out), "cards"),
-    review: makeCompareReviewer(),
+    review,
+    grader,
   });
   const out = NodePath.resolve(values.out);
   await NodeFSP.mkdir(out, { recursive: true });
@@ -233,11 +254,25 @@ if (values["compare-frames"]) {
   process.exit(0);
 }
 if (values.compare) {
-  // The comparison is a separate ruler: it reuses the frozen grader model and
-  // never runs the lane machinery, so none of the run flags apply.
+  // The comparison is a separate ruler: it reuses the chosen grader model and
+  // never runs the lane machinery, so none of the run flags apply. Codex stays
+  // the default; --grader opencode swaps only the model route, keeping the
+  // blind shuffled design and the identical-pair control intact.
   if (values.regrade !== undefined) throw new Error("--regrade cannot be combined with --compare.");
-  if (values.grader !== "codex")
-    throw new Error("--compare measures with the frozen codex grader; drop --grader.");
+  const graderName = values.grader as string;
+  if (graderName !== "codex" && graderName !== "opencode")
+    throw new Error("--grader must be codex or opencode.");
+  let review: CompareReview;
+  let grader: { readonly provider: string; readonly model: string };
+  if (graderName === "opencode") {
+    const model = (values["grader-model"] as string | undefined) ?? OPENCODE_GRADER_MODEL;
+    const opencode = makeOpenCodeCompareReviewer({ model });
+    review = opencode.review;
+    grader = { provider: "opencode", model: opencode.usedModel() };
+  } else {
+    review = makeCompareReviewer();
+    grader = { provider: "codex", model: CODEX_GRADER_MODEL };
+  }
   const [harnessDir, rawDir] = positionals;
   if (harnessDir === undefined || rawDir === undefined || positionals.length !== 2)
     throw new Error("--compare takes a harness directory and a raw directory.");
@@ -260,7 +295,8 @@ if (values.compare) {
     rawDir: NodePath.resolve(rawDir),
     out: NodePath.resolve(values.out),
     briefs: selected,
-    review: makeCompareReviewer(),
+    review,
+    grader,
     log: (line) => console.log(line),
   });
   for (const brief of report.briefs)
@@ -272,6 +308,11 @@ const timeoutMs = Number(values["timeout-ms"]);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
 const lane = values.lane as BenchmarkLane;
 if (lane !== "harness" && lane !== "raw") throw new Error("--lane must be harness or raw.");
+if (values.builder !== undefined && values.builder !== "minimal")
+  throw new Error("--builder must be minimal when set; omit it for the default scaffold.");
+if (values.builder === "minimal" && lane !== "harness")
+  throw new Error("--builder minimal only applies to --lane harness.");
+const minimalBuilder = values.builder === "minimal";
 const reuseRaw = values["reuse-raw"] === undefined ? null : NodePath.resolve(values["reuse-raw"]);
 if (reuseRaw !== null && lane !== "raw") throw new Error("--reuse-raw only applies to --lane raw.");
 const jobs = parseJobCount(values.jobs);
@@ -319,25 +360,18 @@ const checkoutGit = (args: ReadonlyArray<string>) =>
   exec("git", ["-C", checkout, ...args], { maxBuffer: 16 * 1024 * 1024 });
 
 const harnessCommit = (await checkoutGit(["rev-parse", "HEAD"])).stdout.trim();
+// Templates, scaffold, contracts and server code shape a benchmark game as much
+// as this runner does, so any uncommitted checkout change must make the run
+// dirty; a path list would let a clean-commit row be resumed against other bytes.
 const harnessDirty = (
-  await checkoutGit([
-    "status",
-    "--porcelain",
-    "--",
-    "scripts/game-e2e.ts",
-    "scripts/game-benchmark.ts",
-    "scripts/game-benchmark",
-    "scripts/game-grade.ts",
-    "scripts/lib/benchmark-server.ts",
-    "scripts/lib/display-sandbox.ts",
-  ])
+  await checkoutGit(["status", "--porcelain", "--untracked-files=all"])
 ).stdout.trim();
-// Resume reuses rows by commit, so an uncommitted harness would silently mix
-// two runners in one aggregate.
-if (harnessDirty !== "")
-  throw new Error(
-    `Commit or stash the benchmark harness before running it; it is uncommitted:\n${harnessDirty}`,
-  );
+const runLayout = benchmarkRunLayout({
+  out: values.out,
+  harnessCommit,
+  dirty: harnessDirty !== "",
+  nonce: `${Date.now().toString(36)}-${process.pid}`,
+});
 
 const allBriefs = await loadGameBenchmarkBriefs(
   NodePath.join(checkout, "scripts/game-benchmark/briefs"),
@@ -363,7 +397,7 @@ const stopListeningForShutdown = () => {
   process.off("SIGINT", onSigint);
   process.off("SIGTERM", onSigterm);
 };
-const runDirectory = NodePath.join(NodePath.resolve(values.out), harnessCommit.slice(0, 8));
+const runDirectory = runLayout.runDirectory;
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "");
 const runnerPath = NodePath.resolve(values.runner);
 
@@ -397,7 +431,8 @@ const runBrief = async (
     "--summary",
     summaryPath,
     "--plan-first",
-    "true",
+    minimalBuilder ? "false" : "true",
+    ...(minimalBuilder ? ["--builder", "minimal"] : []),
     "--name",
     `${brief.title} ${stamp}`,
     "--parent-dir",
@@ -760,10 +795,12 @@ if (savedRunDirectory !== null) {
 }
 
 await NodeFSP.mkdir(runDirectory, { recursive: true });
-const savedRows = await readSavedBenchmarkRows(
-  runDirectory,
-  allBriefs.map((brief) => brief.id),
-);
+const savedRows = runLayout.resume
+  ? await readSavedBenchmarkRows(
+      runDirectory,
+      allBriefs.map((brief) => brief.id),
+    )
+  : { results: [] as ReadonlyArray<BenchmarkBriefResult> };
 const writer = createBenchmarkAggregateWriter({
   runDirectory,
   harnessCommit,
@@ -783,6 +820,7 @@ const runOne = async (brief: LoadedGameBenchmarkBrief, abort: AbortSignal) => {
       .catch(() => null),
   );
   if (
+    runLayout.resume &&
     previous !== null &&
     shouldResume(previous, {
       harnessCommit,
@@ -887,7 +925,9 @@ const runOne = async (brief: LoadedGameBenchmarkBrief, abort: AbortSignal) => {
 };
 
 console.log(
-  `Harness commit ${harnessCommit}; running ${briefs.length} brief(s) ${
+  `Harness commit ${harnessCommit}${
+    runLayout.resume ? "" : " plus uncommitted checkout changes (fresh run, no resume)"
+  }; running ${briefs.length} brief(s) ${
     jobs === 1 ? "serially" : `with up to ${jobs} at a time`
   }.`,
 );

@@ -3,6 +3,7 @@ import {
   GameToolkit,
   GameArtToolkit,
   GameRecipeToolkit,
+  GameReviewDetailTool,
   GameWebPlaytestTool,
   GameTryInputTool,
   GameVerifyTool,
@@ -32,6 +33,7 @@ import * as ServerConfig from "../config.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as GameService from "../game/GameService.ts";
 import * as GameArtKits from "../game/GameArtKits.ts";
+import * as GameAssetLibrary from "../game/GameAssetLibrary.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -648,6 +650,13 @@ const withoutImageTransport = (payload: unknown) => {
 /**
  * `McpServer.toolkit` serializes every result as JSON text, which is the wrong
  * shape for a screenshot: the model needs image content.
+ *
+ * Sequence tools (web playtests, verifications, input experiments) default to
+ * metadata-only results: every frame is persisted with a readable `path` and
+ * the caller opens chosen frames with file tools. Attaching every frame
+ * inline replays those bytes on every later provider request, and past fifty
+ * accumulated images the turn dies outright. Pass `defaultIncludeImage: false`
+ * for those tools; single-image tools keep the inline default.
  */
 const registerImageTool = <T extends Tool.Any, E, R>(
   tool: T,
@@ -660,17 +669,32 @@ const registerImageTool = <T extends Tool.Any, E, R>(
   ) => Effect.Effect<ImageToolHandleResult, E, McpInvocationContext.McpInvocationContext>,
   operation: string,
   failureText: string | ((error: E) => string),
+  options?: { readonly defaultIncludeImage?: boolean },
 ) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
+    const defaultIncludeImage = options?.defaultIncludeImage ?? true;
     const strict = Tool.getStrictMode(tool) === true;
     const decodeOptions: SchemaAST.ParseOptions = {
       onExcessProperty: strict ? "error" : "ignore",
       errors: "all",
     };
-    const inputSchema = strict
-      ? { ...Tool.getJsonSchema(tool), additionalProperties: false }
-      : Tool.getJsonSchema(tool);
+    const parametersSchema = Tool.getJsonSchema(tool);
+    const inputSchema = {
+      ...parametersSchema,
+      properties: {
+        ...(parametersSchema.properties !== null && typeof parametersSchema.properties === "object"
+          ? parametersSchema.properties
+          : {}),
+        includeImage: {
+          type: "boolean",
+          description: defaultIncludeImage
+            ? "Attach image content. Defaults to true; false returns metadata only."
+            : "Attach the saved frames inline. Defaults to false; read selected frame paths with file/image tools to avoid accumulating entire sequences in context.",
+        },
+      },
+      ...(strict ? { additionalProperties: false } : {}),
+    };
     yield* server.addTool({
       tool: new McpSchema.Tool({
         name: tool.name,
@@ -694,6 +718,27 @@ const registerImageTool = <T extends Tool.Any, E, R>(
             fiber.context,
             McpInvocationContext.McpInvocationContext,
           );
+          // `includeImage` is transport metadata validated here, before the
+          // service runs: a non-boolean must fail instead of silently
+          // attaching (or dropping) every frame.
+          const rawIncludeImage = (payload as { readonly includeImage?: unknown } | undefined)
+            ?.includeImage;
+          if (rawIncludeImage !== undefined && typeof rawIncludeImage !== "boolean") {
+            return Effect.succeed(
+              new McpSchema.CallToolResult({
+                isError: true,
+                structuredContent: {
+                  error: {
+                    _tag: `${tool.name}Error`,
+                    operation,
+                    failureCount: 1,
+                    message: "includeImage must be a boolean.",
+                  },
+                },
+                content: [{ type: "text", text: "includeImage must be a boolean." }],
+              }),
+            );
+          }
           return provide(
             handle(withoutImageTransport(payload) as Tool.Parameters<T>, decodeOptions),
           ).pipe(
@@ -704,8 +749,7 @@ const registerImageTool = <T extends Tool.Any, E, R>(
                 const { screenshot, screenshots, ...rest } = encodedResult as ImageToolResult;
                 const frames = screenshots ?? (screenshot === undefined ? [] : [screenshot]);
                 const includeImage =
-                  (payload as { readonly includeImage?: boolean } | undefined)?.includeImage !==
-                  false;
+                  typeof rawIncludeImage === "boolean" ? rawIncludeImage : defaultIncludeImage;
                 const metadata = {
                   ...rest,
                   ...(screenshot === undefined
@@ -766,6 +810,9 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
       ),
     "playtest",
     (error) => (error instanceof Error ? error.message : "Game web playtest failed."),
+    // A playtest captures a whole sequence: metadata with per-frame paths by
+    // default, inline bytes only on explicit opt-in.
+    { defaultIncludeImage: false },
   );
   yield* registerImageTool(
     GameTryInputTool,
@@ -776,6 +823,17 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
     (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
     "playtest",
     (error) => (error instanceof Error ? error.message : "Game input experiment failed."),
+    { defaultIncludeImage: false },
+  );
+  yield* registerImageTool(
+    GameReviewDetailTool,
+    (payload, options) =>
+      built
+        .handle("game_review_detail", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
+    "review-detail",
+    (error) => (error instanceof Error ? error.message : "Game review detail failed."),
   );
   yield* registerImageTool(
     GameVerifyTool,
@@ -790,6 +848,7 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
       ),
     "verify",
     (error) => (error instanceof Error ? error.message : "Game verification failed."),
+    { defaultIncludeImage: false },
   );
 });
 
@@ -908,6 +967,7 @@ export const layerGameRecipes = toolkitRegistration(GameRecipeToolkit, GameHandl
 
 export const layerGameArt = toolkitRegistration(GameArtToolkit, GameHandlers.layerArt).pipe(
   Layer.provide(GameArtKits.layer),
+  Layer.provide(GameAssetLibrary.layer),
 );
 
 export const layerGamePlaytest = imageToolRegistration(

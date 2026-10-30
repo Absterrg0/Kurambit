@@ -1,5 +1,10 @@
 ## The real smoke-test checks, loaded at runtime by `tests/smoke_test.gd`.
 ##
+## Reference-game assertions: relic totals and gate flow test the shipped level. A new
+## game adapts this file to its DESIGN.md scope (rewrite counts, drop checks for cut
+## mechanics) and keeps meaningful checks for everything retained and promised. The
+## server only requires that the canonical suite exits 0; these numbers are not
+## server-owned law.
 ## It boots the game scene and drives the real physics loop with synthetic input and
 ## teleports: movement, jumping, every relic, the gate, a death below the kill plane,
 ## pause/resume and restart. Nothing here is a "call the helper directly" shortcut:

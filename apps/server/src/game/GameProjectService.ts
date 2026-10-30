@@ -25,6 +25,7 @@ import {
   type GamePendingRevision,
   removedCriteriaWithoutRemovedLine,
   type GameAsset,
+  type GameArtProfile,
   type GameCreateInput,
   type GameDesign,
   type GameDesignApprovalResult,
@@ -52,7 +53,13 @@ import { gameCoverCandidates, latestGameActivity, sortGameSummaries } from "./ga
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { readLastPlaytest } from "./playtestEvidence.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { designSkeleton, initialGamePrompt, scaffoldFiles, scaffoldManifest } from "./scaffold.ts";
+import {
+  designSkeleton,
+  initialGamePrompt,
+  isMinimalBuilder,
+  scaffoldFiles,
+  scaffoldManifest,
+} from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -149,6 +156,7 @@ export class GameProjectService extends Context.Service<
     readonly upsertAsset: (
       root: string,
       asset: GameAsset,
+      options?: { readonly artProfile?: GameArtProfile | undefined },
     ) => Effect.Effect<void, GameOperationError>;
     /**
      * Expensive reads (asset usage, scenes, viewport, builds). `sourceId` is the
@@ -224,6 +232,26 @@ const make = Effect.gen(function* () {
             ...(asset.thumbnail ? [asset.thumbnail] : []),
           ])
             insideGame(root, relative);
+        for (const family of manifest.families ?? [])
+          for (const target of family.paths) {
+            if (target.startsWith("res://")) {
+              const rest = target.slice("res://".length);
+              if (
+                rest.length === 0 ||
+                rest.includes("\\") ||
+                rest.split("/").includes("..") ||
+                target.length > 500
+              )
+                throw new GameOperationError({
+                  operation: "resolve-path",
+                  path: target,
+                  reason: "invalid-path",
+                });
+              insideGame(root, `${manifest.godotProject}/${rest}`);
+            } else {
+              insideGame(root, target);
+            }
+          }
         return manifest;
       },
       catch: (cause) =>
@@ -374,7 +402,8 @@ const make = Effect.gen(function* () {
       // writing any server-owned record. A symlinked parent must not mint keys
       // that the rest of the app cannot match.
       let root = requestedRoot;
-      const template = input.template ?? DEFAULT_GAME_TEMPLATE;
+      const minimal = isMinimalBuilder(input);
+      const template = minimal ? "blank" : (input.template ?? DEFAULT_GAME_TEMPLATE);
       let created = false;
       let intentRecorded = false;
       const removeCreatedRoot = Effect.promise(async () => {
@@ -428,6 +457,12 @@ const make = Effect.gen(function* () {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
+        if (minimal)
+          // The switch owns no template document: the model is never pointed
+          // at it and the file is absent rather than unread.
+          yield* Effect.promise(() =>
+            NodeFSP.rm(NodePath.join(root, "TEMPLATE.md"), { force: true }),
+          );
         root = yield* resolveCanonicalRoot(root, "create-game");
         // The creation-time design promise lives outside the workspace. Without
         // it, deleting DESIGN.md or editing game.json could pass a plan-first
@@ -436,7 +471,11 @@ const make = Effect.gen(function* () {
         const creationManifest = scaffoldManifest(input);
         yield* approvals.recordIntent(
           root,
-          input.planFirst === false ? "skipped" : input.reviewDesign === true ? "required" : "auto",
+          minimal || input.planFirst === false
+            ? "skipped"
+            : input.reviewDesign === true
+              ? "required"
+              : "auto",
           creationManifest.probe === true,
           {
             testSuite: gameTestSuite(creationManifest),
@@ -1185,10 +1224,11 @@ const make = Effect.gen(function* () {
     approveRevision,
     discardRevision,
     updateVerificationPolicy,
-    upsertAsset: (root, asset) =>
+    upsertAsset: (root, asset, options) =>
       updateManifest(root, "save-asset", (manifest) => ({
         ...manifest,
         assets: manifest.assets.filter((entry) => entry.id !== asset.id).concat(asset),
+        ...(options?.artProfile === undefined ? {} : { artProfile: options.artProfile }),
       })),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root, sourceId) {
       const manifest = yield* read(root);

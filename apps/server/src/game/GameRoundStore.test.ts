@@ -97,6 +97,42 @@ const candidate = async (
   };
 };
 
+it.live("an exported build keeps its measured playtest and reads a legacy record", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordExport(root, build);
+      const facts = {
+        booted: true,
+        responded: true,
+        executedInputSteps: 1,
+        consoleErrors: 0,
+        steps: [{ press: "Space" }],
+        viewport: { width: 1152, height: 648 },
+      };
+      // The shape written before gameplay verdicts were measured still reads.
+      yield* rounds.recordBuildPlaytest(root, build.buildId, facts);
+      expect((yield* rounds.exported(root, build.buildId))?.playtest).toEqual(facts);
+
+      const measured = {
+        ...facts,
+        qualifies: false,
+        blockers: ["no movement or design progress"],
+        evidenceDirectory: "builds/playtests/2026-10-01T10-00-00-000Z",
+      };
+      yield* rounds.recordBuildPlaytest(root, build.buildId, measured);
+      const read = yield* rounds.exported(root, build.buildId);
+      expect(read?.playtest).toMatchObject({
+        qualifies: false,
+        blockers: ["no movement or design progress"],
+        evidenceDirectory: "builds/playtests/2026-10-01T10-00-00-000Z",
+      });
+      expect(read?.playtest?.executedInputSteps).toBe(1);
+    }),
+  ),
+);
+
 it.live(
   "begin snapshots the source, promote switches the selected build, reject restores and drops it",
   () =>
@@ -818,6 +854,170 @@ it.live("old facet-only ballot history stays readable without inventing an overa
       expect(ballot?.main.works).toBe("A");
       expect(ballot?.preservation[0]?.B).toBe("unknown");
       expect(ballot?.reason).toBe("Captured before overall judgments existed.");
+    }),
+  ),
+);
+
+it.live("buildIsCurrent stays true after a design edit and false after an engine edit", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordExport(root, build);
+      expect(yield* rounds.buildIsCurrent(root, build.buildId)).toBe(true);
+      // Notes and design docs are never build inputs.
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Revised plan\n"),
+      );
+      expect(yield* rounds.buildIsCurrent(root, build.buildId)).toBe(true);
+      // A real engine source moves the build inputs.
+      yield* edit(root, "extends Node\n# edit\n");
+      expect(yield* rounds.buildIsCurrent(root, build.buildId)).toBe(false);
+    }),
+  ),
+);
+
+it.live("buildIsCurrent is false for unknown builds and unreadable bindings", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      expect(yield* rounds.buildIsCurrent(root, "d".repeat(64))).toBe(false);
+      expect(yield* rounds.buildIsCurrent(root, "not-a-build")).toBe(false);
+      const frozen = yield* snapshots.store(root);
+      const build = yield* Effect.promise(() => candidate(root, frozen.manifest.sourceId));
+      yield* rounds.recordExport(root, build);
+      expect(yield* rounds.buildIsCurrent(root, build.buildId)).toBe(true);
+      // An unreadable engine project fails closed instead of forgiving the change.
+      const manifestPath = NodePath.join(root, "game.json");
+      const before = yield* Effect.promise(() => NodeFSP.readFile(manifestPath, "utf8"));
+      yield* Effect.promise(() => NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), "# Moved\n"));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          manifestPath,
+          `${JSON.stringify({
+            schemaVersion: 1,
+            name: "probe",
+            brief: "A probe game.",
+            artDirection: "Plain.",
+            engine: { name: "godot", version: "4.7.2" },
+            godotProject: "../outside",
+            assets: [],
+          })}\n`,
+        ),
+      );
+      expect(yield* rounds.buildIsCurrent(root, build.buildId)).toBe(false);
+      yield* Effect.promise(() => NodeFSP.writeFile(manifestPath, before));
+    }),
+  ),
+);
+
+it.live("evicting old rounds deletes their unreferenced candidate builds", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const dirExists = (directory: string) =>
+        Effect.promise(() =>
+          NodeFSP.stat(NodePath.join(root, directory)).then(
+            () => true,
+            () => false,
+          ),
+        );
+      // Fifty stopped rounds, each with its own candidate build on disk.
+      const firstDirs: string[] = [];
+      for (let index = 0; index < 50; index += 1) {
+        const opened = yield* rounds.begin(root, {});
+        const frozen = yield* snapshots.capture(root);
+        const build = yield* Effect.promise(() => candidate(root, frozen.sourceId));
+        if (index === 0) firstDirs.push(build.directory);
+        yield* rounds.recordCandidate(root, opened.id, build);
+        yield* rounds.stop(root, opened.id, "test stop");
+      }
+      expect(yield* dirExists(firstDirs[0]!)).toBe(true);
+      expect((yield* rounds.read(root)).rounds).toHaveLength(50);
+      // The 51st round evicts the oldest; its candidate build must not linger.
+      const overflow = yield* rounds.begin(root, {});
+      yield* rounds.stop(root, overflow.id, "test stop");
+      expect((yield* rounds.read(root)).rounds).toHaveLength(50);
+      expect(yield* dirExists(firstDirs[0]!)).toBe(false);
+    }),
+  ),
+);
+
+it.live("round eviction preserves live previews, selected builds and retained candidates", () =>
+  withGame(({ root, rounds, snapshots }) =>
+    Effect.gen(function* () {
+      const source = yield* snapshots.store(root);
+      const preview = yield* Effect.promise(() => candidate(root, source.manifest.sourceId));
+      const selected = yield* Effect.promise(() => candidate(root, source.manifest.sourceId));
+      const shared = yield* Effect.promise(() => candidate(root, source.manifest.sourceId));
+      for (const build of [preview, selected, shared, shared]) {
+        const round = yield* rounds.begin(root);
+        yield* rounds.recordCandidate(root, round.id, build);
+        yield* rounds.stop(root, round.id, "test stop");
+      }
+      yield* rounds.select(root, selected);
+      for (let index = 0; index < 46; index += 1) {
+        const round = yield* rounds.begin(root);
+        yield* rounds.stop(root, round.id, "test stop");
+      }
+      for (const build of [preview, selected, shared]) {
+        const round = yield* rounds.begin(root, { preserveDirectories: [preview.directory] });
+        yield* rounds.stop(root, round.id, "test stop");
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, build.directory, "index.html"), "utf8").catch(
+              () => null,
+            ),
+          ),
+        ).not.toBeNull();
+      }
+      expect((yield* rounds.read(root)).selected?.buildId).toBe(selected.buildId);
+    }),
+  ),
+);
+
+it.live("frozen quality stays with its round and later edits cannot rewrite it", () =>
+  withGame(({ root, rounds }) =>
+    Effect.gen(function* () {
+      const opened = yield* rounds.begin(root, {});
+      const quality = {
+        artConsistency: { verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Holds." },
+        animation: { verdict: "cannot-tell" as const, frameIds: [], note: "One pose." },
+        audio: { verdict: "cannot-tell" as const, frameIds: [], note: "No audio evidence." },
+        readability: { verdict: "no" as const, frameIds: ["f2"], note: "HUD clipped." },
+        progression: { verdict: "cannot-tell" as const, frameIds: [], note: "Short route." },
+        agency: { verdict: "cannot-tell" as const, frameIds: [], note: "No choice." },
+        playability: { verdict: "yes" as const, frameIds: ["f1"], note: "Acts." },
+      };
+      yield* rounds.recordReview(root, opened.id, {
+        quality,
+        qualityRubricVersion: 1,
+        qualityCoverage: { rubricVersion: 1, assessed: 7, total: 7, unknowns: 4 },
+      });
+      // A later write that omits quality (mechanical checks, ballots) keeps
+      // the frozen assessment; the rubric version pins what it was judged on.
+      yield* rounds.recordReview(root, opened.id, {
+        checks: [{ id: "boot", status: "passed" as const }],
+      });
+      const stored = (yield* rounds.read(root)).rounds.find((entry) => entry.id === opened.id)!;
+      expect(stored.quality).toEqual(quality);
+      expect(stored.qualityRubricVersion).toBe(1);
+      expect(stored.qualityCoverage).toEqual({
+        rubricVersion: 1,
+        assessed: 7,
+        total: 7,
+        unknowns: 4,
+      });
+      // Legacy rounds simply have none of the fields: unknown, never met.
+      yield* rounds.stop(root, opened.id, "test stop");
+      const legacy = yield* rounds.begin(root, {});
+      yield* rounds.recordReview(root, legacy.id, {
+        checks: [{ id: "boot", status: "passed" as const }],
+      });
+      const legacyStored = (yield* rounds.read(root)).rounds.find(
+        (entry) => entry.id === legacy.id,
+      )!;
+      expect(legacyStored.quality).toBeUndefined();
+      expect(legacyStored.qualityRubricVersion).toBeUndefined();
+      expect(legacyStored.qualityCoverage).toBeUndefined();
     }),
   ),
 );

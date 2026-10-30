@@ -80,15 +80,19 @@ function fixture(
     refuseStop?: boolean;
     /** The newest loop stopped because a user edit blocked its rejection. */
     blockedByEdit?: boolean;
+    /** Newest-first rounds; defaults to three interrupted rounds without quality. */
+    rounds?: GameReviewRound[];
   } = {},
 ) {
   let stopped = 0;
   let restored = 0;
   const factsCalls: string[] = [];
   const stoppedByEdit = options.blockedByEdit === true;
-  const rounds = stoppedByEdit
-    ? [stoppedRound("three"), stoppedRound("two"), stoppedRound("one")]
-    : [round("three"), round("two"), round("one")];
+  const rounds =
+    options.rounds ??
+    (stoppedByEdit
+      ? [stoppedRound("three"), stoppedRound("two"), stoppedRound("one")]
+      : [round("three"), round("two"), round("one")]);
   const record = stoppedByEdit ? stoppedLoop : options.loop === undefined ? loop : options.loop;
   const layer = GameReviewApi.layer.pipe(
     Layer.provide(
@@ -276,6 +280,74 @@ describe("game review API", () => {
         "The child has not stopped.",
       );
     }).pipe(Effect.provide(fixture({ refuseStop: true }).layer)),
+  );
+  it.effect("status omits quality coverage when no round assessed it", () =>
+    Effect.gen(function* () {
+      const api = yield* GameReviewApi.GameReviewApi;
+      // No round assessed quality: the status carries no coverage, never a zero.
+      expect((yield* api.status(threadId)).qualityCoverage).toBeUndefined();
+    }).pipe(Effect.provide(fixture().layer)),
+  );
+  it.effect("status reports the newest frozen quality coverage", () =>
+    Effect.gen(function* () {
+      const api = yield* GameReviewApi.GameReviewApi;
+      const status = yield* api.status(threadId);
+      expect(status.qualityCoverage).toEqual({
+        rubricVersion: 1,
+        assessed: 7,
+        total: 7,
+        unknowns: 4,
+      });
+    }).pipe(
+      Effect.provide(
+        fixture({
+          rounds: [
+            {
+              ...round("four"),
+              qualityRubricVersion: 1,
+              qualityCoverage: { rubricVersion: 1, assessed: 7, total: 7, unknowns: 4 },
+            },
+            round("three"),
+          ],
+        }).layer,
+      ),
+    ),
+  );
+  it.effect("history returns the frozen quality coverage with the round", () =>
+    Effect.gen(function* () {
+      const api = yield* GameReviewApi.GameReviewApi;
+      const history = yield* api.history({ threadId, limit: 5 });
+      expect(history.rounds).toHaveLength(1);
+      expect(history.rounds[0]?.round.qualityCoverage).toEqual({
+        rubricVersion: 1,
+        assessed: 7,
+        total: 7,
+        unknowns: 7,
+      });
+      expect(history.rounds[0]?.round.qualityRubricVersion).toBe(1);
+    }).pipe(
+      Effect.provide(
+        fixture({
+          rounds: [
+            {
+              ...round("one"),
+              qualityRubricVersion: 1,
+              qualityCoverage: { rubricVersion: 1, assessed: 7, total: 7, unknowns: 7 },
+            },
+          ],
+        }).layer,
+      ),
+    ),
+  );
+  it.effect("history leaves legacy rounds without quality unknown", () =>
+    Effect.gen(function* () {
+      const api = yield* GameReviewApi.GameReviewApi;
+      const history = yield* api.history({ threadId, limit: 5 });
+      for (const entry of history.rounds) {
+        expect(entry.round.quality).toBeUndefined();
+        expect(entry.round.qualityCoverage).toBeUndefined();
+      }
+    }).pipe(Effect.provide(fixture().layer)),
   );
 });
 

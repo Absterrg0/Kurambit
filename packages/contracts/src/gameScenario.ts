@@ -178,6 +178,141 @@ export const GameScenarioObservation = Schema.Struct({
   ),
 });
 export type GameScenarioObservation = typeof GameScenarioObservation.Type;
+/**
+ * One runtime layout probe hit during a scenario run. `kind` separates
+ * definite geometry (`clip` and `viewport`: the control is provably outside
+ * its visible area or the native viewport) from `overlap-risk` (a later
+ * sibling covers enough area to matter, but transparency can hide paint, so
+ * geometry alone never proves visual occlusion). Native headless pixels are
+ * the game's own layout at its logical size, never the exported Web build, so
+ * a finding is a hint for where to look with Web frames, never a Web verdict.
+ */
+export const GameScenarioLayoutKind = Schema.Literals(["clip", "viewport", "overlap-risk"]);
+export type GameScenarioLayoutKind = typeof GameScenarioLayoutKind.Type;
+export const GameScenarioLayoutFinding = Schema.Struct({
+  kind: GameScenarioLayoutKind,
+  /** The control, e.g. `Button "Cook"`. */
+  subject: Schema.String,
+  /** What the probe measured, in the checker's wording. */
+  detail: Schema.String,
+  /** Scene-tree path of the control in the running game. */
+  nodePath: Schema.String,
+  /** Runner scenario frame when the probe ran. */
+  scenarioFrame: Schema.Int,
+  /** Route step whose boundary the probe followed, or null for the boot probe. */
+  step: Schema.NullOr(Schema.Int),
+  /** Native viewport the probe measured against. */
+  viewport: Schema.Struct({ width: Schema.Number, height: Schema.Number }),
+});
+export type GameScenarioLayoutFinding = typeof GameScenarioLayoutFinding.Type;
+/**
+ * How much of the route runtime layout actually inspected. The probes are a
+ * small bounded sample near input step boundaries and gameplay baselines, not
+ * a full-route proof: `omittedProbes` counts scheduled probes skipped by the
+ * finding cap, and `truncated` says a cap stopped the scan. Absence of
+ * findings never means full coverage.
+ */
+export const GameScenarioLayoutCoverage = Schema.Struct({
+  probes: Schema.Int,
+  omittedProbes: Schema.Int,
+  inspectedControls: Schema.Int,
+  pairs: Schema.Int,
+  truncated: Schema.Boolean,
+  viewport: Schema.Struct({ width: Schema.Number, height: Schema.Number }),
+});
+export type GameScenarioLayoutCoverage = typeof GameScenarioLayoutCoverage.Type;
+export const GameScenarioLayout = Schema.Struct({
+  findings: Schema.Array(GameScenarioLayoutFinding),
+  coverage: GameScenarioLayoutCoverage,
+});
+export type GameScenarioLayout = typeof GameScenarioLayout.Type;
+/**
+ * One bounded runtime spatial snapshot: the player-group origin and
+ * built-in body velocity plus nearby Area2D/Area3D collision-shape bounds in
+ * world coordinates. Portable measurements only, never a verdict engine:
+ * rotated and non-box bounds are conservative axis-aligned boxes, and a
+ * point-in-box test never means an entire body is inside or that any game
+ * trigger fired. Native headless geometry may diverge from Web cadence and
+ * runtime, so these numbers are never Web telemetry or quality facts.
+ */
+export const GameScenarioSpatialPlayer = Schema.Struct({
+  /** True when a `player`-group node existed at the probe. */
+  present: Schema.Boolean,
+  /** World origin as [x, y] or [x, y, z], null when absent or non-spatial. */
+  position: Schema.NullOr(Schema.Array(Schema.Number)),
+  /** Built-in CharacterBody/RigidBody velocity as [x, y] or [x, y, z]; null otherwise. */
+  velocity: Schema.NullOr(Schema.Array(Schema.Number)),
+  /** Engine node class (e.g. CharacterBody2D) or null when absent. */
+  bodyKind: Schema.NullOr(Schema.String),
+});
+export type GameScenarioSpatialPlayer = typeof GameScenarioSpatialPlayer.Type;
+export const GameScenarioSpatialBounds = Schema.Struct({
+  kind: Schema.Literals(["rect2", "aabb3", "unknown"]),
+  /** World min as [x, y] or [x, y, z]; null when unknown. */
+  min: Schema.NullOr(Schema.Array(Schema.Number)),
+  /** World max as [x, y] or [x, y, z]; null when unknown. */
+  max: Schema.NullOr(Schema.Array(Schema.Number)),
+});
+export type GameScenarioSpatialBounds = typeof GameScenarioSpatialBounds.Type;
+export const GameScenarioSpatialShape = Schema.Struct({
+  /** Scene-tree path of the CollisionShape node in the running game. */
+  nodePath: Schema.String,
+  /** Engine shape class (e.g. RectangleShape2D, BoxShape3D) or unknown/none. */
+  shapeKind: Schema.String,
+  /** True when the CollisionShape node is disabled. */
+  disabled: Schema.Boolean,
+  /** Conservative world AABB; unknown when the shape type is unsupported. */
+  bounds: GameScenarioSpatialBounds,
+  /** True for rotated or non-box bounds: the box may over-cover. */
+  conservative: Schema.Boolean,
+  /**
+   * Whether the probed player origin sat inside this shape's world bounds.
+   * Null when the player was absent, the bounds are unknown, or dimensions
+   * mismatch. Never means an entire body is inside or a game trigger fired.
+   */
+  containsPlayerOrigin: Schema.NullOr(Schema.Boolean),
+});
+export type GameScenarioSpatialShape = typeof GameScenarioSpatialShape.Type;
+export const GameScenarioSpatialArea = Schema.Struct({
+  /** Scene-tree path of the Area node in the running game. */
+  nodePath: Schema.String,
+  /** Engine class: Area2D or Area3D. */
+  type: Schema.String,
+  monitoring: Schema.Boolean,
+  monitorable: Schema.Boolean,
+  visible: Schema.Boolean,
+  shapes: Schema.Array(GameScenarioSpatialShape),
+});
+export type GameScenarioSpatialArea = typeof GameScenarioSpatialArea.Type;
+export const GameScenarioSpatialSnapshot = Schema.Struct({
+  /** Runner scenario frame when the probe ran. */
+  scenarioFrame: Schema.Int,
+  /** Route step whose boundary the probe followed, or null for the boot probe. */
+  step: Schema.NullOr(Schema.Int),
+  player: GameScenarioSpatialPlayer,
+  areas: Schema.Array(GameScenarioSpatialArea),
+});
+export type GameScenarioSpatialSnapshot = typeof GameScenarioSpatialSnapshot.Type;
+/**
+ * How much of the scene the spatial probes actually inspected. Bounded and
+ * honest: truncated says a cap stopped the scan, skippedFreed counts nodes
+ * that vanished mid-scan, and absence of areas never means full coverage.
+ */
+export const GameScenarioSpatialCoverage = Schema.Struct({
+  snapshots: Schema.Int,
+  omittedSnapshots: Schema.Int,
+  visitedNodes: Schema.Int,
+  areas: Schema.Int,
+  shapes: Schema.Int,
+  skippedFreed: Schema.Int,
+  truncated: Schema.Boolean,
+});
+export type GameScenarioSpatialCoverage = typeof GameScenarioSpatialCoverage.Type;
+export const GameScenarioSpatial = Schema.Struct({
+  snapshots: Schema.Array(GameScenarioSpatialSnapshot),
+  coverage: GameScenarioSpatialCoverage,
+});
+export type GameScenarioSpatial = typeof GameScenarioSpatial.Type;
 export const GameScenarioEvidence = Schema.Struct({
   id: Schema.String,
   /** Physics frames the route ran, including boot and step frames. */
@@ -200,6 +335,23 @@ export const GameScenarioEvidence = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   invalidActions: Schema.Array(Schema.String),
   observations: Schema.Array(GameScenarioObservation),
+  /**
+   * Bounded runtime layout probes sampled near input step boundaries, when
+   * the runner was asked to inspect layout. Additive diagnostics only: the
+   * state exam grades observations, never these findings, so uncertain
+   * overlap geometry cannot fail a mechanics gate. Absent on older runs and
+   * on runs that did not probe; absence never means fully covered.
+   */
+  layout: Schema.optionalKey(GameScenarioLayout),
+  /**
+   * Bounded runtime spatial snapshots (player origin/velocity plus Area
+   * collision-shape world bounds) sampled at the same probe schedule, when
+   * the runner was asked to record them. Additive measurements only: the
+   * state exam grades observations, never this geometry. Absent on older
+   * runs and on runs that did not probe; absence never means fully covered.
+   * Native headless geometry may diverge from Web cadence and runtime.
+   */
+  spatial: Schema.optionalKey(GameScenarioSpatial),
 });
 export type GameScenarioEvidence = typeof GameScenarioEvidence.Type;
 export const GameScenarioCriterionStatus = Schema.Literals([

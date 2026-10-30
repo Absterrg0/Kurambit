@@ -48,3 +48,7 @@ node_modules/
 apps/server/templates/*/godot/.godot/
 apps/server/templates/*/godot/**/*.import
 apps/server/templates/*/godot/**/*.uid
+
+# Emberward export and import cache
+/builds/
+/godot/.godot/

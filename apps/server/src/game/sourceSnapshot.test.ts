@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Snapshot tests use real temporary source trees.
 import { expect, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeFS from "node:fs";
+import { vi } from "vite-plus/test";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
@@ -33,7 +35,60 @@ const knownId = async (root: string) => {
   return snapshot.sourceId;
 };
 
-it.effect("hashes paths, sizes and mtimes so additions, edits and deletions all change it", () =>
+it.effect("an already cancelled source read never returns a freshness claim", () =>
+  withTree((root) =>
+    Effect.promise(async () => {
+      const controller = new AbortController();
+      const reason = new Error("cancelled before the scan");
+      controller.abort(reason);
+      await expect(snapshotBuildSource(root, "godot", { signal: controller.signal })).rejects.toBe(
+        reason,
+      );
+    }),
+  ),
+);
+
+it.effect.skipIf(!NodeFS.existsSync("/proc/self/fd"))(
+  "cancellation after opening a real source file closes its descriptor",
+  () =>
+    withTree((root) =>
+      Effect.promise(async () => {
+        const descriptors = () =>
+          NodeFS.readdirSync("/proc/self/fd").flatMap((fd) => {
+            try {
+              const target = NodeFS.readlinkSync(`/proc/self/fd/${fd}`);
+              return target.startsWith(root + NodePath.sep) ? [target] : [];
+            } catch {
+              return [];
+            }
+          });
+        const controller = new AbortController();
+        const reason = new Error("cancelled during the opened read");
+        const subscribe = controller.signal.addEventListener.bind(controller.signal);
+        let opened: string[] = [];
+        const registration = vi
+          .spyOn(controller.signal, "addEventListener")
+          .mockImplementation((type, listener, options) => {
+            subscribe(type, listener, options);
+            if (type === "abort") {
+              opened = descriptors();
+              controller.abort(reason);
+            }
+          });
+        try {
+          await expect(
+            snapshotBuildSource(root, "godot", { signal: controller.signal }),
+          ).rejects.toBe(reason);
+          expect(opened).toContain(NodePath.join(root, "godot/project.godot"));
+          expect(descriptors()).toEqual([]);
+        } finally {
+          registration.mockRestore();
+        }
+      }),
+    ),
+);
+
+it.effect("hashes paths, sizes and contents so additions, edits and deletions all change it", () =>
   withTree((root) =>
     Effect.gen(function* () {
       const first = yield* Effect.promise(() => knownId(root));
@@ -56,6 +111,49 @@ it.effect("hashes paths, sizes and mtimes so additions, edits and deletions all 
       const deleted = yield* Effect.promise(() => knownId(root));
       expect(deleted).not.toBe(edited);
       expect(deleted).not.toBe(withExtra);
+    }),
+  ),
+);
+
+it.effect("detects a same-size edit even when the mtime is preserved", () =>
+  withTree((root) =>
+    Effect.gen(function* () {
+      const target = NodePath.join(root, "godot/scripts/main.gd");
+      // Pin a fixed mtime so the restore below is exact: both snapshots see
+      // the same truncated timestamp, the same way a preserved mtime would.
+      const pinned = 1_700_000_000;
+      yield* Effect.promise(() => NodeFSP.utimes(target, pinned, pinned));
+      const before = yield* Effect.promise(() => knownId(root));
+      const beforeStat = yield* Effect.promise(() => NodeFSP.stat(target));
+      // Same length, different bytes: the weak size/mtime identity calls this unchanged.
+      yield* Effect.promise(() => NodeFSP.writeFile(target, "extends Nope\n"));
+      yield* Effect.promise(() => NodeFSP.utimes(target, pinned, pinned));
+      const afterStat = yield* Effect.promise(() => NodeFSP.stat(target));
+      expect(afterStat.size).toBe(beforeStat.size);
+      expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
+      expect(yield* Effect.promise(() => knownId(root))).not.toBe(before);
+    }),
+  ),
+);
+
+it.effect("keeps the same identity for identical bytes with new mtimes, renames change it", () =>
+  withTree((root) =>
+    Effect.gen(function* () {
+      const before = yield* Effect.promise(() => knownId(root));
+      const target = NodePath.join(root, "godot/scripts/main.gd");
+      // Touch-only: same bytes, new mtime must not look like a source change.
+      const touchedAt = 1_600_000_000;
+      yield* Effect.promise(() => NodeFSP.utimes(target, touchedAt, touchedAt));
+      expect(yield* Effect.promise(() => knownId(root))).toBe(before);
+      // Rewriting identical bytes (a copy) also keeps the identity.
+      const bytes = yield* Effect.promise(() => NodeFSP.readFile(target));
+      yield* Effect.promise(() => NodeFSP.writeFile(target, bytes));
+      expect(yield* Effect.promise(() => knownId(root))).toBe(before);
+      // A rename is a different input set even though no bytes changed.
+      yield* Effect.promise(() =>
+        NodeFSP.rename(target, NodePath.join(root, "godot/scripts/renamed.gd")),
+      );
+      expect(yield* Effect.promise(() => knownId(root))).not.toBe(before);
     }),
   ),
 );

@@ -67,7 +67,7 @@ func snapshot() -> Dictionary:
     // the landing frame without a third press after landing.
     steps: [
       { key: "Space", holdMs: 60 },
-      { waitMs: 550 },
+      { waitMs: 900 },
       { key: "Space", holdMs: 60 },
       { waitMs: 900 },
       { screenshot: "buffered-jump" },

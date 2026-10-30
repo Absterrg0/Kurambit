@@ -356,6 +356,88 @@ it.live.skipIf(!available)(
 );
 
 it.live.skipIf(!available)(
+  "the 2d-screen template proves choices, listening, content, win and loss",
+  () =>
+    withGame(
+      {
+        name: "Screen routes",
+        template: "2d-screen",
+        planFirst: true,
+        criteria: [
+          {
+            id: "choose-reply",
+            kind: "control",
+            text: "Keys 1 to 3 choose a reply",
+            observe: { key: "choices", expect: ">=1" },
+          },
+          {
+            id: "hear-them-out",
+            kind: "control",
+            text: "Holding L hears the caller out",
+            observe: { key: "listened", expect: ">=1" },
+          },
+          {
+            id: "warm-trust",
+            kind: "mechanic",
+            text: "A warm reply raises trust",
+            observe: { key: "trust", expect: ">=3" },
+          },
+          {
+            id: "answer-all",
+            kind: "content",
+            text: "All five callers are answered",
+            observe: { key: "calls", expect: ">=5" },
+          },
+          {
+            id: "hold-the-shift",
+            kind: "win",
+            text: "The shift ends with trust intact",
+            observe: { key: "won", expect: "==1" },
+          },
+          {
+            id: "three-colds",
+            kind: "lose",
+            text: "Three cold replies end the shift",
+            observe: { key: "state", expect: "==4" },
+          },
+        ],
+      },
+      ({ game, threadId }) =>
+        Effect.gen(function* () {
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          expect(result.summary).toMatchObject({ mode: "criteria", passed: true });
+          expect(
+            result.summary.criteria.map((criterion) => [criterion.id, criterion.status]),
+          ).toEqual([
+            ["choose-reply", "passed"],
+            ["hear-them-out", "passed"],
+            ["warm-trust", "passed"],
+            ["answer-all", "passed"],
+            ["hold-the-shift", "passed"],
+            ["three-colds", "passed"],
+          ]);
+          expect(result.summary.coverage).toEqual([
+            { kind: "control", proven: 2, failed: 0, missing: 0 },
+            { kind: "mechanic", proven: 1, failed: 0, missing: 0 },
+            { kind: "content", proven: 1, failed: 0, missing: 0 },
+            { kind: "win", proven: 1, failed: 0, missing: 0 },
+            { kind: "lose", proven: 1, failed: 0, missing: 0 },
+          ]);
+          const win = result.summary.criteria.find(
+            (criterion) => criterion.id === "hold-the-shift",
+          );
+          expect(win?.provenBy?.scenario).toBe("full-run");
+          const lose = result.summary.criteria.find((criterion) => criterion.id === "three-colds");
+          expect(lose?.provenBy?.scenario).toBe("lose-run");
+          return result;
+        }),
+    ),
+  { timeout: 240_000 },
+);
+
+it.live.skipIf(!available)(
   "a still route never qualifies, even though the game is playing",
   () =>
     withGame(
@@ -1146,6 +1228,70 @@ it.live.skipIf(!available)(
           expect(result.scenarios).toEqual([]);
           expect(result.errors.join(" ")).toContain("not an input action");
           expect(result.errors.join(" ")).toContain("Unknown scenario key");
+          return result;
+        }),
+    ),
+  { timeout: 60_000 },
+);
+
+it.live.skipIf(!available)(
+  "an input-driven scene change frees the old main scene",
+  () =>
+    withGame(
+      {
+        name: "menu exit fixture",
+        planFirst: true,
+        controlOnly: true,
+        mainScript: `extends Control
+
+func _ready() -> void:
+\tGameState.state = 1
+
+func _physics_process(_delta: float) -> void:
+\tif Input.is_action_just_pressed("jump"):
+\t\tget_tree().change_scene_to_file("res://second.tscn")
+
+func _exit_tree() -> void:
+\tGameState.menu_exits += 1
+`,
+        stateScript: "extends Node\nvar state := 0\nvar menu_exits := 0\n",
+        scenarios: {
+          "menu-exit": { id: "menu-exit", steps: [{ press: "jump" }, { wait: 30 }] },
+        },
+        criteria: [
+          {
+            id: "menu-frees",
+            kind: "mechanic",
+            text: "The menu scene exits when play starts",
+            observe: { key: "menu_exits", expect: ">=1" },
+          },
+        ],
+      },
+      ({ root, game, threadId }) =>
+        Effect.gen(function* () {
+          // The second scene lives beside the menu only for this regression:
+          // it is the scene the menu changes to, not a template change.
+          yield* Effect.promise(async () => {
+            await NodeFSP.writeFile(
+              NodePath.join(root, "godot/second.tscn"),
+              `[gd_scene load_steps=2 format=3]\n\n[ext_resource type="Script" path="res://second.gd" id="1_second"]\n\n[node name="Second" type="Control"]\nscript = ExtResource("1_second")\n`,
+            );
+            await NodeFSP.writeFile(NodePath.join(root, "godot/second.gd"), "extends Control\n");
+          });
+          const result = yield* game.scenariosRun(threadId);
+          expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+          expect(result.ok, JSON.stringify(result.summary)).toBe(true);
+          const run = result.scenarios[0]!;
+          expect(run.error).toBeNull();
+          const exits = run.observations.find((observation) => observation.key === "menu_exits");
+          // Without current_scene the unmanaged menu is never freed, so its
+          // _exit_tree only runs after the result is written and the route
+          // observes 0. With the lifecycle fix the scene change frees the
+          // menu first and the input observes the exit.
+          expect(exits?.last).toBeGreaterThanOrEqual(1);
+          expect(
+            result.summary.criteria.find((criterion) => criterion.id === "menu-frees")?.status,
+          ).toBe("passed");
           return result;
         }),
     ),

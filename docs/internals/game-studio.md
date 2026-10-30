@@ -91,15 +91,29 @@ test keeps it in step with the folders.
 
 We evaluated ahujasid/mcp-for-blender, hi-godot/godot-ai and Coding-Solo/godot-mcp (all MIT):
 
-- mcp-for-blender drives a GUI Blender through an addon socket on a fixed port. That is not
-  project-bound, and its useful core is "run bpy code".
+- mcp-for-blender drives a GUI Blender through an addon socket. Its current addon explicitly
+  refuses background mode because commands depend on Blender's UI event loop. Its port is
+  configurable; an adapter would still need to own the session, bind it to a game and join it
+  on cancellation.
 - godot-ai needs a running editor, a plugin, and a Python bridge on fixed ports.
 - godot-mcp is the closest fit (headless CLI plus a GDScript ops script), but bundling it means a
   second MCP server configured separately for every provider.
 
-The small set of headless, project-bound operations we need (run a bpy script, import, run a
-GDScript test, export, serve, playtest) is cheaper to own than to adapt. Revisit this if we need
-live editor manipulation.
+The unattended path keeps one headless process per operation so a game owns its outputs and
+cancellation. The [2.2.4 addon](https://github.com/ahujasid/mcp-for-blender/blob/main/addon.py)
+also provides scene inspection and asset-library integrations, which remain useful candidates
+for interactive authoring. Upstream library content reaches games a different way:
+`game_library_search/get` read the keyless Poly Haven public API
+([overview](https://polyhaven.com/our-api), [terms](https://github.com/Poly-Haven/Public-API/blob/master/ToS.md),
+assets [CC0](https://polyhaven.com/license)) with the required app User-Agent and a visible
+credit, and `game_library_import_model/material` stream the pinned 1k files with size and
+MD5 checks before any byte lands, then publish them for the native engine import. Models
+stay raw glTF beside their textures; PBR materials become StandardMaterial3D resources built
+by a headless Godot script, never handwritten `.tres` text. Adopting the addon's own
+integrations would still require a managed GUI or virtual-display session, not replacing
+the existing exporter with another CLI call. Exported
+bytes are inspected with the glTF-Transform SDK (MIT), and sprite animations are built with
+Godot's native SpriteFrames and AtlasTexture resources rather than handwritten formats.
 
 ## Processes are owned and bounded
 
@@ -117,12 +131,27 @@ without reading log files. Full output stays in `<game>/builds/logs/`.
 ## Assets keep their source
 
 A Blender asset is the triple `.blend` source, bpy script, and exported `.glb`, recorded in
-`game.json`. Godot imports only `godot/`, so it never sees `.blend` files. A revision re-exports to
+`game.json` with the run's optional named `inputs` (supplied game-local `.gltf`/`.glb`/image
+sources, recorded only). Godot imports only `godot/`, so it never sees `.blend` files. A revision re-exports to
 the same `.glb` path, which keeps Godot's import UIDs and every scene reference stable. "Used by" is
 derived by scanning scenes and scripts for the export's `res://` path, not stored, so it cannot go
 stale. `game_blender_run` edits the existing `.blend` unless the agent passes `reset`, in which
 case the script rebuilds the asset from an empty scene. Only the latest script is kept in
 `art/scripts/`; the `.blend` is the editable source of truth and git holds the history.
+Named inputs are staged reads exposed as `ASSET_INPUTS[name]` and packed into the saved `.blend`,
+so removing scratch files never breaks later revisions. A `.gltf` source keeps its
+percent-encoded dependency URIs verbatim in an SDK resource map (NodeIO decodes them
+against the source directory, so `mesh%20data.bin` and contained `../textures` parents
+resolve when they stay inside the game); remote, escaping and symlink-file sources are
+rejected. Direct images, glTF dependencies/data URIs and embedded GLB textures share one
+decoded-pixel budget (16 MP per image, 32 MP total): headers reject oversized images before
+any pixel decode, and a bound failure lands before Blender so live files never move. A
+revision without new inputs keeps the previous input trace; `reset` without new inputs
+starts a fresh source and clears it. Blender writes staged copies under `builds/logs/` and the service publishes them only after the
+export parses as a GLB, so a failed or cancelled run keeps the last good triple. The optional
+`artProfile` in `game.json` (palette roles, standing height) is applied on export and judged in
+the result warnings. `art/previews/contact_sheet.png` compares up to the latest 64 thumbnails;
+older assets remain available individually, and a truncated sheet is reported in the result.
 
 ## Preview and playtest
 
@@ -142,6 +171,12 @@ or a selected build change may reset the game. Play keeps the selected immutable
 sources differ; only Rebuild or an accepted repair changes selection. A missing artifact is an
 explicit error, never permission to publish the current repair sources. Legacy games without a
 selected-build record can still publish their first build.
+
+Exploration (`game_explore_start/act/close/replay`) is the builder's short act/observe loop on
+one frozen export: a single live browser per host stays paused between calls, acts serialize
+without holding the game's operation lock, and closing (or idle/wall-clock expiry) saves a
+server-owned trace outside the game. Nothing explored qualifies; only a fresh replay of the saved
+sequence against the same verified bytes counts, and only for the traced steps.
 
 ## Qualification is server-owned
 
@@ -211,27 +246,43 @@ decides when the game realises the brief. Reviews use the originating game's fro
 provider/model by default; unavailable credentials mean unavailable review, never a substitute
 model. Critic and comparison children start with fresh evidence-only context. The critic can test
 hypotheses through bounded headless `game_try_input` calls on the frozen build and viewport.
+Report tools interrupt the reviewer after persisting its valid answer; that terminal status is
+completion, not cancellation.
 Server-captured frames extend its hashed round evidence and are valid citations. Comparison ballots
 remain blind and frozen-evidence-only; they cannot call `game_try_input` or the read-only recipe
 tools. Builders, repair children and critics can search the static recipe catalog for a mechanism
-or fix; retrieval reads no game and starts no work. Builders and repair children
+or fix; retrieval reads no game and starts no work. Free text ranks token overlap over titles,
+tags, aliases and intent, so a brief's own sentence finds its mechanism; structured filters
+stay exact tags. Builders and repair children
 can use `game_try_input` before `game_submit`. Repairs write in place,
-one at a time, within three repairs or forty-five minutes. Opposite-order ballots and identical-build
-controls reduce position bias and must tie. Both ballots must prefer the challenger overall,
+one at a time, within three repairs or forty-five minutes. The two blind opposite-order ballots run
+concurrently; neither can promote alone. Identical-build controls reduce position bias and must tie.
+Both ballots must prefer the challenger overall,
 or both must judge more listed defects fixed on the challenger without both reporting something
 worse there. Each ballot receives the critic's defect list and cites frames for each fix and
 regression. Mechanical regressions and preservation items judged lost on the challenger in both
 orders still block promotion. Facets inform the overall judgment; one ballot's preservation loss
 is a note, and unknown is neutral.
 The critic judges boot, input response, visible core action and state readability through typed
-fundamentals. A cited negative judgment creates a blocker. Per-input before/after pairs carry
+fundamentals. A cited negative judgment creates a blocker. When an approved design binds, the
+evidence also carries its bounded acceptance as DESIGN_REQUIREMENTS.md plus a structured
+DESIGN_REQUIREMENTS.json, and the repair prompt carries the same lines, so unmet presentation
+promises reach the critic as defects and the repair; legacy games without an approved design
+review as before. The critic assesses every frozen requirement exactly once with
+yes/no/cannot-tell and frame citations; missing, duplicate or unknown ids fail validation for
+a retry, cannot-tell stays neutral and never counts as met, and each unmet promise also
+becomes a frame-backed repair defect even when omitted from defects. The frozen round's
+requirements bind repair and both anonymous ballots, so a later approval edit cannot rewrite
+the review. Judgments must name the actual behavior or visual subject and use before/after or
+game_try_input evidence for stateful promises; a lit counter or glowing bulb does not prove
+illuminated surfaces and a jumps count does not prove coyote or buffering timing. Per-input before/after pairs carry
 exact steps, sampled pixel deltas and bridge changes; up to four complete pairs replace loose
 frames. Ballots see each pair as one labelled side-by-side card, while both original captures stay
 in the hashed evidence for citation. Each check also takes one boot+burst capture in a differently
 shaped window from the one the route played in (900×900 for a wide window, 1280×720 otherwise),
 labelled with its size, so letterboxing, clipping and overflow are visible; it is evidence, never a
-gate, and the evidence manifest carries every frame's capture size. Movement, HUD text matching and
-scenario completion never veto this review loop.
+gate, and the evidence manifest carries every frame's capture size. Movement and HUD text matching
+alone are not quality verdicts. A recorded failed playtest of the exact build blocks promotion.
 A pairwise improvement does not certify every presentation claim.
 
 A review has one origin: the builder's `game_submit`. The builder names the export it stands
@@ -239,7 +290,9 @@ behind (default: the latest one), and the server checks only facts before record
 declaration and publishing that build: the build directory exists, its bytes hash to the id they
 are addressed by, the export record names that build, and the playtest recorded against those
 exact bytes booted, logged no console errors and executed real input steps. A refusal lists the
-failed checks and leaves the selection alone. When the turn ends, the loop starts on the turn's
+failed checks and leaves the selection alone. Submission and review admission also require the
+current engine inputs to match the export; design-note edits do not invalidate it. A stale source
+tree cannot start a review, while the last selected artifact remains playable. When the turn ends, the loop starts on the turn's
 last accepted submission. A turn with no submission falls back to its own latest export
 only when the same facts pass. The derived playable completion no longer gates review; it stays a
 status display. A repair child submits the same way, and its note (which defects it believes it
@@ -269,6 +322,11 @@ retain legacy judgements; the frozen grader and historical aggregates keep their
 console errors. It launches its own browser without the SOCKS proxy that `html_preview` uses,
 because it only ever loads the game's own loopback server. Do not merge it into
 `htmlRender/headlessChrome.ts`: that launcher's proxy and sandbox flags protect untrusted HTML.
+Playback uses the installed Playwright clock so capture latency cannot lengthen recorded holds.
+Boot and the pause-bridge check run before the clock pauses; only explicit input durations advance
+it afterward. Review replays legacy wall-time passes instead of comparing them with controlled-clock
+candidates, while a stored failed qualification still blocks promotion. Engine bootstrap can still
+shift the physics phase, so controlled playback is not a claim of exact cross-run determinism.
 
 Booting is not a verdict. The playtest downsamples the boot frame and the after-steps frame and
 requires a visible difference when steps were given, so an inert game fails instead of passing on a
@@ -339,6 +397,9 @@ a real shape, because a decorative shape nested elsewhere does not move the body
 declares no gameplay scene has its check run only the main scene, and the warning says so rather
 than implying gameplay was exercised.
 `game_scene_inspect` dumps a scene's node tree when the wiring, not the code, is the problem.
+`game_godot_api` queries the installed engine's ClassDB for one class with bounded signatures,
+properties, signals, constants and inheritance; it runs headless in an isolated scratch project,
+never loads the game's scenes, and covers engine classes only.
 
 Agents stop after a current playable export and ordinary-input playtest, returning the preview
 URL. The server starts bounded review only after the run that produced that export completes;

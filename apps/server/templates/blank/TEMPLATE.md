@@ -38,6 +38,10 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
 - Keep the Web export single-threaded, so preview and playtest need no COOP/COEP
   headers.
 
+Before building, write the 3–5 step build plan in DESIGN.md's Milestones: core playable
+first with a first playable checkpoint early, then content, then presentation. Each step
+names the acceptance ids it proves and the proof you will run.
+
 ## Conventions
 
 - GDScript only, typed where practical, one script per scene or system.
@@ -51,6 +55,12 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
 - The probe also answers the stage's `studio-visibility` messages: while the stage tab
   is hidden it pauses the scene tree and mutes the master audio bus, then restores what
   it found. Keep that half of the bridge as well.
+
+## Recipes
+
+Start with `state.world`, `read.hud` and `audio.feedback` — fetch one with
+`game_recipe_get`, then adapt its mechanism to the game you are building. Search
+with `game_recipe_search` when the id does not cover the problem.
 
 ## Tests
 

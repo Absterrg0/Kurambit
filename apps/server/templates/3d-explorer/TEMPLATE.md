@@ -4,7 +4,8 @@ This game started from the **3D Explorer** template: a complete third-person exp
 game in Godot 4.7 (Compatibility renderer, GDScript only) that runs in the editor, on
 Linux, and in the single-threaded Web export. It is a real game — menu, HUD, pause,
 settings, relics, a hazard, checkpoints, a locked gate, win and lose screens — and every
-system below is meant to be extended, not replaced.
+system below is a reference implementation: reuse what fits the design, adapt or
+cut the rest.
 
 Play it with `game_preview` / `game_run_native`, test it with
 `game_godot_test { script: "tests/smoke_test.gd" }`.
@@ -118,6 +119,10 @@ below the bridge deck, because standing on the bridge must never count as standi
 
 ## Recipes
 
+Start with `read.onboarding`, `state.world` and `read.hud` — fetch one with
+`game_recipe_get`, then adapt its mechanism to this game's controls and look. Search
+with `game_recipe_search` when the id does not cover the problem.
+
 **Another level.** Copy `scenes/levels/level_01.tscn`, keep the container names, and point
 `scenes/game.tscn`'s `Level` node at the new scene. Nothing else changes: `Game` asks
 `Level` for the spawn point, the relic list and the goal.
@@ -201,7 +206,11 @@ autoloads exist, so only the runtime-loaded harness can name `GameState`. Add ch
 `_check_*(…)` helpers in the harness and call them from `run()`; keep the entry point
 alone. The harness drives the real loop — synthetic input for movement, jump and pause
 (`Input.parse_input_event`), teleports for content checks — and exits nonzero with a list
-of failures. Extend it whenever you add a system: it is the fastest way to prove a change
+of failures. Adapt the harness to the design: rewrite counts, drop checks for cut
+systems, and keep meaningful checks for everything retained and promised. The shipped
+relic totals and gate flow test the reference game only, never a new design. Never lower
+a threshold or skip a check to make green: tie every harness change to DESIGN.md
+acceptance. Extend it whenever you add a system: it is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
 
 ## Acceptance criteria
@@ -215,7 +224,12 @@ a real `lose` observes the value the run ends at, not `changes`; a game with no 
 writes a `lose` criterion with `"noLoseState": true` and no observe instead. `presentation`
 claims have no observe and wait for the visual stage.
 
-Two examples per kind for this template (pick 5–12 total in the real design):
+Before building, write the 3–5 step build plan in DESIGN.md's Milestones: core playable
+first with a first playable checkpoint early, then content, then presentation. Each step
+names the acceptance ids it proves and the proof you will run.
+
+Two examples per kind for this template (pick 5–12 total in the real design;
+numbers below are the reference game's, not requirements):
 
 - control: `{ "id": "move-and-jump", "kind": "control", "text": "WASD moves and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }`
 - control: `{ "id": "reach-first-relic", "kind": "control", "text": "Walking the path reaches the first relic", "observe": { "key": "collected", "expect": ">=1" } }`
@@ -232,21 +246,29 @@ Two examples per kind for this template (pick 5–12 total in the real design):
 
 ## Acceptance scenarios
 
-`godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
-the main menu, collects all five relics, and walks into the unlocked gate.
-`godot/tests/scenarios/lose-run.json` is its adverse twin: it walks and hops into the lava
-pool three times, spending all three lives through normal input. Keep both routes working
-when you change a level or the controller, and add a route rather than weakening one when
-new content needs its own playthrough. It is data, not
-code — `press`, `hold` and `wait` steps using this project's InputMap actions. Extend it
-when you add a relic, level or platform: the server runs it under real physics and grades
+`godot/tests/scenarios/full-run.json` starts at the main menu, collects all five
+relics, and walks into the unlocked gate; `godot/tests/scenarios/lose-run.json`
+is its adverse twin: it walks and hops into the lava pool three times, spending
+all three lives through normal input. Both files are game-owned route data copied
+from the reference game, not server-owned law. Server-owned is the verification
+policy (the canonical `res://tests/smoke_test.gd` suite path, the gameplay scene,
+and the probe obligation, persisted server-side and changed only by an explicit
+creator action) plus the approved DESIGN.md observations that
+`game_scenarios_run` grades. Adapt the routes to this game's scope: rewrite steps,
+counts and levels, drop mechanics the design cuts, and keep meaningful coverage of
+everything retained and promised. The reference game keeps both routes; a new game
+keeps routes for what it keeps. Never weaken a route or lower a threshold to make
+green, and never silently drop coverage for retained behavior: tie every change to
+DESIGN.md acceptance. It is data, not
+code — `press`, `hold` and `wait` steps using this project's InputMap actions. The server runs it under real physics and grades
 the approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks
 in the smoke harness; a scenario proves the whole game can be finished, not that one
 mechanic works in isolation. Do not teleport, call game methods or write GameState from a
 route.
 
 Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
-the failing criterion). The template route collects the Sunstone, Tideglass, Verdant Idol
+the failing criterion). The shipped template route collects the Sunstone, Tideglass, Verdant Idol
 and Sky Shard on the east/north side, then crosses to Emberheart and the gate; the lose
-route approaches the lava from the east and jumps in three times. Keep the jump timings in
-step with actual physics rather than moving collectibles onto the path.
+route approaches the lava from the east and jumps in three times. Those timings describe
+the reference level only: retune them to this game's actual physics and maps rather than
+keeping reference content or moving collectibles onto the old path.

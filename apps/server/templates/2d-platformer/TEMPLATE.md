@@ -4,7 +4,8 @@ This game started from the **2D Platformer** template: a two-level side-scroller
 Godot 4.7 (Compatibility renderer, GDScript only) that runs in the editor, on Linux and
 in the single-threaded Web export. It is a real game — menu, HUD, pause, settings,
 coins, a patrolling enemy, spikes, checkpoints, a goal door, level progression, win and
-lose screens — and every system below is meant to be extended, not replaced.
+lose screens — and every system below is a reference implementation: reuse what fits
+the design, adapt or cut the rest.
 
 Play it with `game_preview` / `game_run_native`, test it with
 `game_godot_test { script: "tests/smoke_test.gd" }`.
@@ -123,6 +124,10 @@ origin is the ground line under their feet.
 
 ## Recipes
 
+Start with `loop.platformer`, `feel.coyote` and `read.onboarding` — fetch one with
+`game_recipe_get`, then adapt its mechanism to this game's physics and art. Search
+with `game_recipe_search` when the id does not cover the problem.
+
 **Another level.** The fast way is to paint one: duplicate `level_01.tscn`, keep the
 container names, and paint with the TileSet — the tile meanings are in the tooltip of
 every tile ("grass top", "one-way plank", "spikes"), and the spikes need a hurt box, so
@@ -227,7 +232,13 @@ Two rules the checks teach, and that new ones have to respect:
   respawn delay cannot load a level or move the player in the new run. Copy the same
   guard for every new delay.
 
-Whenever you add a system, extend the harness: it is the fastest way to prove a change
+Whenever you add a system, extend the harness; whenever the design cuts or
+shrinks one, rewrite the harness to match: update counts, drop checks for cut
+mechanics, and keep meaningful checks for everything retained and promised. The
+shipped counts and mechanics (level-one coin and slime totals, wall jump, sprint,
+stomp, one-way, both levels) test the reference game only, never a new design.
+Never lower a threshold or skip a check to make green: tie every harness change to
+DESIGN.md acceptance. It is the fastest way to prove a change
 did not break the game, and the template's own quality bar comes from it.
 
 ## Acceptance criteria
@@ -241,7 +252,12 @@ or a real `lose` observes the value the run ends at, not `changes`; a game with 
 writes a `lose` criterion with `"noLoseState": true` and no observe instead. `presentation`
 claims have no observe and wait for the visual stage.
 
-Two examples per kind for this template (pick 5–12 total in the real design):
+Before building, write the 3–5 step build plan in DESIGN.md's Milestones: core playable
+first with a first playable checkpoint early, then content, then presentation. Each step
+names the acceptance ids it proves and the proof you will run.
+
+Two examples per kind for this template (pick 5–12 total in the real design;
+numbers below are the reference game's, not requirements):
 
 - control: `{ "id": "move-and-jump", "kind": "control", "text": "A and D move and Space jumps", "observe": { "key": "jumps", "expect": ">=1" } }`
 - control: `{ "id": "reach-second-level", "kind": "control", "text": "Clearing level one reaches level two", "observe": { "key": "level_index", "expect": ">=1" } }`
@@ -258,20 +274,28 @@ Two examples per kind for this template (pick 5–12 total in the real design):
 
 ## Acceptance scenarios
 
-`godot/tests/scenarios/full-run.json` is the server-owned completion route: it starts at
-the main menu, plays both levels with normal input and wins.
-`godot/tests/scenarios/lose-run.json` is its adverse twin: it walks and jumps into the
-first pit three times, spending all three lives through normal input. Keep both routes
-working when you change a level or the controller, and add a route rather than weakening
-one when new content needs its own playthrough. It is data, not code —
-`press`, `hold` and `wait` steps using this project's InputMap actions. Extend it when
-you add a level or change the route: the server runs it under real physics and grades the
+`godot/tests/scenarios/full-run.json` starts at the main menu, plays both levels
+with normal input and wins; `godot/tests/scenarios/lose-run.json` is its adverse
+twin: it walks and jumps into the first pit three times, spending all three lives
+through normal input. Both files are game-owned route data copied from the
+reference game, not server-owned law. Server-owned is the verification policy
+(the canonical `res://tests/smoke_test.gd` suite path, the gameplay scene, and the
+probe obligation, persisted server-side and changed only by an explicit creator
+action) plus the approved DESIGN.md observations that `game_scenarios_run`
+grades. Adapt the routes to this game's scope: rewrite steps, counts and levels,
+drop mechanics the design cuts (sprint, wall jump, stomp, second level), and keep
+meaningful coverage of everything retained and promised. The reference game keeps
+both routes; a new game keeps routes for what it keeps. Never weaken a route or
+lower a threshold to make green, and never silently drop coverage for retained
+behavior: tie every change to DESIGN.md acceptance. It is data, not code —
+`press`, `hold` and `wait` steps using this project's InputMap actions. The server runs it under real physics and grades the
 approved DESIGN.md observations with `game_scenarios_run`. Keep the interaction checks in
 the smoke harness; scenarios prove the whole game can be finished, not that a mechanic
 works in isolation. Do not teleport, call game methods or write GameState from a route.
 
 Tune a route by running it (`game_scenarios_run` returns frames, the values observed and
-the failing criterion). The 2D routes use the slime stomp at the first spike platform as a
+the failing criterion). The shipped 2D routes use the slime stomp at the first spike platform as a
 bounce, the high stone steps, and sprint jumps over the spike runs; the lose route uses the
-same early jumps and then walks into the first pit. Keep those timings in step with actual
-physics rather than shortening the level for the test.
+same early jumps and then walks into the first pit. Those timings describe the reference
+levels only: retune them to this game's actual physics and maps rather than keeping
+reference content or shortening a level to fit the old route.

@@ -1,12 +1,13 @@
-// @effect-diagnostics globalTimers:off globalDate:off -- Boot polling and kill escalation run on wall-clock timers; runs are interrupted through an AbortSignal.
-// @effect-diagnostics nodeBuiltinImport:off -- This module owns the browser process and the raw DevTools WebSocket boundary.
-import * as NodeChildProcess from "node:child_process";
+// @effect-diagnostics globalTimers:off globalDate:off -- Boot polling and the pause-bridge sleeps run on wall-clock timers; runs are interrupted through an AbortSignal.
+// @effect-diagnostics nodeBuiltinImport:off -- This module owns the Playwright browser through the managed executable.
 import * as NodeFSP from "node:fs/promises";
+import * as NodeModule from "node:module";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import type { BrowserContext, Keyboard, Mouse, Page } from "playwright-core";
 import {
   GameOperationError,
   GamePlaytestProbe,
@@ -16,8 +17,8 @@ import {
   type GamePlaytestStep,
   type GameWebPlaytestResult,
 } from "@t3tools/contracts";
-import { playtestStepWithEvidence } from "./playtestInputPairs.ts";
-import { runCaptureWindow } from "./playtestTiming.ts";
+import { playtestStepWithEvidence, trailingWaitObservation } from "./playtestInputPairs.ts";
+import { runCaptureWindow, type ControlledClock } from "./playtestTiming.ts";
 import { sandboxDisabled } from "../preview/PreviewBrowserHost.ts";
 import {
   compareFrameSamples,
@@ -31,6 +32,7 @@ import {
   type GamePlaytestSample,
   summarizePlaytestSamples,
 } from "./playtestState.ts";
+import { createConsoleCollector } from "./consoleCollector.ts";
 
 export interface GameWebPlaytestInput {
   /** Headless browser executable, resolved the same way as for the preview pane. */
@@ -45,6 +47,14 @@ export interface GameWebPlaytestInput {
   readonly steps: readonly GamePlaytestStep[];
   readonly captureEveryMs?: number;
   readonly captureAllSteps?: boolean;
+  /**
+   * INTERNAL experiment-only capture boundary: execute steps before this
+   * zero-based index with the exact same clock/input path but take no PNG,
+   * sample or interval captures there. Observed suffix keeps original
+   * full-route stepIndex values so pairs stay truthful. Only the isolated
+   * experiment path may set it; normal qualification and public verify never do.
+   */
+  readonly captureFromStep?: number;
   /** The engine owes a probe, so qualification reads the probe samples. */
   readonly probeRequired: boolean;
   /** The approved acceptance, or null for a game created without a design. */
@@ -52,7 +62,8 @@ export interface GameWebPlaytestInput {
 }
 
 // Godot's HTML shell keeps #status visible while loading and hides it once the canvas takes over.
-const BOOT_CHECK = `(() => {
+// Exported for the persistent exploration driver, which boots the same way.
+export const BOOT_CHECK = `(() => {
   const canvas = document.querySelector("canvas");
   const status = document.getElementById("status");
   const hidden =
@@ -66,15 +77,15 @@ const BOOT_CHECK = `(() => {
 
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 500;
-const CONNECT_TIMEOUT_MS = 30_000;
-const REQUEST_TIMEOUT_MS = 30_000;
+
+const isOperationError = Schema.is(GameOperationError);
 
 /**
  * Reads StudioProbe's snapshot. The probe parks the JSON on the window because a
  * JavaScriptBridge callback's return value does not cross back into JavaScript;
  * the return value is still accepted for templates that can return one.
  */
-const READ_PROBE = `(() => {
+export const READ_PROBE = `(() => {
   const probe = window.__studioProbe;
   if (typeof probe !== "function") return null;
   try {
@@ -86,7 +97,7 @@ const READ_PROBE = `(() => {
     return null;
   }
 })()`;
-const decodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(GamePlaytestProbe));
+export const decodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(GamePlaytestProbe));
 
 /**
  * The pause bridge's parked ack, the driver's window into whether the game's
@@ -103,91 +114,20 @@ const READ_VISIBILITY_ACK = `(() => {
 const sendVisibility = (visible: boolean): string =>
   `window.postMessage({ type: "studio-visibility", visible: ${visible} }, "*")`;
 
-interface BrowserHandle {
-  readonly child: NodeChildProcess.ChildProcess;
-  readonly wsUrl: Promise<string>;
-}
-
-interface CdpSocket {
-  send: <T>(method: string, params?: object, sessionId?: string) => Promise<T>;
-  onSession: (
-    sessionId: string,
-    handle: (message: { method: string; params: any }) => void,
-  ) => void;
-  close: () => void;
-}
-
-interface KeyEvent {
-  readonly type: "keyDown" | "keyUp";
-  readonly key: string;
-  readonly code: string;
-  readonly windowsVirtualKeyCode: number;
-  readonly text?: string;
-}
-
-/** KeyboardEvent names DevTools expects; unknown keys fall back to the DOM name alone. */ const keyEvent =
-  (key: string, type: "keyDown" | "keyUp"): KeyEvent => {
-    const named: Record<string, KeyEvent> = {
-      ArrowUp: { type, key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
-      ArrowDown: { type, key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
-      ArrowLeft: { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
-      ArrowRight: { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
-      Space: { type, key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
-      Enter: { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
-      Tab: { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
-      Backspace: { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
-      Escape: { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
-      Shift: { type, key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
-      Control: { type, key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
-      Alt: { type, key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
-    };
-    const held = named[key] ?? (key === " " ? named.Space : undefined);
-    if (held) return held;
-    if (key.length === 1 && /[a-z]/.test(key)) {
-      return {
-        type,
-        key,
-        code: `Key${key.toUpperCase()}`,
-        windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0),
-        text: key,
-      };
-    }
-    if (key.length === 1 && /[A-Z]/.test(key)) {
-      return { type, key, code: `Key${key}`, windowsVirtualKeyCode: key.charCodeAt(0), text: key };
-    }
-    if (key.length === 1 && /[0-9]/.test(key)) {
-      return { type, key, code: `Digit${key}`, windowsVirtualKeyCode: 48 + Number(key), text: key };
-    }
-    return { type, key, code: key, windowsVirtualKeyCode: 0 };
-  };
-
-/** Centre of the game canvas in viewport coordinates, or null before it exists. */
-const CANVAS_CENTRE = `(() => {
+/** Centre of the game canvas in viewport coordinates, or null before it exists. Exported for the persistent exploration driver. */
+export const CANVAS_CENTRE = `(() => {
   const canvas = document.querySelector("canvas");
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 })()`;
 
-const canvasCentre = async (
-  cdp: CdpSocket,
-  sessionId: string,
-): Promise<{ x: number; y: number } | null> => {
-  const evaluated = await cdp.send<{ result?: { value?: { x: number; y: number } | null } }>(
-    "Runtime.evaluate",
-    { expression: CANVAS_CENTRE, returnByValue: true },
-    sessionId,
-  );
-  const centre = evaluated.result?.value;
-  return centre ?? null;
-};
-
 /**
  * Downscales the game canvas into a small RGBA buffer. Reading the canvas is
  * cheaper and steadier than decoding two PNG screenshots, and it samples the
  * same rendered frame the screenshots capture.
  */
-const SAMPLE_FRAME = `(() => {
+export const SAMPLE_FRAME = `(() => {
   const canvas = document.querySelector("canvas");
   if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
   const sample = document.createElement("canvas");
@@ -199,205 +139,106 @@ const SAMPLE_FRAME = `(() => {
   return Array.from(context.getImageData(0, 0, sample.width, sample.height).data);
 })()`;
 
-const sampleFrame = async (cdp: CdpSocket, sessionId: string): Promise<FrameSample | null> => {
-  const evaluated = await cdp.send<{ result?: { value?: number[] | null } }>(
-    "Runtime.evaluate",
-    { expression: SAMPLE_FRAME, returnByValue: true },
-    sessionId,
-  );
-  const data = evaluated.result?.value;
-  if (!Array.isArray(data)) return null;
-  return { width: FRAME_SAMPLE_WIDTH, height: FRAME_SAMPLE_HEIGHT, data };
+/** Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable. */
+const requirePlaywright = NodeModule.createRequire(import.meta.url);
+const loadPlaywright = () =>
+  requirePlaywright("playwright-core") as typeof import("playwright-core");
+
+/**
+ * The browser key name Playwright's keyboard expects. The route vocabulary
+ * uses the DOM name "Space"; Playwright (and the DOM key value) wants " ".
+ * Every other route key already names the physical key Playwright accepts.
+ */
+export const toPlaywrightKey = (key: string): string => (key === "Space" ? " " : key);
+
+export type PlaywrightKeyboard = Pick<Keyboard, "down" | "up">;
+export type PlaywrightMouse = Pick<Mouse, "move" | "down" | "up" | "click">;
+
+/**
+ * Holds keys for a nominal duration on the controlled clock, always releasing
+ * them. The hold advances only through `clock.runFor`; captures and wall-clock
+ * round trips while paused never stretch it. Cleanup runs even on abort or a
+ * clock failure, so a cancelled run never leaves a key stuck down.
+ */
+export const holdKeysWithClock = async (input: {
+  readonly keyboard: PlaywrightKeyboard;
+  readonly clock: ControlledClock;
+  readonly signal?: AbortSignal | undefined;
+  readonly keys: readonly string[];
+  readonly holdMs: number;
+  readonly captureEveryMs?: number | undefined;
+  readonly capture?: ((elapsedMs: number) => Promise<void>) | undefined;
+}): Promise<void> => {
+  const pressed: string[] = [];
+  let releaseError: unknown;
+  try {
+    for (const key of input.keys.map(toPlaywrightKey)) {
+      await input.keyboard.down(key);
+      pressed.push(key);
+    }
+    await runCaptureWindow({
+      duration: input.holdMs,
+      ...(input.captureEveryMs === undefined ? {} : { captureInterval: input.captureEveryMs }),
+      clock: input.clock,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.capture === undefined ? {} : { capture: input.capture }),
+    });
+  } finally {
+    for (const key of pressed.toReversed()) {
+      try {
+        await input.keyboard.up(key);
+      } catch (cause) {
+        releaseError ??= cause;
+      }
+    }
+  }
+  if (releaseError !== undefined) throw releaseError;
 };
 
 /**
- * Presses and releases one mouse button at the centre of the canvas. Web games need
- * a real click before the shell lets them capture the pointer, and menu buttons need
- * one to be pressed at all.
+ * Drags from one point to another over a nominal duration on the controlled
+ * clock, always releasing the button. Pointer fractions advance only through
+ * `clock.runFor`; the button release runs even on abort or clock failure.
  */
-const clickCanvas = async (
-  cdp: CdpSocket,
-  sessionId: string,
-  button: "left" | "middle" | "right",
-): Promise<{ x: number; y: number } | null> => {
-  const centre = await canvasCentre(cdp, sessionId);
-  if (!centre) return null;
-  const at = { x: Math.round(centre.x), y: Math.round(centre.y) };
-  // No mouseMoved first: moving the pointer from wherever it happens to be would hand
-  // the game one huge relative motion, which is not what a player clicking sees.
-  const options = { ...at, clickCount: 1 };
-  await cdp.send(
-    "Input.dispatchMouseEvent",
-    { type: "mousePressed", ...options, button },
-    sessionId,
-  );
-  await cdp.send(
-    "Input.dispatchMouseEvent",
-    { type: "mouseReleased", ...options, button },
-    sessionId,
-  );
-  return at;
-};
-
-const launchBrowser = (input: GameWebPlaytestInput): BrowserHandle => {
-  const flags = [
-    "--headless=new",
-    "--remote-debugging-port=0",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--mute-audio",
-    "--hide-scrollbars",
-    "--use-angle=swiftshader",
-    "--enable-unsafe-swiftshader",
-    `--user-data-dir=${input.profileDirectory}`,
-    `--window-size=${input.width},${input.height}`,
-    "about:blank",
-  ];
-  // Same sandbox switch HtmlRender uses, so the operator keeps one policy.
-  if (sandboxDisabled(process.env)) flags.unshift("--no-sandbox");
-  const child = NodeChildProcess.spawn(input.executable, flags, {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let stderr = "";
-  child.stderr?.setEncoding("utf8");
-  const wsUrl = new Promise<string>((resolve, reject) => {
-    let pending = true;
-    const settle = (value: { ok: boolean; detail: string }) => {
-      if (!pending) return;
-      pending = false;
-      if (value.ok) resolve(value.detail);
-      else reject(new Error(value.detail));
-    };
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-      // Chrome prints the endpoint once its DevTools server accepts connections.
-      const match = stderr.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (match) settle({ ok: true, detail: match[1]! });
+export const dragWithClock = async (input: {
+  readonly mouse: PlaywrightMouse;
+  readonly clock: ControlledClock;
+  readonly signal?: AbortSignal | undefined;
+  readonly from: { readonly x: number; readonly y: number };
+  readonly to: { readonly x: number; readonly y: number };
+  readonly holdMs: number;
+  readonly captureEveryMs?: number | undefined;
+  readonly capture?: ((elapsedMs: number) => Promise<void>) | undefined;
+}): Promise<void> => {
+  await input.mouse.move(input.from.x, input.from.y);
+  await input.mouse.down({ button: "left" });
+  let releaseError: unknown;
+  try {
+    await runCaptureWindow({
+      duration: input.holdMs,
+      ...(input.captureEveryMs === undefined ? {} : { captureInterval: input.captureEveryMs }),
+      clock: input.clock,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      move: async (fraction) => {
+        await input.mouse.move(
+          input.from.x + (input.to.x - input.from.x) * fraction,
+          input.from.y + (input.to.y - input.from.y) * fraction,
+        );
+        input.signal?.throwIfAborted();
+      },
+      ...(input.capture === undefined ? {} : { capture: input.capture }),
     });
-    child.once("exit", () =>
-      settle({
-        ok: false,
-        detail: `Browser exited before opening DevTools: ${stderr.slice(-2000)}`,
-      }),
-    );
-    child.once("error", (cause) =>
-      settle({ ok: false, detail: `Browser failed to launch: ${String(cause)}` }),
-    );
-  });
-  return { child, wsUrl };
-};
-
-const closeBrowser = (handle: BrowserHandle) =>
-  new Promise<void>((resolve) => {
-    const { child } = handle;
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-    const escalation = setTimeout(() => child.kill("SIGKILL"), 2_000);
-    child.once("exit", () => {
-      clearTimeout(escalation);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
-
-const connectCdp = (wsUrl: string): Promise<CdpSocket> => {
-  const socket = new WebSocket(wsUrl);
-  const pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (cause: unknown) => void; method: string }
-  >();
-  const sessions = new Map<string, (message: { method: string; params: any }) => void>();
-  const failAll = (cause: unknown) => {
-    for (const entry of pending.values()) entry.reject(cause);
-    pending.clear();
-  };
-  socket.addEventListener("close", () => failAll(new Error("DevTools socket closed")), {
-    once: true,
-  });
-  socket.addEventListener("error", () => failAll(new Error("DevTools socket failed")), {
-    once: true,
-  });
-  socket.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") return;
-    let message: any;
+  } finally {
     try {
-      message = JSON.parse(event.data);
-    } catch {
-      return;
+      await input.mouse.up({ button: "left" });
+    } catch (cause) {
+      releaseError = cause;
     }
-    if (typeof message.id === "number") {
-      const entry = pending.get(message.id);
-      if (!entry) return;
-      pending.delete(message.id);
-      if (message.error)
-        entry.reject(new Error(`${entry.method}: ${message.error.message ?? "error"}`));
-      else entry.resolve(message.result);
-      return;
-    }
-    if (typeof message.method === "string" && typeof message.sessionId === "string") {
-      sessions.get(message.sessionId)?.({ method: message.method, params: message.params ?? {} });
-    }
-  });
-  return new Promise((resolve, reject) => {
-    const guard = setTimeout(() => {
-      reject(new Error("DevTools socket timed out"));
-      socket.close();
-    }, CONNECT_TIMEOUT_MS);
-    socket.addEventListener(
-      "open",
-      () => {
-        clearTimeout(guard);
-        let nextId = 0;
-        resolve({
-          send: <T>(method: string, params?: object, sessionId?: string): Promise<T> =>
-            new Promise((resolveSend, rejectSend) => {
-              const id = ++nextId;
-              const timer = setTimeout(() => {
-                pending.delete(id);
-                rejectSend(new Error(`${method} timed out`));
-              }, REQUEST_TIMEOUT_MS);
-              pending.set(id, {
-                resolve: (value: unknown) => {
-                  clearTimeout(timer);
-                  resolveSend(value as T);
-                },
-                reject: (cause) => {
-                  clearTimeout(timer);
-                  rejectSend(cause);
-                },
-                method,
-              });
-              socket.send(
-                JSON.stringify({
-                  id,
-                  method,
-                  ...(sessionId ? { sessionId } : {}),
-                  ...(params ? { params } : {}),
-                }),
-              );
-            }),
-          onSession: (sessionId, handle) => {
-            sessions.set(sessionId, handle);
-          },
-          close: () => socket.close(),
-        });
-      },
-      { once: true },
-    );
-    socket.addEventListener(
-      "error",
-      () => {
-        clearTimeout(guard);
-        reject(new Error("DevTools socket failed to open"));
-      },
-      { once: true },
-    );
-  });
+  }
+  if (releaseError !== undefined) throw releaseError;
 };
 
-const sleep = (signal: AbortSignal | undefined, ms: number) =>
+export const sleep = (signal: AbortSignal | undefined, ms: number) =>
   new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
@@ -410,30 +251,69 @@ const sleep = (signal: AbortSignal | undefined, ms: number) =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
-/** Reads the byte order of a PNG header, so screenshot dimensions do not need another round trip. */
-const decodePngSize = (base64: string) => {
-  const png = Buffer.from(base64, "base64");
-  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+/** PNG IHDR guard, so screenshot dimensions never read past a truncated file. */
+export const decodePngSize = (bytes: Buffer) => {
+  if (bytes.length < 24 || bytes.subarray(1, 4).toString("ascii") !== "PNG")
+    throw new Error("Screenshot did not decode as a PNG.");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 };
 
-const screenshot = async (
-  cdp: CdpSocket,
-  sessionId: string,
+export const screenshot = async (
+  page: Page,
   label: string,
   probe: GamePlaytestProbe | null,
 ): Promise<GamePlaytestScreenshot> => {
-  const shot = await cdp.send<{ data: string }>(
-    "Page.captureScreenshot",
-    { format: "png" },
-    sessionId,
-  );
+  const bytes = await page.screenshot({ type: "png" });
+  const data = bytes.toString("base64");
   return {
     label,
     mimeType: "image/png" as const,
-    data: shot.data,
-    ...decodePngSize(shot.data),
+    data,
+    ...decodePngSize(bytes),
     ...(probe === null ? {} : { probe }),
   };
+};
+
+export const canvasCentre = async (page: Page): Promise<{ x: number; y: number } | null> => {
+  try {
+    const centre = await page.evaluate(CANVAS_CENTRE);
+    if (
+      centre !== null &&
+      typeof centre === "object" &&
+      typeof (centre as { x?: unknown }).x === "number" &&
+      typeof (centre as { y?: unknown }).y === "number"
+    )
+      return centre as { x: number; y: number };
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+export const sampleFrame = async (page: Page): Promise<FrameSample | null> => {
+  try {
+    const data = await page.evaluate(SAMPLE_FRAME);
+    if (!Array.isArray(data)) return null;
+    return { width: FRAME_SAMPLE_WIDTH, height: FRAME_SAMPLE_HEIGHT, data };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Presses and releases one mouse button at the centre of the canvas. Web games need
+ * a real click before the shell lets them capture the pointer, and menu buttons need
+ * one to be pressed at all. Exported for the persistent exploration driver.
+ */
+export const clickCanvas = async (
+  page: Page,
+  button: "left" | "middle" | "right",
+): Promise<{ x: number; y: number } | null> => {
+  const centre = await canvasCentre(page);
+  if (!centre) return null;
+  const at = { x: Math.round(centre.x), y: Math.round(centre.y) };
+  await page.mouse.click(at.x, at.y, { button });
+  return at;
 };
 
 /**
@@ -443,57 +323,55 @@ const screenshot = async (
  * rather than as a crashed run; the honest tool reports what it could verify.
  */
 const readVisibilityAck = async (
-  cdp: CdpSocket,
-  sessionId: string,
+  page: Page,
 ): Promise<{ visible: boolean; paused: boolean; muted: boolean } | null> => {
-  const evaluated = await cdp
-    .send<{ result?: { value?: { visible: boolean; paused: boolean; muted: boolean } | null } }>(
-      "Runtime.evaluate",
-      { expression: READ_VISIBILITY_ACK, returnByValue: true },
-      sessionId,
-    )
-    .catch(() => null);
-  return evaluated?.result?.value ?? null;
+  try {
+    const ack = (await page.evaluate(READ_VISIBILITY_ACK)) as {
+      visible?: unknown;
+      paused?: unknown;
+      muted?: unknown;
+    } | null;
+    if (ack === null || typeof ack !== "object") return null;
+    return {
+      visible: ack.visible === true,
+      paused: ack.paused === true,
+      muted: ack.muted === true,
+    };
+  } catch {
+    return null;
+  }
 };
 
 const waitForVisibilityAck = async (
-  cdp: CdpSocket,
-  sessionId: string,
+  page: Page,
   visible: boolean,
   signal: AbortSignal | undefined,
 ): Promise<{ visible: boolean; paused: boolean; muted: boolean } | null> => {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     await sleep(signal, 120);
-    const ack = await readVisibilityAck(cdp, sessionId);
+    const ack = await readVisibilityAck(page);
     if (ack !== null && ack.visible === visible) return ack;
   }
   return null;
 };
 
-const verifyPauseBridge = async (
-  cdp: CdpSocket,
-  sessionId: string,
+export const verifyPauseBridge = async (
+  page: Page,
   signal: AbortSignal | undefined,
 ): Promise<boolean> => {
   /** The GameState JSON as the probe just reported it, or null when it cannot. */
   const probeState = async (): Promise<string | null> => {
-    const evaluated = await cdp
-      .send<{ result?: { value?: unknown } }>(
-        "Runtime.evaluate",
-        { expression: READ_PROBE, returnByValue: true },
-        sessionId,
-      )
-      .catch(() => null);
-    return typeof evaluated?.result?.value === "string" ? evaluated.result.value : null;
+    try {
+      const value = await page.evaluate(READ_PROBE);
+      return typeof value === "string" ? value : null;
+    } catch {
+      return null;
+    }
   };
   try {
-    await cdp.send(
-      "Runtime.evaluate",
-      { expression: sendVisibility(false), returnByValue: true },
-      sessionId,
-    );
-    const hiddenAck = await waitForVisibilityAck(cdp, sessionId, false, signal);
+    await page.evaluate(sendVisibility(false));
+    const hiddenAck = await waitForVisibilityAck(page, false, signal);
     if (hiddenAck === null || !hiddenAck.paused || !hiddenAck.muted) return false;
     // The ack is the engine's word about itself; this is the world's word: two
     // spaced probe reads while hidden must show the same GameState, so the
@@ -503,12 +381,8 @@ const verifyPauseBridge = async (
     await sleep(signal, 700);
     const stillHeld = await probeState();
     if (held === null || stillHeld === null || held !== stillHeld) return false;
-    await cdp.send(
-      "Runtime.evaluate",
-      { expression: sendVisibility(true), returnByValue: true },
-      sessionId,
-    );
-    const shownAck = await waitForVisibilityAck(cdp, sessionId, true, signal);
+    await page.evaluate(sendVisibility(true));
+    const shownAck = await waitForVisibilityAck(page, true, signal);
     return shownAck !== null && !shownAck.paused && !shownAck.muted;
   } catch {
     // A page that interrupts evaluation (a reload, a navigation) cannot confirm.
@@ -516,66 +390,96 @@ const verifyPauseBridge = async (
   }
 };
 
+export const clockError = (cause: unknown): GameOperationError =>
+  new GameOperationError({
+    operation: "Web playtest",
+    path: "",
+    reason: "command-failed",
+    detail:
+      `The controlled clock is unavailable in this browser and the run stayed paused instead of guessing: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`.slice(0, 1000),
+    ...(cause === undefined ? {} : { cause }),
+  });
+
+export const launchContext = async (input: {
+  readonly executable: string;
+  readonly profileDirectory: string;
+  readonly width: number;
+  readonly height: number;
+}): Promise<BrowserContext> => {
+  const { chromium } = loadPlaywright();
+  const env = process.env;
+  // Same sandbox switch HtmlRender uses, so the operator keeps one policy.
+  // Playwright's chromiumSandbox option carries it instead of a raw flag.
+  const context = await chromium.launchPersistentContext(input.profileDirectory, {
+    executablePath: input.executable,
+    headless: true,
+    args: [
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--mute-audio",
+      "--hide-scrollbars",
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader",
+      "--disable-dev-shm-usage",
+    ],
+    chromiumSandbox: !sandboxDisabled(env),
+    viewport: { width: input.width, height: input.height },
+  });
+  return context;
+};
+
 /** Drives one browser run to completion; the caller's acquire/release finalizers own cleanup. */
 const runPlaytest = async (
-  handle: BrowserHandle,
+  context: BrowserContext,
   input: GameWebPlaytestInput,
   signal: AbortSignal | undefined,
 ): Promise<GameWebPlaytestResult> => {
-  const wsUrl = await Promise.race([
-    handle.wsUrl,
-    sleep(signal, CONNECT_TIMEOUT_MS).then(() => {
-      throw new Error("Browser did not report a DevTools endpoint");
-    }),
-  ]);
   signal?.throwIfAborted();
-  const cdp = await connectCdp(wsUrl);
-  const consoleMessages: GameConsoleMessage[] = [];
-  const screenshots: GamePlaytestScreenshot[] = [];
+  const page = context.pages()[0] ?? (await context.newPage());
+  // The viewport the route was recorded at; pointer coordinates are pixels in it.
+  await page.setViewportSize({ width: input.width, height: input.height });
+  // Bounded retention with honest accounting: the error total counts every
+  // error ever recorded, so a failure emitted after forty ordinary logs
+  // still fails the run even though its text was not kept.
+  const consoleCollector = createConsoleCollector({
+    maxMessages: MAX_MESSAGES,
+    maxChars: MAX_MESSAGE_CHARS,
+  });
   let engineCookie = false;
   const record = (level: GameConsoleMessage["level"], text: string) => {
     const message = text.slice(0, MAX_MESSAGE_CHARS);
     if (message.includes("Godot Engine v4")) engineCookie = true;
-    if (consoleMessages.length < MAX_MESSAGES) consoleMessages.push({ level, text: message });
+    consoleCollector.record(level, message);
   };
+  page.on("console", (message) => {
+    const type = String(message.type() ?? "log");
+    const level: GameConsoleMessage["level"] =
+      type === "error"
+        ? "error"
+        : type === "warning"
+          ? "warning"
+          : type === "info"
+            ? "info"
+            : "log";
+    const text = message.text().trim();
+    record(level, text || `console ${type}()`);
+  });
+  page.on("pageerror", (error) => {
+    record("error", error instanceof Error ? error.message : String(error));
+  });
+  const screenshots: GamePlaytestScreenshot[] = [];
   try {
-    const target = await cdp.send<{ targetId: string }>("Target.createTarget", {
-      url: "about:blank",
-    });
-    const session = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
-      targetId: target.targetId,
-      flatten: true,
-    });
-    cdp.onSession(session.sessionId, (event) => {
-      if (event.method === "Runtime.consoleAPICalled") {
-        const type = String(event.params.type ?? "log");
-        const level: GameConsoleMessage["level"] =
-          type === "error"
-            ? "error"
-            : type === "warning"
-              ? "warning"
-              : type === "info"
-                ? "info"
-                : "log";
-        const text = (event.params.args ?? [])
-          .map((arg: any) => arg.description ?? (typeof arg.value === "string" ? arg.value : ""))
-          .join(" ")
-          .trim();
-        record(level, text || `console ${type}()`);
-      } else if (event.method === "Runtime.exceptionThrown") {
-        const details = event.params.exceptionDetails ?? {};
-        const text =
-          details.exception?.description ??
-          [details.text, details.exception?.value ? String(details.exception.value) : ""]
-            .filter(Boolean)
-            .join(": ");
-        record("error", text || details.text || "uncaught exception");
-      }
-    });
-    await cdp.send("Page.enable", undefined, session.sessionId);
-    await cdp.send("Runtime.enable", undefined, session.sessionId);
-    await cdp.send("Log.enable", undefined, session.sessionId);
-    await cdp.send("Page.navigate", { url: input.url }, session.sessionId);
+    // Install the fake clock before the game's time APIs start so Date,
+    // performance, timers and requestAnimationFrame are all controlled. Boot
+    // and the pause bridge then behave naturally while the clock runs.
+    try {
+      await page.clock.install();
+    } catch (cause) {
+      throw clockError(cause);
+    }
+    await page.goto(input.url, { timeout: input.bootTimeoutMs, waitUntil: "load" });
 
     const bootDeadline = Date.now() + input.bootTimeoutMs;
     let booted = false;
@@ -588,12 +492,8 @@ const runPlaytest = async (
         break;
       }
       try {
-        const check = await cdp.send<{ result?: { value?: unknown } }>(
-          "Runtime.evaluate",
-          { expression: BOOT_CHECK, returnByValue: true },
-          session.sessionId,
-        );
-        if (check.result?.value === true) {
+        const check = await page.evaluate(BOOT_CHECK);
+        if (check === true) {
           booted = true;
           break;
         }
@@ -610,14 +510,12 @@ const runPlaytest = async (
     const samples: GamePlaytestSample[] = [];
     let sawInput = false;
     const readProbe = async () => {
-      const evaluated = await cdp
-        .send<{ result?: { value?: unknown } }>(
-          "Runtime.evaluate",
-          { expression: READ_PROBE, returnByValue: true },
-          session.sessionId,
-        )
-        .catch(() => null);
-      const value = evaluated?.result?.value;
+      let value: unknown;
+      try {
+        value = await page.evaluate(READ_PROBE);
+      } catch {
+        return null;
+      }
       if (typeof value !== "string") return null;
       const probe = decodeProbe(value);
       if (Option.isNone(probe)) return null;
@@ -625,163 +523,215 @@ const runPlaytest = async (
       return probe.value;
     };
     const latestProbe = () => samples.findLast((sample) => sample.probe)?.probe ?? null;
-    screenshots.push(await screenshot(cdp, session.sessionId, "booted", null));
-    const bootSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    screenshots.push(await screenshot(page, "booted", null));
+    const bootSample = await sampleFrame(page).catch(() => null);
     let pointer: { x: number; y: number } | null = null;
     await readProbe();
     // Games whose policy owes the probe owe its pause bridge too; run the
-    // round trip once, before any step, so the samples never span a pause.
+    // round trip once, before any step and before the clock pauses, so the
+    // samples never span a pause.
     let pauseConfirmed: boolean | null = null;
     if (booted && input.probeRequired && samples.length > 0)
-      pauseConfirmed = await verifyPauseBridge(cdp, session.sessionId, signal);
+      pauseConfirmed = await verifyPauseBridge(page, signal);
+
+    // Pause after boot and the bridge: from here game time advances only
+    // through explicit clock.runFor slices for waits, holds, presses and
+    // drags. Screenshots, probe reads and frame samples stay paused, so their
+    // wall-clock cost never runs the game. No Node wall-offset bookkeeping.
+    try {
+      const now = await page.evaluate(`Date.now()`);
+      const at = typeof now === "number" && Number.isFinite(now) ? now + 100 : Date.now() + 100;
+      await page.clock.pauseAt(at);
+    } catch (cause) {
+      throw clockError(cause);
+    }
 
     let executedInputSteps = 0;
-    for (const [stepIndex, step] of input.steps.entries()) {
+    const clock: ControlledClock = {
+      runFor: async (milliseconds) => {
+        try {
+          await page.clock.runFor(milliseconds);
+        } catch (cause) {
+          throw clockError(cause);
+        }
+      },
+    };
+    const captureFrom = input.captureFromStep ?? 0;
+    if (!Number.isInteger(captureFrom) || captureFrom < 0 || captureFrom > input.steps.length)
+      throw new Error(
+        `captureFromStep ${String(input.captureFromStep)} is outside the route of ${input.steps.length} steps.`,
+      );
+    const executeStep = async (
+      step: GamePlaytestStep,
+      captureDuring?: (elapsed: number) => Promise<void>,
+    ): Promise<boolean> => {
+      if (!("waitMs" in step) && !("screenshot" in step)) sawInput = true;
+      if ("waitMs" in step) {
+        await runCaptureWindow({
+          duration: step.waitMs,
+          clock,
+          ...(input.captureEveryMs === undefined ? {} : { captureInterval: input.captureEveryMs }),
+          ...(signal === undefined ? {} : { signal }),
+          ...(captureDuring === undefined ? {} : { capture: captureDuring }),
+        });
+      } else if ("screenshot" in step) {
+        if (captureDuring === undefined) return false;
+        screenshots.push(await screenshot(page, step.screenshot, latestProbe()));
+        // The frame itself is the step's product; the next read pairs the probe
+        // that follows it, not the one before it.
+        await readProbe();
+        return false;
+      } else if ("click" in step) {
+        const clicked =
+          step.x === undefined || step.y === undefined
+            ? await clickCanvas(page, step.click)
+            : await (async () => {
+                const point = { x: step.x!, y: step.y! };
+                await page.mouse.click(point.x, point.y, {
+                  button: step.click,
+                  clickCount: 1,
+                });
+                return point;
+              })();
+        pointer = clicked ?? pointer;
+        if (clicked === null) return false;
+      } else if ("drag" in step) {
+        const { from, to } = step.drag;
+        await dragWithClock({
+          mouse: page.mouse,
+          clock,
+          signal,
+          from,
+          to,
+          holdMs: step.holdMs,
+          captureEveryMs: input.captureEveryMs,
+          ...(captureDuring === undefined ? {} : { capture: captureDuring }),
+        });
+        pointer = to;
+      } else if ("mouseMove" in step) {
+        const centre: { x: number; y: number } | null = pointer ?? (await canvasCentre(page));
+        if (centre) {
+          const next: { x: number; y: number } = {
+            x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
+            y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
+          };
+          await page.mouse.move(Math.round(next.x), Math.round(next.y));
+          pointer = next;
+        }
+      } else {
+        try {
+          await page.evaluate(`document.querySelector("canvas")?.focus()`);
+        } catch {
+          // The canvas may not be up yet; keyboard events still reach the document.
+        }
+        const keys =
+          "keys" in step
+            ? step.keys
+            : ["key" in step ? step.key : "hold" in step ? step.hold : step.press];
+        await holdKeysWithClock({
+          keyboard: page.keyboard,
+          clock,
+          signal,
+          keys,
+          holdMs: "holdMs" in step ? step.holdMs : 50,
+          captureEveryMs: input.captureEveryMs,
+          ...(captureDuring === undefined ? {} : { capture: captureDuring }),
+        });
+      }
+      return !("waitMs" in step) && !("screenshot" in step) && !("mouseMove" in step);
+    };
+    // Uncaptured prelude: the exact same clock/input path (holds, releases,
+    // drags, waits, cancellation) but no PNG, sample or interval captures and
+    // no probe reads. Each declared wait runs once, in order; no observation
+    // window folds across the capture boundary.
+    for (let setupIndex = 0; setupIndex < captureFrom; setupIndex += 1) {
+      const step = input.steps[setupIndex]!;
+      signal?.throwIfAborted();
+      const paired = await playtestStepWithEvidence({
+        step,
+        stepIndex: setupIndex,
+        skipCapture: true,
+        capture: async () => {
+          throw new Error("setup steps must not capture");
+        },
+        execute: () => executeStep(step),
+      });
+      if (paired.executed) executedInputSteps++;
+      signal?.throwIfAborted();
+    }
+    let stepIndex = captureFrom;
+    while (stepIndex < input.steps.length) {
+      const step = input.steps[stepIndex]!;
       signal?.throwIfAborted();
       const duringFrames: GamePlaytestScreenshot[] = [];
-      const waitWithCaptures = async (
-        duration: number,
-        move?: (fraction: number) => Promise<void>,
-      ) =>
+      const captureDuringFor = (labelStepIndex: number) => async (elapsed: number) => {
+        signal?.throwIfAborted();
+        duringFrames.push(
+          await screenshot(
+            page,
+            `step ${labelStepIndex + 1} during: ${elapsed}ms`,
+            await readProbe(),
+          ),
+        );
+      };
+      const captureDuring = captureDuringFor(stepIndex);
+      const waitWithCapturesAt = async (labelStepIndex: number, duration: number) =>
         runCaptureWindow({
           duration,
           ...(input.captureEveryMs === undefined ? {} : { captureInterval: input.captureEveryMs }),
-          now: () => performance.now(),
-          sleep: (milliseconds) => sleep(signal, milliseconds),
-          ...(move === undefined ? {} : { move }),
-          capture: async (elapsed) => {
-            duringFrames.push(
-              await screenshot(
-                cdp,
-                session.sessionId,
-                `step ${stepIndex + 1} during: ${elapsed}ms`,
-                await readProbe(),
-              ),
-            );
-          },
+          clock,
+          ...(signal === undefined ? {} : { signal }),
+          capture: captureDuringFor(labelStepIndex),
         });
+      // Observe release-queued effects during declared waits without adding
+      // game time or extending holds. captureAllSteps keeps wait pairs separate.
+      let observationCount = 0;
+      let observationDelayMs = 0;
+      if (!("waitMs" in step) && !("screenshot" in step) && input.captureAllSteps !== true) {
+        const trailing = trailingWaitObservation(input.steps, stepIndex + 1);
+        observationCount = trailing.count;
+        observationDelayMs = trailing.delayMs;
+      }
       const paired = await playtestStepWithEvidence({
         step,
         stepIndex,
         ...(input.captureAllSteps === undefined ? {} : { captureAllSteps: input.captureAllSteps }),
+        ...(observationCount > 0
+          ? {
+              observation: {
+                delayMs: observationDelayMs,
+                observedAfterStepIndex: stepIndex + observationCount,
+              },
+            }
+          : {}),
         capture: async () => {
+          signal?.throwIfAborted();
           const probe = await readProbe();
           return {
-            screenshot: await screenshot(cdp, session.sessionId, "input", probe),
-            pixels: await sampleFrame(cdp, session.sessionId).catch(() => null),
+            screenshot: await screenshot(page, "input", probe),
+            pixels: await sampleFrame(page).catch(() => null),
             probe,
           };
         },
         execute: async () => {
-          if (!("waitMs" in step) && !("screenshot" in step)) sawInput = true;
-          if ("waitMs" in step) await waitWithCaptures(step.waitMs);
-          else if ("screenshot" in step) {
-            screenshots.push(
-              await screenshot(cdp, session.sessionId, step.screenshot, latestProbe()),
-            );
-            // The frame itself is the step's product; the next read pairs the probe
-            // that follows it, not the one before it.
-            await readProbe();
-            return false;
-          } else if ("click" in step) {
-            const clicked =
-              step.x === undefined || step.y === undefined
-                ? await clickCanvas(cdp, session.sessionId, step.click)
-                : await (async () => {
-                    const point = { x: step.x!, y: step.y! };
-                    for (const type of ["mousePressed", "mouseReleased"])
-                      await cdp.send(
-                        "Input.dispatchMouseEvent",
-                        { type, ...point, button: step.click, clickCount: 1 },
-                        session.sessionId,
-                      );
-                    return point;
-                  })();
-            pointer = clicked ?? pointer;
-            return clicked !== null;
-          } else if ("drag" in step) {
-            const { from, to } = step.drag;
-            await cdp.send(
-              "Input.dispatchMouseEvent",
-              { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 },
-              session.sessionId,
-            );
-            try {
-              await waitWithCaptures(step.holdMs, async (fraction) => {
-                await cdp.send(
-                  "Input.dispatchMouseEvent",
-                  {
-                    type: "mouseMoved",
-                    x: from.x + (to.x - from.x) * fraction,
-                    y: from.y + (to.y - from.y) * fraction,
-                    button: "left",
-                    buttons: 1,
-                  },
-                  session.sessionId,
-                );
-              });
-            } finally {
-              await cdp.send(
-                "Input.dispatchMouseEvent",
-                { type: "mouseReleased", ...to, button: "left", clickCount: 1 },
-                session.sessionId,
-              );
-            }
-            pointer = to;
-            return true;
-          } else if ("mouseMove" in step) {
-            const centre: { x: number; y: number } | null =
-              pointer ?? (await canvasCentre(cdp, session.sessionId));
-            if (centre) {
-              const next: { x: number; y: number } = {
-                x: Math.max(0, Math.min(input.width, centre.x + step.mouseMove.dx)),
-                y: Math.max(0, Math.min(input.height, centre.y + step.mouseMove.dy)),
-              };
-              await cdp.send(
-                "Input.dispatchMouseEvent",
-                {
-                  type: "mouseMoved",
-                  x: Math.round(next.x),
-                  y: Math.round(next.y),
-                  button: "none",
-                },
-                session.sessionId,
-              );
-              pointer = next;
-              return true;
-            }
-          } else {
-            try {
-              await cdp.send<unknown>(
-                "Runtime.evaluate",
-                { expression: `document.querySelector("canvas")?.focus()` },
-                session.sessionId,
-              );
-            } catch {
-              // The canvas may not be up yet; keyboard events still reach the document.
-            }
-            const keys =
-              "keys" in step
-                ? step.keys
-                : ["key" in step ? step.key : "hold" in step ? step.hold : step.press];
-            for (const key of keys)
-              await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyDown"), session.sessionId);
-            try {
-              await waitWithCaptures("holdMs" in step ? step.holdMs : 50);
-            } finally {
-              for (const key of [...keys].toReversed())
-                await cdp.send("Input.dispatchKeyEvent", keyEvent(key, "keyUp"), session.sessionId);
-            }
+          const executed = await executeStep(step, captureDuring);
+          for (let consumed = 1; consumed <= observationCount; consumed += 1) {
+            const waited = input.steps[stepIndex + consumed]!;
+            if (!("waitMs" in waited)) break;
+            await waitWithCapturesAt(stepIndex + consumed, waited.waitMs);
           }
-          return !("waitMs" in step) && !("mouseMove" in step);
+          return executed;
         },
       });
       if (paired.executed) executedInputSteps++;
       screenshots.push(...paired.frames.slice(0, 1), ...duringFrames, ...paired.frames.slice(1));
+      signal?.throwIfAborted();
       await readProbe();
+      stepIndex += 1 + observationCount;
     }
-    screenshots.push(await screenshot(cdp, session.sessionId, "after-steps", latestProbe()));
-    const afterSample = await sampleFrame(cdp, session.sessionId).catch(() => null);
+    // Still paused: the final frame and samples cost wall time but no game time.
+    screenshots.push(await screenshot(page, "after-steps", latestProbe()));
+    const afterSample = await sampleFrame(page).catch(() => null);
     await readProbe();
     const comparison =
       bootSample !== null && afterSample !== null
@@ -793,7 +743,12 @@ const runPlaytest = async (
         : // One summary serves both the report and the evidence: the same
           // baseline-inclusive picture evaluatePlaytestRun judges.
           summarizePlaytestSamples(samples);
-    const errors = consoleMessages.filter((message) => message.level === "error").length;
+    // Total errors across the whole run, not just the retained suffix: a
+    // failure after forty ordinary logs still counts. The retained text is
+    // the newest slice; consoleTruncated says how much older text was dropped.
+    const errors = consoleCollector.totalErrors();
+    const consoleMessages = consoleCollector.messages();
+    const consoleTruncated = consoleCollector.dropped();
     const stepsGiven = input.steps.length > 0;
     const verdict = evaluatePlaytestRun({
       samples,
@@ -834,15 +789,19 @@ const runPlaytest = async (
       changedPercent: comparison.changedPercent,
       message: success ? `Playtest succeeded: ${summary}` : `Playtest failed: ${summary}`,
       consoleMessages,
+      consoleErrorCount: errors,
+      consoleTruncated,
       screenshots,
       state,
       pauseConfirmed,
       qualifies: verdict.qualifies,
       blockers: [...verdict.blockers],
       interaction: verdict.interaction,
+      timing: "controlled-clock",
     };
   } finally {
-    cdp.close();
+    page.removeAllListeners();
+    await context.close().catch(() => undefined);
   }
 };
 
@@ -868,16 +827,16 @@ export const playtest = (
     }),
     () =>
       Effect.acquireUseRelease(
-        Effect.try({
-          try: () => launchBrowser(input),
+        Effect.tryPromise({
+          try: () => launchContext(input),
           catch: operationError(input),
         }),
-        (handle: BrowserHandle) =>
+        (context: BrowserContext) =>
           Effect.tryPromise({
-            try: (signal) => runPlaytest(handle, input, signal),
-            catch: operationError(input),
+            try: (signal) => runPlaytest(context, input, signal),
+            catch: (cause) => (isOperationError(cause) ? cause : operationError(input)(cause)),
           }),
-        (handle) => Effect.promise(() => closeBrowser(handle)),
+        (context) => Effect.promise(() => context.close().catch(() => undefined)),
       ).pipe(Effect.scoped),
     (profileDirectory) =>
       Effect.promise(() => NodeFSP.rm(profileDirectory, { recursive: true, force: true })),

@@ -3,6 +3,13 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
+
+/**
+ * Marker prefix for a run whose build qualified and booted but whose review
+ * loop lacks complete judgment evidence. game-e2e writes it; the aggregate
+ * matches this marker, never prose, to label the run review-incomplete.
+ */
+export const REVIEW_INCOMPLETE_PREFIX = "review-incomplete: ";
 import {
   GameVisualJudgement,
   LegacyGameQualificationRead,
@@ -397,8 +404,12 @@ export const GameE2eRepairLoopRead = Schema.Struct({
   /** The build Play shows after the loop ended; completion is asserted on it. */
   selectedBuildId: Schema.NullOr(Schema.String),
   waitedMs: Schema.Number,
-  /** The loop outlived its budget plus the shutdown margin. */
+  /** The loop outlived the bound the harness was willing to wait. */
   timedOut: Schema.Boolean,
+  /** Which bound ended the observation; absent on summaries written before it existed. */
+  timedOutBy: Schema.optionalKey(
+    Schema.NullOr(Schema.Literals(["loop-budget", "harness-deadline"])),
+  ),
 });
 export type GameE2eRepairLoopRead = typeof GameE2eRepairLoopRead.Type;
 
@@ -409,7 +420,7 @@ export const GameE2eRunSummary = Schema.Struct({
   harnessCommit: Schema.String,
   startedAt: Schema.String,
   durationMs: Schema.Number,
-  /** Where the run stopped: create, design, build, qualified, preview, native, revise, done. */
+  /** Where the run stopped: create, design, build, review, qualified, preview, native, revise, done. */
   phase: Schema.String,
   /** The harness's own timeout fired; the process still wrote this summary. */
   timedOut: Schema.Boolean,

@@ -486,7 +486,7 @@ export interface ComparisonReport {
   readonly generatedAt: string;
   readonly role: "look-feel-comparison";
   /** Not an obligations row: no sum here feeds results.json or results.md. */
-  readonly grader: { readonly provider: "codex"; readonly model: string };
+  readonly grader: { readonly provider: string; readonly model: string };
   /** The comparison ruler, separate from the source grades' `graderVersion`. */
   readonly comparisonVersion: number;
   readonly harnessDir: string;
@@ -517,6 +517,8 @@ export interface RunComparisonInput {
   readonly out: string;
   readonly briefs: ReadonlyArray<LoadedGameBenchmarkBrief>;
   readonly review: CompareReview;
+  /** Who measured this comparison; codex stays the default when omitted. */
+  readonly grader?: { readonly provider: string; readonly model: string };
   /** Progress lines; the CLI prints them, tests stay quiet. */
   readonly log?: (line: string) => void;
 }
@@ -729,7 +731,7 @@ export const runComparison = async (
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     role: "look-feel-comparison",
-    grader: { provider: "codex", model: CODEX_GRADER_MODEL },
+    grader: input.grader ?? { provider: "codex", model: CODEX_GRADER_MODEL },
     comparisonVersion: COMPARE_VERSION,
     harnessDir: NodePath.resolve(input.harnessDir),
     rawDir: NodePath.resolve(input.rawDir),
@@ -796,7 +798,7 @@ export interface RevisionComparison {
   readonly schemaVersion: 1;
   readonly generatedAt: string;
   readonly role: "revision-frame-comparison";
-  readonly grader: { readonly provider: "codex"; readonly model: string };
+  readonly grader: { readonly provider: string; readonly model: string };
   /** The look/feel ruler version; capture packs carry their own captureVersion. */
   readonly comparisonVersion: number;
   readonly brief: {
@@ -960,6 +962,8 @@ export async function compareFramePacks(input: {
   readonly second: LoadedFramePack;
   readonly cardsRoot: string;
   readonly review: CompareReview;
+  /** Who measured this comparison; codex stays the default when omitted. */
+  readonly grader?: { readonly provider: string; readonly model: string };
 }): Promise<RevisionComparison> {
   assertComparablePacks(input);
   const firstBuild = packBuild(input.first);
@@ -970,7 +974,7 @@ export async function compareFramePacks(input: {
     schemaVersion: 1 as const,
     generatedAt: new Date().toISOString(),
     role: "revision-frame-comparison" as const,
-    grader: { provider: "codex" as const, model: CODEX_GRADER_MODEL },
+    grader: input.grader ?? { provider: "codex", model: CODEX_GRADER_MODEL },
     comparisonVersion: COMPARE_VERSION,
     brief: {
       id: input.brief.id,

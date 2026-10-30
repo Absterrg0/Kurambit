@@ -65,19 +65,17 @@ func snapshot() -> Dictionary:
 	}
 `,
   tryInput: {
-    // D starts a 30 px walk to the lip. The body leaves while the next step is
-    // being set up, so the Space press lands ~100 ms after the lip, inside the
-    // 150 ms grace. The second walk leaves and waits 250 ms before its press, so
-    // that one is past the window and must be counted as ignored.
+    // Walking reaches the lip in 150 ms. The first press follows 200 ms of
+    // walking, inside the grace window; the second follows 400 ms, outside it.
     steps: [
       { waitMs: 300 },
-      { key: "D", holdMs: 50 },
+      { key: "D", holdMs: 200 },
       { key: "Space", holdMs: 60 },
       { waitMs: 150 },
       { screenshot: "grace-jump" },
       { waitMs: 1400 },
       { key: "D", holdMs: 50 },
-      { waitMs: 250 },
+      { waitMs: 350 },
       { key: "Space", holdMs: 60 },
       { waitMs: 120 },
       { screenshot: "expired-press" },

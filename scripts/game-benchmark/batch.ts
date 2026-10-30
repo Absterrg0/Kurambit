@@ -74,6 +74,25 @@ export async function runBounded<T>(
   if (controller.signal.aborted) throw abortReason(controller.signal);
 }
 
+/**
+ * A clean harness may resume rows under `<out>/<commit8>`. Any uncommitted
+ * checkout change can alter how a game is built or graded even when HEAD is
+ * unchanged, so that invocation gets a fresh directory and never resumes; two
+ * runners must not share an aggregate merely because they started from the same
+ * commit.
+ */
+export function benchmarkRunLayout(input: {
+  readonly out: string;
+  readonly harnessCommit: string;
+  readonly dirty: boolean;
+  readonly nonce: string;
+}): { readonly runDirectory: string; readonly resume: boolean } {
+  const directory = NodePath.join(NodePath.resolve(input.out), input.harnessCommit.slice(0, 8));
+  return input.dirty
+    ? { runDirectory: `${directory}-dirty-${input.nonce}`, resume: false }
+    : { runDirectory: directory, resume: true };
+}
+
 export interface BenchmarkJobLocation {
   /** Passed to game-e2e, which appends its own `benchmark-server` directory. */
   readonly homeDir: string;

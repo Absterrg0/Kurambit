@@ -11,7 +11,6 @@ import {
   gameProductionBudgetMs,
   type GameProductionStatus,
   type GameRepairFrame,
-  type GamePlaytestStep,
   GameRepairLoop as GameRepairLoopSchema,
   type GameRepairLoop as GameRepairLoopRecord,
   GAME_REVIEW_FACETS,
@@ -19,6 +18,8 @@ import {
   type GameReviewBallotPlan,
   type GameReviewBallotRecord,
   type GameReviewCheck,
+  GAME_REVIEW_QUALITY_RUBRIC_VERSION,
+  gameReviewQualityCoverage,
   type GameReviewUsage,
   type GameReviewChildUsage,
   type GameReviewDefect,
@@ -43,6 +44,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameOperations from "./GameOperations.ts";
@@ -50,10 +52,17 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
+import * as GameReviewAttemptPolicy from "./gameReviewAttemptPolicy.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
+import { qualityRepairDefects } from "./gameQualityEval.ts";
 import { playtestIntervalObservation } from "./playtestEvidence.ts";
-import { playtestStepAction } from "./playtestInputPairs.ts";
+import {
+  chooseDiverseWitnessPairs,
+  playtestInputSignature,
+  playtestPairWitnessScore,
+  playtestStepAction,
+} from "./playtestInputPairs.ts";
 import { productionBudgetText, productionStatus } from "./gameProduction.ts";
 import { gameRecordLocation, readRecordText } from "./gameRecord.ts";
 
@@ -70,6 +79,8 @@ const decodeStoredLoops = Schema.decodeUnknownSync(Schema.fromJsonString(StoredL
 const MAX_STORED_LOOPS = 10;
 
 const MAX_REPAIR_PROMPT_DEFECTS = 5;
+/** Enough of the last rejection to steer the next repair without crowding its brief. */
+const MAX_PREVIOUS_REJECTION_CHARS = 1_200;
 const BALLOT_FRAMES_PER_SIDE = 6;
 const CRITIC_FRAMES = 8;
 const REQUIRED_POSITIVE_CHECKS = ["boot", "console", "input"] as const;
@@ -116,6 +127,7 @@ const framesFor = (frames: ReadonlyArray<GameRepairFrame>) =>
     ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
     ...(frame.width === undefined ? {} : { width: frame.width }),
     ...(frame.height === undefined ? {} : { height: frame.height }),
+    ...(frame.observations === undefined ? {} : { observations: frame.observations }),
   }));
 
 /**
@@ -132,18 +144,60 @@ const boundedFrames = <T extends { readonly window?: boolean }>(
   return [...rest.slice(0, Math.max(0, limit - shaped.length)), ...shaped];
 };
 
+const toCriticFrame = (
+  frame: GameRepairStudio.GameRepairStudioFrame,
+  index: number,
+): GameRepairFrame => ({
+  id: `f${index + 1}`,
+  label: frame.label,
+  path: frame.path,
+  ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
+  ...(frame.width === undefined ? {} : { width: frame.width }),
+  ...(frame.height === undefined ? {} : { height: frame.height }),
+  ...(frame.window === true ? { window: true } : {}),
+  ...(frame.observations === undefined ? {} : { observations: frame.observations }),
+});
+
 const criticFrames = (
   frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
-): GameRepairFrame[] =>
-  boundedFrames(frames, CRITIC_FRAMES).map((frame, index) => ({
-    id: `f${index + 1}`,
-    label: frame.label,
-    path: frame.path,
-    ...(frame.inputPair === undefined ? {} : { inputPair: frame.inputPair }),
-    ...(frame.width === undefined ? {} : { width: frame.width }),
-    ...(frame.height === undefined ? {} : { height: frame.height }),
-    ...(frame.window === true ? { window: true } : {}),
-  }));
+): GameRepairFrame[] => {
+  const shaped = frames.filter((frame) => frame.window === true);
+  const rest = frames.filter((frame) => frame.window !== true);
+  const byStep = new Map<number, GameRepairStudio.GameRepairStudioFrame[]>();
+  for (const frame of rest) {
+    if (frame.inputPair === undefined) continue;
+    const group = byStep.get(frame.inputPair.stepIndex) ?? [];
+    group.push(frame);
+    byStep.set(frame.inputPair.stepIndex, group);
+  }
+  const complete = [...byStep.entries()]
+    .filter(
+      ([, pair]) =>
+        pair.length === 2 &&
+        pair[0]!.inputPair?.phase === "before" &&
+        pair[1]!.inputPair?.phase === "after",
+    )
+    .sort(([left], [right]) => left - right);
+  // No whole pairs (loose fallback): keep the old prefix behavior so a
+  // no-pairs run still shows its loose frames within budget.
+  if (complete.length === 0) return boundedFrames(frames, CRITIC_FRAMES).map(toCriticFrame);
+  const budgetPairs = Math.max(0, Math.floor((CRITIC_FRAMES - shaped.length) / 2));
+  // Second cut uses the same diverse witness-aware ranking as the first
+  // stage, so it keeps the best whole pairs instead of undoing the choice
+  // by dropping to a prefix. Selection measurements are not quality verdicts.
+  const ranks = complete.map(([stepIndex, pair]) => {
+    const inputPair = pair[1]!.inputPair!;
+    return {
+      stepIndex,
+      signature:
+        inputPair.input === undefined ? "unknown" : playtestInputSignature(inputPair.input),
+      score: playtestPairWitnessScore(inputPair),
+    };
+  });
+  const chosen = new Set(chooseDiverseWitnessPairs(ranks, budgetPairs));
+  const kept = complete.filter(([stepIndex]) => chosen.has(stepIndex)).flatMap(([, pair]) => pair);
+  return [...kept, ...shaped].map(toCriticFrame);
+};
 
 const assignmentFrames = (
   frames: ReadonlyArray<BallotFrame>,
@@ -212,10 +266,13 @@ interface BallotFrame {
 }
 
 const inputRouteKey = (
-  steps: ReadonlyArray<GamePlaytestStep>,
+  route: Pick<GameReviewExperimentRoute, "steps" | "setupSteps">,
   stepIndex: number,
   viewport: GameRepairLoopRecord["inputs"]["viewport"],
-) => JSON.stringify([viewport, steps.slice(0, stepIndex + 1)]);
+) => {
+  const full = [...(route.setupSteps ?? []), ...route.steps];
+  return JSON.stringify([viewport, full.slice(0, stepIndex + 1)]);
+};
 
 const experimentFrames = (
   frames: ReadonlyArray<GameRepairStudio.GameRepairStudioFrame>,
@@ -295,6 +352,7 @@ const ballotPlans = (loopId: string, roundId: string): GameReviewBallotPlan[] =>
 };
 
 type VetoKind =
+  | { readonly kind: "unqualified" }
   | { readonly kind: "failed"; readonly check: string }
   | { readonly kind: "unmeasured"; readonly check: string }
   | { readonly kind: "required"; readonly check: string }
@@ -310,6 +368,7 @@ const mechanicalVeto = (
   items: ReadonlyArray<GameReviewDoNotRegress>,
 ): VetoKind | null => {
   const after = new Map(candidate.map((check) => [check.id, check]));
+  if (after.get("playtest")?.status === "failed") return { kind: "unqualified" };
   for (const before of incumbent) {
     if (!FACT_CHECK_IDS.has(before.id) || before.status !== "passed") continue;
     const now = after.get(before.id);
@@ -331,6 +390,8 @@ const mechanicalVeto = (
 
 const vetoReason = (veto: VetoKind): string => {
   switch (veto.kind) {
+    case "unqualified":
+      return "playtest-failed: the challenger's exact-build playtest did not qualify.";
     case "failed":
       return `check-failed: ${veto.check} passed on the incumbent and fails on the challenger.`;
     case "unmeasured":
@@ -371,7 +432,12 @@ interface OwnedChild {
 
 type ChildOutcome =
   | { readonly kind: "failed"; readonly reason: string }
-  | { readonly kind: "expired"; readonly child: OwnedChild | null }
+  | {
+      readonly kind: "expired";
+      readonly child: OwnedChild | null;
+      /** The phase cap interrupted and fully joined the child before this was read. */
+      readonly settled: boolean;
+    }
   | {
       readonly kind: "terminal";
       readonly status: "completed" | "failed" | "cancelled" | "interrupted" | "rolled_back";
@@ -381,8 +447,20 @@ type ChildOutcome =
 /** Everything one live fiber needs and nothing a restart could reuse. */
 interface Task {
   readonly root: string;
-  readonly owned: Ref.Ref<OwnedChild | null>;
+  /** Every live child keyed by role:order, so siblings never clear each other. */
+  readonly owned: Ref.Ref<ReadonlyMap<string, OwnedChild>>;
+  readonly usageWrite: Semaphore.Semaphore;
 }
+
+const ownedKey = (role: string, order: number) => `${role}:${order}`;
+
+const ownedRemove = (task: Task, key: string) =>
+  Ref.update(task.owned, (current) => {
+    if (!current.has(key)) return current;
+    const next = new Map(current);
+    next.delete(key);
+    return next;
+  });
 
 interface RoundOutcome {
   readonly record: GameRepairLoopRecord;
@@ -590,9 +668,9 @@ export const layer = (options: GameRepairLoopOptions) => {
         : rounds.read(root).pipe(
             Effect.map(
               (state) =>
-                (state.submissions ?? [])
-                  .filter((entry) => String(entry.runId) === String(runId))
-                  .at(-1) ?? null,
+                (state.submissions ?? []).findLast(
+                  (entry) => String(entry.runId) === String(runId),
+                ) ?? null,
             ),
             Effect.orElseSucceed(() => null),
           );
@@ -814,9 +892,86 @@ export const layer = (options: GameRepairLoopOptions) => {
           updatedAt: nowIso(),
         }));
       }).pipe(
+        task.usageWrite.withPermits(1),
         Effect.catchCause((cause) => logFailure("recording review usage failed", cause)),
         Effect.asVoid,
       );
+
+    /** Freeze phase caps from this round's opening budget, not the original loop allowance. */
+    const phasePlan = (
+      record: GameRepairLoopRecord,
+      phase: GameReviewAttemptPolicy.ReviewPhase,
+      roundBudgetMs: number,
+    ) =>
+      GameReviewAttemptPolicy.planReviewPhase({
+        phase,
+        remainingMs: remainingBudget(record, now()).elapsedMs,
+        totalBudgetMs: Math.min(record.budget.elapsedMs, roundBudgetMs),
+      });
+
+    const withinPhase = <A, E>(effect: Effect.Effect<A, E>, allowanceMs: number) =>
+      effect.pipe(Effect.timeoutOption(Duration.millis(Math.max(1, allowanceMs))));
+
+    const answerDetail = (
+      answer: GameReviewSessions.GameReviewSessionAnswerResult | null,
+    ): string | undefined => {
+      if (answer === null || answer.kind === "critic" || answer.kind === "ballot") return undefined;
+      return answer.kind === "invalid" ? answer.reason : "the child left no terminal answer.";
+    };
+
+    const answerReadiness = (
+      answer: GameReviewSessions.GameReviewSessionAnswerResult | null,
+    ): GameReviewAttemptPolicy.ReviewAnswerReadiness =>
+      answer === null
+        ? "missing"
+        : answer.kind === "critic" || answer.kind === "ballot"
+          ? "usable"
+          : "unusable";
+
+    const answerExhausted = (
+      answer: GameReviewSessions.GameReviewSessionAnswerResult | null,
+    ): boolean => answer !== null && answer.kind === "invalid" && answer.exhausted === true;
+
+    /**
+     * One reading of a child's end for every role. A usable recorded answer or
+     * an actual candidate is judgment even when the provider ended failed; no
+     * evidence from such an end is infrastructure, not a game result. A phase
+     * cap the loop itself joined may also have left that evidence on disk.
+     * An exhausted tool record is the review's own invalid output, never a
+     * user cancellation, so its last validation error rides as the detail.
+     */
+    const attemptVerdict = (
+      role: GameReviewAttemptPolicy.ReviewAttemptRole,
+      child: ChildOutcome,
+      answer: GameReviewSessions.GameReviewSessionAnswerResult | null = null,
+      hasCandidate = false,
+    ): GameReviewAttemptPolicy.ReviewAttemptVerdict => {
+      if (child.kind === "expired")
+        return GameReviewAttemptPolicy.classifyReviewAttempt(role, {
+          kind: "expired",
+          settled: child.settled,
+          evidence:
+            role === "repair" ? (hasCandidate ? "usable" : "missing") : answerReadiness(answer),
+        });
+      if (child.kind === "failed")
+        return GameReviewAttemptPolicy.classifyReviewAttempt(role, {
+          kind: "unstarted",
+          detail: child.reason,
+        });
+      const detail = answerDetail(answer);
+      const exhausted = answerExhausted(answer);
+      return GameReviewAttemptPolicy.classifyReviewAttempt(role, {
+        kind: "terminal",
+        status: child.status,
+        answer: answerReadiness(answer),
+        hasCandidate,
+        ...(detail === undefined ? {} : { detail }),
+        ...(exhausted ? { exhausted: true as const } : {}),
+      });
+    };
+
+    const infrastructureReason = (reason: string) =>
+      `review-infrastructure: ${reason}; the selected build is kept.`;
 
     /**
      * Waits for a review child inline. The wait is taken after `start` returns
@@ -831,6 +986,8 @@ export const layer = (options: GameRepairLoopOptions) => {
         readonly role: GameReviewSessions.GameReviewTaskRole;
         readonly order: number;
         readonly roundId: string;
+        /** A hard phase bound; the loop deadline still applies on top. */
+        readonly allowanceMs: number;
         readonly evidence?: GameReviewSessions.GameReviewEvidenceInput | undefined;
         readonly repair?: GameReviewSessions.GameReviewRepairInput | undefined;
         readonly items?: ReadonlyArray<{ readonly id: string; readonly what: string }> | undefined;
@@ -839,10 +996,19 @@ export const layer = (options: GameRepairLoopOptions) => {
     ): Effect.Effect<ChildOutcome, GameOperationError> =>
       Effect.gen(function* () {
         const remaining = remainingBudget(record, now()).elapsedMs;
-        if (remaining <= 0) return { kind: "expired", child: yield* Ref.get(task.owned) } as const;
+        const key = ownedKey(input.role, input.order);
+        if (remaining <= 0)
+          return {
+            kind: "expired",
+            child: null,
+            settled: false,
+          } as const;
+        const timeoutMs = Math.max(1, Math.min(input.allowanceMs, remaining));
         // Starting the child and recording ownership is one uninterruptible
         // step: an interrupt between the dispatch commit and the Ref write
         // would otherwise release a child the loop no longer knew it owned.
+        // Ownership is keyed by role:order so a sibling completing first
+        // can never clear this child's ownership.
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
             const started = yield* sessions.start({
@@ -866,13 +1032,13 @@ export const layer = (options: GameRepairLoopOptions) => {
               runId: started.runId,
               label: `${input.role}:${input.order}`,
             };
-            yield* Ref.set(task.owned, child);
+            yield* Ref.update(task.owned, (current) => new Map(current).set(key, child));
             yield* recordUsage(task, child, input, false);
             const shell = yield* threads
               .getThreadShell(started.childThreadId)
               .pipe(Effect.orElseSucceed(() => null));
             if (shell === null) {
-              yield* Ref.set(task.owned, null);
+              yield* ownedRemove(task, key);
               return {
                 kind: "failed",
                 reason: "The review child thread vanished before it could be awaited.",
@@ -884,7 +1050,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                   projectId: shell.projectId,
                   threadId: started.childThreadId,
                   ...(started.runId === null ? {} : { runId: started.runId }),
-                  timeoutMs: Math.max(1, remaining),
+                  timeoutMs,
                 })
                 .pipe(
                   Effect.onInterrupt(() =>
@@ -892,7 +1058,7 @@ export const layer = (options: GameRepairLoopOptions) => {
                       Effect.flatMap((settled) =>
                         Effect.gen(function* () {
                           yield* recordUsage(task, child, input, settled);
-                          if (settled) yield* Ref.set(task.owned, null);
+                          if (settled) yield* ownedRemove(task, key);
                         }),
                       ),
                     ),
@@ -910,8 +1076,15 @@ export const layer = (options: GameRepairLoopOptions) => {
                 ),
             );
             if (waited.timedOut) {
-              yield* Ref.set(task.owned, null);
-              return { kind: "expired", child } as const;
+              // A phase cut must not leave an orphan writer: join the child
+              // before the loop restores or releases the game.
+              const settled = yield* interruptChild(
+                child,
+                "The review phase allowance ended before the child finished.",
+              );
+              yield* recordUsage(task, child, input, settled);
+              if (settled) yield* ownedRemove(task, key);
+              return { kind: "expired", child, settled } as const;
             }
             const status = yield* sessions.runStatus({
               threadId: record.threadId,
@@ -920,7 +1093,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               role: input.role,
               order: input.order,
             });
-            yield* Ref.set(task.owned, null);
+            yield* ownedRemove(task, key);
             yield* recordUsage(task, child, input, true);
             if (status.kind === "missing")
               return {
@@ -958,6 +1131,7 @@ export const layer = (options: GameRepairLoopOptions) => {
           yield* rounds
             .reject(input.root, open.id, {
               reason: input.reason,
+              decision: "stop",
               preserveDirectories: preview.directories(input.root),
             })
             .pipe(
@@ -1025,25 +1199,130 @@ export const layer = (options: GameRepairLoopOptions) => {
       plan: GameReviewBallotPlan,
       experiments: ReadonlyArray<BallotExperimentPair>,
       inputs: GameRepairLoopRecord["inputs"],
+      defects: ReadonlyArray<GameReviewDefect>,
     ) => {
       const experimentFrames = (side: "incumbent" | "challenger") =>
         experiments.flatMap((pair) => (side === "challenger" ? pair.candidate : pair.incumbent));
+      // Defect witnesses win the frozen budget. Ordinary citations name the
+      // incumbent's fN ids, so the candidate's cN frames are matched by causal
+      // route prefix (viewport plus the steps through the cited input), never
+      // by id string. Try citations are already replayed as experiments and
+      // windows already survive as shape evidence, so neither needs a frozen
+      // slot. When many defects exhaust the frozen budget only the first
+      // fitting pairs are shown; the ballot still lists every defect and judges
+      // a missing witness cannot-tell instead of claiming full coverage, and
+      // preservation filler never displaces a shown defect.
+      const defectKeys = (() => {
+        const byId = new Map(incumbentFrames.map((frame) => [frame.id, frame]));
+        const seen = new Set<string>();
+        const keys: string[] = [];
+        for (const defect of defects) {
+          if (defect.frameId.startsWith("try")) continue;
+          const cited = byId.get(defect.frameId);
+          if (cited === undefined || cited.window === true) continue;
+          const key =
+            cited.inputPair === undefined
+              ? `label:${cited.label}`
+              : inputRouteKey({ steps: inputs.steps }, cited.inputPair.stepIndex, inputs.viewport);
+          if (!seen.has(key)) {
+            seen.add(key);
+            keys.push(key);
+          }
+        }
+        return keys;
+      })();
+      const replayed = new Set(experiments.map((entry) => entry.key));
+      const frozenKeys = defectKeys.filter((key) => !replayed.has(key));
+      const restFor = (frozen: ReadonlyArray<GameRepairFrame>) =>
+        frozen.filter(
+          (frame) =>
+            frame.window !== true &&
+            (frame.inputPair === undefined ||
+              !replayed.has(
+                inputRouteKey({ steps: inputs.steps }, frame.inputPair.stepIndex, inputs.viewport),
+              )),
+        );
+      const shapedFor = (frozen: ReadonlyArray<GameRepairFrame>) =>
+        frozen.filter((frame) => frame.window === true);
+      const groupRest = (rest: ReadonlyArray<GameRepairFrame>) => {
+        const groups: Array<{ readonly key: string; readonly frames: GameRepairFrame[] }> = [];
+        const byKey = new Map<string, GameRepairFrame[]>();
+        for (const frame of rest) {
+          const key =
+            frame.inputPair === undefined
+              ? `label:${frame.label}`
+              : inputRouteKey({ steps: inputs.steps }, frame.inputPair.stepIndex, inputs.viewport);
+          let group = byKey.get(key);
+          if (group === undefined) {
+            group = [];
+            byKey.set(key, group);
+            groups.push({ key, frames: group });
+          }
+          group.push(frame);
+        }
+        return { groups, byKey };
+      };
+      const restIncumbent = restFor(incumbentFrames);
+      const restCandidate = restFor(candidateFrames);
+      const groupedIncumbent = groupRest(restIncumbent);
+      const groupedCandidate = groupRest(restCandidate);
+      const commonDefectKeys = frozenKeys.filter(
+        (key) => groupedIncumbent.byKey.has(key) && groupedCandidate.byKey.has(key),
+      );
+      const budgetFor = (shapedLength: number) =>
+        Math.max(0, BALLOT_FRAMES_PER_SIDE - shapedLength);
+      const budgetIncumbent = budgetFor(shapedFor(incumbentFrames).length);
+      const budgetCandidate = budgetFor(shapedFor(candidateFrames).length);
+      // The same defect set must appear on both builds, so the tighter budget
+      // decides which prefix of the ordered defect pairs is shown.
+      const shownDefectKeys: string[] = [];
+      let incumbentDefectCount = 0;
+      let candidateDefectCount = 0;
+      for (const key of commonDefectKeys) {
+        const incumbentSize = groupedIncumbent.byKey.get(key)!.length;
+        const candidateSize = groupedCandidate.byKey.get(key)!.length;
+        if (
+          incumbentDefectCount + incumbentSize > budgetIncumbent ||
+          candidateDefectCount + candidateSize > budgetCandidate
+        )
+          break;
+        shownDefectKeys.push(key);
+        incumbentDefectCount += incumbentSize;
+        candidateDefectCount += candidateSize;
+      }
+      const shownDefects = new Set(shownDefectKeys);
+      const selectRest = (
+        rest: ReadonlyArray<GameRepairFrame>,
+        grouped: ReturnType<typeof groupRest>,
+        budget: number,
+        defectCount: number,
+      ): ReadonlyArray<GameRepairFrame> => {
+        const selectedKeys = new Set(shownDefects);
+        let used = defectCount;
+        for (const group of grouped.groups) {
+          if (selectedKeys.has(group.key)) continue;
+          if (used + group.frames.length > budget) break;
+          selectedKeys.add(group.key);
+          used += group.frames.length;
+        }
+        const wanted = new Set<GameRepairFrame>();
+        for (const group of grouped.groups) {
+          if (!selectedKeys.has(group.key)) continue;
+          for (const frame of group.frames) wanted.add(frame);
+        }
+        return rest.filter((frame) => wanted.has(frame));
+      };
       const buildFrames = (side: "incumbent" | "challenger") => {
-        // Route prefixes distinguish repeated actions reached through different inputs.
         const frozen = side === "challenger" ? candidateFrames : incumbentFrames;
-        const replayed = new Set(experiments.map((entry) => entry.key));
+        const shaped = shapedFor(frozen);
+        const rest = side === "challenger" ? restCandidate : restIncumbent;
+        const grouped = side === "challenger" ? groupedCandidate : groupedIncumbent;
+        const budget = side === "challenger" ? budgetCandidate : budgetIncumbent;
+        const defectCount = side === "challenger" ? candidateDefectCount : incumbentDefectCount;
         return ballotFrames([
           ...experimentFrames(side),
-          ...boundedFrames(
-            frozen.filter(
-              (frame) =>
-                frame.inputPair === undefined ||
-                !replayed.has(
-                  inputRouteKey(inputs.steps, frame.inputPair.stepIndex, inputs.viewport),
-                ),
-            ),
-            BALLOT_FRAMES_PER_SIDE,
-          ),
+          ...selectRest(rest, grouped, budget, defectCount),
+          ...shaped,
         ]);
       };
       const buildChecks = (side: "incumbent" | "challenger") =>
@@ -1064,6 +1343,37 @@ export const layer = (options: GameRepairLoopOptions) => {
       ];
       return { frames: [...frames, ...controls], checks };
     };
+
+    /**
+     * What the next repair must not repeat: the last rejected round of this
+     * same loop, with its concrete failed checks. It is round history, not
+     * durable game memory, and it is bounded so the brief stays dominant.
+     */
+    const previousRejectionFor = (
+      root: string,
+      loopId: string,
+      roundId: string,
+    ): Effect.Effect<string | undefined, GameOperationError> =>
+      Effect.gen(function* () {
+        const state = yield* rounds.read(root);
+        const rejected = state.rounds.find(
+          (entry) => entry.loopId === loopId && entry.id !== roundId && entry.status === "rejected",
+        );
+        if (rejected === undefined) return undefined;
+        const failedChecks = (rejected.candidateChecks ?? []).filter(
+          (check) => check.status === "failed",
+        );
+        const text = [
+          rejected.reason ?? "The previous attempt was rejected.",
+          ...failedChecks.map(
+            (check) =>
+              `failed check ${check.id}${check.detail === undefined ? "" : `: ${check.detail}`}`,
+          ),
+        ].join("\n");
+        return text.length <= MAX_PREVIOUS_REJECTION_CHARS
+          ? text
+          : `${text.slice(0, MAX_PREVIOUS_REJECTION_CHARS - 1)}…`;
+      });
 
     /** Replay every cited point on both builds before adding the frozen route. */
     const replayExperimentPairs = (input: {
@@ -1087,6 +1397,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               root: input.root,
               buildId,
               steps: route.steps,
+              ...(route.setupSteps === undefined ? {} : { setupSteps: [...route.setupSteps] }),
               captureEveryMs: route.captureEveryMs,
               viewport: route.viewport,
             });
@@ -1106,7 +1417,7 @@ export const layer = (options: GameRepairLoopOptions) => {
               const routeKey =
                 stepIndex === null
                   ? `${route.id}:${citation.frameId}`
-                  : inputRouteKey(route.steps, stepIndex, route.viewport);
+                  : inputRouteKey(route, stepIndex, route.viewport);
               const key =
                 kind === "pair"
                   ? routeKey
@@ -1309,6 +1620,7 @@ export const layer = (options: GameRepairLoopOptions) => {
         const remaining = remainingBudget(record, now());
         const round = yield* rounds.begin(task.root, {
           threadId: record.threadId,
+          preserveDirectories: preview.directories(task.root),
           budget: {
             repairs: remaining.repairs,
             elapsedMs: Math.max(1, remaining.elapsedMs),
@@ -1319,14 +1631,35 @@ export const layer = (options: GameRepairLoopOptions) => {
         });
         // B7: every check of every candidate replays the inputs captured once
         // when the loop opened, never the newest playtest on disk.
+        const incumbentPlan = phasePlan(record, "incumbent-check", round.budget.elapsedMs);
+        if (!incumbentPlan.admitted)
+          return {
+            record,
+            done: yield* stop(
+              task.root,
+              "budget-admission: the remaining review budget cannot cover the selected build check; the selected build is kept.",
+            ),
+          };
         yield* progress(task.root, "Checking the selected build");
-        const checked = yield* studio.check({
-          threadId: record.threadId,
-          root: task.root,
-          target: "incumbent",
-          buildId: round.incumbentBuildId!,
-          inputs: record.inputs,
-        });
+        const incumbentCheck = yield* withinPhase(
+          studio.check({
+            threadId: record.threadId,
+            root: task.root,
+            target: "incumbent",
+            buildId: round.incumbentBuildId!,
+            inputs: record.inputs,
+          }),
+          incumbentPlan.allowanceMs,
+        );
+        if (Option.isNone(incumbentCheck))
+          return {
+            record,
+            done: yield* interrupted(
+              task.root,
+              "deadline: the selected build check did not finish within its phase allowance; the selected build is kept.",
+            ),
+          };
+        const checked = incumbentCheck.value;
         // Legacy evidence recorded no viewport. This first incumbent run is its
         // one recapture: the viewport it actually played at is frozen before
         // any review, so later checks never fall back to mutable defaults.
@@ -1340,50 +1673,79 @@ export const layer = (options: GameRepairLoopOptions) => {
         }
         const incumbentFrames = criticFrames(checked.frames);
         yield* rounds.recordReview(task.root, round.id, { checks: [...checked.checks] });
+        const criticPlan = phasePlan(record, "critic", round.budget.elapsedMs);
+        if (!criticPlan.admitted)
+          return {
+            record,
+            done: yield* stop(
+              task.root,
+              "budget-admission: the remaining review budget cannot cover the critic; the selected build is kept.",
+            ),
+          };
         yield* progress(task.root, "Reviewing frames");
         const critic = yield* awaitChild(task, record, {
           role: "critic",
           order: 0,
           roundId: round.id,
+          allowanceMs: criticPlan.allowanceMs,
           evidence: {
             frames: framesFor(incumbentFrames),
             checks: [...checked.checks],
+            ...(checked.nativeDiagnostics === undefined
+              ? {}
+              : { nativeDiagnostics: checked.nativeDiagnostics }),
+            ...(checked.nativeWorld === undefined ? {} : { nativeWorld: checked.nativeWorld }),
           },
         });
-        if (critic.kind === "expired")
+        // A failed provider with a recorded answer is still judged; without one
+        // it is infrastructure, and a completed child's unusable answer is the
+        // review's own malformed output. Neither is a game verdict. A phase cap
+        // the loop joined may likewise have left an answer on disk.
+        const criticAnswer =
+          critic.kind === "terminal" || (critic.kind === "expired" && critic.settled)
+            ? yield* sessions.answer({
+                threadId: record.threadId,
+                loopId: record.id,
+                roundId: round.id,
+                role: "critic",
+                order: 0,
+              })
+            : null;
+        const criticVerdict = attemptVerdict("critic", critic, criticAnswer);
+        if (criticVerdict.kind === "expired")
           return {
             record,
             done: yield* interrupted(
               task.root,
-              "deadline: the review ran out of time while the critic was running.",
+              `deadline: ${criticVerdict.reason} The selected build is kept.`,
             ),
           };
-        if (critic.kind === "failed")
-          return { record, done: yield* stop(task.root, `critic-failed: ${critic.reason}`) };
-        const answered: GameReviewSessions.GameReviewSessionAnswerResult = yield* sessions.answer({
-          threadId: record.threadId,
-          loopId: record.id,
-          roundId: round.id,
-          role: "critic",
-          order: 0,
-        });
-        if (answered.kind === "pending")
+        if (criticVerdict.kind === "infrastructure")
+          return {
+            record,
+            done: yield* interrupted(task.root, infrastructureReason(criticVerdict.reason)),
+          };
+        if (criticVerdict.kind === "cancelled")
+          return {
+            record,
+            done: yield* stop(task.root, `interrupted: ${criticVerdict.reason}`),
+          };
+        if (criticVerdict.kind !== "judged")
+          return {
+            record,
+            done: yield* stop(task.root, `invalid-critic: ${criticVerdict.reason}`),
+          };
+        if (criticAnswer === null || criticAnswer.kind !== "critic")
           return {
             record,
             done: yield* stop(
               task.root,
-              "critic-failed: the critic ended without an answer; the incumbent is kept.",
+              "invalid-critic: the critic's recorded answer could not be read as a critic answer.",
             ),
           };
-        if (answered.kind !== "critic")
-          return {
-            record,
-            done: yield* stop(
-              task.root,
-              `invalid-critic: ${answered.kind === "invalid" ? answered.reason : "the critic did not answer with defects."}`,
-            ),
-          };
-        const fundamentalDefects: GameReviewDefect[] = Object.entries(answered.answer.fundamentals)
+        const fundamentalDefects: GameReviewDefect[] = Object.entries(
+          criticAnswer.answer.fundamentals,
+        )
           .filter(([, judgment]) => judgment.verdict === "no" && judgment.frameIds.length > 0)
           .map(([name, judgment]) => ({
             severity: "blocker",
@@ -1391,18 +1753,52 @@ export const layer = (options: GameRepairLoopOptions) => {
             frameId: judgment.frameIds[0]!,
             fix: `Resolve ${name}: ${judgment.note}`,
           }));
-        const defects = [...fundamentalDefects, ...answered.answer.defects]
+        // An explicit unmet promise reaches repair even when the critic omits
+        // it from defects: each no-verdict requirement becomes one frame-backed
+        // actionable defect. Cannot-tell stays neutral and never invents one.
+        const requirementDefects: GameReviewDefect[] = (criticAnswer.answer.requirements ?? [])
+          .filter((requirement) => requirement.verdict === "no" && requirement.frameIds.length > 0)
+          .map((requirement) => ({
+            severity: "visible" as const,
+            what: `Requirement ${requirement.id} unmet: ${requirement.note}`,
+            frameId: requirement.frameIds[0]!,
+            fix: `Fulfill ${requirement.id} and verify the actual effect with frames or game_try_input; yes/no: ${requirement.note}`,
+          }));
+        // Absolute quality reaches bounded repair only as frame-backed,
+        // actionable failures: each visual no-verdict dimension becomes one
+        // defect, capped with everything else at five and ordered after the
+        // explicit design defects so a quality note never displaces an
+        // approved promise. Audio never becomes a defect from screenshots:
+        // judging a heard effect from frames is unsupported, and hidden
+        // behavior without frames is not invented. Cannot-tell stays neutral.
+        const qualityDefects = qualityRepairDefects(criticAnswer.answer.quality);
+        const defects = [
+          ...fundamentalDefects,
+          ...requirementDefects,
+          ...criticAnswer.answer.defects,
+          ...qualityDefects,
+        ]
           .toSorted((left, right) => {
             const rank = { blocker: 0, visible: 1, nit: 2 } as const;
             return rank[left.severity] - rank[right.severity];
           })
           .slice(0, MAX_REPAIR_PROMPT_DEFECTS);
-        const doNotRegress = answered.answer.doNotRegress;
+        const doNotRegress = criticAnswer.answer.doNotRegress;
+        const citedQualityFrameIds = Object.values(criticAnswer.answer.quality ?? {}).flatMap(
+          (judgment) => judgment.frameIds,
+        );
+        const citedRequirementFrameIds = (criticAnswer.answer.requirements ?? []).flatMap(
+          (requirement) => requirement.frameIds,
+        );
         const citedFrameIds = [
           ...new Set([
-            ...answered.answer.defects.map((defect) => defect.frameId),
+            ...criticAnswer.answer.defects.map((defect) => defect.frameId),
             ...doNotRegress.map((item) => item.frameId),
-            ...Object.values(answered.answer.fundamentals).flatMap((judgment) => judgment.frameIds),
+            ...Object.values(criticAnswer.answer.fundamentals).flatMap(
+              (judgment) => judgment.frameIds,
+            ),
+            ...citedRequirementFrameIds,
+            ...citedQualityFrameIds,
           ]),
         ];
         const experimentFrameIds = citedFrameIds.filter((frameId) => frameId.startsWith("try"));
@@ -1416,19 +1812,58 @@ export const layer = (options: GameRepairLoopOptions) => {
                 frameIds: experimentFrameIds,
               });
         yield* rounds.recordReview(task.root, round.id, {
-          fundamentals: answered.answer.fundamentals,
+          fundamentals: criticAnswer.answer.fundamentals,
+          ...(criticAnswer.answer.requirements === undefined
+            ? {}
+            : { requirements: criticAnswer.answer.requirements }),
+          ...(criticAnswer.answer.requirementsIncomplete === undefined
+            ? {}
+            : { requirementsIncomplete: criticAnswer.answer.requirementsIncomplete }),
+          ...(criticAnswer.answer.downgradedRequirements === undefined
+            ? {}
+            : { downgradedRequirements: criticAnswer.answer.downgradedRequirements }),
+          // Freeze the rubric, the verdicts and their exact coverage with
+          // the round: a mid-round edit cannot rewrite the exam, and legacy
+          // rounds simply have none of these fields.
+          ...(criticAnswer.answer.quality === undefined
+            ? {}
+            : {
+                quality: criticAnswer.answer.quality,
+                qualityRubricVersion:
+                  criticAnswer.qualityRubricVersion ?? GAME_REVIEW_QUALITY_RUBRIC_VERSION,
+                qualityCoverage: gameReviewQualityCoverage(
+                  criticAnswer.answer.quality,
+                  criticAnswer.qualityRubricVersion,
+                ),
+              }),
           defects,
           doNotRegress,
           experiments,
         });
-        if (defects.length === 0)
+        if (defects.length === 0) {
+          const requirementUnknowns = (criticAnswer.answer.requirements ?? []).filter(
+            (requirement) => requirement.verdict === "cannot-tell",
+          ).length;
+          const coverage = gameReviewQualityCoverage(
+            criticAnswer.answer.quality,
+            criticAnswer.qualityRubricVersion,
+          );
+          const coverageNote =
+            criticAnswer.answer.quality === undefined
+              ? "quality unassessed (legacy round)"
+              : `${coverage.unknowns} quality dimension(s) unknown of ${coverage.total}`;
           return {
             record,
             done: yield* stop(
               task.root,
-              "zero-defects: the critic found nothing to repair; the incumbent is kept.",
+              requirementUnknowns > 0 ||
+                criticAnswer.answer.requirementsIncomplete === true ||
+                coverage.unknowns > 0
+                ? `zero-defects: no observed defect to repair; coverage incomplete (${requirementUnknowns} requirement(s) unknown${criticAnswer.answer.requirementsIncomplete === true ? "; the design packet was incomplete" : " on limited evidence"}; ${coverageNote}); the incumbent is kept. A selected relative improvement is not proof of absolute quality, and a finished loop is not production readiness.`
+                : "zero-defects: the critic found nothing to repair; the incumbent is kept. A selected relative improvement is not proof of absolute quality, and a finished loop is not production readiness.",
             ),
           };
+        }
         return yield* repairAndJudge(
           task,
           record,
@@ -1440,6 +1875,135 @@ export const layer = (options: GameRepairLoopOptions) => {
             experiments,
           },
         );
+      });
+
+    /**
+     * A repair that produced no candidate and judged nothing is review
+     * infrastructure, not a bad repair: give the reservation back, keep usage
+     * history, and end without a game verdict. The round stays the history of
+     * the dispatch through `repairStartedAt`.
+     */
+    const repairInfrastructure = (
+      task: Task,
+      signal: GameReviewAttemptPolicy.ReviewAttemptSignal,
+    ): Effect.Effect<RoundOutcome, GameOperationError> =>
+      Effect.gen(function* () {
+        const verdict = GameReviewAttemptPolicy.classifyReviewAttempt("repair", signal);
+        const refunded = yield* patch(task.root, (current) => ({
+          ...current,
+          repairsUsed: Math.max(0, current.repairsUsed - 1),
+          updatedAt: nowIso(),
+        }));
+        return {
+          record: refunded,
+          done: yield* interrupted(
+            task.root,
+            infrastructureReason(
+              `${
+                verdict.kind === "infrastructure"
+                  ? verdict.reason
+                  : "the repair ended before it could be judged"
+              }; the reserved repair attempt was refunded`,
+            ),
+          ),
+        };
+      });
+
+    /**
+     * A host phase cap is not a user stop: `awaitChild` interrupted and joined
+     * this child itself, so evidence it wrote before the cut may still be
+     * judged. A candidate is usable only when the source it was exported from
+     * is exactly the tree the settled child left. Otherwise the selected build
+     * stays and the reserved attempt still counts.
+     *
+     * Returns null only when the shared candidate-check-and-ballot path below
+     * may run.
+     */
+    const phaseCappedRepair = (
+      task: Task,
+      record: GameRepairLoopRecord,
+      reserved: GameRepairLoopRecord,
+      roundId: string,
+      child: Extract<ChildOutcome, { readonly kind: "expired" }>,
+    ): Effect.Effect<RoundOutcome | null, GameOperationError> =>
+      Effect.gen(function* () {
+        const capped = "the repair used its phase allowance before it finished";
+        if (!child.settled || child.child === null)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              `deadline: ${capped} and its child did not settle; the attempt counts and the selected build is kept.`,
+            ),
+          };
+        // The deadline cannot be bypassed by the cap: a phase can consume the
+        // last of the loop budget while its child is joining.
+        if (remainingBudget(reserved, now()).elapsedMs <= 0)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              `deadline: ${capped} after the review budget ran out; the attempt counts and the selected build is kept.`,
+            ),
+          };
+        const open = yield* findRound(task.root, roundId);
+        if (open === null || open.status !== "running")
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              "superseded: the open round was stopped while the capped repair was joining.",
+            ),
+          };
+        const stamp = yield* admission.stamp(task.root);
+        if (stamp.generation !== record.generation)
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              "superseded: a user action took the game while the capped repair was joining.",
+            ),
+          };
+        if (open.candidate === null)
+          return {
+            record: reserved,
+            done: yield* interrupted(task.root, `deadline: ${capped}; the attempt counts.`),
+          };
+        // Capture the source the writer actually left. The candidate must
+        // match it exactly; a cap can land between an export and a later edit.
+        yield* rounds
+          .recordPostRepair(task.root, roundId)
+          .pipe(
+            Effect.catchCause((cause) => logFailure("recording the repair tree failed", cause)),
+          );
+        const afterRepair = yield* findRound(task.root, roundId);
+        if (afterRepair === null || afterRepair.status !== "running")
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              "superseded: the open round was stopped while the capped repair was joining.",
+            ),
+          };
+        const candidate = afterRepair.candidate;
+        if (candidate === null)
+          return {
+            record: reserved,
+            done: yield* interrupted(task.root, `deadline: ${capped}; the attempt counts.`),
+          };
+        if (candidate.sourceId === null || candidate.sourceId !== afterRepair.postRepairSourceId)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              `repair-phase-capped: candidate ${candidate.buildId} exists but its source ${
+                candidate.sourceId ?? "unknown"
+              } does not match the repaired source ${
+                afterRepair.postRepairSourceId ?? "unknown"
+              }; the attempt counts and the selected build is kept.`,
+            ),
+          };
+        return null;
       });
 
     const repairAndJudge = (
@@ -1457,8 +2021,6 @@ export const layer = (options: GameRepairLoopOptions) => {
       },
     ): Effect.Effect<RoundOutcome, GameOperationError> =>
       Effect.gen(function* () {
-        // Budget is checked only before a new dispatch, so a started repair
-        // (including the third) is always judged.
         const at = now();
         const remaining = remainingBudget(record, at);
         if (remaining.repairs <= 0 || remaining.elapsedMs <= 0)
@@ -1469,6 +2031,19 @@ export const layer = (options: GameRepairLoopOptions) => {
               "budget-exhausted: the review budget ran out before another repair.",
             ),
           };
+        // Keep checking and voting time out of the repair's allowance so it
+        // cannot consume the whole budget before a selection is possible.
+        const repairPlan = phasePlan(record, "repair", round.budget.elapsedMs);
+        if (!repairPlan.admitted)
+          return {
+            record,
+            done: yield* stop(
+              task.root,
+              "budget-admission: the remaining review budget cannot cover a repair plus the candidate check and two ballots; the selected build is kept.",
+            ),
+          };
+        const previousRejection = yield* previousRejectionFor(task.root, record.id, round.id);
+        const repairMinutes = Math.max(1, Math.ceil(repairPlan.allowanceMs / 60_000));
         const stamp = yield* admission.stamp(task.root);
         if (stamp.generation !== record.generation)
           return {
@@ -1493,26 +2068,27 @@ export const layer = (options: GameRepairLoopOptions) => {
           role: "repair",
           order: 0,
           roundId: round.id,
+          allowanceMs: repairPlan.allowanceMs,
           repair: {
-            remainingBudget: budgetText(reserved, at),
+            remainingBudget: `${budgetText(reserved, at)}; this attempt has at most ${repairMinutes} minute${repairMinutes === 1 ? "" : "s"}`,
             defects: review.defects,
             doNotRegress: review.doNotRegress,
+            ...(previousRejection === undefined ? {} : { previousRejection }),
           },
         });
-        if (repair.kind === "expired")
-          return {
-            record: reserved,
-            done: yield* interrupted(
-              task.root,
-              "deadline: the review ran out of time while the repair was running; the attempt counts.",
-            ),
-          };
+        if (repair.kind === "expired") {
+          const capped = yield* phaseCappedRepair(task, record, reserved, round.id, repair);
+          if (capped !== null) return capped;
+        }
         if (repair.kind === "failed")
-          return {
-            record: reserved,
-            done: yield* stop(task.root, `repair-unavailable: ${repair.reason}`),
-          };
-        if (repair.status === "cancelled" || repair.status === "interrupted")
+          return yield* repairInfrastructure(task, {
+            kind: "unstarted",
+            detail: repair.reason,
+          });
+        if (
+          repair.kind === "terminal" &&
+          (repair.status === "cancelled" || repair.status === "interrupted")
+        )
           return {
             record: reserved,
             done: yield* stop(
@@ -1520,16 +2096,21 @@ export const layer = (options: GameRepairLoopOptions) => {
               `interrupted: the repair ended ${repair.status} before it was judged; the attempt counts.`,
             ),
           };
-        yield* rounds
-          .recordPostRepair(task.root, round.id)
-          .pipe(
-            Effect.catchCause((cause) => logFailure("recording the repair tree failed", cause)),
-          );
+        // The capped path already captured the tree it compared the candidate
+        // against; no writer remains, so recording it twice would only rehash.
+        if (repair.kind !== "expired")
+          yield* rounds
+            .recordPostRepair(task.root, round.id)
+            .pipe(
+              Effect.catchCause((cause) => logFailure("recording the repair tree failed", cause)),
+            );
+        const endedStatus = repair.kind === "terminal" ? repair.status : "interrupted";
         // The child's own submit says which defects it believes it fixed. It is
         // testimony for the history, never evidence: the checks and ballots
         // below still decide, and a child that never submitted is still judged.
-        if (repair.child.runId !== null) {
-          const claimed = yield* submissionForRun(task.root, repair.child.runId);
+        const repairChild = repair.child;
+        if (repairChild !== null && repairChild.runId !== null) {
+          const claimed = yield* submissionForRun(task.root, repairChild.runId);
           if (claimed !== null)
             yield* rounds
               .recordReview(task.root, round.id, { submissionNote: claimed.note })
@@ -1549,6 +2130,19 @@ export const layer = (options: GameRepairLoopOptions) => {
             ),
           };
         if (afterRepair.candidate === null) {
+          // A provider-ended repair (failed/rolled_back) with no candidate is
+          // infrastructure, not "no-output" from the game: refund the reserved
+          // attempt and keep the selected build.
+          const noCandidateSignal: GameReviewAttemptPolicy.ReviewAttemptSignal = {
+            kind: "terminal",
+            status: endedStatus,
+            hasCandidate: false,
+          };
+          if (
+            GameReviewAttemptPolicy.classifyReviewAttempt("repair", noCandidateSignal).kind ===
+            "infrastructure"
+          )
+            return yield* repairInfrastructure(task, noCandidateSignal);
           const exported = yield* studio
             .exportState(task.root)
             .pipe(Effect.orElseSucceed(() => null));
@@ -1564,10 +2158,10 @@ export const layer = (options: GameRepairLoopOptions) => {
               exportedAt >= Date.parse(round.startedAt));
           const reason = failedAfterStart
             ? `export-failed: ${exported?.detail ?? "the export command failed"}${
-                repair.status === "completed" ? "" : ` (the repair child ended ${repair.status})`
+                endedStatus === "completed" ? "" : ` (the repair child ended ${endedStatus})`
               }`
             : `no-output: the repair produced no exported build${
-                repair.status === "completed" ? "" : ` (the repair child ended ${repair.status})`
+                endedStatus === "completed" ? "" : ` (the repair child ended ${endedStatus})`
               }`;
           return yield* rejectRound(reserved, round.id, reason);
         }
@@ -1582,13 +2176,34 @@ export const layer = (options: GameRepairLoopOptions) => {
           );
 
         yield* progress(task.root, "Checking the repaired build");
-        const candidate = yield* studio.check({
-          threadId: record.threadId,
-          root: task.root,
-          target: "candidate",
-          buildId: afterRepair.candidate.buildId,
-          inputs: record.inputs,
-        });
+        const candidatePlan = phasePlan(record, "candidate-check", round.budget.elapsedMs);
+        if (!candidatePlan.admitted)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              "deadline: the candidate check cannot fit before the review budget ends; the selected build is kept.",
+            ),
+          };
+        const candidateCheck = yield* withinPhase(
+          studio.check({
+            threadId: record.threadId,
+            root: task.root,
+            target: "candidate",
+            buildId: afterRepair.candidate.buildId,
+            inputs: record.inputs,
+          }),
+          candidatePlan.allowanceMs,
+        );
+        if (Option.isNone(candidateCheck))
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              "deadline: the candidate check did not finish within its phase allowance; the selected build is kept.",
+            ),
+          };
+        const candidate = candidateCheck.value;
         const candidateFrames: GameRepairFrame[] = candidate.frames.map((frame, index) => ({
           id: `c${index + 1}`,
           label: frame.label,
@@ -1606,102 +2221,224 @@ export const layer = (options: GameRepairLoopOptions) => {
         if (veto !== null)
           return yield* rejectRound(reserved, round.id, `mechanical-veto: ${vetoReason(veto)}`);
 
-        const experimentPairs = yield* replayExperimentPairs({
-          threadId: record.threadId,
-          root: task.root,
-          incumbentBuildId: afterRepair.incumbentBuildId ?? round.incumbentBuildId,
-          candidateBuildId: afterRepair.candidate.buildId,
-          experiments: review.experiments,
-          defects: review.defects,
-          doNotRegress: review.doNotRegress,
-        });
+        // Experiment replays are optional evidence: when no bounded allowance
+        // fits before the ballots, the frozen check evidence still decides.
+        const experimentPlan = phasePlan(record, "experiments", round.budget.elapsedMs);
+        const experimentPairs =
+          review.experiments.length === 0 || !experimentPlan.admitted
+            ? []
+            : Option.getOrElse(
+                yield* withinPhase(
+                  replayExperimentPairs({
+                    threadId: record.threadId,
+                    root: task.root,
+                    incumbentBuildId: afterRepair.incumbentBuildId ?? round.incumbentBuildId,
+                    candidateBuildId: afterRepair.candidate.buildId,
+                    experiments: review.experiments,
+                    defects: review.defects,
+                    doNotRegress: review.doNotRegress,
+                  }),
+                  experimentPlan.allowanceMs,
+                ),
+                () => [],
+              );
         const plans = ballotPlans(record.id, round.id);
         yield* rounds.recordReview(task.root, round.id, { ballots: plans });
-        let current = yield* findRound(task.root, round.id);
-        for (const plan of plans) {
-          const admittedNow = yield* admission.stamp(task.root);
-          if (admittedNow.generation !== record.generation)
-            return {
-              record: reserved,
-              done: yield* stop(
-                task.root,
-                "superseded: a user action took the game before a ballot was dispatched.",
-              ),
-            };
-          yield* progress(task.root, `Comparing builds, vote ${plan.order + 1} of 2`);
-          const ballot = yield* awaitChild(task, reserved, {
-            role: "ballot",
-            order: plan.order,
-            roundId: round.id,
-            evidence: ballotEvidence(
-              incumbent.frames,
-              candidateFrames,
-              incumbent.checks,
-              candidate.checks,
-              plan,
-              experimentPairs,
-              record.inputs,
+        const currentBeforePair = yield* findRound(task.root, round.id);
+        const admittedNow = yield* admission.stamp(task.root);
+        if (admittedNow.generation !== record.generation)
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              "superseded: a user action took the game before a ballot was dispatched.",
             ),
-            defects: review.defects.map(
-              ({ frameId: _frameId, recipeId: _recipeId, ...defect }, index) => ({
-                id: `defect-${index + 1}`,
-                ...defect,
-              }),
+          };
+        // The pair shares one wallclock allowance. Both votes start together;
+        // insufficient budget starts neither.
+        const pairPlan = phasePlan(reserved, "ballot", round.budget.elapsedMs);
+        if (!pairPlan.admitted)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              "deadline: neither ballot can be decided within the remaining review budget; the selected build is kept.",
             ),
-            items: review.doNotRegress.map((item) => ({ id: item.id, what: item.what })),
-          });
-          if (ballot.kind === "expired")
-            return {
-              record: reserved,
-              done: yield* interrupted(
-                task.root,
-                "deadline: the review ran out of time while a ballot was running.",
+          };
+        yield* progress(task.root, "Comparing builds, votes 1 and 2 of 2");
+        const pairDefects = review.defects.map(
+          ({ frameId: _frameId, recipeId: _recipeId, ...defect }, index) => ({
+            id: `defect-${index + 1}`,
+            ...defect,
+          }),
+        );
+        const pairItems = review.doNotRegress.map((item) => ({ id: item.id, what: item.what }));
+        const pairAllowance = pairPlan.allowanceMs;
+        // Both independent blind opposite-order ballots run concurrently
+        // (max 2) under the one pair allowance. Each branch awaits its child
+        // and reads its answer; collection persists sorted afterwards so
+        // concurrent writes never race. One infra/invalid response cannot
+        // promote and never abandons its sibling: the forEach joins both.
+        const pairResults = yield* Effect.forEach(
+          plans,
+          (plan) =>
+            Effect.gen(function* () {
+              const ballot = yield* awaitChild(task, reserved, {
+                role: "ballot",
+                order: plan.order,
+                roundId: round.id,
+                allowanceMs: pairAllowance,
+                evidence: ballotEvidence(
+                  incumbent.frames,
+                  candidateFrames,
+                  incumbent.checks,
+                  candidate.checks,
+                  plan,
+                  experimentPairs,
+                  record.inputs,
+                  review.defects,
+                ),
+                defects: pairDefects,
+                items: pairItems,
+              });
+              const ballotAnswer =
+                ballot.kind === "terminal" || (ballot.kind === "expired" && ballot.settled)
+                  ? yield* sessions.answer({
+                      threadId: record.threadId,
+                      loopId: record.id,
+                      roundId: round.id,
+                      role: "ballot",
+                      order: plan.order,
+                    })
+                  : null;
+              const ballotVerdict = attemptVerdict("ballot", ballot, ballotAnswer);
+              const malformed =
+                ballotVerdict.kind === "malformed" ||
+                (ballotVerdict.kind === "judged" &&
+                  (ballotAnswer === null || ballotAnswer.kind !== "ballot"));
+              const malformedReason =
+                ballotVerdict.kind === "malformed"
+                  ? ballotVerdict.reason
+                  : "the ballot's recorded answer did not belong to this ballot.";
+              let entry: GameReviewBallotRecord | null = null;
+              if (ballotAnswer !== null && ballotAnswer.kind === "ballot") {
+                const lost = challengerLosses(ballotAnswer.answer, plan);
+                entry = {
+                  order: plan.order,
+                  outcome: "valid",
+                  answer: ballotAnswer.answer,
+                  raw: ballotAnswer.raw,
+                  ...(lost.length === 0
+                    ? {}
+                    : {
+                        reason: `preservation-note: ballot ${plan.order} saw ${lost.join(", ")} lost on the challenger; requires confirmation from the opposite order.`,
+                      }),
+                };
+              } else if (ballotAnswer !== null && ballotAnswer.kind === "invalid") {
+                entry = {
+                  order: plan.order,
+                  outcome: "invalid",
+                  reason: ballotAnswer.reason,
+                  ...(ballotAnswer.raw !== null ? { raw: ballotAnswer.raw } : {}),
+                };
+              }
+              return {
+                plan,
+                ballot,
+                ballotAnswer,
+                ballotVerdict,
+                malformed,
+                malformedReason,
+                entry,
+              };
+            }),
+          { concurrency: 2 },
+        );
+        // No promotion while a writer is still active: an unsettled phase cap
+        // or an ignored interrupt leaves ownership behind and fails closed.
+        const stillOwned = yield* Ref.get(task.owned);
+        if (stillOwned.size > 0)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              "deadline: a ballot child did not settle within its phase allowance; the selected build is kept.",
+            ),
+          };
+        // Retain all evidence: persist every settled answer sorted by order
+        // before any verdict, so a valid sibling survives an infra sibling.
+        const pairEntries = pairResults
+          .flatMap((result) => (result.entry === null ? [] : [result.entry]))
+          .toSorted((left, right) => left.order - right.order);
+        let current =
+          pairEntries.length === 0
+            ? currentBeforePair
+            : yield* rounds.recordReview(task.root, round.id, {
+                ballotAnswers: [
+                  ...(currentBeforePair?.ballotAnswers ?? []),
+                  ...pairEntries,
+                ].toSorted((left, right) => left.order - right.order),
+              });
+        const firstExpired = pairResults.find((result) => result.ballotVerdict.kind === "expired");
+        if (firstExpired !== undefined)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              `deadline: ${firstExpired.ballotVerdict.kind === "expired" ? firstExpired.ballotVerdict.reason : "a ballot used its phase allowance before it finished."} The selected build is kept.`,
+            ),
+          };
+        const firstInfra = pairResults.find(
+          (result) => result.ballotVerdict.kind === "infrastructure",
+        );
+        if (firstInfra !== undefined)
+          return {
+            record: reserved,
+            done: yield* interrupted(
+              task.root,
+              infrastructureReason(
+                firstInfra.ballotVerdict.kind === "infrastructure"
+                  ? firstInfra.ballotVerdict.reason
+                  : "a ballot could not start",
               ),
-            };
-          let entry: GameReviewBallotRecord;
-          if (ballot.kind === "failed") {
-            entry = { order: plan.order, outcome: "invalid", reason: ballot.reason };
-          } else {
-            const answer = yield* sessions.answer({
-              threadId: record.threadId,
-              loopId: record.id,
-              roundId: round.id,
-              role: "ballot",
-              order: plan.order,
-            });
-            if (answer.kind === "ballot") {
-              const lost = challengerLosses(answer.answer, plan);
-              entry = {
-                order: plan.order,
-                outcome: "valid",
-                answer: answer.answer,
-                raw: answer.raw,
-                ...(lost.length === 0
-                  ? {}
-                  : {
-                      reason: `preservation-note: ballot ${plan.order} saw ${lost.join(", ")} lost on the challenger; requires confirmation from the opposite order.`,
-                    }),
-              };
-            } else if (answer.kind === "pending")
-              entry = {
-                order: plan.order,
-                outcome: "invalid",
-                reason: "the ballot ended without an answer.",
-              };
-            else
-              entry = {
-                order: plan.order,
-                outcome: "invalid",
-                reason:
-                  answer.kind === "invalid" ? answer.reason : "the child did not return a ballot.",
-                ...(answer.kind === "invalid" && answer.raw !== null ? { raw: answer.raw } : {}),
-              };
-          }
-          const answers = [...(current?.ballotAnswers ?? []), entry].toSorted(
-            (left, right) => left.order - right.order,
-          );
-          current = yield* rounds.recordReview(task.root, round.id, { ballotAnswers: answers });
-        }
+            ),
+          };
+        const firstCancelled = pairResults.find(
+          (result) => result.ballotVerdict.kind === "cancelled",
+        );
+        if (firstCancelled !== undefined)
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              `interrupted: ${
+                firstCancelled.ballotVerdict.kind === "cancelled"
+                  ? firstCancelled.ballotVerdict.reason
+                  : "a ballot was interrupted"
+              }`,
+            ),
+          };
+        const firstNoOutput = pairResults.find(
+          (result) => result.ballotVerdict.kind === "no-output",
+        );
+        if (firstNoOutput !== undefined)
+          return {
+            record: reserved,
+            done: yield* stop(
+              task.root,
+              `invalid-ballot: ${
+                firstNoOutput.ballotVerdict.kind === "no-output"
+                  ? firstNoOutput.ballotVerdict.reason
+                  : "a ballot produced no output"
+              }`,
+            ),
+          };
+        const firstMalformed = pairResults.find((result) => result.malformed);
+        if (firstMalformed !== undefined)
+          return {
+            record: reserved,
+            done: yield* stop(task.root, `invalid-ballot: ${firstMalformed.malformedReason}`),
+          };
         if (current === null) return { record: reserved, done: true };
         return yield* decide(reserved, current);
       });
@@ -1816,7 +2553,8 @@ export const layer = (options: GameRepairLoopOptions) => {
       Effect.gen(function* () {
         const task: Task = {
           root,
-          owned: yield* Ref.make<OwnedChild | null>(null),
+          owned: yield* Ref.make<ReadonlyMap<string, OwnedChild>>(new Map()),
+          usageWrite: Semaphore.makeUnsafe(1),
         };
         const fiber = yield* runLoop(record, task).pipe(Effect.forkIn(scope));
         const held = yield* hold(root, record.id, fiber);
@@ -1963,6 +2701,26 @@ export const layer = (options: GameRepairLoopOptions) => {
                 detail:
                   "The verified build has no recorded export/source binding; export the game again.",
               });
+            // The immutable facts still pass for a retained build after the
+            // folder moved on. A round would then snapshot the current tree and
+            // repair different engine inputs than the incumbent names, so the
+            // declaration is refused while the old artifact stays usable. Notes
+            // and design edits are not build inputs and stay submittable.
+            if (!(yield* rounds.buildIsCurrent(root, facts.buildId)))
+              return refused(
+                `sources-current: the game folder's engine sources changed after build ${facts.buildId.slice(0, 12)} was exported; run game_verify on the current sources and export again, then submit the new build.`,
+                facts.buildId,
+                [
+                  ...facts.checks,
+                  {
+                    id: "sources-current",
+                    status: "failed" as const,
+                    detail:
+                      "The engine sources changed after this build was exported; export the current game before submitting.",
+                  },
+                ],
+                productionBefore,
+              );
             if (!ownedRepair) {
               yield* rounds.select(root, exported.artifact);
               // A preview already open follows the declaration at once, so the
@@ -2074,8 +2832,9 @@ export const layer = (options: GameRepairLoopOptions) => {
         // A submission is the origin: the builder named these bytes and the
         // server verified them at submit time. The facts are checked once more
         // because the build or its records can be replaced before the turn
-        // ends; nothing about the current design or source freshness is
-        // re-derived, so a later DESIGN.md edit cannot change what was declared.
+        // ends. The current engine inputs are checked too: an edit after the
+        // export would make a round snapshot an unrelated tree, so only
+        // design and notes edits ride along with the declaration.
         const submitted = yield* submissionForRun(root, input.runId);
         let exportBuildId: string;
         let submissionNote: string | undefined;
@@ -2099,6 +2858,12 @@ export const layer = (options: GameRepairLoopOptions) => {
             failedFact = facts.reason ?? "build: the server could not verify the exported build.";
           exportBuildId = provenance.exportBuildId;
         }
+        // Defend an export/submit followed by a later engine edit before the
+        // turn ended: starting a round now would snapshot an unrelated tree.
+        // The retained facts and artifact stay valid; only the review is
+        // skipped, with its budget, admission and deadline untouched.
+        if (failedFact === null && !(yield* rounds.buildIsCurrent(root, exportBuildId)))
+          failedFact = `sources-current: the game folder's engine sources changed after build ${exportBuildId.slice(0, 12)} was exported; export the current game before review. The selected build is kept.`;
         const completedAt =
           run.completedAt === null ? null : DateTime.toEpochMillis(run.completedAt);
         const inputs =
@@ -2140,6 +2905,10 @@ export const layer = (options: GameRepairLoopOptions) => {
                   exported.failure.detail ?? "sources: the recorded sources could not be read.";
               else if (exported.success === null)
                 skipped = "sources: the build has no recorded export/source binding.";
+              // Re-check under the gate: an engine edit that landed while the
+              // reads above ran must not become the round's incumbent tree.
+              else if (!(yield* rounds.buildIsCurrent(root, exportBuildId)))
+                skipped = `sources-current: the game folder's engine sources changed after build ${exportBuildId.slice(0, 12)} was exported; export the current game before review. The selected build is kept.`;
               else yield* rounds.select(root, exported.success.artifact);
             }
             const builderSelection = run.modelSelection ?? records.thread.modelSelection;

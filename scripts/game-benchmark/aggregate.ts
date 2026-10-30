@@ -13,7 +13,7 @@ import type {
   SelectedWebArtifact,
 } from "./artifacts.ts";
 import type { GradeTarget } from "../game-grade.ts";
-import { visualRepairDelta } from "./artifacts.ts";
+import { REVIEW_INCOMPLETE_PREFIX, visualRepairDelta } from "./artifacts.ts";
 
 export const BENCHMARK_OUTCOMES = [
   "passed",
@@ -21,6 +21,7 @@ export const BENCHMARK_OUTCOMES = [
   "failed-visual",
   "evidence-gap",
   "unsupported",
+  "review-incomplete",
   "crashed",
   "timeout",
 ] as const;
@@ -317,6 +318,21 @@ const selectedBuildReading = (summary: GameE2eRunSummary): SelectedBuildReading 
   return { kind: "verified" };
 };
 
+/**
+ * Whether the run's build qualified and booted, so a missing review record is
+ * incomplete judgment rather than a broken build. Schema 2 reads the verified
+ * selected artifact Play serves; schema 1 reads the completed folder
+ * qualification with a passed playtest.
+ */
+const buildQualifiedAndBooting = (summary: GameE2eRunSummary): boolean => {
+  if (summary.schemaVersion === 2) return selectedBuildReading(summary).kind === "verified";
+  const qualification = summary.qualification;
+  if (qualification?.completion !== "complete") return false;
+  return qualification.stages.some(
+    (stage) => stage.stage === "playtest" && stage.status === "passed",
+  );
+};
+
 /** The run's verdict, in the order that keeps a crash from masquerading as one. */
 export function classifyRun(observation: BenchmarkRunObservation): {
   readonly outcome: BenchmarkOutcome;
@@ -408,6 +424,12 @@ export function classifyRun(observation: BenchmarkRunObservation): {
         visual.judgement?.detail ??
         `The visual stage is ${visual.stage?.status ?? "missing"} on judged gameplay frames.`,
     };
+  if (
+    summary.error !== null &&
+    summary.error.startsWith(REVIEW_INCOMPLETE_PREFIX) &&
+    buildQualifiedAndBooting(summary)
+  )
+    return { outcome: "review-incomplete", reason: summary.error };
   if (summary.error !== null)
     return { outcome: "crashed", reason: `The run failed after its verdict: ${summary.error}` };
 
@@ -756,6 +778,7 @@ export function shouldResume(
     readonly harnessCommit: string;
     readonly fixtureChecksum: string;
     readonly lane?: BenchmarkLane;
+    readonly outcome?: BenchmarkOutcome;
     readonly grade?: BenchmarkGrade | null;
     readonly evaluation?: BenchmarkEvaluationProfile | null;
   } | null,
@@ -773,6 +796,10 @@ export function shouldResume(
     (existing.lane ?? "harness") !== (expected.lane ?? "harness")
   )
     return false;
+  // A crash or timeout is not a finished attempt. Rerunning the command is how
+  // an operator retries it; silently reusing the failure would report the old
+  // run as this one's result and never spend the retry.
+  if (existing.outcome === "crashed" || existing.outcome === "timeout") return false;
   // Nothing was graded, so no grader profile can differ.
   if ((existing.grade ?? null) === null) return true;
   return (

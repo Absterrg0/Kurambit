@@ -13,6 +13,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   RunId,
   ThreadId,
+  type GameAcceptanceCriterion,
   type GameManifest,
   type GameVerifyInput,
   type GameWebPlaytestResult,
@@ -21,6 +22,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameQualification from "./GameQualification.ts";
+import { approvalRecordFile, designDocumentHash } from "./GameDesignApproval.ts";
 import * as GameRepairStudio from "./GameRepairStudio.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
 import * as GameService from "./GameService.ts";
@@ -96,6 +98,12 @@ case "$*" in
       exit 1
     fi
     ;;
+  *scenario.gd*)
+    echo scenarios >> "$dir/operations"
+    out=""
+    for last do out=$last; done
+    printf '%s' '{"id":"scenario","frames":900,"durationMs":1000,"firstInputFrame":30,"baselineFrame":36,"playerMoved":false,"error":null,"invalidActions":[],"observations":[{"key":"jumps","min":0,"max":1,"first":0,"last":1,"firstChangeFrame":60,"baseline":0,"matches":[{"id":"jump","frame":60,"value":1}]},{"key":"state","min":1,"max":1,"first":1,"last":1,"firstChangeFrame":null,"baseline":1,"matches":[]}]}' > "$out"
+    ;;
   *--editor*)
     echo import >> "$dir/operations"
     ;;
@@ -105,6 +113,7 @@ exit 0
 
 const playtestResult = (): GameWebPlaytestResult => ({
   success: true,
+  timing: "controlled-clock",
   booted: true,
   bootMs: 20,
   responded: true,
@@ -138,7 +147,11 @@ const marker = (base: string, name: string) =>
   Effect.promise(() => NodeFSP.writeFile(NodePath.join(base, name), ""));
 const withFixture = <A, E, R>(
   body: (fixture: Fixture) => Effect.Effect<A, E, R>,
-  options: { readonly playtest?: () => GameWebPlaytestResult } = {},
+  options: {
+    readonly playtest?: () => GameWebPlaytestResult;
+    readonly acceptance?: readonly GameAcceptanceCriterion[];
+    readonly scenarios?: Readonly<Record<string, unknown>>;
+  } = {},
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -163,6 +176,31 @@ const withFixture = <A, E, R>(
         );
         await NodeFSP.writeFile(NodePath.join(root, "game.json"), JSON.stringify(manifest()));
         await NodeFSP.writeFile(executable, fakeGodot, { mode: 0o755 });
+        if (options.acceptance !== undefined) {
+          const design = "# Fixture design\n\nA disposable acceptance fixture.\n";
+          await NodeFSP.writeFile(NodePath.join(root, "DESIGN.md"), design);
+          const file = approvalRecordFile(stateDir, root);
+          await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+          await NodeFSP.writeFile(
+            file,
+            JSON.stringify({
+              schemaVersion: 1,
+              game: NodePath.resolve(root),
+              approvalId: "fixture-approval",
+              designHash: designDocumentHash(design),
+              approvedAt: "2026-10-20T00:00:00.000Z",
+              acceptance: options.acceptance,
+            }),
+          );
+        }
+        if (options.scenarios !== undefined) {
+          await NodeFSP.mkdir(NodePath.join(root, "godot/tests/scenarios"), { recursive: true });
+          for (const [name, scenario] of Object.entries(options.scenarios))
+            await NodeFSP.writeFile(
+              NodePath.join(root, "godot/tests/scenarios", `${name}.json`),
+              JSON.stringify(scenario),
+            );
+        }
       });
       const current = manifest();
       const playtestCalls: Array<{ readonly steps: readonly unknown[] }> = [];
@@ -309,6 +347,15 @@ it.live("rejects bad playtest input before any engine work", () =>
         );
         expect(interval.failure.detail).toContain("Increase captureEveryMs or shorten the steps.");
       }
+      const actionName = yield* Effect.result(
+        game.verify(threadId, { steps: [{ press: "ui_accept" }] }),
+      );
+      expect(Result.isFailure(actionName)).toBe(true);
+      if (Result.isFailure(actionName)) {
+        expect(actionName.failure.reason).toBe("invalid-input");
+        expect(actionName.failure.detail).toContain('"ui_accept" is not a browser key');
+        expect(actionName.failure.detail).toContain("game_scenarios_run");
+      }
       expect(yield* operations).toEqual([]);
       expect(NodeFS.existsSync(NodePath.join(base, "game/builds/candidates"))).toBe(false);
       expect(NodeFS.existsSync(NodePath.join(base, "game/builds/playtests"))).toBe(false);
@@ -433,6 +480,7 @@ it.live("runs the recorded stages in order and binds the playtest to the exact b
       expect(result.build?.path).toBe(NodePath.join(root, result.build!.directory, "index.html"));
       expect(result.playtest?.success).toBe(true);
       expect(result.playtest?.responded).toBe(true);
+      expect(result.playtest?.timing).toBe("controlled-clock");
       expect("screenshots" in (result.playtest ?? {})).toBe(false);
       expect(result.screenshots.map((frame) => frame.label)).toEqual(["booted", "after-steps"]);
       expect(result.message).toContain("not a quality verdict");
@@ -452,8 +500,83 @@ it.live("runs the recorded stages in order and binds the playtest to the exact b
       const binding = yield* rounds.exported(root, result.build!.buildId);
       expect(binding?.playtest?.responded).toBe(true);
       expect(binding?.playtest?.executedInputSteps).toBe(1);
+      expect(binding?.playtest?.qualifies).toBe(true);
+      expect(binding?.playtest?.evidenceDirectory).toContain("builds/playtests/");
       const facts = yield* studio.submissionFacts(root, result.build!.buildId);
       expect(facts.passed, facts.reason ?? "").toBe(true);
+    }),
+  ),
+);
+
+it.live("a matching recorded route is reused while the alternate window is checked", () =>
+  withFixture(({ game, root, studio, playtestCalls }) =>
+    Effect.gen(function* () {
+      const result = yield* game.verify(threadId, { steps });
+      expect(result.success, result.message).toBe(true);
+      expect(playtestCalls).toHaveLength(1);
+      const inputs = yield* studio.frozenInputs(root, result.build!.buildId);
+      const checked = yield* studio.check({
+        threadId,
+        root,
+        target: "candidate",
+        buildId: result.build!.buildId,
+        inputs,
+      });
+      expect(playtestCalls).toHaveLength(2);
+      expect(playtestCalls[1]?.steps).not.toEqual(steps);
+      expect(checked.checks.find((entry) => entry.id === "playtest")?.status).toBe("passed");
+      expect(checked.checks.find((entry) => entry.id === "window")?.status).toBe("passed");
+      expect(checked.frames.length).toBeGreaterThan(0);
+    }),
+  ),
+);
+
+it.live("a review replay leaves the builder's playtest binding intact", () =>
+  withFixture(({ game, root, rounds, studio }) =>
+    Effect.gen(function* () {
+      const result = yield* game.verify(threadId, { steps });
+      expect(result.success, result.message).toBe(true);
+      const before = yield* rounds.exported(root, result.build!.buildId);
+      expect(before?.playtest?.steps).toEqual(steps);
+      yield* studio.check({
+        threadId,
+        root,
+        target: "candidate",
+        buildId: result.build!.buildId,
+        inputs: {
+          steps: [{ press: "Enter" }],
+          viewport: { width: 960, height: 540 },
+          seed: "unknown",
+        },
+      });
+      const after = yield* rounds.exported(root, result.build!.buildId);
+      expect(after?.playtest?.steps).toEqual(steps);
+      expect(after?.playtest?.qualifies).toBe(true);
+    }),
+  ),
+);
+
+it.live("an older verified build stays reviewable after a newer export", () =>
+  withFixture(({ game, root, qualification, studio }) =>
+    Effect.gen(function* () {
+      const first = yield* game.verify(threadId, { steps });
+      expect(first.success, first.message).toBe(true);
+      yield* Effect.promise(() =>
+        NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# later edit\n"),
+      );
+      const second = yield* game.verify(threadId, { steps: [{ press: "Enter" }] });
+      expect(second.success, second.message).toBe(true);
+      expect(second.build?.buildId).not.toBe(first.build?.buildId);
+      // The global stage now names the newer build; the older build's own
+      // binding still supplies its route and verdict.
+      expect((yield* qualification.stageRecord(root, "playtest"))?.buildId).toBe(
+        second.build?.buildId,
+      );
+      const inputs = yield* studio.frozenInputs(root, first.build!.buildId);
+      expect(inputs.steps).toEqual(steps);
+      const facts = yield* studio.submissionFacts(root, first.build!.buildId);
+      expect(facts.passed, facts.reason ?? "").toBe(true);
+      expect(facts.checks.find((entry) => entry.id === "playtest")?.status).toBe("passed");
     }),
   ),
 );
@@ -612,3 +735,207 @@ it.live("holds one operation across the cycle and cancellation kills the capture
     }),
   ),
 );
+
+const approvedAcceptance = [
+  {
+    id: "jump",
+    kind: "control" as const,
+    text: "Space jumps",
+    observe: { key: "jumps", expect: ">=1" },
+  },
+  {
+    id: "never-fails",
+    kind: "lose" as const,
+    text: "The run never ends in failure",
+    noLoseState: true as const,
+  },
+] satisfies readonly GameAcceptanceCriterion[];
+const approvedScenarios = {
+  "jump-run": { id: "jump-run", steps: [{ press: "ui_accept" }] },
+};
+
+it.live("an approved design with acceptance runs the state exam inside one verify", () =>
+  withFixture(
+    ({ game, root, qualification, operations }) =>
+      Effect.gen(function* () {
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success, result.message).toBe(true);
+        expect(result.failedStage).toBeUndefined();
+        expect(result.completed).toEqual(["check", "test", "state", "export", "playtest"]);
+        expect(result.scenarios?.ok).toBe(true);
+        expect(result.scenarios?.summary.passed).toBe(true);
+        expect(result.scenarios?.summary.mode).toBe("criteria");
+        // The canned runner never moved a body, so a passing run proves the
+        // no-player path rather than a hidden movement assumption.
+        expect(result.scenarios?.scenarios[0]?.playerMoved).toBe(false);
+        const jump = result.scenarios?.summary.criteria.find(
+          (criterion) => criterion.id === "jump",
+        );
+        expect(jump?.status).toBe("passed");
+        expect(jump?.provenBy?.scenario).toBe("jump-run");
+        const noLose = result.scenarios?.summary.criteria.find(
+          (criterion) => criterion.id === "never-fails",
+        );
+        expect(noLose?.status).toBe("not-applicable");
+        const stateRecord = yield* qualification.stageRecord(root, "state");
+        expect(stateRecord?.outcome).toBe("passed");
+        expect(stateRecord?.sourceId).not.toBeNull();
+        expect(yield* operations).toContain("scenarios");
+      }),
+    { acceptance: approvedAcceptance, scenarios: approvedScenarios },
+  ),
+);
+
+it.live("an approved design without acceptance keeps the four-stage verify", () =>
+  withFixture(
+    ({ game, root, qualification, operations }) =>
+      Effect.gen(function* () {
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success, result.message).toBe(true);
+        expect(result.completed).toEqual(["check", "test", "export", "playtest"]);
+        expect(result.scenarios).toBeUndefined();
+        expect(result.failedStage).toBeUndefined();
+        const read = yield* qualification.read(root, "godot");
+        // No acceptance means no exam to grade, so the state stage stays missing
+        // while the playable build still completes.
+        expect(read.stages.find((stage) => stage.stage === "state")?.status).toBe("missing");
+        expect(read.completion).toBe("complete");
+        expect(yield* operations).not.toContain("scenarios");
+      }),
+    { acceptance: [] },
+  ),
+);
+
+it.live("a failing state exam stops before the export", () =>
+  withFixture(
+    ({ game, root, qualification, operations }) =>
+      Effect.gen(function* () {
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success).toBe(false);
+        expect(result.failedStage).toBe("state");
+        expect(result.completed).toEqual(["check", "test"]);
+        // The canned run proves jumps but never collected, so the content
+        // promise is the one that must fail, not an invented win.
+        const missing = result.scenarios?.summary.criteria.find(
+          (criterion) => criterion.id === "collect-one",
+        );
+        expect(missing?.status).not.toBe("passed");
+        expect(result.export).toBeUndefined();
+        expect(result.playtest).toBeUndefined();
+        expect(result.screenshots).toEqual([]);
+        expect(yield* operations).not.toContain("export");
+        expect(NodeFS.existsSync(NodePath.join(root, "builds/playtests"))).toBe(false);
+        const read = yield* qualification.read(root, "godot");
+        expect(read.stages.find((stage) => stage.stage === "state")?.status).toBe("failed");
+        expect(read.stages.find((stage) => stage.stage === "export")?.status).toBe("missing");
+      }),
+    {
+      acceptance: [
+        {
+          id: "jump",
+          kind: "control",
+          text: "Space jumps",
+          observe: { key: "jumps", expect: ">=1" },
+        },
+        {
+          id: "collect-one",
+          kind: "content",
+          text: "Collect one relic",
+          observe: { key: "collected", expect: ">=1" },
+        },
+      ],
+      scenarios: approvedScenarios,
+    },
+  ),
+);
+
+it.live("an approved design without scenario files stops honestly at state", () =>
+  withFixture(
+    ({ game, root, qualification, operations }) =>
+      Effect.gen(function* () {
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success).toBe(false);
+        expect(result.failedStage).toBe("state");
+        expect(result.completed).toEqual(["check", "test"]);
+        expect(result.scenarios?.ok).toBe(false);
+        expect(result.scenarios?.errors.join(" ")).toContain("No scenarios found");
+        expect(result.export).toBeUndefined();
+        expect(NodeFS.existsSync(NodePath.join(root, "builds/playtests"))).toBe(false);
+        expect(yield* operations).not.toContain("export");
+        const read = yield* qualification.read(root, "godot");
+        expect(read.stages.find((stage) => stage.stage === "state")?.status).toBe("failed");
+      }),
+    { acceptance: approvedAcceptance },
+  ),
+);
+
+it.live("a source edit during the export still stops after a passing state exam", () =>
+  withFixture(
+    ({ game, base }) =>
+      Effect.gen(function* () {
+        yield* marker(base, "mutate-on-export");
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success).toBe(false);
+        expect(result.failedStage).toBe("export");
+        expect(result.completed).toEqual(["check", "test", "state"]);
+        expect(result.scenarios?.summary.passed).toBe(true);
+        expect(result.export?.success).toBe(false);
+        expect(result.playtest).toBeUndefined();
+      }),
+    { acceptance: approvedAcceptance, scenarios: approvedScenarios },
+  ),
+);
+
+it.live("edited sources rerun the state exam instead of reusing the old pass", () =>
+  withFixture(
+    ({ game, root }) =>
+      Effect.gen(function* () {
+        const first = yield* game.verify(threadId, { steps });
+        expect(first.success, first.message).toBe(true);
+        expect(first.completed).toContain("state");
+        yield* Effect.promise(() =>
+          NodeFSP.appendFile(NodePath.join(root, "godot/scripts/main.gd"), "# later edit\n"),
+        );
+        const second = yield* game.verify(threadId, { steps: [{ press: "Enter" }] });
+        expect(second.success, second.message).toBe(true);
+        expect(second.completed).toContain("state");
+        expect(second.scenarios?.summary.passed).toBe(true);
+        expect(second.build?.buildId).not.toBe(first.build?.buildId);
+      }),
+    { acceptance: approvedAcceptance, scenarios: approvedScenarios },
+  ),
+);
+
+it.live("a design revision during the browser run invalidates the earlier state exam", () => {
+  let revise = () => {};
+  return withFixture(
+    ({ game, root, base }) =>
+      Effect.gen(function* () {
+        revise = () => {
+          const designPath = NodePath.join(root, "DESIGN.md");
+          const design = `${NodeFS.readFileSync(designPath, "utf8")}\nA revised approval.\n`;
+          NodeFS.writeFileSync(designPath, design);
+          const file = approvalRecordFile(NodePath.join(base, "state"), root);
+          const record = JSON.parse(NodeFS.readFileSync(file, "utf8")) as Record<string, unknown>;
+          NodeFS.writeFileSync(
+            file,
+            JSON.stringify({ ...record, designHash: designDocumentHash(design) }),
+          );
+        };
+        const result = yield* game.verify(threadId, { steps });
+        expect(result.success).toBe(false);
+        expect(result.failedStage).toBe("state");
+        expect(result.scenarios?.summary.passed).toBe(true);
+        expect(result.playtest?.qualifies).toBe(true);
+        expect(result.message).toContain("approved design changed");
+      }),
+    {
+      acceptance: approvedAcceptance,
+      scenarios: approvedScenarios,
+      playtest: () => {
+        revise();
+        return playtestResult();
+      },
+    },
+  );
+});

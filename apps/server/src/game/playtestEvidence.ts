@@ -42,6 +42,11 @@ const StoredPlaytest = Schema.fromJsonString(
     message: Schema.String,
     steps: Schema.Array(Schema.Unknown),
     consoleMessages: Schema.Array(GameConsoleMessage),
+    // Honest accounting persisted with the run: the total across the whole
+    // run (including text dropped from the retained suffix) and how much of
+    // the retained text was dropped. Absent on older evidence.
+    consoleErrorCount: Schema.optionalKey(Schema.Int),
+    consoleTruncated: Schema.optionalKey(Schema.Int),
     frames: Schema.Array(StoredFrame),
     // Older evidence has no probe snapshot; it is still valid evidence of what
     // the run did, just without the state the probe would have reported.
@@ -55,6 +60,10 @@ const StoredPlaytest = Schema.fromJsonString(
     baseWidth: Schema.optionalKey(Schema.Number),
     baseHeight: Schema.optionalKey(Schema.Number),
     captureScale: Schema.optionalKey(Schema.Number),
+    // How the run's game time was driven. Absent on wall-time evidence
+    // written before the controlled-clock driver; such evidence is not
+    // controlled-clock evidence and must be replayed for adjudication.
+    timing: Schema.optionalKey(Schema.Literal("controlled-clock")),
   }),
 );
 type StoredPlaytest = typeof StoredPlaytest.Type;
@@ -118,7 +127,8 @@ const uniqueDirectory = async (root: string, base: string) => {
   }
 };
 
-/** Writes frames and a result.json, then keeps only the newest five runs. */
+/** Writes frames and a result.json, then keeps only the newest five runs. Returns
+ * the game-relative directory and the frame file names in screenshot order. */
 export const writePlaytestEvidence = async (input: {
   readonly root: string;
   /** An isolated experiment store; never prunes or writes the game playtest history. */
@@ -126,7 +136,7 @@ export const writePlaytestEvidence = async (input: {
   readonly steps: readonly GamePlaytestStep[];
   readonly result: GameWebPlaytestResult;
   readonly at?: Date;
-}): Promise<{ readonly directory: string }> => {
+}): Promise<{ readonly directory: string; readonly files: ReadonlyArray<string> }> => {
   const at = input.at ?? new Date();
   const relativeDirectory =
     input.directory ??
@@ -159,6 +169,12 @@ export const writePlaytestEvidence = async (input: {
     message: input.result.message,
     steps: [...input.steps],
     consoleMessages: input.result.consoleMessages,
+    ...(input.result.consoleErrorCount === undefined
+      ? {}
+      : { consoleErrorCount: input.result.consoleErrorCount }),
+    ...(input.result.consoleTruncated === undefined
+      ? {}
+      : { consoleTruncated: input.result.consoleTruncated }),
     frames,
     state: input.result.state,
     ...(input.result.designObservations === undefined
@@ -182,13 +198,14 @@ export const writePlaytestEvidence = async (input: {
             ? {}
             : { captureScale: input.result.captureScale }),
         }),
+    ...(input.result.timing === undefined ? {} : { timing: input.result.timing }),
   };
   await NodeFSP.writeFile(
     NodePath.join(directory, "result.json"),
     `${JSON.stringify(stored, null, 2)}\n`,
   );
   if (input.directory === undefined) await prunePlaytests(input.root);
-  return { directory: relativeDirectory };
+  return { directory: relativeDirectory, files: frames.map((frame) => frame.file) };
 };
 
 const prunePlaytests = async (root: string): Promise<void> => {
@@ -246,6 +263,14 @@ export interface PlaytestEvidenceRun {
     readonly probe?: GamePlaytestProbe;
   }>;
   readonly state: GamePlaytestState | null;
+  readonly changedPercent: number;
+  readonly designObservations: ReadonlyArray<string>;
+  /**
+   * How this run's game time was driven. Absent on wall-time evidence written
+   * before the controlled-clock driver; such evidence must be replayed for
+   * adjudication, never reused as a controlled-clock pass.
+   */
+  readonly timing?: "controlled-clock";
 }
 
 /** Reads one evidence folder by its game-relative `builds/playtests/<run>` path. */
@@ -262,7 +287,15 @@ export const readPlaytestEvidenceAt = async (
   directory: string,
 ): Promise<PlaytestEvidenceRun | null> => {
   const stored = await readStoredRun(NodePath.dirname(directory), NodePath.basename(directory));
-  return stored === null ? null : { frames: stored.frames, state: stored.state ?? null };
+  return stored === null
+    ? null
+    : {
+        frames: stored.frames,
+        state: stored.state ?? null,
+        changedPercent: stored.changedPercent,
+        designObservations: stored.designObservations ?? [],
+        ...(stored.timing === undefined ? {} : { timing: stored.timing }),
+      };
 };
 
 /**
@@ -276,6 +309,9 @@ export interface PlaytestRunFacts {
   readonly consoleErrors: number;
   /** Input steps the run actually executed. Waits and screenshots do not count. */
   readonly steps: number;
+  /** The run's own gameplay verdict; absent in older evidence. */
+  readonly qualifies?: boolean;
+  readonly blockers: ReadonlyArray<string>;
 }
 
 /**
@@ -300,10 +336,14 @@ export const readPlaytestRunFacts = async (
     ...(stored.executedInputSteps === undefined
       ? {}
       : { executedInputSteps: stored.executedInputSteps }),
-    consoleErrors: stored.consoleMessages.filter((message) => message.level === "error").length,
+    consoleErrors:
+      stored.consoleErrorCount ??
+      stored.consoleMessages.filter((message) => message.level === "error").length,
     steps: stored.steps.filter(
       (step) => isPlaytestStep(step) && !("waitMs" in step) && !("screenshot" in step),
     ).length,
+    ...(stored.qualifies === undefined ? {} : { qualifies: stored.qualifies }),
+    blockers: stored.blockers === undefined ? [] : [...stored.blockers],
   };
 };
 
@@ -346,7 +386,9 @@ export const readLastPlaytest = async (
     success: stored.success,
     responded: stored.responded,
     changedPercent: stored.changedPercent,
-    consoleErrorCount: stored.consoleMessages.filter((message) => message.level === "error").length,
+    consoleErrorCount:
+      stored.consoleErrorCount ??
+      stored.consoleMessages.filter((message) => message.level === "error").length,
     frames,
     // A run that failed to qualify leaves no playable frame behind; callers
     // fall back to the newest run's after-steps frame instead of a menu.

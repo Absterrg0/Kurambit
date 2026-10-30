@@ -1,13 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The review session test writes real evidence and record directories.
-import { expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeHttp from "node:http";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { PNG } from "pngjs";
 import {
   CommandId,
   GAME_REVIEW_ANSWER_MAX_BYTES,
+  GameOperationError,
   type GameManifest,
   type GameStatus,
   type GameWebPlaytestInput,
@@ -31,9 +34,12 @@ import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as GameService from "./GameService.ts";
+import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameReviewSessions from "./GameReviewSessions.ts";
 import * as GameRoundStore from "./GameRoundStore.ts";
+import { playtest } from "./GameWebPlaytest.ts";
+import { previewBrowserRelease } from "../preview/PreviewBrowser.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import type * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 
@@ -161,6 +167,7 @@ const tryResult: GameWebPlaytestResult = {
   responded: true,
   changedPercent: 25,
   message: "Played",
+  evidenceDirectory: "/private/internal-experiment",
   consoleMessages: [{ level: "error", text: "observed console fault" }],
   state: null,
   screenshots: ["before", "after"].map((phase) => ({
@@ -179,6 +186,7 @@ const tryResult: GameWebPlaytestResult = {
   })),
 };
 interface Scripted {
+  liveResult?: GameWebPlaytestResult;
   tryScreenshots?: GameWebPlaytestResult["screenshots"];
   readonly tries: Array<{ threadId: ThreadId; buildId: string; input: GameWebPlaytestInput }>;
   builderStatus: OrchestrationV2Run["status"];
@@ -211,6 +219,14 @@ interface Scripted {
   childStatus: OrchestrationV2Run["status"];
   answer: string;
   available: boolean;
+  /** Approved acceptance the mocked design snapshot binds; null means legacy/no record. */
+  designAcceptance: ReadonlyArray<{
+    readonly id: string;
+    readonly kind: "control" | "mechanic" | "content" | "win" | "lose" | "presentation";
+    readonly text: string;
+    readonly observe?: { readonly key: string; readonly expect: string };
+  }> | null;
+  designReadFails?: boolean;
 }
 
 const makeScripted = (): Scripted => ({
@@ -232,6 +248,7 @@ const makeScripted = (): Scripted => ({
   childStatus: "completed",
   answer: "",
   available: true,
+  designAcceptance: null,
 });
 
 const walk = async (directory: string): Promise<Array<string>> => {
@@ -316,8 +333,11 @@ const withSession = <A, E>(
                   scripted.tries.push({ threadId, buildId, input });
                   if (scripted.tryGate !== null) yield* scripted.tryGate();
                   const result = {
-                    ...tryResult,
-                    screenshots: scripted.tryScreenshots ?? tryResult.screenshots,
+                    ...(scripted.liveResult ?? tryResult),
+                    screenshots:
+                      scripted.tryScreenshots ??
+                      scripted.liveResult?.screenshots ??
+                      tryResult.screenshots,
                   };
                   return scripted.captureScale === undefined
                     ? result
@@ -441,6 +461,45 @@ const withSession = <A, E>(
               },
             } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
           ),
+          Layer.provide(
+            Layer.mock(GameDesignApproval.GameDesignApproval)({
+              snapshot: () =>
+                scripted.designReadFails
+                  ? Effect.fail(
+                      new GameOperationError({
+                        operation: "read-design",
+                        path: root,
+                        reason: "io",
+                        detail: "Design record unreadable",
+                      }),
+                    )
+                  : Effect.succeed({
+                      read: {
+                        state: "approved",
+                        document: null,
+                        documentTruncated: false,
+                        approvedHash: "design-hash",
+                        currentHash: "design-hash",
+                        approvedAt: "2026-10-23T00:00:00.000Z",
+                        acceptance: [...(scripted.designAcceptance ?? [])],
+                        issues: [],
+                        pendingRevision: null,
+                        revisionDiff: null,
+                      },
+                      record:
+                        scripted.designAcceptance === null
+                          ? null
+                          : {
+                              schemaVersion: 1 as const,
+                              game: root,
+                              approvalId: "approval-1",
+                              designHash: "design-hash",
+                              approvedAt: "2026-10-23T00:00:00.000Z",
+                              acceptance: [...scripted.designAcceptance],
+                            },
+                    }),
+            }),
+          ),
           Layer.provide(NodeServices.layer),
         );
         return service;
@@ -513,6 +572,21 @@ const fundamentals = {
   stateReadable: { verdict: "yes" as const, frameIds: ["f1"], note: "State readable." },
 };
 
+/** Modern exact-once quality coverage for session fixtures: every dimension judged. */
+const quality = {
+  artConsistency: { verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Own look holds." },
+  animation: {
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "One pose cannot show motion.",
+  },
+  audio: { verdict: "cannot-tell" as const, frameIds: [], note: "No audio evidence attached." },
+  readability: { verdict: "yes" as const, frameIds: ["f1"], note: "State legible." },
+  progression: { verdict: "cannot-tell" as const, frameIds: [], note: "Route too short." },
+  agency: { verdict: "cannot-tell" as const, frameIds: [], note: "No distinct choice observed." },
+  playability: { verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Player can act." },
+};
+
 const criticText = JSON.stringify({
   fundamentals,
   defects: [
@@ -524,6 +598,7 @@ const criticText = JSON.stringify({
     },
   ],
   doNotRegress: [{ id: "turns", what: "Left and right still turn the player.", frameId: "f1" }],
+  quality,
 });
 
 it.live("a critic runs fresh on the game thread's model with evidence only", () =>
@@ -561,7 +636,7 @@ it.live("a critic runs fresh on the game thread's model with evidence only", () 
       );
       expect(command.task).not.toContain("Do not edit, execute, browse");
       expect(command.task).toContain("Correct tool validation errors in this session");
-      expect(command.task).toContain("Only when tools are unavailable");
+      expect(command.task).toContain("A terminal JSON answer uses exactly the same schema");
       expect(command.task).not.toContain("builds/");
 
       // Evidence only: brief, anonymous frames and normalized checks.
@@ -1286,6 +1361,12 @@ it.live("strict parsing rejects malformed, extra-key and unknown-id answers", ()
         itemIds: items,
       }).kind,
     ).toBe("invalid");
+    expect(
+      GameReviewSessions.parseBallotAnswer(ballot({ works: "A" }), {
+        frameIds: frames,
+        itemIds: items,
+      }).kind,
+    ).toBe("invalid");
   }),
 );
 
@@ -1344,7 +1425,7 @@ it.live("an answer is bound to the run the round dispatched", () =>
         id: RunId.make("run:review-followup"),
         ordinal: 2,
         status: "completed",
-        answer: JSON.stringify({ fundamentals, defects: [], doNotRegress: [] }),
+        answer: JSON.stringify({ fundamentals, defects: [], doNotRegress: [], quality }),
       });
       const bound = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
       expect(bound.kind).toBe("critic");
@@ -1621,8 +1702,16 @@ it.live("returns the schema error, accepts a valid retry, and ends on the first 
         fundamentals,
         defects: [],
         doNotRegress: [],
+        quality,
       });
-      expect(accepted).toEqual({ accepted: true, error: null, attemptsRemaining: 0, ended: true });
+      expect(accepted).toEqual({
+        accepted: true,
+        error: null,
+        attemptsRemaining: 0,
+        ended: true,
+        // Exact absolute-quality coverage rides with the accepted report.
+        qualityCoverage: { rubricVersion: 2, assessed: 7, total: 7, unknowns: 4 },
+      });
       expect(scripted.dispatches.at(-1)).toMatchObject({
         type: "run.interrupt",
         runId: started.runId,
@@ -1653,7 +1742,7 @@ it.live(
           threadId: started.childThreadId,
           providerInstanceId: builderSelection.instanceId,
         };
-        const answer = { fundamentals, defects: [], doNotRegress: [] };
+        const answer = { fundamentals, defects: [], doNotRegress: [], quality };
         expect(yield* service.toolRole({ ...caller, threadId })).toBeNull();
         expect((yield* service.report({ ...caller, threadId }, "critic", answer)).accepted).toBe(
           false,
@@ -1745,7 +1834,7 @@ it.live("validates ballot coverage and evidence before recording the top-level f
       expect(command.task).toContain(
         '"works":"tie","look":"tie","feel":"tie","play":"tie","defects"',
       );
-      expect(command.task).toContain('four choices wrapped in "main"');
+      expect(command.task).toContain("A terminal JSON answer uses exactly the same schema");
       expect(command.task).toContain("unknown is neutral");
       const value = {
         overall: "A",
@@ -1799,7 +1888,7 @@ it.live(
           threadId: started.childThreadId,
           providerInstanceId: builderSelection.instanceId,
         };
-        const answer = { fundamentals, defects: [], doNotRegress: [] };
+        const answer = { fundamentals, defects: [], doNotRegress: [], quality };
         expect((yield* service.report(caller, "critic", answer)).accepted).toBe(true);
         const input = { threadId, loopId, roundId, role: "critic" as const };
         expect(yield* service.answer(input)).toEqual({ kind: "pending" });
@@ -1816,12 +1905,52 @@ it.live(
           kind: "critic",
           answer,
           raw: JSON.stringify(answer),
+          qualityRubricVersion: 2,
         });
       }),
     ),
 );
 
-it.live("printed JSON is only a fallback when the session never received tools", () =>
+it.live("a completed ballot can submit the same payload without using its offered tool", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      expect(
+        yield* service.toolRole({
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        }),
+      ).toBe("ballot");
+      scripted.answer = JSON.stringify({
+        overall: "tie",
+        overallReason: "Both builds show the same interaction.",
+        works: "tie",
+        look: "tie",
+        feel: "tie",
+        play: "tie",
+        defects: [],
+        regressions: { A: [], B: [] },
+        preservation: [],
+        control: { works: "tie", look: "tie", feel: "tie", play: "tie" },
+        reason: "f1 and f2 show the same input response.",
+      });
+      scripted.childStatus = "completed";
+      const result = yield* service.answer({ threadId, loopId, roundId, role: "ballot" });
+      expect(result.kind).toBe("ballot");
+      if (result.kind === "ballot") expect(result.answer.main.works).toBe("tie");
+    }),
+  ),
+);
+
+it.live("a first terminal answer remains valid when tools were offered but unused", () =>
   withSession(({ frames, scripted, service }) =>
     Effect.gen(function* () {
       scripted.childStatus = "running";
@@ -1844,12 +1973,38 @@ it.live("printed JSON is only a fallback when the session never received tools",
       scripted.childStatus = "running";
       expect(yield* service.toolRole(caller)).toBe("critic");
       scripted.childStatus = "completed";
-      expect(yield* service.answer(input)).toMatchObject({
-        kind: "invalid",
-        reason: expect.stringContaining("without calling it successfully"),
-      });
+      expect((yield* service.answer(input)).kind).toBe("critic");
     }),
   ),
+);
+
+it.live("an unused review tool never makes an unsuccessful run's final text valid", () =>
+  Effect.gen(function* () {
+    for (const status of ["failed", "cancelled", "interrupted"] as const) {
+      yield* withSession(({ frames, scripted, service }) =>
+        Effect.gen(function* () {
+          scripted.childStatus = "running";
+          const started = yield* service.start({
+            threadId,
+            loopId,
+            roundId,
+            role: "critic",
+            evidence: frameInput(frames),
+          });
+          if (started.kind !== "started") return expect(started.kind).toBe("started");
+          yield* service.toolRole({
+            threadId: started.childThreadId,
+            providerInstanceId: builderSelection.instanceId,
+          });
+          scripted.answer = criticText;
+          scripted.childStatus = status;
+          const answer = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+          expect(answer.kind, status).toBe("invalid");
+          if (answer.kind === "invalid") expect(answer.reason).toContain(`ended ${status}`);
+        }),
+      );
+    }
+  }),
 );
 
 it.live("rejects a tool answer if its run binding or evidence hash changed", () =>
@@ -1869,8 +2024,12 @@ it.live("rejects a tool answer if its run binding or evidence hash changed", () 
         providerInstanceId: builderSelection.instanceId,
       };
       expect(
-        (yield* service.report(caller, "critic", { fundamentals, defects: [], doNotRegress: [] }))
-          .accepted,
+        (yield* service.report(caller, "critic", {
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          quality,
+        })).accepted,
       ).toBe(true);
       scripted.childStatus = "interrupted";
       const input = { threadId, loopId, roundId, role: "critic" as const };
@@ -1967,6 +2126,8 @@ it.live("fundamentals require typed verdicts and honest frame citations", () =>
       checkIds: new Set<string>(),
       recipeIds: new Set<string>(),
     };
+    // Legacy evidence frozen before the rubric: no quality field, judged on
+    // fundamentals alone and never read as a quality verdict.
     const answer = { fundamentals, defects: [], doNotRegress: [] };
     const parse = (judgment: unknown) =>
       GameReviewSessions.parseCriticAnswer(
@@ -2018,6 +2179,7 @@ it.live(
         expect(yield* service.toolRole(caller)).toBe("critic");
         scripted.viewport = { width: 1280, height: 720 };
         const result = yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+        expect(result.evidenceDirectory).toBe(".");
         expect(result.consoleMessages).toEqual(tryResult.consoleMessages);
         expect(result.screenshots.map((frame) => frame.frameId)).toEqual(["try1f1", "try1f2"]);
         expect(result.screenshots[1]?.inputPair?.stateChanges).toEqual([
@@ -2062,6 +2224,7 @@ it.live(
             },
           ],
           doNotRegress: [{ id: "working-input", what: "Input responds", frameId: "try1f1" }],
+          quality,
         });
         expect(accepted.accepted).toBe(true);
         expect(
@@ -2100,6 +2263,7 @@ it.live("freezes the routes of the critic's cited experiments", () =>
         fundamentals,
         defects: [],
         doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "try1f1" }],
+        quality,
       });
       expect(accepted.accepted).toBe(true);
       const routes = yield* service.experiments({
@@ -2199,6 +2363,7 @@ it.live("replays a critic's scaled route in the window it was played in", () =>
         fundamentals,
         defects: [],
         doNotRegress: [{ id: "turns", what: "Turning still works.", frameId: "try1f1" }],
+        quality,
       });
       expect(accepted.accepted).toBe(true);
       const routes = yield* service.experiments({
@@ -2233,6 +2398,11 @@ it.live("bounds active calls durably and rejects invalid routes before launching
           .tryInput(caller, { steps: Array.from({ length: 13 }, () => ({ press: "w" })) })
           .pipe(Effect.flip)).detail,
       ).toContain("1–12 steps");
+      expect(
+        (yield* service
+          .tryInput(caller, { steps: [{ keys: ["ui_accept"], holdMs: 100 }] })
+          .pipe(Effect.flip)).detail,
+      ).toContain('"ui_accept" is not a browser key');
       expect(
         (yield* service
           .tryInput(caller, { buildId: "other", steps: [{ press: "w" }] })
@@ -2281,6 +2451,240 @@ it.live("ballots cannot play and their frozen evidence remains unchanged", () =>
       expect(yield* service.evidenceHash({ threadId, loopId, roundId, role: "ballot" })).toBe(
         started.evidenceHash,
       );
+    }),
+  ),
+);
+
+const detailPng = (
+  width: number,
+  height: number,
+  base: readonly [number, number, number],
+  patches: ReadonlyArray<{
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+    readonly color: readonly [number, number, number];
+  }>,
+): Buffer => {
+  const png = new PNG({ width, height });
+  for (let y = 0; y < height; y += 1)
+    for (let x = 0; x < width; x += 1) {
+      const patch = patches.find(
+        (entry) => x >= entry.x && x < entry.x + entry.w && y >= entry.y && y < entry.y + entry.h,
+      );
+      const [red, green, blue] = patch?.color ?? base;
+      const at = (y * width + x) * 4;
+      png.data[at] = red;
+      png.data[at + 1] = green;
+      png.data[at + 2] = blue;
+      png.data[at + 3] = 255;
+    }
+  return PNG.sync.write(png);
+};
+
+const WARM_PATCH = { x: 40, y: 10, w: 16, h: 16, color: [184, 136, 72] as const };
+const FLAT_BASE = [101, 113, 175] as const;
+
+it.live("critics crop a native-resolution detail without changing the evidence", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          frames[0]!,
+          detailPng(64, 48, FLAT_BASE, [{ ...WARM_PATCH, color: [...WARM_PATCH.color] }]),
+        ),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(frames[1]!, detailPng(64, 48, FLAT_BASE, [])));
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const view = yield* service.inspectDetail(caller, {
+        frameId: "f1",
+        x: 40,
+        y: 10,
+        width: 16,
+        height: 16,
+      });
+      expect(view.screenshots).toHaveLength(1);
+      expect(view.screenshots[0]).toMatchObject({ width: 32, height: 32 });
+      expect(view.detail).toMatchObject({
+        frameId: "f1",
+        x: 40,
+        y: 10,
+        width: 16,
+        height: 16,
+        scale: 2,
+        sourceWidth: 64,
+        sourceHeight: 48,
+        pair: false,
+      });
+      expect(view.detail.regions).toEqual([{ name: "frame", mean: [184, 136, 72], pixels: 256 }]);
+      expect(view.detail.delta).toBeUndefined();
+      const pixels = PNG.sync.read(Buffer.from(view.screenshots[0]!.data, "base64"));
+      expect([pixels.data[0], pixels.data[1], pixels.data[2], pixels.data[3]]).toEqual([
+        184, 136, 72, 255,
+      ]);
+      // A read-only crop cannot move the hash the answer validates against.
+      expect(yield* service.evidenceHash({ threadId, loopId, roundId, role: "critic" })).toBe(
+        started.evidenceHash,
+      );
+      expect(
+        yield* service.detailCalls(started.childThreadId, RunId.make("run:review-child")),
+      ).toBe(1);
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [{ id: "flat-roof", what: "The roof stays flat blue.", frameId: "f1" }],
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("ballots compare the same region on both halves of a pair card", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      const beforePath = NodePath.join(NodePath.dirname(frames[0]!), "pair-before.png");
+      const afterPath = NodePath.join(NodePath.dirname(frames[0]!), "pair-after.png");
+      yield* Effect.promise(() => NodeFSP.writeFile(beforePath, detailPng(64, 48, FLAT_BASE, [])));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          afterPath,
+          detailPng(64, 48, FLAT_BASE, [{ ...WARM_PATCH, color: [...WARM_PATCH.color] }]),
+        ),
+      );
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        evidence: {
+          frames: [
+            {
+              id: "pair-source",
+              label: "A: held ArrowRight 1000ms",
+              sourcePath: beforePath,
+              pair: { beforePath, afterPath, caption: "held ArrowRight 1000ms" },
+            },
+          ],
+          checks: [],
+        },
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const view = yield* service.inspectDetail(caller, {
+        frameId: "f1",
+        x: 40,
+        y: 10,
+        width: 16,
+        height: 16,
+        scale: 2,
+      });
+      expect(view.screenshots).toHaveLength(1);
+      // Both halves keep their native pixels at the same scale, side by side.
+      expect(view.screenshots[0]).toMatchObject({ width: 16 * 2 + 8 + 16 * 2 });
+      expect(view.detail.pair).toBe(true);
+      expect(view.detail.regions).toEqual([
+        { name: "before", mean: [101, 113, 175], pixels: 256 },
+        { name: "after", mean: [184, 136, 72], pixels: 256 },
+      ]);
+      expect(view.detail.delta).toEqual({ meanAbs: [83, 23, 103], changedPercent: 100 });
+      expect(yield* service.evidenceHash({ threadId, loopId, roundId, role: "ballot" })).toBe(
+        started.evidenceHash,
+      );
+    }),
+  ),
+);
+
+it.live("detail views refuse strangers, bad regions and exhausted budgets", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() => NodeFSP.writeFile(frames[0]!, detailPng(64, 48, FLAT_BASE, [])));
+      yield* Effect.promise(() => NodeFSP.writeFile(frames[1]!, detailPng(64, 48, FLAT_BASE, [])));
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      expect(
+        (yield* service
+          .inspectDetail(caller, { frameId: "f9", x: 0, y: 0, width: 16, height: 16 })
+          .pipe(Effect.flip)).detail,
+      ).toContain("Unknown frame");
+      expect(
+        (yield* service
+          .inspectDetail(caller, { frameId: "f1", x: 60, y: 10, width: 16, height: 16 })
+          .pipe(Effect.flip)).detail,
+      ).toContain("extends past the 64x48");
+      expect(
+        (yield* service
+          .inspectDetail(
+            { threadId, providerInstanceId: builderSelection.instanceId },
+            { frameId: "f1", x: 0, y: 0, width: 16, height: 16 },
+          )
+          .pipe(Effect.flip)).detail,
+      ).toContain("only available to the active critic or ballot session");
+      for (let call = 0; call < 6; call++)
+        yield* service.inspectDetail(caller, { frameId: "f1", x: 0, y: 0, width: 16, height: 16 });
+      expect(
+        yield* service.detailCalls(started.childThreadId, RunId.make("run:review-child")),
+      ).toBe(6);
+      expect(
+        (yield* service
+          .inspectDetail(caller, { frameId: "f1", x: 0, y: 0, width: 16, height: 16 })
+          .pipe(Effect.flip)).detail,
+      ).toContain("exhausted its 6 calls");
+    }),
+  ),
+);
+
+it.live("detail views reject oversized PNG dimensions before decoding pixels", () =>
+  withSession(({ service, scripted, frames }) =>
+    Effect.gen(function* () {
+      const png = PNG.sync.write(new PNG({ width: 8, height: 8 }));
+      png.writeUInt32BE(500_000, 16);
+      yield* Effect.promise(() => NodeFSP.writeFile(frames[0]!, png));
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const error = yield* service
+        .inspectDetail(
+          { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+          { frameId: "f1", x: 0, y: 0, width: 8, height: 8 },
+        )
+        .pipe(Effect.flip);
+      expect(error.reason).toBe("invalid-input");
+      expect(error.detail).toContain("500000x8 frame is outside");
     }),
   ),
 );
@@ -2401,6 +2805,216 @@ it.live("playing in one session does not block unrelated MCP authentication", ()
   ),
 );
 
+it.live("an unreadable design cannot silently dispatch a review without its requirements", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designReadFails = true;
+      const error = yield* service
+        .start({ threadId, loopId, roundId, role: "critic", evidence: frameInput(frames) })
+        .pipe(Effect.flip);
+      expect(error.reason).toBe("io");
+      expect(scripted.dispatches).toHaveLength(0);
+    }),
+  ),
+);
+
+it.live("an approved design reaches the critic as bounded requirements, not source", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "warm-glow", kind: "presentation", text: "Lit lanterns cast a warm glow" },
+        {
+          id: "collect-two",
+          kind: "content",
+          text: "The player collects two lanterns",
+        },
+      ];
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const command = scripted.dispatches[0]!;
+      expect(command.type).toBe("game-round.task.request");
+      if (command.type !== "game-round.task.request") return;
+      // The critic prompt names the bounded requirements file and how to judge it.
+      expect(command.task).toContain("DESIGN_REQUIREMENTS.md (approved design requirements)");
+      expect(command.task).toContain("report an unmet one as a defect with frames");
+      expect(command.task).toContain("never as met");
+      const files = yield* Effect.promise(() => walk(command.evidenceDirectory!));
+      expect(files).toContain("DESIGN_REQUIREMENTS.md");
+      const requirements = yield* Effect.promise(() =>
+        NodeFSP.readFile(
+          NodePath.join(command.evidenceDirectory!, "DESIGN_REQUIREMENTS.md"),
+          "utf8",
+        ),
+      );
+      expect(requirements).toContain("warm-glow");
+      expect(requirements).toContain("Lit lanterns cast a warm glow");
+      expect(requirements).toContain("collect-two");
+      // Bounded creator prose only: no observe keys, no agent instructions.
+      expect(requirements).not.toContain("observe");
+      expect(requirements).not.toContain("AGENTS.md");
+      expect(requirements).not.toContain("game.json");
+    }),
+  ),
+);
+
+it.live("a repair child gets the same bounded design promises in its prompt", () =>
+  withSession(({ scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "warm-glow", kind: "presentation", text: "Lit lanterns cast a warm glow" },
+      ];
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        repair: {
+          remainingBudget: "2 repairs and 20 minutes left",
+          defects: [
+            {
+              severity: "visible",
+              what: "The lanterns never glow.",
+              frameId: "f2",
+              fix: "Light the lanterns; yes/no: lit lanterns glow.",
+            },
+          ],
+          doNotRegress: [],
+        },
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const command = scripted.dispatches[0]!;
+      expect(command.type).toBe("game-round.task.request");
+      if (command.type !== "game-round.task.request") return;
+      expect(command.task).toContain("DESIGN (approved acceptance;");
+      expect(command.task).toContain("warm-glow");
+      expect(command.task).toContain("The lanterns never glow.");
+    }),
+  ),
+);
+
+it.live("a legacy game without an approved design reviews exactly as before", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = null;
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(critic.kind).toBe("started");
+      if (critic.kind !== "started") return;
+      const command = scripted.dispatches[0]!;
+      expect(command.type).toBe("game-round.task.request");
+      if (command.type !== "game-round.task.request") return;
+      expect(command.task).not.toContain("DESIGN_REQUIREMENTS");
+      const files = yield* Effect.promise(() => walk(command.evidenceDirectory!));
+      expect(files).toEqual([
+        "BRIEF.md",
+        "evidence.json",
+        "frames/frame-01.png",
+        "frames/frame-02.png",
+      ]);
+    }),
+  ),
+);
+
+it.live("an all-cannot-tell critic answer stays unknown instead of certifying quality", () =>
+  Effect.sync(() => {
+    const frames = new Set(["f1", "f2"]);
+    const checks = new Set(["boot", "input"]);
+    const recipeIds = new Set(["feel.buffer"]);
+    const unknown = JSON.stringify({
+      fundamentals: {
+        boots: { verdict: "yes", frameIds: ["f1"], note: "Boot frame." },
+        respondsToInput: {
+          verdict: "cannot-tell",
+          frameIds: ["f1"],
+          note: "No input pair shows it.",
+        },
+        coreActionVisible: { verdict: "cannot-tell", frameIds: [], note: "Cannot see it." },
+        stateReadable: { verdict: "cannot-tell", frameIds: [], note: "Cannot read it." },
+      },
+      defects: [],
+      doNotRegress: [],
+      // Absolute quality all unknown: exact-once coverage with no verdict.
+      // Unknown stays neutral, never a pass, a fail or a score.
+      quality: {
+        artConsistency: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+        animation: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+        audio: { verdict: "cannot-tell", frameIds: [], note: "No audio evidence attached." },
+        readability: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+        progression: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+        agency: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+        playability: { verdict: "cannot-tell", frameIds: [], note: "Cannot judge." },
+      },
+    });
+    const parsed = GameReviewSessions.parseCriticAnswer(unknown, {
+      frameIds: frames,
+      checkIds: checks,
+      recipeIds,
+      requireQuality: true,
+    });
+    // Valid as an answer, but it names no defect and proves nothing: the loop
+    // must keep the incumbent on zero defects, never promote on unknown.
+    expect(parsed.kind).toBe("valid");
+    if (parsed.kind !== "valid") return;
+    expect(parsed.answer.defects).toEqual([]);
+    expect(
+      Object.values(parsed.answer.fundamentals).filter(
+        (judgment) => judgment.verdict === "cannot-tell",
+      ),
+    ).toHaveLength(3);
+  }),
+);
+
+it.live("design requirements render bounded creator prose and nothing else", () =>
+  Effect.sync(() => {
+    expect(GameReviewSessions.renderDesignRequirements([])).toBeNull();
+    const rendered = GameReviewSessions.renderDesignRequirements([
+      { id: "warm-glow", kind: "presentation", text: "Lit lanterns cast a warm glow" },
+      { id: "collect-two", kind: "content", text: "  The   player collects\ntwo lanterns  " },
+    ])!;
+    expect(rendered).toContain("- [presentation] warm-glow: Lit lanterns cast a warm glow");
+    expect(rendered).toContain("- [content] collect-two: The player collects two lanterns");
+    // A normal 198-char promise keeps its essential final clause in full.
+    const full = GameReviewSessions.renderDesignRequirements([
+      {
+        id: "lantern-glow",
+        kind: "presentation",
+        text: "The lanterns are part of the evening route and the player can walk freely between the rooftops while the timer records the entire journey. After activation they MUST illuminate nearby roof surfaces.",
+      },
+    ])!;
+    expect(full).toContain("MUST illuminate nearby roof surfaces");
+    expect(full).not.toContain("Coverage incomplete");
+    const long = GameReviewSessions.renderDesignRequirements([
+      { id: "epic", kind: "mechanic", text: `x`.repeat(500) },
+    ])!;
+    expect(long.length).toBeLessThan(900);
+    expect(long).toContain("[truncated]");
+    expect(long).toContain("Coverage incomplete");
+    expect(long).toContain("cannot-tell");
+    const many = GameReviewSessions.renderDesignRequirements(
+      Array.from({ length: 30 }, (_, index) => ({
+        id: `criterion-${index}`,
+        kind: "mechanic" as const,
+        text: `Promise ${index}`,
+      })),
+    )!;
+    expect(many.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(12);
+    expect(many).toContain("Coverage incomplete");
+  }),
+);
+
 it("ballots require every defect once and known evidence for fixes and regressions", () => {
   const judgment = { fixed: "yes", frameIds: ["f1"] };
   const answer = {
@@ -2437,3 +3051,3580 @@ it("ballots require every defect once and known evidence for fixes and regressio
     }).kind,
   ).toBe("invalid");
 });
+
+it.live("incomplete requirements cannot receive unsupported yes verdicts", () =>
+  Effect.sync(() => {
+    const known = {
+      frameIds: new Set(["f1"]),
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["glow"],
+    };
+    const answer = {
+      fundamentals,
+      defects: [],
+      doNotRegress: [],
+      requirements: [
+        { id: "glow", verdict: "yes", frameIds: new Array<string>(), note: "A halo is visible." },
+      ],
+    };
+    expect(GameReviewSessions.parseCriticAnswer(JSON.stringify(answer), known)).toMatchObject({
+      kind: "invalid",
+      reason: expect.stringContaining("needs a frame"),
+    });
+    answer.requirements[0]!.frameIds.push("f1");
+    expect(
+      GameReviewSessions.parseCriticAnswer(JSON.stringify(answer), {
+        ...known,
+        incompleteRequirementIds: ["glow"],
+        requirementsIncomplete: true,
+      }),
+    ).toMatchObject({ kind: "invalid", reason: expect.stringContaining("incomplete") });
+    expect(
+      GameReviewSessions.parseCriticAnswer(JSON.stringify(answer), {
+        ...known,
+        requirementsIncomplete: true,
+      }),
+    ).toMatchObject({ kind: "valid", answer: { requirementsIncomplete: true } });
+  }),
+);
+
+it.live("a bound critic must assess every requirement exactly once with cited frames", () =>
+  Effect.sync(() => {
+    const frames = new Set(["f1", "f2"]);
+    const checks = new Set(["boot"]);
+    const recipeIds = new Set<string>();
+    const known = {
+      frameIds: frames,
+      checkIds: checks,
+      recipeIds,
+      requirementIds: ["glow", "lit"],
+    };
+    const base = {
+      fundamentals,
+      defects: [],
+      doNotRegress: [],
+      requirements: [
+        { id: "glow", verdict: "yes" as const, frameIds: ["f1"], note: "Roof glows." },
+        { id: "lit", verdict: "cannot-tell" as const, frameIds: [], note: "Cannot see it." },
+      ],
+    };
+    expect(GameReviewSessions.parseCriticAnswer(JSON.stringify(base), known).kind).toBe("valid");
+    // Missing one requirement is not silently accepted.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({ ...base, requirements: [base.requirements[0]] }),
+        known,
+      ),
+    ).toMatchObject({ kind: "invalid", reason: expect.stringContaining("did not assess") });
+    // Unknown ids and duplicates are rejected through the same validation.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          ...base,
+          requirements: [
+            base.requirements[0],
+            { id: "unknown", verdict: "yes" as const, frameIds: ["f1"], note: "Unknown." },
+          ],
+        }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({ ...base, requirements: [base.requirements[0], base.requirements[0]] }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    // An unmet promise without frames and an unknown frame are both invalid.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          ...base,
+          requirements: [
+            { id: "glow", verdict: "no" as const, frameIds: [], note: "No glow." },
+            base.requirements[1],
+          ],
+        }),
+        known,
+      ),
+    ).toMatchObject({ kind: "invalid", reason: expect.stringContaining("needs a frame") });
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          ...base,
+          requirements: [
+            { id: "glow", verdict: "no" as const, frameIds: ["f9"], note: "No glow." },
+            base.requirements[1],
+          ],
+        }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    // Legacy games with no bound requirements stay compatible and need no field.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({ fundamentals, defects: [], doNotRegress: [] }),
+        { frameIds: frames, checkIds: checks, recipeIds },
+      ).kind,
+    ).toBe("valid");
+  }),
+);
+
+describe("last-attempt requirement downgrades", () => {
+  const knownBase = {
+    frameIds: new Set(["f1", "f2"]),
+    checkIds: new Set(["boot"]),
+    recipeIds: new Set<string>(),
+  };
+  const text = (requirements?: unknown) =>
+    JSON.stringify({
+      fundamentals,
+      defects: [],
+      doNotRegress: [],
+      ...(requirements === undefined ? {} : { requirements }),
+    });
+  const decodedAnswer = (requirements: unknown) => {
+    const parsed = GameReviewSessions.parseCriticAnswer(text(requirements), knownBase);
+    expect(parsed.kind).toBe("valid");
+    if (parsed.kind !== "valid") throw new Error("The downgrade fixture must parse cleanly.");
+    return parsed.answer;
+  };
+  const reparse = (
+    answer: GameReviewSessions.DowngradedCriticAnswer["answer"],
+    known: GameReviewSessions.CriticAnswerKnownIds,
+  ) => GameReviewSessions.parseCriticAnswer(JSON.stringify(answer), known);
+
+  it("turns omitted requirements into cannot-tell with the server-applied list", () => {
+    const known = { ...knownBase, requirementIds: ["req-a", "req-b"] };
+    const downgraded = GameReviewSessions.downgradeUnsupportedRequirements(
+      decodedAnswer(undefined),
+      known,
+    );
+    expect(downgraded).not.toBeNull();
+    expect(downgraded!.answer.requirements).toEqual([
+      {
+        id: "req-a",
+        verdict: "cannot-tell",
+        frameIds: [],
+        note: expect.stringContaining("did not assess requirements"),
+      },
+      {
+        id: "req-b",
+        verdict: "cannot-tell",
+        frameIds: [],
+        note: expect.stringContaining("did not assess requirements"),
+      },
+    ]);
+    expect(downgraded!.downgrades).toEqual([
+      { id: "req-a", reason: expect.stringContaining("did not assess requirements") },
+      { id: "req-b", reason: expect.stringContaining("did not assess requirements") },
+    ]);
+    expect(reparse(downgraded!.answer, known).kind).toBe("valid");
+  });
+
+  it("fills a missing requirement while leaving the critic's verdicts alone", () => {
+    const known = { ...knownBase, requirementIds: ["req-a", "req-b"] };
+    const downgraded = GameReviewSessions.downgradeUnsupportedRequirements(
+      decodedAnswer([{ id: "req-a", verdict: "yes", frameIds: ["f1"], note: "Lit." }]),
+      known,
+    );
+    expect(downgraded).not.toBeNull();
+    expect(downgraded!.answer.requirements).toEqual([
+      { id: "req-a", verdict: "yes", frameIds: ["f1"], note: "Lit." },
+      { id: "req-b", verdict: "cannot-tell", frameIds: [], note: expect.stringContaining("req-b") },
+    ]);
+    expect(downgraded!.downgrades.map((entry) => entry.id)).toEqual(["req-b"]);
+    expect(reparse(downgraded!.answer, known).kind).toBe("valid");
+  });
+
+  it("turns a temporally refused yes into cannot-tell with the rule's reason", () => {
+    const known = {
+      ...knownBase,
+      requirementIds: ["req-a"],
+      temporalRequirementIds: ["req-a"],
+      evidenceFrames: [{ id: "f1" }, { id: "f2" }],
+    };
+    const downgraded = GameReviewSessions.downgradeUnsupportedRequirements(
+      decodedAnswer([{ id: "req-a", verdict: "yes", frameIds: ["f1"], note: "Lit." }]),
+      known,
+    );
+    expect(downgraded).not.toBeNull();
+    expect(downgraded!.answer.requirements).toEqual([
+      {
+        id: "req-a",
+        verdict: "cannot-tell",
+        frameIds: ["f1"],
+        note: expect.stringContaining("before/after witness"),
+      },
+    ]);
+    expect(downgraded!.downgrades).toHaveLength(1);
+    expect(downgraded!.downgrades[0]).toMatchObject({
+      id: "req-a",
+      reason: expect.stringContaining("before/after witness"),
+    });
+    expect(reparse(downgraded!.answer, known).kind).toBe("valid");
+  });
+
+  it("turns an end-state refused yes into cannot-tell with the rule's reason", () => {
+    const known = {
+      ...knownBase,
+      requirementIds: ["req-win"],
+      endStateRequirements: [{ id: "req-win", kind: "win" as const, key: "won", expect: "==1" }],
+      evidenceFrames: [{ id: "f1" }, { id: "f2" }],
+    };
+    const downgraded = GameReviewSessions.downgradeUnsupportedRequirements(
+      decodedAnswer([{ id: "req-win", verdict: "yes", frameIds: ["f1", "f2"], note: "Won." }]),
+      known,
+    );
+    expect(downgraded).not.toBeNull();
+    expect(downgraded!.answer.requirements?.[0]).toMatchObject({
+      id: "req-win",
+      verdict: "cannot-tell",
+      note: expect.stringContaining("matched ordinary-input transition"),
+    });
+    expect(downgraded!.downgrades).toHaveLength(1);
+    expect(reparse(downgraded!.answer, known).kind).toBe("valid");
+  });
+
+  it("never changes a requirement no", () => {
+    const known = { ...knownBase, requirementIds: ["req-a", "req-b"] };
+    const downgraded = GameReviewSessions.downgradeUnsupportedRequirements(
+      decodedAnswer([{ id: "req-a", verdict: "no", frameIds: ["f1"], note: "Not lit." }]),
+      known,
+    );
+    expect(downgraded).not.toBeNull();
+    expect(downgraded!.answer.requirements?.[0]).toMatchObject({ id: "req-a", verdict: "no" });
+    expect(downgraded!.downgrades.map((entry) => entry.id)).toEqual(["req-b"]);
+    expect(reparse(downgraded!.answer, known).kind).toBe("valid");
+  });
+
+  it("leaves unknown ids, citation failures and other faults invalid", () => {
+    const requirementIds = ["req-a"];
+    // Unknown requirement id.
+    expect(
+      GameReviewSessions.downgradeUnsupportedRequirements(
+        decodedAnswer([{ id: "unknown", verdict: "yes", frameIds: ["f1"], note: "X." }]),
+        { ...knownBase, requirementIds },
+      ),
+    ).toBeNull();
+    // Requirement no without frames.
+    expect(
+      GameReviewSessions.downgradeUnsupportedRequirements(
+        decodedAnswer([{ id: "req-a", verdict: "no", frameIds: [], note: "Not lit." }]),
+        { ...knownBase, requirementIds },
+      ),
+    ).toBeNull();
+    // A defect citing a frame outside the frozen manifest.
+    const parsed = GameReviewSessions.parseCriticAnswer(
+      JSON.stringify({
+        fundamentals,
+        defects: [{ severity: "visible", what: "Fault.", frameId: "f9", fix: "Fix it." }],
+        doNotRegress: [],
+        requirements: [{ id: "req-a", verdict: "yes", frameIds: ["f1"], note: "Lit." }],
+      }),
+      { ...knownBase, frameIds: new Set(["f1", "f2", "f9"]) },
+    );
+    expect(parsed.kind).toBe("valid");
+    if (parsed.kind !== "valid") throw new Error("The downgrade fixture must parse cleanly.");
+    expect(
+      GameReviewSessions.downgradeUnsupportedRequirements(parsed.answer, {
+        ...knownBase,
+        requirementIds: ["req-b"],
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when there is nothing to downgrade", () => {
+    const known = { ...knownBase, requirementIds: ["req-a"] };
+    expect(
+      GameReviewSessions.downgradeUnsupportedRequirements(
+        decodedAnswer([{ id: "req-a", verdict: "cannot-tell", frameIds: [], note: "Unseen." }]),
+        known,
+      ),
+    ).toBeNull();
+    // Legacy records without frozen requirements never downgrade.
+    expect(
+      GameReviewSessions.downgradeUnsupportedRequirements(decodedAnswer(undefined), knownBase),
+    ).toBeNull();
+  });
+});
+
+it.live("a corrupt frozen critic record cannot fall back to a changed approval", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "glow", kind: "presentation", text: "The roof lights up." },
+      ];
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(critic.kind).toBe("started");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(directory!, "../session.json"), "{broken"),
+      );
+      scripted.designAcceptance = [];
+      const failure = yield* service
+        .start({ threadId, loopId, roundId, role: "ballot", evidence: frameInput(frames) })
+        .pipe(Effect.flip);
+      expect(failure.reason).toBe("io");
+      expect(scripted.dispatches).toHaveLength(1);
+    }),
+  ),
+);
+
+it.live(
+  "the requirement packet preserves every included id and its incomplete notice within budget",
+  () =>
+    Effect.sync(() => {
+      const bound = GameReviewSessions.boundDesignRequirements(
+        Array.from({ length: 12 }, (_, index) => ({
+          id: `requirement-${index}`,
+          kind: "presentation" as const,
+          text: "A".repeat(500),
+        })),
+      )!;
+      expect(bound.markdown.length).toBeLessThanOrEqual(4000);
+      expect(bound.markdown).toContain("Coverage incomplete");
+      expect(bound.requirements).toHaveLength(12);
+      for (const requirement of bound.requirements) {
+        expect(bound.markdown).toContain(`${requirement.id}:`);
+        expect(requirement.incomplete).toBe(true);
+      }
+    }),
+);
+
+it.live("repair and ballot reuse the critic's frozen requirements when approval changes", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "lantern-glow", kind: "presentation", text: "Lit lanterns cast a warm glow" },
+      ];
+      const critic = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(critic.kind).toBe("started");
+      if (critic.kind !== "started") return;
+      const criticCommand = scripted.dispatches.at(-1)!;
+      expect(criticCommand.type).toBe("game-round.task.request");
+      if (criticCommand.type !== "game-round.task.request") return;
+      expect(criticCommand.task).toContain("DESIGN_REQUIREMENTS.md");
+      const criticDirectory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      const criticRequirements = yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(criticDirectory!, "DESIGN_REQUIREMENTS.md"), "utf8"),
+      );
+      expect(criticRequirements).toContain("lantern-glow");
+
+      // The approval changes after the critic started; the round must not follow it.
+      scripted.designAcceptance = [
+        { id: "replaced-promise", kind: "presentation", text: "A different promise entirely" },
+      ];
+      const repair = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "repair",
+        repair: { remainingBudget: "2 repairs left", defects: [], doNotRegress: [] },
+      });
+      expect(repair.kind).toBe("started");
+      if (repair.kind !== "started") return;
+      const repairCommand = scripted.dispatches.at(-1)!;
+      if (repairCommand.type !== "game-round.task.request") return;
+      expect(repairCommand.task).toContain("lantern-glow");
+      expect(repairCommand.task).not.toContain("replaced-promise");
+
+      const ballot = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        order: 1,
+        evidence: frameInput(frames),
+        items: [],
+      });
+      expect(ballot.kind).toBe("started");
+      if (ballot.kind !== "started") return;
+      const ballotCommand = scripted.dispatches.at(-1)!;
+      if (ballotCommand.type !== "game-round.task.request") return;
+      expect(ballotCommand.task).toContain("DESIGN_REQUIREMENTS.md");
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "ballot",
+        order: 1,
+      });
+      const ballotRequirements = yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(directory!, "DESIGN_REQUIREMENTS.md"), "utf8"),
+      );
+      expect(ballotRequirements).toContain("lantern-glow");
+      expect(ballotRequirements).not.toContain("replaced-promise");
+    }),
+  ),
+);
+
+it.live("preserves an older session's rubric version in reports and answers after restart", () =>
+  withSession(({ stateDir, frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
+      );
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { qualityRubricVersion: number; command: { task: string } };
+      stored.qualityRubricVersion = 1;
+      stored.command.task = "Frozen version-one critic task";
+      yield* Effect.promise(() => NodeFSP.writeFile(recordPath, JSON.stringify(stored)));
+      const resumed = yield* restart();
+      const result = yield* resumed.report(
+        { threadId: started.childThreadId, providerInstanceId: builderSelection.instanceId },
+        "critic",
+        { fundamentals, defects: [], doNotRegress: [], quality },
+      );
+      expect(result.accepted).toBe(true);
+      expect(result.qualityCoverage?.rubricVersion).toBe(1);
+      scripted.childStatus = "interrupted";
+      const answer = yield* resumed.answer({ threadId, loopId, roundId, role: "critic", order: 0 });
+      expect(answer.kind).toBe("critic");
+      if (answer.kind === "critic") expect(answer.qualityRubricVersion).toBe(1);
+    }),
+  ),
+);
+
+it.live("temporal policy replays the Workshop Rover static win as invalid, pair as valid", () =>
+  Effect.sync(() => {
+    // Frozen Rover route: Enter (f1/f2) then hold w 3000ms (f3 before, f4 after win).
+    // The shipped tool-answer marked park-in-bay yes with ONLY f4; the new
+    // policy must reject that static final frame and accept the cited pair.
+    const evidenceFrames = [
+      {
+        id: "f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Enter" } },
+      },
+      {
+        id: "f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Enter" } },
+      },
+      {
+        id: "f3",
+        inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+      },
+    ];
+    const known = {
+      frameIds: new Set(["f1", "f2", "f3", "f4"]),
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["park-in-bay"],
+      temporalRequirementIds: ["park-in-bay"],
+      evidenceFrames,
+    };
+    const answer = (frameIds: string[]) =>
+      JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds,
+            note: "Parking inside marked bay after all 3 gates wins run.",
+          },
+        ],
+      });
+    expect(GameReviewSessions.parseCriticAnswer(answer(["f4"]), known).kind).toBe("invalid");
+    const staticReason = GameReviewSessions.parseCriticAnswer(answer(["f4"]), known);
+    if (staticReason.kind === "invalid")
+      expect(staticReason.reason).toMatch(/before\/after|finished state|cannot-tell/i);
+    expect(GameReviewSessions.parseCriticAnswer(answer(["f3", "f4"]), known).kind).toBe("valid");
+    // cannot-tell with no witness stays neutral.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            {
+              id: "park-in-bay",
+              verdict: "cannot-tell" as const,
+              frameIds: [],
+              note: "No transition shows the bay trigger.",
+            },
+          ],
+        }),
+        known,
+      ).kind,
+    ).toBe("valid");
+  }),
+);
+
+it.live(
+  "temporal pairs reject duplicates, unrelated, cross-experiment and wait-only witnesses",
+  () =>
+    Effect.sync(() => {
+      const evidenceFrames = [
+        {
+          id: "f1",
+          inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Enter" } },
+        },
+        {
+          id: "f2",
+          inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Enter" } },
+        },
+        {
+          id: "f3",
+          inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+        },
+        {
+          id: "f4",
+          inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+        },
+        {
+          id: "try2f6",
+          inputPair: { stepIndex: 2, phase: "before" as const, input: { hold: "w", holdMs: 1200 } },
+        },
+        {
+          id: "try2f8",
+          inputPair: { stepIndex: 2, phase: "after" as const, input: { hold: "w", holdMs: 1200 } },
+        },
+        {
+          id: "try3f6",
+          inputPair: { stepIndex: 2, phase: "before" as const, input: { hold: "w", holdMs: 1200 } },
+        },
+        {
+          id: "try3f8",
+          inputPair: { stepIndex: 2, phase: "after" as const, input: { hold: "w", holdMs: 1200 } },
+        },
+        {
+          id: "w1",
+          inputPair: { stepIndex: 3, phase: "before" as const, input: { waitMs: 600 } },
+        },
+        {
+          id: "w2",
+          inputPair: { stepIndex: 3, phase: "after" as const, input: { waitMs: 600 } },
+        },
+        { id: "static" },
+      ];
+      const knownFor = (temporal: ReadonlyArray<string>) => ({
+        frameIds: new Set(evidenceFrames.map((frame) => frame.id)),
+        checkIds: new Set<string>(),
+        recipeIds: new Set<string>(),
+        requirementIds: ["win-bay"],
+        temporalRequirementIds: temporal,
+        evidenceFrames,
+      });
+      const answer = (frameIds: string[]) =>
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            { id: "win-bay", verdict: "yes" as const, frameIds, note: "Stateful win." },
+          ],
+        });
+      const known = knownFor(["win-bay"]);
+      // Valid experiment pair from one try_input call.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["try2f6", "try2f8"]), known).kind).toBe(
+        "valid",
+      );
+      // Duplicated id is not a pair.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["f4", "f4"]), known).kind).toBe(
+        "invalid",
+      );
+      // Two after frames never satisfy, even across experiments.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["f4", "try2f8"]), known).kind).toBe(
+        "invalid",
+      );
+      // Unrelated before/after (different steps) never satisfy.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["f1", "f4"]), known).kind).toBe(
+        "invalid",
+      );
+      // Cross-experiment alias with same step and input never satisfies.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["try2f6", "try3f8"]), known).kind).toBe(
+        "invalid",
+      );
+      // Wait-only pairs are not ordinary input and never satisfy.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["w1", "w2"]), known).kind).toBe(
+        "invalid",
+      );
+      // Source-less frames never satisfy.
+      expect(GameReviewSessions.parseCriticAnswer(answer(["static"]), known).kind).toBe("invalid");
+      expect(
+        GameReviewSessions.hasMatchingOrdinaryInputPair(["try2f6", "try2f8"], evidenceFrames),
+      ).toBe(true);
+      expect(
+        GameReviewSessions.hasMatchingOrdinaryInputPair(["try2f6", "try3f8"], evidenceFrames),
+      ).toBe(false);
+    }),
+);
+
+it.live("temporal policy leaves presentation and legacy sessions compatible", () =>
+  Effect.sync(() => {
+    const evidenceFrames = [
+      {
+        id: "f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Enter" } },
+      },
+      {
+        id: "f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Enter" } },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+      },
+    ];
+    const frameIds = new Set(["f1", "f2", "f4"]);
+    // Presentation yes from one static frame stays valid under the policy.
+    const presentationKnown = {
+      frameIds,
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["toy-workshop"],
+      temporalRequirementIds: [] as ReadonlyArray<string>,
+      evidenceFrames,
+    };
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            { id: "toy-workshop", verdict: "yes" as const, frameIds: ["f4"], note: "Toy look." },
+          ],
+        }),
+        presentationKnown,
+      ).kind,
+    ).toBe("valid");
+    // Legacy sessions without a frozen temporal policy keep the old rule: one
+    // known frame is enough even for a stateful win.
+    const legacyKnown = {
+      frameIds,
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["park-in-bay"],
+    };
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f4"], note: "Win." },
+          ],
+        }),
+        legacyKnown,
+      ).kind,
+    ).toBe("valid");
+    // Eligibility is kinds plus observe only: presentation and observe-less
+    // promises never join the frozen list.
+    expect(
+      GameReviewSessions.temporalEligibleRequirementIds([
+        {
+          id: "drive",
+          kind: "control",
+          text: "Drive.",
+          observe: { key: "collected", expect: ">=1" },
+        },
+        { id: "look", kind: "presentation", text: "Look." },
+        { id: "win", kind: "win", text: "Win." },
+        { id: "lose-free", kind: "lose", text: "No lose state", noLoseState: true as const },
+      ]),
+    ).toEqual(["drive"]);
+  }),
+);
+
+it.live(
+  "end-state policy needs a measured after-satisfying transition with a non-terminal before",
+  () =>
+    Effect.sync(() => {
+      const evidenceFrames = [
+        { id: "f1" },
+        {
+          id: "f3",
+          inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 0 },
+        },
+        {
+          id: "f4",
+          inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 1 },
+        },
+        {
+          id: "try1f1",
+          inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Space" } },
+          observations: { won: 0 },
+        },
+        {
+          id: "try1f2",
+          inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Space" } },
+          observations: { won: 0 },
+        },
+      ];
+      const known = {
+        frameIds: new Set(["f1", "f3", "f4", "try1f1", "try1f2"]),
+        checkIds: new Set<string>(),
+        recipeIds: new Set<string>(),
+        requirementIds: ["park-in-bay"],
+        temporalRequirementIds: ["park-in-bay"],
+        endStateRequirements: [
+          { id: "park-in-bay", kind: "win" as const, key: "won", expect: "==1" },
+        ],
+        evidenceFrames,
+      };
+      const answer = (frameIds: string[], challenge?: unknown) =>
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            {
+              id: "park-in-bay",
+              verdict: "yes" as const,
+              frameIds,
+              note: "Parking inside the marked bay after all 3 gates wins the run.",
+              ...(challenge === undefined ? {} : { challenge }),
+            },
+          ],
+        });
+      const goodChallenge = {
+        frameIds: ["try1f1", "try1f2"],
+        note: "Drove without parking; won stayed 0, missing bay trigger tested.",
+      };
+      // False->true positive plus a separate false->false ordinary-play
+      // counterexample is the only accepted shape.
+      expect(answer(["f3", "f4"], goodChallenge)).toSatisfy(
+        (text) => GameReviewSessions.parseCriticAnswer(text as string, known).kind === "valid",
+      );
+      // Arbitrary won=false pair (after does not satisfy) cannot substantiate yes.
+      const wrongCounterFrames = [
+        { id: "f1" },
+        {
+          id: "f3",
+          inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 0 },
+        },
+        {
+          id: "f4",
+          inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 0 },
+        },
+        ...evidenceFrames.slice(3),
+      ];
+      const wrongKnown = { ...known, evidenceFrames: wrongCounterFrames };
+      expect(
+        GameReviewSessions.parseCriticAnswer(answer(["f3", "f4"], goodChallenge), wrongKnown).kind,
+      ).toBe("invalid");
+      // Missing scalar justifies cannot-tell, never yes.
+      const missingFrames = [
+        { id: "f1" },
+        { id: "f3", inputPair: evidenceFrames[1]!.inputPair! },
+        { id: "f4", inputPair: evidenceFrames[2]!.inputPair! },
+        ...evidenceFrames.slice(3),
+      ];
+      expect(
+        GameReviewSessions.parseCriticAnswer(answer(["f3", "f4"], goodChallenge), {
+          ...known,
+          evidenceFrames: missingFrames,
+        }).kind,
+      ).toBe("invalid");
+      expect(
+        GameReviewSessions.parseCriticAnswer(
+          JSON.stringify({
+            fundamentals,
+            defects: [],
+            doNotRegress: [],
+            requirements: [
+              {
+                id: "park-in-bay",
+                verdict: "cannot-tell" as const,
+                frameIds: [],
+                note: "No measured transition shows the bay trigger.",
+              },
+            ],
+          }),
+          { ...known, evidenceFrames: missingFrames },
+        ).kind,
+      ).toBe("valid");
+      // Before already terminal (won 1->1) proves nothing about this input.
+      const terminalBefore = [
+        { id: "f1" },
+        {
+          id: "f3",
+          inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 1 },
+        },
+        {
+          id: "f4",
+          inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+          observations: { won: 1 },
+        },
+        ...evidenceFrames.slice(3),
+      ];
+      expect(
+        GameReviewSessions.parseCriticAnswer(answer(["f3", "f4"], goodChallenge), {
+          ...known,
+          evidenceFrames: terminalBefore,
+        }).kind,
+      ).toBe("invalid");
+    }),
+);
+
+it.live("end-state challenge must be a separate unsatisfied counterexample", () =>
+  Effect.sync(() => {
+    const evidenceFrames = [
+      { id: "f1" },
+      {
+        id: "f3",
+        inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+        observations: { won: 0 },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+        observations: { won: 1 },
+      },
+      {
+        id: "try1f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Space" } },
+        observations: { won: 0 },
+      },
+      {
+        id: "try1f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Space" } },
+        observations: { won: 0 },
+      },
+      {
+        id: "try2f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Space" } },
+        observations: { won: 0 },
+      },
+      {
+        id: "try2f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Space" } },
+        observations: { won: 1 },
+      },
+    ];
+    const known = {
+      frameIds: new Set(evidenceFrames.map((frame) => frame.id)),
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["park-in-bay"],
+      temporalRequirementIds: ["park-in-bay"],
+      endStateRequirements: [
+        { id: "park-in-bay", kind: "win" as const, key: "won", expect: "==1" },
+      ],
+      evidenceFrames,
+    };
+    const answer = (challenge: unknown) =>
+      JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f3", "f4"],
+            note: "Won 0->1 on the parking drive.",
+            ...(challenge === undefined ? {} : { challenge }),
+          },
+        ],
+      });
+    // Missing challenge cannot prove the trigger necessary.
+    expect(GameReviewSessions.parseCriticAnswer(answer(undefined), known).kind).toBe("invalid");
+    // Same pair reused as challenge is not separate.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["f3", "f4"], note: "Same pair." }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    // Same experiment (base) with a different step is still the same run.
+    const baseExtra = [
+      ...evidenceFrames,
+      {
+        id: "f5",
+        inputPair: { stepIndex: 2, phase: "before" as const, input: { hold: "w", holdMs: 500 } },
+        observations: { won: 0 },
+      },
+      {
+        id: "f6",
+        inputPair: { stepIndex: 2, phase: "after" as const, input: { hold: "w", holdMs: 500 } },
+        observations: { won: 0 },
+      },
+    ];
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["f5", "f6"], note: "Separate base steps." }),
+        {
+          ...known,
+          frameIds: new Set(baseExtra.map((frame) => frame.id)),
+          evidenceFrames: baseExtra,
+        },
+      ).kind,
+    ).toBe("invalid");
+    // A challenge that itself reaches won=1 cannot prove the trigger.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["try2f1", "try2f2"], note: "Unparked drive still won." }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+    const resetChallenge = evidenceFrames.map((frame) =>
+      frame.id === "try1f1" ? { ...frame, observations: { won: 1 } } : frame,
+    );
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["try1f1", "try1f2"], note: "Reset an already won run." }),
+        { ...known, evidenceFrames: resetChallenge },
+      ).kind,
+    ).toBe("invalid");
+    // Missing measurement in the challenge justifies cannot-tell, never yes.
+    const missingChallenge = [
+      ...evidenceFrames.slice(0, 5),
+      { id: "try2f1", inputPair: evidenceFrames[5]!.inputPair! },
+      { id: "try2f2", inputPair: evidenceFrames[6]!.inputPair! },
+    ];
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["try2f1", "try2f2"], note: "No measurement." }),
+        {
+          ...known,
+          frameIds: new Set(missingChallenge.map((frame) => frame.id)),
+          evidenceFrames: missingChallenge,
+        },
+      ).kind,
+    ).toBe("invalid");
+    // Unknown challenge frames never count.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        answer({ frameIds: ["try9f1", "try9f2"], note: "Unknown." }),
+        known,
+      ).kind,
+    ).toBe("invalid");
+  }),
+);
+
+it.live("end-state refusals name the way out with the attempts left", () =>
+  Effect.sync(() => {
+    const evidenceFrames = [
+      { id: "f1" },
+      {
+        id: "f3",
+        inputPair: { stepIndex: 1, phase: "before" as const, input: { hold: "w", holdMs: 3000 } },
+        observations: { won: 0 },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+        observations: { won: 1 },
+      },
+    ];
+    const base = {
+      frameIds: new Set(["f1", "f3", "f4"]),
+      endStateRequirements: [
+        { id: "park-in-bay", kind: "win" as const, key: "won", expect: "==1" },
+      ],
+      evidenceFrames,
+    };
+    const answer = {
+      fundamentals,
+      defects: [],
+      doNotRegress: [],
+      requirements: [
+        {
+          id: "park-in-bay",
+          verdict: "yes" as const,
+          frameIds: ["f3", "f4"],
+          note: "Won without proving the trigger.",
+        },
+      ],
+    } as unknown as Parameters<typeof GameReviewSessions.endStateRefusalReason>[0];
+    for (const attemptsRemaining of [2, 1]) {
+      const refusal = GameReviewSessions.endStateRefusalReason(answer, {
+        ...base,
+        attemptsRemaining,
+      });
+      expect(refusal).not.toBeNull();
+      expect(refusal ?? "").toContain("game_try_input");
+      expect(refusal ?? "").toContain("cannot-tell");
+      expect(refusal ?? "").toContain("stays available");
+      expect(refusal ?? "").toContain(
+        attemptsRemaining === 1 ? "1 attempt remains" : "2 attempts remain",
+      );
+    }
+  }),
+);
+
+it.live(
+  "a missing positive transition names its own way out, not the missing-trigger experiment",
+  () =>
+    Effect.sync(() => {
+      const evidenceFrames = [{ id: "f1" }];
+      const base = {
+        frameIds: new Set(["f1"]),
+        endStateRequirements: [
+          { id: "park-in-bay", kind: "win" as const, key: "won", expect: "==1" },
+        ],
+        evidenceFrames,
+      };
+      const answer = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f1"],
+            note: "Won without a transition.",
+          },
+        ],
+      } as unknown as Parameters<typeof GameReviewSessions.endStateRefusalReason>[0];
+      const refusal = GameReviewSessions.endStateRefusalReason(answer, {
+        ...base,
+        attemptsRemaining: 2,
+      });
+      expect(refusal).not.toBeNull();
+      expect(refusal ?? "").toContain("reaches the end state");
+      expect(refusal ?? "").not.toContain("trigger deliberately missing");
+      expect(refusal ?? "").toContain("cannot-tell");
+    }),
+);
+
+it.live("an exhausted end-state refusal says the session has ended", () =>
+  Effect.sync(() => {
+    const evidenceFrames = [{ id: "f1" }];
+    const base = {
+      frameIds: new Set(["f1"]),
+      endStateRequirements: [
+        { id: "park-in-bay", kind: "win" as const, key: "won", expect: "==1" },
+      ],
+      evidenceFrames,
+    };
+    const answer = {
+      fundamentals,
+      defects: [],
+      doNotRegress: [],
+      requirements: [
+        {
+          id: "park-in-bay",
+          verdict: "yes" as const,
+          frameIds: ["f1"],
+          note: "Won without a transition.",
+        },
+      ],
+    } as unknown as Parameters<typeof GameReviewSessions.endStateRefusalReason>[0];
+    const refusal = GameReviewSessions.endStateRefusalReason(answer, {
+      ...base,
+      attemptsRemaining: 0,
+    });
+    expect(refusal).not.toBeNull();
+    expect(refusal ?? "").toContain("has ended");
+    expect(refusal ?? "").not.toContain("game_try_input");
+    expect(refusal ?? "").not.toContain("stays available");
+    expect(refusal ?? "").not.toContain("0 attempts remain");
+  }),
+);
+
+it.live("a refused end-state report keeps the session open with one attempt left", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const staticAnswer = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Win run." },
+        ],
+        quality,
+      };
+      const first = yield* service.report(caller, "critic", staticAnswer);
+      expect(first.accepted).toBe(false);
+      expect(first.attemptsRemaining).toBe(2);
+      expect(first.ended).toBe(false);
+      expect(first.error ?? "").toContain("game_try_input");
+      expect(first.error ?? "").toContain("2 attempts remain");
+      // The session stays open between refused attempts, so a second
+      // ordinary-play experiment can still be recorded with game_try_input.
+      expect(yield* service.toolRole(caller)).toBe("critic");
+      const second = yield* service.report(caller, "critic", staticAnswer);
+      expect(second.accepted).toBe(false);
+      expect(second.attemptsRemaining).toBe(1);
+      expect(second.ended).toBe(false);
+      expect(second.error ?? "").toContain("game_try_input");
+      expect(second.error ?? "").toContain("1 attempt remains");
+      expect(second.error ?? "").toContain("cannot-tell");
+    }),
+  ),
+);
+
+it.live("the last tool attempt accepts omitted requirements as a server downgrade", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "look-a", kind: "presentation", text: "Warm light fills the room." },
+        { id: "look-b", kind: "presentation", text: "Soft shadows ground the player." },
+      ];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const input = { threadId, loopId, roundId, role: "critic" as const };
+      const hashBefore = yield* service.evidenceHash(input);
+      const answer = { fundamentals, defects: [], doNotRegress: [], quality };
+      const first = yield* service.report(caller, "critic", answer);
+      expect(first.accepted).toBe(false);
+      expect(first.attemptsRemaining).toBe(2);
+      expect(first.ended).toBe(false);
+      expect(first.error).toContain("did not assess requirements");
+      const second = yield* service.report(caller, "critic", answer);
+      expect(second).toMatchObject({ accepted: false, attemptsRemaining: 1, ended: false });
+      expect(second.error).toContain("did not assess requirements");
+      const third = yield* service.report(caller, "critic", answer);
+      expect(third.accepted).toBe(true);
+      expect(third.ended).toBe(true);
+      const directory = yield* service.evidenceDirectory(input);
+      const sessionDir = NodePath.join(directory!, "..");
+      const readJson = (name: string) =>
+        Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(sessionDir, name), "utf8").then(
+            (text) => JSON.parse(text) as Record<string, unknown>,
+          ),
+        );
+      const recorded = (yield* readJson("tool-answer.json")) as { raw: string };
+      const raw = JSON.parse(recorded.raw) as {
+        requirements: Array<{ id: string; verdict: string }>;
+        downgradedRequirements: Array<{ id: string; reason: string }>;
+      };
+      expect(raw.requirements).toHaveLength(2);
+      expect(raw.downgradedRequirements.map((entry) => entry.id).sort()).toEqual([
+        "look-a",
+        "look-b",
+      ]);
+      // The answer endpoint surfaces the server-applied list, not a critic verdict.
+      scripted.childStatus = "completed";
+      const read = yield* service.answer(input);
+      expect(read.kind).toBe("critic");
+      if (read.kind !== "critic") return;
+      expect((read.answer.downgradedRequirements ?? []).map((entry) => entry.id).sort()).toEqual([
+        "look-a",
+        "look-b",
+      ]);
+      // Both refused attempts left their payload and error beside the tool record.
+      for (const attempt of [1, 2]) {
+        const retained = yield* readJson(`tool-attempt-${attempt}.json`);
+        expect(String(retained.error)).toContain("did not assess requirements");
+        expect(String(retained.payload)).toContain("fundamentals");
+      }
+      // The rescued third attempt still shows what the model actually sent.
+      const rescued = (yield* readJson("tool-attempt-3.json")) as Record<string, unknown>;
+      expect(rescued.serverDowngraded).toBe(true);
+      expect(rescued.error).toBeNull();
+      expect(String(rescued.validationError)).toContain("did not assess requirements");
+      // Retaining attempts never changes the sealed evidence hash.
+      expect(yield* service.evidenceHash(input)).toBe(hashBefore);
+    }),
+  ),
+);
+
+it.live("the last tool attempt downgrades an end-state refused yes", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const staticAnswer = {
+        fundamentals,
+        defects: [
+          {
+            severity: "visible" as const,
+            what: "The gate sign clips the bay marker.",
+            frameId: "f2",
+            fix: "Move the sign; yes/no: the marker reads fully.",
+          },
+        ],
+        doNotRegress: [],
+        requirements: [
+          { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Win run." },
+        ],
+        quality,
+      };
+      const first = yield* service.report(caller, "critic", staticAnswer);
+      expect(first.accepted).toBe(false);
+      expect(first.error ?? "").toContain("game_try_input");
+      const second = yield* service.report(caller, "critic", staticAnswer);
+      expect(second).toMatchObject({ accepted: false, attemptsRemaining: 1, ended: false });
+      const third = yield* service.report(caller, "critic", staticAnswer);
+      expect(third.accepted).toBe(true);
+      expect(third.ended).toBe(true);
+      const input = { threadId, loopId, roundId, role: "critic" as const };
+      const directory = yield* service.evidenceDirectory(input);
+      const recorded = (yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(directory!, "..", "tool-answer.json"), "utf8").then(
+          (text) => JSON.parse(text) as { raw: string },
+        ),
+      )) as { raw: string };
+      const raw = JSON.parse(recorded.raw) as {
+        requirements: Array<{ id: string; verdict: string; note: string }>;
+        downgradedRequirements: Array<{ id: string; reason: string }>;
+      };
+      expect(raw.requirements).toHaveLength(1);
+      expect(raw.requirements[0]).toMatchObject({
+        id: "park-in-bay",
+        verdict: "cannot-tell",
+        note: expect.stringContaining("counterexample experiment"),
+      });
+      expect(raw.downgradedRequirements).toHaveLength(1);
+      expect(raw.downgradedRequirements[0]).toMatchObject({
+        id: "park-in-bay",
+        reason: expect.stringContaining("counterexample experiment"),
+      });
+    }),
+  ),
+);
+
+it.live("a downgraded cannot-tell still owes the coverage work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const staticAnswer = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Win run." },
+        ],
+        quality,
+      };
+      yield* service.report(caller, "critic", staticAnswer);
+      yield* service.report(caller, "critic", staticAnswer);
+      // The yes is downgraded, but the honest cannot-tell still names an
+      // eligible promise the critic never tried, so the work rule refuses
+      // exactly as it would for a critic-written cannot-tell.
+      const last = yield* service.report(caller, "critic", staticAnswer);
+      expect(last.accepted).toBe(false);
+      expect(last.ended).toBe(true);
+      expect(last.error ?? "").toContain("cannot-tell on eligible stateful promises");
+    }),
+  ),
+);
+
+it.live("an undecodable last attempt stays invalid", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "look-a", kind: "presentation", text: "Warm light fills the room." },
+      ];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const unknownId = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [{ id: "unknown", verdict: "yes", frameIds: ["f1"], note: "Unknown." }],
+        quality,
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const refused = yield* service.report(caller, "critic", unknownId);
+        expect(refused.accepted).toBe(false);
+        expect(refused.ended).toBe(false);
+      }
+      const last = yield* service.report(caller, "critic", unknownId);
+      expect(last).toMatchObject({ accepted: false, ended: true, attemptsRemaining: 0 });
+      expect(last.error ?? "").toContain("unknown");
+    }),
+  ),
+);
+
+it.live("a terminal answer with omitted requirements is rescued as a server downgrade", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "look-a", kind: "presentation", text: "Warm light fills the room." },
+      ];
+      scripted.childStatus = "completed";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const input = { threadId, loopId, roundId, role: "critic" as const };
+      scripted.answer = "not one JSON object";
+      const undecodable = yield* service.answer(input);
+      expect(undecodable.kind).toBe("invalid");
+      scripted.answer = criticText;
+      const read = yield* service.answer(input);
+      expect(read.kind).toBe("critic");
+      if (read.kind !== "critic") return;
+      expect(read.answer.requirements).toEqual([
+        {
+          id: "look-a",
+          verdict: "cannot-tell",
+          frameIds: [],
+          note: expect.stringContaining("did not assess requirements"),
+        },
+      ]);
+      expect(read.answer.downgradedRequirements).toHaveLength(1);
+      expect(read.answer.downgradedRequirements?.[0]).toMatchObject({
+        id: "look-a",
+        reason: expect.stringContaining("did not assess requirements"),
+      });
+    }),
+  ),
+);
+
+it.live("a second schema refusal names the last-attempt way out", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const invalidAnswer = {
+        fundamentals,
+        defects: [],
+        doNotRegress: "wrong",
+      };
+      const first = yield* service.report(caller, "critic", invalidAnswer);
+      expect(first.accepted).toBe(false);
+      expect(first.attemptsRemaining).toBe(2);
+      const second = yield* service.report(caller, "critic", invalidAnswer);
+      expect(second.accepted).toBe(false);
+      expect(second.attemptsRemaining).toBe(1);
+      expect(second.ended).toBe(false);
+      expect(second.error ?? "").toContain("last attempt");
+      expect(second.error ?? "").toContain("cannot-tell");
+    }),
+  ),
+);
+
+it.live("end-state policy excludes presentation, no-loss and old records", () =>
+  Effect.sync(() => {
+    const evidenceFrames = [
+      {
+        id: "f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Enter" } },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { hold: "w", holdMs: 3000 } },
+      },
+    ];
+    // Presentation yes from one static frame stays valid under the policy.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            { id: "toy-workshop", verdict: "yes" as const, frameIds: ["f4"], note: "Toy look." },
+          ],
+        }),
+        {
+          frameIds: new Set(["f1", "f4"]),
+          checkIds: new Set<string>(),
+          recipeIds: new Set<string>(),
+          requirementIds: ["toy-workshop"],
+          temporalRequirementIds: [],
+          endStateRequirements: [],
+          evidenceFrames,
+        },
+      ).kind,
+    ).toBe("valid");
+    // No-loss declarations carry no observe and are never eligible.
+    expect(
+      GameReviewSessions.endStateEligibleRequirements([
+        { id: "lose-free", kind: "lose", text: "No lose state" },
+        {
+          id: "two-failed",
+          kind: "lose",
+          text: "Two fails end the shift",
+          observe: { key: "fails", expect: ">=2" },
+        },
+        { id: "look", kind: "presentation", text: "Look" },
+        {
+          id: "win-changes",
+          kind: "win",
+          text: "Win changes",
+          observe: { key: "won", expect: "changes" },
+        },
+      ]),
+    ).toEqual([{ id: "two-failed", kind: "lose", key: "fails", expect: ">=2" }]);
+    // Legacy records without the frozen policy keep the old rule.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f4"], note: "Win." },
+          ],
+        }),
+        {
+          frameIds: new Set(["f1", "f4"]),
+          checkIds: new Set<string>(),
+          recipeIds: new Set<string>(),
+          requirementIds: ["park-in-bay"],
+        },
+      ).kind,
+    ).toBe("valid");
+  }),
+);
+
+it.live("tool path freezes the temporal policy across an approval revision", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const staticAnswer = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f2"], note: "Win screen." },
+        ],
+        quality,
+      };
+      const staticRefused = yield* service.report(caller, "critic", staticAnswer);
+      expect(staticRefused.accepted).toBe(false);
+      expect(staticRefused.error ?? "").toMatch(/before\/after|finished state|cannot-tell/i);
+      // Midround approval revision replaces the promise; the frozen round
+      // must still judge the original id with the original witness rule.
+      scripted.designAcceptance = [
+        {
+          id: "replaced-promise",
+          kind: "win",
+          text: "A different promise entirely",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      const stillFrozen = yield* service.report(caller, "critic", staticAnswer);
+      expect(stillFrozen.accepted).toBe(false);
+      expect(stillFrozen.error ?? "").toMatch(/before\/after|finished state|cannot-tell/i);
+      expect(stillFrozen.error ?? "").not.toContain("unknown or repeated");
+      // A measured base pair alone still needs its separate measured
+      // counterexample: run one ordinary-play try_input that stays unwon.
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 1 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "Space" },
+          changedPercent: 25,
+          stateChanges: [{ key: "state.won", before: 0, after: 0 }],
+        },
+        probe: { gameState: { won: 0 }, player: null },
+      }));
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      const paired = yield* service.report(caller, "critic", {
+        ...staticAnswer,
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1 on the parking drive.",
+            challenge: {
+              frameIds: ["try1f1", "try1f2"],
+              note: "Drove without parking; won stayed 0, missing bay trigger tested.",
+            },
+          },
+        ],
+      });
+      expect(paired.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("terminal text path downgrades an unsupported yes instead of losing the review", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 1 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "Space" },
+          changedPercent: 25,
+          stateChanges: [{ key: "state.won", before: 0, after: 0 }],
+        },
+        probe: { gameState: { won: 0 }, player: null },
+      }));
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      const staticText = JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          { id: "park-in-bay", verdict: "yes" as const, frameIds: ["f2"], note: "Win screen." },
+        ],
+        quality,
+      });
+      const pairedText = JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1 on the parking drive.",
+            challenge: {
+              frameIds: ["try1f1", "try1f2"],
+              note: "Drove without parking; won stayed 0, missing bay trigger tested.",
+            },
+          },
+        ],
+        quality,
+      });
+      scripted.answer = staticText;
+      scripted.childStatus = "completed";
+      const terminalStatic = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(terminalStatic.kind).toBe("critic");
+      if (terminalStatic.kind !== "critic") return;
+      expect(terminalStatic.answer.requirements).toHaveLength(1);
+      expect(terminalStatic.answer.requirements?.[0]).toMatchObject({
+        id: "park-in-bay",
+        verdict: "cannot-tell",
+        note: expect.stringMatching(/before\/after|finished state/i),
+      });
+      expect(terminalStatic.answer.downgradedRequirements).toHaveLength(1);
+      expect(terminalStatic.answer.downgradedRequirements?.[0]).toMatchObject({
+        id: "park-in-bay",
+        reason: expect.stringMatching(/before\/after|finished state/i),
+      });
+      scripted.answer = pairedText;
+      const terminalPaired = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(terminalPaired.kind).toBe("critic");
+    }),
+  ),
+);
+
+it.live("end-state freeze keeps keys and observations across revision and restart", () =>
+  withSession(({ frames, stateDir, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations:
+            index === 0
+              ? { won: 0 as const, collected: 5 as const }
+              : { won: 1 as const, collected: 5 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      // Only the frozen approved key rides the sealed manifest; unapproved
+      // counters never reach the frozen record.
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        order: 0,
+      });
+      const manifest = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: Array<{ id: string; observations?: Record<string, number | boolean> }> };
+      expect(manifest.frames[0]?.observations).toEqual({ won: 0 });
+      expect(manifest.frames[1]?.observations).toEqual({ won: 1 });
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
+      );
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { endStatePolicyVersion?: number; endStateRequirements?: unknown };
+      expect(stored.endStatePolicyVersion).toBe(2);
+      expect(stored.endStateRequirements).toEqual([
+        { id: "park-in-bay", kind: "win", key: "won", expect: "==1" },
+      ]);
+      // Midround approval rewrites the key; the frozen exam still demands won.
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking wins",
+          observe: { key: "collected", expect: ">=3" },
+        },
+      ];
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 1 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "Space" },
+          changedPercent: 25,
+          stateChanges: [{ key: "state.won", before: 0, after: 0 }],
+        },
+        probe: { gameState: { won: 0, collected: 9 }, player: null },
+      }));
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      // The try append also filters to the frozen key, not the revised one.
+      const afterTry = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: Array<{ id: string; observations?: Record<string, number | boolean> }> };
+      expect(afterTry.frames.find((frame) => frame.id === "try1f2")?.observations).toEqual({
+        won: 0,
+      });
+      const good = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1 on the parking drive.",
+            challenge: {
+              frameIds: ["try1f1", "try1f2"],
+              note: "Drove without parking; won stayed 0, missing bay trigger tested.",
+            },
+          },
+        ],
+        quality,
+      };
+      const resumed = yield* restart();
+      const accepted = yield* resumed.report(caller, "critic", good);
+      expect(accepted.accepted).toBe(true);
+      // The prompt orders the critic to name the missing trigger in the
+      // challenge note; the validator checks measurements and separation,
+      // never the English semantics of that note.
+    }),
+  ),
+);
+
+it.live("invalid preflight cannot fabricate an observed challenge", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "park-in-bay",
+          kind: "win",
+          text: "Parking inside the marked bay after all 3 gates wins the run",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withWon = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations: index === 0 ? { won: 0 as const } : { won: 1 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withWon,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const invalid = yield* service
+        .tryInput(caller, { steps: Array.from({ length: 13 }, () => ({ press: "w" })) })
+        .pipe(Effect.flip);
+      expect(invalid.detail).toContain("1–12 steps");
+      expect(yield* service.inputCalls(caller.threadId, started.runId!)).toBe(0);
+      // No try frames were recorded, so a challenge citing them is unknown.
+      const fabricated = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "park-in-bay",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1.",
+            challenge: { frameIds: ["try1f1", "try1f2"], note: "Fabricated." },
+          },
+        ],
+        quality,
+      });
+      expect(fabricated.accepted).toBe(false);
+    }),
+  ),
+);
+
+it.live("end-state v2 cross-terminal guard keeps kitchen pairs, refuses contamination", () =>
+  Effect.sync(() => {
+    const frozen = [
+      { id: "finish-the-shift", kind: "win" as const, key: "won", expect: "==1" },
+      { id: "two-failed-orders", kind: "lose" as const, key: "fails", expect: ">=2" },
+    ];
+    const mkFrames = (
+      posBefore: Record<string, number | boolean> | undefined,
+      posAfter: Record<string, number | boolean> | undefined,
+      chalBefore: Record<string, number | boolean> | undefined,
+      chalAfter: Record<string, number | boolean> | undefined,
+    ) => [
+      { id: "f1" },
+      {
+        id: "f3",
+        inputPair: { stepIndex: 1, phase: "before" as const, input: { press: "s" } },
+        ...(posBefore === undefined ? {} : { observations: posBefore }),
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { press: "s" } },
+        ...(posAfter === undefined ? {} : { observations: posAfter }),
+      },
+      {
+        id: "try1f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Space" } },
+        ...(chalBefore === undefined ? {} : { observations: chalBefore }),
+      },
+      {
+        id: "try1f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Space" } },
+        ...(chalAfter === undefined ? {} : { observations: chalAfter }),
+      },
+    ];
+    const knownFor = (frames: ReturnType<typeof mkFrames>, version?: number) => ({
+      frameIds: new Set(frames.map((frame) => frame.id)),
+      checkIds: new Set<string>(),
+      recipeIds: new Set<string>(),
+      requirementIds: ["finish-the-shift", "two-failed-orders"],
+      temporalRequirementIds: [] as string[],
+      endStateRequirements: frozen,
+      ...(version === undefined ? {} : { endStatePolicyVersion: version }),
+      evidenceFrames: frames,
+    });
+    const winYes = (challenge: unknown) =>
+      JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "finish-the-shift",
+            verdict: "yes" as const,
+            frameIds: ["f3", "f4"],
+            note: "Win trigger.",
+            ...(challenge === undefined ? {} : { challenge }),
+          },
+          {
+            id: "two-failed-orders",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "No loss observed.",
+          },
+        ],
+      });
+    const loseYes = (challenge: unknown) =>
+      JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "two-failed-orders",
+            verdict: "yes" as const,
+            frameIds: ["f3", "f4"],
+            note: "Lose trigger.",
+            ...(challenge === undefined ? {} : { challenge }),
+          },
+          {
+            id: "finish-the-shift",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "No win observed.",
+          },
+        ],
+      });
+    const goodChallenge = {
+      frameIds: ["try1f1", "try1f2"],
+      note: "Ordinary play without trigger; both scalars stayed down.",
+    };
+    // Valid kitchen-like win/lose pairs remain accepted under v2.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 0 },
+            { won: 1, fails: 0 },
+            { won: 0, fails: 0 },
+            { won: 0, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("valid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        loseYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 1 },
+            { won: 0, fails: 2 },
+            { won: 0, fails: 0 },
+            { won: 0, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("valid");
+    // Win challenge already lost.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 0 },
+            { won: 1, fails: 0 },
+            { won: 0, fails: 2 },
+            { won: 0, fails: 2 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    // Lose challenge already won.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        loseYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 1 },
+            { won: 0, fails: 2 },
+            { won: 1, fails: 0 },
+            { won: 1, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    // Positive starts already terminal (other predicate).
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 2 },
+            { won: 1, fails: 0 },
+            { won: 0, fails: 0 },
+            { won: 0, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    // Positive ends mutually contradictory (opposite kind after).
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 0 },
+            { won: 1, fails: 2 },
+            { won: 0, fails: 0 },
+            { won: 0, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        loseYes(goodChallenge),
+        knownFor(
+          mkFrames(
+            { won: 0, fails: 1 },
+            { won: 1, fails: 2 },
+            { won: 0, fails: 0 },
+            { won: 0, fails: 0 },
+          ),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    // Missing other terminal measurement fails closed to cannot-tell.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes(goodChallenge),
+        knownFor(
+          mkFrames({ won: 0 }, { won: 1, fails: 0 }, { won: 0, fails: 0 }, { won: 0, fails: 0 }),
+          2,
+        ),
+      ).kind,
+    ).toBe("invalid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        winYes({
+          frameIds: ["try1f1", "try1f2"],
+          note: "Missing fails measurement.",
+        }),
+        knownFor(mkFrames({ won: 0, fails: 0 }, { won: 1, fails: 0 }, { won: 0 }, { won: 0 }), 2),
+      ).kind,
+    ).toBe("invalid");
+    // Neutral cannot-tell stays valid when measurement is missing.
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            {
+              id: "finish-the-shift",
+              verdict: "cannot-tell" as const,
+              frameIds: [],
+              note: "No win observed.",
+            },
+            {
+              id: "two-failed-orders",
+              verdict: "cannot-tell" as const,
+              frameIds: [],
+              note: "No loss observed.",
+            },
+          ],
+        }),
+        knownFor(mkFrames({ won: 0 }, { won: 1, fails: 0 }, { won: 0 }, { won: 0 }), 2),
+      ).kind,
+    ).toBe("valid");
+    // Same-kind simultaneous completion remains valid under v2.
+    const sameKindFrozen = [
+      { id: "win-a", kind: "win" as const, key: "won", expect: "==1" },
+      { id: "win-b", kind: "win" as const, key: "collected", expect: ">=3" },
+    ];
+    const sameKindFrames = [
+      { id: "f1" },
+      {
+        id: "f3",
+        inputPair: { stepIndex: 1, phase: "before" as const, input: { press: "s" } },
+        observations: { won: 0, collected: 0 },
+      },
+      {
+        id: "f4",
+        inputPair: { stepIndex: 1, phase: "after" as const, input: { press: "s" } },
+        observations: { won: 1, collected: 3 },
+      },
+      {
+        id: "try1f1",
+        inputPair: { stepIndex: 0, phase: "before" as const, input: { press: "Space" } },
+        observations: { won: 0, collected: 0 },
+      },
+      {
+        id: "try1f2",
+        inputPair: { stepIndex: 0, phase: "after" as const, input: { press: "Space" } },
+        observations: { won: 0, collected: 0 },
+      },
+    ];
+    expect(
+      GameReviewSessions.parseCriticAnswer(
+        JSON.stringify({
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: [
+            {
+              id: "win-a",
+              verdict: "yes" as const,
+              frameIds: ["f3", "f4"],
+              note: "Both win predicates describe the same ending.",
+              challenge: goodChallenge,
+            },
+            {
+              id: "win-b",
+              verdict: "cannot-tell" as const,
+              frameIds: [],
+              note: "Same ending as win-a; not separately judged.",
+            },
+          ],
+        }),
+        {
+          frameIds: new Set(sameKindFrames.map((frame) => frame.id)),
+          checkIds: new Set<string>(),
+          recipeIds: new Set<string>(),
+          requirementIds: ["win-a", "win-b"],
+          temporalRequirementIds: [] as string[],
+          endStateRequirements: sameKindFrozen,
+          endStatePolicyVersion: 2,
+          evidenceFrames: sameKindFrames,
+        },
+      ).kind,
+    ).toBe("valid");
+    // Version 1 and legacy keep the own-predicate-only rule.
+    const crossTerminal = mkFrames(
+      { won: 0, fails: 0 },
+      { won: 1, fails: 0 },
+      { won: 0, fails: 2 },
+      { won: 0, fails: 2 },
+    );
+    expect(
+      GameReviewSessions.parseCriticAnswer(winYes(goodChallenge), knownFor(crossTerminal, 1)).kind,
+    ).toBe("valid");
+    expect(
+      GameReviewSessions.parseCriticAnswer(winYes(goodChallenge), knownFor(crossTerminal)).kind,
+    ).toBe("valid");
+  }),
+);
+
+it.live("end-state v2 session report enforces fully non-terminal and freezes version", () =>
+  withSession(({ frames, stateDir, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "finish-the-shift",
+          kind: "win",
+          text: "Serving all three wins the shift",
+          observe: { key: "won", expect: "==1" },
+        },
+        {
+          id: "two-failed-orders",
+          kind: "lose",
+          text: "Two failed orders end the shift",
+          observe: { key: "fails", expect: ">=2" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withBoth = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations:
+            index === 0
+              ? { won: 0 as const, fails: 0 as const }
+              : { won: 1 as const, fails: 0 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withBoth,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
+      );
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { endStatePolicyVersion?: number; endStateRequirements?: unknown };
+      expect(stored.endStatePolicyVersion).toBe(2);
+      const sealedPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("END_STATE_REQUIREMENTS.json"),
+        )!,
+      );
+      const sealed = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(sealedPath, "utf8")),
+      ) as { policyVersion?: number };
+      expect(sealed.policyVersion).toBe(2);
+      const resumed = yield* restart();
+      const reread = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { endStatePolicyVersion?: number };
+      expect(reread.endStatePolicyVersion).toBe(2);
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      // Challenge already lost (fails 2) must be refused under v2, even after restart.
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 1 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "Space" },
+          changedPercent: 0,
+          stateChanges: [],
+        },
+        probe: { gameState: { won: 0, fails: 2 }, player: null },
+      }));
+      yield* resumed.tryInput(caller, { steps: [{ press: "Space" }] });
+      const refused = yield* resumed.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "finish-the-shift",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1.",
+            challenge: { frameIds: ["try1f1", "try1f2"], note: "Already lost; fails stayed 2." },
+          },
+          {
+            id: "two-failed-orders",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "Not judged.",
+          },
+        ],
+        quality,
+      });
+      expect(refused.accepted).toBe(false);
+      expect(refused.error ?? "").toMatch(/terminal|cross-terminal|non-terminal|opposite/i);
+      // Fully non-terminal challenge stays accepted under v2.
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 2 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "ArrowLeft" },
+          changedPercent: 0,
+          stateChanges: [],
+        },
+        probe: { gameState: { won: 0, fails: 0 }, player: null },
+      }));
+      yield* resumed.tryInput(caller, { steps: [{ press: "ArrowLeft" }] });
+      const accepted = yield* resumed.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "finish-the-shift",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won 0->1 from fully non-terminal before.",
+            challenge: {
+              frameIds: ["try2f1", "try2f2"],
+              note: "Ordinary play without trigger; both stayed down.",
+            },
+          },
+          {
+            id: "two-failed-orders",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "Not judged.",
+          },
+        ],
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("end-state v2 terminal answer downgrades an opposite-kind yes", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "finish-the-shift",
+          kind: "win",
+          text: "Serving all three wins the shift",
+          observe: { key: "won", expect: "==1" },
+        },
+        {
+          id: "two-failed-orders",
+          kind: "lose",
+          text: "Two failed orders end the shift",
+          observe: { key: "fails", expect: ">=2" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const measuredEvidence = frameInput(frames);
+      const withBoth = {
+        ...measuredEvidence,
+        frames: measuredEvidence.frames.map((frame, index) => ({
+          ...frame,
+          observations:
+            index === 0
+              ? { won: 0 as const, fails: 0 as const }
+              : { won: 1 as const, fails: 2 as const },
+        })),
+      };
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: withBoth,
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      scripted.tryScreenshots = ["before", "after"].map((phase) => ({
+        label: `input 1 ${phase}`,
+        mimeType: "image/png" as const,
+        data: "cG5n",
+        width: 640,
+        height: 360,
+        inputPair: {
+          stepIndex: 0,
+          phase: phase as "before" | "after",
+          input: { press: "Space" },
+          changedPercent: 0,
+          stateChanges: [],
+        },
+        probe: { gameState: { won: 0, fails: 0 }, player: null },
+      }));
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      // Positive after reaches the opposite kind (won 1 fails 2): invalid under v2.
+      scripted.answer = JSON.stringify({
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "finish-the-shift",
+            verdict: "yes" as const,
+            frameIds: ["f1", "f2"],
+            note: "Won but also already lost.",
+            challenge: { frameIds: ["try1f1", "try1f2"], note: "Ordinary play stayed down." },
+          },
+          {
+            id: "two-failed-orders",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "Not judged.",
+          },
+        ],
+        quality,
+      });
+      scripted.childStatus = "completed";
+      const rescued = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(rescued.kind).toBe("critic");
+      if (rescued.kind !== "critic") return;
+      expect(rescued.answer.requirements?.[0]).toMatchObject({
+        id: "finish-the-shift",
+        verdict: "cannot-tell",
+        note: expect.stringMatching(/opposite|cross-terminal|fully non-terminal/i),
+      });
+      expect(rescued.answer.downgradedRequirements).toHaveLength(1);
+      expect(rescued.answer.downgradedRequirements?.[0]).toMatchObject({
+        id: "finish-the-shift",
+        reason: expect.stringMatching(/opposite|cross-terminal|fully non-terminal/i),
+      });
+    }),
+  ),
+);
+
+it.live("try_input appends are citable witnesses for the frozen temporal rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        {
+          id: "drive-gate1",
+          kind: "control",
+          text: "WASD driving carries the crate through gate 1",
+          observe: { key: "collected", expect: ">=1" },
+        },
+      ];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      const base = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        quality,
+      };
+      const staticTry = yield* service.report(caller, "critic", {
+        ...base,
+        requirements: [
+          { id: "drive-gate1", verdict: "yes" as const, frameIds: ["try1f2"], note: "After only." },
+        ],
+      });
+      expect(staticTry.accepted).toBe(false);
+      const pairedTry = yield* service.report(caller, "critic", {
+        ...base,
+        requirements: [
+          {
+            id: "drive-gate1",
+            verdict: "yes" as const,
+            frameIds: ["try1f1", "try1f2"],
+            note: "Same try_input press transition.",
+          },
+        ],
+      });
+      expect(pairedTry.accepted).toBe(true);
+    }),
+  ),
+);
+
+const kitchenAcceptance = [
+  {
+    id: "add-ingredient",
+    kind: "control" as const,
+    text: "Clicking ingredients fills the pan",
+    observe: { key: "added", expect: ">=2" },
+  },
+  {
+    id: "start-cooking",
+    kind: "control" as const,
+    text: "Cook puts the full pan on the burner",
+    observe: { key: "on_burner", expect: ">=1" },
+  },
+  {
+    id: "empty-pan",
+    kind: "control" as const,
+    text: "Empty clears a filled pan without failing",
+    observe: { key: "emptied", expect: ">=1" },
+  },
+  {
+    id: "bad-serve-fails",
+    kind: "mechanic" as const,
+    text: "Serving early or wrong fails that order",
+    observe: { key: "fails", expect: ">=1" },
+  },
+  {
+    id: "serve-all-three",
+    kind: "content" as const,
+    text: "All three customers are served",
+    observe: { key: "served", expect: ">=3" },
+  },
+  {
+    id: "finish-the-shift",
+    kind: "win" as const,
+    text: "Serving all three wins the shift",
+    observe: { key: "won", expect: "==1" },
+  },
+  {
+    id: "two-failed-orders",
+    kind: "lose" as const,
+    text: "Two failed orders end the shift",
+    observe: { key: "fails", expect: ">=2" },
+  },
+  {
+    id: "copper-kitchen-look",
+    kind: "presentation" as const,
+    text: "Copper kitchen with tickets and pan",
+  },
+];
+
+const kitchenRequirements = [
+  { id: "add-ingredient", verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Press adds." },
+  { id: "start-cooking", verdict: "yes" as const, frameIds: ["f1", "f2"], note: "Cook works." },
+  {
+    id: "empty-pan",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "No empty observed.",
+  },
+  {
+    id: "bad-serve-fails",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "No early serve observed.",
+  },
+  {
+    id: "serve-all-three",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "Only first order served.",
+  },
+  {
+    id: "finish-the-shift",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "No win screen observed.",
+  },
+  {
+    id: "two-failed-orders",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "No loss observed.",
+  },
+  {
+    id: "copper-kitchen-look",
+    verdict: "cannot-tell" as const,
+    frameIds: [],
+    note: "Look not judged for play.",
+  },
+];
+
+it.live(
+  "coverage work rule refuses a static no-defect unknown then accepts after one try_input",
+  () =>
+    withSession(({ frames, scripted, service }) =>
+      Effect.gen(function* () {
+        scripted.designAcceptance = [...kitchenAcceptance];
+        scripted.childStatus = "running";
+        const started = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: frameInput(frames),
+        });
+        expect(started.kind).toBe("started");
+        if (started.kind !== "started") return;
+        const caller = {
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        };
+        const payload = {
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          requirements: kitchenRequirements,
+          quality,
+        };
+        const first = yield* service.report(caller, "critic", payload);
+        expect(first.accepted).toBe(false);
+        expect(first.error ?? "").toContain("finish-the-shift");
+        expect(first.error ?? "").toContain("game_try_input");
+        expect(first.attemptsRemaining).toBe(2);
+        expect(first.ended).toBe(false);
+        expect(yield* service.inputCalls(caller.threadId, started.runId!)).toBe(0);
+        expect(scripted.tries).toHaveLength(0);
+
+        yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+        expect(yield* service.inputCalls(caller.threadId, started.runId!)).toBe(1);
+        expect(scripted.tries).toHaveLength(1);
+
+        const second = yield* service.report(caller, "critic", payload);
+        expect(second.accepted).toBe(true);
+        expect(second.error).toBeNull();
+      }),
+    ),
+);
+
+it.live("terminal text path enforces the same coverage work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const payload = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      };
+      scripted.answer = JSON.stringify(payload);
+      scripted.childStatus = "completed";
+      const refused = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(refused.kind).toBe("invalid");
+      if (refused.kind === "invalid") {
+        expect(refused.reason).toContain("finish-the-shift");
+        expect(refused.reason).toContain("game_try_input");
+      }
+    }),
+  ),
+);
+
+it.live("a valid earlier attempt already counts and a failed bounded attempt may abstain", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const payload = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      };
+      scripted.tryScreenshots = [];
+      yield* service.tryInput(caller, { steps: [{ press: "Space" }] });
+      expect(yield* service.inputCalls(caller.threadId, started.runId!)).toBe(1);
+      const accepted = yield* service.report(caller, "critic", payload);
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("presentation-only unknowns do not force physical play", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [
+        { id: "copper-kitchen-look", kind: "presentation" as const, text: "Copper look" },
+      ];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: [
+          {
+            id: "copper-kitchen-look",
+            verdict: "cannot-tell" as const,
+            frameIds: [],
+            note: "Look.",
+          },
+        ],
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("requirement no skips the coverage work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const actionable = kitchenRequirements.map((entry) =>
+        entry.id === "empty-pan"
+          ? { ...entry, verdict: "no" as const, frameIds: ["f1"], note: "Observed missing." }
+          : entry,
+      );
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: actionable,
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("quality no and fundamental no skip the coverage work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const qualityNo = {
+        ...quality,
+        readability: { verdict: "no" as const, frameIds: ["f1"], note: "Contradicts consequence." },
+      };
+      const acceptedQualityNo = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality: qualityNo,
+      });
+      expect(acceptedQualityNo.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("fundamental no skips the coverage work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals: {
+          ...fundamentals,
+          respondsToInput: { verdict: "no" as const, frameIds: ["f1"], note: "No response." },
+        },
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("non-booting and actionable reports skip the work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const base = {
+        defects: [] as const,
+        doNotRegress: [] as const,
+        requirements: kitchenRequirements,
+        quality,
+      };
+      const notBooting = yield* service.report(caller, "critic", {
+        ...base,
+        fundamentals: {
+          ...fundamentals,
+          boots: { verdict: "cannot-tell" as const, frameIds: [], note: "No boot." },
+        },
+      });
+      expect(notBooting.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("actionable reports with defects or no verdicts skip the work rule", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const withDefect = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [
+          {
+            severity: "visible" as const,
+            what: "Fault",
+            frameId: "f1",
+            fix: "Fix it; yes/no: fixed.",
+          },
+        ],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      });
+      expect(withDefect.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("legacy sessions without the frozen work flag stay compatible", () =>
+  withSession(({ stateDir, frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = null;
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
+      );
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as Record<string, unknown>;
+      expect(stored["coverageAttemptPolicyVersion"]).toBeUndefined();
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const accepted = yield* service.report(caller, "critic", {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        quality,
+      });
+      expect(accepted.accepted).toBe(true);
+    }),
+  ),
+);
+
+it.live("the work flag freezes across approval edits and restarts", () =>
+  withSession(({ stateDir, frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const recordPath = NodePath.join(
+        stateDir,
+        (yield* Effect.promise(() => walk(stateDir))).find((file) =>
+          file.endsWith("session.json"),
+        )!,
+      );
+      const stored = JSON.parse(
+        yield* Effect.promise(() => NodeFSP.readFile(recordPath, "utf8")),
+      ) as { coverageAttemptPolicyVersion?: number; temporalRequirementIds?: string[] };
+      expect(stored.coverageAttemptPolicyVersion).toBe(1);
+      expect(stored.temporalRequirementIds).toContain("finish-the-shift");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const payload = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      };
+      scripted.designAcceptance = [
+        {
+          id: "replaced-promise",
+          kind: "win" as const,
+          text: "Different",
+          observe: { key: "won", expect: "==1" },
+        },
+      ];
+      const stillFrozen = yield* (yield* restart()).report(caller, "critic", payload);
+      expect(stillFrozen.accepted).toBe(false);
+      expect(stillFrozen.error ?? "").toContain("finish-the-shift");
+      expect(stillFrozen.error ?? "").not.toContain("unknown or repeated");
+    }),
+  ),
+);
+
+it.live("invalid preflight requests do not count as coverage attempts", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      scripted.designAcceptance = [...kitchenAcceptance];
+      scripted.childStatus = "running";
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      if (started.kind !== "started") return expect(started.kind).toBe("started");
+      const caller = {
+        threadId: started.childThreadId,
+        providerInstanceId: builderSelection.instanceId,
+      };
+      const invalid = yield* service
+        .tryInput(caller, { steps: Array.from({ length: 13 }, () => ({ press: "w" })) })
+        .pipe(Effect.flip);
+      expect(invalid.detail).toContain("1–12 steps");
+      expect(yield* service.inputCalls(caller.threadId, started.runId!)).toBe(0);
+      const payload = {
+        fundamentals,
+        defects: [],
+        doNotRegress: [],
+        requirements: kitchenRequirements,
+        quality,
+      };
+      const refused = yield* service.report(caller, "critic", payload);
+      expect(refused.accepted).toBe(false);
+      expect(scripted.tries).toHaveLength(0);
+    }),
+  ),
+);
+
+it.live.skipIf(process.env.GAME_REVIEW_END_STATE_LIVE !== "1")(
+  "real browser observations survive sealed session evidence and the challenge guard",
+  () =>
+    withSession(({ service, scripted, frames, stateDir }) =>
+      Effect.gen(function* () {
+        const html = `<!doctype html><canvas width="640" height="360" tabindex="0"></canvas><script>
+      const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+      let won = false;
+      const paint = () => {ctx.fillStyle = won ? '#80d080' : '#305080'; ctx.fillRect(0,0,640,360);};
+      paint();
+      addEventListener('keydown', event => {if(event.code === 'Space') won = true; paint();});
+      window.__studioProbe = () => JSON.stringify({gameState:{won, unrelated:17},player:null});
+      console.log('Godot Engine v4 browser fixture');
+    </script>`;
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<NodeHttp.Server>((resolve) => {
+                const server = NodeHttp.createServer((_request, response) => {
+                  response.writeHead(200, { "Content-Type": "text/html" });
+                  response.end(html);
+                });
+                server.listen(0, "127.0.0.1", () => resolve(server));
+              }),
+          ),
+          (server) =>
+            Effect.promise(
+              () =>
+                new Promise<void>((resolve, reject) =>
+                  server.close((error) => (error ? reject(error) : resolve())),
+                ),
+            ),
+        );
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("No loopback address");
+        scripted.designAcceptance = [
+          {
+            id: "finish",
+            kind: "win",
+            text: "Space completes the round.",
+            observe: { key: "won", expect: "==1" },
+          },
+        ];
+        scripted.childStatus = "running";
+        const started = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: frameInput(frames),
+        });
+        expect(started.kind).toBe("started");
+        if (started.kind !== "started") return;
+        const caller = {
+          threadId: started.childThreadId,
+          providerInstanceId: builderSelection.instanceId,
+        };
+        const platform = yield* HostProcess.Platform;
+        const release = previewBrowserRelease(platform, yield* HostProcess.Architecture);
+        if (release === null) throw new Error("Managed preview browser unsupported on this host");
+        const executable =
+          process.env.GAME_REVIEW_BROWSER_EXECUTABLE ??
+          NodePath.resolve(
+            import.meta.dirname,
+            "../../../../.t3/tools/chrome-headless-shell",
+            release.platform,
+            release.version,
+            platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell",
+          );
+        const run = (key: string, name: string) =>
+          playtest({
+            executable,
+            url: `http://127.0.0.1:${address.port}`,
+            profileDirectory: NodePath.join(stateDir, name),
+            width: 640,
+            height: 360,
+            bootTimeoutMs: 5000,
+            probeRequired: false,
+            acceptance: null,
+            captureAllSteps: true,
+            steps: [{ press: key }, { waitMs: 100 }],
+          });
+        scripted.liveResult = yield* run("Space", "positive-browser");
+        expect(scripted.liveResult.booted).toBe(true);
+        const positive = yield* service.tryInput(caller, {
+          steps: [{ press: "Space" }, { waitMs: 100 }],
+        });
+        scripted.liveResult = yield* run("ArrowLeft", "challenge-browser");
+        const challenge = yield* service.tryInput(caller, {
+          steps: [{ press: "ArrowLeft" }, { waitMs: 100 }],
+        });
+        const pairIds = (result: typeof positive) =>
+          result.screenshots
+            .filter((frame) => frame.inputPair?.stepIndex === 0)
+            .map((frame) => frame.frameId!);
+        const positiveIds = pairIds(positive),
+          challengeIds = pairIds(challenge);
+        expect(positiveIds).toHaveLength(2);
+        expect(challengeIds).toHaveLength(2);
+        const accepted = yield* service.report(caller, "critic", {
+          fundamentals,
+          defects: [],
+          doNotRegress: [],
+          quality,
+          requirements: [
+            {
+              id: "finish",
+              verdict: "yes",
+              frameIds: positiveIds,
+              note: "Space changed won false to true.",
+              challenge: {
+                frameIds: challengeIds,
+                note: "Moving left without pressing Space did not finish.",
+              },
+            },
+          ],
+        });
+        expect(accepted.accepted).toBe(true);
+        const directory = yield* service.evidenceDirectory({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          order: 0,
+        });
+        expect(directory).not.toBeNull();
+        const predicates = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "END_STATE_REQUIREMENTS.json"), "utf8"),
+        );
+        expect(predicates).toContain('"key": "won"');
+        expect(predicates).toContain('"expect": "==1"');
+        const frozen = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory!, "evidence.json"), "utf8"),
+        );
+        expect(frozen).toContain('"observations"');
+        expect(frozen).not.toContain('"unrelated"');
+      }),
+    ),
+  60_000,
+);
+
+const worldTextForSession = () =>
+  `${JSON.stringify(
+    {
+      note: "Same-source headless world measurements at probe frames; verify on Web frames, never cite as proof. containsPlayerOrigin tests the probed origin point only.",
+      sourceId: "sources",
+      evidenceDirectory: "builds/logs/scenarios-1",
+      scenarios: [
+        {
+          id: "full-run",
+          spatial: {
+            snapshots: [
+              {
+                scenarioFrame: 30,
+                step: null,
+                player: {
+                  present: true,
+                  position: [100, 200],
+                  velocity: [0, 0],
+                  bodyKind: "CharacterBody2D",
+                },
+                areas: [
+                  {
+                    nodePath: "Main/Zone",
+                    type: "Area2D",
+                    monitoring: true,
+                    monitorable: true,
+                    visible: true,
+                    shapes: [
+                      {
+                        nodePath: "Main/Zone/Shape",
+                        shapeKind: "RectangleShape2D",
+                        disabled: false,
+                        bounds: { kind: "rect2", min: [50, 150], max: [150, 250] },
+                        conservative: false,
+                        containsPlayerOrigin: true,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            coverage: {
+              snapshots: 1,
+              omittedSnapshots: 0,
+              visitedNodes: 42,
+              areas: 1,
+              shapes: 1,
+              skippedFreed: 0,
+              truncated: false,
+            },
+          },
+        },
+      ],
+      omitted: 0,
+      truncated: false,
+    },
+    null,
+    2,
+  )}\n`;
+
+it.live("a critic start seals native world byte-exact with hash and stable reuse", () =>
+  withSession(({ frames, scripted, service, restart }) =>
+    Effect.gen(function* () {
+      const text = worldTextForSession();
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(32_768);
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: {
+          ...frameInput(frames),
+          nativeWorld: {
+            sourceId: "sources",
+            evidenceDirectory: "builds/logs/scenarios-1",
+            text,
+          },
+        },
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      expect(started.reconciled).toBe(false);
+      expect(started.evidenceHash).toMatch(/^[0-9a-f]{64}$/);
+      const command = scripted.dispatches[0]!;
+      expect(command.type).toBe("game-round.task.request");
+      if (command.type !== "game-round.task.request") return;
+      const directory = command.evidenceDirectory!;
+      // Byte-exact: the sealed file equals the Studio text, no slicing.
+      const sealed = yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(directory, "NATIVE_WORLD.json"), "utf8"),
+      );
+      expect(sealed).toBe(text);
+      expect(() => JSON.parse(sealed)).not.toThrow();
+      expect(sealed).toContain("containsPlayerOrigin");
+      // FILES/manifest discoverability: prompt lists the file, evidence.json
+      // keeps root frames/check ids unchanged.
+      expect(command.task).toContain("NATIVE_WORLD.json (same-source headless world measurements");
+      const files = yield* Effect.promise(() => walk(directory));
+      expect(files).toContain("NATIVE_WORLD.json");
+      expect(files).toContain("evidence.json");
+      const manifest = JSON.parse(
+        yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(directory, "evidence.json"), "utf8"),
+        ),
+      ) as { frames: Array<{ id: string }>; checks: Array<{ id: string }> };
+      expect(manifest.frames.map((frame) => frame.id)).toEqual(["f1", "f2"]);
+      expect(manifest.checks.map((check) => check.id)).toEqual(["boot", "input"]);
+      // Evidence hash includes the world file: it matches the stored hash.
+      expect(yield* service.evidenceHash({ threadId, loopId, roundId, role: "critic" })).toBe(
+        started.evidenceHash,
+      );
+      // Restart/frozen reuse is stable: same child, same hash, no new dispatch
+      // and no new approval/measurement rewrite.
+      const dispatchesBefore = scripted.dispatches.length;
+      const second = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: {
+          ...frameInput(frames),
+          nativeWorld: {
+            sourceId: "sources",
+            evidenceDirectory: "builds/logs/scenarios-1",
+            text,
+          },
+        },
+      });
+      expect(second.kind).toBe("started");
+      if (second.kind !== "started") return;
+      expect(second.reconciled).toBe(true);
+      expect(second.childThreadId).toBe(started.childThreadId);
+      expect(second.evidenceHash).toBe(started.evidenceHash);
+      expect(scripted.dispatches.length).toBe(dispatchesBefore);
+      const resumed = yield* restart();
+      const third = yield* resumed.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: {
+          ...frameInput(frames),
+          nativeWorld: {
+            sourceId: "sources",
+            evidenceDirectory: "builds/logs/scenarios-1",
+            text,
+          },
+        },
+      });
+      expect(third.kind).toBe("started");
+      if (third.kind !== "started") return;
+      expect(third.reconciled).toBe(true);
+      expect(third.evidenceHash).toBe(started.evidenceHash);
+      const resealed = yield* Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(directory, "NATIVE_WORLD.json"), "utf8"),
+      );
+      expect(resealed).toBe(text);
+    }),
+  ),
+);
+
+it.live("tampering native world invalidates the answer while legacy absence stays valid", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const text = worldTextForSession();
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: {
+          ...frameInput(frames),
+          nativeWorld: {
+            sourceId: "sources",
+            evidenceDirectory: "builds/logs/scenarios-1",
+            text,
+          },
+        },
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      scripted.answer = criticText;
+      expect(yield* service.answer({ threadId, loopId, roundId, role: "critic" })).toMatchObject({
+        kind: "critic",
+      });
+      const directory = yield* service.evidenceDirectory({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+      });
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(directory!, "NATIVE_WORLD.json"), "tampered"),
+      );
+      const tampered = yield* service.answer({ threadId, loopId, roundId, role: "critic" });
+      expect(tampered.kind).toBe("invalid");
+      if (tampered.kind === "invalid") expect(tampered.reason).toContain("evidence changed");
+    }),
+  ),
+);
+
+it.live("legacy sessions without native world review exactly as before", () =>
+  withSession(({ frames, scripted, service }) =>
+    Effect.gen(function* () {
+      const started = yield* service.start({
+        threadId,
+        loopId,
+        roundId,
+        role: "critic",
+        evidence: frameInput(frames),
+      });
+      expect(started.kind).toBe("started");
+      if (started.kind !== "started") return;
+      const command = scripted.dispatches[0]!;
+      expect(command.type).toBe("game-round.task.request");
+      if (command.type !== "game-round.task.request") return;
+      // The static prompt always names the optional file "when present";
+      // the FILES listing is what must omit it for legacy sessions.
+      expect(command.task).not.toContain("NATIVE_WORLD.json (same-source");
+      const files = yield* Effect.promise(() => walk(command.evidenceDirectory!));
+      expect(files).not.toContain("NATIVE_WORLD.json");
+      expect(files).toEqual([
+        "BRIEF.md",
+        "evidence.json",
+        "frames/frame-01.png",
+        "frames/frame-02.png",
+      ]);
+      scripted.answer = criticText;
+      expect(yield* service.answer({ threadId, loopId, roundId, role: "critic" })).toMatchObject({
+        kind: "critic",
+      });
+    }),
+  ),
+);
+
+it.live("oversized or invalid native world is honestly omitted without breaking the review", () =>
+  Effect.gen(function* () {
+    const valid = worldTextForSession();
+    const oversized = `${valid}${"x".repeat(40_000)}`;
+    expect(Buffer.byteLength(oversized, "utf8")).toBeGreaterThan(32_768);
+    const cases = [oversized, "not json", ""];
+    for (const text of cases) {
+      yield* withSession(({ frames, scripted, service }) =>
+        Effect.gen(function* () {
+          const started = yield* service.start({
+            threadId,
+            loopId,
+            roundId,
+            role: "critic",
+            evidence: {
+              ...frameInput(frames),
+              nativeWorld: {
+                sourceId: "sources",
+                evidenceDirectory: "builds/logs/scenarios-1",
+                text,
+              },
+            },
+          });
+          expect(started.kind).toBe("started");
+          if (started.kind !== "started") return;
+          const command = scripted.dispatches.at(-1)!;
+          expect(command.type).toBe("game-round.task.request");
+          if (command.type !== "game-round.task.request") return;
+          // Listing agrees with existence: omitted file is never named in FILES.
+          expect(command.task).not.toContain("NATIVE_WORLD.json (same-source");
+          const files = yield* Effect.promise(() => walk(command.evidenceDirectory!));
+          expect(files).not.toContain("NATIVE_WORLD.json");
+          expect(files).toContain("evidence.json");
+          // Root frames/checks are unchanged and the review still answers.
+          const manifest = JSON.parse(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(command.evidenceDirectory!, "evidence.json"), "utf8"),
+            ),
+          ) as { frames: Array<{ id: string }>; checks: Array<{ id: string }> };
+          expect(manifest.frames.map((frame) => frame.id)).toEqual(["f1", "f2"]);
+          expect(manifest.checks.map((check) => check.id)).toEqual(["boot", "input"]);
+        }),
+      );
+    }
+    // A multibyte payload split mid-character would previously slice into
+    // malformed JSON; the writer now omits instead of writing half a char.
+    const multibyte = `{"note":"${"霜".repeat(20_000)}"}`;
+    expect(Buffer.byteLength(multibyte, "utf8")).toBeGreaterThan(32_768);
+    yield* withSession(({ frames, scripted, service }) =>
+      Effect.gen(function* () {
+        const split = yield* service.start({
+          threadId,
+          loopId,
+          roundId,
+          role: "critic",
+          evidence: {
+            ...frameInput(frames),
+            nativeWorld: {
+              sourceId: "sources",
+              evidenceDirectory: "builds/logs/scenarios-1",
+              text: multibyte,
+            },
+          },
+        });
+        expect(split.kind).toBe("started");
+        if (split.kind !== "started") return;
+        const last = scripted.dispatches.at(-1)!;
+        expect(last.type).toBe("game-round.task.request");
+        if (last.type !== "game-round.task.request") return;
+        expect(last.task).not.toContain("NATIVE_WORLD.json (same-source");
+        const lastFiles = yield* Effect.promise(() => walk(last.evidenceDirectory!));
+        expect(lastFiles).not.toContain("NATIVE_WORLD.json");
+      }),
+    );
+  }),
+);

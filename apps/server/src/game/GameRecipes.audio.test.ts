@@ -22,8 +22,15 @@ const AUDIO_QUERIES = ["sound", "audio feedback", "silent pickup", "sound cues"]
 
 it.effect("a novice finds the audio recipe with sound words and defect tags", () =>
   Effect.gen(function* () {
-    for (const query of AUDIO_QUERIES)
-      expect(yield* searchIds({ query }), `query '${query}'`).toEqual(["audio.feedback"]);
+    // Free text ranks: the best mechanism first, related feedback recipes below.
+    for (const query of AUDIO_QUERIES) {
+      const ids = yield* searchIds({ query });
+      expect(ids[0], `query '${query}'`).toBe("audio.feedback");
+    }
+    expect(yield* searchIds({ query: "sound" }), "query 'sound'").toEqual(["audio.feedback"]);
+    expect(yield* searchIds({ query: "sound cues" }), "query 'sound cues'").toEqual([
+      "audio.feedback",
+    ]);
 
     // Field filters stay exact tags; both spellings a builder is likely to use
     // for this defect exist in the metadata. feel.pickup also carries the tag.
@@ -31,7 +38,8 @@ it.effect("a novice finds the audio recipe with sound words and defect tags", ()
     expect(defectIds).toContain("audio.feedback");
     expect(defectIds[0]).toBe("audio.feedback");
     expect(yield* searchIds({ mechanic: "audio-feedback" })).toEqual(["audio.feedback"]);
-    expect(yield* searchIds({ text: "AUDIO FEEDBACK" })).toEqual(["audio.feedback"]);
+    const loud = yield* searchIds({ text: "AUDIO FEEDBACK" });
+    expect(loud[0], "text 'AUDIO FEEDBACK'").toBe("audio.feedback");
   }),
 );
 

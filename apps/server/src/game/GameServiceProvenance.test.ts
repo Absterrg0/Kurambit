@@ -1469,13 +1469,14 @@ it.live(
         },
         playtest: (input) => {
           played.push(input.url);
+          const executed = input.steps.filter(
+            (step) => !("waitMs" in step) && !("screenshot" in step),
+          ).length;
           return Effect.succeed({
             ...playtestResult,
-            executedInputSteps: input.steps.filter(
-              (step) => !("waitMs" in step) && !("screenshot" in step),
-            ).length,
-            qualifies: false,
-            blockers: ["no movement or design progress"],
+            executedInputSteps: executed,
+            qualifies: executed > 0,
+            blockers: executed > 0 ? [] : ["no movement or design progress"],
             screenshots: [
               {
                 label: "after-steps",
@@ -1500,7 +1501,8 @@ it.live(
           });
           const waiting = yield* studio.submissionFacts(root, first.buildId);
           expect(waiting.passed).toBe(false);
-          expect(waiting.reason).toBe(
+          expect(waiting.checks.find((check) => check.id === "playtest")?.status).toBe("failed");
+          expect(waiting.reason).toContain(
             "input: The playtest executed no input steps; waits and screenshots do not count.",
           );
           yield* game.webPlaytest(threadId, { steps: [{ click: "left" }] });
@@ -2104,6 +2106,63 @@ it.live(
         }),
     );
   },
+);
+
+it.live(
+  "frame paths still name the right pixels after an earlier frame exceeds the response budget",
+  () =>
+    withGame(
+      {
+        run: (input) =>
+          Effect.promise(async () => {
+            if (input.operation === "export-web") {
+              const directory = NodePath.dirname(input.args.at(-1)!);
+              await NodeFSP.mkdir(directory, { recursive: true });
+              for (const name of ["index.html", "index.js", "index.wasm", "index.pck"])
+                await NodeFSP.writeFile(NodePath.join(directory, name), `export ${name}`);
+            }
+            return processOk(input.root);
+          }),
+        playtest: () =>
+          Effect.succeed({
+            ...playtestResult,
+            screenshots: [
+              {
+                label: "too-large",
+                mimeType: "image/png" as const,
+                width: 640,
+                height: 360,
+                data: Buffer.alloc(7 * 1024 * 1024, 7).toString("base64"),
+              },
+              {
+                label: "kept",
+                mimeType: "image/png" as const,
+                width: 640,
+                height: 360,
+                data: Buffer.from("kept-pixels").toString("base64"),
+              },
+            ],
+          }),
+      },
+      ({ root, stateDir, game, rounds }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(root, "game.json"), JSON.stringify(manifest())),
+          );
+          yield* game.export(threadId, "Web");
+          const buildId = (yield* rounds.read(root)).selected!.buildId;
+          const result = yield* game.webPlaytestBuild(
+            threadId,
+            buildId,
+            { steps: [{ press: "Space" }] },
+            NodePath.join(stateDir, "path-experiment"),
+          );
+          expect(result.screenshots.map((shot) => shot.label)).toEqual(["kept"]);
+          const path = result.screenshots[0]!.path!;
+          expect(path).toContain("02-kept.png");
+          expect(yield* Effect.promise(() => NodeFSP.readFile(path, "utf8"))).toBe("kept-pixels");
+        }),
+    ),
 );
 
 it.live(

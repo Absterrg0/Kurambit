@@ -26,6 +26,7 @@ import {
   type GameReviewDefect,
   type GameReviewDoNotRegress,
   type GameReviewExperimentRoute,
+  type GameReviewRequirementDowngrade,
   type GameReviewRound as GameReviewRoundType,
   type GameReviewState as GameReviewStateType,
   type ModelSelection,
@@ -62,6 +63,11 @@ const BuildPlaytest = Schema.Struct({
   viewport: Schema.NullOr(GameViewport),
   /** The multiple of the base viewport this play actually used. */
   captureScale: Schema.optionalKey(Schema.Number),
+  /** The run's own gameplay verdict; older records have none and stay readable. */
+  qualifies: Schema.optionalKey(Schema.Boolean),
+  blockers: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Game-relative playtest evidence, so review can reuse this exact run. */
+  evidenceDirectory: Schema.optionalKey(Schema.String),
 });
 const StoredExport = Schema.Struct({
   artifact: GameReviewArtifact,
@@ -176,6 +182,8 @@ const sameBuildInputs = (
 export interface GameRoundBeginInput {
   readonly threadId?: ThreadId | undefined;
   readonly budget?: GameReviewBudget | undefined;
+  /** Live previews may still request files from a round leaving the history window. */
+  readonly preserveDirectories?: readonly string[] | undefined;
   /** The repair loop that owns this round, when one does. */
   readonly loopId?: string | undefined;
   /** Frozen model selections; a later composer change cannot alter this round. */
@@ -189,6 +197,14 @@ export interface GameRoundReviewInput {
   readonly childUsage?: GameReviewRoundType["childUsage"] | undefined;
   readonly usageByRole?: GameReviewRoundType["usageByRole"] | undefined;
   readonly fundamentals?: GameReviewRoundType["fundamentals"] | undefined;
+  readonly requirements?: GameReviewRoundType["requirements"] | undefined;
+  readonly requirementsIncomplete?: boolean | undefined;
+  /** Server-applied downgrades frozen with the round; absent on legacy rounds. */
+  readonly downgradedRequirements?: ReadonlyArray<GameReviewRequirementDowngrade> | undefined;
+  /** Frozen absolute-quality assessment; absent on legacy rounds, which read as unknown. */
+  readonly quality?: GameReviewRoundType["quality"] | undefined;
+  readonly qualityRubricVersion?: number | undefined;
+  readonly qualityCoverage?: GameReviewRoundType["qualityCoverage"] | undefined;
   readonly defects?: ReadonlyArray<GameReviewDefect> | undefined;
   readonly doNotRegress?: ReadonlyArray<GameReviewDoNotRegress> | undefined;
   readonly checks?: ReadonlyArray<GameReviewCheck> | undefined;
@@ -290,6 +306,7 @@ export type GameRestore =
  * recovery that marks it interrupted.
  */
 export const isRestorableRound = (round: GameReviewRoundType): boolean =>
+  round.restoredAt === undefined &&
   (round.status === "interrupted" || round.status === "stopped") &&
   (round.repairStartedAt !== undefined || round.postRepairSourceId !== null);
 
@@ -352,6 +369,15 @@ export class GameRoundStore extends Context.Service<
     >;
     /** Re-identifies a private export copy so an export can prove its input did not move. */
     readonly frozenSourceId: (directory: string) => Effect.Effect<string, GameOperationError>;
+    /**
+     * Whether the named export still describes the current engine inputs. It
+     * reads the validated export/source binding and compares only the Godot
+     * project bytes, so a design-doc or notes edit stays current while an
+     * engine-source edit does not. Unknown, unreadable or unbound builds are
+     * not current; callers refuse with `sources-current` instead of selecting
+     * or reviewing them. Never throws for a stale tree.
+     */
+    readonly buildIsCurrent: (root: string, buildId: string) => Effect.Effect<boolean>;
     /** Snapshots the source and opens a round before the repair child writes. */
     readonly begin: (
       root: string,
@@ -399,6 +425,8 @@ export class GameRoundStore extends Context.Service<
         readonly preserveDirectories?: readonly string[] | undefined;
         /** The exact reason the round was rejected, kept as provenance. */
         readonly reason?: string | undefined;
+        /** A safety rollback after an unfinished review carries no game judgment. */
+        readonly decision?: "reject" | "stop" | undefined;
       },
     ) => Effect.Effect<GameRejection, GameOperationError>;
     /**
@@ -750,6 +778,29 @@ export const layer = (options: { readonly stateDir: string }) => {
           ),
         frozenSourceId: (directory) =>
           snapshots.capture(directory).pipe(Effect.map((manifest) => manifest.sourceId)),
+        buildIsCurrent: (root, buildId) =>
+          Effect.gen(function* () {
+            if (!/^[0-9a-f]{64}$/.test(buildId)) return false;
+            const recorded = yield* readExport(root, buildId).pipe(
+              Effect.orElseSucceed(() => null),
+            );
+            if (recorded === null) return false;
+            let artifact: GameReviewArtifact;
+            try {
+              artifact = validatedArtifact(recorded.artifact);
+            } catch {
+              return false;
+            }
+            if (artifact.buildId !== buildId || artifact.sourceId === null) return false;
+            const current = yield* Effect.result(snapshots.capture(root));
+            if (current._tag === "Failure") return false;
+            if (current.success.sourceId === artifact.sourceId) return true;
+            return yield* sameBuildInputs(snapshots, {
+              root,
+              candidateSourceId: artifact.sourceId,
+              current: current.success,
+            }).pipe(Effect.orElseSucceed(() => false));
+          }),
         begin: (root, input) =>
           withLock(root, "begin game review round", (found) =>
             Effect.gen(function* () {
@@ -799,10 +850,30 @@ export const layer = (options: { readonly stateDir: string }) => {
                   : { doNotRegress: [...input.doNotRegress] }),
                 budget: input?.budget ?? DEFAULT_GAME_REVIEW_BUDGET,
               };
-              yield* writeStateEffect(found.file, {
+              const retained: StoredState = {
                 ...state,
                 rounds: [created, ...state.rounds].slice(0, MAX_STORED_ROUNDS),
-              });
+              };
+              yield* writeStateEffect(found.file, retained);
+              // Expired history must not retain exports that no round, selection or preview uses.
+              for (const dropped of [created, ...state.rounds].slice(MAX_STORED_ROUNDS)) {
+                if (dropped.candidate === null) continue;
+                yield* Effect.suspend(() =>
+                  discardCandidate(
+                    root,
+                    retained,
+                    validatedArtifact(dropped.candidate!),
+                    input?.preserveDirectories ?? [],
+                  ),
+                ).pipe(
+                  Effect.catchCause(() =>
+                    Effect.logWarning("discarding an evicted review candidate failed", {
+                      roundId: dropped.id,
+                    }),
+                  ),
+                  Effect.asVoid,
+                );
+              }
               return created;
             }),
           ),
@@ -861,6 +932,22 @@ export const layer = (options: { readonly stateDir: string }) => {
                 ...(input.childUsage === undefined ? {} : { childUsage: input.childUsage }),
                 ...(input.usageByRole === undefined ? {} : { usageByRole: input.usageByRole }),
                 ...(input.fundamentals === undefined ? {} : { fundamentals: input.fundamentals }),
+                ...(input.requirements === undefined
+                  ? {}
+                  : { requirements: [...input.requirements] }),
+                ...(input.requirementsIncomplete === undefined
+                  ? {}
+                  : { requirementsIncomplete: input.requirementsIncomplete }),
+                ...(input.downgradedRequirements === undefined
+                  ? {}
+                  : { downgradedRequirements: [...input.downgradedRequirements] }),
+                ...(input.quality === undefined ? {} : { quality: input.quality }),
+                ...(input.qualityRubricVersion === undefined
+                  ? {}
+                  : { qualityRubricVersion: input.qualityRubricVersion }),
+                ...(input.qualityCoverage === undefined
+                  ? {}
+                  : { qualityCoverage: input.qualityCoverage }),
                 ...(input.defects === undefined ? {} : { defects: [...input.defects] }),
                 ...(input.doNotRegress === undefined
                   ? {}
@@ -1039,12 +1126,15 @@ export const layer = (options: { readonly stateDir: string }) => {
                 expectSourceId: round.postRepairSourceId,
               });
               if (restored.kind === "blocked") return yield* stopped(restored.detail);
+              const decision = rejectOptions?.decision ?? "reject";
               const rejected = terminal(
-                round,
-                "rejected",
-                "reject",
+                { ...round, restoredAt: at },
+                decision === "stop" ? "stopped" : "rejected",
+                decision,
                 rejectOptions?.reason ??
-                  "The round was rejected; the previous source snapshot was restored.",
+                  (decision === "stop"
+                    ? "The review stopped before a decision; the previous source snapshot was restored."
+                    : "The round was rejected; the previous source snapshot was restored."),
                 at,
               );
               yield* writeStateEffect(found.file, replaceRound(state, rejected));
@@ -1071,7 +1161,11 @@ export const layer = (options: { readonly stateDir: string }) => {
             Effect.gen(function* () {
               const state = yield* readStateEffect(found.file);
               const round = roundById(state, roundId, "restore game review version");
-              if (round.status === "promoted" || round.status === "rejected")
+              if (
+                round.status === "promoted" ||
+                round.status === "rejected" ||
+                round.restoredAt !== undefined
+              )
                 return yield* failure(
                   "restore game review version",
                   roundId,
@@ -1118,7 +1212,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               if (restored.kind === "blocked")
                 return { kind: "blocked", round: preservedRound, detail: restored.detail };
               const restoredRound = terminal(
-                preservedRound,
+                { ...preservedRound, restoredAt: DateTime.formatIso(yield* DateTime.now) },
                 "rejected",
                 "reject",
                 `The previous version was restored on request; the version it replaced is kept as snapshot ${preserved.manifest.sourceId}.`,

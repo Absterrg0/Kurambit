@@ -535,6 +535,56 @@ export const makeOpenCodeReviewer = (options: {
   return { review, usedModel: () => used };
 };
 
+/**
+ * Blind look/feel comparison through the opencode CLI. It reuses the same CLI
+ * seam as the obligations grader (`runOpenCode`, `openCodeText`,
+ * `parseJsonReply`) and the same free-limit fallback, but asks for the
+ * comparison ruler's JSON shape instead of a verdict/actions shape. The
+ * prompt itself (blind A/B cards, both orders, identical-pair control) lives
+ * in `scripts/game-benchmark/compare.ts`; this only swaps the model route.
+ */
+export const OPENCODE_COMPARE_REPLY_SHAPE =
+  '{"works":"A or B or tie","look":"A or B or tie","feel":"A or B or tie","play":"A or B or tie","overall":"A or B or tie","reason":"one short sentence"}';
+
+export interface OpenCodeCompareReviewer {
+  readonly review: (request: {
+    readonly prompt: string;
+    readonly imagePaths: ReadonlyArray<string>;
+  }) => Promise<unknown>;
+  /** The model that answered, after any free-limit fallback. */
+  readonly usedModel: () => string;
+}
+
+export const makeOpenCodeCompareReviewer = (options: {
+  readonly model?: string;
+  readonly fallbackModel?: string;
+  readonly run?: OpenCodeRunner;
+}): OpenCodeCompareReviewer => {
+  const model = options.model ?? OPENCODE_GRADER_MODEL;
+  const fallbackModel = options.fallbackModel ?? OPENCODE_GRADER_FALLBACK_MODEL;
+  const run = options.run ?? runOpenCode;
+  let used = model;
+  const review = async (request: {
+    readonly prompt: string;
+    readonly imagePaths: ReadonlyArray<string>;
+  }): Promise<unknown> => {
+    const prompt = `${request.prompt}\n\nAnswer with one JSON object and nothing else:\n${OPENCODE_COMPARE_REPLY_SHAPE}`;
+    const answer = (route: string) => run({ model: route, prompt, imagePaths: request.imagePaths });
+    let result = await answer(model);
+    if (result.output.includes(FREE_LIMIT) && fallbackModel !== model) {
+      used = fallbackModel;
+      result = await answer(fallbackModel);
+    }
+    const text = openCodeText(result.output);
+    if (text.trim() === "")
+      throw new Error(
+        `The opencode grader said nothing (exit ${result.exitCode ?? "none"}): ${result.output.slice(0, 400)}`,
+      );
+    return parseJsonReply(text);
+  };
+  return { review, usedModel: () => used };
+};
+
 // --------------------------------------------------------------------- frames
 
 const tinyPng = Buffer.from(
