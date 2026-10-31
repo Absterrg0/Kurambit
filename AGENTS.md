@@ -2,6 +2,10 @@
 
 Game Studio is a local desktop app for making games with coding agents. It is a fork of T3 Code: a Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. Game Studio adds a game layer on top: agents build Godot games with Blender through the server's `game_*` tools, and users play, revise, and export them in the app. "Game Studio" is a working name.
 
+## Where Game Studio is going
+
+One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build, reviews it with fresh sessions, compares builds blind so a worse one never lands, and keeps working until the budget ends. The review, repair, design-approval and qualification code in `apps/server/src/game` is the old approach and is being replaced: do not extend it. New work starts in `scripts/studio/`.
+
 ## What we keep
 
 ### 1. Open at the core
@@ -44,7 +48,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **game** means a project whose root contains `game.json`: a git repository with Blender sources under `art/` and a Godot project under `godot/`.
+- **game** means a project whose root contains `game.json`: a git repository holding an engine project (Godot today), its assets and the model's own documents.
 - **home** means the base data directory (`~/.game-studio`, `GAME_STUDIO_HOME`, or a dev checkout's `.t3`). Runtime state normally lives below its userdata directory.
 
 ## The three ways to hurt yourself
@@ -88,13 +92,11 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 
 ## Verifying
 
-- Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
-- Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
+- Smallest proof that the change works, by running it. For game-layer work that means making a real game and looking at it. Targeted typecheck and lint for what you changed.
+- Do not write test suites for the game layer or ask generated games to carry smoke tests or scripted routes: games get played. A small test is fine only for data safety or tricky pure logic.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
-- Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
 - Upon request, user-visible frontend changes should get one integrated pass in a real client (`test-t3-app`). The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
-- Game-layer changes: `node scripts/game-e2e.ts --brief "..."` drives a running dev server like a client, creating a game with a real agent and checking preview, export, native run, revision (`--revise`) and cancellation (`--cancel-test`).
 
 ## Pull requests
 

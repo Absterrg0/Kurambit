@@ -1,0 +1,2173 @@
+// @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the production loop's native boundary: wall-clock blocks, pids, git, and the run/rounds JSONL in the game folder, like the bot and Blender services.
+// GameRun: one game's production loop as a T3 service. One service, no game
+// or genre knowledge. Every role is a fresh ordinary T3 thread on the game's
+// project; state is `.studio/run.json` + `.studio/rounds.jsonl` + git.
+// Scope: quality of what exists; growing the game is the creator's job.
+// Code never parses model prose apart from declared STATUS/SHIP/COMPARE lines.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import {
+  CommandId,
+  MessageId,
+  ProviderInstanceId,
+  type ModelSelection,
+  type OrchestrationV2Run,
+  type OrchestrationV2TurnItem,
+  type ProjectId,
+  type ProviderInteractionMode,
+  type RunId,
+  type RuntimeMode,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as GameProjectService from "./GameProjectService.ts";
+import * as GameService from "./GameService.ts";
+import {
+  latestExecutedRun,
+  latestRootProviderFailure,
+} from "@t3tools/shared/orchestrationV2ThreadError";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+
+export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
+  operation: Schema.String,
+  path: Schema.String,
+  reason: Schema.String,
+  detail: Schema.optionalKey(Schema.String),
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {
+  override get message(): string {
+    return this.detail ?? `Game run ${this.operation} failed (${this.reason}).`;
+  }
+}
+
+// Production-loop timings mirror frozen scripts/studio/run.ts: the block only
+// sets how often the game is judged; judgement is blind play, never prose.
+const BLOCK_MS = 25 * 60_000;
+const FULL_BUILD_MS = 40 * 60_000;
+const TESTER_CAP_MS = 4 * 60_000;
+const JUDGE_CAP_MS = 6 * 60_000;
+const REVIEWER_CAP_MS = 5 * 60_000;
+const WRITE_CAP_MS = 2 * 60_000;
+const SHIP_CAP_MS = 7 * 60_000;
+// Hang watchdog: 4 minutes with no thread activity means interrupt and
+// continue, up to 3 times, then replace the thread.
+const STALL_MS = 4 * 60_000;
+const MAX_RESTARTS = 3;
+// An instantly failed turn never reached the model (provider or session
+// failure, e.g. an unroutable model): back off, retry, replace the thread,
+// pause the run. Never loop hundreds of turns on these (T25 spun 1152).
+const INSTANT_FAIL_MS = 8_000;
+const INSTANT_FAIL_RETRIES = 3;
+const INSTANT_FAIL_REPLACEMENTS = 2;
+const DISPLAY_VARS = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
+
+type VerdictRef = { order: string; verdict: string; reason: string };
+type RoundRecord = {
+  round: number;
+  move: string;
+  branch: string;
+  sweepFindings: number;
+  verdicts: VerdictRef[];
+  kept: boolean;
+  unjudged?: boolean;
+  durationMs: number;
+  linesChanged: number;
+  testerNote?: string;
+  note?: string;
+};
+type ThreadRef = { role: string; threadId: string; startedAt: string };
+
+type StoredRun = {
+  runId: string;
+  brief: string;
+  artDirection: string;
+  budgetMinutes: number | null;
+  provider: string | null;
+  model: string | null;
+  variant: string | null;
+  startedAt: string;
+  stage: string;
+  ending: string | null;
+  stallStreak: number;
+  lastFailure: string;
+  shipNoReasons: string;
+  rounds: RoundRecord[];
+  threads: ThreadRef[];
+};
+
+const newRunId = (): string =>
+  `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`;
+
+// Nothing may open on the user's desktop; every child inherits a clean room.
+const strippedEnv = (): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of DISPLAY_VARS) delete env[name];
+  env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
+  env.NODE_OPTIONS = "--max-old-space-size=1536";
+  return env;
+};
+
+const readJsonFile = async <T>(path: string, fallback: T): Promise<T> => {
+  try {
+    return JSON.parse(await NodeFSP.readFile(path, "utf8")) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const lastMatch = (text: string, re: RegExp): string | null => {
+  const matches = [...text.matchAll(re)];
+  if (matches.length === 0) return null;
+  return (matches[matches.length - 1]?.[1] ?? "").toUpperCase();
+};
+
+const isUsageLimit = (text: string): boolean =>
+  /usage limit|rate limit|quota exceeded|exceeded.*quota|\b429\b|capacity exceeded|overloaded/i.test(
+    text,
+  );
+
+// Variant selections ride in the model options (`{id:"variant"}` for the
+// opencode driver), never in the model id. Unknown option shapes pass
+// through untouched.
+const withVariantOption = (options: unknown, variant: string | null | undefined): unknown => {
+  if (variant === null || variant === undefined || variant.length === 0) return options;
+  if (Array.isArray(options)) {
+    const kept = (options as Array<Record<string, unknown>>).filter(
+      (entry) => entry?.["id"] !== "variant",
+    );
+    return [...kept, { id: "variant", value: variant }];
+  }
+  if (typeof options === "object" && options !== null)
+    return { ...(options as Record<string, unknown>), variant };
+  return [{ id: "variant", value: variant }];
+};
+
+// Declared lines only. Code never interprets any other prose.
+const parseStatus = (text: string): string | null => {
+  const m = lastMatch(text, /^STATUS:\s*(continue|ready)\s*$/gim);
+  return m === null ? null : m.toLowerCase();
+};
+const parseShip = (text: string): string | null => {
+  const m = lastMatch(text, /^SHIP:\s*(YES|NO)\s*$/gim);
+  return m === null ? null : m.toUpperCase();
+};
+const parseCompare = (text: string): string | null => {
+  const m = lastMatch(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
+  return m === null ? null : m.toUpperCase();
+};
+
+export class GameRun extends Context.Service<
+  GameRun,
+  {
+    readonly runStart: (input: {
+      readonly threadId: ThreadId;
+      readonly brief: string;
+      readonly artDirection?: string | undefined;
+      readonly budgetMinutes?: number | undefined;
+      readonly provider?: string | undefined;
+      readonly model?: string | undefined;
+      readonly variant?: string | undefined;
+    }) => Effect.Effect<
+      { runId: string; root: string; stage: string; resumed: boolean },
+      GameRunError
+    >;
+    readonly runStatus: (threadId: ThreadId) => Effect.Effect<
+      {
+        active: boolean;
+        runId: string | null;
+        stage: string;
+        ending: string | null;
+        rounds: Array<{
+          round: number;
+          move: string;
+          branch: string;
+          kept: boolean;
+          verdicts: VerdictRef[];
+          linesChanged: number;
+          testerNote: string | null;
+          durationMs: number;
+          note: string | null;
+        }>;
+        threads: ThreadRef[];
+        message: string;
+      },
+      GameRunError
+    >;
+    readonly runStop: (
+      threadId: ThreadId,
+    ) => Effect.Effect<{ stopped: boolean; message: string }, GameRunError>;
+    /** MCP catalog role: "run" for threads this service launched, else null. */
+    readonly toolRole: (caller: { readonly threadId: ThreadId }) => Effect.Effect<"run" | null>;
+  }
+>()("t3/game/GameRun") {}
+
+export const layer = (options: { readonly stateDir: string }) => {
+  const callerFile = (threadId: string): string =>
+    NodePath.join(options.stateDir, "game-run-callers", `${encodeURIComponent(threadId)}.json`);
+
+  // Game services resolve at call time from the request scope (the same way
+  // MCP handlers do), so this layer only needs its state directory at build
+  // time and never constrains the server's layer order.
+  const needService = <S>(
+    option: Effect.Effect<Option.Option<S>>,
+    operation: string,
+    path: string,
+    name: string,
+  ): Effect.Effect<S, GameRunError> =>
+    option.pipe(
+      Effect.flatMap((found) =>
+        Option.isSome(found)
+          ? Effect.succeed(found.value)
+          : Effect.fail(
+              new GameRunError({
+                operation,
+                path,
+                reason: "service-unavailable",
+                detail: `${name} is not in scope for this call.`,
+              }),
+            ),
+      ),
+    );
+
+  const make = Effect.gen(function* () {
+    const active = new Map<string, { fiber: Fiber.Fiber<string, GameRunError>; runId: string }>();
+    // Run-wide count of back-to-back instantly failed turns. Builder blocks
+    // run their own replace policy; this catches every other role.
+    const routeHealth = { consec: 0 };
+
+    const runPaths = (root: string) => ({
+      dir: NodePath.join(root, ".studio"),
+      run: NodePath.join(root, ".studio", "run.json"),
+      rounds: NodePath.join(root, ".studio", "rounds.jsonl"),
+      stop: NodePath.join(root, ".studio", "stop"),
+      botResults: NodePath.join(root, ".studio", "bot-results.jsonl"),
+    });
+
+    const fail = (operation: string, path: string, reason: string, detail?: string): GameRunError =>
+      new GameRunError({ operation, path, reason, ...(detail === undefined ? {} : { detail }) });
+
+    const needThreads = (operation: string, path: string) =>
+      needService(
+        Effect.serviceOption(ThreadManagement.ThreadManagementService),
+        operation,
+        path,
+        "Thread management",
+      );
+    const needLaunches = (operation: string, path: string) =>
+      needService(
+        Effect.serviceOption(ThreadLaunch.ThreadLaunchService),
+        operation,
+        path,
+        "Thread launching",
+      );
+    const needProjects = (operation: string, path: string) =>
+      needService(
+        Effect.serviceOption(GameProjectService.GameProjectService),
+        operation,
+        path,
+        "Game projects",
+      );
+    const needGame = (operation: string, path: string) =>
+      needService(Effect.serviceOption(GameService.GameService), operation, path, "Game service");
+
+    const resolveGame = Effect.fn("GameRun.resolveGame")(function* (threadId: ThreadId) {
+      const projects = yield* needProjects("resolve-game", String(threadId));
+      const threads = yield* needThreads("resolve-game", String(threadId));
+      const root = yield* projects
+        .resolve(threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("resolve-game", String(threadId), "project-not-found", cause.message),
+          ),
+        );
+      const shell = yield* threads
+        .getThreadShell(threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("resolve-game", String(threadId), "thread-read", String(cause)),
+          ),
+        );
+      if (shell === null || shell.deletedAt !== null)
+        return yield* Effect.fail(
+          fail("resolve-game", String(threadId), "project-not-found", "The thread is gone."),
+        );
+      return { root, projectId: shell.projectId as ProjectId };
+    });
+
+    const readStored = (root: string): Effect.Effect<StoredRun | null> =>
+      Effect.promise(() => readJsonFile<StoredRun | null>(runPaths(root).run, null));
+
+    const writeStored = (root: string, stored: StoredRun): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
+        await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+      });
+
+    const markRoleThread = (threadId: ThreadId): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(callerFile(String(threadId))), { recursive: true });
+        await NodeFSP.writeFile(callerFile(String(threadId)), '{"role":"run"}\n');
+      }).pipe(Effect.orElseSucceed(() => undefined));
+
+    const recordThread = (
+      root: string,
+      stored: StoredRun,
+      role: string,
+      threadId: ThreadId,
+    ): Effect.Effect<void> =>
+      Effect.andThen(
+        markRoleThread(threadId),
+        Effect.promise(async () => {
+          stored.threads.push({
+            role,
+            threadId: String(threadId),
+            startedAt: new Date().toISOString(),
+          });
+          await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
+          await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+        }),
+      );
+
+    const appendRound = (
+      root: string,
+      stored: StoredRun,
+      record: RoundRecord,
+    ): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        stored.rounds.push(record);
+        await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
+        // The file mirrors run.json's array (full rewrite, not blind
+        // append): branch checkouts between rounds can clobber trailing
+        // lines, and the rewrite heals that (T26: round 3's line).
+        await NodeFSP.writeFile(
+          runPaths(root).rounds,
+          stored.rounds.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        );
+        await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+      });
+
+    const stopRequested = (root: string): Effect.Effect<boolean> =>
+      Effect.promise(() =>
+        NodeFSP.access(runPaths(root).stop)
+          .then(() => true)
+          .catch(() => false),
+      );
+
+    const gitExec = (
+      root: string,
+      args: ReadonlyArray<string>,
+      timeoutMs: number,
+    ): Effect.Effect<{ exitCode: number | null; stdout: string }> =>
+      Effect.promise(() => {
+        const child = NodeChildProcess.spawn("git", [...args], {
+          cwd: root,
+          env: strippedEnv(),
+          timeout: timeoutMs,
+        });
+        let stdout = "";
+        child.stdout?.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8");
+        });
+        child.stderr?.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8");
+        });
+        return new Promise<{ exitCode: number | null; stdout: string }>((resolve) => {
+          child.on("close", (code) => resolve({ exitCode: code, stdout }));
+          child.on("error", () => resolve({ exitCode: null, stdout }));
+        });
+      });
+
+    const gitOut = (root: string, args: ReadonlyArray<string>): Effect.Effect<string> =>
+      Effect.sync(() => {
+        try {
+          return NodeChildProcess.execFileSync("git", [...args], { cwd: root, env: strippedEnv() })
+            .toString()
+            .trim();
+        } catch {
+          return "";
+        }
+      });
+
+    const commitAll = (root: string, message: string): Effect.Effect<string | null> =>
+      Effect.sync(() => {
+        try {
+          NodeChildProcess.execFileSync("git", ["add", "-A"], { cwd: root, env: strippedEnv() });
+          try {
+            NodeChildProcess.execFileSync("git", ["diff", "--cached", "--quiet"], {
+              cwd: root,
+              env: strippedEnv(),
+            });
+            try {
+              return NodeChildProcess.execFileSync("git", ["rev-parse", "HEAD"], {
+                cwd: root,
+                env: strippedEnv(),
+              })
+                .toString()
+                .trim();
+            } catch {
+              return null;
+            }
+          } catch {
+            NodeChildProcess.execFileSync(
+              "git",
+              ["-c", "user.email=studio@local", "-c", "user.name=studio", "commit", "-qm", message],
+              { cwd: root, env: strippedEnv() },
+            );
+            return NodeChildProcess.execFileSync("git", ["rev-parse", "HEAD"], {
+              cwd: root,
+              env: strippedEnv(),
+            })
+              .toString()
+              .trim();
+          }
+        } catch {
+          return null;
+        }
+      });
+
+    // The game's own source and assets live under godot/. Bots, notes and
+    // skill-pack files never count as game change: a round with no change
+    // here is no real change (T25 merged a .studio-only round as unjudged).
+    const gameLinesSince = (root: string, sha: string): Effect.Effect<number> =>
+      Effect.sync(() => {
+        try {
+          const stat = NodeChildProcess.execFileSync(
+            "git",
+            ["diff", "--numstat", `${sha}..HEAD`, "--", "godot"],
+            { cwd: root, env: strippedEnv() },
+          ).toString();
+          let total = 0;
+          for (const line of stat.split("\n")) {
+            const parts = line.split("\t");
+            const add = Number(parts[0]);
+            const del = Number(parts[1]);
+            if (Number.isFinite(add)) total += add;
+            if (Number.isFinite(del)) total += del;
+          }
+          return total;
+        } catch {
+          return 0;
+        }
+      });
+
+    const gameChangedSince = (root: string, sha: string): Effect.Effect<boolean> =>
+      gameLinesSince(root, sha).pipe(Effect.map((lines) => lines > 0));
+
+    const checkoutOk = (root: string, ref: string): Effect.Effect<boolean> =>
+      gitExec(root, ["checkout", "-q", ref], 60_000).pipe(Effect.map((r) => r.exitCode === 0));
+
+    const ensureOn = Effect.fn("GameRun.ensureOn")(function* (
+      root: string,
+      ref: string,
+      why: string,
+    ) {
+      if (yield* checkoutOk(root, ref)) return true;
+      yield* logLine(root, `checkout ${ref} blocked (${why}); parking the tree in a stash`);
+      yield* gitExec(
+        root,
+        ["stash", "-u", "-m", `studio ${why}: park tree for checkout ${ref}`],
+        60_000,
+      ).pipe(Effect.ignore);
+      if (yield* checkoutOk(root, ref)) {
+        yield* logLine(root, `checkout ${ref} ok after stash (${why})`);
+        return true;
+      }
+      yield* logLine(root, `checkout ${ref} FAILED (${why}): leaving refs alone`);
+      return false;
+    });
+
+    // Reset main only when actually on main; never reset a round branch.
+    const resetMainTo = Effect.fn("GameRun.resetMainTo")(function* (root: string, ref: string) {
+      const at = yield* gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      if (at.trim() !== "main") {
+        yield* logLine(root, `refusing reset on ${at.trim() || "?"} (not main)`);
+        return false;
+      }
+      const done = yield* gitExec(root, ["reset", "--hard", "-q", ref], 60_000);
+      return done.exitCode === 0;
+    });
+
+    // Failed work is saved on rejected/<label>, never thrown away.
+    const rejectWork = Effect.fn("GameRun.rejectWork")(function* (
+      root: string,
+      best: string,
+      label: string,
+      why: string,
+    ) {
+      yield* gitExec(root, ["checkout", "-qb", `rejected/${label}`], 60_000).pipe(
+        Effect.catch(() => gitExec(root, ["checkout", "-q", `rejected/${label}`], 60_000)),
+      );
+      yield* commitAll(root, `rejected ${label}: ${why.slice(0, 120)}`);
+      if (yield* ensureOn(root, "main", `reject ${label}`)) {
+        if (best.length > 0) yield* resetMainTo(root, best);
+      }
+    });
+
+    const readNextMd = (root: string): Effect.Effect<string> =>
+      Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(root, ".studio", "next.md"), "utf8")
+          .then((text) => text.trim().slice(0, 4000))
+          .catch(() => ""),
+      );
+
+    const readPick = (root: string): Effect.Effect<string> =>
+      Effect.promise(() =>
+        NodeFSP.readFile(NodePath.join(root, ".studio", "pick.txt"), "utf8")
+          .then((text) => text.trim().slice(0, 1500))
+          .catch(() => ""),
+      );
+
+    // Scaffold for new runs: .studio/ plus the skill pack, with skills
+    // readable through a one-line list in AGENTS.md.
+    const ensureGameScaffold = (root: string): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true });
+        await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
+        try {
+          await NodeFSP.cp(
+            "/home/abstergo/Programming/Projects/game-studio/apps/server/templates/studio",
+            NodePath.join(root, "studio-skills"),
+            { recursive: true },
+          );
+        } catch {
+          // The pack may already exist; never fail a run on it.
+        }
+        try {
+          await NodeFSP.cp(
+            "/home/abstergo/Programming/Projects/game-studio/apps/server/templates/bot-kit",
+            NodePath.join(root, ".studio", "bot", "kit"),
+            { recursive: true },
+          );
+        } catch {
+          // The kit may already exist; never fail a run on it.
+        }
+        const agentsPath = NodePath.join(root, "AGENTS.md");
+        const existing = await NodeFSP.readFile(agentsPath, "utf8").catch(() => "");
+        if (!/studio-skills\//.test(existing)) {
+          const line = `\n\n## Studio skills (read the ones your role needs)\n\nSkill pack in ./studio-skills, one line each: planning (look, cut to the ask, plan and rungs); game-foundations (boundaries, state ownership, data-driven content); godot-game (engine rules, CLI, export); playtest (smoke/feature/regression/visual passes, report separately); art-pipeline (key art first, every asset as a file); audio (effects plus a music loop as files); art-director (would you ship this, defects, DO NOT REGRESS, one big move); stranger (first minute cold).\n`;
+          await NodeFSP.writeFile(agentsPath, `${existing}${line}`);
+        }
+      });
+
+    const stageDone = (root: string): Effect.Effect<Record<string, boolean>> =>
+      Effect.promise(async () => {
+        const exists = async (rel: string): Promise<boolean> =>
+          NodeFSP.access(NodePath.join(root, rel))
+            .then(() => true)
+            .catch(() => false);
+        let branches = "";
+        try {
+          branches = NodeChildProcess.execFileSync(
+            "git",
+            ["branch", "--list", "--format=%(refname:short)"],
+            { cwd: root, env: strippedEnv() },
+          ).toString();
+        } catch {
+          branches = "";
+        }
+        const names = new Set(
+          branches
+            .split("\n")
+            .map((name) => name.trim())
+            .filter(Boolean),
+        );
+        const assets = await NodeFSP.readdir(NodePath.join(root, "godot", "assets")).catch(
+          () => [] as string[],
+        );
+        return {
+          vision: await exists("VISION.md"),
+          proto0: names.has("proto-0") || names.has("rejected/proto-0"),
+          proto1: names.has("proto-1") || names.has("rejected/proto-1"),
+          pick: await exists(".studio/pick.txt"),
+          plan: await exists("PLAN.md"),
+          art: assets.length > 0 || (await exists("ASSETS.md")),
+        };
+      });
+
+    // The game's chosen provider, model and options: the creator thread's own
+    // selection unless the run was started with explicit overrides. A
+    // `#variant` suffix on a model id is the client's display form, not a
+    // routable model: the opencode adapter parses provider/model and reads
+    // the variant from the model options, so launching with the suffix fails
+    // every turn at once (provider.no-route, ~100ms, zero assistant text).
+    // The suffix is stripped and becomes the `variant` option instead. (T25:
+    // every #xhigh turn failed this way while the plain model was fine.)
+    const selectionFor = Effect.fn("GameRun.selectionFor")(function* (
+      creatorThreadId: ThreadId,
+      stored: Pick<StoredRun, "provider" | "model" | "variant">,
+    ) {
+      const threads = yield* needThreads("read-model", String(creatorThreadId));
+      const projection = (yield* threads
+        .getThreadProjection(creatorThreadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("read-model", String(creatorThreadId), "thread-read", String(cause)),
+          ),
+        )) as unknown as {
+        thread: { modelSelection: ModelSelection };
+        runs: Array<{ modelSelection: ModelSelection }>;
+      };
+      const current: ModelSelection =
+        projection.runs[0]?.modelSelection ?? projection.thread.modelSelection;
+      const known = current as unknown as {
+        instanceId: ProviderInstanceId;
+        model: string;
+        options?: unknown;
+      };
+      let model = stored.model ?? known.model;
+      let variant = stored.variant;
+      const suffix = /#([A-Za-z][A-Za-z0-9_-]*)$/.exec(model);
+      if (suffix !== null) {
+        model = model.slice(0, suffix.index);
+        if (
+          (variant === null || variant === undefined || variant.length === 0) &&
+          suffix[1] !== undefined
+        )
+          variant = suffix[1];
+      }
+      const instanceId =
+        stored.provider === null || stored.provider === undefined
+          ? known.instanceId
+          : ProviderInstanceId.make(stored.provider);
+      if (
+        (variant === null || variant === undefined || variant.length === 0) &&
+        (stored.model === null || stored.model === undefined) &&
+        (stored.provider === null || stored.provider === undefined)
+      )
+        return current;
+      const base = current as unknown as Record<string, unknown>;
+      const options = withVariantOption(known.options, variant);
+      return {
+        ...base,
+        instanceId,
+        model,
+        ...(options === undefined ? {} : { options }),
+      } as ModelSelection;
+    });
+
+    const shellFor = Effect.fn("GameRun.shellFor")(function* (creatorThreadId: ThreadId) {
+      const threads = yield* needThreads("read-thread", String(creatorThreadId));
+      const projection = (yield* threads
+        .getThreadProjection(creatorThreadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("read-thread", String(creatorThreadId), "thread-read", String(cause)),
+          ),
+        )) as unknown as {
+        thread: { runtimeMode: RuntimeMode; interactionMode: ProviderInteractionMode };
+      };
+      return {
+        runtimeMode: projection.thread.runtimeMode,
+        interactionMode: projection.thread.interactionMode,
+      };
+    });
+
+    // One fresh ordinary thread on the game's project. `createdBy: "user"`
+    // keeps it a normal client-visible thread rather than a subagent child.
+    const launchRole = Effect.fn("GameRun.launchRole")(function* (
+      root: string,
+      stored: StoredRun,
+      creatorThreadId: ThreadId,
+      projectId: ProjectId,
+      role: string,
+      title: string,
+      prompt: string,
+    ) {
+      const launches = yield* needLaunches("launch-thread", root);
+      const selection: ModelSelection = yield* selectionFor(creatorThreadId, stored);
+      const shell: { runtimeMode: RuntimeMode; interactionMode: ProviderInteractionMode } =
+        yield* shellFor(creatorThreadId);
+      const launched = (yield* launches
+        .launch({
+          commandId: CommandId.make(NodeCrypto.randomUUID()),
+          projectId,
+          title,
+          modelSelection: selection,
+          runtimeMode: shell.runtimeMode,
+          interactionMode: shell.interactionMode,
+          workspaceStrategy: { type: "root" },
+          initialMessage: { text: prompt, attachments: [] },
+          createdBy: "user",
+          creationSource: "server",
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("launch-thread", root, "thread-launch", cause.message ?? String(cause)),
+          ),
+        )) as unknown as { threadId: ThreadId; projection: { runs: Array<{ id: RunId }> } };
+      const threadId = launched.threadId;
+      const runId = launched.projection.runs[0]?.id;
+      yield* recordThread(root, stored, role, threadId);
+      return { threadId, runId };
+    });
+
+    const sendTurn = Effect.fn("GameRun.sendTurn")(function* (
+      projectId: ProjectId,
+      threadId: ThreadId,
+      text: string,
+    ) {
+      const threads = yield* needThreads("send-turn", String(threadId));
+      const sent = (yield* threads
+        .sendToThread({
+          projectId,
+          commandId: CommandId.make(NodeCrypto.randomUUID()),
+          threadId,
+          messageId: MessageId.make(NodeCrypto.randomUUID()),
+          text,
+          attachments: [],
+          mode: "auto",
+          createdBy: "user",
+          creationSource: "server",
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("send-turn", String(threadId), "thread-send", String(cause)),
+          ),
+        )) as unknown as { run: { id: RunId } };
+      return sent.run.id;
+    });
+
+    // Wait for the thread's run with the 4-minute hang watchdog: no thread
+    // activity for STALL_MS means interrupt and continue on the same thread,
+    // up to MAX_RESTARTS times, then the caller replaces the thread.
+    const waitWithWatchdog = Effect.fn("GameRun.waitWithWatchdog")(function* (
+      projectId: ProjectId,
+      threadId: ThreadId,
+      runId: RunId | undefined,
+      capMs: number,
+      continueText: string,
+    ) {
+      const threads = yield* needThreads("wait-thread", String(threadId));
+      const deadline = Date.now() + capMs;
+      let restarts = 0;
+      let currentRunId = runId;
+      let lastGrowth = Date.now();
+      const baseline = (yield* threads.getThreadEventSequence(threadId).pipe(
+        Effect.mapError((cause) =>
+          fail("watch-thread", String(threadId), "thread-read", String(cause)),
+        ),
+        Effect.orElseSucceed(() => -1),
+      )) as unknown as number;
+      let lastSequence = baseline;
+      for (;;) {
+        const left = deadline - Date.now();
+        if (left <= 0) return { replaced: false as const, restarts };
+        const slice = Math.min(60_000, left);
+        const waited = (yield* threads
+          .waitForThread({
+            projectId,
+            threadId,
+            ...(currentRunId === undefined ? {} : { runId: currentRunId }),
+            timeoutMs: slice,
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              fail("wait-thread", String(threadId), "thread-wait", String(cause)),
+            ),
+          )) as unknown as { run: { id: RunId; status: string } | null; timedOut: boolean };
+        if (waited.run !== null && waited.run.id !== undefined) currentRunId = waited.run.id;
+        if (!waited.timedOut) return { replaced: false as const, restarts };
+        const sequence = (yield* threads.getThreadEventSequence(threadId).pipe(
+          Effect.mapError((cause) =>
+            fail("watch-thread", String(threadId), "thread-read", String(cause)),
+          ),
+          Effect.orElseSucceed(() => lastSequence),
+        )) as unknown as number;
+        if (sequence !== lastSequence) {
+          lastSequence = sequence;
+          lastGrowth = Date.now();
+          continue;
+        }
+        if (Date.now() - lastGrowth < STALL_MS) continue;
+        if (restarts >= MAX_RESTARTS) return { replaced: true as const, restarts };
+        restarts += 1;
+        lastGrowth = Date.now();
+        yield* threads
+          .interruptThread({
+            projectId,
+            commandId: CommandId.make(NodeCrypto.randomUUID()),
+            threadId,
+            ...(currentRunId === undefined ? {} : { runId: currentRunId }),
+            reason: "No thread activity for 4 minutes; continuing.",
+          })
+          .pipe(Effect.ignore);
+        currentRunId = yield* sendTurn(projectId, threadId, continueText);
+      }
+    });
+
+    const assistantText = Effect.fn("GameRun.assistantText")(function* (
+      threadId: ThreadId,
+      runId: RunId | undefined,
+    ) {
+      const threads = yield* needThreads("read-answer", String(threadId));
+      const records = (yield* threads
+        .getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["assistant"] })
+        .pipe(Effect.orElseSucceed(() => null))) as unknown as {
+        messages: Array<{ runId: RunId | null; role: string; text: string }>;
+      } | null;
+      if (records === null) return "";
+      const texts: string[] = [];
+      for (const message of records.messages ?? []) {
+        if (runId !== undefined && message.runId !== null && message.runId !== runId) continue;
+        if (typeof message.text === "string" && message.text.length > 0) texts.push(message.text);
+      }
+      return texts.join("\n");
+    });
+
+    // A usage limit pauses and retries: the run waits in 30-minute slices
+    // up to 6 hours, then resumes from the folder. Never switches models.
+    const pauseOnUsageLimit = Effect.fn("GameRun.pauseOnUsageLimit")(function* (
+      root: string,
+      threadId: ThreadId,
+      runId: RunId | undefined,
+    ) {
+      const text = yield* assistantText(threadId, runId);
+      if (!isUsageLimit(text)) return "ok" as const;
+      for (let i = 0; i < 12; i += 1) {
+        if (yield* stopRequested(root)) return "stopped" as const;
+        yield* Effect.sleep("30 minutes");
+        const retry = yield* assistantText(threadId, undefined);
+        if (!isUsageLimit(retry)) return "ok" as const;
+      }
+      return "usage-limit" as const;
+    });
+
+    const logLine = (root: string, line: string): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true });
+        await NodeFSP.appendFile(
+          NodePath.join(root, ".studio", "run.log"),
+          `${new Date().toISOString()} ${line}\n`,
+        );
+      }).pipe(Effect.ignore);
+
+    // The latest executed run's outcome: instant provider/session failures
+    // carry the provider's own reason (never model prose). Failed turns
+    // carry no assistant text, so the usage-limit text check never sees
+    // them; the failure class covers that gap too.
+    const latestOutcome = Effect.fn("GameRun.latestOutcome")(function* (threadId: ThreadId) {
+      const threads = yield* needThreads("read-outcome", String(threadId));
+      const records = (yield* threads
+        .getThreadRecords(threadId, ["runs", "turnItems"])
+        .pipe(Effect.orElseSucceed(() => null))) as unknown as {
+        runs: ReadonlyArray<OrchestrationV2Run>;
+        turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+      } | null;
+      if (records === null) return { instant: false, reason: "", cls: null as string | null };
+      const run = latestExecutedRun(records.runs);
+      if (run === null || run.status !== "failed")
+        return { instant: false, reason: "", cls: null as string | null };
+      const failure = latestRootProviderFailure(run, records.turnItems);
+      const text = yield* assistantText(threadId, run.id);
+      const wallMs =
+        run.startedAt !== null && run.completedAt !== null
+          ? DateTime.toEpochMillis(run.completedAt) - DateTime.toEpochMillis(run.startedAt)
+          : Number.POSITIVE_INFINITY;
+      const instant = wallMs < INSTANT_FAIL_MS && text.trim().length === 0;
+      const reason =
+        failure === null
+          ? "run failed with no provider message"
+          : `${failure.class}: ${failure.message}`.slice(0, 300);
+      return { instant, reason, cls: (failure?.class ?? null) as string | null };
+    });
+
+    // Back off and retry an instant failure, replace the thread after a few,
+    // pause the run when fresh threads fail the same way. Sleeps inside.
+    const handleInstantFail = Effect.fn("GameRun.handleInstantFail")(function* (
+      root: string,
+      stored: StoredRun,
+      state: { consec: number; replacements: number },
+      reason: string,
+      cls: string | null,
+    ): Generator<
+      Effect.Effect<unknown, GameRunError>,
+      "retry" | "replace" | "down" | "usage",
+      never
+    > {
+      state.consec += 1;
+      stored.lastFailure = reason;
+      yield* writeStored(root, stored);
+      yield* logLine(root, `instant-failed turn (${reason}) [${state.consec} in a row]`);
+      if (cls === "usage_limit") return "usage";
+      if (state.consec >= INSTANT_FAIL_RETRIES) {
+        if (state.replacements >= INSTANT_FAIL_REPLACEMENTS) {
+          yield* logLine(root, `provider route still down (${reason}): pausing run`);
+          return "down";
+        }
+        state.replacements += 1;
+        state.consec = 0;
+        yield* logLine(root, `replacing thread after repeated instant failures (${reason})`);
+        return "replace";
+      }
+      yield* Effect.sleep(`${Math.min(15 * 2 ** (state.consec - 1), 120)} seconds`);
+      return "retry";
+    });
+
+    // One wait plus the usage-limit pause. `end` is null while the run goes on.
+    // An instantly failed turn backs off here too, so judging and writing
+    // roles never spin; builder blocks add replacement on top.
+    const noteRouteFailure = (root: string, reason: string): Effect.Effect<void> =>
+      Effect.promise(async () => {
+        const path = NodePath.join(root, ".studio", "run.json");
+        try {
+          const current = JSON.parse(await NodeFSP.readFile(path, "utf8")) as StoredRun;
+          current.lastFailure = reason;
+          await NodeFSP.writeFile(path, `${JSON.stringify(current, null, 2)}\n`);
+        } catch {
+          // Never fail a run on bookkeeping.
+        }
+      }).pipe(Effect.ignore);
+
+    const waitRole = Effect.fn("GameRun.waitRole")(function* (
+      root: string,
+      projectId: ProjectId,
+      threadId: ThreadId,
+      runId: RunId | undefined,
+      capMs: number,
+      continueText: string,
+    ): Generator<
+      Effect.Effect<unknown, GameRunError>,
+      { replaced: boolean; restarts: number; end: string | null },
+      never
+    > {
+      const waited = yield* waitWithWatchdog(projectId, threadId, runId, capMs, continueText);
+      const limit = yield* pauseOnUsageLimit(root, threadId, undefined);
+      if (limit !== "ok")
+        return { replaced: waited.replaced, restarts: waited.restarts, end: limit };
+      const outcome = yield* latestOutcome(threadId);
+      if (!outcome.instant) {
+        routeHealth.consec = 0;
+        return { replaced: waited.replaced, restarts: waited.restarts, end: null };
+      }
+      routeHealth.consec += 1;
+      yield* noteRouteFailure(root, outcome.reason);
+      yield* logLine(
+        root,
+        `instant-failed turn (${outcome.reason}) [run-wide ${routeHealth.consec}]`,
+      );
+      if (outcome.cls === "usage_limit")
+        return { replaced: waited.replaced, restarts: waited.restarts, end: "usage-limit" };
+      yield* Effect.sleep("30 seconds");
+      if (routeHealth.consec >= 8) {
+        yield* logLine(root, `provider route down (${outcome.reason}): pausing run`);
+        return { replaced: waited.replaced, restarts: waited.restarts, end: "provider-down" };
+      }
+      return { replaced: waited.replaced, restarts: waited.restarts, end: null };
+    });
+
+    // Run one role turn, then a separate writing turn on the same thread, so
+    // a report file always exists even when the play turn hits its cap.
+    const playThenWrite = Effect.fn("GameRun.playThenWrite")(function* (
+      root: string,
+      stored: StoredRun,
+      creatorThreadId: ThreadId,
+      projectId: ProjectId,
+      role: string,
+      playPrompt: string,
+      writePrompt: string,
+      playCapMs: number,
+      notesRel: string | null,
+    ) {
+      const continued = "Continue where you left off. Reply briefly, then keep working.";
+      const launched = yield* launchRole(
+        root,
+        stored,
+        creatorThreadId,
+        projectId,
+        role,
+        `studio ${role}`,
+        playPrompt,
+      );
+      const play = yield* waitRole(
+        root,
+        projectId,
+        launched.threadId,
+        launched.runId,
+        playCapMs,
+        continued,
+      );
+      if (play.end !== null)
+        return {
+          threadId: launched.threadId,
+          notes: "",
+          wrote: false as const,
+          restarts: play.restarts,
+          end: play.end,
+        };
+      let activeThreadId = launched.threadId;
+      let restarts = play.restarts;
+      if (play.replaced) {
+        const retry = yield* launchRole(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          role,
+          `studio ${role} (continued)`,
+          `${playPrompt}\n\nA previous thread hung and was replaced. Carry on from the folder state.`,
+        );
+        activeThreadId = retry.threadId;
+        const retryWait = yield* waitRole(
+          root,
+          projectId,
+          retry.threadId,
+          retry.runId,
+          WRITE_CAP_MS,
+          continued,
+        );
+        restarts += retryWait.restarts;
+        if (retryWait.end !== null)
+          return {
+            threadId: activeThreadId,
+            notes: "",
+            wrote: false as const,
+            restarts,
+            end: retryWait.end,
+          };
+      }
+      const writeRunId = yield* sendTurn(
+        projectId,
+        activeThreadId,
+        `Stop playing, now write it. ${writePrompt}`,
+      );
+      const written = yield* waitRole(
+        root,
+        projectId,
+        activeThreadId,
+        writeRunId,
+        WRITE_CAP_MS,
+        continued,
+      );
+      if (written.end !== null)
+        return {
+          threadId: activeThreadId,
+          notes: "",
+          wrote: false as const,
+          restarts,
+          end: written.end,
+        };
+      let notes = "";
+      if (notesRel !== null) {
+        notes = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, notesRel), "utf8").catch(() => ""),
+        );
+        notes = notes.trim();
+      }
+      if (notes.trim().length <= 20) {
+        const fallback = yield* assistantText(activeThreadId, writeRunId);
+        if (fallback.trim().length > 20)
+          return {
+            threadId: activeThreadId,
+            notes: fallback,
+            wrote: true as const,
+            restarts,
+            end: null as string | null,
+          };
+      }
+      return {
+        threadId: activeThreadId,
+        notes,
+        wrote: (notes.trim().length > 20) as boolean,
+        restarts,
+        end: null as string | null,
+      };
+    });
+
+    // One continuing builder thread per block. When a turn ends and block
+    // time remains, the harness sends minutes used plus what's still undone.
+    const builderBlock = Effect.fn("GameRun.builderBlock")(function* (
+      root: string,
+      stored: StoredRun,
+      creatorThreadId: ThreadId,
+      projectId: ProjectId,
+      tag: string,
+      direction: string,
+      blockMs: number,
+    ) {
+      const continued = "Continue where you left off. Reply briefly, then keep working.";
+      const end = Date.now() + blockMs;
+      const first =
+        `${BUILD_RULE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
+        `Note learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
+      const launched = yield* launchRole(
+        root,
+        stored,
+        creatorThreadId,
+        projectId,
+        `builder-${tag}`,
+        `studio builder ${tag}`,
+        first,
+      );
+      let threadId = launched.threadId;
+      let runId = launched.runId;
+      let turns = 0;
+      const failState = { consec: 0, replacements: 0 };
+      const replaceThread = function* (why: string) {
+        const retry = yield* launchRole(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          `builder-${tag}`,
+          `studio builder ${tag} (continued)`,
+          `${first}\n\n${why} Carry on from the folder state.`,
+        );
+        threadId = retry.threadId;
+        runId = retry.runId;
+      };
+      for (;;) {
+        const left = end - Date.now();
+        if (left < 120_000) break;
+        turns += 1;
+        const waited = yield* waitRole(root, projectId, threadId, runId, left, continued);
+        if (waited.end !== null) return { threadId, turns, end: waited.end as string | null };
+        if (waited.replaced) {
+          yield* replaceThread("A previous builder thread hung and was replaced.");
+          failState.consec = 0;
+          continue;
+        }
+        // An instantly failed turn never reached the model: back off and
+        // retry the direction (never the minutes-left nudge), replace the
+        // thread after a few, pause the run when the route stays down.
+        const outcome = yield* latestOutcome(threadId);
+        if (outcome.instant) {
+          const action = yield* handleInstantFail(
+            root,
+            stored,
+            failState,
+            outcome.reason,
+            outcome.cls,
+          );
+          if (action === "down") return { threadId, turns, end: "provider-down" as string | null };
+          if (action === "usage") return { threadId, turns, end: "usage-limit" as string | null };
+          if (action === "replace") {
+            yield* replaceThread(
+              `The last turns failed before reaching the model (${outcome.reason}).`,
+            );
+            continue;
+          }
+          runId = yield* sendTurn(
+            projectId,
+            threadId,
+            `The last turn failed before reaching the model (${outcome.reason}). Continue with this block's direction:\n${direction}\nNo subagents. No commits.`,
+          );
+          continue;
+        }
+        failState.consec = 0;
+        const leftAfter = end - Date.now();
+        if (leftAfter < 120_000) break;
+        const mins = Math.max(1, Math.round(leftAfter / 60_000));
+        runId = yield* sendTurn(
+          projectId,
+          threadId,
+          `${mins} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nDo not redo what works. No subagents. No commits.`,
+        );
+      }
+      return { threadId, turns, end: null as string | null };
+    });
+
+    // Plain code facts for reviewers. States numbers, never interprets them.
+    // The bot's fastest finish is a plain fact with no length target beside
+    // it; the reviewer decides what it means.
+    const codeFacts = (root: string): Effect.Effect<string> =>
+      Effect.promise(async () => {
+        const gd: Array<{ f: string; n: number }> = [];
+        const walk = async (dir: string): Promise<void> => {
+          for (const entry of await NodeFSP.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+            const full = NodePath.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              if (entry.name !== ".godot" && entry.name !== "builds") await walk(full);
+            } else if (entry.name.endsWith(".gd")) {
+              const text = await NodeFSP.readFile(full, "utf8").catch(() => "");
+              gd.push({ f: NodePath.relative(root, full), n: text.split("\n").length });
+            }
+          }
+        };
+        await walk(NodePath.join(root, "godot"));
+        gd.sort((a, b) => b.n - a.n);
+        const count = async (re: RegExp): Promise<number> => {
+          let found = 0;
+          const walkFiles = async (dir: string): Promise<void> => {
+            for (const entry of await NodeFSP.readdir(dir, { withFileTypes: true }).catch(
+              () => [],
+            )) {
+              const full = NodePath.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                if (entry.name !== ".godot") await walkFiles(full);
+              } else if (re.test(entry.name) && !entry.name.endsWith(".import")) found += 1;
+            }
+          };
+          await walkFiles(NodePath.join(root, "godot"));
+          return found;
+        };
+        const images = await count(/\.(png|jpg|jpeg|webp|svg)$/i);
+        const audio = await count(/\.(wav|ogg|mp3|mid|midi)$/i);
+        const models = await count(/\.(glb|gltf|fbx|obj|blend)$/i);
+        let refs = 0;
+        try {
+          const out = await new Promise<string>((resolve) => {
+            const child = NodeChildProcess.spawn(
+              "grep",
+              ["-rho", "res://[^\"' )]*", NodePath.join(root, "godot")],
+              { env: strippedEnv() },
+            );
+            let text = "";
+            child.stdout?.on("data", (chunk: Buffer) => {
+              text += chunk.toString("utf8");
+            });
+            child.on("close", () => resolve(text));
+            child.on("error", () => resolve(""));
+          });
+          refs = out.split("\n").filter(Boolean).length;
+        } catch {
+          refs = 0;
+        }
+        const top =
+          gd
+            .slice(0, 5)
+            .map((entry) => `${entry.f} ${entry.n} lines`)
+            .join("; ") || "no gd files";
+        // Bot-run facts: fastest finish anyone managed, how many runs
+        // reached the ending. Testers append one JSON line per game_bot_run.
+        let botLine = "no bot runs recorded yet";
+        try {
+          const lines = (
+            await NodeFSP.readFile(NodePath.join(root, ".studio", "bot-results.jsonl"), "utf8")
+          )
+            .split("\n")
+            .filter(Boolean);
+          let wins = 0;
+          let fastest: number | null = null;
+          let total = 0;
+          let findings = 0;
+          for (const line of lines) {
+            try {
+              const row = JSON.parse(line) as {
+                won?: boolean;
+                seconds?: number;
+                findings?: number;
+              };
+              total += 1;
+              if (row.won === true) {
+                wins += 1;
+                if (typeof row.seconds === "number" && (fastest === null || row.seconds < fastest))
+                  fastest = row.seconds;
+              }
+              if (typeof row.findings === "number") findings += row.findings;
+            } catch {
+              // One bad line never breaks the facts.
+            }
+          }
+          botLine = `${total} bot runs, ${wins} reached the ending${fastest === null ? "" : `, fastest finish ${fastest.toFixed(1)}s`}, ${findings} detector findings`;
+        } catch {
+          // No bot results yet; leave the default.
+        }
+        return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} res:// references. Bots: ${botLine}.`;
+      });
+
+    const bootCheck = Effect.fn("GameRun.bootCheck")(function* (threadId: ThreadId) {
+      const game = yield* needGame("boot-check", String(threadId));
+      const result = (yield* game
+        .check(threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            fail("boot-check", String(threadId), "check-failed", cause.message),
+          ),
+        )) as unknown as { ok: boolean };
+      if (result.ok) return { ok: true as const, detail: "boot clean" };
+      return { ok: false as const, detail: "check failed" };
+    });
+
+    const runLoop = Effect.fn("GameRun.runLoop")(function* (
+      root: string,
+      projectId: ProjectId,
+      creatorThreadId: ThreadId,
+      stored: StoredRun,
+    ): Generator<Effect.Effect<unknown, GameRunError>, string, never> {
+      yield* ensureGameScaffold(root);
+      const deadline =
+        stored.budgetMinutes === null ? Infinity : Date.now() + stored.budgetMinutes * 60_000;
+      const remaining = (): number => deadline - Date.now();
+      const done = yield* stageDone(root);
+      let best = yield* gitOut(root, ["rev-parse", "HEAD"]);
+      let stallStreak = stored.stallStreak;
+
+      const singleStage = Effect.fn("GameRun.singleStage")(function* (
+        key: string,
+        title: string,
+        prompt: string,
+        capMs: number,
+      ) {
+        const current = yield* readStored(root);
+        if (current !== null && current.stage !== key && done[key] === true) {
+          stored.stage = key;
+          yield* writeStored(root, stored);
+          return null as string | null;
+        }
+        const launched = yield* launchRole(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          key,
+          `studio ${title}`,
+          prompt,
+        );
+        const staged = yield* waitRole(
+          root,
+          projectId,
+          launched.threadId,
+          launched.runId,
+          capMs,
+          "Continue where you left off. Reply briefly, then keep working.",
+        );
+        if (staged.end !== null) return staged.end;
+        const sha = yield* commitAll(root, key);
+        if (sha !== null && sha !== best) {
+          const boot = yield* bootCheck(launched.threadId);
+          if (!boot.ok) {
+            yield* rejectWork(root, best, key, boot.detail);
+          } else {
+            best = sha;
+          }
+        }
+        stored.stage = key;
+        yield* writeStored(root, stored);
+        return null as string | null;
+      });
+
+      // 1. Vision.
+      if (done.vision !== true) {
+        const visionEnd = yield* singleStage(
+          "vision",
+          "vision",
+          `${PLAYBOOK}Read the brief in BRIEF.md (and PROJECT.md when present) and make it yours. Write VISION.md in this folder in your own words: the player's fantasy, the 30-second loop, what makes this one special. Then create one key-art PNG the finished game must live up to (write it with code or your own image tools) and name it in VISION.md. Do not write game code yet. Work only in this folder. Do not use subagents. Never commit.`,
+          6 * 60_000,
+        );
+        if (visionEnd !== null) return visionEnd;
+      } else {
+        stored.stage = "vision";
+        yield* writeStored(root, stored);
+      }
+      if (yield* stopRequested(root)) return "stopped";
+
+      // 2. Two quick prototypes on branches, then a blind pick by a fresh
+      // thread that plays them.
+      const protos = done;
+      for (let i = 0; i < 2; i += 1) {
+        const key = `proto-${i}`;
+        if (protos[`proto${i}`] === true) continue;
+        const launched = yield* launchRole(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          key,
+          `studio ${key}`,
+          `${BUILD_RULE_SHORT}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./godot on this branch with placeholder art only: something winnable and losable. Keep the boot clean. Do not use subagents. Do not commit.`,
+        );
+        const protoWait = yield* waitRole(
+          root,
+          projectId,
+          launched.threadId,
+          launched.runId,
+          8 * 60_000,
+          "Continue where you left off. Reply briefly, then keep working.",
+        );
+        if (protoWait.end !== null) return protoWait.end;
+        yield* gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
+          Effect.catch(() => gitExec(root, ["checkout", "-q", key], 60_000)),
+        );
+        const sha = yield* commitAll(root, key);
+        if (sha !== null) {
+          const boot = yield* bootCheck(launched.threadId);
+          if (!boot.ok) yield* rejectWork(root, best, key, boot.detail);
+        }
+        yield* ensureOn(root, "main", "proto cleanup");
+        if (best.length > 0) yield* resetMainTo(root, best);
+      }
+      if ((yield* stageDone(root)).pick !== true) {
+        const usable = (yield* gitOut(root, ["branch", "--list", "--format=%(refname:short)"]))
+          .split("\n")
+          .map((name) => name.trim())
+          .filter((name) => /^(rejected\/)?proto-\d+$/.test(name));
+        if (usable.length >= 2) {
+          const aSha = usable[0]!;
+          const bSha = usable[1]!;
+          // Blind pick: the picker plays the live folder while the harness
+          // swaps the checked-out build between its turns, labelled only A/B.
+          // A failed swap voids the pick (the judge would play one build twice).
+          if (!(yield* checkoutOk(root, aSha))) {
+            yield* logLine(root, "pick: cannot check out build A; skipping blind pick");
+          } else {
+            const launched = yield* launchRole(
+              root,
+              stored,
+              creatorThreadId,
+              projectId,
+              "pick",
+              "studio pick",
+              `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native), about two minutes. After every couple of plays, append what you did and felt to PICK-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, what you learned, where it got boring, whether you wanted another go. Write one line COMPARE: A in PICK-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
+            );
+            const pickWait1 = yield* waitRole(
+              root,
+              projectId,
+              launched.threadId,
+              launched.runId,
+              JUDGE_CAP_MS,
+              "Continue where you left off. Reply briefly, then keep working.",
+            );
+            if (pickWait1.end !== null) return pickWait1.end;
+            if (!(yield* checkoutOk(root, bSha))) {
+              yield* logLine(root, "pick: cannot check out build B; keeping A-only notes");
+            } else {
+              const secondRunId = yield* sendTurn(
+                projectId,
+                launched.threadId,
+                "Build B is now checked out in this folder. Play it the same way, about two minutes, appending to PICK-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
+              );
+              const pickWait2 = yield* waitRole(
+                root,
+                projectId,
+                launched.threadId,
+                secondRunId,
+                JUDGE_CAP_MS,
+                "Continue where you left off. Reply briefly, then keep working.",
+              );
+              if (pickWait2.end !== null) return pickWait2.end;
+            }
+            const writeRunId = yield* sendTurn(
+              projectId,
+              launched.threadId,
+              "Stop playing, now write it. Rewrite PICK-NOTES.md with what you did and felt in each build in your own words, copy it to .studio/pick.txt, and end PICK-NOTES.md with exactly one line COMPARE: A or COMPARE: B plus reasons on following lines. You may only write PICK-NOTES.md and .studio/pick.txt. Judge only from play.",
+            );
+            const pickWait3 = yield* waitRole(
+              root,
+              projectId,
+              launched.threadId,
+              writeRunId,
+              WRITE_CAP_MS,
+              "Continue where you left off. Reply briefly, then keep working.",
+            );
+            if (pickWait3.end !== null) return pickWait3.end;
+            const pickText = yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(root, ".studio", "pick.txt"), "utf8").catch(() => ""),
+            );
+            const verdict = parseCompare(pickText);
+            const winner = verdict === "B" ? bSha : aSha;
+            if (yield* ensureOn(root, "main", "pick merge")) {
+              const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", winner], 60_000);
+              if (merged.exitCode !== 0)
+                yield* logLine(
+                  root,
+                  `pick merge failed (${merged.stdout.slice(0, 200)}); staying on best`,
+                );
+              best = yield* gitOut(root, ["rev-parse", "HEAD"]);
+            }
+            yield* Effect.promise(() =>
+              NodeFSP.rm(NodePath.join(root, "PICK-NOTES.md"), { force: true }).catch(
+                () => undefined,
+              ),
+            );
+          } // end picked-pair block (skipped when build A never checked out)
+        } else if (usable.length === 1) {
+          if (yield* ensureOn(root, "main", "pick merge single")) {
+            const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", usable[0]!], 60_000);
+            if (merged.exitCode !== 0)
+              yield* logLine(
+                root,
+                `pick merge failed (${merged.stdout.slice(0, 200)}); staying on best`,
+              );
+            best = yield* gitOut(root, ["rev-parse", "HEAD"]);
+          }
+        }
+        stored.stage = "pick";
+        yield* writeStored(root, stored);
+      }
+      if (yield* stopRequested(root)) return "stopped";
+
+      // 3. Plan: PLAN.md with the game's structure, assets, what makes the
+      // core experience good, and what done means for the scope the brief
+      // asks for. No content list, no length target: quality of what exists
+      // is the goal, and adding levels is the creator's job, not the loop's.
+      if ((yield* stageDone(root)).plan !== true) {
+        const planEnd = yield* singleStage(
+          "plan",
+          "plan",
+          `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (target native). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Do not list extra levels or content to add. Do not write game code. Do not use subagents. Do not commit.`,
+          5 * 60_000,
+        );
+        if (planEnd !== null) return planEnd;
+        const sha = yield* commitAll(root, "plan");
+        if (sha !== null && sha !== best) best = sha;
+      } else {
+        stored.stage = "plan";
+        yield* writeStored(root, stored);
+      }
+
+      // 4. Art. For 3D that means the game_blender_* tools.
+      if ((yield* stageDone(root)).art !== true) {
+        const artEnd = yield* singleStage(
+          "art",
+          "art",
+          `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Render the game's asset set as files in godot/assets (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. A 3D game needs real 3D models made with the game_blender_* tools and exported as GLB (rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. Record sources in ASSETS.md. Do not write game code yet. Do not use subagents. Do not commit.`,
+          8 * 60_000,
+        );
+        if (artEnd !== null) return artEnd;
+        const sha = yield* commitAll(root, "art");
+        if (sha !== null && sha !== best) {
+          const boot = yield* bootCheck(creatorThreadId);
+          if (!boot.ok) yield* rejectWork(root, best, "art", boot.detail);
+          else best = sha;
+        }
+      } else {
+        stored.stage = "art";
+        yield* writeStored(root, stored);
+      }
+      if (yield* stopRequested(root)) return "stopped";
+
+      // 5. Build block.
+      if (stored.rounds.length === 0) {
+        const blockMs =
+          stored.budgetMinutes === null
+            ? FULL_BUILD_MS
+            : Math.min(FULL_BUILD_MS, remaining() - 24 * 60_000);
+        if (blockMs >= 120_000) {
+          const buildBlock = yield* builderBlock(
+            root,
+            stored,
+            creatorThreadId,
+            projectId,
+            "build",
+            FIRST_DIRECTION,
+            blockMs,
+          );
+          if (buildBlock.end !== null) return buildBlock.end;
+          const sha = yield* commitAll(root, "build");
+          if (sha !== null && sha !== best) {
+            const boot = yield* bootCheck(creatorThreadId);
+            if (!boot.ok) yield* rejectWork(root, best, "build", boot.detail);
+            else best = sha;
+          }
+        }
+        stored.stage = "build";
+        yield* writeStored(root, stored);
+      }
+
+      // 6. Rounds until an ending.
+      let round = stored.rounds.length;
+      for (;;) {
+        if (yield* stopRequested(root)) return "stopped";
+        if (stored.budgetMinutes !== null && remaining() < 4 * 60_000 + 18 * 60_000)
+          return "budget";
+        round += 1;
+        const key = `round-${round}`;
+        const roundStart = Date.now();
+        const nextMd = yield* readNextMd(root);
+        const pickNotes = nextMd.length > 0 ? "" : yield* readPick(root);
+        const concreteAsk =
+          "Deliver something a player would notice in the first minute: a control that feels different, a visible change on screen, a new or fixed sound, a readable HUD element, or one fixed rough edge from the tester notes. Work in game files under godot/ only; notes, bots and skill files do not count.";
+        const direction =
+          nextMd.length > 0
+            ? nextMd
+            : pickNotes.length > 0
+              ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks (better, never bigger: no new levels, systems or length):\n${pickNotes}\n${concreteAsk}`
+              : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. Do not add new levels, systems or length; make what's there really good. ${concreteAsk}`;
+        const move = direction.slice(0, 300);
+        const record: RoundRecord = {
+          round,
+          move,
+          branch: key,
+          sweepFindings: 0,
+          verdicts: [],
+          kept: false,
+          durationMs: 0,
+          linesChanged: 0,
+        };
+        if (!(yield* ensureOn(root, "main", `round ${round} start`))) {
+          yield* logLine(root, `round ${round}: cannot reach main; counting stalled`);
+          stallStreak += 1;
+          stored.stallStreak = stallStreak;
+          yield* writeStored(root, stored);
+          if (stallStreak >= 3) return "stalled";
+          yield* Effect.sleep("60 seconds");
+          continue;
+        }
+        yield* gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
+          Effect.catch(() => gitExec(root, ["checkout", "-q", key], 60_000)),
+        );
+        const blockMs =
+          stored.budgetMinutes === null
+            ? BLOCK_MS
+            : Math.min(BLOCK_MS, remaining() - 18 * 60_000 - 4 * 60_000);
+        if (blockMs < 120_000) return stored.budgetMinutes === null ? "stopped" : "budget";
+        const roundBlock = yield* builderBlock(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          `${round}`,
+          direction,
+          blockMs,
+        );
+        if (roundBlock.end !== null) return roundBlock.end;
+        yield* commitAll(root, key);
+        if (!(yield* gameChangedSince(root, best))) {
+          // One short replace attempt with a concrete prompt before calling
+          // it stalled: the last block changed no game files.
+          const retryMs =
+            stored.budgetMinutes === null
+              ? 6 * 60_000
+              : Math.min(6 * 60_000, remaining() - 5 * 60_000);
+          if (retryMs >= 120_000) {
+            const retry = yield* builderBlock(
+              root,
+              stored,
+              creatorThreadId,
+              projectId,
+              `${round}b`,
+              `The last block changed no game files under godot/ and will be discarded. Make a real change now: ${direction} Deliver something a player would notice in the first minute (a control that feels different, a visible change on screen, a sound, a fixed rough edge). Verify with game_check. Do not end your turn without changing a game file under godot/. No subagents. No commits.`,
+              retryMs,
+            );
+            if (retry.end !== null) return retry.end;
+            yield* commitAll(root, `${key}-retry`);
+          }
+        }
+        if (!(yield* gameChangedSince(root, best))) {
+          yield* ensureOn(root, "main", `round ${round} stall`);
+          yield* logLine(
+            root,
+            `round ${round}: stalled (no game-code change under godot/ after replace attempt)`,
+          );
+          record.note = "stalled (no game-code change under godot/ after replace attempt)";
+          record.durationMs = Date.now() - roundStart;
+          yield* appendRound(root, stored, record);
+          stallStreak += 1;
+          stored.stallStreak = stallStreak;
+          yield* writeStored(root, stored);
+          if (stallStreak >= 3) return "stalled";
+          continue;
+        }
+        const candidate = yield* gitOut(root, ["rev-parse", "HEAD"]);
+        const boot = yield* bootCheck(creatorThreadId);
+        if (!boot.ok) {
+          yield* rejectWork(root, best, key, `boot failed: ${boot.detail}`);
+          record.note = `boot failed: ${boot.detail}`.slice(0, 300);
+          record.durationMs = Date.now() - roundStart;
+          yield* appendRound(root, stored, record);
+          stallStreak += 1;
+          stored.stallStreak = stallStreak;
+          yield* writeStored(root, stored);
+          if (stallStreak >= 3) return "stalled";
+          continue;
+        }
+        record.linesChanged = yield* gameLinesSince(root, best);
+
+        // Tester: plays, writes or updates a bot with game_bot_run, tries to
+        // reach the ending, plays roughly, writes .studio/tester-<n>.md.
+        const tester = yield* playThenWrite(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          `tester-${round}`,
+          `${PLAYBOOK}Play the game in this folder freely: start it with game_explore_start (target native), get past the menu, push as far as you can, try to win and to lose. You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev); after each bot run append one JSON line to .studio/bot-results.jsonl with runId, seconds, won true/false, video path, and findings count. A note without a bot run does not count. Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${round}.md, main complaint first. You may only write that notes file, .studio/bot/ files and .studio/bot-results.jsonl; do not change game files. Do not use subagents.`,
+          `Read .studio/tester-${round}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. You may only write that notes file.`,
+          TESTER_CAP_MS,
+          `.studio/tester-${round}.md`,
+        );
+        if (tester.end !== null) return tester.end;
+        record.testerNote = tester.notes.split("\n").slice(0, 20).join("\n").slice(0, 600);
+        if (!tester.wrote) record.note = `${record.note ?? ""} tester write failed`.trim();
+
+        // Blind compare by a fresh thread that plays candidate and best from
+        // neutral folders, in both orders. The candidate merges unless best
+        // wins both. Rejected work stays on a branch.
+        const judgeOne = Effect.fn("GameRun.judgeOne")(function* (
+          tag: string,
+          firstSha: string,
+          secondSha: string,
+        ) {
+          const dir = NodePath.join(
+            NodeOS.homedir(),
+            ".gs-tmp",
+            `studio-cmp-${stored.runId}-${tag}`,
+          );
+          yield* Effect.promise(() =>
+            NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
+          );
+          yield* Effect.promise(() => NodeFSP.mkdir(NodePath.join(dir, "A"), { recursive: true }));
+          yield* Effect.promise(() => NodeFSP.mkdir(NodePath.join(dir, "B"), { recursive: true }));
+          yield* gitExec(
+            root,
+            ["--work-tree", NodePath.join(dir, "A"), "checkout", firstSha, "--", "."],
+            60_000,
+          ).pipe(Effect.ignore);
+          yield* gitExec(root, ["reset", "-q"], 60_000).pipe(Effect.ignore);
+          yield* gitExec(
+            root,
+            ["--work-tree", NodePath.join(dir, "B"), "checkout", secondSha, "--", "."],
+            60_000,
+          ).pipe(Effect.ignore);
+          yield* gitExec(root, ["reset", "-q"], 60_000).pipe(Effect.ignore);
+          // A failed swap voids this judging: the judge would play one build twice.
+          if (!(yield* checkoutOk(root, firstSha))) {
+            yield* logLine(root, `round ${round}: judge ${tag} cannot check out first build`);
+            yield* Effect.promise(() =>
+              NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
+            );
+            return { verdict: "NONE", reason: "build checkout failed", end: null as string | null };
+          }
+          const launched = yield* launchRole(
+            root,
+            stored,
+            creatorThreadId,
+            projectId,
+            `judge-${tag}`,
+            `studio judge ${tag}`,
+            `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native) and game_bot_run, about two minutes. After every couple of plays, append what you did and felt to JUDGE-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, where it got boring, whether you wanted another go. Write one line COMPARE: A in JUDGE-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
+          );
+          const judgeWait1 = yield* waitRole(
+            root,
+            projectId,
+            launched.threadId,
+            launched.runId,
+            JUDGE_CAP_MS,
+            "Continue where you left off. Reply briefly, then keep working.",
+          );
+          if (judgeWait1.end !== null)
+            return { verdict: "NONE", reason: "", end: judgeWait1.end as string | null };
+          if (!(yield* checkoutOk(root, secondSha))) {
+            yield* logLine(root, `round ${round}: judge ${tag} cannot check out second build`);
+            yield* Effect.promise(() =>
+              NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
+            );
+            return { verdict: "NONE", reason: "build checkout failed", end: null as string | null };
+          }
+          const secondRunId = yield* sendTurn(
+            projectId,
+            launched.threadId,
+            "Build B is now checked out in this folder. Play it the same way with game_explore_start (target native) and game_bot_run, about two minutes, appending to JUDGE-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
+          );
+          const judgeWait2 = yield* waitRole(
+            root,
+            projectId,
+            launched.threadId,
+            secondRunId,
+            JUDGE_CAP_MS,
+            "Continue where you left off. Reply briefly, then keep working.",
+          );
+          if (judgeWait2.end !== null)
+            return { verdict: "NONE", reason: "", end: judgeWait2.end as string | null };
+          const writeRunId = yield* sendTurn(
+            projectId,
+            launched.threadId,
+            "Stop playing, now write it. Rewrite JUDGE-NOTES.md so it states what you did and felt in build A and build B in your own words and ends with COMPARE: A or COMPARE: B or COMPARE: TIE plus reasons on following lines. You may only write JUDGE-NOTES.md.",
+          );
+          const judgeWait3 = yield* waitRole(
+            root,
+            projectId,
+            launched.threadId,
+            writeRunId,
+            WRITE_CAP_MS,
+            "Continue where you left off. Reply briefly, then keep working.",
+          );
+          if (judgeWait3.end !== null)
+            return { verdict: "NONE", reason: "", end: judgeWait3.end as string | null };
+          const notes = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "JUDGE-NOTES.md"), "utf8").catch(() => ""),
+          );
+          yield* Effect.promise(() =>
+            NodeFSP.rm(NodePath.join(root, "JUDGE-NOTES.md"), { force: true }).catch(
+              () => undefined,
+            ),
+          );
+          yield* Effect.promise(() =>
+            NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
+          );
+          const verdict = parseCompare(notes);
+          const lines = notes.split("\n");
+          const at = lines.findLastIndex((line) => /^COMPARE:\s*(A|B|TIE)\s*$/i.test(line));
+          const reason =
+            at >= 0
+              ? lines
+                  .slice(at + 1)
+                  .join(" ")
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .slice(0, 500)
+              : "";
+          return { verdict: verdict ?? "NONE", reason, end: null as string | null };
+        });
+        let order1 = yield* judgeOne(`${key}-1`, candidate, best);
+        if (order1.end !== null) return order1.end;
+        // A missing verdict gets one retry; a round with no verdicts is
+        // never kept as if it had won.
+        const retryNone = function* (
+          tag: string,
+          first: string,
+          second: string,
+          cur: { verdict: string; reason: string; end: string | null },
+        ) {
+          if (cur.verdict !== "NONE") return cur;
+          yield* logLine(root, `round ${round}: judge ${tag} gave no verdict, retrying once`);
+          const retry = yield* judgeOne(`${key}-${tag}r`, first, second);
+          if (retry.end !== null) return { verdict: "NONE", reason: "", end: retry.end };
+          return retry.verdict !== "NONE" ? retry : cur;
+        };
+        order1 = yield* retryNone("order 1", candidate, best, order1);
+        if (order1.end !== null) return order1.end;
+        record.verdicts.push({
+          order: "A=candidate,B=best",
+          verdict: order1.verdict,
+          reason: order1.reason,
+        });
+        let order2 = yield* judgeOne(`${key}-2`, best, candidate);
+        if (order2.end !== null) return order2.end;
+        order2 = yield* retryNone("order 2", best, candidate, order2);
+        if (order2.end !== null) return order2.end;
+        record.verdicts.push({
+          order: "A=best,B=candidate",
+          verdict: order2.verdict,
+          reason: order2.reason,
+        });
+        const bestWinsBoth = order1.verdict === "B" && order2.verdict === "A";
+        const noVerdicts = order1.verdict === "NONE" || order2.verdict === "NONE";
+        if (bestWinsBoth) {
+          if (yield* ensureOn(root, "main", `round ${round} reject`)) {
+            if (best.length > 0) yield* resetMainTo(root, best);
+          }
+          record.kept = false;
+          record.note = `${record.note ?? ""} rejected: best won both orders`.trim();
+          stallStreak += 1;
+        } else if (noVerdicts) {
+          if (yield* ensureOn(root, "main", `round ${round} unjudged`)) {
+            if (best.length > 0) yield* resetMainTo(root, best);
+          }
+          yield* logLine(
+            root,
+            `round ${round}: no judge verdicts after retry; kept on branch ${key}`,
+          );
+          record.unjudged = true;
+          record.kept = false;
+          record.note = `${record.note ?? ""} no judge verdicts after retry; kept on branch`.trim();
+          stallStreak += 1;
+        } else if (!(yield* ensureOn(root, "main", `round ${round} merge`))) {
+          yield* logLine(root, `round ${round}: cannot reach main; kept on branch ${key}`);
+          record.kept = false;
+          record.note =
+            `${record.note ?? ""} merge skipped (cannot reach main); kept on branch`.trim();
+          stallStreak += 1;
+        } else {
+          const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", key], 60_000);
+          if (merged.exitCode !== 0) {
+            yield* logLine(
+              root,
+              `round ${round}: merge ${key} failed (${merged.stdout.slice(0, 200)}); kept on branch`,
+            );
+            record.kept = false;
+            record.note = `${record.note ?? ""} merge failed; kept on branch`.trim();
+            stallStreak += 1;
+          } else {
+            best = candidate;
+            record.kept = true;
+            stallStreak = 0;
+          }
+        }
+
+        // Reviewer plays, then writes .studio/next.md ending in STATUS.
+        // Quality of what exists only: how it plays, feels and looks,
+        // working systems, no bugs. Never a push for more levels or length.
+        const facts = yield* codeFacts(root);
+        const reviewer = yield* playThenWrite(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          `reviewer-${round}`,
+          `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): it is the kept build. Read PLAN.md and .studio/tester-${round}.md. Code facts: ${facts}. After every couple of plays, append what you did and felt to .studio/reviewer-${round}.md. You may only write that notes file. Do not change game files. Do not use subagents.`,
+          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the one big quality move for the next block (better, never bigger: no new levels, systems or length); a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Code facts: ${facts}. Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
+          REVIEWER_CAP_MS,
+          `.studio/reviewer-${round}.md`,
+        );
+        if (reviewer.end !== null) return reviewer.end;
+        if (!reviewer.wrote) record.note = `${record.note ?? ""} reviewer write failed`.trim();
+        record.durationMs = Date.now() - roundStart;
+        yield* appendRound(root, stored, record);
+        stored.stallStreak = stallStreak;
+        stored.stage = key;
+        yield* writeStored(root, stored);
+        if (!record.kept && stallStreak >= 3) return "stalled";
+
+        const nextText = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, ".studio", "next.md"), "utf8").catch(() => ""),
+        );
+        if (parseStatus(nextText) === "ready") {
+          // Fresh ship review plays and writes SHIP: YES|NO. YES finishes;
+          // NO goes back into the next round.
+          const ship = yield* playThenWrite(
+            root,
+            stored,
+            creatorThreadId,
+            projectId,
+            `ship-${round}`,
+            `${PLAYBOOK}Play the game in this folder to the end if you can. After every couple of plays, append what you did and felt to .studio/ship.md. Do not change files. Do not use subagents.`,
+            "Read .studio/ship.md. Rewrite the notes file with what you did and felt, then end with exactly one line SHIP: YES or SHIP: NO and the reasons. You may only write .studio/ship.md.",
+            SHIP_CAP_MS,
+            ".studio/ship.md",
+          );
+          if (ship.end !== null) return ship.end;
+          const shipFile = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, ".studio", "ship.md"), "utf8").catch(() => ""),
+          );
+          const shipText = shipFile.length > 0 ? shipFile : ship.notes;
+          if (parseShip(shipText) === "YES") return "ready";
+          stored.shipNoReasons =
+            shipText
+              .split(/SHIP:\s*(YES|NO)/i)
+              .pop()
+              ?.trim()
+              .slice(0, 500) ?? "";
+          yield* writeStored(root, stored);
+        }
+      }
+    });
+
+    const finishExports = Effect.fn("GameRun.finishExports")(function* (
+      root: string,
+      creatorThreadId: ThreadId,
+    ) {
+      // Exports and final video on any ending. The final video comes from the
+      // best real bot or tester run.
+      const game = yield* needGame("export", root);
+      yield* game.export(creatorThreadId, "Web").pipe(Effect.ignore);
+      yield* game.export(creatorThreadId, "Linux").pipe(Effect.ignore);
+      let bestVideo: string | null = null;
+      const botText = yield* Effect.promise(() =>
+        NodeFSP.readFile(runPaths(root).botResults, "utf8").catch(() => ""),
+      );
+      let fastest: number | null = null;
+      for (const line of botText.split("\n").filter(Boolean)) {
+        try {
+          const row = JSON.parse(line) as { won?: boolean; seconds?: number; video?: string };
+          if (
+            row.won === true &&
+            typeof row.seconds === "number" &&
+            typeof row.video === "string"
+          ) {
+            if (fastest === null || row.seconds < fastest) {
+              fastest = row.seconds;
+              bestVideo = row.video;
+            }
+          }
+        } catch {
+          // Skip bad lines.
+        }
+      }
+      if (bestVideo !== null) {
+        const target = bestVideo;
+        yield* Effect.promise(() =>
+          NodeFSP.copyFile(target, NodePath.join(root, ".studio", "final.mp4")).catch(
+            () => undefined,
+          ),
+        );
+      }
+    });
+
+    const runStart = Effect.fn("GameRun.runStart")(function* (input: {
+      readonly threadId: ThreadId;
+      readonly brief: string;
+      readonly artDirection?: string | undefined;
+      readonly budgetMinutes?: number | undefined;
+      readonly provider?: string | undefined;
+      readonly model?: string | undefined;
+      readonly variant?: string | undefined;
+    }) {
+      const target = yield* resolveGame(input.threadId);
+      const root = target.root;
+      const projectId = target.projectId;
+      if (active.has(root)) {
+        const current = yield* readStored(root);
+        return {
+          runId: current?.runId ?? active.get(root)!.runId,
+          root,
+          stage: current?.stage ?? "running",
+          resumed: true as const,
+        };
+      }
+      let stored = yield* readStored(root);
+      let resumed = false;
+      // Continuable endings resume from the folder (stages it already has
+      // are skipped); only a shipped or stalled run starts over.
+      const continuable =
+        stored !== null &&
+        (stored.ending === null ||
+          stored.ending === "budget" ||
+          stored.ending === "usage-limit" ||
+          stored.ending === "provider-down" ||
+          stored.ending === "stopped");
+      if (continuable) {
+        resumed = true;
+        const resumedRun = stored as StoredRun;
+        if (input.brief.length > 0) resumedRun.brief = input.brief;
+        if (input.budgetMinutes !== undefined) resumedRun.budgetMinutes = input.budgetMinutes;
+        yield* writeStored(root, resumedRun);
+      } else {
+        stored = {
+          runId: newRunId(),
+          brief: input.brief,
+          artDirection: input.artDirection ?? "",
+          budgetMinutes: input.budgetMinutes ?? null,
+          provider: input.provider ?? null,
+          model: input.model ?? null,
+          variant: input.variant ?? null,
+          startedAt: new Date().toISOString(),
+          stage: "starting",
+          ending: null,
+          stallStreak: 0,
+          lastFailure: "",
+          shipNoReasons: "",
+          rounds: [],
+          threads: [],
+        };
+        const roundsText = yield* Effect.promise(() =>
+          NodeFSP.readFile(runPaths(root).rounds, "utf8").catch(() => ""),
+        );
+        for (const line of roundsText.split("\n").filter(Boolean)) {
+          try {
+            stored.rounds.push(JSON.parse(line) as RoundRecord);
+          } catch {
+            // Skip bad lines.
+          }
+        }
+        yield* writeStored(root, stored);
+      }
+      if (stored === null)
+        return yield* Effect.fail(fail("run-start", root, "state", "The run record is missing."));
+      const run = stored;
+      // The loop outlives the runStart request, so it gets its own scope:
+      // streams inside (thread waits, watches) must not run in the request's
+      // scope, which closes as soon as this RPC returns.
+      const fiber = yield* Effect.forkDetach(
+        Effect.scoped(
+          runLoop(root, projectId, input.threadId, run).pipe(
+            Effect.tap((ending) =>
+              Effect.promise(async () => {
+                const current = await readJsonFile<StoredRun | null>(runPaths(root).run, null);
+                if (current !== null) {
+                  current.ending = ending as string;
+                  await NodeFSP.writeFile(
+                    runPaths(root).run,
+                    `${JSON.stringify(current, null, 2)}\n`,
+                  );
+                }
+              }).pipe(Effect.ignore),
+            ),
+            Effect.tap(() => finishExports(root, input.threadId).pipe(Effect.ignore)),
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (active.get(root)?.runId === run.runId) active.delete(root);
+              }),
+            ),
+          ),
+        ),
+      );
+      active.set(root, { fiber, runId: run.runId });
+      return { runId: run.runId, root, stage: run.stage, resumed };
+    });
+
+    const runStatus = Effect.fn("GameRun.runStatus")(function* (threadId: ThreadId) {
+      const target = yield* resolveGame(threadId);
+      const stored = yield* readStored(target.root);
+      if (stored === null) {
+        return {
+          active: false as const,
+          runId: null as string | null,
+          stage: "none",
+          ending: null as string | null,
+          rounds: [],
+          threads: [],
+          message: "No run recorded for this game.",
+        };
+      }
+      return {
+        active: active.has(target.root),
+        runId: stored.runId,
+        stage: stored.stage,
+        ending: stored.ending,
+        rounds: stored.rounds.map((record) => ({
+          round: record.round,
+          move: record.move,
+          branch: record.branch,
+          kept: record.kept,
+          verdicts: record.verdicts,
+          linesChanged: record.linesChanged,
+          testerNote: record.testerNote ?? null,
+          durationMs: record.durationMs,
+          note: record.note ?? null,
+        })),
+        threads: stored.threads,
+        message:
+          stored.ending === null
+            ? `Run ${stored.runId} at stage ${stored.stage} with ${stored.rounds.length} rounds.${(stored.lastFailure ?? "").length > 0 ? ` Last provider failure: ${stored.lastFailure}` : ""}`
+            : `Run ${stored.runId} ended: ${stored.ending}.${(stored.lastFailure ?? "").length > 0 ? ` Last provider failure: ${stored.lastFailure}` : ""}`,
+      };
+    });
+
+    const runStop = Effect.fn("GameRun.runStop")(function* (threadId: ThreadId) {
+      const target = yield* resolveGame(threadId);
+      const root = target.root;
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          runPaths(root).stop,
+          `stopped by the creator at ${new Date().toISOString()}\n`,
+        ).catch(() => undefined),
+      );
+      const running = active.get(root);
+      if (running !== undefined) {
+        yield* Fiber.interrupt(running.fiber);
+        active.delete(root);
+      }
+      return {
+        stopped: true as const,
+        message:
+          "The run was stopped. Rejected work stays on its branch; the folder holds all state.",
+      };
+    });
+
+    const toolRole = (caller: { readonly threadId: ThreadId }): Effect.Effect<"run" | null> =>
+      Effect.promise(() =>
+        readJsonFile<{ role?: string } | null>(callerFile(String(caller.threadId)), null),
+      ).pipe(
+        Effect.map((marker) => (marker?.role === "run" ? ("run" as const) : null)),
+        Effect.orElseSucceed(() => null),
+      );
+
+    return GameRun.of({ runStart, runStatus, runStop, toolRole });
+  });
+  return Layer.effect(GameRun, make);
+};
+
+// Shared prompt fragments. Builders write; the harness plays. About 150
+// words, names no game, genre or mechanic.
+// Role threads have no local engine binaries and must never look for any:
+// the game_* MCP tools are the only way to check, play, export, bot-test or
+// model anything. Shell Godot/Blender do not exist for these threads.
+const TOOL_RULE =
+  "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close/replay, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
+const BUILD_RULE = `${TOOL_RULE}Write the game; the harness plays and judges it after you finish. Check new work only briefly with game_check, never playtest through the slot. Spend the block changing the game, not planning or judging: the harness plays and judges your build after you finish, so run the game only for brief checks of new work. Keep it bootable and changes small, so an early stop loses nothing. End the block with a change a player would notice in the first minute (a control that feels different, something new or fixed on screen, a sound, a readable HUD): a block that changes no game file under godot/ is discarded, and changing only notes, bots or skill files does not count.`;
+const BUILD_RULE_SHORT = BUILD_RULE;
+const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
+const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use long holds for movement; quick taps are unreliable. `;
+const FIRST_DIRECTION =
+  "Read VISION.md and PLAN.md first. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in godot/assets for every visual and sound. End with something a player notices in the first minute; game files under godot/ only.";

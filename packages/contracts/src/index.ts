@@ -77,4 +77,7 @@ export * from "./gameAssets.ts";
 export * from "./gameNativeCapture.ts";
 export * from "./gameRuntimeCalibrate.ts";
 export * from "./gameExplore.ts";
+export * from "./gameBot.ts";
+export * from "./gameRun.ts";
 export * from "./gameAudio.ts";
+export * from "./gameBlender.ts";

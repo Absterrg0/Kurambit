@@ -1,5 +1,6 @@
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as GameReviewApi from "./game/GameReviewApi.ts";
+import * as GameRun from "./game/GameRun.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
@@ -1144,6 +1145,7 @@ const layerWsRpc = (
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
       const gameReviews = yield* GameReviewApi.GameReviewApi;
+      const gameRun = yield* GameRun.GameRun;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
@@ -1733,6 +1735,45 @@ const layerWsRpc = (
         [WS_METHODS.gameReviewHistory]: (input) => gameReviews.history(input),
         [WS_METHODS.gameReviewStop]: ({ threadId }) => gameReviews.stop(threadId),
         [WS_METHODS.gameReviewRestore]: ({ threadId }) => gameReviews.restore(threadId),
+        [WS_METHODS.gameRunStart]: (input) =>
+          gameRun.runStart(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-start",
+                  path: String(input.threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
+        [WS_METHODS.gameRunStatus]: ({ threadId }) =>
+          gameRun.runStatus(threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-status",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
+        [WS_METHODS.gameRunStop]: ({ threadId }) =>
+          gameRun.runStop(threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-stop",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
@@ -2895,6 +2936,7 @@ export const layer = Layer.unwrap(
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const game = yield* GameService.GameService;
     const gameReviews = yield* GameReviewApi.GameReviewApi;
+    const gameRun = yield* GameRun.GameRun;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const sql = yield* SqlClient.SqlClient;
@@ -2954,6 +2996,7 @@ export const layer = Layer.unwrap(
             ).pipe(
               Layer.provide(Layer.succeed(GameService.GameService, game)),
               Layer.provide(Layer.succeed(GameReviewApi.GameReviewApi, gameReviews)),
+              Layer.provide(Layer.succeed(GameRun.GameRun, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provideMerge(RpcSerialization.layerJson),

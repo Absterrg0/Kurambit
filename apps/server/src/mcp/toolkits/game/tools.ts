@@ -16,6 +16,18 @@ import {
   GameArtSearchResult,
   GameBlenderInput,
   GameBlenderResult,
+  GameBlenderCodeInput,
+  GameBlenderCodeResult,
+  GameBlenderLookInput,
+  GameBlenderLookResult,
+  GameBlenderSceneInput,
+  GameBlenderSceneResult,
+  GameBlenderAssetsSearchInput,
+  GameBlenderAssetsSearchResult,
+  GameBlenderAssetsImportInput,
+  GameBlenderAssetsImportResult,
+  GameBlenderGenerateInput,
+  GameBlenderGenerateResult,
   GameCheckResult,
   GameLibraryGetInput,
   GameLibraryGetResult,
@@ -67,6 +79,10 @@ import {
   GameExploreActResult,
   GameExploreCloseResult,
   GameExploreReplayResult,
+  GameBotRunInput,
+  GameBotRunResult,
+  GameBotViewInput,
+  GameBotViewResult,
   GameVerifyResult,
   GameWebPackage,
   GameWindowsPackage,
@@ -101,6 +117,24 @@ const hiddenFromCriticAndBallot = () => {
   return role === null || role === undefined;
 };
 /**
+ * Run threads from the GameRun production loop get only play-level tools
+ * (explore native, game_bot_*, game_blender_*, game_export, game_status,
+ * game_check). Everything else hides from them through this check, using the
+ * same visibility mechanism as the review roles.
+ */
+const isGameRunThread = () => {
+  const fiber = Fiber.getCurrent();
+  if (fiber === undefined) return false;
+  return (
+    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
+      ?.gameRunRole === "run"
+  );
+};
+/** Disallowed tools stay out of the run-thread catalog. */
+const hiddenFromCriticAndBallotOrRun = () => hiddenFromCriticAndBallot() && !isGameRunThread();
+/** Play-level tools stay visible to run threads without changing review behavior. */
+const playLevelVisible = () => hiddenFromCriticAndBallot() || isGameRunThread();
+/**
  * Review management belongs to the builder's turn. A repair child fixes the
  * isolated game copy and must leave checks and review records alone, so those
  * four schemas stay out of its catalog while every build tool stays in.
@@ -110,6 +144,7 @@ const reviewControlVisible = () => {
   if (fiber === undefined) return true;
   const scope = Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext);
   if (scope?.gameReviewRole !== null && scope?.gameReviewRole !== undefined) return false;
+  if (scope?.gameRunRole === "run") return false;
   return scope?.gameRepairChild !== true;
 };
 const GameStatusTool = Tool.make("game_status", {
@@ -122,7 +157,7 @@ const GameStatusTool = Tool.make("game_status", {
   dependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const reviewDependencies = [...dependencies, GameReviewApi.GameReviewApi];
 const ReviewStatusTool = Tool.make("game_review_status", {
   description:
@@ -178,7 +213,7 @@ const SubmitTool = Tool.make("game_submit", {
   dependencies: reviewDependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const BlenderTool = Tool.make("game_blender_run", {
   description:
     'Build or revise a model in this thread\'s game. Supply a stable id and Python bpy script. Opens art/blender/<id>.blend if present, otherwise an empty factory scene. Set reset=true to rebuild from an empty scene at the same source/export paths; false/default modifies the existing file, so edit objects by name to avoid duplicates. The run executes off to the side and publishes only after the export validates: a failure or interruption keeps the last good .blend, .glb, script and manifest. Pass art once to set this game\'s shared profile (palette hex colours and a standing height in metres); the exporter ensures one StudioPalette_<hex> material per colour and later runs reuse the profile. Assign those shared materials instead of inventing colours, keep the standing height, and stand the mesh on the origin. Pass inputs to reuse local models/textures by name, e.g. {name:"base", path:"godot/assets/library/models/crate/crate.gltf"} or a res:// path; the staged file appears as ASSET_INPUTS["base"] for bpy.ops.import_scene.gltf or bpy.data.images.load, and images are packed into the saved .blend. Recorded names never prove use or quality. Exports GLB with applied modifiers to the same godot/assets/models/<id>.glb path, renders a small CPU thumbnail unless thumbnail=false, refreshes the set\'s contact sheet, and updates game.json. Returns mesh/material/animation/triangle counts, bounds, material details, profile warnings and real output. Script exceptions return their traceback and a log path. Follow with game_godot_import.',
@@ -189,7 +224,74 @@ const BlenderTool = Tool.make("game_blender_run", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BlenderCodeTool = Tool.make("game_blender_code", {
+  description:
+    "Run Python bpy code in this game's live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do. The .blend source is saved in the game after each call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions.",
+  parameters: GameBlenderCodeInput,
+  success: GameBlenderCodeResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+export const GameBlenderLookTool = Tool.make("game_blender_look", {
+  description:
+    "See the live Blender scene as one image (pinned mcp-for-blender look, adapted). Choose where from: viewport (what the scene shows; default), camera (through the scene camera), angles (the target from several sides) or frames (a strip over the animation). Shading: solid, material, rendered, wireframe or xray. Use it as much as you need; for counts, sizes and positions, use game_blender_scene. Every setting changed to take the picture is restored afterwards.",
+  parameters: GameBlenderLookInput,
+  success: GameBlenderLookResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BlenderSceneTool = Tool.make("game_blender_scene", {
+  description:
+    "Facts about the live Blender scene as text (pinned mcp-for-blender get_scene_info, adapted): object counts, active object, then one line per object with location, size and children. No image; use game_blender_look to see the scene. For anything else about an object, read it with game_blender_code.",
+  parameters: GameBlenderSceneInput,
+  success: GameBlenderSceneResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
+  description:
+    "Search a library of existing assets for the live Blender scene (pinned mcp-for-blender search_assets, adapted). Sources: polyhaven (HDRIs, PBR textures and realistic models, all CC0, no key), sketchfab (user-made models; needs the user's Sketchfab API key in the scene) and polypizza (stylised low-poly, CC0 or CC-BY; needs the user's Poly Pizza API key). Pass the result id to game_blender_assets_import.",
+  parameters: GameBlenderAssetsSearchInput,
+  success: GameBlenderAssetsSearchResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
+  description:
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under godot/assets/blender/ that the game can preload; run game_import after so Godot sees it. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+  parameters: GameBlenderAssetsImportInput,
+  success: GameBlenderAssetsImportResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BlenderGenerateTool = Tool.make("game_blender_generate", {
+  description:
+    "Forward to the upstream 3D generator (pinned mcp-for-blender generate_3d, adapted): one new textured model from a text prompt or an image. No generator is configured on this machine (no Premium, no Tripo/Hunyuan/Hyper3D/Meshy key), so this reports that clearly instead of generating. Wire a key to enable it later; the seam already forwards prompt, image, name and provider.",
+  parameters: GameBlenderGenerateInput,
+  success: GameBlenderGenerateResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
 const ImportTool = Tool.make("game_godot_import", {
   description:
     "Run a real headless editor import in this thread's game. Call after every asset transfer or engine change. game_import is the preferred neutral name and behaves identically. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
@@ -199,7 +301,7 @@ const ImportTool = Tool.make("game_godot_import", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 /** Preferred neutral name for the editor import; the godot-named tool is its legacy alias. */
 const ImportNeutralTool = Tool.make("game_import", {
   description:
@@ -210,7 +312,7 @@ const ImportNeutralTool = Tool.make("game_import", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const CheckTool = Tool.make("game_godot_check", {
   description:
     "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. game_check is the preferred neutral name and behaves identically. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
@@ -220,7 +322,7 @@ const CheckTool = Tool.make("game_godot_check", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 /** Preferred neutral name for the static and boot check; the godot-named tool is its legacy alias. */
 const CheckNeutralTool = Tool.make("game_check", {
   description:
@@ -231,7 +333,7 @@ const CheckNeutralTool = Tool.make("game_check", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const InspectSceneTool = Tool.make("game_scene_inspect", {
   description:
     "Dump a scene's node tree headlessly: scene-relative path, name, type, script path, groups, position, collision layer/mask and child names, capped at 400 nodes with truncation reported. Use the res:// path shown by game_status, such as res://scenes/main_menu.tscn. Read-only; use it to debug scene wiring without opening the Godot editor.",
@@ -242,7 +344,7 @@ const InspectSceneTool = Tool.make("game_scene_inspect", {
   dependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const GodotApiTool = Tool.make("game_godot_api", {
   description:
     "Query the installed Godot version's built-in ClassDB for one engine class and an optional member substring filter. Returns engine-native method signatures, properties, signals, enums/constants and inheritance with counts and truncation, plus the installed engine version. No network, no extra server, no guessed APIs: one bounded headless query in an isolated scratch project that never loads the game's scenes or autoloads and never edits sources. ClassDB covers engine classes only, not script-defined classes or Variant builtin types. Use it before calling an engine API you have not verified.",
@@ -253,7 +355,7 @@ const GodotApiTool = Tool.make("game_godot_api", {
   dependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const AssetsInspectTool = Tool.make("game_assets_inspect", {
   description:
     "Inventory this thread's game: bounded files, declared manifest/family references, source mentions, native dependencies/animations/collisions/scales, family checks and provenance. Whole-project image/model preflight runs before editor import; unbounded inputs leave native facts unknown. Check named res:// paths against the exact recorded Web pack in an isolated Godot project. Pack inclusion is separate from runtime use or visibility, which remain unknown. Mentions never prove loading. Read-only apart from engine import sidecars and builds/logs scratch. No art-quality certification.",
@@ -264,7 +366,7 @@ const AssetsInspectTool = Tool.make("game_assets_inspect", {
   dependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const TestTool = Tool.make("game_godot_test", {
   description:
     "Run a headless GDScript in this thread's game project. The script must extend SceneTree and quit explicitly, using a nonzero code for failures. Supply a project-relative .gd path, such as tests/smoke_test.gd. game_test is the preferred neutral name and behaves identically. Use this to simulate and assert the core gameplay loop. Returns real exit status, stdout/stderr and log path. Timeout defaults to 60 seconds and is bounded at 300 seconds.",
@@ -278,7 +380,7 @@ const TestTool = Tool.make("game_godot_test", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 /** Preferred neutral name for the script test run; the godot-named tool is its legacy alias. */
 const TestNeutralTool = Tool.make("game_test", {
   description:
@@ -293,7 +395,7 @@ const TestNeutralTool = Tool.make("game_test", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const ScenariosTool = Tool.make("game_scenarios_run", {
   description:
     "Run every route in godot/tests/scenarios/*.json through the real game for diagnosis, starting from the main menu under normal physics with only injected input. Grades each approved DESIGN.md observation from the first sample after the route's first input, so a value already true at play start fails; records the state qualification stage with proven/failed/missing coverage per kind, where a declared no-loss criterion is not-applicable rather than missing. Also lists the scenarios' per-criterion proving scenario and frame. Each run also takes a small bounded set of native headless layout probes near input step boundaries; their findings ride the result as diagnostic hints for Web-frame inspection, never as verdicts. A route is pure data: press, hold or wait steps using actions from project.godot's InputMap. Returns frames run, route errors and per-criterion pass/fail/not-applicable with the values actually observed. Routes cannot call game functions or set state; fix the route or the game, never the exam. A run must press a control; a wait-only route proves nothing. game_verify already refreshes this exam for an approved design with acceptance, so do not run it again after a passing verify; use this only to diagnose a state failure. With an approved design no player node or movement is required: a no-player game marks play with a typed GameState.state (0/false before play, another value once play starts), and every applicable approved observation must become true after that baseline. A legacy game without an approved design instead needs a player in group \"player\" to move and GameState to reach its playing state.",
@@ -303,7 +405,7 @@ const ScenariosTool = Tool.make("game_scenarios_run", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const NativeCaptureTool = Tool.make("game_native_capture", {
   description:
     "Record a short native diagnostic clip for one validated route in godot/tests/scenarios/<id>.json: replays it through the real game under Godot MovieWriter on a private virtual display, then transcodes with the installed FFmpeg. Returns game-relative paths to clip.mp4, a native poster frame, the runner result and the input/frame timeline plus actual size, render rate, encoded rate and frame counts from ffprobe. A diagnostic timing aid only: it never proves gameplay, never writes a qualification record, and its source identity is the native game sources, not an exported Web build. Missing Linux tooling (xvfb, ffmpeg) is an actionable error; Web playtests and scenario runs are unaffected. fps sets the engine render cadence (keep it fixed for comparisons because route outcomes can vary); outputFps only converts the encoding without rerunning the game and never proves another cadence behaves the same. Each run uses fresh per-run user:// isolation. Use it when static frames cannot show a timing problem; prefer game_web_playtest for shipped-Web behavior.",
@@ -314,7 +416,7 @@ const NativeCaptureTool = Tool.make("game_native_capture", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const RuntimeCalibrateTool = Tool.make("game_runtime_calibrate", {
   description:
     "Replay one validated route in godot/tests/scenarios/<id>.json headlessly at 2-3 render cadences (default 30+60) with 2 repeats each, under one fixed seed and fresh per-run user:// isolation. No videos: it measures baseline/final player transforms, engine physics/render counters, nominal physics seconds and final GameState, then compares same-rate repeats before cross-rate pairs within documented tolerances. Returns per-run evidence paths, compared/unknown counts, concrete differences and a measured verdict for the tested route and settings only (equivalent/different/unknown) — never a global determinism certificate. A named jump/coin counter alone is not physical proof; displacement is measured from observed positions. Missing values, unobserved probes, errors and partial timeouts are unknown, never equivalent. Diagnostic only: it never qualifies, promotes or edits scenes/scripts. Builder/repair only; critics and ballots never reach it.",
@@ -325,7 +427,7 @@ const RuntimeCalibrateTool = Tool.make("game_runtime_calibrate", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const AudioInspectTool = Tool.make("game_audio_inspect", {
   description:
     "Measure one local audio asset or one recorded native clip with the installed FFmpeg: peak/RMS level, silence, near-clipping and opposite-phase cancellation, plus codec, sample rate, channels and duration. The path is game-relative (e.g. godot/assets/theme.ogg or a builds/native-capture/<id>/clip.mp4 audio stream); symlinks escaping the game are refused. Size, duration, segment, output-byte and time limits run before any decode; the PCM stays in the filter graph. Returns concrete metrics plus honest unknowns, never a quality verdict: it does not prove exported Web audio, composition, taste, spatial mix or good audio. Native-clip audio is the engine mixer from the native sources, never the exported Web build. Missing FFmpeg is an actionable error; Web playtests and scenario runs are unaffected.",
@@ -336,7 +438,7 @@ const AudioInspectTool = Tool.make("game_audio_inspect", {
   dependencies,
 })
   .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const ExportTool = Tool.make("game_export", {
   description:
     "Import and export this thread's game with the Web, Windows or Linux release preset. Windows produces builds/windows/game.exe, a 64-bit x86_64 executable. The standard preset embeds the game data, so the executable alone is enough; a custom preset that does not embed it also produces builds/windows/game.pck, so heed the result and copy both files together. It has not been run on Windows. Linux produces builds/linux/game.x86_64. Both native targets export the current sources and never replace the Web build Play serves. Verifies matching Godot export templates and the actual artifact. Missing Windows templates are an actionable error; Install tools adds them without replacing the Godot binary. Web uses Compatibility rendering and single-threaded export. Returns actual paths and command output or errors. A Web export is immediately playable; game_submit makes a build the first playable and publishes each improved one. Use game_preview to build and serve a playable browser URL.",
@@ -347,7 +449,7 @@ const ExportTool = Tool.make("game_export", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const PackageWindowsTool = Tool.make("game_package_windows", {
   description:
     "Package the Windows release this game already exported as a downloadable ZIP. It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's Godot pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the Builds panel also receives a short-lived signed download URL. Packaging does not prove Windows booted.",
@@ -359,7 +461,7 @@ const PackageWindowsTool = Tool.make("game_package_windows", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const PackageWebTool = Tool.make("game_package_web", {
   description:
     "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft, legacy builds/web, an unselected candidate or later source edits: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root (a root-level custom HTML entry is stored as index.html without changing its bytes). The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the Builds panel also receives a short-lived signed download URL.",
@@ -370,7 +472,7 @@ const PackageWebTool = Tool.make("game_package_web", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const PreviewTool = Tool.make("game_preview", {
   description:
     "Build this thread's Web release when it is missing or older than the game sources, start its managed loopback static server, and return the playable URL. A fresh existing build is served without another export. This is an actual WebAssembly game, not a screenshot. game_stop closes the server.",
@@ -380,7 +482,7 @@ const PreviewTool = Tool.make("game_preview", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const NativeTool = Tool.make("game_run_native", {
   description:
     "Import and launch this thread's Godot game natively with a tracked PID and output log. The agent's run is headless: it opens no window and inherits no display; only the creator's own Play action may open a window. Use game_stop to stop it; unrelated processes are never terminated.",
@@ -390,7 +492,7 @@ const NativeTool = Tool.make("game_run_native", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const StopTool = Tool.make("game_stop", {
   description:
     "Stop only this game's processes spawned by Game Studio, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
@@ -400,7 +502,7 @@ const StopTool = Tool.make("game_stop", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 /**
  * Bounded persistent exploration: open one paused browser on the frozen
  * export, poke it with short act/observe cycles across turns, close to save
@@ -419,7 +521,7 @@ const ExploreStartTool = Tool.make("game_explore_start", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const ExploreActTool = Tool.make("game_explore_act", {
   description:
     "Run one short input batch (1–6 steps, at most 10 s nominal) in an exploration session and observe what happened: the current probe, one persisted screenshot path (null with a reason when a native session has no display) and bounded console text. Native sessions additionally return visible screenText, interactive ui controls, script/engine errors, per-ui-step receipt and per-inspect-step read-only values; use ui {id, action} for real mouse input at a listed control and inspect {path} for read-only reflection. The player stays paused between calls, so observations cost no game time. Descriptive only, never a verdict; replay the saved trace for independent confirmation.",
@@ -430,7 +532,7 @@ const ExploreActTool = Tool.make("game_explore_act", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const ExploreCloseTool = Tool.make("game_explore_close", {
   description:
     "Close an exploration session, saving its trace to a server-owned path and releasing its browser and profile. The trace stays inspectable and replayable after close. Idle and wall-clock expiry close the same way with the reason saved.",
@@ -441,7 +543,7 @@ const ExploreCloseTool = Tool.make("game_explore_close", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 const ExploreReplayTool = Tool.make("game_explore_replay", {
   description:
     "Replay a saved exploration trace in a fresh player: a web trace against its same immutable export in a fresh browser and viewport, a native trace against the same game sources natively. Refuses a missing or changed build (or changed sources) without rebuilding, and needs the exploratory session closed first. Returns the fresh run's own evidence paths and probe, never the exploratory observations. Covers only the traced sequence; unexplored parts remain unknown.",
@@ -452,15 +554,36 @@ const ExploreReplayTool = Tool.make("game_explore_replay", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BotRunTool = Tool.make("game_bot_run", {
+  description:
+    "Play this thread's game in real time with a model-written bot file under .studio/bot/ (goal, observe, options with facts and executors, status, optional policy). The real game runs continuously at normal speed on a private display; holds and releases go out at 10 Hz, one continuous video is recorded, and in-game detectors report findings with time and position. decider policy (default) uses the bot's own policy; jev asks the optional Jev route, which decides asynchronously without stopping play and falls back to policy on failure. The bot may write state only through an explicit set-state call; a run that did is marked and is not pure play. Returns goal status, measured tick rate and game/wall ratio, decisions, findings, and server-owned paths to the trace, video and frames.",
+  parameters: GameBotRunInput,
+  success: GameBotRunResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
+const BotViewTool = Tool.make("game_bot_view", {
+  description:
+    "Take a quick look at a finished bot run: goal status, measured tick rate and game/wall ratio, decisions, findings and server-owned paths to the trace, video and frames. Pass the runId from game_bot_run.",
+  parameters: GameBotViewInput,
+  success: GameBotViewResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, playLevelVisible);
 /** Ballots keep frozen comparison context; retrieval and play are hidden. */
 const hiddenFromBallots = () => {
   const fiber = Fiber.getCurrent();
-  return (
-    fiber === undefined ||
-    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
-      ?.gameReviewRole !== "ballot"
-  );
+  if (fiber === undefined) return true;
+  const scope = Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext);
+  if (scope?.gameRunRole === "run") return false;
+  return scope?.gameReviewRole !== "ballot";
 };
 const VerifyTool = Tool.make("game_verify", {
   description: `Run one complete build iteration in a single call: Godot check, the canonical suite from the server-owned policy, the approved scenario exam when DESIGN.md binds nonempty acceptance, then a Web export (a normal publish outside a review round, the round's candidate during one) and a recorded playtest of those exact exported bytes with the steps you supply. steps is required and must contain at least one real input step (press, hold, key/keys, click, drag or mouseMove); a wait-only or boot-only route proves nothing and game_submit needs a responding playtest. This tool records the build's playtest, so it takes no exactSize layout override; use game_web_playtest for review-only window evidence. Interval captures are planned before any stage runs and must fit ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; increase captureEveryMs or shorten the route instead of retrying the same plan. It stops at the first failing stage and returns that stage's result, errors and log paths; later stages do not run. For approved games this is the only scenario run you need; use game_scenarios_run only to diagnose a state failure. Inspect the returned frames, then game_submit the build you stand behind. The result is path-first: every frame is saved under evidenceDirectory with a per-frame path and no inline images; read chosen PNGs with file tools (result.json in the same folder maps labels to files) and reserve includeImage:true for a small deliberate route, since repeated full-sequence image results can exceed the provider's image limit and end the turn. Mechanical success is not a quality verdict, a visual check, or proof beyond the measured observations. Individual game_* tools remain available for narrower fixes and diagnostics.`,
@@ -474,7 +597,7 @@ const VerifyTool = Tool.make("game_verify", {
   // Unknown options must fail instead of being stripped: exactSize belongs to
   // the review-only web playtest, not to a recorded verification.
   .annotate(Tool.Strict, true)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const WebPlaytestTool = Tool.make("game_web_playtest", {
   description: `Load this game's real Web export in a headless browser, wait for Godot to boot, optionally hold keys and click the canvas, and return screenshots plus console errors. Template games also report a read-only state probe: GameState values and the player position before and after the steps, with a short diff. Interval captures are planned before the browser launches and must fit ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; increase captureEveryMs or shorten the route instead of retrying the same plan. The result is path-first: every frame is saved under evidenceDirectory with a per-frame path and no inline images; read chosen PNGs with file tools (result.json in the same folder maps labels to files) and reserve includeImage:true for a small deliberate route, since repeated full-sequence image results can exceed the provider's image limit and end the turn. Use this as the final web check instead of building your own browser tooling.`,
   parameters: GameWebPlaytestInput,
@@ -499,11 +622,10 @@ export const GameTryInputTool = Tool.make("game_try_input", {
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, () => {
     const fiber = Fiber.getCurrent();
-    return (
-      fiber === undefined ||
-      Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
-        ?.gameReviewRole !== "ballot"
-    );
+    if (fiber === undefined) return true;
+    const scope = Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext);
+    if (scope?.gameRunRole === "run") return false;
+    return scope?.gameReviewRole !== "ballot";
   });
 /**
  * Critic and ballot children judge frozen frames; only those two roles may
@@ -596,7 +718,7 @@ const GameArtImportTool = Tool.make("game_art_import", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const GameArtFramesTool = Tool.make("game_art_frames", {
   description:
     "Build a Godot SpriteFrames resource from a shipped art kit's authored sheet animations. Give the kit id and sheet name from game_art_get (such as the pixel-platformer kit's characters sheet); animations defaults to every authored entry, or name a subset. Imports the project and builds AtlasTexture frames using Godot, returning the exact res:// resource path plus license and source. Subsets get separate paths, matching requests reuse existing resources, and modified resources are refused rather than overwritten. The kit must already be imported with game_art_import; its PNGs are never touched. Use the returned path with AnimatedSprite2D and nearest texture filtering. Hidden from read-only critic and ballot sessions.",
@@ -607,7 +729,7 @@ const GameArtFramesTool = Tool.make("game_art_frames", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const libraryDependencies = [GameAssetLibrary.GameAssetLibrary];
 const GameLibrarySearchTool = Tool.make("game_library_search", {
   description:
@@ -641,7 +763,7 @@ const GameLibraryImportModelTool = Tool.make("game_library_import_model", {
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 const GameLibraryImportMaterialTool = Tool.make("game_library_import_material", {
   description:
     "Download one Poly Haven PBR texture's bounded 1k maps and build a reusable StandardMaterial3D with Godot itself (albedo colour plus OpenGL normal and roughness as non-colour data). Returns the exact res:// material path plus usage for sharing it across several MeshInstance3D nodes. The real PBR maps are never repainted. Matching requests reuse the resource; edited resources refuse instead of being overwritten. Hidden from read-only critic and ballot sessions.",
@@ -652,7 +774,7 @@ const GameLibraryImportMaterialTool = Tool.make("game_library_import_material", 
   dependencies,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallot);
+  .annotate(McpSchema.EnabledWhen, hiddenFromCriticAndBallotOrRun);
 export const GameArtToolkit = Toolkit.make(
   GameArtSearchTool,
   GameArtGetTool,
@@ -677,6 +799,11 @@ export const GameToolkit = Toolkit.make(
   ReviewRestoreTool,
   SubmitTool,
   BlenderTool,
+  BlenderCodeTool,
+  BlenderSceneTool,
+  BlenderAssetsSearchTool,
+  BlenderAssetsImportTool,
+  BlenderGenerateTool,
   ImportTool,
   ImportNeutralTool,
   CheckTool,
@@ -700,6 +827,8 @@ export const GameToolkit = Toolkit.make(
   ExploreActTool,
   ExploreCloseTool,
   ExploreReplayTool,
+  BotRunTool,
+  BotViewTool,
 );
 
 // The service validates raw calls so schema failures count toward the same retry budget.

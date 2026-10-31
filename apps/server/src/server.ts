@@ -12,6 +12,7 @@ import * as GameRepairLoop from "./game/GameRepairLoop.ts";
 import * as GameRepairReactor from "./game/GameRepairReactor.ts";
 import * as GameRepairStudio from "./game/GameRepairStudio.ts";
 import * as GameReviewSessions from "./game/GameReviewSessions.ts";
+import * as GameRun from "./game/GameRun.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
@@ -558,6 +559,17 @@ const layerGameServices = Layer.mergeAll(
     ),
   ),
 ).pipe(
+  // The production loop resolves its game services at call time from the
+  // request scope, so it only needs its state directory at build time and can
+  // sit anywhere in this chain.
+  Layer.provideMerge(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        return GameRun.layer({ stateDir: config.stateDir });
+      }),
+    ),
+  ),
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),

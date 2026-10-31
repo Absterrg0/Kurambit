@@ -268,15 +268,21 @@ export const attachLineState = (socket: NodeNet.Socket, state: NativeLineState):
   socket.on("error", onClose);
 };
 
-/** PATH discovery for xvfb-run, including the user-space fallback this host uses. */
+/** PATH discovery for xvfb-run, including the user-space fallback for hosts without one. */
 export const findXvfb = async (): Promise<string | null> => {
   const pathEnv = process.env.PATH ?? "";
-  const local = `${process.env.HOME ?? "~"}/.gs-tmp/xvfb-local/usr/bin${NodePath.delimiter}${pathEnv}`;
+  const fallback = `${process.env.HOME ?? "~"}/.gs-tmp/xvfb-local/usr/bin`;
   try {
-    return await findExecutable("xvfb-run", {
-      pathEnv: local,
+    // The system wrapper comes first: the user-space fallback's script fails
+    // to hand Godot a display (hardcoded server number, races on -a), so every
+    // native boot times out with no picture when it wins. Hosts without a
+    // system xvfb-run still fall back to it.
+    const system = await findExecutable("xvfb-run", {
+      pathEnv,
       override: process.env.GAME_STUDIO_XVFB_RUN,
     });
+    if (system !== null) return system;
+    return await findExecutable("xvfb-run", { pathEnv: fallback });
   } catch {
     return null;
   }

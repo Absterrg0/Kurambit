@@ -41,6 +41,8 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   readonly gameReviewRole?: "critic" | "ballot" | null;
+  /** Threads the GameRun production loop launched. They get play-level tools only. */
+  readonly gameRunRole?: "run" | null;
   /**
    * A repair child keeps the builder's build tools but not review control.
    * This is a catalog fact, deliberately separate from the audit role above:

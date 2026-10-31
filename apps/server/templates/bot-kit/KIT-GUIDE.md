@@ -1,0 +1,83 @@
+// Bot kit guidance: how testers write bots with this kit.
+// Adapted from Aura's autopilot KIT.md + harness.py + agents/session.py
+// SYSTEM (Apache-2.0, ramenvr/autopilot): the doctrine (facts/options vs
+// script, plans, reflexes in code) is theirs; this file is ours.
+
+# Bot kit: write decisions, not navigation
+
+The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
+(`.studio/bot/<name>.mjs`) decides. The split:
+
+- **Code computes facts and legal options.** `observe(api, last)` reads the
+  tick and returns facts in the player's terms (distances, counts, what is
+  held, what is in danger). `options(obs)` lists what is legal _now_, each
+  with its own facts. Few options (2-8), each a whole meaningful step.
+- **Jev decides.** With decider `jev`, Jev picks among the options at tempo;
+  with `policy`, your `policy(obs, opts)` picks. The kit works with both.
+- **A fixed route is a script, not a bot.** Waypoint lists with one legal
+  option at a time give Jev nothing to choose between and do not count as a
+  Jev run (needs 3+ decisions among 2+ options). Offer real alternatives:
+  flank vs frontal, fight vs retreat, wait vs push, which target, heal now
+  or later. Executors do the fast part in code every tick (steer, time a
+  press); Jev chooses what to do.
+
+## Shape
+
+```js
+import { posOf, stateOf, hudHas } from "./kit/sensors.mjs";
+import { makeHolds } from "./kit/steer.mjs";
+import { makeWalkTo, driveWalk } from "./kit/walk.mjs";
+
+export const goal = "Win a run: clear both floors and take the stair.";
+export const tempo = 4;          // decisions/second (reflex play: 4-8)
+export const switchMargin = 0.25;
+export const stallSeconds = 60;
+
+const holds = makeHolds();
+let walkToGate = null;
+
+export function observe(api, last) {
+  const obs = { state: stateOf(last), pos: posOf(last), facts: factsOf(last) };
+  // Per-tick steering runs here, every tick, not just on decisions.
+  ...
+  return obs;
+}
+export function options(obs) { /* 2+ legal options with facts */ }
+export function status(obs) { /* running | done | failed + note */ }
+export function policy(obs, opts) { /* fallback pick */ }
+// Optional: plan(obs) -> {done: [...], now: {step, what} | null, next: [...]}
+// The runtime offers Jev only the current step's options and tells it the
+// plan's standing, so play can't wander back to steps already done.
+```
+
+## Controllers
+
+- `makeWalkTo(target, {mode: "xz"|"xy", within, timeoutS, jumpWhenStuck,
+avoidDrops, avoidWalls, keyMap})` + `driveWalk(holds, walker, api, raw,
+t)`: walk to a point (or () => point, re-read every tick: follows moving
+  things). Steers round sensed walls, hops (Space) when stuck, stops at
+  sensed drops. `mode: "xy"` for top-down 2D with the game's own keyMap.
+- `faceKeys(mode, pos, goal, keyMap)`: steering toward a target. The runner
+  has no mouse-look: attacks land by standing close, not by aiming a camera.
+- `makeAttack(target, {key, reach, cooldownS, ...})`: close in and strike.
+- `makeRetreat(threat, {seconds})`, `makeKeepAway(threat, {dist})`,
+  `makeStrikeAndRetreat(...)`: hit and run for fights a plain attack loses.
+- `makeTapper(key, cooldownS)`, `makeHoldFor(key, seconds)`,
+  `makeHolds()`: press and hold helpers.
+
+## Facts that play well
+
+Read the game's code for exact rules (ranges, cooldowns, what a pickup
+needs) and check them in play before relying on them. Put the numbers into
+executors. Every option gets its own facts. Reflexes (dodge a telegraphed
+hit) go in executor code every tick, never in a Jev decision: a decision
+takes ~0.3s from sight to action, too slow for a fast hit.
+
+## Reach (what the runner gives you)
+
+- Keys W/A/S/D, arrows, Space, Shift, E, Enter, F-keys; clicks on listed UI
+  controls or at screen points; `setState` writes (reported, never the
+  player's position in play: teleports don't count as play).
+- Observations at 10 Hz: game state values, player position, HUD text, body
+  (on-ground, velocity), visible landmarks, wall/drop clearance (3D), shape
+  overlap, engine errors. 2D games have no room rays: steer by position.

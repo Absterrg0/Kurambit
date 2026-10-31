@@ -15,7 +15,9 @@
  * Input lands before game nodes read it by frame order: every event is
  * injected synchronously and the next physics frame is awaited before the
  * release, so the game polls the already-queued event. A key tap stays down
- * for at least 2 physics frames. Mouse goes through the real viewport
+ * for at least 10 physics frames (~167 ms at 60 Hz): T16 showed shorter
+ * presses land between physics frames and are missed despite input latches.
+ * Mouse goes through the real viewport
  * (`push_input` at the control's centre); the runner never emits a signal
  * directly, so an overlay blocking a click stays visible and the reply says
  * the control did not receive it.
@@ -226,7 +228,9 @@ func _is_input_step(step: Dictionary) -> bool:
 
 func _step_nominal_ms(step: Dictionary) -> int:
 	if step.has("press"):
-		return 50
+		return 170
+	if step.has("actionHold") and step["actionHold"] is Dictionary:
+		return maxi(50, int((step["actionHold"] as Dictionary).get("holdMs", 300)))
 	if step.has("waitMs"):
 		return maxi(0, int(step["waitMs"]))
 	if step.has("holdMs"):
@@ -272,6 +276,7 @@ func _run_step(step: Dictionary, ui_results: Array, inspections: Array) -> Strin
 		_ensure_pointer()
 		_pointer.x = clampf(_pointer.x + float(mv.get("dx", 0.0)), 0.0, float(root.size.x))
 		_pointer.y = clampf(_pointer.y + float(mv.get("dy", 0.0)), 0.0, float(root.size.y))
+		root.warp_mouse(_pointer)
 		var motion := InputEventMouseMotion.new()
 		motion.position = _pointer
 		motion.global_position = _pointer
@@ -282,6 +287,11 @@ func _run_step(step: Dictionary, ui_results: Array, inspections: Array) -> Strin
 	if step.has("inspect"):
 		inspections.append(_do_inspect(step["inspect"]))
 		return ""
+	if step.has("sweepCheck"):
+		inspections.append(_do_sweep_check())
+		return ""
+	if step.has("actionHold"):
+		return await _do_action_hold(step["actionHold"])
 	return "Unknown step kind."
 
 func _click_pos(step: Dictionary) -> Vector2:
@@ -303,12 +313,15 @@ func _ensure_pointer() -> void:
 func _do_key_tap(code: int) -> String:
 	if code == KEY_NONE:
 		return "Unknown key."
+	# T16: a 2-frame tap lands between physics frames and is dropped by most
+	# games. Hold ~167 ms so the press spans several polls before release.
 	var down := _make_key_event(code, code, true)
 	Input.parse_input_event(down)
-	await physics_frame
-	await physics_frame
+	for i in 10:
+		await physics_frame
 	var up := _make_key_event(code, code, false)
 	Input.parse_input_event(up)
+	await physics_frame
 	await physics_frame
 	return ""
 
@@ -344,6 +357,9 @@ func _release_all_inputs() -> void:
 func _push_click(pos: Vector2, button: int) -> void:
 	_pointer = pos
 	_pointer_init = true
+	# Pushed motion feeds gui hit-testing, but the viewport's own mouse
+	# position (what get_global_mouse_position reads) only follows a warp.
+	root.warp_mouse(pos)
 	var motion := InputEventMouseMotion.new()
 	motion.position = pos
 	motion.global_position = pos
@@ -368,6 +384,7 @@ func _push_drag(from: Vector2, to: Vector2, frames: int) -> void:
 	for i in maxi(1, frames):
 		var f := float(i + 1) / float(maxi(1, frames))
 		var pos := from.lerp(to, f)
+		root.warp_mouse(pos)
 		var motion := InputEventMouseMotion.new()
 		motion.position = pos
 		motion.global_position = pos
@@ -375,6 +392,7 @@ func _push_drag(from: Vector2, to: Vector2, frames: int) -> void:
 		await physics_frame
 	_pointer = to
 	_pointer_init = true
+	root.warp_mouse(to)
 	_push_release(to, int(MOUSE_BUTTON_LEFT))
 	await physics_frame
 
@@ -615,24 +633,30 @@ func _click_control(c: Control) -> bool:
 		await physics_frame
 		_push_release(pos, int(MOUSE_BUTTON_LEFT))
 		await physics_frame
+		# A click that rebuilds its screen frees the control mid-click. That
+		# means the click landed, so report received without touching the
+		# freed control: touching it logs "Trying to cast a freed object",
+		# which is runner noise, not a game finding.
+		if not is_instance_valid(c):
+			return true
 		if (c as BaseButton).pressed.is_connected(on_pressed):
 			(c as BaseButton).pressed.disconnect(on_pressed)
 		if (c as BaseButton).toggled.is_connected(on_toggled):
 			(c as BaseButton).toggled.disconnect(on_toggled)
-		if not is_instance_valid(c):
-			return true
 		return bool(state.pressed) or bool(state.toggled)
 	_push_click(pos, int(MOUSE_BUTTON_LEFT))
 	await physics_frame
 	await physics_frame
 	_push_release(pos, int(MOUSE_BUTTON_LEFT))
 	await physics_frame
+	if not is_instance_valid(c):
+		return true
 	if c is LineEdit or c is TextEdit:
 		var vp := c.get_viewport()
 		if vp != null and vp.gui_get_focus_owner() == c:
 			return true
-		return is_instance_valid(c)
-	return is_instance_valid(c)
+		return true
+	return true
 
 func _do_inspect(spec: Variant) -> Dictionary:
 	if typeof(spec) != TYPE_DICTIONARY:
@@ -683,6 +707,116 @@ func _encode_inspect_value(value: Variant) -> Variant:
 	if value is Vector3i:
 		return [float((value as Vector3i).x), float((value as Vector3i).y), float((value as Vector3i).z)]
 	return null
+
+# Player search adapted from ramenvr/autopilot lib/world.gd (Apache-2.0):
+# camera-hung body, then the player group, then the first character body.
+# Only the search order is borrowed; the query below is our own.
+func _find_sweep_player() -> Node:
+	var cam3d: Camera3D = null
+	var vp := root.get_viewport() if root is Window else null
+	if vp != null:
+		cam3d = vp.get_camera_3d()
+	if cam3d != null:
+		var n: Node = cam3d
+		while n != null:
+			if n is PhysicsBody3D:
+				return n
+			n = n.get_parent()
+	var cam2d: Camera2D = null
+	if vp != null:
+		cam2d = vp.get_camera_2d()
+	if cam2d != null:
+		var n2: Node = cam2d
+		while n2 != null:
+			if n2 is PhysicsBody2D:
+				return n2
+			n2 = n2.get_parent()
+	for g in ["player", "Player", "players"]:
+		for cand in get_nodes_in_group(g):
+			if cand is Node2D or cand is Node3D:
+				return cand
+	var s := current_scene
+	if s != null:
+		var found3 := s.find_children("*", "CharacterBody3D", true, false)
+		if found3.size() > 0:
+			return found3[0]
+		var found2 := s.find_children("*", "CharacterBody2D", true, false)
+		if found2.size() > 0:
+			return found2[0]
+	return null
+
+# No-clip probe for the code-only bug sweep: overlap the player's own shape
+# against the physics space and report solid contacts. Runs in the runner, so
+# the game's project is untouched.
+func _do_sweep_check() -> Dictionary:
+	var p := _find_sweep_player()
+	if p == null:
+		return {"path": "", "values": {}, "error": "sweepCheck: no player body."}
+	if p is CollisionObject2D:
+		var body2 := p as CollisionObject2D
+		for c in body2.get_children():
+			if c is CollisionShape2D and (c as CollisionShape2D).shape != null and not (c as CollisionShape2D).disabled:
+				var q := PhysicsShapeQueryParameters2D.new()
+				q.shape = (c as CollisionShape2D).shape
+				q.transform = (c as CollisionShape2D).global_transform
+				q.exclude = [body2.get_rid()]
+				q.collide_with_areas = false
+				q.collide_with_bodies = true
+				var hits: Array = root.world_2d.direct_space_state.intersect_shape(q, 8)
+				var names: Array = []
+				for h in hits:
+					var collider: Variant = (h as Dictionary).get("collider", null)
+					if collider is Node:
+						names.append(str((collider as Node).name))
+				var pos2: Vector2 = (p as Node2D).global_position
+				return {"path": str(body2.get_path()), "values": {
+					"dim": "2d", "x": pos2.x, "y": pos2.y,
+					"overlaps": hits.size(), "overlapNames": ",".join(names.slice(0, 8)),
+					"onFloor": (body2 as CharacterBody2D).is_on_floor() if body2 is CharacterBody2D else null,
+					"vx": (body2 as CharacterBody2D).velocity.x if body2 is CharacterBody2D else null,
+					"vy": (body2 as CharacterBody2D).velocity.y if body2 is CharacterBody2D else null}}
+		return {"path": str(body2.get_path()), "values": {}, "error": "sweepCheck: no enabled shape under the 2D player."}
+	if p is CollisionObject3D:
+		var body3 := p as CollisionObject3D
+		for c in body3.get_children():
+			if c is CollisionShape3D and (c as CollisionShape3D).shape != null and not (c as CollisionShape3D).disabled:
+				var q3 := PhysicsShapeQueryParameters3D.new()
+				q3.shape = (c as CollisionShape3D).shape
+				q3.transform = (c as CollisionShape3D).global_transform
+				q3.exclude = [body3.get_rid()]
+				q3.collide_with_areas = false
+				q3.collide_with_bodies = true
+				var hits3: Array = root.world_3d.direct_space_state.intersect_shape(q3, 8)
+				var names3: Array = []
+				for h in hits3:
+					var collider3: Variant = (h as Dictionary).get("collider", null)
+					if collider3 is Node:
+						names3.append(str((collider3 as Node).name))
+				var pos3: Vector3 = (p as Node3D).global_position
+				return {"path": str(body3.get_path()), "values": {
+					"dim": "3d", "x": pos3.x, "y": pos3.y, "z": pos3.z,
+					"overlaps": hits3.size(), "overlapNames": ",".join(names3.slice(0, 8)),
+					"onFloor": (body3 as CharacterBody3D).is_on_floor() if body3 is CharacterBody3D else null,
+					"vx": (body3 as CharacterBody3D).velocity.x if body3 is CharacterBody3D else null,
+					"vy": (body3 as CharacterBody3D).velocity.y if body3 is CharacterBody3D else null,
+					"vz": (body3 as CharacterBody3D).velocity.z if body3 is CharacterBody3D else null}}
+		return {"path": str(body3.get_path()), "values": {}, "error": "sweepCheck: no enabled shape under the 3D player."}
+	return {"path": str((p as Node).get_path()), "values": {}, "error": "sweepCheck: player is not a physics body."}
+
+# Sweep-only driver: press an InputMap action directly so the code-only sweep
+# can hold and tap every action even when its key binding is unknown.
+func _do_action_hold(spec: Variant) -> String:
+	if typeof(spec) != TYPE_DICTIONARY:
+		return "An actionHold step needs an object."
+	var action_name := str(spec.get("action", ""))
+	if action_name.is_empty() or not InputMap.has_action(action_name):
+		return "Unknown action %s." % action_name
+	Input.action_press(action_name)
+	for i in _frames_for_ms(maxi(50, int(spec.get("holdMs", 300)))):
+		await physics_frame
+	Input.action_release(action_name)
+	await physics_frame
+	return ""
 
 # --- probe, errors, screenshot, transport ---
 

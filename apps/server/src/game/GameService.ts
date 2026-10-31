@@ -92,6 +92,22 @@ import {
   type GamePlaytestProbe,
   type GamePlaytestStep,
   type GameViewport,
+  type GameBlenderCodeInput,
+  type GameBlenderCodeResult,
+  type GameBlenderLookInput,
+  type GameBlenderLookResult,
+  type GameBlenderSceneInput,
+  type GameBlenderSceneResult,
+  type GameBlenderAssetsSearchInput,
+  type GameBlenderAssetsSearchResult,
+  type GameBlenderAssetsImportInput,
+  type GameBlenderAssetsImportResult,
+  type GameBlenderGenerateInput,
+  type GameBlenderGenerateResult,
+  type GameBotRunInput,
+  type GameBotRunResult,
+  type GameBotViewInput,
+  type GameBotViewResult,
 } from "@t3tools/contracts";
 import * as GameAdmission from "./GameAdmission.ts";
 import * as GameArtKits from "./GameArtKits.ts";
@@ -114,6 +130,8 @@ import {
   GODOT_ASSET_MATERIAL_SCRIPT,
 } from "./gameAssetMaterialScript.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameBlender from "./GameBlender.ts";
+import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameDesignApproval from "./GameDesignApproval.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -311,6 +329,40 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: typeof GameBlenderInput.Type,
     ) => Effect.Effect<typeof GameBlenderResult.Type, GameOperationError>;
+    /** Live Blender scene: run bpy code, auto-saving the .blend source. */
+    readonly blenderCode: (
+      threadId: ThreadId,
+      input: GameBlenderCodeInput,
+    ) => Effect.Effect<GameBlenderCodeResult, GameOperationError>;
+    /** Live Blender scene: see it as one image (viewport, camera, angles, frames). */
+    readonly blenderLook: (
+      threadId: ThreadId,
+      input: GameBlenderLookInput,
+    ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
+    /** Live Blender scene: facts as text (objects, sizes, health). */
+    readonly blenderScene: (
+      threadId: ThreadId,
+      input: GameBlenderSceneInput,
+    ) => Effect.Effect<GameBlenderSceneResult, GameOperationError>;
+    /** Live Blender scene: search a library of existing assets. */
+    readonly blenderAssetsSearch: (
+      threadId: ThreadId,
+      input: GameBlenderAssetsSearchInput,
+    ) => Effect.Effect<GameBlenderAssetsSearchResult, GameOperationError>;
+    /**
+     * Live Blender scene: import a library asset, save the .blend source in
+     * the game and export a GLB under godot/ the game can load. Run
+     * game_import after so Godot sees it.
+     */
+    readonly blenderAssetsImport: (
+      threadId: ThreadId,
+      input: GameBlenderAssetsImportInput,
+    ) => Effect.Effect<GameBlenderAssetsImportResult, GameOperationError>;
+    /** Live Blender scene: forward to the upstream generator; reports clearly when none is available. */
+    readonly blenderGenerate: (
+      threadId: ThreadId,
+      input: GameBlenderGenerateInput,
+    ) => Effect.Effect<GameBlenderGenerateResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly test: (
       threadId: ThreadId,
@@ -412,6 +464,22 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: typeof GameExploreReplayInput.Type,
     ) => Effect.Effect<typeof GameExploreReplayResult.Type, GameOperationError>;
+    /**
+     * Runs a model-written bot file against the real game in real time at
+     * normal speed on a private display. Holds and releases go out at 10 Hz,
+     * one continuous video is recorded, and detectors findings carry time
+     * and position. Never blocked by another operation: one bot run per game
+     * at a time, refused as busy otherwise.
+     */
+    readonly botRun: (
+      threadId: ThreadId,
+      input: GameBotRunInput,
+    ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /** A quick look at a finished bot run: summary, findings and evidence paths. */
+    readonly botView: (
+      threadId: ThreadId,
+      input: GameBotViewInput,
+    ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     /**
      * One complete iteration in one admitted operation: check, the canonical
      * suite, the approved scenario exam when the design binds nonempty
@@ -974,6 +1042,8 @@ const make = Effect.gen(function* () {
   const rounds = yield* GameRoundStore.GameRoundStore;
   const admission = yield* GameAdmission.GameAdmission;
   const artKits = yield* GameArtKits.GameArtKits;
+  const liveBlender = yield* GameBlender.GameBlender;
+  const gameBot = yield* GameBot.GameBot;
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const designApprovals = yield* GameDesignApproval.GameDesignApproval;
   const playtest = yield* GameWebPlaytest.GamePlaytest;
@@ -2736,7 +2806,11 @@ const make = Effect.gen(function* () {
               args: [
                 "-a",
                 "-s",
-                `-screen 0 ${baseViewport.width}x${baseViewport.height}`,
+                // Xvfb rejects a screen without depth ("Invalid screen
+                // configuration"), and xvfb-run still runs Godot against the
+                // dead display, so every native boot times out with no
+                // picture. Keep the x24 depth the helper uses.
+                `-screen 0 ${baseViewport.width}x${baseViewport.height}x24`,
                 resolved.godot.path,
                 ...godotArgs,
               ],
@@ -7652,6 +7726,30 @@ const make = Effect.gen(function* () {
     exploreAct: (threadId, input) => exploreAct(threadId, input),
     exploreClose: (threadId, input) => exploreClose(threadId, input),
     exploreReplay: (threadId, input) => exploreReplay(threadId, input),
+    botRun: (threadId, input) =>
+      Effect.gen(function* () {
+        // No exclusive() here: a real-time run takes minutes and must not
+        // hold the game's operation lock. The bot service refuses a second
+        // concurrent run per game as busy.
+        const root = yield* projects.resolve(threadId);
+        const imported = yield* importGame(root);
+        if (!imported.success)
+          return yield* new GameOperationError({
+            operation: "Bot run",
+            path: imported.path ?? root,
+            reason: "command-failed",
+            detail:
+              `The Godot import failed before the bot run started.\n${imported.message}`.slice(
+                -2000,
+              ),
+          });
+        return yield* gameBot.run(root, input);
+      }),
+    botView: (threadId, input) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        return yield* gameBot.view(root, input);
+      }),
     verify: (threadId, input) =>
       withRoot(threadId, "Game verify", (root) =>
         Effect.gen(function* () {
@@ -9047,6 +9145,18 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    blenderCode: (threadId, input) =>
+      withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
+    blenderLook: (threadId, input) =>
+      withRoot(threadId, "Blender look", (root) => liveBlender.look(root, input)),
+    blenderScene: (threadId, input) =>
+      withRoot(threadId, "Blender scene", (root) => liveBlender.scene(root, input)),
+    blenderAssetsSearch: (threadId, input) =>
+      withRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
+    blenderAssetsImport: (threadId, input) =>
+      withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
+    blenderGenerate: (threadId, input) =>
+      withRoot(threadId, "Blender generate", (root) => liveBlender.generate(root, input)),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       // Rebuild and Stop are creator decisions that outrank a live review. The
@@ -9064,6 +9174,8 @@ const make = Effect.gen(function* () {
       if (action === "stop") {
         yield* cancel(root);
         yield* processes.stop(root);
+        yield* liveBlender.stop(root).pipe(Effect.ignore);
+        yield* gameBot.stop(root).pipe(Effect.ignore);
         yield* preview.stop(root);
         // Stopping the game is a user decision; a round that is repairing it
         // must not keep owning the folder afterwards.
@@ -9156,6 +9268,8 @@ export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameAssetLibrary.layer),
   Layer.provide(GameWebPlaytest.layer),
   Layer.provide(GameExploreBrowser.layer),
+  Layer.provide(GameBlender.layer),
+  Layer.provide(GameBot.layer),
   Layer.provideMerge(GameOperations.layer),
 );
 /** Tests inject a fake browser run; production uses the real playtest. */
@@ -9166,6 +9280,8 @@ export const layerWithPlaytest = (run: typeof GameWebPlaytest.playtest) =>
     Layer.provide(GameAssetLibrary.layer),
     Layer.provide(GameWebPlaytest.layerOf(run)),
     Layer.provide(GameExploreBrowser.layer),
+    Layer.provide(GameBlender.layer),
+    Layer.provide(GameBot.layer),
     Layer.provideMerge(GameOperations.layer),
   );
 /**
@@ -9182,5 +9298,7 @@ export const layerWithExploreBrowser = (
     Layer.provide(GameAssetLibrary.layer),
     Layer.provide(run === undefined ? GameWebPlaytest.layer : GameWebPlaytest.layerOf(run)),
     Layer.provide(GameExploreBrowser.layerOf(open)),
+    Layer.provide(GameBlender.layer),
+    Layer.provide(GameBot.layer),
     Layer.provideMerge(GameOperations.layer),
   );

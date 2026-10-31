@@ -14,6 +14,7 @@ import {
   GamePlaytestToolkit,
   GameRecipeToolkit,
   GameReviewAnswerToolkit,
+  GameBlenderLookToolkit,
 } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) =>
@@ -69,6 +70,41 @@ const handlers = {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
       return yield* game.blender(scope.thread.threadId, input);
+    }),
+  ),
+  game_blender_code: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderCode(scope.thread.threadId, input);
+    }),
+  ),
+  game_blender_scene: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderScene(scope.thread.threadId, input);
+    }),
+  ),
+  game_blender_assets_search: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderAssetsSearch(scope.thread.threadId, input);
+    }),
+  ),
+  game_blender_assets_import: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderAssetsImport(scope.thread.threadId, input);
+    }),
+  ),
+  game_blender_generate: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderGenerate(scope.thread.threadId, input);
     }),
   ),
   game_godot_import: McpToolAccess.actsAsCaller(() =>
@@ -234,6 +270,20 @@ const handlers = {
       return yield* game.exploreReplay(scope.thread.threadId, input);
     }),
   ),
+  game_bot_run: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.botRun(scope.thread.threadId, input);
+    }),
+  ),
+  game_bot_view: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.botView(scope.thread.threadId, input);
+    }),
+  ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
 // Contextual input typing comes from the satisfies check below.
 const playtestHandlers = {
@@ -267,6 +317,20 @@ const playtestHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GamePlaytestToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
+/**
+ * Registered separately over the HTTP transport so the look image becomes
+ * real image content; see McpHttpServer.registerGameBlenderLook.
+ */
+const blenderLookHandlers = {
+  game_blender_look: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderLook(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
+export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
 /**
  * Registered separately over the HTTP transport so the playtest frames become
  * real image content; see McpHttpServer.registerGameWebPlaytest.

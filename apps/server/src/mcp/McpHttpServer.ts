@@ -7,6 +7,8 @@ import {
   GameWebPlaytestTool,
   GameTryInputTool,
   GameVerifyTool,
+  GameBlenderLookTool,
+  GameBlenderLookToolkit,
   GameReviewAnswerToolkit,
 } from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
@@ -31,6 +33,7 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contrac
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as GameReviewSessions from "../game/GameReviewSessions.ts";
+import * as GameRun from "../game/GameRun.ts";
 import * as GameService from "../game/GameService.ts";
 import * as GameArtKits from "../game/GameArtKits.ts";
 import * as GameAssetLibrary from "../game/GameAssetLibrary.ts";
@@ -151,6 +154,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
   const reviews = yield* Effect.serviceOption(GameReviewSessions.GameReviewSessions);
+  const runs = yield* Effect.serviceOption(GameRun.GameRun);
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -183,11 +187,16 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       invocation.thread !== undefined && Option.isSome(reviews)
         ? yield* reviews.value.repairChild(invocation.thread)
         : false;
+    const gameRunRole =
+      invocation.thread !== undefined && Option.isSome(runs)
+        ? yield* runs.value.toolRole(invocation.thread)
+        : null;
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameReviewRole,
         gameRepairChild,
+        gameRunRole,
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -852,6 +861,26 @@ const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest
   );
 });
 
+const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook")(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* GameBlenderLookToolkit;
+  yield* registerImageTool(
+    GameBlenderLookTool,
+    (payload, options) =>
+      built
+        .handle("game_blender_look", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "blender-look",
+    (error) => (error instanceof Error ? error.message : "Game blender look failed."),
+  );
+});
+
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -975,9 +1004,15 @@ export const layerGamePlaytest = imageToolRegistration(
   GameHandlers.layerPlaytest,
 );
 
+export const layerGameBlenderLook = imageToolRegistration(
+  registerGameBlenderLook(),
+  GameHandlers.layerBlenderLook,
+);
+
 export const layerGameToolkit = Layer.mergeAll(
   layerGameReviewAnswers,
   layerGamePlaytest,
+  layerGameBlenderLook,
   layerGameRecipes,
   layerGameArt,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
