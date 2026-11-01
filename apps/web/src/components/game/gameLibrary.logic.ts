@@ -1,4 +1,4 @@
-import type { GameSummary, GameTemplateId } from "@t3tools/contracts";
+import type { GameSummary } from "@t3tools/contracts";
 
 export interface GameTemplateAppearance {
   readonly label: string;
@@ -6,40 +6,13 @@ export interface GameTemplateAppearance {
   readonly coverClassName: string;
 }
 
-export const gameTemplateAppearance = (template: GameTemplateId | null): GameTemplateAppearance => {
-  switch (template) {
-    case "2d-platformer":
-      return {
-        label: "2D Platformer",
-        initialClassName: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-        coverClassName: "from-sky-500/25 via-indigo-400/10 to-transparent",
-      };
-    case "2d-screen":
-      return {
-        label: "2D Screen",
-        initialClassName: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
-        coverClassName: "from-teal-500/25 via-amber-400/10 to-transparent",
-      };
-    case "blank":
-      return {
-        label: "Blank",
-        initialClassName: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-300",
-        coverClassName: "from-zinc-500/20 via-zinc-400/10 to-transparent",
-      };
-    case "3d-explorer":
-      return {
-        label: "3D Explorer",
-        initialClassName: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-        coverClassName: "from-amber-500/25 via-orange-400/10 to-transparent",
-      };
-    default:
-      return {
-        label: "Blank",
-        initialClassName: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-300",
-        coverClassName: "from-zinc-500/20 via-zinc-400/10 to-transparent",
-      };
-  }
-};
+export const gameTemplateAppearance = (
+  _template: GameSummary["template"],
+): GameTemplateAppearance => ({
+  label: "Blank",
+  initialClassName: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-300",
+  coverClassName: "from-zinc-500/20 via-zinc-400/10 to-transparent",
+});
 
 /** The New game dialog and the server derive the folder name the same way. */
 export const gameSlug = (name: string): string =>

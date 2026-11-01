@@ -1,5 +1,4 @@
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
-import * as GameReviewApi from "./game/GameReviewApi.ts";
 import * as GameRun from "./game/GameRun.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
@@ -1144,7 +1143,6 @@ const layerWsRpc = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const game = yield* GameService.GameService;
-      const gameReviews = yield* GameReviewApi.GameReviewApi;
       const gameRun = yield* GameRun.GameRun;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -1730,11 +1728,6 @@ const layerWsRpc = (
       const handlers = ServerWsRpcGroup.of({
         [WS_METHODS.gameStatus]: ({ threadId, checkSources }) =>
           game.status(threadId, { checkSources }),
-        [WS_METHODS.gameReviewStatus]: ({ threadId, checkSelectedBuild }) =>
-          gameReviews.status(threadId, checkSelectedBuild),
-        [WS_METHODS.gameReviewHistory]: (input) => gameReviews.history(input),
-        [WS_METHODS.gameReviewStop]: ({ threadId }) => gameReviews.stop(threadId),
-        [WS_METHODS.gameReviewRestore]: ({ threadId }) => gameReviews.restore(threadId),
         [WS_METHODS.gameRunStart]: (input) =>
           gameRun.runStart(input).pipe(
             Effect.mapError(
@@ -1777,26 +1770,6 @@ const layerWsRpc = (
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
-        // Design actions take the game's admission gate inside the service, so
-        // a live review is joined before the action changes anything.
-        [WS_METHODS.gameApproveDesign]: ({ threadId, expectedDesignHash }) =>
-          gameProjects.approveDesign(threadId, expectedDesignHash),
-        [WS_METHODS.gameRequestChange]: ({ threadId, text }) =>
-          gameProjects.requestChange(threadId, text),
-        [WS_METHODS.gameApproveRevision]: ({ threadId, expectedDesignHash }) =>
-          gameProjects.approveRevision(threadId, expectedDesignHash),
-        [WS_METHODS.gameDiscardRevision]: ({ threadId }) => gameProjects.discardRevision(threadId),
-        [WS_METHODS.gameUpdateVerificationPolicy]: ({
-          threadId,
-          testSuite,
-          gameplayScene,
-          probe,
-        }) =>
-          gameProjects.updateVerificationPolicy(threadId, {
-            testSuite,
-            gameplayScene,
-            probe,
-          }),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
           Effect.gen(function* () {
@@ -2935,7 +2908,6 @@ export const layer = Layer.unwrap(
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const game = yield* GameService.GameService;
-    const gameReviews = yield* GameReviewApi.GameReviewApi;
     const gameRun = yield* GameRun.GameRun;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -2995,7 +2967,6 @@ export const layer = Layer.unwrap(
               serverBrowser,
             ).pipe(
               Layer.provide(Layer.succeed(GameService.GameService, game)),
-              Layer.provide(Layer.succeed(GameReviewApi.GameReviewApi, gameReviews)),
               Layer.provide(Layer.succeed(GameRun.GameRun, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),

@@ -14,14 +14,11 @@ import type * as GameToolchain from "./GameToolchain.ts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { GODOT_CHECK_SCRIPT } from "./godotCheckScript.ts";
-import { GODOT_SCENARIO_SCRIPT } from "./godotScenarioScript.ts";
 import { RawCheckResult, parseGodotIssues } from "./godotCheckOutput.ts";
-import { decodeScenarioEvidence } from "./gameScenarios.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
 import type { GameEngineBackend } from "./GameEngine.ts";
 
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
-const isGameOperationError = Schema.is(GameOperationError);
 
 const response = (
   process: GameProcessResult,
@@ -44,10 +41,9 @@ const response = (
 
 /**
  * The Godot backend: every Godot process invocation this server makes for the
- * production import/check/test/scenario/export slice, plus the project-settings
- * and output parsing those invocations need. Qualification, source binding,
- * stage order, design gates and promotion stay in GameService; this module
- * never reads game.json and never writes a qualification record.
+ * production import/check/export slice, plus the project-settings and output
+ * parsing those invocations need. Source binding and stage order stay in
+ * GameService; this module never reads game.json and never writes records.
  */
 export const makeGodotBackend = (
   processes: GameProcesses.GameProcesses["Service"],
@@ -69,7 +65,6 @@ export const makeGodotBackend = (
     });
   return {
     id: "godot",
-    capabilities: { scenarios: true, classDbApi: true },
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
         const binary = yield* tools.executable("godot");
@@ -85,7 +80,6 @@ export const makeGodotBackend = (
       viewport: parseGodotViewport(projectFileText),
     }),
     parseDiagnostics: (output: string) => parseGodotIssues(output),
-    scenarioScript: { fileName: "scenario.gd", text: GODOT_SCENARIO_SCRIPT },
     importProject,
     runCheck: (ctx, input) =>
       Effect.gen(function* () {
@@ -148,66 +142,6 @@ export const makeGodotBackend = (
             Effect.promise(() => NodeFSP.rm(temporary, { recursive: true, force: true })),
           ),
         );
-      }),
-    runTestScript: (ctx, input) =>
-      Effect.gen(function* () {
-        const scriptPath = yield* Effect.try({
-          try: () => insideGame(ctx.projectDir, input.scriptPath.replace(/^res:\/\//, "")),
-          catch: (cause) =>
-            isGameOperationError(cause)
-              ? cause
-              : new GameOperationError({
-                  operation: "test",
-                  path: input.scriptPath,
-                  reason: "invalid-path",
-                  cause,
-                }),
-        });
-        if (!scriptPath.endsWith(".gd"))
-          return yield* new GameOperationError({
-            operation: "test",
-            path: input.scriptPath,
-            reason: "invalid-path",
-          });
-        const run = yield* processes.run({
-          root: ctx.root,
-          executable: ctx.binary.path,
-          args: ["--headless", "--path", ctx.projectDir, "--script", scriptPath],
-          operation: "godot-test",
-          timeoutMs: Math.max(1_000, Math.min(input.timeoutMs, 300_000)),
-        });
-        return response(run);
-      }),
-    runScenario: (ctx, input) =>
-      Effect.gen(function* () {
-        const run = yield* processes.run({
-          root: ctx.root,
-          executable: ctx.binary.path,
-          args: [
-            "--headless",
-            "--fixed-fps",
-            "60",
-            "--path",
-            ctx.projectDir,
-            "--script",
-            input.scriptPath,
-            "--",
-            input.requestPath,
-            input.resultPath,
-          ],
-          operation: "godot-scenarios",
-          timeoutMs: input.timeoutMs,
-          ...(input.env === undefined ? {} : { env: input.env, ownedProcessGroup: true }),
-        });
-        // Read before the caller removes its evidence scratch.
-        const resultText = yield* Effect.promise(() =>
-          NodeFSP.readFile(input.resultPath, "utf8").catch(() => null),
-        );
-        return {
-          evidence: resultText === null ? null : decodeScenarioEvidence(resultText),
-          issues: parseGodotIssues(`${run.stdout}\n${run.stderr}`),
-          run,
-        };
       }),
     runExportRelease: (ctx, input) =>
       Effect.gen(function* () {

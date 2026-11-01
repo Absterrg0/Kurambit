@@ -1,16 +1,8 @@
 import * as Schema from "effect/Schema";
-import * as Struct from "effect/Struct";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectId, RunId, ThreadId } from "./baseSchemas.ts";
-import { GameDesignRead, GameDesignState } from "./gameDesign.ts";
-import { GameArtProfile } from "./gameArt.ts";
+import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
-import {
-  GameScenarioCriterionResult,
-  GameScenarioKindCoverage,
-  GameScenariosRunResult,
-} from "./gameScenario.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -67,12 +59,7 @@ export const GameAsset = Schema.Struct({
   inputs: Schema.optionalKey(Schema.Array(GameBlenderInputSource)),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals([
-  "3d-explorer",
-  "2d-platformer",
-  "2d-screen",
-  "blank",
-]);
+export const GameTemplateId = Schema.Literals(["blank"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
@@ -102,36 +89,6 @@ export const DEFAULT_GAME_TEST_SUITE = "res://tests/smoke_test.gd";
  */
 export const GAME_TEMPLATES: readonly GameTemplate[] = [
   {
-    id: "3d-explorer",
-    name: "3D Explorer",
-    description:
-      "Third-person exploration with real collision: collect the relics, cross the lava, unlock the gate.",
-    dimension: "3d",
-    testSuite: DEFAULT_GAME_TEST_SUITE,
-    gameplayScene: "res://scenes/game.tscn",
-    probe: true,
-  },
-  {
-    id: "2d-platformer",
-    name: "2D Platformer",
-    description:
-      "Side-scrolling platformer with real pixel art: run, jump and stomp through two levels of coins, spikes and slimes.",
-    dimension: "2d",
-    testSuite: DEFAULT_GAME_TEST_SUITE,
-    gameplayScene: "res://scenes/game.tscn",
-    probe: true,
-  },
-  {
-    id: "2d-screen",
-    name: "2D Screen",
-    description:
-      "A fixed-screen dialogue and management starter: safe layout, pointer and keyboard parity, and a five-call shift.",
-    dimension: "2d",
-    testSuite: DEFAULT_GAME_TEST_SUITE,
-    gameplayScene: "res://scenes/game.tscn",
-    probe: true,
-  },
-  {
     id: "blank",
     name: "Blank",
     description:
@@ -143,16 +100,7 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     probe: true,
   },
 ];
-export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "3d-explorer";
-/**
- * The design phase shown in the manifest. This is a display mirror only: the
- * server-owned approval record decides whether a design revision is approved.
- */
-export const GameDesign = Schema.Struct({
-  status: Schema.Literals(["draft", "approved"]),
-  approvedAt: Schema.optionalKey(Schema.String),
-});
-export type GameDesign = typeof GameDesign.Type;
+export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -160,27 +108,10 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
-  /**
-   * The shared look this game's assets build against: palette roles and the
-   * height assets stand at. `game_blender_run` applies it and warns on drift.
-   * Absent on legacy games, which export without profile checks.
-   */
-  artProfile: Schema.optionalKey(GameArtProfile),
-  // Display mirror of the server-owned verification policy. New games get it
-  // from the template; old games are the one-time source the policy is adopted
-  // from. Editing these keys never changes the exam.
+  // Where the check runs the gameplay scene from; the blank template names it.
   testSuite: Schema.optionalKey(Schema.String),
   gameplayScene: Schema.optionalKey(Schema.String),
   probe: Schema.optionalKey(Schema.Boolean),
-  // Games created before the design step existed have no design key.
-  design: Schema.optionalKey(GameDesign),
-  /**
-   * How long a builder turn gets to produce after its first playable. It is a
-   * time box the builder reads, not a server deadline; absent means the default.
-   */
-  productionMinutes: Schema.optionalKey(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(5), Schema.isLessThanOrEqualTo(600)),
-  ),
   engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
@@ -198,67 +129,6 @@ export type GameAsset = typeof GameAsset.Type;
 /** The suite that owns the `test` qualification stage for this game. */
 export const gameTestSuite = (manifest: GameManifest): string =>
   manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE;
-/**
- * Production is the time a builder may keep deepening the game after its first
- * playable. The harness never ends the turn early; the model decides when the
- * game is realised, and this is only the budget it reads in status and submit.
- */
-export const DEFAULT_GAME_PRODUCTION_MINUTES = 45;
-export const gameProductionBudgetMs = (manifest: GameManifest): number =>
-  (manifest.productionMinutes ?? DEFAULT_GAME_PRODUCTION_MINUTES) * 60_000;
-/**
- * What a game has produced: the first build its builder made playable, and the
- * declarations of the turn that is producing now.
- */
-export const GameProduction = Schema.Struct({
-  /** The game's first accepted submit, kept for the life of the game. */
-  firstPlayableAt: Schema.NullOr(Schema.String),
-  firstPlayableBuildId: Schema.NullOr(Schema.String),
-  /** The builder turn the turn fields describe; null before the first submit. */
-  runId: Schema.NullOr(RunId),
-  turnFirstSubmitAt: Schema.NullOr(Schema.String),
-  turnLastSubmitAt: Schema.NullOr(Schema.String),
-  /** Accepted declarations in that turn. Refusals are not counted. */
-  submissions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-export type GameProduction = typeof GameProduction.Type;
-export const GameProductionStatus = Schema.Struct({
-  ...GameProduction.fields,
-  budgetMs: Schema.Int.check(Schema.isGreaterThan(0)),
-  /**
-   * Producing time used. It is live while the turn runs and the first-to-last
-   * submit span once the turn is over, so a finished turn never keeps counting.
-   */
-  elapsedMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  remainingMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-export type GameProductionStatus = typeof GameProductionStatus.Type;
-/**
- * The server-owned exam for one game. It is written at creation and changed
- * only through an explicit creator action, never by editing game.json.
- */
-export const GameVerificationPolicy = Schema.Struct({
-  /** The canonical suite whose pass records the test stage. */
-  testSuite: Schema.String,
-  /** The scene play starts in; null when the game has no separate gameplay scene. */
-  gameplayScene: Schema.NullOr(Schema.String),
-  /** Whether a qualifying playtest must read the StudioProbe. */
-  probe: Schema.Boolean,
-});
-export type GameVerificationPolicy = typeof GameVerificationPolicy.Type;
-export const GameVerificationPolicyRead = Schema.Struct({
-  policy: GameVerificationPolicy,
-  /** Stable identity of this policy; a change invalidates recorded evidence. */
-  revision: Schema.String,
-});
-export type GameVerificationPolicyRead = typeof GameVerificationPolicyRead.Type;
-export const GameVerificationPolicyUpdateInput = Schema.Struct({
-  threadId: ThreadId,
-  testSuite: Schema.String,
-  gameplayScene: Schema.NullOr(Schema.String),
-  probe: Schema.Boolean,
-});
-export type GameVerificationPolicyUpdateInput = typeof GameVerificationPolicyUpdateInput.Type;
 export class GameOperationError extends Schema.TaggedError<GameOperationError>()(
   "GameOperationError",
   {
@@ -273,24 +143,12 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "templates-missing",
       "unknown-template",
       "starter-templates-missing",
-      "art-kits-missing",
-      "unknown-art-kit",
-      "art-kit-conflict",
-      "art-kit-corrupt",
       "command-failed",
       "busy",
       "unsupported-platform",
       "checksum",
       "download",
       "project-not-found",
-      "design-draft",
-      "design-changed",
-      "design-missing",
-      "design-invalid",
-      "design-hash-mismatch",
-      "design-legacy",
-      "design-revision-pending",
-      "revision-missing",
       "thread-dispatch",
       "invalid-input",
     ]),
@@ -311,13 +169,6 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "unknown-template": "Pick a starter template from the New game dialog.",
       "starter-templates-missing":
         "Game Studio's starter template files are missing. Reinstall or update the app.",
-      "art-kits-missing": "Game Studio's art kit files are missing. Reinstall or update the app.",
-      "unknown-art-kit":
-        "Search the optional art kit catalog with game_art_search and use a kit id it returns.",
-      "art-kit-conflict":
-        "One of this kit's files already exists with different contents. The import changed nothing. Keep the existing files, or move them aside, then retry.",
-      "art-kit-corrupt":
-        "Game Studio's shipped art kit file is corrupt or does not match its catalog hash. Reinstall or update the app.",
       "command-failed":
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
       busy: "Another operation is running for this game. Wait for it or press Stop.",
@@ -325,26 +176,10 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       download: "The tool download failed. Check network access and retry the install.",
       io: "Check that the path exists and is writable. Read the server log for the underlying error.",
       "unsupported-platform": "Managed installation currently supports Linux x86_64 only.",
-      "design-draft":
-        "DESIGN.md is still a draft, so this game may not export, preview, run or playtest yet. Finish the design and ask for review; after the creator approves it on the Design tab, retry.",
-      "design-changed":
-        "DESIGN.md changed after the creator approved it, so this game may not export, preview, run or playtest until they review the new scope and re-approve it on the Design tab.",
-      "design-revision-pending":
-        "A change request is pending its review on the Design tab, so this game may not export, preview, run or playtest until they approve the change, or discard the request there.",
-      "design-missing":
-        "DESIGN.md is missing or unreadable. Write the design and ask the creator to approve it on the Design tab.",
-      "design-invalid":
-        "DESIGN.md is not ready to approve. Fix the listed issues, then ask the creator to approve it.",
-      "design-hash-mismatch":
-        "The design changed after the creator reviewed it. Refresh the Design tab, read the current version, and approve that.",
-      "design-legacy":
-        "This game was created before the design step, so it has no design to approve.",
-      "revision-missing":
-        "There is no pending change request for this game. Ask for a change on the Design tab first.",
       "project-not-found":
         "Open this game as a project and start a thread before using game tools.",
       "thread-dispatch":
-        "The turn that follows this game operation could not be sent. For design approval, try approving again; for a change request, discard the pending request on the Design tab and request the change again.",
+        "The turn that follows this game operation could not be sent. Retry the operation.",
       "invalid-input":
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
     };
@@ -437,13 +272,13 @@ export const GamePlaytestStep = Schema.Union([
   Schema.Struct({
     press: Schema.String.annotate({
       description:
-        'Physical browser key to press, such as "Enter", "Space", "ArrowLeft", "w" or "F1" — not a Godot InputMap action name; use game_scenarios_run for action names.',
+        'Physical browser key to press, such as "Enter", "Space", "ArrowLeft", "w" or "F1" — not a Godot InputMap action name.',
     }),
   }),
   Schema.Struct({
     hold: Schema.String.annotate({
       description:
-        'Physical browser key to hold, such as "Space" or "ArrowRight" — not a Godot InputMap action name; use game_scenarios_run for action names.',
+        'Physical browser key to hold, such as "Space" or "ArrowRight" — not a Godot InputMap action name.',
     }),
     holdMs: Schema.Number,
   }),
@@ -454,14 +289,14 @@ export const GamePlaytestStep = Schema.Union([
   Schema.Struct({
     key: Schema.String.annotate({
       description:
-        'Physical browser key to hold while playing, such as "ArrowUp", "w", "Space" or "F1" — not a Godot InputMap action name; use game_scenarios_run for action names.',
+        'Physical browser key to hold while playing, such as "ArrowUp", "w", "Space" or "F1" — not a Godot InputMap action name.',
     }),
     holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
   }),
   Schema.Struct({
     keys: Schema.Array(Schema.String).annotate({
       description:
-        'Physical browser keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"] — not Godot InputMap action names; use game_scenarios_run for action names.',
+        'Physical browser keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"] — not Godot InputMap action names.',
     }),
     holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
   }),
@@ -487,171 +322,6 @@ export const GamePlaytestStep = Schema.Union([
   }),
 ]);
 export type GamePlaytestStep = typeof GamePlaytestStep.Type;
-export const GamePlaytestInputPair = Schema.Struct({
-  stepIndex: Schema.Int,
-  phase: Schema.Literals(["before", "after"]),
-  input: GamePlaytestStep,
-  changedPercent: Schema.NullOr(Schema.Number),
-  stateChanges: Schema.NullOr(
-    Schema.Array(
-      Schema.Struct({
-        key: Schema.String,
-        before: Schema.NullOr(GamePlaytestStateValue),
-        after: Schema.NullOr(GamePlaytestStateValue),
-      }),
-    ),
-  ),
-  /**
-   * Nominal game time of the already-declared contiguous trailing wait step(s)
-   * whose realization the after capture includes. Zero/absent means the after
-   * capture ran immediately after the input with the clock still paused: an
-   * honest but unsettled observation, never proof the control is broken.
-   * The route steps themselves are unchanged; this only says where the after
-   * frame was taken.
-   */
-  observationDelayMs: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
-  /** The last trailing wait step index the after capture includes, when any. */
-  observedAfterStepIndex: Schema.optionalKey(Schema.Int),
-});
-export type GamePlaytestInputPair = typeof GamePlaytestInputPair.Type;
-export const GamePlaytestFrame = Schema.Struct({
-  label: Schema.String,
-  inputPair: Schema.optionalKey(GamePlaytestInputPair),
-  path: Schema.String,
-  /**
-   * The probe snapshot taken nearest this frame, persisted with the evidence
-   * so a cover can be chosen from observed play rather than frame labels.
-   * Older evidence and the boot frame may have none.
-   */
-  probe: Schema.optionalKey(GamePlaytestProbe),
-});
-export type GamePlaytestFrame = typeof GamePlaytestFrame.Type;
-export const GameLastPlaytest = Schema.Struct({
-  at: Schema.String,
-  directory: Schema.String,
-  success: Schema.Boolean,
-  responded: Schema.Boolean,
-  changedPercent: Schema.Number,
-  consoleErrorCount: Schema.Number,
-  frames: Schema.Array(GamePlaytestFrame),
-  /**
-   * The run no longer matches the current game: the web build was rebuilt
-   * after it, or its passing evidence no longer matches the current sources.
-   * A run that failed to qualify is not marked stale for that reason alone.
-   */
-  stale: Schema.Boolean,
-  /**
-   * The frame chosen to represent the game, picked from the persisted
-   * per-frame probe state of the latest run that qualified as real play (a
-   * real observed moment of play), or null when no run proved gameplay. That
-   * run can be older than this newest run when the newest failed to qualify.
-   */
-  coverFrame: Schema.optionalKey(Schema.NullOr(GamePlaytestFrame)),
-  /**
-   * Whether the newest run counted as honest gameplay evidence. `success`
-   * only says the browser run booted, responded and logged no errors; a run
-   * that did none of the play it owed is still a successful tool call. Absent
-   * on evidence written before the verdict existed.
-   */
-  qualifies: Schema.optionalKey(Schema.Boolean),
-  /** Structured reasons the run did not qualify; empty when it did. */
-  blockers: Schema.optionalKey(Schema.Array(Schema.String)),
-  /** What changed from the run's gameplay baseline, when the probe saw it. */
-  interaction: Schema.optionalKey(Schema.String),
-  /**
-   * The ordinary-input route this run used. A review replays the same route on
-   * both builds, so it is not chosen again after the fact.
-   */
-  steps: Schema.optionalKey(Schema.Array(GamePlaytestStep)),
-  /**
-   * The base viewport the route was recorded at, when the evidence kept it.
-   * A review replays the route in the same frame, so a different window size
-   * cannot be mistaken for a gameplay difference.
-   */
-  viewport: Schema.optionalKey(GameViewport),
-  /** The whole-number multiple the frames and pointer coordinates used. */
-  captureScale: Schema.optionalKey(Schema.Number),
-});
-export type GameLastPlaytest = typeof GameLastPlaytest.Type;
-/**
- * One qualification stage. `design` is the creator's approval of the current
- * DESIGN.md; `state` grades the approved behaviour criteria.
- */
-export const GameQualificationStage = Schema.Literals([
-  "design",
-  "check",
-  "test",
-  "export",
-  "playtest",
-  "state",
-]);
-export type GameQualificationStage = typeof GameQualificationStage.Type;
-export const GameQualificationStageStatus = Schema.Literals([
-  "passed",
-  "failed",
-  "missing",
-  "stale",
-  "unknown",
-]);
-export type GameQualificationStageStatus = typeof GameQualificationStageStatus.Type;
-/**
- * Playable completion is deliberately narrower than qualification: a current
- * web export plus a playtest that played those exact bytes. Check, test, the
- * state exam are certification, and stay optional.
- */
-export const GameCompletionState = Schema.Literals(["complete", "incomplete", "unknown"]);
-export type GameCompletionState = typeof GameCompletionState.Type;
-export const GameQualificationStageRead = Schema.Struct({
-  stage: GameQualificationStage,
-  status: GameQualificationStageStatus,
-  /** The source snapshot the stage recorded, or null when it never recorded one. */
-  sourceId: Schema.NullOr(Schema.String),
-  /** The build an export produced or a playtest played, when applicable. */
-  buildId: Schema.NullOr(Schema.String),
-  finishedAt: Schema.NullOr(Schema.String),
-  /** The per-criterion result the state stage recorded, when there is one. */
-  criteria: Schema.optionalKey(Schema.Array(GameScenarioCriterionResult)),
-  /** Proven/failed/missing counts per kind for the state stage; not-applicable is in none. */
-  coverage: Schema.optionalKey(Schema.Array(GameScenarioKindCoverage)),
-  /** Why the state stage passed or failed, including legacy rules. */
-  detail: Schema.optionalKey(Schema.String),
-  /** For an export, the build-addressed directory its files live in. */
-  buildDirectory: Schema.optionalKey(Schema.String),
-});
-export type GameQualificationStageRead = typeof GameQualificationStageRead.Type;
-/**
- * The server's own verdict, derived from records it wrote after real operations.
- * A stage only counts while its source snapshot (and, for playtests, its build)
- * still matches the files on disk. `unknown` means the source tree could not be
- * snapshotted within the scan bound, so nothing can be called current.
- */
-export const GameQualificationRead = Schema.Struct({
-  state: Schema.Literals(["qualified", "unqualified", "unknown"]),
-  /**
-   * Playable completion: the current web export and a playtest of those exact
-   * bytes. It does not require the optional certification stages, so a game
-   * that ships a playable build is complete even when test/state are missing.
-   */
-  completion: GameCompletionState,
-  /**
-   * Every mechanical stage and the design passed. Review decisions are separate
-   * and do not certify all presentation criteria.
-   */
-  mechanicsQualified: Schema.Boolean,
-  /** The game's current source snapshot, or null when it is unknown. */
-  sourceId: Schema.NullOr(Schema.String),
-  /** The current qualified web build, when one exists. */
-  buildId: Schema.NullOr(Schema.String),
-  /**
-   * Identity of the web build actually served from `builds/web`, from the
-   * export record's artifact descriptor while those bytes are still on disk.
-   * Current with stale sources is not the same thing: a source edit or a failed
-   * rebuild must not treat the running preview as replaced.
-   */
-  servedArtifactId: Schema.NullOr(Schema.String),
-  stages: Schema.Array(GameQualificationStageRead),
-});
-export type GameQualificationRead = typeof GameQualificationRead.Type;
 /**
  * A game operation the server is running, or the last one it ran. Its events
  * replace polling: a stage opened while idle learns about a later agent build
@@ -662,42 +332,22 @@ export type GameOperationState = typeof GameOperationState.Type;
 export const GameStatus = Schema.Struct({
   root: Schema.String,
   manifest: GameManifest,
-  /** The server-owned design lifecycle: the approval record, never game.json alone. */
-  design: GameDesignRead,
-  /** Game-relative paths, when the file exists on disk. */
-  designPath: Schema.NullOr(Schema.String),
-  briefPath: Schema.NullOr(Schema.String),
   toolchain: GameToolchainStatus,
-  assets: Schema.Array(Schema.Struct({ ...GameAsset.fields, usedBy: Schema.Array(Schema.String) })),
-  scenes: Schema.Array(Schema.String),
   /**
-   * The design resolution from `godot/project.godot`, in which the web preview
+   * The resolution from `godot/project.godot`, in which the web preview
    * is framed. Falls back to Godot's own default when the project does not set one.
    */
   viewport: GameViewport,
   /** A web build exists but game sources changed after it: play would be out of date. */
   webBuildStale: Schema.Boolean,
   /**
-   * The selected build's identity, whether or not its files are still usable.
-   * A candidate export never changes it; only promotion or a direct publish does.
-   */
-  selectedBuildId: Schema.NullOr(Schema.String),
-  /**
-   * Whether every served file of the selected build is still present and
-   * nonempty. Null when nothing is selected. Byte identity is checked when Play
-   * opens the build, not on every status read.
-   */
-  selectedArtifactUsable: Schema.NullOr(Schema.Boolean),
-  /**
-   * Whether the current source bytes are the ones the selected build was
+   * Whether the current source bytes are the ones the served build was
    * exported from. `"unknown"` is status's cheap answer: byte freshness costs
    * a full source read, so it is only computed on an explicit check (status
-   * with `checkSources`, or a round decision). This says nothing about whether
-   * the selected build itself is usable.
+   * with `checkSources`). This says nothing about whether the served build
+   * itself is usable.
    */
   sourcesDifferFromPlay: Schema.Union([Schema.Boolean, Schema.Literal("unknown")]),
-  /** Server-owned qualification of the current sources. */
-  qualification: GameQualificationRead,
   builds: Schema.Array(
     Schema.Struct({ target: Schema.String, path: Schema.String, updatedAt: Schema.String }),
   ),
@@ -705,10 +355,6 @@ export const GameStatus = Schema.Struct({
     Schema.Struct({ pid: Schema.Number, operation: Schema.String, logPath: Schema.String }),
   ),
   previewUrl: Schema.NullOr(Schema.String),
-  logsDirectory: Schema.String,
-  lastPlaytest: Schema.NullOr(GameLastPlaytest),
-  /** The builder's production phase: first playable, its declarations and time left. */
-  production: GameProductionStatus,
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,
@@ -734,38 +380,11 @@ export const GameOperationEvent = Schema.Struct({
   at: Schema.String,
 });
 export type GameOperationEvent = typeof GameOperationEvent.Type;
-/**
- * The cheap library verdict: the server's qualification record and design
- * record, without walking the game's sources. `asOf` is when the record was
- * written; the Stage still does the exact check against the files on disk.
- */
-export const GameQualificationSummary = Schema.Struct({
-  state: Schema.Literals(["qualified", "unqualified"]),
-  /** The playable build the record proves, without a source walk. */
-  completion: Schema.Literals(["complete", "incomplete"]),
-  asOf: Schema.NullOr(Schema.String),
-});
-export type GameQualificationSummary = typeof GameQualificationSummary.Type;
 export const GameCreateInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   parentDirectory: Schema.String,
-  template: Schema.optionalKey(GameTemplateId),
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
-  /** Write DESIGN.md before building. Defaults to true. */
-  planFirst: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Wait for the creator to approve each DESIGN.md revision before building.
-   * Defaults to false: the server records every revision itself and the agent
-   * builds in the same turn.
-   */
-  reviewDesign: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Minimal instruction stack: blank start with no design stage. Absent means
-   * the default scaffold; "minimal" forces the blank template, skips DESIGN.md
-   * and acceptance, and uses the reduced prompt and AGENTS.md.
-   */
-  builder: Schema.optionalKey(Schema.Literals(["minimal"])),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
@@ -778,22 +397,16 @@ export const GameProjectResult = Schema.Struct({
 });
 /**
  * One row in the games library. It is a batched read: the sidebar must not ask
- * for a game's status once per project. `coverImagePath` is game-relative; the
- * client asks the asset service for a URL only when it actually shows a cover.
+ * for a game's status once per project.
  */
 export const GameSummary = Schema.Struct({
   projectId: ProjectId,
   root: Schema.String,
   name: Schema.String,
   template: Schema.NullOr(GameTemplateId),
-  /** The server-owned design lifecycle, not game.json's display mirror. */
-  designState: Schema.NullOr(GameDesignState),
   /** The operation running now, or the last one, for a building label. */
   operation: Schema.NullOr(Schema.Struct({ name: Schema.String, state: GameOperationState })),
-  /** The qualification record's verdict, as of when it was written. */
-  qualification: GameQualificationSummary,
   updatedAt: Schema.String,
-  coverImagePath: Schema.NullOr(Schema.String),
 });
 export type GameSummary = typeof GameSummary.Type;
 export const GameListResult = Schema.Array(GameSummary);
@@ -807,10 +420,8 @@ export const GameThreadInput = Schema.Struct({
   checkSources: Schema.optionalKey(Schema.Boolean),
 });
 export const GameAction = Schema.Literals([
-  "verify",
   "preview",
   "rebuild",
-  "native",
   "stop",
   "export-linux",
   "export-windows",
@@ -899,223 +510,6 @@ export const GameConsoleMessage = Schema.Struct({
   text: Schema.String,
 });
 export type GameConsoleMessage = typeof GameConsoleMessage.Type;
-export const GamePlaytestScreenshot = Schema.Struct({
-  frameId: Schema.optionalKey(Schema.String),
-  label: Schema.String,
-  inputPair: Schema.optionalKey(GamePlaytestInputPair),
-  mimeType: Schema.Literal("image/png"),
-  data: Schema.String,
-  width: Schema.Number,
-  height: Schema.Number,
-  /**
-   * Where this frame's PNG lives for a file/image read: game-relative for
-   * recorded playtests (e.g. builds/playtests/<run>/01-booted.png),
-   * evidence-relative for critic experiments (e.g. frames/try-1-1.png), or an
-   * isolated absolute evidence path for builder experiments (which never write
-   * into the game folder). Absent when the run did not persist a readable
-   * copy. The MCP image transport strips `data` and keeps this path, so a
-   * default metadata-only result still names every frame without attaching
-   * its bytes.
-   */
-  path: Schema.optionalKey(Schema.String),
-  /** The latest probe state when this frame was taken, so evidence can pair them. */
-  probe: Schema.optionalKey(GamePlaytestProbe),
-});
-export type GamePlaytestScreenshot = typeof GamePlaytestScreenshot.Type;
-/**
- * The capture envelope. A routine agent mistake must not hold the game's
- * operation lock for hours, allocate a huge result, or push an oversized frame
- * over the websocket. Tool schemas advertise the simple bounds; duration sums
- * and screenshot counts stay with `playtestInputIssues` because they span the
- * whole sequence.
- */
-export const GAME_PLAYTEST_BOUNDS = {
-  minDimension: 320,
-  maxDimension: 1920,
-  maxStepMs: 10_000,
-  maxSequenceMs: 120_000,
-  maxSteps: 60,
-  maxScreenshotSteps: 12,
-  maxBootTimeoutMs: 120_000,
-  /** Aggregate PNG bytes returned to the caller; the rest stay as evidence. */
-  maxResultImageBytes: 6 * 1024 * 1024,
-} as const;
-export const GAME_TRY_INPUT_BOUNDS = {
-  maxRunMs: 180_000,
-  maxSteps: 12,
-  maxSetupSteps: 48,
-  maxSequenceMs: 30_000,
-  maxFrames: 32,
-  maxCalls: 6,
-  minCaptureEveryMs: 100,
-} as const;
-export const GameTryInput = Schema.Struct({
-  buildId: Schema.optionalKey(Schema.String),
-  steps: Schema.Array(GamePlaytestStep)
-    .check(Schema.isMinLength(1), Schema.isMaxLength(GAME_TRY_INPUT_BOUNDS.maxSteps))
-    .annotate({
-      description: `1–${GAME_TRY_INPUT_BOUNDS.maxSteps} route steps. The plan is 2 setup frames plus 2 per step (1 for a screenshot) plus max(0, ceil(stepMs / captureEveryMs) - 1) interval frames, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
-    }),
-  setupSteps: Schema.optionalKey(
-    Schema.Array(GamePlaytestStep)
-      .check(Schema.isMaxLength(GAME_TRY_INPUT_BOUNDS.maxSetupSteps))
-      .annotate({
-        description: `Optional uncaptured prelude of at most ${GAME_TRY_INPUT_BOUNDS.maxSetupSteps} physical inputs/waits (no screenshots) replayed from fresh boot before steps, to reach a later question. Only steps are captured and citable; setup proves nothing alone. Combined setup+steps share ${GAME_TRY_INPUT_BOUNDS.maxSequenceMs / 1000} seconds and the ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame plan (setup adds no frames).`,
-      }),
-  ),
-  captureEveryMs: Schema.optionalKey(
-    Schema.Finite.check(
-      Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
-    ).annotate({
-      description: `Interval between extra frames during a step. Defaults to 1000 and must be at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms.`,
-    }),
-  ),
-});
-export type GameTryInput = typeof GameTryInput.Type;
-const gamePlaytestCaptureOptions = {
-  captureEveryMs: Schema.optionalKey(
-    Schema.Finite.check(
-      Schema.isGreaterThanOrEqualTo(GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs),
-    ).annotate({
-      description: `Also capture a frame at this interval during held and waited steps, at least ${GAME_TRY_INPUT_BOUNDS.minCaptureEveryMs} ms apart. The plan is checked before the run: 2 setup frames, plus 2 per input step (1 for a screenshot; a wait adds 2 only with captureAllSteps), plus max(0, ceil(stepMs / captureEveryMs) - 1) interval frames per step, against a ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame limit.`,
-    }),
-  ),
-  captureAllSteps: Schema.optionalKey(Schema.Boolean).annotate({
-    description: `Keep before/after pair frames for wait steps too, and keep a pair when a step dispatches no input. Those frames count against the ${GAME_TRY_INPUT_BOUNDS.maxFrames}-frame plan.`,
-  }),
-  width: Schema.optionalKey(
-    Schema.Finite.check(
-      Schema.isBetween({
-        minimum: GAME_PLAYTEST_BOUNDS.minDimension,
-        maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
-      }),
-    ).annotate({
-      description: `Capture width in pixels, ${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension}.`,
-    }),
-  ),
-  height: Schema.optionalKey(
-    Schema.Finite.check(
-      Schema.isBetween({
-        minimum: GAME_PLAYTEST_BOUNDS.minDimension,
-        maximum: GAME_PLAYTEST_BOUNDS.maxDimension,
-      }),
-    ).annotate({
-      description: `Capture height in pixels, ${GAME_PLAYTEST_BOUNDS.minDimension}–${GAME_PLAYTEST_BOUNDS.maxDimension}.`,
-    }),
-  ),
-  bootTimeoutMs: Schema.optionalKey(
-    Schema.Finite.check(
-      Schema.isBetween({ minimum: 1, maximum: GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs }),
-    ).annotate({
-      description: `How long to wait for Godot to boot, 1–${GAME_PLAYTEST_BOUNDS.maxBootTimeoutMs} ms.`,
-    }),
-  ),
-};
-export const GameWebPlaytestInput = Schema.Struct({
-  ...gamePlaytestCaptureOptions,
-  steps: Schema.optionalKey(
-    Schema.Array(GamePlaytestStep)
-      .check(Schema.isMaxLength(GAME_PLAYTEST_BOUNDS.maxSteps))
-      .annotate({
-        description: `Optional route of at most ${GAME_PLAYTEST_BOUNDS.maxSteps} steps. The request is rejected before the browser launches if the interval capture plan exceeds ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; see captureEveryMs.`,
-      }),
-  ),
-  /**
-   * Capture at exactly width×height instead of a whole-number multiple of the
-   * game's base viewport. Review layout evidence needs a window whose shape can
-   * differ from the game's; such a run is evidence only and is never recorded
-   * as the build's playtest.
-   */
-  exactSize: Schema.optionalKey(Schema.Boolean).annotate({
-    description:
-      "Capture at exactly width×height as review-only layout evidence. The run is saved under builds/review-evidence, never recorded as the build's playtest and never counted toward qualification. Both width and height are required.",
-  }),
-});
-export type GameWebPlaytestInput = typeof GameWebPlaytestInput.Type;
-/** A route step that drives the game; waits and screenshots only gather evidence. */
-export const isGameplayInputStep = (step: GamePlaytestStep): boolean =>
-  !("waitMs" in step) && !("screenshot" in step);
-/**
- * What a recorded verification accepts. `steps` is the required gameplay
- * route; `exactSize` is review-only evidence and stays on
- * `GameWebPlaytestInput` instead. The service still rejects legacy direct
- * callers that send it.
- */
-export const GameVerifyInput = Schema.Struct({
-  steps: Schema.Array(GamePlaytestStep)
-    .check(
-      Schema.makeFilter(
-        (steps) =>
-          steps.some(isGameplayInputStep) ||
-          "Provide at least one real input step (press, hold, key, keys, click, drag or mouseMove). Waits and screenshots cannot prove the game responds, and game_submit needs a playtest that dispatched input.",
-        { toJsonSchema: () => [{ minItems: 1 }, true] },
-      ),
-    )
-    .check(Schema.isMaxLength(GAME_PLAYTEST_BOUNDS.maxSteps))
-    .annotate({
-      description: `Required route: 1–${GAME_PLAYTEST_BOUNDS.maxSteps} steps, including at least one gameplay input step (press, hold, key/keys, click, drag or mouseMove). Waits and screenshots only gather evidence and cannot be the whole route. The request is rejected before any stage runs if the interval capture plan exceeds ${GAME_TRY_INPUT_BOUNDS.maxFrames} frames; see captureEveryMs.`,
-    }),
-  ...gamePlaytestCaptureOptions,
-});
-export type GameVerifyInput = typeof GameVerifyInput.Type;
-export const GameWebPlaytestResult = Schema.Struct({
-  /** Actual dispatched input steps; absent in older recordings. */
-  executedInputSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  success: Schema.Boolean,
-  booted: Schema.Boolean,
-  bootMs: Schema.NullOr(Schema.Number),
-  responded: Schema.Boolean,
-  /** Share of sampled pixels that changed between the boot and after-steps frames. */
-  changedPercent: Schema.Number,
-  message: Schema.String,
-  consoleMessages: Schema.Array(GameConsoleMessage),
-  /**
-   * Every console error the run observed, including ones dropped from the
-   * bounded retained text. Absent on evidence written before the counter
-   * existed; the retained messages are then the only record.
-   */
-  consoleErrorCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  /**
-   * Retained console messages dropped by the bound, oldest first. Honest
-   * truncation: a nonzero count means the text above is a suffix, never the
-   * whole log.
-   */
-  consoleTruncated: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  screenshots: Schema.Array(GamePlaytestScreenshot),
-  /** Null when the game has no StudioProbe (games created before the probe existed). */
-  state: Schema.NullOr(GamePlaytestState),
-  /**
-   * Approved observe criteria this playtest happened to satisfy. Informational:
-   * the server-owned scenario runner is what gates the state stage.
-   */
-  designObservations: Schema.optionalKey(Schema.Array(Schema.String)),
-  /** Game-relative evidence directory, when the service persisted this run. */
-  evidenceDirectory: Schema.optionalKey(Schema.String),
-  /** Whether this run was honest gameplay evidence for the game's exam. */
-  qualifies: Schema.optionalKey(Schema.Boolean),
-  /** Structured reasons this run did not qualify; empty when it qualified. */
-  blockers: Schema.optionalKey(Schema.Array(Schema.String)),
-  /** What changed from the run's gameplay baseline, human readable. */
-  interaction: Schema.optionalKey(Schema.String),
-  /**
-   * The stage's pause/mute bridge, exercised once by the driver like the play
-   * surface does. Null when the check did not run; otherwise true only when
-   * both ends of the postMessage confirmed the hidden pause.
-   */
-  pauseConfirmed: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-  /** The project's base viewport the frames were scaled up from. */
-  baseViewport: Schema.optionalKey(GameViewport),
-  /** The integer multiple of the base viewport the frames were captured at. */
-  captureScale: Schema.optionalKey(Schema.Number),
-  /**
-   * How the run's game time was driven. `controlled-clock` means the driver
-   * paused the page clock after boot and advanced it only with explicit
-   * nominal durations, so captures and wall-clock round trips never ran the
-   * game. Absent on wall-time evidence written before the controlled driver.
-   */
-  timing: Schema.optionalKey(Schema.Literal("controlled-clock")),
-});
-export type GameWebPlaytestResult = typeof GameWebPlaytestResult.Type;
 export const GameCheckIssue = Schema.Struct({
   file: Schema.String,
   line: Schema.optionalKey(Schema.Number),
@@ -1131,141 +525,3 @@ export const GameCheckResult = Schema.Struct({
   durationMs: Schema.Number,
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
-/** The five stages a complete verification runs, in order. `state` only runs for an approved design with nonempty acceptance; legacy, skipped and no-acceptance games keep the original four. */
-export const GameVerifyStage = Schema.Literals(["check", "test", "state", "export", "playtest"]);
-export type GameVerifyStage = typeof GameVerifyStage.Type;
-/**
- * The playtest evidence without its frame bytes: `game_verify` returns those at
- * the result's top level so the MCP image transport attaches them once.
- */
-export const GameVerifyPlaytest = Schema.Struct(
-  Struct.omit(GameWebPlaytestResult.fields, ["screenshots"]),
-);
-export type GameVerifyPlaytest = typeof GameVerifyPlaytest.Type;
-/** The exported artifact a verification played, by exact recorded identity. */
-export const GameVerifyBuild = Schema.Struct({
-  buildId: Schema.String,
-  /** Game-relative immutable build directory. */
-  directory: Schema.String,
-  /** Absolute path to the build's entry document. */
-  path: Schema.String,
-});
-export type GameVerifyBuild = typeof GameVerifyBuild.Type;
-/**
- * One complete iteration's mechanical evidence. `success` covers only the
- * stages this call ran; quality and design acceptance remain model judgment.
- * `state` and `scenarios` are present only when an approved design with
- * nonempty acceptance made the call run its scenario exam.
- */
-export const GameVerifyResult = Schema.Struct({
-  success: Schema.Boolean,
-  message: Schema.String,
-  /** Stages whose recorded result passed and matched the same sources, in order. */
-  completed: Schema.Array(GameVerifyStage),
-  /** The stage that stopped the run, absent only when every stage it ran passed. */
-  failedStage: Schema.optionalKey(GameVerifyStage),
-  check: Schema.optionalKey(GameCheckResult),
-  test: Schema.optionalKey(GameActionResult),
-  /** The refreshed scenario exam, when the approved acceptance required one. */
-  scenarios: Schema.optionalKey(GameScenariosRunResult),
-  export: Schema.optionalKey(GameActionResult),
-  build: Schema.optionalKey(GameVerifyBuild),
-  playtest: Schema.optionalKey(GameVerifyPlaytest),
-  /** Playtest frames, kept at the top level for the image transport. Each frame
-   * carries its persisted `path` so the default metadata-only result still
-   * names every frame; the transport attaches bytes only on explicit opt-in. */
-  screenshots: Schema.Array(GamePlaytestScreenshot),
-});
-export type GameVerifyResult = typeof GameVerifyResult.Type;
-export const GameSceneNode = Schema.Struct({
-  /** Scene-relative node path; "." is the scene root. */
-  path: Schema.String,
-  name: Schema.String,
-  type: Schema.String,
-  script: Schema.optionalKey(Schema.String),
-  groups: Schema.Array(Schema.String),
-  position: Schema.optionalKey(Schema.Array(Schema.Number)),
-  collisionLayer: Schema.optionalKey(Schema.Number),
-  collisionMask: Schema.optionalKey(Schema.Number),
-  /** Direct child names, in scene order. */
-  children: Schema.Array(Schema.String),
-});
-export type GameSceneNode = typeof GameSceneNode.Type;
-export const GameSceneInspectInput = Schema.Struct({ scenePath: Schema.String });
-export const GameSceneInspectResult = Schema.Struct({
-  scenePath: Schema.String,
-  nodes: Schema.Array(GameSceneNode),
-  nodeCount: Schema.Number,
-  truncated: Schema.Boolean,
-});
-export type GameSceneInspectResult = typeof GameSceneInspectResult.Type;
-export const GameBlenderInput = Schema.Struct({
-  id: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,80}$/)),
-  script: Schema.String,
-  thumbnail: Schema.optionalKey(Schema.Boolean),
-  reset: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Establish or replace this game's shared art profile. It is persisted on a
-   * successful export and applied to this asset; later runs reuse it until it
-   * is set again. The exporter creates one material per palette colour named
-   * `StudioPalette_<hex>` (for example `StudioPalette_ff5b3a`), so scripts
-   * assign `bpy.data.materials["StudioPalette_ff5b3a"]` instead of inventing
-   * colours per asset.
-   */
-  art: Schema.optionalKey(GameArtProfile),
-  /**
-   * Optional named local models/images this new asset reuses: up to
-   * `GAME_BLENDER_INPUT_BOUNDS.maxInputs` entries such as
-   * `{ name: "base", path: "godot/assets/library/models/crate/crate.gltf" }`
-   * or `{ name: "bark", path: "res://assets/library/materials/bark/Diffuse_1k.jpg" }`.
-   * Supported types are `.gltf` (plus its local `.bin`/image dependencies),
-   * `.glb`, `.png`, `.jpg` and `.jpeg`. The service stages each source under a
-   * scratch file and exposes the staged path as `ASSET_INPUTS[name]` to the
-   * bpy script, so `bpy.ops.import_scene.gltf(filepath=ASSET_INPUTS["base"])`
-   * or `bpy.data.images.load(ASSET_INPUTS["bark"])` reuses geometry, UVs,
-   * textures or clips. Images are packed into the saved `.blend`, so removing
-   * scratch files never breaks later revisions. Bindings are recorded on the
-   * asset; supplying a name never proves the script used it. A revision
-   * without new inputs keeps the previous bindings, while reset without new
-   * inputs clears them for the fresh source. Images are bounded per file and
-   * in decoded pixels (see `GAME_BLENDER_INPUT_BOUNDS`); oversized sources
-   * are rejected before Blender launches.
-   */
-  inputs: Schema.optionalKey(
-    Schema.Array(GameBlenderInputSource).check(
-      Schema.isMinLength(1),
-      Schema.isMaxLength(GAME_BLENDER_INPUT_BOUNDS.maxInputs),
-    ),
-  ),
-});
-/** One material the export reported, with its base colour as linear RGB. */
-export const GameBlenderMaterial = Schema.Struct({
-  name: Schema.String,
-  color: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
-});
-export type GameBlenderMaterial = typeof GameBlenderMaterial.Type;
-export const GameBlenderResult = Schema.Struct({
-  asset: GameAsset,
-  objects: Schema.Number,
-  meshes: Schema.Number,
-  materials: Schema.Number,
-  /** Every material on the export, so callers see which palette entries bound. */
-  materialDetails: Schema.Array(GameBlenderMaterial),
-  /** Actions on the export; glTF animations come from these. */
-  animations: Schema.Number,
-  /** Estimated triangles across all meshes. */
-  triangles: Schema.Number,
-  dimensions: Schema.Array(Schema.Number),
-  /**
-   * How far the mesh bounds' bottom-centre sits from the world origin, in
-   * metres as [x, y, z]. Assets stand on the ground when this is near zero.
-   */
-  originOffset: Schema.Array(Schema.Number),
-  warnings: Schema.Array(Schema.String),
-  /**
-   * Game-relative contact sheet comparing every asset thumbnail, refreshed on
-   * this export. Absent when no asset has a thumbnail yet.
-   */
-  contactSheet: Schema.optionalKey(Schema.String),
-  process: GameProcessResult,
-});

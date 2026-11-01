@@ -25,6 +25,28 @@ interface Running {
  * and an agent's `godot --write-movie` must not open a window on that session.
  */
 export const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
+/**
+ * PATH discovery for standard executables. Env overrides exist for configured
+ * tools (for example GAME_STUDIO_FFMPEG) and for tests.
+ */
+export const findExecutable = async (
+  name: string,
+  options: { readonly pathEnv?: string | undefined; readonly override?: string | undefined },
+): Promise<string | null> => {
+  const candidates: string[] = [];
+  if (options.override?.trim()) candidates.push(options.override.trim());
+  for (const entry of (options.pathEnv ?? "").split(NodePath.delimiter).filter(Boolean))
+    candidates.push(NodePath.join(entry, name));
+  for (const candidate of candidates) {
+    try {
+      await NodeFSP.access(candidate, NodeFSP.constants.X_OK);
+      if ((await NodeFSP.stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Not usable; try the next candidate.
+    }
+  }
+  return null;
+};
 /** The environment headless children get: the server's, minus every display route. */
 export const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const headless: NodeJS.ProcessEnv = { ...environment };
@@ -38,12 +60,6 @@ interface ProcessInput {
   operation: string;
   timeoutMs?: number;
   cwd?: string;
-  /**
-   * `headless` (the default) strips display variables. `inherit` is only for a
-   * game the creator launched to watch: the benchmark server has no display to
-   * inherit, so even that route stays isolated there.
-   */
-  display?: "headless" | "inherit";
   /** Extra variables merged over the base environment for this child only; never leaked globally. */
   env?: NodeJS.ProcessEnv | undefined;
   /**
@@ -88,10 +104,7 @@ const make = Effect.gen(function* () {
     });
     const child = NodeChildProcess.spawn(input.executable, [...input.args], {
       cwd: input.cwd ?? input.root,
-      env: {
-        ...(input.display === "inherit" ? process.env : headlessEnvironment(process.env)),
-        ...input.env,
-      },
+      env: { ...headlessEnvironment(process.env), ...input.env },
       stdio: ["ignore", "pipe", "pipe"],
       // A wrapper (xvfb-run) leaves its display server and engine child in the
       // group; group signalling is the only way to own all of them by PID.

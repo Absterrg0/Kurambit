@@ -7,7 +7,6 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameProcessResult,
-  type GameScenarioEvidence,
   type GameViewport,
 } from "@t3tools/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -39,13 +38,6 @@ export interface GameEngineContext {
   readonly binary: GameEngineBinary;
 }
 
-export interface GameEngineCapabilities {
-  /** Whether the backend can run the approved-scenario exam. */
-  readonly scenarios: boolean;
-  /** Whether the backend answers engine ClassDB reflection queries. */
-  readonly classDbApi: boolean;
-}
-
 export interface GameEngineProjectSettings {
   readonly viewport: GameViewport;
 }
@@ -61,26 +53,15 @@ export interface GameEngineCheckReport {
   readonly run: GameProcessResult;
 }
 
-export interface GameEngineScenarioExecution {
-  readonly evidence: GameScenarioEvidence | null;
-  /** Issues parsed from the scenario run's own stdout/stderr. */
-  readonly issues: ReadonlyArray<GameCheckIssue>;
-  readonly run: GameProcessResult;
-}
-
 /**
  * One engine backend. It owns engine execution, configuration and parsing:
  * process arguments, runner scripts, project-settings formats and output
- * diagnostics. The core (GameService) owns everything else — stage order, the
- * design gate, source binding, cancellation and operation ownership,
- * qualification and promotion — and calls this interface for the
- * production import/check/test/scenario/export slice. Methods that probe or
- * build other engine surfaces (scene inspection, ClassDB, asset inventory,
- * art frames, native capture, calibration) remain Godot-specific.
+ * diagnostics. The core (GameService) owns everything else — stage order,
+ * source binding, cancellation and operation ownership — and calls this
+ * interface for the production import/check/export slice.
  */
 export interface GameEngineBackend {
   readonly id: SupportedGameEngineId;
-  readonly capabilities: GameEngineCapabilities;
   readonly resolveProject: (
     root: string,
     manifest: GameManifest,
@@ -91,8 +72,6 @@ export interface GameEngineBackend {
   readonly projectSettings: (projectFileText: string) => GameEngineProjectSettings;
   /** Parse engine diagnostics from combined process output. */
   readonly parseDiagnostics: (output: string) => ReadonlyArray<GameCheckIssue>;
-  /** The scenario runner script the core stages in its evidence directory. */
-  readonly scenarioScript: { readonly fileName: string; readonly text: string };
   /** Headless editor import plus the diagnostics its output reported. */
   readonly importProject: (
     ctx: GameEngineContext,
@@ -100,27 +79,11 @@ export interface GameEngineBackend {
     { readonly result: GameActionResult; readonly issues: ReadonlyArray<GameCheckIssue> },
     GameOperationError
   >;
-  /** Static + boot check: script execution and parsing, no qualification. */
+  /** Static + boot check: script execution and parsing. */
   readonly runCheck: (
     ctx: GameEngineContext,
     input: { readonly gameplayScene: string },
   ) => Effect.Effect<GameEngineCheckReport, GameOperationError>;
-  /** Run one engine script file and map the process outcome. */
-  readonly runTestScript: (
-    ctx: GameEngineContext,
-    input: { readonly scriptPath: string; readonly timeoutMs: number },
-  ) => Effect.Effect<GameActionResult, GameOperationError>;
-  /** Run one prepared scenario request and decode its evidence file. */
-  readonly runScenario: (
-    ctx: GameEngineContext,
-    input: {
-      readonly scriptPath: string;
-      readonly requestPath: string;
-      readonly resultPath: string;
-      readonly timeoutMs: number;
-      readonly env?: NodeJS.ProcessEnv | undefined;
-    },
-  ) => Effect.Effect<GameEngineScenarioExecution, GameOperationError>;
   /** Run one export-release invocation and map the process outcome. */
   readonly runExportRelease: (
     ctx: GameEngineContext,

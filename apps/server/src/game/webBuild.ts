@@ -3,7 +3,6 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import type { GameQualificationRead } from "@t3tools/contracts";
 
 /** The legacy mutable build directory. A new export never writes here. */
 export const WEB_BUILD_DIRECTORY = "builds/web";
@@ -150,55 +149,3 @@ export const hashWebBuild = async (
   const hashed = await hashWebBuildDirectory(NodePath.join(root, directory));
   return hashed === null ? null : { ...hashed, directory };
 };
-
-const sameArtifacts = (
-  recorded: readonly WebArtifactFile[],
-  current: readonly WebArtifactFile[],
-): boolean =>
-  recorded.length === current.length &&
-  recorded.every((file, index) => {
-    const other = current[index]!;
-    return file.path === other.path && file.size === other.size && file.mtimeMs === other.mtimeMs;
-  });
-
-/**
- * Whether the artifact the export record names is still the artifact on disk.
- * A record without a descriptor, a missing file, a replaced file or an extra
- * file all read as stale: qualification must never serve files it did not see
- * exported.
- */
-export const webArtifactsMatch = async (
-  root: string,
-  recorded: readonly WebArtifactFile[] | undefined,
-  directory: string = WEB_BUILD_DIRECTORY,
-): Promise<boolean> => {
-  if (recorded === undefined) return false;
-  const current = await describeWebArtifacts(root, directory);
-  return current !== null && sameArtifacts(recorded, current);
-};
-
-/**
- * The one identity of the exact files the preview serves, from the export
- * record's task-30a artifact descriptor. A rebuild produces fresh mtimes and
- * therefore a fresh identity; a source edit (which touches nothing under
- * builds/), a mid-flight export and a failed rebuild all keep the identity, so
- * the running game only resets when its served bytes really were replaced.
- * Derived, not stored: rewriting the same artifact keeps the same identity.
- */
-export const webArtifactIdentity = (
-  artifacts: readonly WebArtifactFile[] | undefined,
-): string | null => {
-  if (artifacts === undefined || artifacts.length === 0) return null;
-  return NodeCrypto.createHash("sha256")
-    .update(JSON.stringify(artifacts))
-    .digest("hex")
-    .slice(0, 24);
-};
-
-/**
- * Whether the current web build may be served or played. The export stage is
- * only passed when its source snapshot and artifact descriptor still match, so
- * a missing, stale, failed or unknown export always forces a rebuild.
- */
-export const isWebBuildFresh = (qualification: GameQualificationRead): boolean =>
-  qualification.stages.some((stage) => stage.stage === "export" && stage.status === "passed");

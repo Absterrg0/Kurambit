@@ -4,7 +4,6 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { LoadedGameBenchmarkBrief } from "./game-benchmark/artifacts.ts";
-import type { GameWebPlaytestResult } from "../packages/contracts/src/index.ts";
 import {
   chooseFrames,
   clampHoldMs,
@@ -35,30 +34,6 @@ const brief: LoadedGameBenchmarkBrief = {
 };
 
 const frames = [{ id: "F1", path: "/frames/f1.png", label: "after step 1" }];
-
-/** A playtest that never boots: enough to prove which bytes the server served. */
-const unopenedPlaytest = (): GameWebPlaytestResult => ({
-  success: true,
-  booted: false,
-  bootMs: null,
-  responded: false,
-  changedPercent: 0,
-  message: "stub playtest",
-  consoleMessages: [],
-  screenshots: [],
-  state: null,
-});
-
-/** Asserts a promise rejects with a message matching `pattern`. */
-const rejects = async (promise: Promise<unknown>, pattern: RegExp): Promise<void> => {
-  let failure: unknown = null;
-  try {
-    await promise;
-  } catch (error) {
-    failure = error;
-  }
-  assert.match(failure instanceof Error ? failure.message : String(failure), pattern);
-};
 
 const reply = (verdict: "YES" | "NO") => ({
   verdict,
@@ -488,9 +463,6 @@ describe("gradeGame", () => {
             reviewed = true;
             return reply("YES");
           },
-          playtest: async () => {
-            throw new Error("a no-build must not playtest");
-          },
         },
       });
       assert.equal(grade.build.kind, "no-build");
@@ -535,9 +507,6 @@ describe("gradeGame", () => {
         deps: {
           exportBuild: async () => ({ ok: false, detail: "no godot project" }),
           review: async () => reply("YES"),
-          playtest: async () => {
-            throw new Error("a no-build must not playtest");
-          },
         },
       });
       assert.deepStrictEqual(grade.grader, {
@@ -602,12 +571,6 @@ describe("gradeGame", () => {
           review: async (request) => {
             prompts.push(request.prompt);
             return reply("NO");
-          },
-          playtest: async () => {
-            throw new Error("a vote-only re-grade must not playtest");
-          },
-          exportBuild: async () => {
-            throw new Error("a vote-only re-grade must not build");
           },
         },
       });
@@ -694,12 +657,6 @@ describe("gradeGame", () => {
             prompts.push(request.prompt);
             return reply("NO");
           },
-          playtest: async () => {
-            throw new Error("a vote-only re-grade must not playtest");
-          },
-          exportBuild: async () => {
-            throw new Error("a vote-only re-grade must not build");
-          },
         },
       });
       // The frame before each reload is the only picture of the win.
@@ -710,97 +667,6 @@ describe("gradeGame", () => {
       assert.match(prompts[0]!, /after step 11: drag \(10,10\)→\(20,20\) — note 11/);
       // Every screenshot comes along as evidence.
       assert.equal((await NodeFSP.readdir(NodePath.join(out, "frames"))).length, 16);
-    } finally {
-      await NodeFSP.rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("serves an explicit saved artifact and never exports the workspace", async () => {
-    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
-    try {
-      const gameDir = NodePath.join(directory, "game");
-      const workspace = NodePath.join(gameDir, "builds/web");
-      const artifact = NodePath.join(directory, "saved-artifact");
-      await NodeFSP.mkdir(workspace, { recursive: true });
-      await NodeFSP.mkdir(artifact, { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(workspace, "index.html"), "workspace build");
-      await NodeFSP.writeFile(NodePath.join(artifact, "index.html"), "selected build");
-      const buildId = "a".repeat(64);
-      let exported = false;
-      let served: string | null = null;
-      const out = NodePath.join(directory, "out");
-      const grade = await gradeGame({
-        gameDir,
-        brief,
-        out,
-        browser: "/browser-not-launched",
-        artifact: { directory: artifact, buildId },
-        deps: {
-          exportBuild: async () => {
-            exported = true;
-            return { ok: true, detail: null };
-          },
-          playtest: async (request) => {
-            served = await (await fetch(request.url)).text();
-            return unopenedPlaytest();
-          },
-          review: async () => reply("NO"),
-        },
-      });
-      // The selected bytes were served, not the workspace's, and no export ran.
-      assert.equal(exported, false);
-      assert.equal(served, "selected build");
-      assert.equal(grade.build.kind, "artifact");
-      assert.deepEqual(grade.target, { kind: "artifact", directory: artifact, buildId });
-      const written = JSON.parse(
-        await NodeFSP.readFile(NodePath.join(out, "grade.json"), "utf8"),
-      ) as { target: unknown };
-      assert.deepEqual(written.target, { kind: "artifact", directory: artifact, buildId });
-      // Serving is read-only: the artifact still holds exactly what it held.
-      assert.equal(
-        await NodeFSP.readFile(NodePath.join(artifact, "index.html"), "utf8"),
-        "selected build",
-      );
-    } finally {
-      await NodeFSP.rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses a missing explicit artifact instead of falling back to the workspace", async () => {
-    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
-    try {
-      const gameDir = NodePath.join(directory, "game");
-      await NodeFSP.mkdir(NodePath.join(gameDir, "builds/web"), { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(gameDir, "builds/web/index.html"), "workspace build");
-      let exported = false;
-      let reviewed = false;
-      let played = false;
-      await rejects(
-        gradeGame({
-          gameDir,
-          brief,
-          out: NodePath.join(directory, "out"),
-          artifact: { directory: NodePath.join(directory, "missing-artifact") },
-          deps: {
-            exportBuild: async () => {
-              exported = true;
-              return { ok: true, detail: null };
-            },
-            playtest: async () => {
-              played = true;
-              return unopenedPlaytest();
-            },
-            review: async () => {
-              reviewed = true;
-              return reply("YES");
-            },
-          },
-        }),
-        /No nonempty index\.html in the artifact directory/,
-      );
-      assert.equal(exported, false);
-      assert.equal(reviewed, false);
-      assert.equal(played, false);
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }
@@ -844,12 +710,6 @@ describe("gradeGame", () => {
               throw new Error("Codex CLI command failed: Reading prompt from stdin...");
             return reply("NO");
           },
-          playtest: async () => {
-            throw new Error("a vote-only re-grade must not playtest");
-          },
-          exportBuild: async () => {
-            throw new Error("a vote-only re-grade must not build");
-          },
         },
       });
       assert.equal(grade.inconclusive, true);
@@ -873,7 +733,7 @@ describe("gradeGame", () => {
     }
   });
 
-  it("keeps a saved grade's target and refuses to relabel it", async () => {
+  it("keeps a saved grade's target", async () => {
     const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "game-grade-test-"));
     try {
       const png = Buffer.from(
@@ -881,11 +741,7 @@ describe("gradeGame", () => {
         "base64",
       );
       const artifact = NodePath.join(directory, "saved-artifact");
-      const otherArtifact = NodePath.join(directory, "other-artifact");
       await NodeFSP.mkdir(artifact, { recursive: true });
-      await NodeFSP.mkdir(otherArtifact, { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(artifact, "index.html"), "selected build");
-      await NodeFSP.writeFile(NodePath.join(otherArtifact, "index.html"), "other build");
       const buildId = "a".repeat(64);
       const target = { kind: "artifact" as const, directory: artifact, buildId };
       const savedDir = NodePath.join(directory, "saved");
@@ -907,62 +763,13 @@ describe("gradeGame", () => {
         solCalls: 0,
       };
       await NodeFSP.writeFile(NodePath.join(savedDir, "grade.json"), JSON.stringify(document));
-      const deps = {
-        review: async () => reply("NO"),
-        playtest: async () => {
-          throw new Error("a vote-only re-grade must not playtest");
-        },
-        exportBuild: async () => {
-          throw new Error("a vote-only re-grade must not build");
-        },
-      };
       const preserved = await gradeGame({
         brief,
         out: NodePath.join(directory, "out-kept"),
         reuseFrames: savedDir,
-        deps,
+        deps: { review: async () => reply("NO") },
       });
       assert.deepEqual(preserved.target, target);
-      // Naming the same artifact again is not a contradiction.
-      const matched = await gradeGame({
-        brief,
-        out: NodePath.join(directory, "out-matched"),
-        reuseFrames: savedDir,
-        artifact: { directory: artifact, buildId },
-        deps,
-      });
-      assert.deepEqual(matched.target, target);
-      await rejects(
-        gradeGame({
-          brief,
-          out: NodePath.join(directory, "out-relabelled"),
-          reuseFrames: savedDir,
-          artifact: { directory: otherArtifact },
-          deps,
-        }),
-        /cannot be relabelled/,
-      );
-      // A document from before target identity existed cannot be relabelled
-      // either: its frames do not prove which build they came from.
-      const oldSavedDir = NodePath.join(directory, "saved-old");
-      await NodeFSP.mkdir(NodePath.join(oldSavedDir, "frames"), { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(oldSavedDir, "frames/boot.png"), png);
-      const oldDocument: Partial<typeof document> = { ...document };
-      delete oldDocument.target;
-      await NodeFSP.writeFile(
-        NodePath.join(oldSavedDir, "grade.json"),
-        JSON.stringify(oldDocument),
-      );
-      await rejects(
-        gradeGame({
-          brief,
-          out: NodePath.join(directory, "out-old"),
-          reuseFrames: oldSavedDir,
-          artifact: { directory: artifact, buildId },
-          deps,
-        }),
-        /cannot be relabelled/,
-      );
     } finally {
       await NodeFSP.rm(directory, { recursive: true, force: true });
     }

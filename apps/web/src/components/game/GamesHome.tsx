@@ -10,10 +10,9 @@ import {
 
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { useAssetUrls } from "../../assets/assetUrls";
 import { useThreadShells } from "../../state/entities";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, GameSummary, GameTemplateId } from "@t3tools/contracts";
+import type { EnvironmentId, GameSummary } from "@t3tools/contracts";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -27,7 +26,6 @@ import {
   newestThreadByProject,
 } from "./gameLibrary.logic";
 import { gameProgress } from "./gameProgress";
-import { TemplatePreview } from "./TemplatePreview";
 import { useGameLibrary } from "./useGameLibrary";
 
 export function GamesHome() {
@@ -61,8 +59,7 @@ export function GamesHome() {
     }
     void handleNewThread(scopeProjectRef(card.game.environmentId, card.game.projectId));
   };
-  const newGame = (template?: GameTemplateId) =>
-    useGameDialogStore.getState().show("create", template);
+  const newGame = () => useGameDialogStore.getState().show("create");
   const openGameFolder = () => useGameDialogStore.getState().show("open");
 
   return (
@@ -164,37 +161,12 @@ function GameGrid({
   environmentId: EnvironmentId;
   cards: readonly GameCard[];
   onOpen: (card: GameCard) => void;
-  onNewGame: (template?: GameTemplateId) => void;
+  onNewGame: () => void;
 }) {
-  const resources = cards.flatMap((card) =>
-    card.game.coverImagePath !== null && card.latestThread !== null
-      ? [
-          {
-            _tag: "workspace-file" as const,
-            threadId: card.latestThread.id,
-            path: card.game.coverImagePath,
-          },
-        ]
-      : [],
-  );
-  const urls = useAssetUrls(environmentId, resources);
-  const coverUrlByGame = new Map<string, string | null>();
-  let urlIndex = 0;
-  for (const card of cards) {
-    if (card.game.coverImagePath !== null && card.latestThread !== null) {
-      coverUrlByGame.set(card.game.projectId, urls[urlIndex] ?? null);
-      urlIndex += 1;
-    }
-  }
   return (
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => (
-        <GameCard
-          key={card.game.projectId}
-          card={card}
-          coverUrl={coverUrlByGame.get(card.game.projectId) ?? null}
-          onOpen={() => onOpen(card)}
-        />
+        <GameCard key={card.game.projectId} card={card} onOpen={() => onOpen(card)} />
       ))}
       <button
         type="button"
@@ -211,15 +183,7 @@ function GameGrid({
   );
 }
 
-function GameCard({
-  card,
-  coverUrl,
-  onOpen,
-}: {
-  card: GameCard;
-  coverUrl: string | null;
-  onOpen: () => void;
-}) {
+function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
   const appearance = gameTemplateAppearance(card.game.template);
   const initial = gameInitial(card.game.name);
   const progress = gameProgress(card.game);
@@ -230,41 +194,29 @@ function GameCard({
       className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-xs transition-[border-color,box-shadow,transform] hover:border-foreground/20 hover:shadow-md"
     >
       <span className="relative block aspect-[16/10] overflow-hidden bg-muted">
-        {coverUrl !== null ? (
-          <img
-            src={coverUrl}
-            alt={`${card.game.name} cover`}
-            loading="lazy"
-            decoding="async"
-            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.015] motion-reduce:transition-none"
-          />
-        ) : card.game.template !== null ? (
-          <TemplatePreview template={card.game.template} />
-        ) : (
+        <span
+          aria-hidden
+          className={`flex size-full items-center justify-center bg-gradient-to-br ${appearance.coverClassName}`}
+        >
           <span
-            aria-hidden
-            className={`flex size-full items-center justify-center bg-gradient-to-br ${appearance.coverClassName}`}
+            className={`flex size-14 items-center justify-center rounded-2xl text-lg font-semibold ${appearance.initialClassName}`}
           >
-            <span
-              className={`flex size-14 items-center justify-center rounded-2xl text-lg font-semibold ${appearance.initialClassName}`}
-            >
-              {initial}
-            </span>
+            {initial}
           </span>
-        )}
+        </span>
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/0" />
-        {progress.kind === "qualified" ? null : (
+        {progress.kind === "building" ? (
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="absolute left-3 top-3 rounded-full border border-warning/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm" />
+                <span className="absolute left-3 top-3 rounded-full border border-info/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm" />
               }
             >
               {progress.label}
             </TooltipTrigger>
             <TooltipPopup>{progress.detail}</TooltipPopup>
           </Tooltip>
-        )}
+        ) : null}
         <span className="absolute bottom-3 left-3 flex items-center gap-1.5 text-2xs font-medium text-white/90 drop-shadow">
           <Gamepad2Icon className="size-3.5" aria-hidden />
           {appearance.label}
@@ -290,15 +242,9 @@ function GamesEmptyState({
   onNewGame,
   onOpenGame,
 }: {
-  onNewGame: (template?: GameTemplateId) => void;
+  onNewGame: () => void;
   onOpenGame: () => void;
 }) {
-  const starters: readonly GameTemplateId[] = ["3d-explorer", "2d-platformer", "2d-screen"];
-  const starterCopy: Partial<Record<GameTemplateId, string>> = {
-    "3d-explorer": "Explore, collect, and reach the goal in a fully playable 3D level.",
-    "2d-platformer": "Run, jump, stomp slimes, and collect every coin under a starry sky.",
-    "2d-screen": "Take a five-call night shift where the replies you choose decide the ending.",
-  };
   return (
     <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:py-10">
       <div className="flex min-w-0 flex-col items-start gap-4">
@@ -310,8 +256,8 @@ function GamesEmptyState({
           Describe it. Your agent builds it. Then you play it.
         </h2>
         <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-          Game Studio turns a brief into a real Godot project with Blender-made art. Approve the
-          design, watch the agent work, and play every revision right here.
+          Game Studio turns a brief into a real Godot project with Blender-made art. Watch the agent
+          work, and play every revision right here.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="lg" onClick={() => onNewGame()}>
@@ -325,8 +271,8 @@ function GamesEmptyState({
         </div>
         <ol className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground">
           {[
-            "Pick a playable starter and describe your idea.",
-            "Review the design draft, then approve the build.",
+            "Describe your game in a few sentences.",
+            "Start a production run and watch the agent build.",
             "Play, ask for changes, and export when it feels right.",
           ].map((item, index) => (
             <li key={item} className="flex items-start gap-2.5">
@@ -338,34 +284,10 @@ function GamesEmptyState({
           ))}
         </ol>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {starters.map((template) => {
-          const appearance = gameTemplateAppearance(template);
-          return (
-            <button
-              key={template}
-              type="button"
-              onClick={() => onNewGame(template)}
-              className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-xs transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md"
-            >
-              <span className="block aspect-video overflow-hidden border-b border-border bg-muted">
-                <TemplatePreview template={template} />
-              </span>
-              <span className="flex flex-col gap-1 p-3.5">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm">{appearance.label}</span>
-                  <ArrowUpRightIcon
-                    className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-hidden
-                  />
-                </span>
-                <span className="text-xs leading-snug text-muted-foreground">
-                  {starterCopy[template]}
-                </span>
-              </span>
-            </button>
-          );
-        })}
+      <div className="hidden items-center justify-center lg:flex">
+        <span className="flex size-40 items-center justify-center rounded-3xl bg-gradient-to-br from-stage-subtle/20 via-stage-muted/10 to-transparent">
+          <Gamepad2Icon className="size-16 text-muted-foreground" aria-hidden />
+        </span>
       </div>
     </div>
   );

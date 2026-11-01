@@ -11,9 +11,7 @@
  * continues on the current option; a null pick means Jev failed or timed
  * out and the child falls back to the bot's own policy.
  *
- * Bot file shape (same as the frozen scripts/studio/bot.ts, plus the Jev
- * fields): goal (string), observe(api, last), options(obs), status(obs),
- * optional policy(obs, opts), optional stallSeconds, optional tempo
+ * Bot file shape (goal, observe, options, status, optional policy, optional stallSeconds, optional tempo
  * (decisions/second while an option runs; reflex play 4-8), optional
  * switchMargin (default 0.25), optional plan(obs) returning
  * {done, now, next} for Jev. Each option is {name, description, facts,

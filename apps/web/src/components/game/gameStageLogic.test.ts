@@ -4,7 +4,6 @@ import {
   buildFailurePrompt,
   countGamePreviewRemounts,
   deriveGameStagePhase,
-  gameDesignLock,
   gamePreviewFrameKey,
   type GamePreviewServe,
   type GameStageInput,
@@ -18,7 +17,6 @@ const BASE: GameStageInput = {
   hasWebBuild: false,
   webBuildStale: true,
   previewUrl: null,
-  designLock: null,
   busyStartedAt: null,
   localError: null,
 };
@@ -57,62 +55,6 @@ it("offers one path per state: tools, never built, ready, playing", () => {
   expect(deriveGameStagePhase({ ...PLAYING, webBuildStale: true })).toEqual({
     kind: "playing",
     stale: true,
-  });
-});
-
-it("locks staging only for a reviewed design that is not approved", () => {
-  // These are the states GameService.refuseWhileUnapproved refuses to stage.
-  expect(gameDesignLock({ state: "draft" })).toBe("draft");
-  expect(gameDesignLock({ state: "changed" })).toBe("changed");
-  expect(gameDesignLock({ state: "revision-pending" })).toBe("revision-pending");
-  // An auto revision means the server records approval itself, including while
-  // the very first design is still being written.
-  expect(gameDesignLock({ state: "draft", autoRevision: 0 })).toBeNull();
-  expect(gameDesignLock({ state: "approved" })).toBeNull();
-  expect(gameDesignLock({ state: "legacy" })).toBeNull();
-});
-
-it("asks for design approval instead of offering a build the server refuses", () => {
-  expect(deriveGameStagePhase({ ...BASE, designLock: "draft" })).toEqual({
-    kind: "design-locked",
-    reason: "draft",
-  });
-  // A fresh build does not make a changed design playable: staging is locked
-  // until the creator re-approves it.
-  expect(
-    deriveGameStagePhase({
-      ...BASE,
-      hasWebBuild: true,
-      webBuildStale: false,
-      designLock: "changed",
-    }),
-  ).toEqual({ kind: "design-locked", reason: "changed" });
-  // Review comes before tool setup: approving the design is the next action.
-  expect(
-    deriveGameStagePhase({
-      ...BASE,
-      toolchainReady: false,
-      designLock: "revision-pending",
-    }),
-  ).toEqual({ kind: "design-locked", reason: "revision-pending" });
-  // An auto game's draft is not a lock, so a new game can build its template.
-  expect(
-    deriveGameStagePhase({
-      ...BASE,
-      designLock: gameDesignLock({ state: "draft", autoRevision: 0 }),
-    }),
-  ).toEqual({ kind: "never-built" });
-});
-
-it("does not tear down an operation or a loaded game for a design review", () => {
-  expect(deriveGameStagePhase({ ...BASE, designLock: "changed", operation: running() })).toEqual({
-    kind: "building",
-    message: "Building the web preview is running.",
-    startedAt: Date.parse(STARTED_AT),
-  });
-  expect(deriveGameStagePhase({ ...PLAYING, designLock: "changed" })).toEqual({
-    kind: "playing",
-    stale: false,
   });
 });
 

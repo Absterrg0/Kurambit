@@ -1,9 +1,6 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the production loop's native boundary: wall-clock blocks, pids, git, and the run/rounds JSONL in the game folder, like the bot and Blender services.
-// GameRun: one game's production loop as a T3 service. One service, no game
-// or genre knowledge. Every role is a fresh ordinary T3 thread on the game's
-// project; state is `.studio/run.json` + `.studio/rounds.jsonl` + git.
-// Scope: quality of what exists; growing the game is the creator's job.
-// Code never parses model prose apart from declared STATUS/SHIP/COMPARE lines.
+// GameRun: one game's production loop as a T3 service; state is `.studio/run.json` + `.studio/rounds.jsonl` + git.
+// Scope: quality of what exists; code never parses prose apart from STATUS/SHIP/COMPARE lines.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -50,8 +47,7 @@ export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunErr
   }
 }
 
-// Production-loop timings mirror frozen scripts/studio/run.ts: the block only
-// sets how often the game is judged; judgement is blind play, never prose.
+// Production-loop block sets how often the game is judged; judgement is blind play, never prose.
 const BLOCK_MS = 25 * 60_000;
 const FULL_BUILD_MS = 40 * 60_000;
 const TESTER_CAP_MS = 4 * 60_000;
@@ -1690,42 +1686,17 @@ export const layer = (options: { readonly stateDir: string }) => {
         record.testerNote = tester.notes.split("\n").slice(0, 20).join("\n").slice(0, 600);
         if (!tester.wrote) record.note = `${record.note ?? ""} tester write failed`.trim();
 
-        // Blind compare by a fresh thread that plays candidate and best from
-        // neutral folders, in both orders. The candidate merges unless best
-        // wins both. Rejected work stays on a branch.
+        // Blind compare by a fresh thread that plays candidate and best, in
+        // both orders. The candidate merges unless best wins both. Rejected
+        // work stays on a branch.
         const judgeOne = Effect.fn("GameRun.judgeOne")(function* (
           tag: string,
           firstSha: string,
           secondSha: string,
         ) {
-          const dir = NodePath.join(
-            NodeOS.homedir(),
-            ".gs-tmp",
-            `studio-cmp-${stored.runId}-${tag}`,
-          );
-          yield* Effect.promise(() =>
-            NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
-          );
-          yield* Effect.promise(() => NodeFSP.mkdir(NodePath.join(dir, "A"), { recursive: true }));
-          yield* Effect.promise(() => NodeFSP.mkdir(NodePath.join(dir, "B"), { recursive: true }));
-          yield* gitExec(
-            root,
-            ["--work-tree", NodePath.join(dir, "A"), "checkout", firstSha, "--", "."],
-            60_000,
-          ).pipe(Effect.ignore);
-          yield* gitExec(root, ["reset", "-q"], 60_000).pipe(Effect.ignore);
-          yield* gitExec(
-            root,
-            ["--work-tree", NodePath.join(dir, "B"), "checkout", secondSha, "--", "."],
-            60_000,
-          ).pipe(Effect.ignore);
-          yield* gitExec(root, ["reset", "-q"], 60_000).pipe(Effect.ignore);
           // A failed swap voids this judging: the judge would play one build twice.
           if (!(yield* checkoutOk(root, firstSha))) {
             yield* logLine(root, `round ${round}: judge ${tag} cannot check out first build`);
-            yield* Effect.promise(() =>
-              NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
-            );
             return { verdict: "NONE", reason: "build checkout failed", end: null as string | null };
           }
           const launched = yield* launchRole(
@@ -1749,9 +1720,6 @@ export const layer = (options: { readonly stateDir: string }) => {
             return { verdict: "NONE", reason: "", end: judgeWait1.end as string | null };
           if (!(yield* checkoutOk(root, secondSha))) {
             yield* logLine(root, `round ${round}: judge ${tag} cannot check out second build`);
-            yield* Effect.promise(() =>
-              NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
-            );
             return { verdict: "NONE", reason: "build checkout failed", end: null as string | null };
           }
           const secondRunId = yield* sendTurn(
@@ -1791,9 +1759,6 @@ export const layer = (options: { readonly stateDir: string }) => {
             NodeFSP.rm(NodePath.join(root, "JUDGE-NOTES.md"), { force: true }).catch(
               () => undefined,
             ),
-          );
-          yield* Effect.promise(() =>
-            NodeFSP.rm(dir, { recursive: true, force: true }).catch(() => undefined),
           );
           const verdict = parseCompare(notes);
           const lines = notes.split("\n");
@@ -2164,7 +2129,7 @@ export const layer = (options: { readonly stateDir: string }) => {
 // the game_* MCP tools are the only way to check, play, export, bot-test or
 // model anything. Shell Godot/Blender do not exist for these threads.
 const TOOL_RULE =
-  "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close/replay, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
+  "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
 const BUILD_RULE = `${TOOL_RULE}Write the game; the harness plays and judges it after you finish. Check new work only briefly with game_check, never playtest through the slot. Spend the block changing the game, not planning or judging: the harness plays and judges your build after you finish, so run the game only for brief checks of new work. Keep it bootable and changes small, so an early stop loses nothing. End the block with a change a player would notice in the first minute (a control that feels different, something new or fixed on screen, a sound, a readable HUD): a block that changes no game file under godot/ is discarded, and changing only notes, bots or skill files does not count.`;
 const BUILD_RULE_SHORT = BUILD_RULE;
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";

@@ -1,6 +1,3 @@
-import * as GameReviewSessions from "../../../game/GameReviewSessions.ts";
-import * as GameReviewApi from "../../../game/GameReviewApi.ts";
-import * as GameRecipes from "../../../game/GameRecipes.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -38,12 +35,6 @@ import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
-  Layer.mock(GameReviewApi.GameReviewApi)({}),
-  Layer.mock(GameReviewSessions.GameReviewSessions)({
-    toolRole: () => Effect.succeed(null),
-    repairChild: () => Effect.succeed(false),
-  }),
-  Layer.mock(GameRecipes.GameRecipes)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.empty,
@@ -152,21 +143,19 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("delegate_task");
       for (const name of [
         "game_status",
-        "game_blender_run",
-        "game_godot_import",
-        "game_godot_test",
-        "game_scenarios_run",
+        "game_check",
+        "game_import",
         "game_export",
-        "game_verify",
         "game_preview",
-        "game_run_native",
         "game_stop",
-        "game_submit",
       ]) {
         expect(toolNames).toContain(name);
-        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(
-          name === "game_status",
-        );
+      }
+      for (const name of ["game_status", "game_bot_view", "game_blender_look"]) {
+        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
+      }
+      for (const name of ["game_check", "game_export", "game_preview", "game_stop"]) {
+        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(false);
       }
 
       const handoff = tools.find((tool) => tool.name === "t3_worktree_handoff");

@@ -4,20 +4,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { GAME_EXPLORE_BOUNDS, type GameExploreStep } from "@t3tools/contracts";
-import { findExecutable } from "./gameNativeCapture.ts";
+import { findExecutable } from "./GameProcesses.ts";
 import { headlessEnvironment, DISPLAY_VARIABLES } from "./GameProcesses.ts";
 import { GODOT_EXPLORE_SCRIPT } from "./godotExploreScript.ts";
 import { prepareNativeUserIsolation, type NativeUserIsolation } from "./gameNativeUserDir.ts";
-
-/** Steps the web backend cannot run. The service rejects these before launch. */
-export const webRejectsForSteps = (steps: readonly GameExploreStep[]): readonly string[] => {
-  const issues: string[] = [];
-  for (const [index, step] of steps.entries()) {
-    if ("ui" in step || "inspect" in step)
-      issues.push(`Step ${index + 1} needs target native; the web session cannot run it.`);
-  }
-  return issues;
-};
 
 /** Nominal game time for new step kinds. Web kinds keep their existing accounting. */
 export const exploreStepNominalMs = (step: GameExploreStep): number => {
@@ -62,7 +52,7 @@ export interface SanitizedNativeObservation {
   }>;
   readonly inspections: ReadonlyArray<{
     readonly path: string;
-    readonly values: Record<string, unknown>;
+    readonly values: Record<string, string | number | boolean | Array<number> | null>;
     readonly error?: string;
   }>;
 }
@@ -116,7 +106,7 @@ export const sanitizeNativeObservation = (raw: unknown): SanitizedNativeObservat
     if (Object.keys(screenText).length >= GAME_EXPLORE_BOUNDS.maxTextPerAct) break;
     if (typeof value === "string") screenText[key.slice(0, 200)] = value.slice(0, 200);
   }
-  const ui: SanitizedNativeObservation["ui"] = [];
+  const ui: Array<SanitizedNativeObservation["ui"][number]> = [];
   {
     const rawUi = Array.isArray(record["ui"]) ? record["ui"] : [];
     for (const entry of rawUi.slice(0, GAME_EXPLORE_BOUNDS.maxUiPerAct)) {
@@ -143,7 +133,7 @@ export const sanitizeNativeObservation = (raw: unknown): SanitizedNativeObservat
       });
     }
   }
-  const errors: SanitizedNativeObservation["errors"] = [];
+  const errors: Array<SanitizedNativeObservation["errors"][number]> = [];
   {
     const rawErrors = Array.isArray(record["errors"]) ? record["errors"] : [];
     for (const entry of rawErrors.slice(0, GAME_EXPLORE_BOUNDS.maxErrorsPerAct)) {
@@ -155,7 +145,7 @@ export const sanitizeNativeObservation = (raw: unknown): SanitizedNativeObservat
       });
     }
   }
-  const uiResults: SanitizedNativeObservation["uiResults"] = [];
+  const uiResults: Array<SanitizedNativeObservation["uiResults"][number]> = [];
   {
     const rawResults = Array.isArray(record["uiResults"]) ? record["uiResults"] : [];
     for (const entry of rawResults.slice(0, GAME_EXPLORE_BOUNDS.maxStepsPerCall)) {
@@ -169,13 +159,13 @@ export const sanitizeNativeObservation = (raw: unknown): SanitizedNativeObservat
       });
     }
   }
-  const inspections: SanitizedNativeObservation["inspections"] = [];
+  const inspections: Array<SanitizedNativeObservation["inspections"][number]> = [];
   {
     const rawInspections = Array.isArray(record["inspections"]) ? record["inspections"] : [];
     for (const entry of rawInspections.slice(0, GAME_EXPLORE_BOUNDS.maxStepsPerCall)) {
       const item = asRecord(entry);
       if (typeof item["path"] !== "string") continue;
-      const values: Record<string, unknown> = {};
+      const values: Record<string, string | number | boolean | Array<number> | null> = {};
       for (const [key, value] of Object.entries(asRecord(item["values"]))) {
         if (Object.keys(values).length >= GAME_EXPLORE_BOUNDS.maxInspectValues || key.length > 64)
           break;
@@ -188,7 +178,10 @@ export const sanitizeNativeObservation = (raw: unknown): SanitizedNativeObservat
             value.length <= 4 &&
             value.every((entry) => typeof entry === "number" && Number.isFinite(entry)))
         )
-          values[key] = typeof value === "string" ? value.slice(0, 256) : value;
+          values[key] =
+            typeof value === "string"
+              ? value.slice(0, 256)
+              : (value as number | boolean | Array<number> | null);
       }
       inspections.push({
         path: (item["path"] as string).slice(0, 500),
@@ -384,19 +377,3 @@ export const nativeGodotArgs = (input: {
         "--",
         input.requestPath,
       ];
-
-/** xvfb-run prefix plus the Godot command: one private display, never the desktop. */
-export const nativeXvfbArgs = (
-  xvfb: string,
-  godotExecutable: string,
-  godotArgs: readonly string[],
-  width: number,
-  height: number,
-): readonly string[] => [
-  xvfb,
-  "-a",
-  "-s",
-  `-screen 0 ${width}x${height}x24`,
-  godotExecutable,
-  ...godotArgs,
-];

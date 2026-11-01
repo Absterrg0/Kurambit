@@ -1,9 +1,0 @@
-[gd_resource type="StandardMaterial3D" format=3]
-
-[resource]
-resource_name = "GateLocked"
-albedo_color = Color(0.22, 0.1, 0.11, 1)
-roughness = 0.5
-emission_enabled = true
-emission = Color(0.85, 0.16, 0.18, 1)
-emission_energy_multiplier = 1.3

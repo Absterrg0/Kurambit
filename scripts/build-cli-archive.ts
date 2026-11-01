@@ -472,7 +472,6 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   // Starter templates resolve from beside the bundle (apps/server/src/game/templates.ts),
   // which inside a single-executable is the executable's own directory.
   const templates = path.join(serverDir, "dist/templates");
-  const artKits = path.join(serverDir, "dist/art-kits");
   const resourceMonitorDir = Option.getOrElse(input.resourceMonitorDir, () =>
     path.join(serverDir, "dist/resource-monitor"),
   );
@@ -485,10 +484,6 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   yield* requireDirectory(
     templates,
     "Run `node apps/server/scripts/cli.ts build` first; it bundles apps/server/templates into dist/templates.",
-  );
-  yield* requireDirectory(
-    artKits,
-    "Run `node apps/server/scripts/cli.ts build` first; it bundles apps/server/assets/art-kits into dist/art-kits.",
   );
   yield* requireInput(
     resourceMonitorDir,
@@ -504,7 +499,6 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
   yield* stageWebClient(webClient, path.join(contentDir, "client"));
   yield* fs.copy(templates, path.join(contentDir, "templates"));
-  yield* fs.copy(artKits, path.join(contentDir, "art-kits"));
   yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
   yield* stageRuntimeExternals({
     repoRoot,

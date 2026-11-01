@@ -5,95 +5,40 @@ Blender and Godot; you direct it, play the result, and ask for changes.
 
 ## Set up the tools once
 
-Open **Settings → General → Game tools**, or the setup card in any game, and choose
-**Install tools**. Game Studio downloads Blender 4.5.14 LTS and Godot 4.7.2 with the matching export
-templates, checks their published checksums, and keeps them in `~/.local/share/game-studio/tools`.
-**Verify** runs a real Blender export and a real Godot import, so a green status means the tools
-work, not just that files exist.
+Open **Settings → General → Game tools** and choose **Install tools**. Game Studio downloads
+Blender 4.5.14 LTS and Godot 4.7.2 with the matching export templates, checks their published
+checksums, and keeps them in `~/.local/share/game-studio/tools`. **Verify** runs a real Blender
+export and a real Godot import, so a green status means the tools work, not just that files exist.
 
 To use your own installs, enter their paths in **Game tools**. Godot must be 4.7.x so its export
 templates match; Blender 4.2 or newer works.
+
+The live Blender view additionally needs `uvx` (or `uv`) on PATH: it runs the pinned 3D-server
+package behind the `game_blender_*` tools. Install uv from https://docs.astral.sh/uv/ if those
+tools report it missing.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
 
 ## Start a game
 
-Choose **New game** on the home screen or in the sidebar. First pick a starter template — each card
-shows a real frame from a working Godot project the agent extends instead of starting from nothing.
-Then name the game, write a brief and optional art direction, and choose where to save it
-(`~/Games/<slug>` by default). Pick the agent and model, then choose **Create game**. Game Studio
-creates the project folder with the template in place, starts a session with your brief, and opens
-the game workspace.
-
-The agent models assets in Blender, brings them into Godot, writes the scenes and GDScript, runs a
-headless gameplay test, and checks the web build in a headless browser before it reports back.
-When an optional pinned art kit fits the game's art direction, ask the agent to use it: it can
-search the shipped CC0 kits and import one into `godot/assets/art/kits/`. A kit adds only its own
-image, license and provenance files; it never changes the game's scripts, scenes or mechanics, and
-the agent chooses whether any kit fits. For a kit sheet with authored animations, the agent can
-also build a Godot SpriteFrames resource from the catalog's cells instead of guessing frame ranges.
-Animation subsets use separate resources, and rebuilding preserves resources you have edited.
-
-For existing 3D props or surface finishes, ask the agent to search Poly Haven. It can bring in
-CC0 models and reusable materials with their source credit, using small 1k downloads by default.
-Several objects can share the same material. Choose assets that fit your art direction; realistic
-scanned surfaces may look out of place in a stylised game. Reimporting preserves your edits and
-reports a conflict when the imported files have changed.
-
-For a consistent set of 3D assets, give the agent a shared palette and a reference height in metres.
-It can reuse those choices across models and report scale or origin differences to correct.
-The generated contact sheet in `art/previews/contact_sheet.png` helps compare the set. Failed
-generation keeps the previous asset available while the agent repairs the problem.
-
-## Design the game first
-
-New games start with a design, not code. The agent writes a one-page `DESIGN.md` from your brief and
-the starter template: the pitch, core loop, controls, how runs end (or why the game is endless),
-content, art direction, audio, scope and milestones. It also writes an **Acceptance** section: a
-fenced `acceptance` block of 5 to 12 concrete criteria covering each control, the core mechanic,
-content counts, and the endings the game promises. Every control, mechanic, content, win or lose
-criterion the design promises names a game value the player changes, except a declared no-lose
-state; a value that is already true when play starts does not count, and content counts have to be
-collected rather than merely exist. A game does not invent a win or loss it does not have. A game
-with no losing state writes a `lose` criterion with `"noLoseState": true` and no observation.
-Presentation claims (a glow, an ambience) carry no observation
-and are listed as not yet verified. **Plan the design first** in the New game dialog is on by
-default; turn it off to skip straight to building.
-
-By default nothing waits for you: the agent writes `DESIGN.md` and builds in the same turn, and Game
-Studio records each new version of the design as a revision. Editing prose keeps the same
-acceptance; changing the acceptance block makes the new criteria the ones the game is checked
-against. Leftover scaffold hint lines show as non-blocking warnings on the **Design** tab. Ask for
-design changes in chat.
-
-To review the design yourself, turn on **Approve the design before building** in the New game
-dialog. The agent then ends its first turn at the draft. Read it and its acceptance checklist on the
-**Design** tab, ask for changes in chat or open **Edit file** to change `DESIGN.md` yourself, and
-choose **Approve & build** when it looks right. Approval binds that exact revision:
-Game Studio stores its hash and acceptance outside the game, so editing `game.json` cannot grant
-approval, and a document that is still the scaffold, missing a section or missing the acceptance
-block cannot be approved. The agent then builds it.
-
-For a reviewed design, if `DESIGN.md` changes after approval, the Design tab says **Design changed since approval** and the
-game is unqualified until you review the new scope and choose **Re-approve design**. Re-approval
-updates the contract without starting another build turn; the agent is told to put scope changes in
-`DESIGN.md` and ask for that review instead of quietly dropping a criterion.
-
-Each game card and sidebar row says what the game actually is: **Design draft** before approval,
-**Building** while an agent operation runs, **Design changed** when an edit needs review, and
-**Checked as of …** once the server's record shows that mechanical checks passed.
-State scenarios check the agreed behaviour after play starts, including routes that win or lose
-when the design calls for them. Review compares visible changes separately and does not certify
-every presentation claim.
-The time matters: it is when the record was written, and the Stage re-checks the current files when
-you open the game. A card's cover is a frame of real play from the latest run that qualified, not
-its menu or a failed attempt.
+Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
+art direction, and choose where to save it (`~/Games/<slug>` by default). Pick the agent and model,
+then choose **Create game**. Game Studio creates the project folder, starts a session with your
+brief, and opens the game workspace.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
-empty one. The sidebar keeps one row per game; use its sessions button to reach older sessions or
-start a new one.
+empty one.
+
+## Run the production loop
+
+The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
+then round after round of building, playtesting and judging until the budget ends or a ship review
+passes. Give it a one-line brief and an optional budget in minutes, then **Start run**. The status
+line says where the run is; the rounds list shows each round's move, whether it was kept, the
+judges' verdicts and the tester's note; role threads link to the sessions that did the work.
+**Stop run** ends it; rejected work stays on its branch.
 
 ## Play and revise
 
@@ -101,15 +46,14 @@ A game opens on its latest session: the game owns the middle of the window and t
 its right.
 
 - **Play** serves the selected build, even when the game's files have changed. If no build exists,
-  it builds the web version and plays it
-  in the stage. It is the real game, not a recording; click the picture once so the keyboard reaches
-  it, and use **Fullscreen** to give it the whole screen. The line beside the game name says what the
-  stage is doing — playing, building, or waiting for a rebuild. Opening **Design**, **Assets** or
-  **Builds** keeps the game running; it pauses and mutes while hidden and resumes when you come
-  back. Only **Stop**, a rebuild that lands a new build, or pressing Play again starts a new session.
+  it builds the web version and plays it in the stage. It is the real game, not a recording; click
+  the picture once so the keyboard reaches it, and use **Fullscreen** to give it the whole screen.
+  Opening **Run** or **Builds** keeps the game running; it pauses and mutes while hidden
+  and resumes when you come back. Only **Stop**, a rebuild that lands a new build, or pressing Play
+  again starts a new session.
 - **Rebuild** always exports a fresh web build. When the game's files changed after the last build,
   the stage says so and offers to rebuild.
-- **Run native** starts the game in its own window. **Stop** ends only the processes Game Studio
+- **Stop** ends only the processes Game Studio
   started for this game, and closes its preview server.
 - **Export Windows** writes a 64-bit build to `builds/windows/game.exe`. The standard preset embeds
   the game data, so you can copy that one file to a Windows PC. A game whose Windows preset does not
@@ -117,78 +61,32 @@ its right.
   result says which files to share. **Download package** on the same card zips the checked release
   files Game Studio already exported — `game.exe` alone, or `game.exe` and `game.pck` — without
   exporting again. If the game sources changed since that export, export Windows again before
-  packaging. **Export Linux** writes a standalone build to `builds/linux/`.
-  Both export the game's current files and leave the Web build Play serves alone; Game Studio checks
-  the Windows executable it produced but does not run it, so try it on Windows before sharing it. If
+  packaging. **Export Linux** writes a standalone build to `builds/linux/`. Game Studio checks the
+  Windows executable it produced but does not run it, so try it on Windows before sharing it. If
   the Windows export templates are missing, **Install tools** in Settings adds them. The **Builds**
-  tab lists every target with its time, folder and logs, the last playtest's verdict and frames,
-  and the review history with decisions, reasons, defects and frame links. Stop review and Restore
-  previous version are explained below.
-- **Download package** on the Web card zips the exact selected build Play serves, at
-  `builds/web-packages/<build-id>.zip`, without exporting or rebuilding. Later source edits are not
-  included; only a new selected build changes what a new package contains. Upload the extracted
-  files to an ordinary static HTTP host and serve them over HTTP, with `.wasm` served as
-  `application/wasm`. Opening `index.html` directly from disk (`file://`) is not a supported way to
-  play a WebAssembly export. If the build declares response headers, the package notes say so;
-  configure them on the host.
-- **Assets** shows each Blender asset's preview, its `.blend` source, its exported `.glb`, and the
-  scenes or scripts that use it.
+  tab lists every target with its time, folder and logs, and a freshness check against the current
+  sources.
+- **Download package** on the Web card zips the exact build Play serves, without exporting or
+  rebuilding. Later source edits are not included; only a new export changes what a new package
+  contains. Upload the extracted files to an ordinary static HTTP host and serve them over HTTP;
+  opening `index.html` directly from disk (`file://`) is not a supported way to play a WebAssembly
+  export.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
-  or `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) to give the game the whole window. It starts narrow and
-  never takes more than about half the window, so the game stays the main surface.
+  to give the game the whole window.
 
-To change the game, write a follow-up in the session, for example "make the rocks taller and spread the
-artifacts out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
+To change the game, write a follow-up in the session, for example "make the rocks taller and spread
+the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
 keep their references.
-
-Each turn ends with a one-line summary of what changed in the game, such as "Changed 2 scenes ·
-3 scripts · 1 model". Select it to see the files and open the full diff.
 
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
-
-## Check the finished game
-
-Ask the agent to check a family of assets against shared scale, pivot, animation and collision
-targets. It can inspect Godot resources and whether files are included in the recorded Web export.
-Inclusion does not prove that an asset appears during play; incomplete checks stay unknown.
-
-For an unfamiliar control sequence, ask the agent to explore the game in short steps and replay
-its saved trace independently. Exploration sessions close after five idle minutes. On Linux, ask
-it to compare the same route at several frame rates with fresh saved state when investigating
-timing problems. This reports differences without changing the game's frame rate or declaring it
-deterministic.
-
-Review also assesses art consistency, animation, audio, readability, progression, meaningful
-choices and playability. A missing observation stays unknown, and screenshots cannot establish
-audio quality. The agent can measure audio levels, silence and stereo cancellation separately;
-those measurements do not replace listening to the game.
-Audio measurements require FFmpeg and ffprobe installed locally. On Linux, a short native gameplay
-clip of a saved route also requires Xvfb.
 
 ## What is in a game folder
 
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
-- `TEMPLATE.md` describes the starter template it was built from and what to extend.
-- `art/blender/` holds the editable `.blend` files and `art/scripts/` the scripts behind them.
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor.
+- `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
-
-## Review and restore
-
-After your agent submits a verified build (or ends a turn with a playable export), Game Studio
-reviews its frames and can attempt up to three repairs within forty-five minutes. The first
-verified submit is playable at once, and the agent keeps producing: each accepted submit replaces
-what Play shows, and review starts on the last one when the turn ends. The production phase is 45
-minutes by default; `productionMinutes` in `game.json` sets it, and the server never cuts a turn
-short. Play keeps the selected build while review runs. Open Builds to read defects, suggested
-fixes, decisions and the frames behind them.
-Review compares versions; it does not promise that every aspect of the game is correct.
-
-Choose Stop review to end it. If a repair started but its result could not be kept, or your edits
-prevent a safe return, Restore previous version returns the game folder to its saved version and
-preserves the version it replaces. A restart does not resume unfinished reviews. If a review session
-is still stopping, wait until the held state clears before restoring. Choose Check to compare the
-current sources with the selected build when source freshness is unknown.
+- `.studio/` holds the production run's rounds, notes, bots and videos.

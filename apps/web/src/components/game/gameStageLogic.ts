@@ -1,16 +1,11 @@
 import type { GameStatus } from "@t3tools/contracts";
 
-/** A reviewed design the server's staging gate refuses until it is approved. */
-export type GameDesignLock = "draft" | "changed" | "revision-pending";
-
 /**
  * What the stage shows for the play surface. Ordered by what the user most
- * needs to know: work in flight, a loaded game, a locked design, then what to
- * do next.
+ * needs to know: work in flight, a loaded game, then what to do next.
  */
 export type GameStagePhase =
   | { kind: "tools-missing" }
-  | { kind: "design-locked"; reason: GameDesignLock }
   | { kind: "building"; message: string; startedAt: number | null }
   | { kind: "failed"; message: string }
   | { kind: "never-built" }
@@ -24,28 +19,10 @@ export interface GameStageInput {
   hasWebBuild: boolean;
   webBuildStale: boolean;
   previewUrl: string | null;
-  /** The server refuses staging while a reviewed design waits for approval. */
-  designLock: GameDesignLock | null;
   /** A stage action is in flight in this client, before the server reports it. */
   busyStartedAt: number | null;
   /** A stage action failed in this client (RPC failure), not on the server. */
   localError: string | null;
-}
-
-/**
- * The design states the server's staging gate refuses. A game created without
- * review records revisions itself, so it has no creator approval to wait for;
- * the same is true of a legacy game with no server record.
- */
-export function gameDesignLock(
-  design: Pick<GameStatus["design"], "state" | "autoRevision">,
-): GameDesignLock | null {
-  if (design.autoRevision !== undefined) return null;
-  return design.state === "draft" ||
-    design.state === "changed" ||
-    design.state === "revision-pending"
-    ? design.state
-    : null;
 }
 
 const operationStartedAt = (operation: GameStatus["operation"]) =>
@@ -63,14 +40,10 @@ export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
       message: operation?.state === "running" ? operation.message : "Starting…",
       startedAt: input.busyStartedAt ?? operationStartedAt(operation),
     };
-  // A loaded game is never taken over by an unrelated failure or a design
-  // review: the status strip names the blocker, and the game keeps running.
+  // A loaded game is never taken over by an unrelated failure: the status
+  // strip names the blocker, and the game keeps running.
   if (input.previewUrl !== null && input.hasWebBuild)
     return { kind: "playing", stale: input.webBuildStale };
-  // Staging is refused while a reviewed design waits for approval. Show that
-  // before the build states so the stage never offers a Play the server will
-  // reject; a never-approved build is not a missing build.
-  if (input.designLock !== null) return { kind: "design-locked", reason: input.designLock };
   // Only a failure that leaves nothing to play becomes the whole state.
   const failure = input.localError ?? (operation?.state === "failed" ? operation.message : null);
   if (failure !== null && !playable) return { kind: "failed", message: failure };

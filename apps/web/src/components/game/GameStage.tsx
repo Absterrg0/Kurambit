@@ -10,7 +10,6 @@ import {
   MessageSquareIcon,
   MinimizeIcon,
   MonitorIcon,
-  MonitorPlayIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
   PlayIcon,
@@ -41,51 +40,32 @@ import {
 } from "../ui/menu";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { GameAssetsPanel } from "./GameAssetsPanel";
 import { GameBuildsPanel } from "./GameBuildsPanel";
-import { GameDesignPanel } from "./GameDesignPanel";
 import { GameElapsed } from "./GameElapsed";
 import { GamePlaySurface } from "./GamePlaySurface";
+import { GameRunPanel } from "./GameRunPanel";
 import {
   buildFailurePrompt,
   deriveGameStagePhase,
-  gameDesignLock,
   nextGamePreviewFrame,
-  type GameDesignLock,
   type GamePreviewServe,
 } from "./gameStageLogic";
 
-type GameStageTab = "design" | "play" | "assets" | "builds";
-
-const DESIGN_LOCK_LABEL: Record<GameDesignLock, string> = {
-  draft: "Approve the design",
-  changed: "Design changed — re-approve",
-  "revision-pending": "Review requested change",
-};
+type GameStageTab = "play" | "run" | "builds";
 
 const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
   rebuild: "Rebuilding the web preview",
-  native: "Starting the native game",
   stop: "Stopping",
   "export-linux": "Exporting the Linux build",
   "export-windows": "Exporting the Windows build",
-  verify: "Verifying game tools",
 };
 
 const PLAY_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
   // The stage is the game itself; "Play" is the action, not the tab, so the
   // header does not read as two Play buttons side by side.
   { value: "play", label: "Stage" },
-  { value: "design", label: "Design" },
-  { value: "assets", label: "Assets" },
-  { value: "builds", label: "Builds" },
-];
-const DESIGN_FIRST_TABS: ReadonlyArray<{ value: GameStageTab; label: string }> = [
-  // An unapproved design is what unblocks staging, so the creator starts there.
-  { value: "design", label: "Design" },
-  { value: "play", label: "Stage" },
-  { value: "assets", label: "Assets" },
+  { value: "run", label: "Run" },
   { value: "builds", label: "Builds" },
 ];
 
@@ -172,14 +152,8 @@ export function GameStage({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
   if (!data) return null;
-  const designLock = gameDesignLock(data.design);
-  // A running game stays on Stage while its design is waiting for review; a
-  // stopped or never-started game opens on the Design tab that unblocks it. An
-  // auto game still starts on its draft, as before, without calling it locked.
-  const designFirst =
-    (designLock !== null || data.design.state === "draft") && data.previewUrl === null;
-  const tabs = designFirst ? DESIGN_FIRST_TABS : PLAY_TABS;
-  const activeTab = tab ?? (designFirst ? "design" : "play");
+  const tabs = PLAY_TABS;
+  const activeTab = tab ?? "play";
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
     toolchainReady: data.toolchain.tools.every((tool) => tool.ready),
@@ -187,17 +161,14 @@ export function GameStage({
     hasWebBuild: webBuild !== undefined,
     webBuildStale: data.webBuildStale,
     previewUrl: data.previewUrl,
-    designLock,
     busyStartedAt: busy?.startedAt ?? null,
     localError: error,
   });
   const building = busy !== null || operationState === "running";
   // Play only starts a preview when none is running; a started game can always
-  // be brought back to Stage. Every other staging action is refused by the
-  // server until a reviewed design is approved.
-  const playEnabled =
-    canOperate && (data.previewUrl !== null || (!building && designLock === null));
-  const stagingEnabled = canOperate && !building && designLock === null;
+  // be brought back to Stage.
+  const playEnabled = canOperate && (data.previewUrl !== null || !building);
+  const stagingEnabled = canOperate && !building;
   const buildingStartedAt =
     busy?.startedAt ??
     (operationState === "running" && data.operation !== null
@@ -219,49 +190,22 @@ export function GameStage({
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
-  const qualification = data.qualification;
-  const qualificationIssues = qualification.stages
-    .filter((stage) => stage.status !== "passed")
-    .map((stage) => `${stage.stage}: ${stage.status}`);
-  const qualificationLabel =
-    qualification.state === "qualified"
-      ? "Checked"
-      : qualification.completion === "complete"
-        ? "Playable"
-        : qualification.completion === "unknown"
-          ? "Completion unknown"
-          : "Incomplete";
-  const certification = qualification.stages
-    .filter(
-      (stage) => stage.stage !== "design" && stage.stage !== "export" && stage.stage !== "playtest",
-    )
-    .map((stage) => `${stage.stage}=${stage.status}`)
-    .join(", ");
-  const qualificationDetail =
-    qualification.completion !== "complete"
-      ? `No current playable build for the current sources. ${qualificationIssues.join(", ")}.`
-      : qualification.state === "qualified"
-        ? "Playable, and the optional test and state checks passed for the current sources."
-        : `Playable: the web export and its playtest are current. Optional checks: ${certification}.`;
   const stagePhaseLabel =
     phase.kind === "playing"
-      ? qualification.completion === "complete"
-        ? "Playing"
-        : `Playing · ${qualificationLabel}`
+      ? data.webBuildStale
+        ? "Playing · older than the game"
+        : "Playing"
       : phase.kind === "ready"
-        ? qualification.completion === "complete"
-          ? "Ready to play"
-          : qualificationLabel
-        : phase.kind === "design-locked"
-          ? DESIGN_LOCK_LABEL[phase.reason]
-          : phase.kind === "never-built"
-            ? "No build yet"
-            : phase.kind === "failed"
-              ? "Build failed"
-              : phase.kind === "tools-missing"
-                ? "Game tools missing"
-                : null;
-  const nativeRunning = data.processes.some((process) => process.operation === "native");
+        ? data.webBuildStale
+          ? "Ready · older than the game"
+          : "Ready to play"
+        : phase.kind === "never-built"
+          ? "No build yet"
+          : phase.kind === "failed"
+            ? "Build failed"
+            : phase.kind === "tools-missing"
+              ? "Game tools missing"
+              : null;
   const runningSomething =
     busy !== null ||
     operationState === "running" ||
@@ -278,10 +222,10 @@ export function GameStage({
   // same object, so this only adjusts state when the fold advanced.
   const frame = nextGamePreviewFrame(frameFold, {
     previewUrl: data.previewUrl,
-    // The selected build's identity, not the last export's descriptor: a
-    // candidate export is evidence for a round and must not remount the
-    // incumbent the creator is playing.
-    servedArtifactId: data.selectedBuildId ?? data.qualification.servedArtifactId,
+    // The served build's identity: a new build (or a rebuilt legacy one)
+    // remounts the game, while source edits and failed rebuilds leave it
+    // running untouched.
+    servedArtifactId: webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
   });
   if (frame !== frameFold) setFrameFold(frame);
   const frameKey = frame.key;
@@ -375,17 +319,6 @@ export function GameStage({
           <XIcon className="size-3" aria-hidden="true" />
         </Button>
       </div>
-    ) : designLock !== null && phase.kind === "playing" ? (
-      <div className="border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5">
-        <button
-          type="button"
-          onClick={() => setTab("design")}
-          className="flex cursor-pointer items-center gap-1.5 text-xs text-warning-foreground underline-offset-2 hover:underline"
-        >
-          <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          {DESIGN_LOCK_LABEL[designLock]}
-        </button>
-      </div>
     ) : staleChipVisible ? (
       <div className="flex items-center gap-2 border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5 text-xs text-warning-foreground">
         <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
@@ -437,22 +370,12 @@ export function GameStage({
                 )}
               </span>
             ) : stagePhaseLabel !== null ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground" />
-                  }
-                >
-                  {phase.kind === "playing" && qualification.state === "qualified" ? (
-                    <span
-                      className="size-1.5 shrink-0 rounded-full bg-success"
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  <span className="truncate">{stageSubtitle}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">{qualificationDetail}</TooltipPopup>
-              </Tooltip>
+              <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+                {phase.kind === "playing" ? (
+                  <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
+                ) : null}
+                <span className="truncate">{stageSubtitle}</span>
+              </span>
             ) : (
               <span className="truncate text-xs leading-4 text-muted-foreground">
                 {templateName}
@@ -489,16 +412,12 @@ export function GameStage({
             value={[activeTab]}
             onValueChange={(value) => {
               const next = value[0];
-              if (next === "design" || next === "play" || next === "assets" || next === "builds")
-                setTab(next);
+              if (next === "run" || next === "play" || next === "builds") setTab(next);
             }}
           >
             {tabs.map((entry) => (
               <Toggle key={entry.value} value={entry.value} data-game-tab={entry.value}>
                 {entry.label}
-                {entry.value === "assets" && data.assets.length > 0 ? (
-                  <span className="text-muted-foreground">{data.assets.length}</span>
-                ) : null}
                 {entry.value === "builds" && data.builds.length > 0 ? (
                   <span className="text-muted-foreground">{data.builds.length}</span>
                 ) : null}
@@ -509,7 +428,7 @@ export function GameStage({
           <div className="flex shrink-0 items-center gap-1">
             <Button
               size="sm"
-              variant={designFirst ? "secondary" : "default"}
+              variant="default"
               aria-label={webBuild === undefined ? "Build and play" : "Play game"}
               disabled={!playEnabled}
               onClick={() => void perform("preview")}
@@ -553,27 +472,6 @@ export function GameStage({
               </TooltipTrigger>
               <TooltipPopup side="bottom">Stop the game and its preview</TooltipPopup>
             </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Run native"
-                    className="hidden @[54rem]/stage-header:inline-flex"
-                    disabled={!stagingEnabled || nativeRunning}
-                    onClick={() => void perform("native")}
-                  />
-                }
-              >
-                <MonitorPlayIcon className="size-3.5" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">
-                {nativeRunning
-                  ? "The native game window is already running"
-                  : "Run the game in its own window"}
-              </TooltipPopup>
-            </Tooltip>
             <Menu>
               <MenuTrigger
                 render={
@@ -591,13 +489,6 @@ export function GameStage({
                 <MenuItem disabled={!stagingEnabled} onClick={() => void perform("rebuild")}>
                   <RefreshCwIcon />
                   Rebuild the web build
-                </MenuItem>
-                <MenuItem
-                  disabled={!stagingEnabled || nativeRunning}
-                  onClick={() => void perform("native")}
-                >
-                  <MonitorPlayIcon />
-                  {nativeRunning ? "Game window is running" : "Run native"}
                 </MenuItem>
                 <MenuItem
                   disabled={!canOperate || !runningSomething}
@@ -619,13 +510,7 @@ export function GameStage({
                 <MenuRadioGroup
                   value={activeTab}
                   onValueChange={(value) => {
-                    if (
-                      value === "design" ||
-                      value === "play" ||
-                      value === "assets" ||
-                      value === "builds"
-                    )
-                      setTab(value);
+                    if (value === "run" || value === "play" || value === "builds") setTab(value);
                   }}
                 >
                   {tabs.map((entry) => (
@@ -676,19 +561,7 @@ export function GameStage({
         </div>
         {statusBanner}
       </header>
-      {activeTab === "design" ? (
-        <GameDesignPanel
-          threadRef={threadRef}
-          status={data}
-          turnRunning={turnRunning}
-          canOperate={canOperate}
-          onApproved={() => {
-            setTab(null);
-            refresh();
-          }}
-          onRefresh={refresh}
-        />
-      ) : null}
+      {activeTab === "run" ? <GameRunPanel threadRef={threadRef} /> : null}
       {/*
         The stage stays mounted across workspace tabs; hiding it keeps the
         iframe alive and the frame key unchanged, so the game keeps its
@@ -713,26 +586,17 @@ export function GameStage({
           onStop={() => void perform("stop")}
           onAskAgent={askAgentToFix}
           onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
-          onOpenDesign={() => setTab("design")}
         />
       </div>
-      {activeTab === "assets" ? (
-        <GameAssetsPanel threadRef={threadRef} assets={data.assets} />
-      ) : null}
       {activeTab === "builds" ? (
         <GameBuildsPanel
-          key={`${threadRef.threadId}:${data.selectedBuildId ?? "legacy"}`}
+          key={threadRef.threadId}
           threadRef={threadRef}
           builds={data.builds}
           webBuildStale={data.webBuildStale}
-          lastPlaytest={data.lastPlaytest}
           sourcesDifferFromPlay={data.sourcesDifferFromPlay}
-          selectedBuildId={data.selectedBuildId}
           canOperate={canOperate}
           operationRunning={building}
-          stagingLocked={designLock !== null}
-          previewAvailable={data.previewUrl !== null}
-          onOpenDesign={() => setTab("design")}
           onPlay={() => {
             setTab("play");
             void perform("preview");

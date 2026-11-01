@@ -23,8 +23,8 @@ import {
 } from "@t3tools/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { findExecutable } from "./gameNativeCapture.ts";
 import { prepareNativeUserIsolation, type NativeUserIsolation } from "./gameNativeUserDir.ts";
+import { findExecutable } from "./GameProcesses.ts";
 import { nativeChildEnv, nativeGodotArgs, nativeSessionToken } from "./gameExploreNative.ts";
 import { GODOT_BOT_SCRIPT } from "./godotBotScript.ts";
 import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";

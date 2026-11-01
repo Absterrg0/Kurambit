@@ -16,12 +16,9 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   projectId: `project-${name}` as GameSummary["projectId"],
   root: `/games/${name}`,
   name,
-  template: "3d-explorer",
-  designState: null,
+  template: "blank",
   operation: null,
-  qualification: { state: "unqualified", completion: "incomplete", asOf: null },
   updatedAt,
-  coverImagePath: null,
 });
 
 describe("gameSlug", () => {
@@ -57,14 +54,9 @@ describe("formatGameEditedAt", () => {
 });
 
 describe("gameTemplateAppearance", () => {
-  it("gives every template a distinct, quiet identity and a readable name", () => {
-    expect(gameTemplateAppearance("3d-explorer").label).toBe("3D Explorer");
-    expect(gameTemplateAppearance("2d-platformer").label).toBe("2D Platformer");
-    expect(gameTemplateAppearance("2d-screen").label).toBe("2D Screen");
+  it("names the blank starter", () => {
+    expect(gameTemplateAppearance("blank").label).toBe("Blank");
     expect(gameTemplateAppearance(null).label).toBe("Blank");
-    expect(gameTemplateAppearance("3d-explorer").initialClassName).not.toBe(
-      gameTemplateAppearance("2d-platformer").initialClassName,
-    );
   });
 });
 

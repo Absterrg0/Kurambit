@@ -1,22 +1,11 @@
-import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameService from "./game/GameService.ts";
-import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
-import * as GameDesignApproval from "./game/GameDesignApproval.ts";
-import * as GameQualification from "./game/GameQualification.ts";
-import * as GameRoundStore from "./game/GameRoundStore.ts";
-import * as GameAdmission from "./game/GameAdmission.ts";
-import * as GameTurnAdmission from "./game/GameTurnAdmission.ts";
-import * as GameReviewApi from "./game/GameReviewApi.ts";
-import * as GameRepairLoop from "./game/GameRepairLoop.ts";
-import * as GameRepairReactor from "./game/GameRepairReactor.ts";
-import * as GameRepairStudio from "./game/GameRepairStudio.ts";
-import * as GameReviewSessions from "./game/GameReviewSessions.ts";
+import * as GameProjectService from "./game/GameProjectService.ts";
+import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameRun from "./game/GameRun.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
-import * as GameRecipes from "./game/GameRecipes.ts";
 import * as GitRepositoryService from "./project/GitRepositoryService.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 
@@ -357,25 +346,7 @@ const layerAuth = EnvironmentAuth.layer.pipe(
 );
 
 // Every game entry point (user turns from any surface, Rebuild, Stop, design
-// actions and loop start) takes this one per-root gate, so a creator action and
-// a review can never interleave. The orchestration runtime and the game layer
-// share this one instance; its registry of live reviews is in memory.
-const layerGameAdmission = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
-    return GameAdmission.layer({ stateDir: config.stateDir });
-  }),
-);
-
-// Every surface that can start a turn reads this one hook: thread dispatch and
-// the delegated-question wake, which dispatches to the orchestrator directly.
-const layerGameTurnAdmission = GameTurnAdmission.layer.pipe(
-  Layer.provide(RuntimeLayer.layerProjectService),
-  Layer.provide(layerGameAdmission),
-);
-
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
-  Layer.provide(layerGameTurnAdmission),
   Layer.provide(ProviderEventIngestor.layerAnalytics),
   Layer.provide(layerCheckpointStore),
   Layer.provide(layerGitWorkflow),
@@ -443,11 +414,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       const service = yield* DelegatedTaskQuestionReactor.DelegatedTaskQuestionReactor;
       yield* service.start();
     }),
-  ).pipe(
-    Layer.provide(DelegatedTaskQuestionReactor.layer),
-    Layer.provide(ProjectionStoreV2.layer),
-    Layer.provide(layerGameTurnAdmission),
-  ),
+  ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer), Layer.provide(ProjectionStoreV2.layer)),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
@@ -528,37 +495,7 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-const layerGameServices = Layer.mergeAll(
-  // The repair loop owns a game's review phases; the studio is its engine-facing
-  // half. Both wrap the one GameService instance below, so they share its locks,
-  // preview and round store.
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      return GameRepairLoop.layer({ stateDir: config.stateDir });
-    }),
-  ).pipe(
-    Layer.provideMerge(
-      // Review children pick their model from the live provider catalog; the
-      // session service itself keeps no provider-specific behaviour. It shares
-      // the same GameProjectService/GameRoundStore instances GameService uses.
-      Layer.unwrap(
-        Effect.gen(function* () {
-          const config = yield* ServerConfig.ServerConfig;
-          return GameReviewSessions.layer({ stateDir: config.stateDir });
-        }),
-      ).pipe(Layer.provideMerge(GameReviewSessions.providerCatalogLayer)),
-    ),
-    Layer.provideMerge(
-      Layer.unwrap(
-        Effect.gen(function* () {
-          const config = yield* ServerConfig.ServerConfig;
-          return GameRepairStudio.layer({ stateDir: config.stateDir });
-        }),
-      ).pipe(Layer.provideMerge(GameService.layer)),
-    ),
-  ),
-).pipe(
+const layerGameServices = Layer.mergeAll(GameService.layer).pipe(
   // The production loop resolves its game services at call time from the
   // request scope, so it only needs its state directory at build time and can
   // sit anywhere in this chain.
@@ -574,39 +511,10 @@ const layerGameServices = Layer.mergeAll(
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provideMerge(GamePreview.layer),
-  Layer.provideMerge(GameRecipes.layer),
   Layer.provide(GameProcesses.layer),
-  // Web playtest drives the same headless browser the html toolkit drives.
-  Layer.provide(PreviewBrowser.layer),
-  Layer.provideMerge(
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        return GameQualification.layer({ stateDir: config.stateDir });
-      }),
-    ),
-  ),
-  Layer.provideMerge(
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        return GameRoundStore.layer({ stateDir: config.stateDir });
-      }),
-    ),
-  ),
-  Layer.provideMerge(
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        return GameDesignApproval.layer({ stateDir: config.stateDir });
-      }),
-    ),
-  ),
-  // Provided last so every other layer above can require it.
-  Layer.provideMerge(layerGameAdmission),
 );
 
-const layerGame = GameReviewApi.layer.pipe(Layer.provideMerge(layerGameServices));
+const layerGame = layerGameServices;
 
 const layerMakeRoutes = Layer.mergeAll(
   Layer.effectDiscard(
@@ -615,12 +523,6 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
-  Layer.effectDiscard(
-    Effect.gen(function* () {
-      const reactor = yield* GameRepairReactor.GameRepairReactor;
-      yield* reactor.start();
-    }),
-  ).pipe(Layer.provide(GameRepairReactor.layer)),
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),

@@ -1,16 +1,4 @@
-import {
-  GamePlaytestToolkit,
-  GameToolkit,
-  GameArtToolkit,
-  GameRecipeToolkit,
-  GameReviewDetailTool,
-  GameWebPlaytestTool,
-  GameTryInputTool,
-  GameVerifyTool,
-  GameBlenderLookTool,
-  GameBlenderLookToolkit,
-  GameReviewAnswerToolkit,
-} from "./toolkits/game/tools.ts";
+import { GameToolkit, GameBlenderLookTool, GameBlenderLookToolkit } from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -32,11 +20,8 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contrac
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
-import * as GameReviewSessions from "../game/GameReviewSessions.ts";
 import * as GameRun from "../game/GameRun.ts";
 import * as GameService from "../game/GameService.ts";
-import * as GameArtKits from "../game/GameArtKits.ts";
-import * as GameAssetLibrary from "../game/GameAssetLibrary.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -153,7 +138,6 @@ const looksLikeProviderToken = (token: string) => token.length > 0 && !token.inc
 const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
-  const reviews = yield* Effect.serviceOption(GameReviewSessions.GameReviewSessions);
   const runs = yield* Effect.serviceOption(GameRun.GameRun);
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -177,16 +161,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
       });
     }
-    const gameReviewRole =
-      invocation.thread !== undefined && Option.isSome(reviews)
-        ? yield* reviews.value.toolRole(invocation.thread).pipe(Effect.orElseSucceed(() => null))
-        : null;
-    // Catalog context is separate from the answer role: a repair has no answer
-    // tool, but its catalog must omit review control.
-    const gameRepairChild =
-      invocation.thread !== undefined && Option.isSome(reviews)
-        ? yield* reviews.value.repairChild(invocation.thread)
-        : false;
     const gameRunRole =
       invocation.thread !== undefined && Option.isSome(runs)
         ? yield* runs.value.toolRole(invocation.thread)
@@ -194,8 +168,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
-        gameReviewRole,
-        gameRepairChild,
         gameRunRole,
       }),
       Effect.map(normalizeMcpHttpResponse),
@@ -580,7 +552,7 @@ interface ImageToolResult {
     readonly width: number;
     readonly height: number;
   };
-  /** Tools like game_web_playtest return several annotated frames. */
+  /** Tools that return several annotated frames. */
   readonly screenshots?: ReadonlyArray<{
     readonly mimeType: "image/png";
     readonly data: string;
@@ -801,66 +773,6 @@ const registerImageTool = <T extends Tool.Any, E, R>(
 
 const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 
-const registerGameWebPlaytest = Effect.fn("McpHttpServer.registerGameWebPlaytest")(function* () {
-  const games = yield* GameService.GameService;
-  const threads = yield* ThreadManagementService.ThreadManagementService;
-  const built = yield* GamePlaytestToolkit;
-  const reviews = yield* GameReviewSessions.GameReviewSessions;
-  yield* registerImageTool(
-    GameWebPlaytestTool,
-    (payload, options) =>
-      built
-        .handle("game_web_playtest", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
-    "playtest",
-    (error) => (error instanceof Error ? error.message : "Game web playtest failed."),
-    // A playtest captures a whole sequence: metadata with per-frame paths by
-    // default, inline bytes only on explicit opt-in.
-    { defaultIncludeImage: false },
-  );
-  yield* registerImageTool(
-    GameTryInputTool,
-    (payload, options) =>
-      built
-        .handle("game_try_input", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
-    "playtest",
-    (error) => (error instanceof Error ? error.message : "Game input experiment failed."),
-    { defaultIncludeImage: false },
-  );
-  yield* registerImageTool(
-    GameReviewDetailTool,
-    (payload, options) =>
-      built
-        .handle("game_review_detail", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideService(GameReviewSessions.GameReviewSessions, reviews)),
-    "review-detail",
-    (error) => (error instanceof Error ? error.message : "Game review detail failed."),
-  );
-  yield* registerImageTool(
-    GameVerifyTool,
-    (payload, options) =>
-      built
-        .handle("game_verify", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) =>
-      effect.pipe(
-        Effect.provideService(GameService.GameService, games),
-        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-      ),
-    "verify",
-    (error) => (error instanceof Error ? error.message : "Game verification failed."),
-    { defaultIncludeImage: false },
-  );
-});
-
 const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook")(function* () {
   const games = yield* GameService.GameService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -987,34 +899,13 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
-export const layerGameReviewAnswers = toolkitRegistration(
-  GameReviewAnswerToolkit,
-  GameHandlers.layerReviewAnswers,
-);
-
-export const layerGameRecipes = toolkitRegistration(GameRecipeToolkit, GameHandlers.layerRecipes);
-
-export const layerGameArt = toolkitRegistration(GameArtToolkit, GameHandlers.layerArt).pipe(
-  Layer.provide(GameArtKits.layer),
-  Layer.provide(GameAssetLibrary.layer),
-);
-
-export const layerGamePlaytest = imageToolRegistration(
-  registerGameWebPlaytest(),
-  GameHandlers.layerPlaytest,
-);
-
 export const layerGameBlenderLook = imageToolRegistration(
   registerGameBlenderLook(),
   GameHandlers.layerBlenderLook,
 );
 
 export const layerGameToolkit = Layer.mergeAll(
-  layerGameReviewAnswers,
-  layerGamePlaytest,
   layerGameBlenderLook,
-  layerGameRecipes,
-  layerGameArt,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );
 

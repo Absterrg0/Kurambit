@@ -2095,22 +2095,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const olderSessions = gameSessions.filter((session) => session.id !== thread.id);
     const working =
       status === "working" || status === "waiting" || status === "approval" || status === "input";
-    // The row's status comes from the server's records, never game.json's
-    // display mirror: a game with no qualification record is not "Ready".
     const progress = gameProgress(gameSummary);
     const progressIcon: Record<GameProgressKind, typeof CircleCheckIcon> = {
-      drafting: SquarePenIcon,
-      "design-changed": SquarePenIcon,
       building: CircleDashedIcon,
-      unqualified: CircleDotDashedIcon,
-      qualified: CircleCheckIcon,
+      idle: CircleDotDashedIcon,
     };
     const progressClass: Record<GameProgressKind, string> = {
-      drafting: "text-warning-foreground",
-      "design-changed": "text-warning-foreground",
       building: "text-info",
-      unqualified: "text-muted-foreground",
-      qualified: "text-success-foreground",
+      idle: "text-muted-foreground",
     };
     const gameStatusLabel =
       status === "failed"

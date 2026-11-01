@@ -4,7 +4,7 @@ Game Studio is a local desktop app for making games with coding agents. It is a 
 
 ## Where Game Studio is going
 
-One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build, reviews it with fresh sessions, compares builds blind so a worse one never lands, and keeps working until the budget ends. The review, repair, design-approval and qualification code in `apps/server/src/game` is the old approach and is being replaced: do not extend it. New work starts in `scripts/studio/`.
+One brief should produce a game at a decent stage with the shape of a Steam demo, and creators keep improving it with the studio. Any genre. What the harness itself does around the model is the product: it plays every build with a separate tester session, compares builds blind so a worse one never lands, and keeps working until the budget ends.
 
 ## What we keep
 
@@ -93,7 +93,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 ## Verifying
 
 - Smallest proof that the change works, by running it. For game-layer work that means making a real game and looking at it. Targeted typecheck and lint for what you changed.
-- Do not write test suites for the game layer or ask generated games to carry smoke tests or scripted routes: games get played. A small test is fine only for data safety or tricky pure logic.
+- Do not write test suites for the game layer or ask generated games to carry smoke tests or scripted routes: games get played. A small test is fine only for data safety or tricky pure logic. Keep only a bare minimum protecting user data and evidence honesty, such as path-traversal or root checks.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
 - The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
 - Upon request, user-visible frontend changes should get one integrated pass in a real client (`test-t3-app`). The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.

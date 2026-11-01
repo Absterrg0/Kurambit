@@ -176,7 +176,6 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
-import { GameChangeSummary } from "../game/GameChangeSummary";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
@@ -4023,21 +4022,6 @@ function AssistantChangedFilesSectionInner({
       },
       event,
     );
-  if (ctx.gameThread) {
-    return (
-      <GameChangeSummary
-        runId={turnSummary.runId}
-        files={checkpointFiles}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onToggleAllDirectories={() =>
-          setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
-        }
-        onOpenTurnDiff={onOpenTurnDiff}
-        onFileContextMenu={onFileContextMenuHandler}
-      />
-    );
-  }
   return (
     <ChangedFilesCard
       runId={turnSummary.runId}

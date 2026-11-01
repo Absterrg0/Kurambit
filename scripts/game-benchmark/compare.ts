@@ -10,11 +10,12 @@ import {
   ProviderInstanceId,
   type ModelSelection,
 } from "../../packages/contracts/src/index.ts";
-import { composeSideBySidePng } from "../../apps/server/src/game/frameCompose.ts";
+import { composeSideBySidePng } from "./frameCompose.ts";
 import { makeCodexTextGeneration } from "../../apps/server/src/textGeneration/CodexTextGeneration.ts";
 import * as TextGeneration from "../../apps/server/src/textGeneration/TextGeneration.ts";
 import * as ServerConfig from "../../apps/server/src/config.ts";
-import { CODEX_GRADER_MODEL } from "../game-grade.ts";
+/** The frozen codex grader model the default compare votes ask for. */
+const CODEX_GRADER_MODEL = "gpt-6.1-sol";
 import type { LoadedGameBenchmarkBrief } from "./artifacts.ts";
 import type { CaptureManifest, LoadedFramePack } from "./capture.ts";
 

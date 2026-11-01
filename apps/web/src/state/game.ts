@@ -58,27 +58,20 @@ export const gameEnvironment = {
     label: "game:checkSources",
     tag: WS_METHODS.gameStatus,
   }),
-  reviewStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:reviewStatus",
-    tag: WS_METHODS.gameReviewStatus,
+  runStart: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runStart",
+    tag: WS_METHODS.gameRunStart,
+  }),
+  runStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:runStatus",
+    tag: WS_METHODS.gameRunStatus,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
     refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
   }),
-  reviewHistory: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:reviewHistory",
-    tag: WS_METHODS.gameReviewHistory,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
-  }),
-  reviewStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:reviewStop",
-    tag: WS_METHODS.gameReviewStop,
-  }),
-  reviewRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:reviewRestore",
-    tag: WS_METHODS.gameReviewRestore,
+  runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runStop",
+    tag: WS_METHODS.gameRunStop,
   }),
   events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {
@@ -88,22 +81,6 @@ export const gameEnvironment = {
   open: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:open",
     tag: WS_METHODS.gameOpen,
-  }),
-  approveDesign: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:approveDesign",
-    tag: WS_METHODS.gameApproveDesign,
-  }),
-  requestChange: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:requestChange",
-    tag: WS_METHODS.gameRequestChange,
-  }),
-  approveRevision: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:approveRevision",
-    tag: WS_METHODS.gameApproveRevision,
-  }),
-  discardRevision: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:discardRevision",
-    tag: WS_METHODS.gameDiscardRevision,
   }),
   action: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:action",

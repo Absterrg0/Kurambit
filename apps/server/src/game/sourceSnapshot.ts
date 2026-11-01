@@ -69,11 +69,8 @@ const hashFileContent = async (
  * import can rewrite it without changing the export; design documents, briefs,
  * notes and art sources live outside `godot/` and are other identities' business.
  *
- * The full-tree snapshot in `GameSnapshots` is deliberately different: rollback
- * and user-edit detection must notice every game-owned file, while a build is
- * stale only when something it was built from moved. Never compare this
- * BUILD-input identity with a round `artifact.sourceId` (the full-tree
- * byte-manifest identity); they cover different files by construction.
+ * This BUILD-input identity covers only what the export reads; the selection
+ * record's source id covers the same files by construction.
  *
  * Symlinks fail closed: following a linked script would let its content change
  * without changing the identity of the tree Godot loaded. Mtime is never part

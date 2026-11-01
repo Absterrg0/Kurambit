@@ -1,11 +1,5 @@
 import * as Schema from "effect/Schema";
-import {
-  GamePlaytestProbe,
-  GamePlaytestState,
-  GamePlaytestStep,
-  GameConsoleMessage,
-  GameViewport,
-} from "./game.ts";
+import { GamePlaytestProbe, GamePlaytestStep, GameConsoleMessage, GameViewport } from "./game.ts";
 
 /**
  * Bounded persistent exploration: short act/observe cycles against one frozen
@@ -49,24 +43,13 @@ export const GAME_EXPLORE_BOUNDS = {
 } as const;
 
 const sessionId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
-const hex64 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 
-export const GameExploreTarget = Schema.Literals(["web", "native"]);
-export type GameExploreTarget = typeof GameExploreTarget.Type;
-
+/**
+ * Exploration plays the current game sources natively with the game paused
+ * between acts. There is no web backend: the game under test is the live
+ * folder, never an export.
+ */
 export const GameExploreStartInput = Schema.Struct({
-  /**
-   * The recorded export to explore. Omitted means the build Play currently
-   * serves; a missing selection is an error, never a fresh export.
-   * Ignored for target native, which plays the current game sources.
-   */
-  buildId: Schema.optionalKey(hex64),
-  /** Which backend to play through. Omitted means the frozen Web export. */
-  target: Schema.optionalKey(GameExploreTarget),
-  /** Capture width in pixels; defaults to the playtest box. Native always runs at the project's window size. */
-  width: Schema.optionalKey(Schema.Finite),
-  /** Capture height in pixels; defaults to the playtest box. Native always runs at the project's window size. */
-  height: Schema.optionalKey(Schema.Finite),
   /** How long to wait for Godot to boot. */
   bootTimeoutMs: Schema.optionalKey(Schema.Finite),
 });
@@ -74,19 +57,13 @@ export type GameExploreStartInput = typeof GameExploreStartInput.Type;
 
 export const GameExploreStartResult = Schema.Struct({
   sessionId,
-  /** The trace this session saves; replay names it after close. */
-  traceId: Schema.String,
-  target: GameExploreTarget,
-  /** For web the frozen export; for native the current source snapshot id. */
+  /** The current source snapshot id. */
   buildId: Schema.String,
   sourceId: Schema.NullOr(Schema.String),
-  /** The frozen capture window every act plays in. */
+  /** The project window every act plays in. */
   viewport: GameViewport,
-  baseViewport: GameViewport,
-  captureScale: Schema.Number,
   booted: Schema.Boolean,
   bootMs: Schema.NullOr(Schema.Number),
-  pauseConfirmed: Schema.NullOr(Schema.Boolean),
   message: Schema.String,
   callsLeft: Schema.Int,
   wallTtlMs: Schema.Int,
@@ -116,9 +93,8 @@ export const GameExploreInspectStep = Schema.Struct({
 export type GameExploreInspectStep = typeof GameExploreInspectStep.Type;
 
 /**
- * Steps an exploration act may carry. Web accepts the shared playtest steps;
- * native additionally accepts ui (real mouse at a listed control) and inspect
- * (read-only reflection). The service rejects ui/inspect on web.
+ * Steps an exploration act may carry: the shared playtest steps plus ui
+ * (real mouse at a listed control) and inspect (read-only reflection).
  */
 export const GameExploreStep = Schema.Union([
   GamePlaytestStep,
@@ -217,10 +193,6 @@ export type GameExploreCloseInput = typeof GameExploreCloseInput.Type;
 
 export const GameExploreCloseResult = Schema.Struct({
   sessionId,
-  traceId: Schema.String,
-  /** Absolute server-owned path of the persisted trace. */
-  tracePath: Schema.String,
-  traceSaved: Schema.Boolean,
   reason: Schema.String,
   actions: Schema.Int,
   executedInputSteps: Schema.Int,
@@ -230,34 +202,90 @@ export const GameExploreCloseResult = Schema.Struct({
 });
 export type GameExploreCloseResult = typeof GameExploreCloseResult.Type;
 
-export const GameExploreReplayInput = Schema.Struct({
-  /** A trace id from a closed exploration session. Never an arbitrary path. */
-  traceId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-});
-export type GameExploreReplayInput = typeof GameExploreReplayInput.Type;
+/** Capture width/height bounds for exploration viewports. */
+export const EXPLORE_CAPTURE_BOUNDS = { minDimension: 320, maxDimension: 1920 } as const;
 
-export const GameExploreReplayFrame = Schema.Struct({
-  label: Schema.String,
-  /** Absolute server-owned path of this replay's own fresh frame. */
-  path: Schema.String,
-  width: Schema.Number,
-  height: Schema.Number,
-  probe: Schema.optionalKey(GamePlaytestProbe),
-});
-export type GameExploreReplayFrame = typeof GameExploreReplayFrame.Type;
+/** Everything wrong with an exploration open request. Empty means the session may open. */
+export const exploreCaptureIssues = (input: {
+  readonly bootTimeoutMs?: number | undefined;
+}): readonly string[] => {
+  const issues: string[] = [];
+  const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
+  if (!Number.isFinite(bootTimeoutMs) || bootTimeoutMs <= 0)
+    issues.push("bootTimeoutMs must be a positive number.");
+  if (Number.isFinite(bootTimeoutMs) && bootTimeoutMs > 120_000)
+    issues.push("bootTimeoutMs must be at most 120000 ms.");
+  return issues;
+};
 
-export const GameExploreReplayResult = Schema.Struct({
-  traceId: Schema.String,
-  buildId: Schema.String,
-  /** Absolute server-owned directory of this replay's own fresh evidence. */
-  evidenceDirectory: Schema.String,
-  success: Schema.Boolean,
-  booted: Schema.Boolean,
-  responded: Schema.Boolean,
-  message: Schema.String,
-  /** The fresh run's own probe summary. The trace's probe is never replayed. */
-  state: Schema.NullOr(GamePlaytestState),
-  consoleMessages: Schema.Array(GameConsoleMessage),
-  frames: Schema.Array(GameExploreReplayFrame),
-});
-export type GameExploreReplayResult = typeof GameExploreReplayResult.Type;
+/**
+ * Keys exploration can send. The browser needs a physical key or a DOM key
+ * name; a Godot InputMap action name such as `ui_accept` has neither, so it
+ * reaches the game as a key it never receives.
+ */
+const BROWSER_KEY_NAMES: ReadonlySet<string> = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Space",
+  "Enter",
+  "Tab",
+  "Backspace",
+  "Escape",
+  "Shift",
+  "Control",
+  "Alt",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Insert",
+  "Delete",
+  ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
+]);
+
+const exploreStepDurationMs = (step: GameExploreStep): number => {
+  if ("press" in step) return 50;
+  if ("waitMs" in step) return step.waitMs;
+  if ("holdMs" in step) return step.holdMs;
+  return 0;
+};
+
+/**
+ * Everything wrong with exploration steps. Empty means the steps may run.
+ * Cheap and pure, so the server rejects before it serves a build or launches
+ * the browser.
+ */
+export const exploreStepIssues = (steps: readonly GameExploreStep[]): readonly string[] => {
+  const issues: string[] = [];
+  for (const [index, step] of steps.entries()) {
+    const duration = exploreStepDurationMs(step);
+    if (!Number.isFinite(duration) || duration < 0)
+      issues.push(`Step ${index + 1} has an invalid duration.`);
+    if (Number.isFinite(duration) && duration > 10_000)
+      issues.push(`Step ${index + 1} lasts ${duration} ms; one step may last at most 10000 ms.`);
+    const fields: ReadonlyArray<readonly [string, readonly string[]]> =
+      "press" in step
+        ? [["press", [step.press]]]
+        : "hold" in step
+          ? [["hold", [step.hold]]]
+          : "keys" in step
+            ? [["keys", step.keys]]
+            : "key" in step
+              ? [["key", [step.key]]]
+              : [];
+    for (const [field, keys] of fields)
+      for (const key of keys) {
+        if (key.length === 0 || key.length > 80) {
+          issues.push(`Step ${index + 1} ${field} must contain 1–80 characters.`);
+          continue;
+        }
+        if (key.length === 1 || BROWSER_KEY_NAMES.has(key)) continue;
+        issues.push(
+          `Step ${index + 1} ${field} "${key}" is not a browser key. Exploration sends physical keys such as "Enter", "Space", "ArrowLeft", "w" or "F1", not Godot InputMap actions; use the key project.godot binds to the action here.`,
+        );
+      }
+  }
+  return issues;
+};

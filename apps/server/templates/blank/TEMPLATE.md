@@ -10,8 +10,8 @@ no gameplay yet. Everything below is the starting point to extend, not a fixed s
   autoloads:
   - `GameState` (`godot/scripts/game_state.gd`) — the game's single source of truth. It
     starts with no values; add the public primitive variables the game needs.
-  - `StudioProbe` (`godot/scripts/studio_probe.gd`) — in web builds it registers the
-    read-only `window.__studioProbe()` snapshot `game_web_playtest` reads. Keep it and its
+  - `StudioProbe` (`godot/scripts/studio_probe.gd`) — in games it reports the
+    read-only probe snapshot `game_explore_*` and `game_check` read. Keep it and its
     autoload line.
 - `godot/scenes/main.tscn` — a `Node3D` named `Main` with a camera and a directional
   light. This is the one scene the game boots into; replace or extend it as the game
@@ -56,15 +56,13 @@ names the acceptance ids it proves and the proof you will run.
   is hidden it pauses the scene tree and mutes the master audio bus, then restores what
   it found. Keep that half of the bridge as well.
 
-## Recipes
+## Playtest
 
-Start with `state.world`, `read.hud` and `audio.feedback` — fetch one with
-`game_recipe_get`, then adapt its mechanism to the game you are building. Search
-with `game_recipe_search` when the id does not cover the problem.
+Play first with the `game_explore_*` tools (target native) and study every frame.
 
 ## Tests
 
-`game_godot_test` runs `tests/smoke_test.gd`. Keep its engine-readiness checks as you add
+`game_check` runs the headless checks plus `tests/smoke_test.gd`. Keep its engine-readiness checks as you add
 gameplay and run values. Extend them with the game's actual behaviour as you build it: boot
 `res://scenes/main.tscn`, drive the real loop with input or physics, assert observable
 outcomes, and quit with a nonzero exit code on failure. A green smoke test on an empty

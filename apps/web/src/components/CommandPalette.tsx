@@ -60,7 +60,6 @@ import {
   LinkIcon,
   MessageSquareIcon,
   MonitorIcon,
-  MonitorPlayIcon,
   MoonIcon,
   PlayIcon,
   SquareIcon,
@@ -1501,14 +1500,6 @@ function OpenCommandPaletteDialog(props: {
         searchTerms: ["stop", "close", "quit", "game"],
         icon: <SquareIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("stop"),
-      },
-      {
-        kind: "action",
-        value: "action:game-native",
-        title: "Run native",
-        searchTerms: ["run", "native", "window", "game"],
-        icon: <MonitorPlayIcon className={ITEM_ICON_CLASS} />,
-        run: runGameAction("native"),
       },
       {
         kind: "action",

@@ -1,10 +1,4 @@
 import {
-  GameReviewStatus,
-  GameReviewHistory,
-  GameReviewHistoryInput,
-  GameReviewRestoreResult,
-} from "./gameReview.ts";
-import {
   GameRunStartInput,
   GameRunStartResult,
   GameRunStatusInput,
@@ -24,19 +18,9 @@ import {
   GameStatus,
   GameThreadInput,
   GameToolchainStatus,
-  GameVerificationPolicyRead,
-  GameVerificationPolicyUpdateInput,
   GameWebPackageResult,
   GameWindowsPackageResult,
 } from "./game.ts";
-import {
-  GameDesignApproveInput,
-  GameDesignApprovalResult,
-  GameRevisionDiscardInput,
-  GameRevisionDiscardResult,
-  GameRevisionRequestInput,
-  GameRevisionRequestResult,
-} from "./gameDesign.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -319,25 +303,16 @@ export const WS_METHODS = {
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
   gameStatus: "game.status",
-  gameReviewStatus: "game.reviewStatus",
-  gameReviewHistory: "game.reviewHistory",
-  gameReviewStop: "game.reviewStop",
-  gameReviewRestore: "game.reviewRestore",
 
   gameList: "game.list",
   gameCreate: "game.create",
   gameOpen: "game.open",
-  gameApproveDesign: "game.approveDesign",
-  gameRequestChange: "game.requestChange",
-  gameApproveRevision: "game.approveRevision",
-  gameDiscardRevision: "game.discardRevision",
-  gameUpdateVerificationPolicy: "game.updateVerificationPolicy",
   gameAction: "game.action",
   gameWindowsPackage: "game.windowsPackage",
+  gameVerify: "game.verify",
   gameWebPackage: "game.webPackage",
   gameToolchainStatus: "game.toolchainStatus",
   gameInstall: "game.install",
-  gameVerify: "game.verify",
   gameRunStart: "game.runStart",
   gameRunStatus: "game.runStatus",
   gameRunStop: "game.runStop",
@@ -1334,29 +1309,6 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 const gameError = Schema.Union([GameOperationError, EnvironmentAuthorizationError]);
-const WsGameReviewStatusRpc = Rpc.make(WS_METHODS.gameReviewStatus, {
-  payload: Schema.Struct({
-    ...GameThreadInput.fields,
-    checkSelectedBuild: Schema.optionalKey(Schema.Boolean),
-  }),
-  success: GameReviewStatus,
-  error: gameError,
-});
-const WsGameReviewHistoryRpc = Rpc.make(WS_METHODS.gameReviewHistory, {
-  payload: GameReviewHistoryInput,
-  success: GameReviewHistory,
-  error: gameError,
-});
-const WsGameReviewStopRpc = Rpc.make(WS_METHODS.gameReviewStop, {
-  payload: GameThreadInput,
-  success: GameReviewStatus,
-  error: gameError,
-});
-const WsGameReviewRestoreRpc = Rpc.make(WS_METHODS.gameReviewRestore, {
-  payload: GameThreadInput,
-  success: GameReviewRestoreResult,
-  error: gameError,
-});
 const WsGameStatusRpc = Rpc.make(WS_METHODS.gameStatus, {
   payload: GameThreadInput,
   success: GameStatus,
@@ -1375,31 +1327,6 @@ const WsGameListRpc = Rpc.make(WS_METHODS.gameList, {
 const WsGameOpenRpc = Rpc.make(WS_METHODS.gameOpen, {
   payload: GameOpenInput,
   success: GameProjectResult,
-  error: gameError,
-});
-const WsGameApproveDesignRpc = Rpc.make(WS_METHODS.gameApproveDesign, {
-  payload: GameDesignApproveInput,
-  success: GameDesignApprovalResult,
-  error: gameError,
-});
-const WsGameRequestChangeRpc = Rpc.make(WS_METHODS.gameRequestChange, {
-  payload: GameRevisionRequestInput,
-  success: GameRevisionRequestResult,
-  error: gameError,
-});
-const WsGameApproveRevisionRpc = Rpc.make(WS_METHODS.gameApproveRevision, {
-  payload: GameDesignApproveInput,
-  success: GameDesignApprovalResult,
-  error: gameError,
-});
-const WsGameDiscardRevisionRpc = Rpc.make(WS_METHODS.gameDiscardRevision, {
-  payload: GameRevisionDiscardInput,
-  success: GameRevisionDiscardResult,
-  error: gameError,
-});
-const WsGameUpdateVerificationPolicyRpc = Rpc.make(WS_METHODS.gameUpdateVerificationPolicy, {
-  payload: GameVerificationPolicyUpdateInput,
-  success: GameVerificationPolicyRead,
   error: gameError,
 });
 const WsGameActionRpc = Rpc.make(WS_METHODS.gameAction, {
@@ -1427,12 +1354,12 @@ const WsGameInstallRpc = Rpc.make(WS_METHODS.gameInstall, {
   success: GameToolchainStatus,
   error: gameError,
 });
-
 const WsGameVerifyRpc = Rpc.make(WS_METHODS.gameVerify, {
   payload: Schema.Struct({}),
   success: GameToolchainStatus,
   error: gameError,
 });
+
 const WsGameRunStartRpc = Rpc.make(WS_METHODS.gameRunStart, {
   payload: GameRunStartInput,
   success: GameRunStartResult,
@@ -1457,19 +1384,10 @@ const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
 
 export const WsRpcGroup = RpcGroup.make(
   WsGameStatusRpc,
-  WsGameReviewStatusRpc,
-  WsGameReviewHistoryRpc,
-  WsGameReviewStopRpc,
-  WsGameReviewRestoreRpc,
 
   WsGameCreateRpc,
   WsGameListRpc,
   WsGameOpenRpc,
-  WsGameApproveDesignRpc,
-  WsGameRequestChangeRpc,
-  WsGameApproveRevisionRpc,
-  WsGameDiscardRevisionRpc,
-  WsGameUpdateVerificationPolicyRpc,
   WsGameActionRpc,
   WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,

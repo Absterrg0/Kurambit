@@ -2,7 +2,16 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import type { GameSelectedBuild } from "@t3tools/contracts";
+/** The immutable web build Play serves. Written at each Web export. */
+export interface GameSelectedBuild {
+  readonly buildId: string;
+  /** Game-relative directory, e.g. builds/candidates/<hash>. */
+  readonly directory: string;
+  /** Game-relative entry file inside `directory`. */
+  readonly entry: string;
+  /** Response headers the artifact needs served, when it needs any. */
+  readonly headers?: Record<string, string> | undefined;
+}
 import { ArchivePublishError, publishArchive } from "./archivePublication.ts";
 import {
   StoredZipError,

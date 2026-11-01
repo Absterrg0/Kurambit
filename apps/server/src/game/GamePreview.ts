@@ -22,25 +22,11 @@ const mime: Record<string, string> = {
 export class GamePreview extends Context.Service<
   GamePreview,
   {
-    /**
-     * Serves one immutable build directory without changing what Play shows.
-     * Evidence runs (a playtest of a candidate) use this, so their URL never
-     * becomes the creator's Play URL.
-     */
-    readonly open: (root: string, directory?: string) => Effect.Effect<string, GameOperationError>;
-    /**
-     * Serves a build and makes it the one Play shows. Only selection and
-     * promotion call this.
-     */
+    /** Serves a build and makes it the one Play shows. */
     readonly select: (root: string, directory: string) => Effect.Effect<string, GameOperationError>;
     readonly stop: (root: string) => Effect.Effect<void>;
     /** The URL of the build most recently selected for Play, or null. */
     readonly url: (root: string) => string | null;
-    /** The URL Play shows if it is this directory; null when another is shown. */
-    readonly urlFor: (root: string, directory: string) => string | null;
-    /** Whether this game currently serves that directory (evidence or selected). */
-    readonly directories: (root: string) => readonly string[];
-    readonly serving: (root: string, directory: string) => boolean;
   }
 >()("t3/game/GamePreview") {}
 const make = Effect.gen(function* () {
@@ -152,18 +138,10 @@ const make = Effect.gen(function* () {
     });
   return GamePreview.of({
     url: (root) => latest.get(root)?.url ?? null,
-    urlFor: (root, directory) => {
-      const current = latest.get(root);
-      return current !== undefined && current.key === keyOf(root, directory) ? current.url : null;
-    },
-    directories: (root) =>
-      [...servers.values()].filter((entry) => entry.root === root).map((entry) => entry.directory),
-    serving: (root, directory) => servers.has(keyOf(root, directory)),
     stop: (root) => Effect.promise(() => closeWhere(root)),
-    open: (root, directory = "builds/web") => openServer(root, directory),
-    // A window opened before a promotion keeps loading the build it was opened
-    // on, because each directory keeps its own server. Selecting only changes
-    // which URL Play reports.
+    // A window opened before a new selection keeps loading the build it was
+    // opened on, because each directory keeps its own server. Selecting only
+    // changes which URL Play reports.
     select: (root, directory) =>
       openServer(root, directory).pipe(
         Effect.tap((url) =>
