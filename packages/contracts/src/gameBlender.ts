@@ -75,6 +75,27 @@ export const GameBlenderAssetsImportResult = Schema.Struct({
 });
 export type GameBlenderAssetsImportResult = typeof GameBlenderAssetsImportResult.Type;
 
+export const GameBlenderExportInput = Schema.Struct({
+  /**
+   * Scene object names to export. Omitted means every mesh in the current
+   * scene. A name that matches nothing fails the call with the close names.
+   */
+  objects: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
+   * Game-relative destination, which must sit under `godot/` and end with
+   * `.glb`. Omitted means `godot/assets/blender/scene.glb`.
+   */
+  file: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
+});
+export type GameBlenderExportInput = typeof GameBlenderExportInput.Type;
+export const GameBlenderExportResult = Schema.Struct({
+  text: Schema.String,
+  /** Game-relative .blend source that stays in the game. */
+  blend: Schema.String,
+  /** Game-relative GLB under godot/ the game can load; run game_import after. */
+  export: Schema.String,
+});
+export type GameBlenderExportResult = typeof GameBlenderExportResult.Type;
 export const GameBlenderGenerateInput = Schema.Struct({
   prompt: Schema.optionalKey(Schema.String),
   image: Schema.optionalKey(Schema.String),

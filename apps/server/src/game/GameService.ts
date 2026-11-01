@@ -41,6 +41,8 @@ import {
   type GameViewport,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
+  type GameBlenderExportInput,
+  type GameBlenderExportResult,
   type GameBlenderLookInput,
   type GameBlenderLookResult,
   type GameBlenderSceneInput,
@@ -53,6 +55,7 @@ import {
   type GameBlenderGenerateResult,
   type GameBotRunInput,
   type GameBotRunResult,
+  type GameBotReportResult,
   type GameBotViewInput,
   type GameBotViewResult,
 } from "@t3tools/contracts";
@@ -159,6 +162,15 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderAssetsImportInput,
     ) => Effect.Effect<GameBlenderAssetsImportResult, GameOperationError>;
+    /**
+     * Live Blender scene: export the named objects (or every mesh) as a GLB
+     * under godot/ the game can load, saving the .blend source. Run
+     * game_import after so Godot sees it.
+     */
+    readonly blenderExport: (
+      threadId: ThreadId,
+      input: GameBlenderExportInput,
+    ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
     /** Live Blender scene: forward to the upstream generator; reports clearly when none is available. */
     readonly blenderGenerate: (
       threadId: ThreadId,
@@ -240,6 +252,10 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBotRunInput,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /** Rebuild the facts-only player report across this game's bot runs. */
+    readonly botReport: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameBotReportResult, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly botView: (
       threadId: ThreadId,
@@ -2107,6 +2123,11 @@ const make = Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         return yield* gameBot.view(root, input);
       }),
+    botReport: (threadId) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        return yield* gameBot.report(root);
+      }),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
@@ -2118,6 +2139,8 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Blender assets search", (root) => liveBlender.assetsSearch(root, input)),
     blenderAssetsImport: (threadId, input) =>
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
+    blenderExport: (threadId, input) =>
+      withRoot(threadId, "Blender export", (root) => liveBlender.exportGlb(root, input)),
     blenderGenerate: (threadId, input) =>
       withRoot(threadId, "Blender generate", (root) => liveBlender.generate(root, input)),
     action: Effect.fn("GameService.action")(function* (threadId, action) {

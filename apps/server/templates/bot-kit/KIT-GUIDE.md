@@ -21,6 +21,30 @@ The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
   or later. Executors do the fast part in code every tick (steer, time a
   press); Jev chooses what to do.
 
+## Run types: what each run is for
+
+- **Win bot (`mode: "play"`).** Goal: finish the game or reach the ending.
+  Answers "can this be finished, and does it hold together?". Options are
+  the sensible plays toward the goal; `policy` encodes the best route you
+  know. Score it on the ending.
+- **Exploration bot (`mode: "explore"`).** Goal: try everything. Never try
+  to win. Options cover the mechanics broadly (every verb, every direction,
+  every usable thing, edge cases, limits), preferring what hasn't been tried
+  yet — Aura's rule for "an exploration". Do not score it on wins: a run
+  that never finishes still reports where play dies, stalls, or goes
+  untried. Several runs (`runs: 3+`) feed one player report.
+- **Jev vs randomised policy.** With decider `jev` and a key, Jev picks.
+  Without a key the service says so plainly (`policyNote`) and an
+  exploration bot picks uniformly at random instead — which is still useful
+  coverage, but it is not Jev and must never be reported as Jev. A win bot
+  without a key falls back to your `policy`.
+- **Player report.** After exploration runs the service writes
+  `.studio/player-report.md` from the run traces: endings, pick counts,
+  offered-but-never-picked options, first-action times, death/stall clusters
+  with positions and times, sampled areas, detector findings, explicit state
+  writes. Code states facts and interprets nothing. Reviewers read it as
+  facts; your notes say what you felt.
+
 ## Shape
 
 ```js

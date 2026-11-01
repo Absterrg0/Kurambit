@@ -19,11 +19,20 @@
  * where run returns "running", "done" or "failed". A single legal option
  * runs without asking Jev and never counts as a Jev decision: a run counts
  * as a Jev run only when Jev made at least 3 decisions among 2+ options.
+ * Argv after the bot file: decider, mode ("play" or "explore"), and whether
+ * the service is actually asking Jev ("jev-live": an exploration without
+ * the key picks uniformly at random and says so in its picked lines).
  */
 export const GAME_BOT_CHILD_JS = `import * as NodeReadline from "node:readline";
 
 const botPath = process.argv[2];
 const decider = process.argv[3] === "jev" ? "jev" : "policy";
+// Exploration mode (Aura's "an exploration"): broad options, no win goal.
+// jevLive is true only when the service actually has the key: without it a
+// jev-decider exploration must say so and fall back to randomised policy.
+const explore = process.argv[4] === "explore";
+const jevLive = process.argv[5] === "jev-live";
+const exploreRandom = explore && decider === "jev" && !jevLive;
 // The protocol runs over stdout, so a chatty bot cannot corrupt it.
 console.log = (...args) => process.stderr.write(args.map(String).join(" ") + "\\n");
 console.warn = (...args) => process.stderr.write(args.map(String).join(" ") + "\\n");
@@ -92,14 +101,16 @@ const policyPick = (options, observer) => {
 
 const pickValid = (name, options) => options.some((o) => String(o.name) === name);
 
-const sendPicked = (name, via, t, twoPlus) => send({ op: "picked", name, via, t, twoPlus: twoPlus === true });
+const randomOption = (options) => String(options[Math.floor(Math.random() * options.length)].name);
 
-const switchTo = (name, via, t, twoPlus) => {
+const sendPicked = (name, via, t, twoPlus, randomized) => send({ op: "picked", name, via, t, twoPlus: twoPlus === true, randomized: randomized === true });
+
+const switchTo = (name, via, t, twoPlus, randomized) => {
   if (current !== null) recent.push({ name: current, ok: false });
   current = name;
   currentSince = Date.now();
   lastProgress = Date.now();
-  sendPicked(current, via, t, twoPlus);
+  sendPicked(current, via, t, twoPlus, randomized);
 };
 
 const handleObs = async (msg) => {
@@ -133,11 +144,16 @@ const handleObs = async (msg) => {
     const needDecide = current === null || optSig !== prevSig || due || lastOutcome === "done" || lastOutcome === "failed";
     if (needDecide && opts.length > 0) {
       lastDecisionAt = Date.now();
-      const fallback = pickValid(policyPick(opts, obs), opts) ? policyPick(opts, obs) : String(opts[0].name);
+      // Without the key there is no Jev to ask: an exploration then picks
+      // uniformly at random (the report states it isn't Jev), otherwise
+      // the bot's own policy.
+      const fallback = exploreRandom
+        ? randomOption(opts)
+        : pickValid(policyPick(opts, obs), opts) ? policyPick(opts, obs) : String(opts[0].name);
       if (opts.length === 1) {
         // A single legal option runs without asking Jev (Aura): there is
         // nothing to choose between, and it must not count as a decision.
-        if (current === null) switchTo(String(opts[0].name), "policy", t, false);
+        if (current === null) switchTo(String(opts[0].name), "policy", t, false, false);
       } else if (decider === "jev" && pending === null) {
         decideId += 1;
         pending = { id: decideId, fallback, options: opts.length };
@@ -154,7 +170,7 @@ const handleObs = async (msg) => {
           recent: recent.slice(-6), plan });
       }
       const immediate = decider === "policy" || current === null ? fallback : null;
-      if (immediate !== null && immediate !== current) switchTo(immediate, "policy", t, opts.length >= 2);
+      if (immediate !== null && immediate !== current) switchTo(immediate, "policy", t, opts.length >= 2, exploreRandom);
     }
     if (current !== null) {
       const opt = opts.find((o) => String(o.name) === current);
@@ -202,16 +218,20 @@ const handleDecision = (msg) => {
   let pick = typeof msg.pick === "string" ? msg.pick : null;
   const probs = msg.probs !== null && typeof msg.probs === "object" ? msg.probs : {};
   let via = "jev";
+  let randomized = false;
   if (pick === null || !pickValid(pick, opts)) {
     pick = pickValid(fallback, opts) ? fallback : (opts.length > 0 ? String(opts[0].name) : null);
     via = "policy";
+    // The fallback is random only when the key is missing on exploration;
+    // otherwise it is the bot's own policy. The trace keeps them apart.
+    randomized = exploreRandom;
   }
   if (pick === null) return;
   if (pick === current) {
     // A kept option still counts as a decision among the options offered
     // (Aura counts kept answers too); otherwise the margin would hide
     // steady Jev play and no run could ever be valid.
-    sendPicked(current, via, null, twoPlus);
+    sendPicked(current, via, null, twoPlus, randomized);
     return;
   }
   if (via === "jev" && current !== null) {
@@ -225,11 +245,11 @@ const handleDecision = (msg) => {
     const margin = (typeof probs[pick] === "number" ? probs[pick] : 1)
       - (typeof probs[current] === "number" ? probs[current] : 0);
     if ((!interruptible && !urgent) || (!urgent && margin < switchMargin)) {
-      sendPicked(current, "jev", null, twoPlus);
+      sendPicked(current, "jev", null, twoPlus, false);
       return;
     }
   }
-  switchTo(pick, via, null, twoPlus);
+  switchTo(pick, via, null, twoPlus, randomized);
 };
 
 const lines = NodeReadline.createInterface({ input: process.stdin, crlfDelay: Infinity });

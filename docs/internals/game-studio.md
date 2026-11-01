@@ -5,7 +5,7 @@
 
 One brief produces a game through a harness-run loop, and the harness — not the model — owns every
 check that matters: it plays every build with a separate session, compares builds blind so a worse
-one never lands, and keeps working until the budget ends.
+one never lands, and keeps working until a ship review says yes, it stalls, or the creator stops it.
 
 ## Services
 
@@ -30,8 +30,8 @@ stay outside their catalog.
 
 ## Loop
 
-Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until the
-budget ends or a ship review says yes: builder block, boot check, tester play with a bot run,
+Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
+review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
 blind compare in both orders, keep or revert, reviewer notes for the next round. The only hard
 checks are boots, exports and keep-or-revert verdicts.
 

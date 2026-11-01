@@ -49,6 +49,7 @@ Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the proj
 Use the game_* tools to check, play, export and package the game; never run Godot yourself. Keep builds/ and godot/.godot/ generated.
 `,
     "CLAUDE.md": "@AGENTS.md\n",
-    ".gitignore": "builds/\ngodot/.godot/\n*.blend1\n",
+    ".gitignore":
+      "builds/\ngodot/.godot/\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
   };
 }

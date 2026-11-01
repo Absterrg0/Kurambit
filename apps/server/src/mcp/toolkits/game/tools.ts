@@ -6,6 +6,8 @@ import {
   GameActionResult,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
+  GameBlenderExportInput,
+  GameBlenderExportResult,
   GameBlenderLookInput,
   GameBlenderLookResult,
   GameBlenderSceneInput,
@@ -27,6 +29,7 @@ import {
   GameExploreCloseResult,
   GameBotRunInput,
   GameBotRunResult,
+  GameBotReportResult,
   GameBotViewInput,
   GameBotViewResult,
   GameWebPackage,
@@ -131,6 +134,17 @@ const BlenderGenerateTool = Tool.make("game_blender_generate", {
     "Forward to the upstream 3D generator (pinned mcp-for-blender generate_3d, adapted): one new textured model from a text prompt or an image. No generator is configured on this machine (no Premium, no Tripo/Hunyuan/Hyper3D/Meshy key), so this reports that clearly instead of generating. Wire a key to enable it later; the seam already forwards prompt, image, name and provider.",
   parameters: GameBlenderGenerateInput,
   success: GameBlenderGenerateResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const BlenderExportTool = Tool.make("game_blender_export", {
+  description:
+    "Export the live Blender scene (or the named objects) as a GLB under godot/ that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to godot/assets/blender/scene.glb. The .blend source is saved in the game with the export. Run game_import after so Godot sees it.",
+  parameters: GameBlenderExportInput,
+  success: GameBlenderExportResult,
   failure,
   failureMode: "return",
   dependencies,
@@ -272,9 +286,19 @@ const ExploreCloseTool = Tool.make("game_explore_close", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BotRunTool = Tool.make("game_bot_run", {
   description:
-    "Play this thread's game in real time with a model-written bot file under .studio/bot/ (goal, observe, options with facts and executors, status, optional policy). The real game runs continuously at normal speed on a private display; holds and releases go out at 10 Hz, one continuous video is recorded, and in-game detectors report findings with time and position. decider policy (default) uses the bot's own policy; jev asks the optional Jev route, which decides asynchronously without stopping play and falls back to policy on failure. The bot may write state only through an explicit set-state call; a run that did is marked and is not pure play. Pass the bot file, seconds budget and decider.",
+    "Play this thread's game in real time with a model-written bot file under .studio/bot/ (goal, observe, options with facts and executors, status, optional policy). The real game runs continuously at normal speed on a private display; holds and releases go out at 10 Hz, one continuous video per run is recorded, and in-game detectors report findings with time and position. decider policy (default) uses the bot's own policy; jev asks the optional Jev route, which decides asynchronously without stopping play and falls back to policy on failure. mode play (default) tries to finish with a win bot; mode explore wanders with an exploration bot (broad options, no win goal) and may make several sequential runs when runs is set (1-10, default 1), writing a facts-only player report to .studio/player-report.md. Every run is recorded in .studio/bot-results.jsonl by the service. The bot may write state only through an explicit set-state call; a run that did is marked and is not pure play. Pass the bot file, seconds budget, decider, mode and runs.",
   parameters: GameBotRunInput,
   success: GameBotRunResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const BotReportTool = Tool.make("game_bot_report", {
+  description:
+    "Rebuild the facts-only player report across this game's recorded bot runs and save it to .studio/player-report.md: run endings, what was picked and how often, offered-but-never-picked and rarely-picked options, first-action times, death/stall position clusters, sampled areas, detector findings and explicit state writes. Code states facts and interprets nothing.",
+  success: GameBotReportResult,
   failure,
   failureMode: "return",
   dependencies,
@@ -300,6 +324,7 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsSearchTool,
   BlenderAssetsImportTool,
   BlenderGenerateTool,
+  BlenderExportTool,
   ImportTool,
   ImportNeutralTool,
   CheckTool,
@@ -314,4 +339,5 @@ export const GameToolkit = Toolkit.make(
   ExploreCloseTool,
   BotRunTool,
   BotViewTool,
+  BotReportTool,
 );

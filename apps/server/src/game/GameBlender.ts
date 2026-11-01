@@ -20,6 +20,8 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
+  type GameBlenderExportInput,
+  type GameBlenderExportResult,
   type GameBlenderGenerateInput,
   type GameBlenderGenerateResult,
   type GameBlenderLookInput,
@@ -210,6 +212,11 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderGenerateInput,
     ) => Effect.Effect<GameBlenderGenerateResult, GameOperationError>;
+    /** Live Blender scene: export named objects (or every mesh) as a GLB under godot/. */
+    readonly exportGlb: (
+      root: string,
+      input: GameBlenderExportInput,
+    ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
     /** Stop one game's live session by root; game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
@@ -615,6 +622,51 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const text = yield* callText(root, "generate_3d", { ...input });
         return { text };
+      }),
+    exportGlb: (root, input) =>
+      Effect.gen(function* () {
+        // Thin path from the live scene to a GLB the game can load: select
+        // the named objects (or every mesh) and run the glTF exporter, then
+        // save the .blend source like every other scene-changing call.
+        const file = input.file ?? "godot/assets/blender/scene.glb";
+        if (!file.startsWith("godot/") || !file.endsWith(".glb") || file.includes(".."))
+          return yield* opError(
+            "blender-export",
+            file,
+            "invalid-input",
+            "The destination must be a game-relative path under godot/ ending with .glb.",
+          );
+        const absolute = NodePath.join(root, file);
+        const names = input.objects ?? [];
+        const exported = yield* callText(root, "execute_blender_code", {
+          code: [
+            "import bpy, os, json",
+            `fp = ${JSON.stringify(absolute)}`,
+            `wanted = ${JSON.stringify(names)}`,
+            "allnames = [o.name for o in bpy.data.objects]",
+            "obs = [bpy.data.objects.get(n) for n in wanted] if wanted else [o for o in bpy.context.scene.objects if o.type == 'MESH']",
+            "obs = [o for o in obs if o is not None]",
+            "missing = [n for n in wanted if bpy.data.objects.get(n) is None]",
+            "bpy.ops.object.select_all(action='DESELECT')",
+            "for o in obs: o.select_set(True)",
+            "print('STUDIO_ALL ' + json.dumps(allnames[:40]))",
+            "print('STUDIO_MISSING ' + json.dumps(missing)) if missing else None",
+            "print('STUDIO_EMPTY') if len(obs) == 0 else None",
+            "os.makedirs(os.path.dirname(fp), exist_ok=True)",
+            "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True) if len(obs) > 0 else None",
+            "print(f'STUDIO_EXPORTED {len(obs)} ' + str(os.path.getsize(fp))) if len(obs) > 0 else None",
+          ].join("\n"),
+        });
+        if (exported.includes("STUDIO_MISSING") || exported.includes("STUDIO_EMPTY"))
+          return yield* opError("blender-export", file, "invalid-input", exported.slice(0, 1000));
+        if (!exported.includes("STUDIO_EXPORTED"))
+          return yield* opError("blender-export", file, "command-failed", exported.slice(0, 1000));
+        const blend = yield* saveBlend(root);
+        return {
+          text: `${exported}\nSaved .blend source: ${blend}\nRun game_import so Godot sees it.`,
+          blend,
+          export: file,
+        };
       }),
     stop: (root) => Effect.sync(() => drop(root)),
   });

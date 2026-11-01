@@ -34,8 +34,8 @@ empty one.
 ## Run the production loop
 
 The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
-then round after round of building, playtesting and judging until the budget ends or a ship review
-passes. Give it a one-line brief and an optional budget in minutes, then **Start run**. The status
+then round after round of building, playtesting and judging until a ship review passes, the
+run stalls, or you stop it. Give it a one-line brief and an optional budget in minutes, then **Start run**. The status
 line says where the run is; the rounds list shows each round's move, whether it was kept, the
 judges' verdicts and the tester's note; role threads link to the sessions that did the work.
 **Stop run** ends it; rejected work stays on its branch.
