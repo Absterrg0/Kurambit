@@ -12,6 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -58,6 +59,10 @@ import {
   type GameBotReportResult,
   type GameBotViewInput,
   type GameBotViewResult,
+  type GameSecretName,
+  type GameSetSecretInput,
+  type GameSetSecretResult,
+  type GameSecretsStatusResult,
 } from "@t3tools/contracts";
 import * as GameExploreNative from "./gameExploreNative.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -67,6 +72,7 @@ import * as GameEngine from "./GameEngine.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { openMediaFile, type OpenMediaFile } from "../assets/MediaFile.ts";
 import { commandDetail } from "./commandDetail.ts";
 import {
@@ -256,6 +262,18 @@ export class GameService extends Context.Service<
     readonly botReport: (
       threadId: ThreadId,
     ) => Effect.Effect<GameBotReportResult, GameOperationError>;
+    /**
+     * Which Game Tools keys are set. Presence alone, never values: the UI
+     * shows "set" or "not set" from this.
+     */
+    readonly secretsStatus: () => Effect.Effect<
+      { readonly jev: boolean; readonly sketchfab: boolean; readonly polypizza: boolean },
+      GameOperationError
+    >;
+    /** Store a Game Tools key, or clear it with an empty value. */
+    readonly setSecret: (
+      input: typeof GameSetSecretInput.Type,
+    ) => Effect.Effect<typeof GameSetSecretResult.Type, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly botView: (
       threadId: ThreadId,
@@ -287,6 +305,7 @@ const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
   const gameBot = yield* GameBot.GameBot;
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
   const operations = yield* GameOperations.GameOperations;
   const active = new Map<
     string,
@@ -2127,6 +2146,50 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         return yield* gameBot.report(root);
+      }),
+    secretsStatus: () =>
+      Effect.gen(function* () {
+        const present = (name: string): Effect.Effect<boolean> =>
+          secrets.get(name).pipe(
+            Effect.map((found) => {
+              if (Option.isNone(found)) return false;
+              return Buffer.from(found.value).toString("utf8").trim().length > 0;
+            }),
+            Effect.orElseSucceed(() => false),
+          );
+        const [jev, sketchfab, polypizza] = yield* Effect.all([
+          present(GameBot.GAME_BOT_JEV_SECRET),
+          present(GameBlender.GAME_BLENDER_SKETCHFAB_SECRET),
+          present(GameBlender.GAME_BLENDER_POLYPIZZA_SECRET),
+        ]);
+        return { jev, sketchfab, polypizza } satisfies GameSecretsStatusResult;
+      }),
+    setSecret: (input) =>
+      Effect.gen(function* () {
+        const name =
+          input.name === "jev"
+            ? GameBot.GAME_BOT_JEV_SECRET
+            : input.name === "sketchfab"
+              ? GameBlender.GAME_BLENDER_SKETCHFAB_SECRET
+              : GameBlender.GAME_BLENDER_POLYPIZZA_SECRET;
+        const value = input.secret.trim();
+        if (value === "") {
+          yield* secrets.remove(name).pipe(Effect.orElseSucceed(() => undefined));
+          return { name: input.name, set: false } satisfies GameSetSecretResult;
+        }
+        yield* secrets.set(name, Buffer.from(value)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GameOperationError({
+                operation: "game secret",
+                path: input.name,
+                reason: "io",
+                detail: "The key could not be stored.",
+                cause,
+              }),
+          ),
+        );
+        return { name: input.name, set: true } satisfies GameSetSecretResult;
       }),
     check: (threadId) => withRoot(threadId, "Godot check", checkGame),
     blenderCode: (threadId, input) =>

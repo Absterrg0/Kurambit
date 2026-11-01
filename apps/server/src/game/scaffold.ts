@@ -50,6 +50,6 @@ Use the game_* tools to check, play, export and package the game; never run Godo
 `,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore":
-      "builds/\ngodot/.godot/\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
+      "builds/\ngodot/.godot/\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\n.studio/player-report.md\n.studio/pick.txt\n.studio/next.md\n.studio/ship.md\n.studio/exports.json\n.studio/final-video.json\n.studio/tester-*.md\n.studio/reviewer-*.md\n.studio/worktrees/\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
   };
 }

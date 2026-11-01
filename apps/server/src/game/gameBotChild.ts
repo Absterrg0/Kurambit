@@ -16,9 +16,15 @@
  * switchMargin (default 0.25), optional plan(obs) returning
  * {done, now, next} for Jev. Each option is {name, description, facts,
  * run(api, obs), interruptible (default true), urgent (default false)}
- * where run returns "running", "done" or "failed". A single legal option
- * runs without asking Jev and never counts as a Jev decision: a run counts
- * as a Jev run only when Jev made at least 3 decisions among 2+ options.
+ * where run returns "running", "done" or "failed". Return "done" when the
+ * option arrived or has nothing left to do: the child then stops offering
+ * it until the option set changes (a "failed" option rests 30 s first), so
+ * exploration cannot re-pick an arrived option hundreds of times.
+ * A single legal option runs without asking Jev and never counts as a Jev
+ * decision: a run counts as a Jev run only when Jev made at least 3
+ * decisions among 2+ options. The service sends runContext with every
+ * observation ({runIndex, runTotal, seed, priorRuns} so runs of one call
+ * can differ); decide requests also carry the child's tried counts.
  * Argv after the bot file: decider, mode ("play" or "explore"), and whether
  * the service is actually asking Jev ("jev-live": an exploration without
  * the key picks uniformly at random and says so in its picked lines).
@@ -91,6 +97,48 @@ let pending = null;
 let decideId = 0;
 let statusSent = false;
 let status = { state: "running", note: "", evidence: {} };
+// Exploration memory (Aura's rule: an option that arrived or has nothing
+// left is not offered again until something changes; a failed option rests
+// briefly). doneOpts maps option -> option-set signature at completion;
+// failedAt maps option -> wall ms of the failure (30 s cooldown). tried
+// counts every pick and its outcome so Jev sees what was tried and what
+// happened, even from bots that track nothing themselves.
+let optSig = "";
+const doneOpts = new Map();
+const failedAt = new Map();
+const tried = new Map();
+const FAIL_COOLDOWN_MS = 30_000;
+let runContext = null;
+
+const noteTried = (name, outcome) => {
+  const entry = tried.get(name) ?? { picks: 0, ok: 0, fail: 0 };
+  entry.picks += 1;
+  if (outcome === "ok") entry.ok += 1;
+  else if (outcome === "fail") entry.fail += 1;
+  tried.set(name, entry);
+};
+
+const triedJson = () => {
+  const out = {};
+  for (const [name, entry] of tried) out[name] = { ...entry };
+  return out;
+};
+
+// Options on offer now: drop completed ones while the set is unchanged and
+// failed ones inside the cooldown. When everything is filtered, offer the
+// full set rather than deadlocking (the bot's status still ends the run).
+const offerable = (options, sig) => {
+  for (const [name, atSig] of [...doneOpts]) if (atSig !== sig) doneOpts.delete(name);
+  const now = Date.now();
+  const kept = options.filter((o) => {
+    const name = String(o.name);
+    if (doneOpts.has(name)) return false;
+    const failed = failedAt.get(name);
+    if (failed !== undefined && now - failed < FAIL_COOLDOWN_MS) return false;
+    return true;
+  });
+  return kept.length > 0 ? kept : options;
+};
 
 const policyPick = (options, observer) => {
   try {
@@ -110,6 +158,7 @@ const switchTo = (name, via, t, twoPlus, randomized) => {
   current = name;
   currentSince = Date.now();
   lastProgress = Date.now();
+  noteTried(name, null);
   sendPicked(current, via, t, twoPlus, randomized);
 };
 
@@ -117,6 +166,11 @@ const handleObs = async (msg) => {
   tick += 1;
   const observation = msg.observation;
   const t = typeof msg.t === "number" ? msg.t : 0;
+  // The service tells each run where it stands among its siblings (index,
+  // total, seed, what earlier runs covered) so runs differ from each other.
+  // Bots that ignore it play exactly as before.
+  if (msg.runContext !== undefined && msg.runContext !== null) runContext = msg.runContext;
+  if (observation !== null && typeof observation === "object") observation.runContext = runContext;
   let tickObs = null;
   let nextOpts = [];
   try {
@@ -137,45 +191,48 @@ const handleObs = async (msg) => {
     send({ op: "status", state: String(status.state), note: String(status.note ?? ""), evidence: status.evidence ?? {} });
   }
   if (!statusSent) {
-    const optSig = opts.map((o) => String(o.name)).join(",");
+    const setSig = opts.map((o) => String(o.name)).join(",");
+    optSig = setSig;
     const prevSig = handleObs._lastSig ?? "";
-    handleObs._lastSig = optSig;
+    handleObs._lastSig = setSig;
     const due = Date.now() - lastDecisionAt > 1000 / tempo;
-    const needDecide = current === null || optSig !== prevSig || due || lastOutcome === "done" || lastOutcome === "failed";
+    const needDecide = current === null || setSig !== prevSig || due || lastOutcome === "done" || lastOutcome === "failed";
     if (needDecide && opts.length > 0) {
       lastDecisionAt = Date.now();
+      const offered = offerable(opts, setSig);
       // Without the key there is no Jev to ask: an exploration then picks
       // uniformly at random (the report states it isn't Jev), otherwise
       // the bot's own policy.
       const fallback = exploreRandom
-        ? randomOption(opts)
-        : pickValid(policyPick(opts, obs), opts) ? policyPick(opts, obs) : String(opts[0].name);
-      if (opts.length === 1) {
+        ? randomOption(offered)
+        : pickValid(policyPick(offered, obs), offered) ? policyPick(offered, obs) : String(offered[0].name);
+      if (offered.length === 1 && opts.length === 1) {
         // A single legal option runs without asking Jev (Aura): there is
         // nothing to choose between, and it must not count as a decision.
-        if (current === null) switchTo(String(opts[0].name), "policy", t, false, false);
+        if (current === null) switchTo(String(offered[0].name), "policy", t, false, false);
       } else if (decider === "jev" && pending === null) {
         decideId += 1;
-        pending = { id: decideId, fallback, options: opts.length };
+        pending = { id: decideId, fallback, options: offered.length };
         const facts = obs && typeof obs === "object" && obs.facts !== undefined ? obs.facts : obs;
         let plan = null;
         try {
           if (typeof readPlan === "function") plan = await readPlan(obs);
           else if (obs && typeof obs === "object" && obs.plan !== undefined) plan = obs.plan;
         } catch { plan = null; }
-        send({ op: "decide", id: decideId, goal, facts: facts ?? null,
-          options: opts.map((o) => ({ name: String(o.name), description: String(o.description ?? ""), facts: o.facts ?? null,
+        send({ op: "decide", id: decideId, goal, facts: facts ?? null, tried: triedJson(),
+          options: offered.map((o) => ({ name: String(o.name), description: String(o.description ?? ""), facts: o.facts ?? null,
             interruptible: o.interruptible !== false, urgent: o.urgent === true })),
           nowDoing: current, nowDoingFor: current === null ? null : (Date.now() - currentSince) / 1000,
           recent: recent.slice(-6), plan });
       }
       const immediate = decider === "policy" || current === null ? fallback : null;
-      if (immediate !== null && immediate !== current) switchTo(immediate, "policy", t, opts.length >= 2, exploreRandom);
+      if (immediate !== null && immediate !== current) switchTo(immediate, "policy", t, offered.length >= 2, exploreRandom);
     }
     if (current !== null) {
       const opt = opts.find((o) => String(o.name) === current);
       if (opt === undefined) {
         recent.push({ name: current, ok: false });
+        noteTried(current, "fail");
         current = null;
         lastOutcome = "failed";
       } else {
@@ -186,11 +243,19 @@ const handleObs = async (msg) => {
         } catch { outcome = "failed"; }
         lastOutcome = outcome;
         if (outcome === "done") {
+          // Arrived or nothing left to do: not offered again until the
+          // option set changes. Bots must return "done" for this to work;
+          // options that always return "running" stay on offer.
           recent.push({ name: current, ok: true });
+          noteTried(current, "ok");
+          doneOpts.set(current, optSig);
           current = null;
           lastProgress = Date.now();
         } else if (outcome === "failed") {
+          // A failed option rests 30 s before it is offered again.
           recent.push({ name: current, ok: false });
+          noteTried(current, "fail");
+          failedAt.set(current, Date.now());
           current = null;
         }
       }

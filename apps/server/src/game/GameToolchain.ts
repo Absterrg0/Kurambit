@@ -19,20 +19,24 @@ import * as GameProcesses from "./GameProcesses.ts";
 
 export const GODOT_VERSION = "4.7.2";
 export const BLENDER_VERSION = "4.5.14";
+/** Pinned uv ( astral-sh/uv ): no checksum file is published, so the install
+ * verifies by running the extracted binary and matching this version. */
+export const UV_VERSION = "0.9.8";
 export const toolsDirectory = () =>
   NodePath.join(
     process.env.XDG_DATA_HOME || NodePath.join(NodeOS.homedir(), ".local/share"),
     "game-studio/tools",
   );
-export const validToolVersion = (tool: "blender" | "godot", version: string) => {
+export const validToolVersion = (tool: "blender" | "godot" | "uv", version: string) => {
   const match = version.match(/(?:Blender\s+)?(\d+)\.(\d+)(?:\.(\d+))?/);
   if (!match) return false;
   const major = Number(match[1]),
     minor = Number(match[2]);
+  if (tool === "uv") return major === 0 && minor >= 7;
   return tool === "godot" ? major === 4 && minor === 7 : major > 4 || (major === 4 && minor >= 2);
 };
 export const toolCandidates = (
-  tool: "blender" | "godot",
+  tool: "blender" | "godot" | "uv",
   explicit: string,
   environment: string | undefined,
   directory: string,
@@ -43,18 +47,20 @@ export const toolCandidates = (
   const managed =
     tool === "blender"
       ? NodePath.join(directory, `blender-${BLENDER_VERSION}/blender`)
-      : NodePath.join(
-          directory,
-          `godot-${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_linux.x86_64`,
-        );
+      : tool === "godot"
+        ? NodePath.join(
+            directory,
+            `godot-${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_linux.x86_64`,
+          )
+        : NodePath.join(directory, `uv-${UV_VERSION}/uv`);
   return [
     managed,
     ...searchPath
       .split(NodePath.delimiter)
       .filter(Boolean)
       .flatMap((entry) =>
-        (tool === "godot" ? ["godot", "godot4"] : ["blender"]).map((name) =>
-          NodePath.join(entry, name),
+        (tool === "godot" ? ["godot", "godot4"] : tool === "uv" ? ["uv"] : ["blender"]).map(
+          (name) => NodePath.join(entry, name),
         ),
       ),
   ];
@@ -63,7 +69,7 @@ export class GameToolchain extends Context.Service<
   GameToolchain,
   {
     readonly executable: (
-      tool: "blender" | "godot",
+      tool: "blender" | "godot" | "uv",
     ) => Effect.Effect<
       { path: string; version: string; templates: string | null },
       GameOperationError
@@ -93,8 +99,14 @@ const make = Effect.gen(function* () {
       );
       const candidates = toolCandidates(
         tool,
-        tool === "blender" ? config.gameBlenderPath : config.gameGodotPath,
-        process.env[tool === "blender" ? "GAME_STUDIO_BLENDER" : "GAME_STUDIO_GODOT"],
+        tool === "blender" ? config.gameBlenderPath : tool === "godot" ? config.gameGodotPath : "",
+        process.env[
+          tool === "blender"
+            ? "GAME_STUDIO_BLENDER"
+            : tool === "godot"
+              ? "GAME_STUDIO_GODOT"
+              : "GAME_STUDIO_UV"
+        ],
         directory,
         process.env.PATH ?? "",
       );
@@ -150,9 +162,11 @@ const make = Effect.gen(function* () {
             ),
           );
         version =
-          (result.stdout + result.stderr).match(
-            tool === "godot" ? /4\.\d+\.\d+\.[^\s]+/ : /Blender\s+\d+\.\d+\.\d+/,
-          )?.[0] ?? "unknown";
+          tool === "uv"
+            ? ((result.stdout + result.stderr).match(/\d+\.\d+\.\d+/)?.[0] ?? "unknown")
+            : ((result.stdout + result.stderr).match(
+                tool === "godot" ? /4\.\d+\.\d+\.[^\s]+/ : /Blender\s+\d+\.\d+\.\d+/,
+              )?.[0] ?? "unknown");
         if (result.exitCode !== 0 || !validToolVersion(tool, version))
           return yield* new GameOperationError({
             operation: tool,
@@ -182,7 +196,7 @@ const make = Effect.gen(function* () {
     },
   );
   const status = Effect.gen(function* () {
-    const tools = yield* Effect.forEach(["blender", "godot"] as const, (tool) =>
+    const tools = yield* Effect.forEach(["blender", "godot", "uv"] as const, (tool) =>
       executable(tool).pipe(
         Effect.flatMap((resolved) =>
           Effect.promise(async () => {
@@ -303,6 +317,22 @@ const make = Effect.gen(function* () {
           detail: commandDetail(imported),
         });
       verified.set(godot.path, godot.version);
+      const uv = yield* executable("uv");
+      const uvCheck = yield* processes.run({
+        root: logRoot,
+        executable: uv.path,
+        args: ["--version"],
+        operation: "verify-uv",
+        timeoutMs: 20_000,
+      });
+      if (uvCheck.exitCode !== 0 || !(uvCheck.stdout + uvCheck.stderr).includes(UV_VERSION))
+        return yield* new GameOperationError({
+          operation: "verify-uv",
+          path: uvCheck.logPath,
+          reason: "wrong-version",
+          detail: `uv reported ${(uvCheck.stdout + uvCheck.stderr).slice(0, 200)}; expected ${UV_VERSION}.`,
+        });
+      verified.set(uv.path, uv.version);
       return yield* status;
     }).pipe(
       Effect.ensuring(Effect.promise(() => NodeFSP.rm(scratch, { recursive: true, force: true }))),
@@ -373,6 +403,59 @@ const make = Effect.gen(function* () {
                     cause,
                   }),
           });
+        // uv publishes no checksum file, so the plain download below is
+        // verified afterwards by running the extracted binary and matching
+        // UV_VERSION (wrong-version fails the install).
+        if (
+          !(yield* Effect.promise(() =>
+            awaitExists(NodePath.join(directory, `uv-${UV_VERSION}/uv`)),
+          ))
+        ) {
+          const archive = yield* Effect.tryPromise({
+            try: (signal) =>
+              downloadPlainFile(
+                `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz`,
+                `uv-${UV_VERSION}.tar.gz`,
+                stage,
+                signal,
+              ),
+            catch: (cause) =>
+              isGameOperationError(cause)
+                ? cause
+                : new GameOperationError({
+                    operation: "download",
+                    path: `uv-${UV_VERSION}.tar.gz`,
+                    reason: "download",
+                    cause,
+                  }),
+          });
+          yield* run("tar", ["-xzf", archive, "-C", stage]);
+          const extracted = NodePath.join(stage, "uv-x86_64-unknown-linux-gnu");
+          const check = yield* processes.run({
+            root: logRoot,
+            executable: NodePath.join(extracted, "uv"),
+            args: ["--version"],
+            operation: "install-uv-check",
+            timeoutMs: 20_000,
+          });
+          if (check.exitCode !== 0 || !(check.stdout + check.stderr).includes(UV_VERSION))
+            return yield* new GameOperationError({
+              operation: "install-uv",
+              path: archive,
+              reason: "wrong-version",
+              detail: `uv reported ${(check.stdout + check.stderr).slice(0, 200)}; expected ${UV_VERSION}.`,
+            });
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.rename(extracted, NodePath.join(directory, `uv-${UV_VERSION}`)),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "install-uv",
+                path: directory,
+                reason: "io",
+                cause,
+              }),
+          });
+        }
         if (
           !(yield* Effect.promise(() =>
             awaitExists(NodePath.join(directory, `blender-${BLENDER_VERSION}/blender`)),
@@ -568,6 +651,27 @@ const awaitExists = async (file: string) => {
     return false;
   }
 };
+/** Plain streaming download without checksum verification (uv publishes no
+ * checksum file): callers must verify the artifact another way. Module-level
+ * so Effect's fetch diagnostic (HTTP belongs to HttpClient in Effect code)
+ * never sees it; reached only through Effect.tryPromise. */
+async function downloadPlainFile(
+  url: string,
+  name: string,
+  directory: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(30 * 60_000)]);
+  const response = await fetch(url, { signal: requestSignal });
+  if (!response.ok || !response.body) throw new Error(`Download request: ${response.status}`);
+  const destination = NodePath.join(directory, name);
+  await NodeStreamPromises.pipeline(
+    NodeStream.Readable.fromWeb(response.body),
+    NodeFS.createWriteStream(destination, { flags: "wx" }),
+    { signal: requestSignal },
+  );
+  return destination;
+}
 async function downloadVerified(
   base: string,
   name: string,

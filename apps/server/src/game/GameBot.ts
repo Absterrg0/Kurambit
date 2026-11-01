@@ -617,6 +617,15 @@ const make = Effect.gen(function* () {
    * child applies the switch margin against dithering. Only the service runs
    * this: the key never leaves this closure, and failures fall back to the
    * bot's policy, never an error.
+   *
+   * Exploration shaping (Aura's "an exploration"): every option's facts
+   * carry how many times it was tried and what happened; the state carries
+   * what has been visited and tried, where this run stands among its
+   * siblings, and whether the player is stuck re-picking one option without
+   * moving. An option that arrived or has nothing left is done: the child
+   * already stops offering it until the situation changes, and the
+   * instructions say the same, so a stuck pick cannot repeat hundreds of
+   * times across identical situations.
    */
   const jevPick = async (input: {
     readonly key: string;
@@ -628,6 +637,26 @@ const make = Effect.gen(function* () {
     readonly nowDoingFor: number | null;
     readonly recent: ReadonlyArray<{ name: string; ok: boolean }>;
     readonly plan: unknown;
+    readonly tried: Readonly<Record<string, { picks: number; ok: number; fail: number }>>;
+    readonly coverage: {
+      readonly cells4m: number;
+      readonly samples: number;
+      readonly bbox: string | null;
+    } | null;
+    readonly run: {
+      readonly index: number;
+      readonly total: number;
+      readonly priorRuns: ReadonlyArray<{
+        readonly topOptions: string;
+        readonly cells: number;
+        readonly ending: string;
+      }>;
+    } | null;
+    readonly stuck: {
+      readonly option: string;
+      readonly picks: number;
+      readonly movedM: number;
+    } | null;
   }): Promise<{
     pick: string | null;
     probs: Record<string, number>;
@@ -641,18 +670,55 @@ const make = Effect.gen(function* () {
       input.nowDoing === null
         ? "nothing"
         : `${input.nowDoing}${input.nowDoingFor === null ? "" : ` (for ${input.nowDoingFor.toFixed(1)}s)`}`;
+    const triedBit =
+      Object.keys(input.tried).length === 0
+        ? "nothing tried yet"
+        : Object.entries(input.tried)
+            .map(
+              ([name, entry]) =>
+                `${name} tried ${entry.picks} (ok ${entry.ok}, fail ${entry.fail})`,
+            )
+            .join("; ");
+    const stuckBit =
+      input.stuck === null
+        ? ""
+        : ` STUCK: "${input.stuck.option}" was picked ${input.stuck.picks} times in a row while the player moved only ${input.stuck.movedM.toFixed(1)} m: pick something else.`;
+    const runBit =
+      input.run === null
+        ? ""
+        : input.run.priorRuns.length === 0
+          ? " This is the first run: no earlier coverage."
+          : ` Earlier runs covered their own ground, go somewhere they did not: ${input.run.priorRuns
+              .map(
+                (entry, i) =>
+                  `run ${i}: tried ${entry.topOptions}, ${entry.cells} cells, ended ${entry.ending}`,
+              )
+              .join("; ")
+              .slice(0, 800)} (this is run ${input.run.index} of ${input.run.total}).`;
     const body = {
       state:
         `Goal: ${input.goal}. Situation: ${JSON.stringify(input.facts).slice(0, 2000)}. ` +
         `Doing now: ${doing}. Recent: ${JSON.stringify(input.recent.slice(-6))}.` +
         (input.plan === null || input.plan === undefined
           ? ""
-          : ` Plan standing: ${JSON.stringify(input.plan).slice(0, 800)}.`),
+          : ` Plan standing: ${JSON.stringify(input.plan).slice(0, 800)}.`) +
+        ` Tried: ${triedBit.slice(0, 1200)}.` +
+        (input.coverage === null
+          ? ""
+          : ` Visited: ${input.coverage.cells4m} area cells in ${input.coverage.samples} samples${input.coverage.bbox ?? ""}.`) +
+        runBit +
+        stuckBit,
       model: JEV_MODEL,
       questions: {
         pick: {
           type: "choice",
-          instructions: `You are the player. Choose the option to do now that best serves the goal. Let "${input.nowDoing ?? "none"}" finish unless another option is clearly better now. Don't keep repeating one that keeps failing in the same situation.`,
+          instructions:
+            `You are the player. Choose the option to do now that best serves the goal. Let "${input.nowDoing ?? "none"}" finish unless another option is clearly better now.` +
+            ` Prefer options with tried 0 or few picks: what has not been tried yet teaches the most. An option that arrived or has nothing left to do is done: do not re-pick it.` +
+            ` Don't keep repeating one that keeps failing in the same situation.${stuckBit}` +
+            (input.run !== null && input.run.priorRuns.length > 0
+              ? " Earlier runs covered their own ground: go somewhere they did not."
+              : ""),
           criteria,
         },
       },
@@ -731,6 +797,15 @@ const make = Effect.gen(function* () {
     readonly policyNote: string | null;
     readonly session: Session;
     readonly signal: AbortSignal | undefined;
+    /** Where this run stands among its siblings, so runs differ. */
+    readonly runIndex: number;
+    readonly runTotal: number;
+    readonly seed: number;
+    readonly priorRuns: ReadonlyArray<{
+      readonly topOptions: string;
+      readonly cells: number;
+      readonly ending: string;
+    }>;
   }
 
   /**
@@ -974,6 +1049,63 @@ const make = Effect.gen(function* () {
       let moveWindow: Array<{ wall: number; pos: [number, number, number] }> = [];
       let noMoveReported = false;
       let lastHeld: string[] = [];
+      // Stuck watch (service side, positions only): the last picks with the
+      // player position at pick time. Six same-name picks inside a metre
+      // means the choice is not moving play, whatever Jev hoped.
+      const pickTrail: Array<{ name: string; pos: [number, number, number] | null }> = [];
+      const stuckOf = (): {
+        readonly option: string;
+        readonly picks: number;
+        readonly movedM: number;
+      } | null => {
+        if (pickTrail.length < 6) return null;
+        const tail = pickTrail.slice(-6);
+        const name = tail[0]!.name;
+        if (!tail.every((entry) => entry.name === name)) return null;
+        const base = tail[0]!.pos;
+        if (base === null) return null;
+        let moved = 0;
+        for (const entry of tail) {
+          if (entry.pos === null) return null;
+          moved = Math.max(
+            moved,
+            Math.hypot(entry.pos[0] - base[0], entry.pos[1] - base[1], entry.pos[2] - base[2]),
+          );
+        }
+        if (moved >= 1) return null;
+        return { option: name, picks: tail.length, movedM: moved };
+      };
+      // Visited-area coverage (service side): 4 m cells over x/z plus the
+      // bounding box, from the same samples the report uses.
+      const coverageOf = (): {
+        readonly cells4m: number;
+        readonly samples: number;
+        readonly bbox: string | null;
+      } => {
+        const cells = new Set<string>();
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const sample of samples) {
+          if (sample.pos === null) continue;
+          const [x, , z] = sample.pos;
+          if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minZ = Math.min(minZ, z);
+          maxZ = Math.max(maxZ, z);
+          cells.add(`${Math.floor(x / 4) * 4},${Math.floor(z / 4) * 4}`);
+        }
+        return {
+          cells4m: cells.size,
+          samples: samples.length,
+          bbox:
+            cells.size === 0
+              ? null
+              : ` (x ${minX.toFixed(1)}..${maxX.toFixed(1)}, z ${minZ.toFixed(1)}..${maxZ.toFixed(1)})`,
+        };
+      };
       const wallStart = Date.now();
       const budgetMs = args.seconds * 1000;
       const addFinding = (
@@ -1141,7 +1273,18 @@ const make = Effect.gen(function* () {
             state: typeof gameState["state"] === "string" ? gameState["state"] : null,
           });
         }
-        writeChild({ op: "obs", tick: ticks, t, observation: msg });
+        writeChild({
+          op: "obs",
+          tick: ticks,
+          t,
+          observation: msg,
+          runContext: {
+            seed: args.seed,
+            runIndex: args.runIndex,
+            runTotal: args.runTotal,
+            priorRuns: args.priorRuns,
+          },
+        });
         // The child answers each tick with its inputs; decide/picked/status
         // ride the same stream and are handled here, never blocking play.
         let answer: {
@@ -1179,6 +1322,13 @@ const make = Effect.gen(function* () {
                   facts: unknown;
                 }>) ?? [];
               const decideFacts = childMsg["facts"] ?? null;
+              // The child's own per-option tried counts (picks, ok, fail),
+              // tracked for every run even when the bot tracks nothing.
+              const decideTried =
+                (childMsg["tried"] as Record<
+                  string,
+                  { picks: number; ok: number; fail: number }
+                >) ?? {};
               const decideNow =
                 typeof childMsg["nowDoing"] === "string" ? (childMsg["nowDoing"] as string) : null;
               const decideFor =
@@ -1204,20 +1354,43 @@ const make = Effect.gen(function* () {
               if (!warm) jevWarm(args.jevBase, args.jevKey);
               jevLastUse = Date.now();
               void (async () => {
+                // Each option's facts carry how many times it was tried and
+                // what happened, on top of whatever the bot put there; the
+                // state carries what has been visited and tried, where this
+                // run stands, and whether one pick is stuck without moving.
+                const enriched = decideOpts.map((o) => {
+                  const name = String(o.name);
+                  const tried =
+                    (decideTried as Record<string, unknown>)[name] !== undefined
+                      ? (decideTried as Record<string, unknown>)[name]
+                      : { picks: 0, ok: 0, fail: 0 };
+                  const base =
+                    o.facts !== null && typeof o.facts === "object" && !Array.isArray(o.facts)
+                      ? (o.facts as Record<string, unknown>)
+                      : {};
+                  return {
+                    name,
+                    description: String(o.description ?? ""),
+                    facts: { ...base, tried },
+                  };
+                });
                 const { pick, probs, failure, latencyMs } = await jevPick({
                   key: args.jevKey!,
                   base: args.jevBase,
                   goal,
                   facts: decideFacts,
-                  options: decideOpts.map((o) => ({
-                    name: String(o.name),
-                    description: String(o.description ?? ""),
-                    facts: o.facts ?? null,
-                  })),
+                  options: enriched,
                   nowDoing: decideNow,
                   nowDoingFor: decideFor,
                   recent: decideRecent,
                   plan: decidePlan,
+                  tried: decideTried as Record<string, { picks: number; ok: number; fail: number }>,
+                  coverage: coverageOf(),
+                  run:
+                    args.runTotal > 1
+                      ? { index: args.runIndex, total: args.runTotal, priorRuns: args.priorRuns }
+                      : null,
+                  stuck: stuckOf(),
                 });
                 jevLatencies.push({ ms: latencyMs, warm });
                 if (pick === null) {
@@ -1234,9 +1407,12 @@ const make = Effect.gen(function* () {
             const via = String(childMsg["via"] ?? "");
             const twoPlus = childMsg["twoPlus"] === true;
             if (via === "jev" && twoPlus) jevDecisions2Plus += 1;
+            const pickedName = String(childMsg["name"] ?? "");
+            pickTrail.push({ name: pickedName, pos });
+            if (pickTrail.length > 12) pickTrail.shift();
             picks.push({
               t,
-              name: String(childMsg["name"] ?? ""),
+              name: pickedName,
               via,
               randomized: childMsg["randomized"] === true,
             });
@@ -1587,6 +1763,9 @@ const make = Effect.gen(function* () {
       sessions.set(root, session);
       const each = yield* Effect.gen(function* () {
         const out: GameBotRunResult[] = [];
+        // What earlier runs of this call covered, told to each next run so
+        // runs differ instead of collapsing onto one trajectory.
+        const priorRuns: Array<{ topOptions: string; cells: number; ending: string }> = [];
         for (let index = 0; index < count; index++) {
           if (session.stopped) break;
           const runId = NodeCrypto.randomUUID();
@@ -1641,6 +1820,10 @@ const make = Effect.gen(function* () {
                 policyNote,
                 session,
                 signal,
+                runIndex: index,
+                runTotal: count,
+                seed: NodeCrypto.randomInt(1_000_000_000),
+                priorRuns: [...priorRuns],
               }),
             catch: (cause) =>
               isGameOperationError(cause)
@@ -1679,6 +1862,40 @@ const make = Effect.gen(function* () {
               })}\n`,
             ).catch(() => undefined),
           );
+          // Tell the next run what this one covered: top options by picks,
+          // visited 4 m cells, and how it ended. Best effort, never fatal.
+          yield* Effect.promise(async () => {
+            try {
+              const trace = JSON.parse(await NodeFSP.readFile(tracePath, "utf8")) as {
+                picks?: Array<{ name?: unknown }>;
+                samples?: Array<{ pos?: [number, number, number] | null }>;
+                status?: { state?: unknown };
+              };
+              const counts = new Map<string, number>();
+              for (const pick of trace.picks ?? []) {
+                const name = String(pick?.name ?? "");
+                if (name !== "") counts.set(name, (counts.get(name) ?? 0) + 1);
+              }
+              const top = [...counts.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([name, n]) => `${name} x${n}`)
+                .join(", ");
+              const cells = new Set<string>();
+              for (const sample of trace.samples ?? []) {
+                const pos = sample?.pos ?? null;
+                if (pos !== null && Number.isFinite(pos[0]) && Number.isFinite(pos[2]))
+                  cells.add(`${Math.floor(pos[0] / 4) * 4},${Math.floor(pos[2] / 4) * 4}`);
+              }
+              priorRuns.push({
+                topOptions: top === "" ? "no picks" : top,
+                cells: cells.size,
+                ending: String(trace.status?.state ?? "unknown"),
+              });
+            } catch {
+              /* one bad trace never breaks the loop */
+            }
+          });
         }
         return out;
       }).pipe(

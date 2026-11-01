@@ -10,6 +10,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
@@ -31,11 +32,19 @@ import {
 } from "@t3tools/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
 const BLEND_REL = "art/blender/live.blend";
 const EXPORT_DIR = "godot/assets/blender";
+
+/** Addon keys the service can pass straight through: the pinned addon's
+ * config getter reads BLENDERMCP_SKETCHFAB_API_KEY /
+ * BLENDERMCP_POLYPIZZA_API_KEY from the environment, so keys set in Game
+ * Tools reach the addon via the Blender and MCP child environments. */
+export const GAME_BLENDER_SKETCHFAB_SECRET = "game-blender-sketchfab-key";
+export const GAME_BLENDER_POLYPIZZA_SECRET = "game-blender-polypizza-key";
 
 interface Session {
   readonly root: string;
@@ -225,7 +234,30 @@ export class GameBlender extends Context.Service<
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
   const sessions = new Map<string, Session>();
+
+  // Addon keys, when set, as env for Blender/MCP children. Values never
+  // leave the secret store except into the child environment; absence
+  // means the addon runs keyless, exactly as before.
+  const readAddonKeyEnv: Effect.Effect<NodeJS.ProcessEnv> = Effect.gen(function* () {
+    const read = (name: string, env: string): Effect.Effect<[string, string] | null> =>
+      secrets.get(name).pipe(
+        Effect.map((found) => {
+          if (Option.isNone(found)) return null;
+          const text = Buffer.from(found.value).toString("utf8").trim();
+          return text === "" ? null : ([env, text] as [string, string]);
+        }),
+        Effect.orElseSucceed(() => null),
+      );
+    const entries = yield* Effect.all([
+      read(GAME_BLENDER_SKETCHFAB_SECRET, "BLENDERMCP_SKETCHFAB_API_KEY"),
+      read(GAME_BLENDER_POLYPIZZA_SECRET, "BLENDERMCP_POLYPIZZA_API_KEY"),
+    ]);
+    const env: NodeJS.ProcessEnv = {};
+    for (const entry of entries) if (entry !== null) env[entry[0]] = entry[1];
+    return env;
+  });
 
   const killPid = (pid: number | undefined): void => {
     if (pid === undefined || pid <= 0 || !alive(pid)) return;
@@ -251,26 +283,49 @@ const make = Effect.gen(function* () {
       "blender-live",
       PINNED_PKG,
       "tool-missing",
-      "The live Blender view needs `uvx` (or `uv`) on PATH to run pinned mcp-for-blender@2.2.6 with telemetry disabled. Install uv from https://docs.astral.sh/uv/ and retry. Follow-up: teach GameToolchain to install uv like Blender and Godot.",
+      "The live Blender view needs managed uv (Settings > General > Game tools > Install), or `uvx` on PATH. Follow-up: teach GameToolchain to install uv like Blender and Godot.",
     );
 
-  const checkUv: Effect.Effect<void, GameOperationError> = Effect.tryPromise({
-    try: async () => {
-      for (const name of ["uvx", "uv"]) {
-        for (const dir of (process.env.PATH ?? "").split(NodePath.delimiter)) {
-          if (dir === "") continue;
-          try {
-            await NodeFSP.access(NodePath.join(dir, name), NodeFSP.constants.X_OK);
-            return;
-          } catch {
-            /* next */
-          }
-        }
+  // uv resolved once per session: the toolchain's managed install first
+  // (downloaded and pinned like Blender and Godot), PATH as a fallback.
+  interface UvPaths {
+    readonly uvx: string;
+    readonly binDir: string | null;
+  }
+  const resolveUv: Effect.Effect<UvPaths, GameOperationError> = Effect.gen(function* () {
+    const managed = yield* tools.executable("uv").pipe(
+      Effect.map((resolved) => resolved.path),
+      Effect.orElseSucceed(() => null as string | null),
+    );
+    if (managed !== null) {
+      const dir = NodePath.dirname(managed);
+      const sibling = NodePath.join(dir, "uvx");
+      const hasSibling = yield* Effect.promise(() =>
+        NodeFSP.access(sibling, NodeFSP.constants.X_OK)
+          .then(() => true)
+          .catch(() => false),
+      );
+      return { uvx: hasSibling ? sibling : managed, binDir: dir };
+    }
+    for (const name of ["uvx", "uv"]) {
+      for (const dir of (process.env.PATH ?? "").split(NodePath.delimiter)) {
+        if (dir === "") continue;
+        const candidate = NodePath.join(dir, name);
+        const found = yield* Effect.promise(() =>
+          NodeFSP.access(candidate, NodeFSP.constants.X_OK)
+            .then(() => true)
+            .catch(() => false),
+        );
+        if (found) return { uvx: candidate, binDir: null };
       }
-      throw new Error("missing uvx");
-    },
-    catch: () => failMissingUv(),
+    }
+    return yield* failMissingUv();
   });
+
+  const withBinDir = (env: NodeJS.ProcessEnv, binDir: string | null): NodeJS.ProcessEnv => {
+    if (binDir === null) return env;
+    return { ...env, PATH: `${binDir}${NodePath.delimiter}${env.PATH ?? ""}` };
+  };
 
   const ensure = (root: string): Effect.Effect<Session, GameOperationError> =>
     Effect.gen(function* () {
@@ -286,8 +341,9 @@ const make = Effect.gen(function* () {
         return existing;
       }
       if (existing !== undefined) drop(root);
-      yield* checkUv;
+      const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
+      const addonKeys = yield* readAddonKeyEnv;
       const homeDir = NodePath.join(root, "builds/logs/blender-live");
       const port = portFor(root);
       if (yield* Effect.promise(() => portFree(port)).pipe(Effect.map((free) => !free)))
@@ -313,14 +369,17 @@ const make = Effect.gen(function* () {
       // config only, never the real ~/.config/blender.
       const installed = yield* processes.run({
         root,
-        executable: "uvx",
+        executable: uv.uvx,
         args: [PINNED_PKG, "install-addon"],
         operation: "blender-live-addon",
         timeoutMs: 120_000,
-        env: {
-          ...sessionEnv(homeDir, null),
-          BLENDERMCP_ADDONS_DIR: addonsDir,
-        },
+        env: withBinDir(
+          {
+            ...sessionEnv(homeDir, null),
+            BLENDERMCP_ADDONS_DIR: addonsDir,
+          },
+          uv.binDir,
+        ),
       });
       if (installed.exitCode !== 0)
         return yield* opError(
@@ -383,7 +442,7 @@ const make = Effect.gen(function* () {
       const spawned = yield* Effect.sync(() => {
         const logFd = NodeFS.openSync(logPath, "w");
         const child = NodeChildProcess.spawn(blender.path, ["--python", bootPy], {
-          env: sessionEnv(homeDir, display),
+          env: withBinDir({ ...sessionEnv(homeDir, display), ...addonKeys }, uv.binDir),
           detached: true,
           stdio: ["ignore", logFd, logFd],
         });
@@ -411,14 +470,22 @@ const make = Effect.gen(function* () {
         );
       }
       // One child of the pinned server per game, telemetry off, over stdio.
-      const mcpEnv = stringEnv({
-        ...GameProcesses.headlessEnvironment(process.env),
-        TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
-        DISABLE_TELEMETRY: "true",
-        LIBGL_ALWAYS_SOFTWARE: "1",
-      });
+      // The addon reads Sketchfab/Poly Pizza keys from BLENDERMCP_* env, so
+      // keys set in Game Tools ride the Blender and MCP environments below.
+      const mcpEnv = stringEnv(
+        withBinDir(
+          {
+            ...GameProcesses.headlessEnvironment(process.env),
+            TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
+            DISABLE_TELEMETRY: "true",
+            LIBGL_ALWAYS_SOFTWARE: "1",
+            ...addonKeys,
+          },
+          uv.binDir,
+        ),
+      );
       const transport = new StdioClientTransport({
-        command: "uvx",
+        command: uv.uvx,
         args: [PINNED_PKG, "--port", String(port)],
         env: mcpEnv,
       });

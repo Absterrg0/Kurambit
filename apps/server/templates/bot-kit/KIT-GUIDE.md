@@ -74,6 +74,25 @@ export function policy(obs, opts) { /* fallback pick */ }
 // plan's standing, so play can't wander back to steps already done.
 ```
 
+## Option outcomes and run context (the exploration contract)
+
+An option's `run` must return `"done"` when it arrived or has nothing left
+to do, `"failed"` when it cannot work from here, else `"running"`. The
+child then stops offering a done option until the option set changes (a
+failed one rests 30 s), so Jev cannot re-pick an arrived option hundreds of
+times. Options that always return `"running"` stay on offer: a walker that
+reached its target but never says so is how runs collapse onto one spot.
+Every decide request carries the child's tried counts per option (picks,
+ok, fail), and the service adds visited-area coverage plus whether one pick
+is stuck without moving — write options with their own facts anyway, for
+the policy fallback and the report.
+
+Every observation carries `runContext`: `{seed, runIndex, runTotal,
+priorRuns}` where each prior run is `{topOptions, cells, ending}`. Use it
+so runs of one call differ: seed the first choice from `seed`, and avoid
+opening with what earlier runs already covered. Tell the truth about it in
+`status` notes; the report states which run did what.
+
 ## Controllers
 
 - `makeWalkTo(target, {mode: "xz"|"xy", within, timeoutS, jumpWhenStuck,

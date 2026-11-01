@@ -6,6 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeUrl from "node:url";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -28,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
+import * as Templates from "./templates.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
   latestExecutedRun,
@@ -62,13 +64,25 @@ const STALL_MS = 4 * 60_000;
 const MAX_RESTARTS = 3;
 // Run state is harness bookkeeping, never game content: it stays on disk
 // and out of git, so swapping builds always works. Tracked copies from
-// before this rule are removed from the index (never from disk).
+// before this rule are removed from the index (never from disk). Notes,
+// reports and judge worktrees are harness output too: ignoring them keeps
+// the tree clean so build swaps never need a stash at all (T28 wedged on a
+// half-applied stash pop and voided a round; T29 removed stash use).
 const RUN_STATE_IGNORES = [
   ".studio/run.json",
   ".studio/rounds.jsonl",
   ".studio/stop",
   ".studio/run.log",
   ".studio/bot-results.jsonl",
+  ".studio/player-report.md",
+  ".studio/pick.txt",
+  ".studio/next.md",
+  ".studio/ship.md",
+  ".studio/exports.json",
+  ".studio/final-video.json",
+  ".studio/tester-*.md",
+  ".studio/reviewer-*.md",
+  ".studio/worktrees/",
   "PICK-NOTES.md",
   "JUDGE-NOTES.md",
 ] as const; // An instantly failed turn never reached the model (provider or session
@@ -481,30 +495,51 @@ export const layer = (options: { readonly stateDir: string }) => {
     const checkoutOk = (root: string, ref: string): Effect.Effect<boolean> =>
       gitExec(root, ["checkout", "-q", ref], 60_000).pipe(Effect.map((r) => r.exitCode === 0));
 
-    const ensureOn = Effect.fn("GameRun.ensureOn")(function* (
+    // Plain live-tree checkout: no stash, ever. Run state, notes and reports
+    // are git-ignored, so a blocked checkout names real dirt (usually
+    // uncommitted game files), never harness bookkeeping.
+    const checkoutRef = Effect.fn("GameRun.checkoutRef")(function* (
       root: string,
       ref: string,
       why: string,
     ) {
       if (yield* checkoutOk(root, ref)) return true;
-      yield* logLine(root, `checkout ${ref} blocked (${why}); parking the tree in a stash`);
-      // Tracked changes only, and the stash is left alone afterwards: run
-      // state and notes are ignored by git so they never need parking, and
-      // an automatic pop back can half-apply on files both sides rewrote
-      // (player-report.md) and wedge the tree with unmerged paths, after
-      // which no checkout works at all (round 4). Parked work stays listed
-      // in the stash, restorable, and never blocks the judging.
-      yield* gitExec(
+      const status = yield* gitOut(root, ["status", "--porcelain=v1", "--", "."]);
+      yield* logLine(
         root,
-        ["stash", "push", "-m", `studio ${why}: park tree for checkout ${ref}`],
-        60_000,
-      ).pipe(Effect.ignore);
-      if (yield* checkoutOk(root, ref)) {
-        yield* logLine(root, `checkout ${ref} ok after stash (${why})`);
-        return true;
-      }
-      yield* logLine(root, `checkout ${ref} FAILED (${why}): leaving refs alone`);
+        `checkout ${ref} blocked (${why}); leaving refs alone. ` +
+          `Dirt: ${status.split("\n").filter(Boolean).slice(0, 8).join(" | ").slice(0, 400)}`,
+      );
       return false;
+    });
+
+    // Blind judging never touches the live tree: each build gets a detached
+    // worktree under ignored `.studio/worktrees/`, opened as its own game so
+    // the judge thread plays it through the game_* tools. Worktrees are
+    // removed after judging; a failed add names the reason instead of
+    // voiding silently.
+    const worktreeDir = (root: string, label: string): string =>
+      NodePath.join(root, ".studio", "worktrees", label);
+    const dropWorktree = (root: string, label: string): Effect.Effect<void> =>
+      gitExec(root, ["worktree", "remove", "--force", worktreeDir(root, label)], 60_000).pipe(
+        Effect.ignore,
+      );
+    const ensureWorktree = Effect.fn("GameRun.ensureWorktree")(function* (
+      root: string,
+      sha: string,
+      label: string,
+    ): Generator<Effect.Effect<unknown, GameRunError>, string | null, never> {
+      const dir = worktreeDir(root, label);
+      // Stale admin entries from a killed server would block the add: prune
+      // first, then force-remove any leftover dir, then add detached.
+      yield* gitExec(root, ["worktree", "prune"], 60_000).pipe(Effect.ignore);
+      yield* dropWorktree(root, label);
+      const added = yield* gitExec(root, ["worktree", "add", "--detach", dir, sha], 120_000);
+      if (added.exitCode !== 0) {
+        yield* logLine(root, `worktree ${label} at ${sha} failed: ${added.stdout.slice(0, 300)}`);
+        return null;
+      }
+      return dir;
     });
 
     // Reset main only when actually on main; never reset a round branch.
@@ -553,7 +588,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.catch(() => gitExec(root, ["checkout", "-q", `rejected/${label}`], 60_000)),
       );
       yield* commitAll(root, `rejected ${label}: ${why.slice(0, 120)}`);
-      if (yield* ensureOn(root, "main", `reject ${label}`)) {
+      if (yield* checkoutRef(root, "main", `reject ${label}`)) {
         if (best.length > 0) yield* resetMainTo(root, best);
       }
     });
@@ -574,28 +609,47 @@ export const layer = (options: { readonly stateDir: string }) => {
 
     // Scaffold for new runs: .studio/ plus the skill pack, with skills
     // readable through a one-line list in AGENTS.md. Run-state ignores ride
-    // along so swapping builds never blocks on harness bookkeeping.
+    // along so swapping builds never blocks on harness bookkeeping. Templates
+    // resolve the same way the game projects do (bundled dist/templates,
+    // then the monorepo tree), checked with plain Node so this also works in
+    // the packaged app instead of a checkout path.
     const ensureGameScaffold = (root: string): Effect.Effect<void> =>
       Effect.promise(async () => {
+        const [bundled, monorepo] = Templates.templateDirectoryCandidates(
+          NodePath.dirname(NodeUrl.fileURLToPath(import.meta.url)),
+          NodePath.join,
+        );
+        let templatesDir: string | null = null;
+        for (const candidate of [bundled, monorepo]) {
+          try {
+            await NodeFSP.access(candidate);
+            templatesDir = candidate;
+            break;
+          } catch {
+            /* next candidate */
+          }
+        }
         await NodeFSP.mkdir(NodePath.join(root, ".studio"), { recursive: true });
         await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
-        try {
-          await NodeFSP.cp(
-            "/home/abstergo/Programming/Projects/game-studio/apps/server/templates/studio",
-            NodePath.join(root, "studio-skills"),
-            { recursive: true },
-          );
-        } catch {
-          // The pack may already exist; never fail a run on it.
-        }
-        try {
-          await NodeFSP.cp(
-            "/home/abstergo/Programming/Projects/game-studio/apps/server/templates/bot-kit",
-            NodePath.join(root, ".studio", "bot", "kit"),
-            { recursive: true },
-          );
-        } catch {
-          // The kit may already exist; never fail a run on it.
+        if (templatesDir !== null) {
+          try {
+            await NodeFSP.cp(
+              NodePath.join(templatesDir, "studio"),
+              NodePath.join(root, "studio-skills"),
+              { recursive: true },
+            );
+          } catch {
+            // The pack may already exist; never fail a run on it.
+          }
+          try {
+            await NodeFSP.cp(
+              NodePath.join(templatesDir, "bot-kit"),
+              NodePath.join(root, ".studio", "bot", "kit"),
+              { recursive: true },
+            );
+          } catch {
+            // The kit may already exist; never fail a run on it.
+          }
         }
         const agentsPath = NodePath.join(root, "AGENTS.md");
         const existing = await NodeFSP.readFile(agentsPath, "utf8").catch(() => "");
@@ -720,6 +774,37 @@ export const layer = (options: { readonly stateDir: string }) => {
 
     // One fresh ordinary thread on the game's project. `createdBy: "user"`
     // keeps it a normal client-visible thread rather than a subagent child.
+    // On resume the same role name reattaches to its thread instead of
+    // launching a second one: when the newest thread recorded for this role
+    // still has a live run, the prompt goes to it as a new turn (a server
+    // restart kills the run fiber but not the role thread, so without this
+    // every resume duplicates in-flight builders, pickers and testers).
+    const TERMINAL_RUN = new Set([
+      "completed",
+      "failed",
+      "interrupted",
+      "cancelled",
+      "rolled_back",
+    ]);
+    const liveRoleThread = (
+      stored: StoredRun,
+      role: string,
+    ): Effect.Effect<{ threadId: ThreadId; projectId: ProjectId } | null, GameRunError> =>
+      Effect.gen(function* () {
+        const peer = [...stored.threads].reverse().find((entry) => entry.role === role);
+        if (peer === undefined) return null;
+        const threads = yield* needThreads("reattach-thread", peer.threadId);
+        const projection = (yield* threads
+          .getThreadProjection(peer.threadId as ThreadId)
+          .pipe(Effect.orElseSucceed(() => null))) as unknown as {
+          thread: { projectId: ProjectId };
+          runs: Array<{ id: RunId; status: string }>;
+        } | null;
+        if (projection === null) return null;
+        const latest = projection.runs[projection.runs.length - 1];
+        if (latest === undefined || TERMINAL_RUN.has(latest.status)) return null;
+        return { threadId: peer.threadId as ThreadId, projectId: projection.thread.projectId };
+      }).pipe(Effect.orElseSucceed(() => null));
     const launchRole = Effect.fn("GameRun.launchRole")(function* (
       root: string,
       stored: StoredRun,
@@ -729,6 +814,12 @@ export const layer = (options: { readonly stateDir: string }) => {
       title: string,
       prompt: string,
     ) {
+      const resumed = yield* liveRoleThread(stored, role);
+      if (resumed !== null && String(resumed.projectId) === String(projectId)) {
+        yield* logLine(root, `reusing live ${role} thread (no second thread on resume)`);
+        const runId = yield* sendTurn(projectId, resumed.threadId, prompt);
+        return { threadId: resumed.threadId, runId };
+      }
       const launches = yield* needLaunches("launch-thread", root);
       const selection: ModelSelection = yield* selectionFor(creatorThreadId, stored);
       const shell: { runtimeMode: RuntimeMode; interactionMode: ProviderInteractionMode } =
@@ -1374,6 +1465,85 @@ export const layer = (options: { readonly stateDir: string }) => {
       let best = yield* gitOut(root, ["rev-parse", "HEAD"]);
       let stallStreak = stored.stallStreak;
 
+      // Open one worktree checkout as its own game so a role thread can play
+      // a build that is not checked out anywhere else. The thread belongs to
+      // that game's project, so its game_* tools play the worktree.
+      const openWorktreeGame = Effect.fn("GameRun.openWorktreeGame")(function* (dir: string) {
+        const projects = yield* needProjects("open-worktree", dir);
+        const selection: ModelSelection = yield* selectionFor(creatorThreadId, stored);
+        const opened = (yield* projects
+          .open({ path: dir, modelSelection: selection })
+          .pipe(
+            Effect.mapError((cause) =>
+              fail("open-worktree", dir, "project-open", cause.message ?? String(cause)),
+            ),
+          )) as unknown as { projectId: ProjectId; threadId: ThreadId; root: string };
+        return opened;
+      });
+      // Judge bot artifacts made in a worktree belong to the live game:
+      // copy new bot-results lines plus their run dirs (paths rewritten to
+      // the live root) so the player report sees judge exploration.
+      const importJudgeRuns = (liveRoot: string, wt: string): Effect.Effect<number> =>
+        Effect.promise(async () => {
+          const rel = NodePath.join(".studio", "bot-results.jsonl");
+          const livePath = NodePath.join(liveRoot, rel);
+          const wtPath = NodePath.join(wt, rel);
+          const liveText = await NodeFSP.readFile(livePath, "utf8").catch(() => "");
+          const known = new Set<string>();
+          for (const line of liveText.split("\n").filter(Boolean)) {
+            try {
+              const row = JSON.parse(line) as { runId?: unknown };
+              if (typeof row.runId === "string") known.add(row.runId);
+            } catch {
+              /* skip bad lines */
+            }
+          }
+          const wtText = await NodeFSP.readFile(wtPath, "utf8").catch(() => "");
+          const freshLines: string[] = [];
+          const freshIds: string[] = [];
+          for (const line of wtText.split("\n").filter(Boolean)) {
+            try {
+              const row = JSON.parse(line) as { runId?: unknown };
+              if (typeof row.runId === "string" && !known.has(row.runId)) {
+                known.add(row.runId);
+                freshLines.push(line);
+                freshIds.push(row.runId);
+              }
+            } catch {
+              /* skip bad lines */
+            }
+          }
+          if (freshLines.length > 0)
+            await NodeFSP.appendFile(livePath, `${freshLines.join("\n")}\n`).catch(() => undefined);
+          let imported = 0;
+          for (const runId of freshIds) {
+            const name = `game-bot-${runId}`;
+            const from = NodePath.join(wt, "builds/logs", name);
+            const to = NodePath.join(liveRoot, "builds/logs", name);
+            try {
+              await NodeFSP.rm(to, { recursive: true, force: true });
+              await NodeFSP.cp(from, to, { recursive: true });
+              for (const entry of ["trace.json", "summary.json"]) {
+                const file = NodePath.join(to, entry);
+                const text = await NodeFSP.readFile(file, "utf8").catch(() => null);
+                if (text !== null && text.includes(wt))
+                  await NodeFSP.writeFile(file, text.split(wt).join(liveRoot)).catch(
+                    () => undefined,
+                  );
+              }
+              imported += 1;
+            } catch {
+              /* one bad run dir never breaks the judging */
+            }
+          }
+          return imported;
+        }).pipe(
+          Effect.catch(() => Effect.succeed(0)),
+          Effect.tap((count) =>
+            count > 0 ? logLine(liveRoot, `imported ${count} judge bot run(s)`) : Effect.void,
+          ),
+        );
+
       const singleStage = Effect.fn("GameRun.singleStage")(function* (
         key: string,
         title: string,
@@ -1465,7 +1635,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           const boot = yield* bootCheck(launched.threadId);
           if (!boot.ok) yield* rejectWork(root, best, key, boot.detail);
         }
-        yield* ensureOn(root, "main", "proto cleanup");
+        yield* checkoutRef(root, "main", "proto cleanup");
         if (best.length > 0) yield* resetMainTo(root, best);
       }
       if ((yield* stageDone(root)).pick !== true) {
@@ -1473,78 +1643,106 @@ export const layer = (options: { readonly stateDir: string }) => {
           .split("\n")
           .map((name) => name.trim())
           .filter((name) => /^(rejected\/)?proto-\d+$/.test(name));
+        // Blind pick: the picker plays build A then build B inside one
+        // detached worktree, labelled only A/B. The live tree is never
+        // swapped, so no stash is ever needed.
         if (usable.length >= 2) {
           const aSha = usable[0]!;
           const bSha = usable[1]!;
-          // Blind pick: the picker plays the live folder while the harness
-          // swaps the checked-out build between its turns, labelled only A/B.
-          // A blocked swap is parked in a stash and retried (never a silent
-          // void): run state is ignored by git, so swaps normally just work.
-          if (!(yield* ensureOn(root, aSha, "pick A"))) {
-            yield* logLine(
-              root,
-              "pick: cannot check out build A after stash retry; skipping blind pick",
-            );
+          const wtPick = yield* ensureWorktree(root, aSha, "pick");
+          if (wtPick === null) {
+            yield* logLine(root, "pick: worktree for build A failed; skipping blind pick");
           } else {
-            const launched = yield* launchRole(
-              root,
-              stored,
-              creatorThreadId,
-              projectId,
-              "pick",
-              "studio pick",
-              `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native), about two minutes. After every couple of plays, append what you did and felt to PICK-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, what you learned, where it got boring, whether you wanted another go. Write one line COMPARE: A in PICK-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
-            );
-            const pickWait1 = yield* waitRole(
-              root,
-              projectId,
-              launched.threadId,
-              launched.runId,
-              JUDGE_CAP_MS,
-              "Continue where you left off. Reply briefly, then keep working.",
-            );
-            if (pickWait1.end !== null) return pickWait1.end;
-            if (!(yield* ensureOn(root, bSha, "pick B"))) {
-              yield* logLine(
-                root,
-                "pick: cannot check out build B after stash retry; keeping A-only notes",
+            const pickResult = yield* Effect.gen(function* () {
+              const opened = yield* openWorktreeGame(wtPick).pipe(
+                Effect.catch((cause) =>
+                  Effect.gen(function* () {
+                    yield* logLine(root, `pick: cannot open worktree game: ${cause.message}`);
+                    return null;
+                  }),
+                ),
               );
-            } else {
-              const secondRunId = yield* sendTurn(
-                projectId,
-                launched.threadId,
-                "Build B is now checked out in this folder. Play it the same way, about two minutes, appending to PICK-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
-              );
-              const pickWait2 = yield* waitRole(
+              if (opened === null) return { verdict: "NONE" as string, playedB: false as boolean };
+              const wtProject = opened.projectId;
+              const launched = yield* launchRole(
                 root,
-                projectId,
+                stored,
+                creatorThreadId,
+                wtProject,
+                "pick",
+                "studio pick",
+                `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native), about two minutes. After every couple of plays, append what you did and felt to PICK-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, what you learned, where it got boring, whether you wanted another go. Write one line COMPARE: A in PICK-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
+              );
+              const pickWait1 = yield* waitRole(
+                root,
+                wtProject,
                 launched.threadId,
-                secondRunId,
+                launched.runId,
                 JUDGE_CAP_MS,
                 "Continue where you left off. Reply briefly, then keep working.",
               );
-              if (pickWait2.end !== null) return pickWait2.end;
+              if (pickWait1.end !== null)
+                return { verdict: "NONE", playedB: false, end: pickWait1.end };
+              const swapped = yield* gitExec(wtPick, ["checkout", "-q", "-f", bSha], 60_000).pipe(
+                Effect.map((r) => r.exitCode === 0),
+              );
+              if (!swapped) {
+                yield* logLine(
+                  root,
+                  "pick: worktree checkout of build B failed; keeping A-only notes",
+                );
+              } else {
+                const secondRunId = yield* sendTurn(
+                  wtProject,
+                  launched.threadId,
+                  "Build B is now checked out in this folder. Play it the same way, about two minutes, appending to PICK-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
+                );
+                const pickWait2 = yield* waitRole(
+                  root,
+                  wtProject,
+                  launched.threadId,
+                  secondRunId,
+                  JUDGE_CAP_MS,
+                  "Continue where you left off. Reply briefly, then keep working.",
+                );
+                if (pickWait2.end !== null)
+                  return { verdict: "NONE", playedB: true, end: pickWait2.end };
+              }
+              const writeRunId = yield* sendTurn(
+                wtProject,
+                launched.threadId,
+                "Stop playing, now write it. Rewrite PICK-NOTES.md with what you did and felt in each build in your own words, copy it to .studio/pick.txt, and end PICK-NOTES.md with exactly one line COMPARE: A or COMPARE: B plus reasons on following lines. You may only write PICK-NOTES.md and .studio/pick.txt. Judge only from play.",
+              );
+              const pickWait3 = yield* waitRole(
+                root,
+                wtProject,
+                launched.threadId,
+                writeRunId,
+                WRITE_CAP_MS,
+                "Continue where you left off. Reply briefly, then keep working.",
+              );
+              if (pickWait3.end !== null)
+                return { verdict: "NONE", playedB: true, end: pickWait3.end };
+              const pickText = yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(wtPick, ".studio", "pick.txt"), "utf8").catch(
+                  () => "",
+                ),
+              );
+              if (pickText.trim().length > 0)
+                yield* Effect.promise(() =>
+                  NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), pickText).catch(
+                    () => undefined,
+                  ),
+                );
+              return { verdict: parseCompare(pickText) ?? "NONE", playedB: true };
+            }).pipe(Effect.ensuring(dropWorktree(root, "pick")));
+            if ((pickResult as { end?: string | null }).end !== undefined) {
+              const end = (pickResult as { end: string | null }).end;
+              if (end !== null) return end;
             }
-            const writeRunId = yield* sendTurn(
-              projectId,
-              launched.threadId,
-              "Stop playing, now write it. Rewrite PICK-NOTES.md with what you did and felt in each build in your own words, copy it to .studio/pick.txt, and end PICK-NOTES.md with exactly one line COMPARE: A or COMPARE: B plus reasons on following lines. You may only write PICK-NOTES.md and .studio/pick.txt. Judge only from play.",
-            );
-            const pickWait3 = yield* waitRole(
-              root,
-              projectId,
-              launched.threadId,
-              writeRunId,
-              WRITE_CAP_MS,
-              "Continue where you left off. Reply briefly, then keep working.",
-            );
-            if (pickWait3.end !== null) return pickWait3.end;
-            const pickText = yield* Effect.promise(() =>
-              NodeFSP.readFile(NodePath.join(root, ".studio", "pick.txt"), "utf8").catch(() => ""),
-            );
-            const verdict = parseCompare(pickText);
+            const verdict = pickResult.verdict;
             const winner = verdict === "B" ? bSha : aSha;
-            if (yield* ensureOn(root, "main", "pick merge")) {
+            if (yield* checkoutRef(root, "main", "pick merge")) {
               const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", winner], 60_000);
               if (merged.exitCode !== 0)
                 yield* logLine(
@@ -1553,14 +1751,9 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               best = yield* gitOut(root, ["rev-parse", "HEAD"]);
             }
-            yield* Effect.promise(() =>
-              NodeFSP.rm(NodePath.join(root, "PICK-NOTES.md"), { force: true }).catch(
-                () => undefined,
-              ),
-            );
-          } // end picked-pair block (skipped when build A never checked out)
+          } // end picked-pair block (skipped when the pick worktree failed)
         } else if (usable.length === 1) {
-          if (yield* ensureOn(root, "main", "pick merge single")) {
+          if (yield* checkoutRef(root, "main", "pick merge single")) {
             const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", usable[0]!], 60_000);
             if (merged.exitCode !== 0)
               yield* logLine(
@@ -1673,13 +1866,20 @@ export const layer = (options: { readonly stateDir: string }) => {
           durationMs: 0,
           linesChanged: 0,
         };
-        if (!(yield* ensureOn(root, "main", `round ${round} start`))) {
-          yield* logLine(root, `round ${round}: cannot reach main; counting stalled`);
+        // Every round writes a record or it doesn't count: a blocked start
+        // records a real stall round with the reason instead of burning a
+        // sleep, and three in a row end the run naming that cause.
+        if (!(yield* checkoutRef(root, "main", `round ${round} start`))) {
+          const reason = `round ${round}: cannot reach main; stalled (blocked live checkout)`;
+          yield* logLine(root, reason);
+          record.note = "stalled (cannot reach main; blocked live checkout)";
+          record.durationMs = Date.now() - roundStart;
+          yield* appendRound(root, stored, record);
+          stored.lastFailure = reason;
           stallStreak += 1;
           stored.stallStreak = stallStreak;
           yield* writeStored(root, stored);
           if (stallStreak >= 3) return "stalled";
-          yield* Effect.sleep("60 seconds");
           continue;
         }
         yield* gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
@@ -1723,7 +1923,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           }
         }
         if (!(yield* gameChangedSince(root, best))) {
-          yield* ensureOn(root, "main", `round ${round} stall`);
+          yield* checkoutRef(root, "main", `round ${round} stall`);
           yield* logLine(
             root,
             `round ${round}: stalled (no game-code change under godot/ after replace attempt)`,
@@ -1731,6 +1931,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.note = "stalled (no game-code change under godot/ after replace attempt)";
           record.durationMs = Date.now() - roundStart;
           yield* appendRound(root, stored, record);
+          stored.lastFailure = `round ${round}: no game-code change under godot/ after replace attempt`;
           stallStreak += 1;
           stored.stallStreak = stallStreak;
           yield* writeStored(root, stored);
@@ -1744,6 +1945,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.note = `boot failed: ${boot.detail}`.slice(0, 300);
           record.durationMs = Date.now() - roundStart;
           yield* appendRound(root, stored, record);
+          stored.lastFailure = `round ${round}: ${record.note}`;
           stallStreak += 1;
           stored.stallStreak = stallStreak;
           yield* writeStored(root, stored);
@@ -1762,6 +1964,11 @@ export const layer = (options: { readonly stateDir: string }) => {
         const winBotAsk = jevKey
           ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md; do not append to .studio/bot-results.jsonl yourself. A note without bot runs does not count."
           : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run in .studio/bot-results.jsonl; do not append there yourself. A note without a bot run does not count.";
+        const botRunsBefore = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, ".studio", "bot-results.jsonl"), "utf8")
+            .then((text) => text.split("\n").filter(Boolean).length)
+            .catch(() => 0),
+        );
         const tester = yield* playThenWrite(
           root,
           stored,
@@ -1774,112 +1981,163 @@ export const layer = (options: { readonly stateDir: string }) => {
           `.studio/tester-${round}.md`,
         );
         if (tester.end !== null) return tester.end;
-        record.testerNote = tester.notes.split("\n").slice(0, 20).join("\n").slice(0, 600);
-        if (!tester.wrote) record.note = `${record.note ?? ""} tester write failed`.trim();
+        // Duty check: the tester must actually run a bot. When its turns
+        // produced no new bot-results line, one follow-up turn says so
+        // plainly and asks for the run; T28's testers ran zero bots each.
+        const botRunsAfter = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(root, ".studio", "bot-results.jsonl"), "utf8")
+            .then((text) => text.split("\n").filter(Boolean).length)
+            .catch(() => 0),
+        );
+        let testerNotes = tester.notes;
+        let testerWrote = tester.wrote;
+        if (botRunsAfter <= botRunsBefore) {
+          yield* logLine(root, `round ${round}: tester ran no bot; one follow-up turn asks for it`);
+          const followRunId = yield* sendTurn(
+            projectId,
+            tester.threadId,
+            "You ended your turn without running any bot, so there is no play evidence. Write or update a bot file under .studio/bot/ for this game now (goal, observe, options, status; see .studio/bot/kit/KIT-GUIDE.md) and run it at least once with game_bot_run, then append what the run showed to your notes file. A note without a bot run does not count.",
+          );
+          const follow = yield* waitRole(
+            root,
+            projectId,
+            tester.threadId,
+            followRunId,
+            Math.min(TESTER_CAP_MS, 6 * 60_000),
+            "Continue where you left off. Reply briefly, then keep working.",
+          );
+          if (follow.end !== null) return follow.end;
+          testerNotes = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, ".studio", `tester-${round}.md`), "utf8").catch(
+              () => testerNotes,
+            ),
+          );
+          if (testerNotes.trim().length > 20) testerWrote = true;
+        }
+        // Tester bot work joins the round branch: uncommitted tester files
+        // would otherwise block the live checkout back to main at merge
+        // time (the T29 lighthouse stall: "merge skipped (cannot reach
+        // main)"). Ignored harness notes stay out of git as before.
+        yield* commitAll(root, key);
+        record.testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
+        if (!testerWrote) record.note = `${record.note ?? ""} tester write failed`.trim();
 
         // Blind compare by a fresh thread that plays candidate and best, in
-        // both orders. The candidate merges unless best wins both. Rejected
-        // work stays on a branch.
+        // both orders, inside one detached worktree per judging: build A is
+        // checked out, played, then build B force-checked out over it and
+        // played by the same thread. The live tree is never swapped. Judge
+        // bot runs are imported into the live game afterwards. The candidate
+        // merges unless best wins both. Rejected work stays on a branch.
         const judgeOne = Effect.fn("GameRun.judgeOne")(function* (
           tag: string,
           firstSha: string,
           secondSha: string,
         ) {
-          // A blocked swap is parked in a stash and retried, then the whole
-          // judging is retried once by the caller: a NONE verdict below is
-          // never the first thing that happens, and it names the retry.
-          if (!(yield* ensureOn(root, firstSha, `judge ${tag} first`))) {
-            yield* logLine(
-              root,
-              `round ${round}: judge ${tag} cannot check out first build after stash retry`,
-            );
+          const label = `${key}-${tag}`;
+          const wt = yield* ensureWorktree(root, firstSha, label);
+          if (wt === null)
             return {
               verdict: "NONE",
-              reason: "build checkout failed after stash retry",
+              reason: `worktree for first build failed (${firstSha.slice(0, 8)})`,
               end: null as string | null,
             };
-          }
-          const launched = yield* launchRole(
-            root,
-            stored,
-            creatorThreadId,
-            projectId,
-            `judge-${tag}`,
-            `studio judge ${tag}`,
-            `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native) and game_bot_run, about two minutes. After every couple of plays, append what you did and felt to JUDGE-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, where it got boring, whether you wanted another go. Write one line COMPARE: A in JUDGE-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
-          );
-          const judgeWait1 = yield* waitRole(
-            root,
-            projectId,
-            launched.threadId,
-            launched.runId,
-            JUDGE_CAP_MS,
-            "Continue where you left off. Reply briefly, then keep working.",
-          );
-          if (judgeWait1.end !== null)
-            return { verdict: "NONE", reason: "", end: judgeWait1.end as string | null };
-          if (!(yield* ensureOn(root, secondSha, `judge ${tag} second`))) {
-            yield* logLine(
-              root,
-              `round ${round}: judge ${tag} cannot check out second build after stash retry`,
+          return yield* Effect.gen(function* () {
+            const opened = yield* openWorktreeGame(wt).pipe(
+              Effect.catch((cause) =>
+                Effect.gen(function* () {
+                  yield* logLine(root, `round ${round}: judge ${tag} cannot open worktree game`);
+                  return null;
+                }),
+              ),
             );
-            return {
-              verdict: "NONE",
-              reason: "build checkout failed after stash retry",
-              end: null as string | null,
-            };
-          }
-          const secondRunId = yield* sendTurn(
-            projectId,
-            launched.threadId,
-            "Build B is now checked out in this folder. Play it the same way with game_explore_start (target native) and game_bot_run, about two minutes, appending to JUDGE-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
-          );
-          const judgeWait2 = yield* waitRole(
-            root,
-            projectId,
-            launched.threadId,
-            secondRunId,
-            JUDGE_CAP_MS,
-            "Continue where you left off. Reply briefly, then keep working.",
-          );
-          if (judgeWait2.end !== null)
-            return { verdict: "NONE", reason: "", end: judgeWait2.end as string | null };
-          const writeRunId = yield* sendTurn(
-            projectId,
-            launched.threadId,
-            "Stop playing, now write it. Rewrite JUDGE-NOTES.md so it states what you did and felt in build A and build B in your own words and ends with COMPARE: A or COMPARE: B or COMPARE: TIE plus reasons on following lines. You may only write JUDGE-NOTES.md.",
-          );
-          const judgeWait3 = yield* waitRole(
-            root,
-            projectId,
-            launched.threadId,
-            writeRunId,
-            WRITE_CAP_MS,
-            "Continue where you left off. Reply briefly, then keep working.",
-          );
-          if (judgeWait3.end !== null)
-            return { verdict: "NONE", reason: "", end: judgeWait3.end as string | null };
-          const notes = yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(root, "JUDGE-NOTES.md"), "utf8").catch(() => ""),
-          );
-          yield* Effect.promise(() =>
-            NodeFSP.rm(NodePath.join(root, "JUDGE-NOTES.md"), { force: true }).catch(
-              () => undefined,
-            ),
-          );
-          const verdict = parseCompare(notes);
-          const lines = notes.split("\n");
-          const at = lines.findLastIndex((line) => /^COMPARE:\s*(A|B|TIE)\s*$/i.test(line));
-          const reason =
-            at >= 0
-              ? lines
-                  .slice(at + 1)
-                  .join(" ")
-                  .replace(/\s+/g, " ")
-                  .trim()
-                  .slice(0, 500)
-              : "";
-          return { verdict: verdict ?? "NONE", reason, end: null as string | null };
+            if (opened === null)
+              return {
+                verdict: "NONE",
+                reason: "worktree game would not open",
+                end: null as string | null,
+              };
+            const wtProject = opened.projectId;
+            const launched = yield* launchRole(
+              root,
+              stored,
+              creatorThreadId,
+              wtProject,
+              `judge-${tag}`,
+              `studio judge ${tag}`,
+              `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native) and game_bot_run, about two minutes. After every couple of plays, append what you did and felt to JUDGE-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, where it got boring, whether you wanted another go. Write one line COMPARE: A in JUDGE-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
+            );
+            const judgeWait1 = yield* waitRole(
+              root,
+              wtProject,
+              launched.threadId,
+              launched.runId,
+              JUDGE_CAP_MS,
+              "Continue where you left off. Reply briefly, then keep working.",
+            );
+            if (judgeWait1.end !== null)
+              return { verdict: "NONE", reason: "", end: judgeWait1.end as string | null };
+            const swapped = yield* gitExec(wt, ["checkout", "-q", "-f", secondSha], 60_000).pipe(
+              Effect.map((r) => r.exitCode === 0),
+            );
+            if (!swapped) {
+              yield* logLine(
+                root,
+                `round ${round}: judge ${tag} worktree checkout of second build failed`,
+              );
+              return {
+                verdict: "NONE",
+                reason: `worktree checkout of second build failed (${secondSha.slice(0, 8)})`,
+                end: null as string | null,
+              };
+            }
+            const secondRunId = yield* sendTurn(
+              wtProject,
+              launched.threadId,
+              "Build B is now checked out in this folder. Play it the same way with game_explore_start (target native) and game_bot_run, about two minutes, appending to JUDGE-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
+            );
+            const judgeWait2 = yield* waitRole(
+              root,
+              wtProject,
+              launched.threadId,
+              secondRunId,
+              JUDGE_CAP_MS,
+              "Continue where you left off. Reply briefly, then keep working.",
+            );
+            if (judgeWait2.end !== null)
+              return { verdict: "NONE", reason: "", end: judgeWait2.end as string | null };
+            const writeRunId = yield* sendTurn(
+              wtProject,
+              launched.threadId,
+              "Stop playing, now write it. Rewrite JUDGE-NOTES.md so it states what you did and felt in build A and build B in your own words and ends with COMPARE: A or COMPARE: B or COMPARE: TIE plus reasons on following lines. You may only write JUDGE-NOTES.md.",
+            );
+            const judgeWait3 = yield* waitRole(
+              root,
+              wtProject,
+              launched.threadId,
+              writeRunId,
+              WRITE_CAP_MS,
+              "Continue where you left off. Reply briefly, then keep working.",
+            );
+            if (judgeWait3.end !== null)
+              return { verdict: "NONE", reason: "", end: judgeWait3.end as string | null };
+            const notes = yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(wt, "JUDGE-NOTES.md"), "utf8").catch(() => ""),
+            );
+            yield* importJudgeRuns(root, wt);
+            const verdict = parseCompare(notes);
+            const lines = notes.split("\n");
+            const at = lines.findLastIndex((line) => /^COMPARE:\s*(A|B|TIE)\s*$/i.test(line));
+            const reason =
+              at >= 0
+                ? lines
+                    .slice(at + 1)
+                    .join(" ")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .slice(0, 500)
+                : "";
+            return { verdict: verdict ?? "NONE", reason, end: null as string | null };
+          }).pipe(Effect.ensuring(dropWorktree(root, label)));
         });
         let order1 = yield* judgeOne(`${key}-1`, candidate, best);
         if (order1.end !== null) return order1.end;
@@ -1916,14 +2174,15 @@ export const layer = (options: { readonly stateDir: string }) => {
         const bestWinsBoth = order1.verdict === "B" && order2.verdict === "A";
         const noVerdicts = order1.verdict === "NONE" || order2.verdict === "NONE";
         if (bestWinsBoth) {
-          if (yield* ensureOn(root, "main", `round ${round} reject`)) {
+          if (yield* checkoutRef(root, "main", `round ${round} reject`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
           }
           record.kept = false;
           record.note = `${record.note ?? ""} rejected: best won both orders`.trim();
+          stored.lastFailure = `round ${round}: rejected, best won both orders`;
           stallStreak += 1;
         } else if (noVerdicts) {
-          if (yield* ensureOn(root, "main", `round ${round} unjudged`)) {
+          if (yield* checkoutRef(root, "main", `round ${round} unjudged`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
           }
           yield* logLine(
@@ -1933,8 +2192,13 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.unjudged = true;
           record.kept = false;
           record.note = `${record.note ?? ""} no judge verdicts after retry; kept on branch`.trim();
+          stored.lastFailure =
+            `round ${round}: ${order1.verdict === "NONE" ? order1.reason : order2.reason}`.slice(
+              0,
+              300,
+            );
           stallStreak += 1;
-        } else if (!(yield* ensureOn(root, "main", `round ${round} merge`))) {
+        } else if (!(yield* checkoutRef(root, "main", `round ${round} merge`))) {
           yield* logLine(root, `round ${round}: cannot reach main; kept on branch ${key}`);
           record.kept = false;
           record.note =
@@ -2180,6 +2444,12 @@ export const layer = (options: { readonly stateDir: string }) => {
       }
       let stored = yield* readStored(root);
       let resumed = false;
+      // A start is an intent to run: clear a stale stop request first, or
+      // the new fiber would end instantly on the previous stop (the panel
+      // proved this: Start after Stop ended in under a minute).
+      yield* Effect.promise(() =>
+        NodeFSP.rm(runPaths(root).stop, { force: true }).catch(() => undefined),
+      );
       // Continuable endings resume from the folder (stages it already has
       // are skipped); only a shipped or stalled run starts over.
       const continuable =
@@ -2194,6 +2464,9 @@ export const layer = (options: { readonly stateDir: string }) => {
         const resumedRun = stored as StoredRun;
         if (input.brief.length > 0) resumedRun.brief = input.brief;
         if (input.budgetMinutes !== undefined) resumedRun.budgetMinutes = input.budgetMinutes;
+        // A stale ending from the previous fiber would lie about the resumed
+        // run (T28 showed `stalled` across resumes); the loop sets it again.
+        resumedRun.ending = null;
         yield* writeStored(root, resumedRun);
       } else {
         stored = {
@@ -2273,11 +2546,17 @@ export const layer = (options: { readonly stateDir: string }) => {
           message: "No run recorded for this game.",
         };
       }
+      const running = active.has(target.root);
+      // A stop request with no live fiber means the creator stopped the run
+      // (runStop interrupts before the fiber can record its ending): report
+      // it as stopped rather than "not started".
+      const stopped = !running && (yield* stopRequested(target.root));
+      const ending = stopped ? "stopped" : stored.ending;
       return {
-        active: active.has(target.root),
+        active: running,
         runId: stored.runId,
         stage: stored.stage,
-        ending: stored.ending,
+        ending,
         rounds: stored.rounds.map((record) => ({
           round: record.round,
           move: record.move,
@@ -2291,9 +2570,9 @@ export const layer = (options: { readonly stateDir: string }) => {
         })),
         threads: stored.threads,
         message:
-          stored.ending === null
+          ending === null
             ? `Run ${stored.runId} at stage ${stored.stage} with ${stored.rounds.length} rounds.${(stored.lastFailure ?? "").length > 0 ? ` Last provider failure: ${stored.lastFailure}` : ""}`
-            : `Run ${stored.runId} ended: ${stored.ending}.${(stored.lastFailure ?? "").length > 0 ? ` Last provider failure: ${stored.lastFailure}` : ""}`,
+            : `Run ${stored.runId} ended: ${ending}.${(stored.lastFailure ?? "").length > 0 ? ` Last provider failure: ${stored.lastFailure}` : ""}`,
       };
     });
 

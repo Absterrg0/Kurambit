@@ -1824,6 +1824,8 @@ const layerWsRpc = (
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
         [WS_METHODS.gameInstall]: () => gameToolchain.install,
         [WS_METHODS.gameVerify]: () => gameToolchain.verify,
+        [WS_METHODS.gameSecretsStatus]: () => game.secretsStatus(),
+        [WS_METHODS.gameSecretsSet]: (input) => game.setSecret(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

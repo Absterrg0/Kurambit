@@ -14,6 +14,9 @@ import { SettingsRow, SettingsSection } from "./settingsLayout";
 export function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
+  const keysQuery = useEnvironmentQuery(
+    gameEnvironment.secretsStatus({ environmentId, input: {} }),
+  );
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const verify = useAtomCommand(gameEnvironment.verify, { reportFailure: false });
   const install = useAtomCommand(gameEnvironment.install, { reportFailure: false });
@@ -25,6 +28,9 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [verified, setVerified] = useState<GameToolchainStatus | null>(null);
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
+  const [keyBusy, setKeyBusy] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const data = verified ?? query.data;
   const perform = async (operation: "save" | "verify" | "install") => {
     if (busy) return;
@@ -148,6 +154,135 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           </Button>
         </div>
       </div>
+      <GameToolsKeysSection
+        environmentId={environmentId}
+        keys={keysQuery.data ?? null}
+        keysError={keysQuery.error ? String(keysQuery.error) : null}
+        drafts={keyDrafts}
+        setDrafts={setKeyDrafts}
+        keyBusy={keyBusy}
+        setKeyBusy={setKeyBusy}
+        keyError={keyError}
+        setKeyError={setKeyError}
+        refreshKeys={() => keysQuery.refresh()}
+      />
     </SettingsSection>
+  );
+}
+
+const KEY_ROWS = [
+  {
+    name: "jev",
+    title: "Jev key",
+    description:
+      "Optional playtest route: Jev picks exploration options at play speed. Unset means the policy fallback.",
+  },
+  {
+    name: "sketchfab",
+    title: "Sketchfab key",
+    description: "Passed to the pinned Blender addon for Sketchfab search and import.",
+  },
+  {
+    name: "polypizza",
+    title: "Poly Pizza key",
+    description: "Passed to the pinned Blender addon for Poly Pizza search and import.",
+  },
+] as const;
+
+function GameToolsKeysSection({
+  environmentId,
+  keys,
+  keysError,
+  drafts,
+  setDrafts,
+  keyBusy,
+  setKeyBusy,
+  keyError,
+  setKeyError,
+  refreshKeys,
+}: {
+  environmentId: EnvironmentId;
+  keys: { jev: boolean; sketchfab: boolean; polypizza: boolean } | null;
+  keysError: string | null;
+  drafts: Record<string, string>;
+  setDrafts: (drafts: Record<string, string>) => void;
+  keyBusy: string | null;
+  setKeyBusy: (busy: string | null) => void;
+  keyError: string | null;
+  setKeyError: (error: string | null) => void;
+  refreshKeys: () => void;
+}) {
+  const setSecret = useAtomCommand(gameEnvironment.setSecret, { reportFailure: false });
+  const canSetSecret = useAtomValue(gameEnvironment.setSecret.permissionAtom(environmentId));
+  const saveKey = async (name: "jev" | "sketchfab" | "polypizza", clear: boolean) => {
+    if (keyBusy) return;
+    setKeyBusy(name);
+    setKeyError(null);
+    try {
+      const result = await setSecret({
+        environmentId,
+        input: { name, secret: clear ? "" : (drafts[name] ?? "") },
+      });
+      if (result._tag === "Failure") {
+        setKeyError(String(squashAtomCommandFailure(result)));
+        return;
+      }
+      setDrafts({ ...drafts, [name]: "" });
+      refreshKeys();
+    } finally {
+      setKeyBusy(null);
+    }
+  };
+  return (
+    <div className="space-y-3 px-4 py-3 text-sm">
+      <p className="font-medium">Keys</p>
+      <p className="text-xs text-muted-foreground">
+        Stored in this environment&apos;s secret store. The UI only shows whether a key is set,
+        never the value.
+      </p>
+      {keysError ? <p role="alert">{keysError}</p> : null}
+      {keyError ? (
+        <p role="alert" className="whitespace-pre-wrap text-destructive">
+          {keyError}
+        </p>
+      ) : null}
+      {KEY_ROWS.map((row) => {
+        const isSet = keys?.[row.name] ?? false;
+        return (
+          <SettingsRow key={row.name} title={row.title} description={row.description}>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">{isSet ? "Set" : "Not set"}</p>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  aria-label={`${row.title} value`}
+                  type="password"
+                  value={drafts[row.name] ?? ""}
+                  disabled={!canSetSecret || keyBusy !== null}
+                  onChange={(event) => setDrafts({ ...drafts, [row.name]: event.target.value })}
+                  placeholder={isSet ? "Enter a new value to replace" : "Paste the key"}
+                />
+                <Button
+                  size="sm"
+                  disabled={
+                    !canSetSecret || keyBusy !== null || (drafts[row.name] ?? "").length === 0
+                  }
+                  onClick={() => void saveKey(row.name, false)}
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canSetSecret || keyBusy !== null || !isSet}
+                  onClick={() => void saveKey(row.name, true)}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+          </SettingsRow>
+        );
+      })}
+    </div>
   );
 }
