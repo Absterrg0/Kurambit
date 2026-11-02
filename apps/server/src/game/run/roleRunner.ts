@@ -25,7 +25,7 @@ import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementS
 import type * as GameService from "../GameService.ts";
 import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
-import type { StepResult } from "./policy.ts";
+import type { RoleDone, StepResult } from "./policy.ts";
 import { CONTINUE } from "./roles.ts";
 import type { RoleStep } from "./state.ts";
 
@@ -69,26 +69,32 @@ const STOP_WAIT_MS = 60_000;
 const ms = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.toEpochMillis(value);
 
-const BotRow = Schema.Struct({ file: Schema.String, mode: Schema.optionalKey(Schema.String) });
+const BotRow = Schema.Struct({
+  file: Schema.String,
+  mode: Schema.optionalKey(Schema.String),
+  decider: Schema.optionalKey(Schema.String),
+});
 const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
 
-// The bot the blind comparison replays: the latest win-bot run among the rows
-// this turn added, else its latest run of any mode. An exploration bot wanders
-// on purpose, so it says less about how far scripted play gets.
-const lastBotRun = async (root: string, after: number): Promise<string> => {
+// The bot the blind comparison replays: the latest play-mode run among the rows
+// this turn added, with the decider it used. An exploration bot wanders on
+// purpose and says nothing about how far scripted play gets, so it gives none.
+const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]> => {
   const text = await NodeFSP.readFile(
     NodePath.join(root, ".studio", "bot-results.jsonl"),
     "utf8",
   ).catch(() => "");
-  const rows = text
+  const row = text
     .split("\n")
     .filter(Boolean)
     .slice(after)
     .flatMap((line) => {
-      const row = decodeBotRow(line);
-      return row._tag === "Some" ? [row.value] : [];
-    });
-  return (rows.findLast((row) => row.mode !== "explore") ?? rows.at(-1))?.file ?? "";
+      const decoded = decodeBotRow(line);
+      return decoded._tag === "Some" ? [decoded.value] : [];
+    })
+    .findLast((each) => each.mode !== "explore");
+  if (row === undefined) return null;
+  return { file: row.file, decider: row.decider === "jev" ? "jev" : "policy" };
 };
 
 export const runRole = Effect.fn("GameRun.runRole")(function* (
@@ -364,7 +370,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     sourceAfter: step.source ? yield* sourceId() : "",
     botsBefore,
     botsAfter: step.bots ? yield* Effect.promise(() => botRunCount(root)) : 0,
-    bot: step.bots ? yield* Effect.promise(() => lastBotRun(root, botsBefore)) : "",
+    bot: step.bots ? yield* Effect.promise(() => lastBotRun(root, botsBefore)) : null,
   } satisfies StepResult;
 });
 

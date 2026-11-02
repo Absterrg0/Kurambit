@@ -10,8 +10,15 @@ const TOOL_RULE =
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYTEST_LINE = "Read ./studio-skills/playtest.md before you play. ";
 const B = GAME_EXPLORE_BOUNDS;
+const CALL_S = B.maxSequenceMsPerCall / 1000;
+const SESSION_S = B.maxTotalNominalMs / 1000;
+/** Each blind player's in-game input across all its sessions; more voids the sample. */
+export const SAMPLE_INPUT_MS = 120_000;
+const SAMPLE_S = SAMPLE_INPUT_MS / 1000;
+const SAMPLE_SESSIONS = Math.ceil(SAMPLE_INPUT_MS / B.maxTotalNominalMs);
 // Slow models spend ~10 s per call, so one short step per call reaches only the opening.
-const BATCH = `Batch your input: each game_explore_act call takes up to ${B.maxStepsPerCall} steps and ${B.maxSequenceMsPerCall / 1000} seconds of input, and a session allows ${B.maxCalls} calls and ${B.maxTotalNominalMs / 1000} seconds, so one short step per call runs out of calls long before input. Learn a control's response with one short hold, then send several held steps per call (keys for combinations), holding a control you understand for 2-5 seconds. Study the frame after each batch. `;
+// Every number here is a bound the explore service rejects past.
+const BATCH = `Batch your input: a session allows ${B.maxCalls} game_explore_act calls, ${B.maxTotalSteps} steps and ${SESSION_S} seconds of input, so one short step per call runs out of calls long before input. Learn a control's response with one short hold, then send 2-3 held steps per call (keys for combinations), at most ${CALL_S} seconds of input per call in total and at most ${B.maxStepsPerCall} steps. Study the frame after each batch. `;
 const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. ${BATCH}`;
 
 export const CONTINUE = "Continue where you left off. Reply briefly, then keep working.";
@@ -104,19 +111,20 @@ export const roundQuestion = (direction: string): string =>
   `The prior reviewer named this unresolved play weakness and direction, not a claim about either build: ${direction}. Is it better handled, and is the game better to play overall?`;
 
 export const samplePlay = (question: string, notes: string): string =>
-  `${PLAYBOOK}${PLAYTEST_LINE}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and 120-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw; multiple sessions share the same 120 seconds, and one session holds at most ${B.maxTotalNominalMs / 1000} of them, so open a second when the first is spent. Batch several held steps into every act call so the budget reaches past the opening. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${notes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`;
+  `${PLAYBOOK}${PLAYTEST_LINE}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and ${SAMPLE_S}-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw. Your sessions share those ${SAMPLE_S} seconds and one session holds at most ${SESSION_S} of them, so use at most ${SAMPLE_SESSIONS} sessions and open the next only when the current one is spent; input past ${SAMPLE_S} seconds in total voids your sample. Batch 2-3 held steps into every act call so the budget reaches past the opening. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${notes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`;
 
 export const sampleMore = (usedSeconds: number, notes: string): string =>
-  `You used about ${usedSeconds} seconds of your 120-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close), several held steps per act call with longer holds for the controls you already know: push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
+  `You used about ${usedSeconds} seconds of your ${SAMPLE_S}-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close), 2-3 held steps per act call and at most ${CALL_S} seconds of input per call, with longer holds for the controls you already know. A session holds at most ${SESSION_S} seconds and ${B.maxTotalSteps} steps; use at most ${SAMPLE_SESSIONS} sessions in all, since input past ${SAMPLE_S} seconds in total voids your sample. Push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
 
 export const sampleWrite = (notes: string): string =>
   `Stop playing, now write it. Rewrite ${notes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${notes}.`;
 
 // Reports are anonymous and in random order; the file carries a neutral id, so
 // nothing on disk tells the comparator which build is which while it works.
-// Bot facts come from one scripted bot run per build for the same real time.
+// Bot facts reach the comparator only when the bot ran on both builds, so an
+// error never points at one of them.
 const BOT_FACTS =
-  "Each report ends with bot facts: the same scripted bot played each build for the same real time, and its ending and the game's final probe values are recorded. Bot facts measure what scripted play reaches, not how play feels; weigh them as facts next to the play report. A bot that could not run on a build may rely on state that build does not expose; that says nothing about how the build plays. ";
+  "Each report ends with bot facts: the same scripted bot played each build for the same real time, and its ending and the game's final probe values are recorded. The tester wrote that bot against one of these two builds, so how far it gets is a fact about scripted play on each build, not a verdict on either; it measures what scripted play reaches, not how play feels. Weigh bot facts as facts next to the play report. ";
 
 export const compare = (
   question: string,

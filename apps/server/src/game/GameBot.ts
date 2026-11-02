@@ -216,21 +216,30 @@ const ENDINGS: Readonly<Record<string, string>> = {
 };
 export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
 
+// Numbers first, then flags: progress, scores and counts read as how far a run got.
+const finalRank = (value: number | boolean | string | null): number =>
+  typeof value === "number" ? 0 : typeof value === "boolean" ? 1 : 2;
+
 /**
  * The game's last probe state, cut to a few primitive keys: a result row and a
  * comparator prompt carry it, so it stays small whatever the game exposes.
  */
 export const botFinalState = (
   state: Readonly<Record<string, number | boolean | string | null>>,
-): Record<string, number | boolean | string | null> =>
-  Object.fromEntries(
-    Object.entries(state)
-      .slice(0, 12)
-      .map(([key, value]) => [
-        key.slice(0, 40),
-        typeof value === "string" ? value.slice(0, 60) : value,
-      ]),
+): Record<string, number | boolean | string | null> => {
+  const entries = Object.entries(state);
+  // The sort is stable, so a game's own key order holds within each kind.
+  const kept =
+    entries.length <= 12
+      ? entries
+      : entries.toSorted(([, a], [, b]) => finalRank(a) - finalRank(b)).slice(0, 12);
+  return Object.fromEntries(
+    kept.map(([key, value]) => [
+      key.slice(0, 40),
+      typeof value === "string" ? value.slice(0, 60) : value,
+    ]),
   );
+};
 
 const posOf = (obs: Record<string, unknown>): [number, number, number] | null => {
   const probe = obs["probe"] as Record<string, unknown> | null | undefined;
