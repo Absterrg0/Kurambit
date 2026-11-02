@@ -206,6 +206,32 @@ const asGameState = (value: unknown): Record<string, number | boolean | string |
   return out;
 };
 
+// The bot's own status word in plain terms; anything else it declared stays as said.
+const ENDINGS: Readonly<Record<string, string>> = {
+  done: "won",
+  failed: "lost",
+  budget: "timed out",
+  stalled: "stalled",
+  error: "error",
+};
+export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
+
+/**
+ * The game's last probe state, cut to a few primitive keys: a result row and a
+ * comparator prompt carry it, so it stays small whatever the game exposes.
+ */
+export const botFinalState = (
+  state: Readonly<Record<string, number | boolean | string | null>>,
+): Record<string, number | boolean | string | null> =>
+  Object.fromEntries(
+    Object.entries(state)
+      .slice(0, 12)
+      .map(([key, value]) => [
+        key.slice(0, 40),
+        typeof value === "string" ? value.slice(0, 60) : value,
+      ]),
+  );
+
 const posOf = (obs: Record<string, unknown>): [number, number, number] | null => {
   const probe = obs["probe"] as Record<string, unknown> | null | undefined;
   const player = probe?.["player"] as { x?: unknown; y?: unknown; z?: unknown } | null | undefined;
@@ -2671,6 +2697,9 @@ const make = Effect.gen(function* () {
                 runId,
                 seconds: one.gameSeconds,
                 won: one.status.state === "done",
+                ending: botEnding(one.status.state),
+                note: one.status.note.slice(0, 160),
+                final: botFinalState(one.finalState),
                 video: videoPath,
                 findings: one.findings.length,
                 mode,

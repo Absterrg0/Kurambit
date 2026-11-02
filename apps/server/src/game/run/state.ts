@@ -104,6 +104,14 @@ const Step = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
   Schema.Struct({ kind: Schema.Literal("facts"), id: Schema.Number }),
+  // One scripted bot run on one build, in a checkout of its own at that sha.
+  Schema.Struct({
+    kind: Schema.Literal("bot"),
+    id: Schema.Number,
+    sha: Schema.String,
+    file: Schema.String,
+    seconds: Schema.Number,
+  }),
   Schema.Struct({
     kind: Schema.Literal("note"),
     id: Schema.Number,
@@ -149,8 +157,23 @@ const Judge = Schema.Struct({
 });
 export type Judge = typeof Judge.Type;
 
+// How the same bot ended on one build: an ending word ("error" when it could
+// not run) and the game's last primitive probe values.
+const BotFact = Schema.Struct({
+  side: Side,
+  ending: Schema.String,
+  seconds: Schema.Number,
+  final: Schema.Record(
+    Schema.String,
+    Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
+  ),
+  note: Schema.String,
+});
+export type BotFact = typeof BotFact.Type;
+
 // One blind comparison: x and y each played once by fresh worktree players,
-// then fresh comparators on those two reports with A=x and (for rounds) A=y.
+// then the round's tester bot on each (when it has one), then fresh
+// comparators on those two reports with A=x and (for rounds) A=y.
 const Compare = Schema.Struct({
   question: Schema.String,
   x: Schema.String,
@@ -158,6 +181,9 @@ const Compare = Schema.Struct({
   xFirst: Schema.Boolean,
   orders: Schema.Array(Side),
   samples: Schema.Array(Sample),
+  // Older run.json files have no bot facts.
+  bot: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  bots: Schema.Array(BotFact).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   judges: Schema.Array(Judge),
 });
 export type Compare = typeof Compare.Type;
@@ -197,6 +223,8 @@ const Round = Schema.TaggedStruct("round", {
   jev: Schema.Boolean,
   thread: Schema.NullOr(ThreadId),
   botsBefore: Schema.Number,
+  // The bot file the tester last ran this round. Older run.json files have none.
+  bot: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   testerNotes: Schema.String,
   cmp: Schema.NullOr(Compare),
   outcome: Schema.Literals(["", "merge", "drop", "hold"]),

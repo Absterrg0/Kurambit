@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import {
+  GAME_EXPLORE_BOUNDS,
   GameActionResult,
   GameBlenderCodeInput,
   GameBlenderCodeResult,
@@ -231,8 +232,7 @@ const ExploreStartTool = Tool.make("game_explore_start", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const ExploreActTool = Tool.make("game_explore_act", {
-  description:
-    "Run one short input batch (1–6 steps, at most 10 s nominal) in an exploration session and observe what happened: the current probe, one persisted screenshot path (null with a reason when the session has no display) and bounded console text, plus visible screenText, interactive ui controls, script/engine errors, per-ui-step receipt and per-inspect-step read-only values; use ui {id, action} for real mouse input at a listed control and inspect {path} for read-only reflection. The player stays paused between calls, so observations cost no game time. Descriptive only, never a verdict.",
+  description: `Run one input batch (1–${GAME_EXPLORE_BOUNDS.maxStepsPerCall} steps, at most ${GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall / 1000} s nominal) in an exploration session and observe what happened: the current probe, one persisted screenshot path (null with a reason when the session has no display) and bounded console text, plus visible screenText, interactive ui controls, script/engine errors, per-ui-step receipt and per-inspect-step read-only values; use ui {id, action} for real mouse input at a listed control and inspect {path} for read-only reflection. A session allows ${GAME_EXPLORE_BOUNDS.maxCalls} calls and ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, so batch: after one short hold shows how a control responds, send several held steps per call with longer holds (2–5 s) for controls you know. Native games stay paused between calls; three.js games keep running in real time. Descriptive only, never a verdict.`,
   parameters: GameExploreActInput,
   success: GameExploreActResult,
   failure,

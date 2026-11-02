@@ -69,6 +69,28 @@ const STOP_WAIT_MS = 60_000;
 const ms = (value: DateTime.Utc | null | undefined) =>
   value == null ? null : DateTime.toEpochMillis(value);
 
+const BotRow = Schema.Struct({ file: Schema.String, mode: Schema.optionalKey(Schema.String) });
+const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
+
+// The bot the blind comparison replays: the latest win-bot run among the rows
+// this turn added, else its latest run of any mode. An exploration bot wanders
+// on purpose, so it says less about how far scripted play gets.
+const lastBotRun = async (root: string, after: number): Promise<string> => {
+  const text = await NodeFSP.readFile(
+    NodePath.join(root, ".studio", "bot-results.jsonl"),
+    "utf8",
+  ).catch(() => "");
+  const rows = text
+    .split("\n")
+    .filter(Boolean)
+    .slice(after)
+    .flatMap((line) => {
+      const row = decodeBotRow(line);
+      return row._tag === "Some" ? [row.value] : [];
+    });
+  return (rows.findLast((row) => row.mode !== "explore") ?? rows.at(-1))?.file ?? "";
+};
+
 export const runRole = Effect.fn("GameRun.runRole")(function* (
   deps: RoleDeps,
   ctx: RoleContext,
@@ -342,6 +364,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     sourceAfter: step.source ? yield* sourceId() : "",
     botsBefore,
     botsAfter: step.bots ? yield* Effect.promise(() => botRunCount(root)) : 0,
+    bot: step.bots ? yield* Effect.promise(() => lastBotRun(root, botsBefore)) : "",
   } satisfies StepResult;
 });
 

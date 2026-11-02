@@ -57,7 +57,10 @@ the policy leads the next round's direction with them.
 
 Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
 review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
-blind compare in both orders, keep or revert, reviewer notes for the next round. The only hard
+blind compare in both orders, keep or revert, reviewer notes for the next round. Before the
+comparators run, the tester's last bot plays both builds in fresh worktrees for the same real time;
+its ending and final probe values sit beside each anonymous report as facts, and a bot that cannot
+run on one build is reported, never a reason to drop the round. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
 committed; a missing verdict keeps the art.

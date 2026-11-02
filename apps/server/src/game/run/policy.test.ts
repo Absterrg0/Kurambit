@@ -48,6 +48,7 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   sourceAfter: `s${step.id}`,
   botsBefore: 0,
   botsAfter: 1,
+  bot: "",
   ...patch,
 });
 const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
@@ -94,7 +95,11 @@ const drive = (
 
 // A responder for a whole round. v1 answers order 1 (A=candidate), v2 order 2 (A=best).
 const roundResponder =
-  (v1: string, v2: string, opts: { bootOk?: boolean; changed?: boolean } = {}): Responder =>
+  (
+    v1: string,
+    v2: string,
+    opts: { bootOk?: boolean; changed?: boolean; bot?: (sha: string) => Policy.StepResult } = {},
+  ): Responder =>
   (step, state) => {
     if (step.kind === "git") {
       if (step.op._tag === "start-round") return gitOk({ branch: "round-1", sha: "best" });
@@ -106,6 +111,13 @@ const roundResponder =
       return { kind: "boot", ok: opts.bootOk ?? true, detail: "check failed" };
     if (step.kind === "facts") return { kind: "facts", jev: false, code: "facts." };
     if (step.kind === "note") return { kind: "note" };
+    if (step.kind === "bot")
+      return (
+        opts.bot?.(step.sha) ?? {
+          kind: "bot",
+          fact: { ending: "timed out", seconds: 140, final: {}, note: "" },
+        }
+      );
     if (step.role.startsWith("compare")) {
       const t = state.task;
       const aIs = t._tag === "round" ? t.cmp?.judges.at(-1)?.aIs : "x";
@@ -293,6 +305,103 @@ describe("rounds", () => {
   });
 });
 
+describe("bot facts", () => {
+  // The tester's turns report the bot they ran; each build's bot outcome is keyed by sha.
+  const withBot =
+    (outcomes: Record<string, Policy.StepResult>, bot = ".studio/bot/win.mjs"): Responder =>
+    (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("tester"))
+        return done(step, {
+          bot: step.read.length === 0 ? bot : "",
+          files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough to count"])),
+        });
+      return roundResponder("A", "B", { bot: (sha) => outcomes[sha]! })(step, state);
+    };
+  const fact = (ending: string, final: Record<string, number>, note = ""): Policy.StepResult => ({
+    kind: "bot",
+    fact: { ending, seconds: ending === "error" ? 0 : 148, final, note },
+  });
+  // Every comparator prompt the round sent.
+  const comparePrompts = (respond: Responder) => {
+    const prompts: string[] = [];
+    const seeing: Responder = (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("compare")) prompts.push(step.prompt);
+      return respond(step, state);
+    };
+    const run = drive(atRound(), seeing, (s) => s.rounds.length === 1);
+    return { ...run, prompts };
+  };
+
+  it("runs the tester's bot on both builds after the plays and gives each report its facts", () => {
+    const { steps, prompts, state } = comparePrompts(
+      withBot({ cand: fact("won", { jars: 5 }), best: fact("timed out", { jars: 2 }) }),
+    );
+    expect(steps.slice(steps.indexOf("restore-commit"), steps.indexOf("compare"))).toEqual([
+      "restore-commit",
+      "sample",
+      "sample",
+      "sample",
+      "sample",
+      "bot",
+      "bot",
+    ]);
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("not how play feels");
+      expect(prompt).toContain(
+        'ended won after 148 seconds of game time. Final probe values: {"jars":5}',
+      );
+      expect(prompt).toContain(
+        'ended timed out after 148 seconds of game time. Final probe values: {"jars":2}',
+      );
+    }
+    // Order 1 shows the candidate as A, order 2 shows the best as A.
+    const factsOf = (prompt: string, label: "A" | "B") =>
+      prompt.split(`Build ${label}. `)[1]!.split("\n\nBuild ")[0]!;
+    expect(factsOf(prompts[0]!, "A")).toContain('{"jars":5}');
+    expect(factsOf(prompts[1]!, "A")).toContain('{"jars":2}');
+    expect(state.rounds[0]?.kept).toBe(true);
+  });
+
+  it("skips bot facts when the tester ran no bot this round", () => {
+    const { steps, prompts } = comparePrompts(roundResponder("A", "B"));
+    expect(steps).not.toContain("bot");
+    expect(prompts.every((p) => !p.includes("Bot facts"))).toBe(true);
+  });
+
+  it("reports a bot that cannot run on one build as a fact and still judges the round", () => {
+    const { steps, prompts, state } = comparePrompts(
+      withBot({
+        cand: fact("lost", { level: 3 }),
+        best: fact("error", {}, "bot file does not load: no node named Jar"),
+      }),
+    );
+    expect(steps.filter((s) => s === "bot")).toHaveLength(2);
+    expect(steps.filter((s) => s === "compare")).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt).toContain(
+        "could not run on this build (bot file does not load: no node named Jar)",
+      );
+      expect(prompt).toContain(
+        'ended lost after 148 seconds of game time. Final probe values: {"level":3}',
+      );
+    }
+    expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
+  });
+
+  it("skips bot facts when the budget fits judging but not the bot runs", () => {
+    const budget = { budgetEndsAt: T0 + 30 * MIN };
+    const atRestore = drive(
+      atRound(budget),
+      withBot({}),
+      (s) => s.task._tag === "round" && s.task.phase === "restore",
+    ).state;
+    const { steps } = drive(atRestore, withBot({}), () => false, T0 + 8 * MIN);
+    expect(steps).toContain("compare");
+    expect(steps).not.toContain("bot");
+  });
+});
+
 describe("art review", () => {
   const atArt = base({
     trunk: "main",
@@ -436,6 +545,13 @@ describe("resume", () => {
   // reattaches to its thread and a git op re-runs (every op is repeatable).
   it("re-runs the persisted step of every kind after a round trip through run.json", () => {
     const seen = new Set<string>();
+    const respond: Responder = (step, s) =>
+      step.kind === "role" && step.role.startsWith("tester")
+        ? done(step, {
+            bot: ".studio/bot/win.mjs",
+            files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough"])),
+          })
+        : roundResponder("A", "B")(step, s);
     let state = atRound();
     for (let guard = 0; guard < 60 && state.rounds.length === 0; guard += 1) {
       const planned = Policy.plan(state, { now: T0, coin: 0.7, id: `p${guard}` });
@@ -450,7 +566,7 @@ describe("resume", () => {
       state = Policy.applyResult(
         planned.state,
         planned.step,
-        roundResponder("A", "B")(planned.step, planned.state),
+        respond(planned.step, planned.state),
         { now: T0, coin: 0.7, id: `q${guard}` },
       ).state;
     }
@@ -458,6 +574,7 @@ describe("resume", () => {
       "role",
       "boot",
       "facts",
+      "bot",
       "git:start-round",
       "git:commit",
       "git:restore-commit",

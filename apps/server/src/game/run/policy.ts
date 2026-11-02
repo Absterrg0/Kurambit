@@ -4,6 +4,7 @@ import type { ThreadId } from "@kurambit/contracts";
 import * as Roles from "./roles.ts";
 import type {
   Block,
+  BotFact,
   Compare,
   Evidence,
   GitOp,
@@ -42,6 +43,10 @@ const CAP = {
 };
 // Both blind plays plus both comparator verdicts, uncorrected.
 const COMPARE_MIN_MS = 2 * (CAP.judge + CAP.write) + 2 * CAP.write;
+// The round's bot plays each build this long in real time, a fresh checkout
+// and engine import included in its share; skipped when the budget lacks it.
+const BOT_SECONDS = 150;
+const BOT_FACTS_MS = 2 * (BOT_SECONDS * 1000 + 2 * MIN);
 // A round needs its block plus tester, judging and review.
 const ROUND_RESERVE_MS = 22 * MIN;
 const FLOOR_MS = 2 * MIN;
@@ -65,6 +70,8 @@ export type RoleDone = {
   readonly sourceAfter: string;
   readonly botsBefore: number;
   readonly botsAfter: number;
+  /** The bot file this turn last ran, "" when it ran none. */
+  readonly bot: string;
 };
 /** One shape for every git op; each op fills the fields it knows. */
 export type GitOutcome = {
@@ -87,6 +94,7 @@ export type StepResult =
   | { readonly kind: "git"; readonly git: GitOutcome }
   | { readonly kind: "boot"; readonly ok: boolean; readonly detail: string }
   | { readonly kind: "facts"; readonly jev: boolean; readonly code: string }
+  | { readonly kind: "bot"; readonly fact: Omit<BotFact, "side"> }
   | { readonly kind: "note" };
 
 export type Planned =
@@ -248,6 +256,7 @@ const newCompare = (
   y: string,
   xFirst: boolean,
   orders: Side[],
+  bot = "",
 ): Compare => ({
   question,
   x,
@@ -255,6 +264,8 @@ const newCompare = (
   xFirst,
   orders,
   samples: [],
+  bot,
+  bots: [],
   judges: [],
 });
 const lastSample = (c: Compare, side: Side): Sample | null =>
@@ -266,12 +277,14 @@ const judgeFile = (j: Pick<Judge, "id">) => `.studio/comparisons/${j.id}.md`;
 
 type CompareMove =
   | { readonly kind: "sample"; readonly side: Side; readonly current: Sample | null }
+  | { readonly kind: "bot"; readonly side: Side }
   | { readonly kind: "judge"; readonly aIs: Side; readonly current: Judge | null }
   | { readonly kind: "done"; readonly gate: string | null };
 
 // Each build is played once, in random order with equal caps; a sample without
-// usable evidence is replayed once. Each order then gets a fresh comparator,
-// and a missing verdict one fresh retry on the same reports.
+// usable evidence is replayed once. The round's bot then plays each build, and
+// each order gets a fresh comparator, a missing verdict one fresh retry on the
+// same reports.
 const compareMove = (c: Compare): CompareMove => {
   for (const side of c.xFirst ? (["x", "y"] as const) : (["y", "x"] as const)) {
     const entries = c.samples.filter((s) => s.side === side);
@@ -285,6 +298,9 @@ const compareMove = (c: Compare): CompareMove => {
     lastSample(c, "y")?.evidence ?? null,
   );
   if (gate !== null) return { kind: "done", gate };
+  if (c.bot.length > 0)
+    for (const side of ["x", "y"] as const)
+      if (!c.bots.some((b) => b.side === side)) return { kind: "bot", side };
   for (const aIs of c.orders) {
     const entries = c.judges.filter((j) => j.aIs === aIs);
     const last = entries.at(-1) ?? null;
@@ -301,8 +317,28 @@ const finalJudge = (c: Compare, aIs: Side): Judge | null => {
   return retry !== undefined && retry.verdict !== "NONE" ? retry : (first ?? null);
 };
 
+// Facts beside each anonymous report; an error is a fact about the bot on that build.
+const botReport = (c: Compare, side: Side): string => {
+  const f = c.bots.find((b) => b.side === side);
+  if (f === undefined) return "";
+  if (f.ending === "error")
+    return `\nBot facts: the scripted bot could not run on this build (${f.note || "no detail"}).`;
+  return `\nBot facts: the scripted bot played this build for ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.`;
+};
+
 const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; step: Step } => {
   const move = compareMove(c);
+  if (move.kind === "bot")
+    return {
+      cmp: c,
+      step: {
+        kind: "bot",
+        id,
+        sha: move.side === "x" ? c.x : c.y,
+        file: c.bot,
+        seconds: BOT_SECONDS,
+      },
+    };
   if (move.kind === "sample") {
     const at = move.side === "x" ? c.x : c.y;
     if (move.current === null) {
@@ -363,13 +399,20 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
       };
       const report = (side: Side) => {
         const s = lastSample(c, side);
-        return `Recorded play: ${JSON.stringify(s?.evidence ?? null)}\n${s?.notes ?? ""}`;
+        return `Recorded play: ${JSON.stringify(s?.evidence ?? null)}\n${s?.notes ?? ""}${botReport(c, side)}`;
       };
       const other: Side = move.aIs === "x" ? "y" : "x";
       const step = role(id, {
         role: `compare-${j.id}`,
         title: "studio blind comparison",
-        prompt: Roles.compare(c.question, report(move.aIs), report(other), j.aFirst, judgeFile(j)),
+        prompt: Roles.compare(
+          c.question,
+          report(move.aIs),
+          report(other),
+          j.aFirst,
+          judgeFile(j),
+          c.bots.length > 0,
+        ),
         capMs: CAP.write,
         read: [judgeFile(j)],
       });
@@ -390,6 +433,15 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
 };
 
 const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
+  if (res.kind === "bot") {
+    const move = compareMove(c);
+    if (move.kind !== "bot") return c;
+    if (res.fact.ending === "error")
+      logs.push(
+        `bot facts: the bot could not run on ${move.side === "x" ? c.x : c.y}: ${res.fact.note}`,
+      );
+    return { ...c, bots: [...c.bots, { side: move.side, ...res.fact }] };
+  }
   const si = c.samples.findIndex((s) => s.phase !== "done");
   if (si >= 0) {
     const s = c.samples[si]!;
@@ -466,6 +518,11 @@ const comparisonFile = (
         evidence: side((s) => s?.evidence ?? null),
         players: side((s) => s?.thread ?? null),
         reports: side((s) => s?.notes ?? ""),
+        bot: c.bot.length === 0 ? null : c.bot,
+        bots: {
+          [names.x]: c.bots.find((b) => b.side === "x") ?? null,
+          [names.y]: c.bots.find((b) => b.side === "y") ?? null,
+        },
         gate,
         verdicts: c.orders.map((aIs) => {
           const j = finalJudge(c, aIs);
@@ -501,6 +558,7 @@ const newRound = (state: RunState, now: number): Round => {
     jev: false,
     thread: null,
     botsBefore: 0,
+    bot: "",
     testerNotes: "",
     cmp: null,
     outcome: "",
@@ -1074,21 +1132,28 @@ const applyRound = (
       return at({ phase: "tester", jev: res.kind === "facts" && res.jev });
     case "tester":
       return res.kind === "done"
-        ? at({ phase: "tester-write", thread: res.threadId, botsBefore: res.botsBefore })
+        ? at({
+            phase: "tester-write",
+            thread: res.threadId,
+            botsBefore: res.botsBefore,
+            bot: res.bot || r.bot,
+          })
         : at({ phase: "restore" });
     case "tester-write":
     case "tester-duty": {
+      const bot = (res.kind === "done" && res.bot) || r.bot;
       const notes = res.kind === "done" ? textOf(res, `.studio/tester-${r.n}.md`) : "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
       if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
-        return at({ phase: "tester-duty", testerNotes });
+        return at({ phase: "tester-duty", testerNotes, bot });
       }
       const testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
       const note = testerNotes.length > 20 ? r.record.note : noteOf(r, "tester write failed");
       return at({
         phase: "restore",
         testerNotes,
+        bot,
         record: { ...r.record, testerNote, ...(note === undefined ? {} : { note }) },
       });
     }
@@ -1101,7 +1166,17 @@ const applyRound = (
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
-      const cmp = newCompare(question, r.candidate, s.best, bit(input.coin, 0), ["x", "y"]);
+      const botFits = remaining(s, now) >= COMPARE_MIN_MS + BOT_FACTS_MS;
+      if (r.bot.length > 0 && !botFits)
+        logs.push(`round ${r.n}: budget leaves no time for bot facts; judging on play reports`);
+      const cmp = newCompare(
+        question,
+        r.candidate,
+        s.best,
+        bit(input.coin, 0),
+        ["x", "y"],
+        botFits ? r.bot : "",
+      );
       return at({ phase: "compare", cmp });
     }
     case "compare": {

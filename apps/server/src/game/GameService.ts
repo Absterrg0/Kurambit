@@ -277,6 +277,14 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBotRunInput,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
+    /**
+     * The same bot run in a checkout of the game no thread owns, such as the
+     * production run's checkout of one build for its blind comparison.
+     */
+    readonly botRunIn: (
+      root: string,
+      input: GameBotRunInput,
+    ) => Effect.Effect<GameBotRunResult, GameOperationError>;
     /** Rebuild the facts-only player report across this game's bot runs. */
     readonly botReport: (
       threadId: ThreadId,
@@ -456,6 +464,26 @@ const make = Effect.gen(function* () {
   });
   const snapshot = (root: string, godotProject: string) =>
     Effect.promise((signal) => snapshotBuildSource(root, godotProject, { signal }));
+  // No exclusive() here: a real-time run takes minutes and must not hold the
+  // game's operation lock. The bot service refuses a second concurrent run
+  // per checkout as busy.
+  const botRunIn = Effect.fnUntraced(function* (root: string, input: GameBotRunInput) {
+    const manifest = yield* projects.read(root);
+    // Static sources need no editor import; the bot plays the folder.
+    if (manifest.engine.name !== "three") {
+      const imported = yield* importGame(root);
+      if (!imported.success)
+        return yield* new GameOperationError({
+          operation: "Bot run",
+          path: imported.path ?? root,
+          reason: "command-failed",
+          detail: `The Godot import failed before the bot run started.\n${imported.message}`.slice(
+            -2000,
+          ),
+        });
+    }
+    return yield* gameBot.run(root, input);
+  });
   const importGame = Effect.fnUntraced(function* (root: string, projectDir?: string) {
     const { backend, godot, cwd, godotProject } = yield* engine(root);
     const executed = yield* backend.importProject({
@@ -2526,28 +2554,8 @@ const make = Effect.gen(function* () {
     exploreAct: (threadId, input) => exploreAct(threadId, input),
     exploreClose: (threadId, input) => exploreClose(threadId, input),
     botRun: (threadId, input) =>
-      Effect.gen(function* () {
-        // No exclusive() here: a real-time run takes minutes and must not
-        // hold the game's operation lock. The bot service refuses a second
-        // concurrent run per game as busy.
-        const root = yield* projects.resolve(threadId);
-        const manifest = yield* projects.read(root);
-        // Static sources need no editor import; the bot plays the folder.
-        if (manifest.engine.name !== "three") {
-          const imported = yield* importGame(root);
-          if (!imported.success)
-            return yield* new GameOperationError({
-              operation: "Bot run",
-              path: imported.path ?? root,
-              reason: "command-failed",
-              detail:
-                `The Godot import failed before the bot run started.\n${imported.message}`.slice(
-                  -2000,
-                ),
-            });
-        }
-        return yield* gameBot.run(root, input);
-      }),
+      Effect.flatMap(projects.resolve(threadId), (root) => botRunIn(root, input)),
+    botRunIn: (root, input) => botRunIn(root, input),
     botView: (threadId, input) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);

@@ -35,6 +35,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
+import { runBotFact } from "./run/botFacts.ts";
 import { reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
 import { makeGit } from "./run/git.ts";
@@ -217,6 +218,7 @@ const describe = (step: State.Step): string => {
   if (step.kind === "role")
     return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}${step.attached === null ? "" : " (reattach)"}`;
   if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
+  if (step.kind === "bot") return `step ${step.id}: bot ${step.file} at ${step.sha.slice(0, 12)}`;
   return `step ${step.id}: ${step.kind}`;
 };
 const summarize = (res: Policy.StepResult): string => {
@@ -225,6 +227,8 @@ const summarize = (res: Policy.StepResult): string => {
     return `git ok=${res.git.ok} ${res.git.branch} ${res.git.sha.slice(0, 8)} ${res.git.detail}`.trim();
   if (res.kind === "boot") return `boot ${res.ok ? "clean" : `failed: ${res.detail}`}`;
   if (res.kind === "ended" || res.kind === "failed") return `${res.kind}: ${res.reason}`;
+  if (res.kind === "bot")
+    return `bot ${res.fact.ending} after ${res.fact.seconds.toFixed(0)}s ${JSON.stringify(res.fact.final)} ${res.fact.note}`.trim();
   return res.kind;
 };
 
@@ -537,6 +541,8 @@ export const layer = (options: { readonly stateDir: string }) => {
                 code: yield* Effect.promise(() => reviewerFacts(root, state.lane)),
               } as const;
             });
+          case "bot":
+            return runBotFact(d.deps, { root, runId: state.runId, log }, step);
           case "note":
             return Effect.promise(async () => {
               for (const file of step.files)

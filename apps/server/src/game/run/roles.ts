@@ -1,5 +1,6 @@
 // Every prompt the loop sends, built from facts. About 150 words of rules; names no game,
 // genre or mechanic. Builders write; the harness plays.
+import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
 
 // Role threads have no local engine binaries and must never look for any:
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
@@ -8,7 +9,10 @@ const TOOL_RULE =
   "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYTEST_LINE = "Read ./studio-skills/playtest.md before you play. ";
-const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
+const B = GAME_EXPLORE_BOUNDS;
+// Slow models spend ~10 s per call, so one short step per call reaches only the opening.
+const BATCH = `Batch your input: each game_explore_act call takes up to ${B.maxStepsPerCall} steps and ${B.maxSequenceMsPerCall / 1000} seconds of input, and a session allows ${B.maxCalls} calls and ${B.maxTotalNominalMs / 1000} seconds, so one short step per call runs out of calls long before input. Learn a control's response with one short hold, then send several held steps per call (keys for combinations), holding a control you understand for 2-5 seconds. Study the frame after each batch. `;
+const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. ${BATCH}`;
 
 export const CONTINUE = "Continue where you left off. Reply briefly, then keep working.";
 
@@ -96,18 +100,29 @@ export const roundQuestion = (direction: string): string =>
   `The prior reviewer named this unresolved play weakness and direction, not a claim about either build: ${direction}. Is it better handled, and is the game better to play overall?`;
 
 export const samplePlay = (question: string, notes: string): string =>
-  `${PLAYBOOK}${PLAYTEST_LINE}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and 120-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw; multiple sessions share the same 120 seconds. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${notes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`;
+  `${PLAYBOOK}${PLAYTEST_LINE}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and 120-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw; multiple sessions share the same 120 seconds, and one session holds at most ${B.maxTotalNominalMs / 1000} of them, so open a second when the first is spent. Batch several held steps into every act call so the budget reaches past the opening. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${notes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`;
 
 export const sampleMore = (usedSeconds: number, notes: string): string =>
-  `You used about ${usedSeconds} seconds of your 120-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close): push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
+  `You used about ${usedSeconds} seconds of your 120-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close), several held steps per act call with longer holds for the controls you already know: push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
 
 export const sampleWrite = (notes: string): string =>
   `Stop playing, now write it. Rewrite ${notes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${notes}.`;
 
 // Reports are anonymous and in random order; the file carries a neutral id, so
 // nothing on disk tells the comparator which build is which while it works.
-export const compare = (question: string, a: string, b: string, aFirst: boolean, file: string) =>
-  `Compare these two independent play reports. Shared question: ${question} Which build better handles that flaw, and is better to play overall? Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports, not the game folder, sources or Git. Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
+// Bot facts come from one scripted bot run per build for the same real time.
+const BOT_FACTS =
+  "Each report ends with bot facts: the same scripted bot played each build for the same real time, and its ending and the game's final probe values are recorded. Bot facts measure what scripted play reaches, not how play feels; weigh them as facts next to the play report. A bot that could not run on a build may rely on state that build does not expose; that says nothing about how the build plays. ";
+
+export const compare = (
+  question: string,
+  a: string,
+  b: string,
+  aFirst: boolean,
+  file: string,
+  bots: boolean,
+) =>
+  `Compare these two independent play reports. Shared question: ${question} Which build better handles that flaw, and is better to play overall? Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. ${bots ? BOT_FACTS : ""}TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports, not the game folder, sources or Git. Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
 
 export const correct = (file: string): string =>
   `Correct only the format of ${file}, using the reports already provided. Put your declaration COMPARE: A or COMPARE: B or COMPARE: TIE alone on its own line. Put reasons in a separate paragraph below it. Do not play again or collect new evidence.`;
