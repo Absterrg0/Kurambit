@@ -68,6 +68,7 @@ const RUN_STATE_IGNORES = [
   ".studio/pick.txt",
   ".studio/next.md",
   ".studio/ship.md",
+  ".studio/art-review.md",
   ".studio/exports.json",
   ".studio/final-video.json",
   ".studio/tester-*.md",
@@ -500,20 +501,22 @@ export const layer = (options: { readonly stateDir: string }) => {
                       detail: r.ok ? "boot clean" : "check failed",
                     }) as const,
                 ),
-                Effect.catchTag("GameOperationError", (error) => {
-                  const transient =
-                    error.reason === "busy" || error.detail === "Operation cancelled.";
-                  if (transient && attempt < 3)
-                    return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
-                      Effect.andThen(Effect.sleep("5 seconds")),
-                      Effect.andThen(check(attempt + 1)),
-                    );
-                  if (error.reason === "tool-missing") return Effect.fail(error);
-                  return Effect.succeed({
-                    kind: "boot",
-                    ok: false,
-                    detail: (error.detail ?? error.reason).slice(0, 300),
-                  } as const);
+                Effect.catchTags({
+                  GameOperationError: (error) => {
+                    const transient =
+                      error.reason === "busy" || error.detail === "Operation cancelled.";
+                    if (transient && attempt < 3)
+                      return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
+                        Effect.andThen(Effect.sleep("5 seconds")),
+                        Effect.andThen(check(attempt + 1)),
+                      );
+                    if (error.reason === "tool-missing") return Effect.fail(error);
+                    return Effect.succeed({
+                      kind: "boot",
+                      ok: false,
+                      detail: (error.detail ?? error.reason).slice(0, 300),
+                    } as const);
+                  },
                 }),
               );
             return check(1);

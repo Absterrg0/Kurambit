@@ -75,8 +75,6 @@ export const GameTemplate = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   dimension: Schema.Literals(["2d", "3d"]),
-  /** The game-relative suite whose pass is the game's qualification test. Absent on lanes with no scripted suite. */
-  testSuite: Schema.optionalKey(Schema.String),
   /**
    * The scene play starts in, which the check runs after the main scene so a
    * failure in gameplay initialization cannot hide behind the menu.
@@ -90,8 +88,6 @@ export const GameTemplate = Schema.Struct({
   probe: Schema.optionalKey(Schema.Boolean),
 });
 export type GameTemplate = typeof GameTemplate.Type;
-/** The suite a game qualifies with unless its manifest names another one. */
-export const DEFAULT_GAME_TEST_SUITE = "res://tests/smoke_test.gd";
 /**
  * The starter templates the New game dialog offers. Template files live under
  * apps/server/templates/<id>/; a server test keeps this list and those folders in step.
@@ -103,7 +99,6 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     description:
       "An empty Godot project: a camera, a light, a live state probe and Web, Windows and Linux export presets.",
     dimension: "3d",
-    testSuite: DEFAULT_GAME_TEST_SUITE,
     // Blank has no menu: its main scene is the game, and the check runs it once.
     gameplayScene: "res://scenes/main.tscn",
     probe: true,
@@ -128,8 +123,9 @@ export const GameManifest = Schema.Struct({
   artDirection: Schema.String,
   // Games created before starter templates existed have no template key.
   template: Schema.optionalKey(GameTemplateId),
-  // Where the check runs the gameplay scene from; the blank template names it.
+  // Legacy and ignored: games no longer carry test suites; kept so older game.json files decode.
   testSuite: Schema.optionalKey(Schema.String),
+  // Where the check runs the gameplay scene from; the blank template names it.
   gameplayScene: Schema.optionalKey(Schema.String),
   probe: Schema.optionalKey(Schema.Boolean),
   engine: Schema.Struct({ name: GameEngineId, version: Schema.String }),
@@ -146,9 +142,6 @@ export const GameManifest = Schema.Struct({
 });
 export type GameManifest = typeof GameManifest.Type;
 export type GameAsset = typeof GameAsset.Type;
-/** The suite that owns the `test` qualification stage for this game. */
-export const gameTestSuite = (manifest: GameManifest): string =>
-  manifest.testSuite ?? DEFAULT_GAME_TEST_SUITE;
 export class GameOperationError extends Schema.TaggedError<GameOperationError>()(
   "GameOperationError",
   {

@@ -107,7 +107,7 @@ export const gameRunRoleLabel = (role: string): string => {
     case "plan":
       return "Plan";
     case "art":
-      return "Art";
+      return tail === "director" ? "Art director" : "Art";
     case "proto":
       return round === null ? "Prototype" : `Prototype ${round + 1}`;
     case "builder":

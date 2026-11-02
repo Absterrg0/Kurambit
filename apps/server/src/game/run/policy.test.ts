@@ -276,6 +276,82 @@ describe("rounds", () => {
   });
 });
 
+describe("art review", () => {
+  const atArt = base({
+    trunk: "main",
+    best: "best",
+    stage: "plan",
+    task: {
+      _tag: "stage",
+      name: "art",
+      phase: "role",
+      thread: null,
+      block: null,
+      sha: "",
+      why: "",
+      review: "",
+    },
+  });
+  // Plays the art stage with the given review text; records each role step it saw.
+  const playArt = (review: string) => {
+    const seen: State.RoleStep[] = [];
+    const respond: Responder = (step) => {
+      if (step.kind === "git") return gitOk({ sha: "art", branch: "main" });
+      if (step.kind === "boot") return { kind: "boot", ok: true, detail: "boot clean" };
+      if (step.kind !== "role") throw new Error(`unexpected ${step.kind}`);
+      seen.push(step);
+      if (step.role === "art-director")
+        return done(step, { files: { ".studio/art-review.md": review } });
+      return done(step, { threadId: ThreadId.make("art-thread") });
+    };
+    const { state, steps } = drive(
+      atArt,
+      respond,
+      (s) => s.task._tag === "stage" && s.task.name === "build",
+    );
+    return { state, steps, roles: seen };
+  };
+
+  it("commits the art as it is on KEEP", () => {
+    const { state, roles, steps } = playArt("- key.png: fine\nART: KEEP");
+    expect(roles.map((r) => r.role)).toEqual(["art", "art-director"]);
+    expect(steps.slice(-2)).toEqual(["commit", "boot"]);
+    expect(state.best).toBe("art");
+  });
+
+  it("gives one redo turn on the art thread with the defect list, then continues", () => {
+    const review =
+      "- assets/firefly.png: plain white dot, no glow; render a soft additive glow\nART: REDO";
+    const { state, roles, steps } = playArt(review);
+    expect(roles.map((r) => r.role)).toEqual(["art", "art-director", "art"]);
+    const redo = roles[2]!;
+    expect(redo.thread).toBe("art-thread");
+    expect(redo.prompt).toContain("plain white dot, no glow");
+    expect(redo.prompt).not.toContain("ART: REDO");
+    expect(steps.slice(-2)).toEqual(["commit", "boot"]);
+    expect(state.task._tag === "stage" && state.task.name).toBe("build");
+  });
+
+  it("keeps the art and logs when the verdict is malformed", () => {
+    const { roles } = playArt("looks mostly fine\nART: maybe REDO later");
+    expect(roles.map((r) => r.role)).toEqual(["art", "art-director"]);
+    const reviewing = {
+      ...atArt,
+      task: { ...atArt.task, phase: "review" as const, thread: ThreadId.make("art-thread") },
+    } as State.RunState;
+    const planned = Policy.plan(reviewing, { now: T0, coin: 0, id: "r" });
+    if (planned.kind !== "step") throw new Error("expected the review step");
+    const applied = Policy.applyResult(
+      planned.state,
+      planned.step,
+      done(planned.step, { files: { ".studio/art-review.md": "no verdict here at all" } }),
+      { now: T0, coin: 0, id: "r2" },
+    );
+    expect(applied.state.task._tag === "stage" && applied.state.task.phase).toBe("commit");
+    expect(applied.logs.join("\n")).toContain("keeping the art");
+  });
+});
+
 describe("steering", () => {
   it("puts the creator's notes ahead of next.md at round start and clears them once used", () => {
     const start = atRound({ next: "fix the jump", steer: ["make the frogs faster"] });

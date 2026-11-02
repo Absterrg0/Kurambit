@@ -28,6 +28,8 @@ const CAP = {
   proto: 8 * MIN,
   plan: 5 * MIN,
   art: 20 * MIN,
+  artReview: 6 * MIN,
+  artRedo: 12 * MIN,
   tester: 12 * MIN,
   duty: 6 * MIN,
   judge: 6 * MIN,
@@ -40,6 +42,10 @@ const COMPARE_MIN_MS = 2 * (CAP.judge + CAP.write) + 2 * CAP.write;
 // A round needs its block plus tester, judging and review.
 const ROUND_RESERVE_MS = 22 * MIN;
 const FLOOR_MS = 2 * MIN;
+// What the first full build needs after art; the art review and its redo
+// run only when they leave the build its start.
+const BUILD_RESERVE_MS = 24 * MIN;
+const ART_REVIEW = ".studio/art-review.md";
 
 export type Inputs = { readonly now: number; readonly coin: number; readonly id: string };
 
@@ -99,6 +105,8 @@ const parseStatus = (text: string) =>
 const parseShip = (text: string) => lastDeclared(text, /^SHIP:\s*(YES|NO)\s*$/gim);
 const parseCompare = (text: string) => lastDeclared(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
 const parseSelect = (text: string) => lastDeclared(text, /^SELECT:\s*(A|B)\s*$/gim);
+const ART_LINE = /^ART:\s*(KEEP|REDO)\s*$/gim;
+const parseArt = (text: string) => lastDeclared(text, ART_LINE);
 const reasonsAfter = (text: string, re: RegExp): string => {
   const lines = text.split("\n");
   const at = lines.findLastIndex((line) => re.test(line));
@@ -497,6 +505,7 @@ const stageTask = (
   block,
   sha: "",
   why: "",
+  review: "",
 });
 
 // Stages before rounds; the stage label names the last one finished.
@@ -511,7 +520,7 @@ const afterStage = (state: RunState, done: string, now: number): RunState => {
   if (done === "pick") return { ...state, stage: done, task: stageTask("plan") };
   if (done === "plan") return { ...state, stage: done, task: stageTask("art") };
   if (done === "art") {
-    const ms = fit(state, now, CAP.fullBuild, 24 * MIN);
+    const ms = fit(state, now, CAP.fullBuild, BUILD_RESERVE_MS);
     if (ms >= FLOOR_MS)
       return {
         ...state,
@@ -555,11 +564,29 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   const reject = (label: string, why: string) =>
     run({ _tag: "reject", label, why, trunk: state.trunk, best: state.best });
   const toTrunk = (message: string) => run({ _tag: "to-trunk", trunk: state.trunk, message });
+  const artCap = (cap: number) =>
+    Math.max(FLOOR_MS, fit(state, input.now, cap, BUILD_RESERVE_MS + FLOOR_MS));
   switch (t._tag) {
     case "init":
       return run({ _tag: "init" });
     case "stage": {
       const name = t.name;
+      if (t.phase === "review")
+        return act({
+          role: "art-director",
+          title: "studio art director",
+          prompt: Roles.artReview(lane),
+          capMs: artCap(CAP.artReview),
+          read: [ART_REVIEW],
+          clear: [ART_REVIEW],
+        });
+      if (t.phase === "redo")
+        return act({
+          role: "art",
+          thread: t.thread,
+          prompt: Roles.artRedo(t.review, lane),
+          capMs: artCap(CAP.artRedo),
+        });
       if (t.phase === "role")
         return name === "build"
           ? go(blockStep(id, t.block!, lane))
@@ -743,7 +770,9 @@ export const applyResult = (
   const t = s.task;
   const inCompare =
     (t._tag === "pick" && t.phase === "compare") || (t._tag === "round" && t.phase === "compare");
-  if (res.kind === "failed" && !inCompare)
+  // The run never stalls on the art reviewer: a review that cannot finish keeps the art.
+  const inArtReview = t._tag === "stage" && t.phase === "review";
+  if (res.kind === "failed" && !inCompare && !inArtReview)
     return out({ ...s, ending: "failed", lastFailure: res.reason.slice(0, 300) });
   if (
     res.kind === "done" &&
@@ -760,6 +789,30 @@ export const applyResult = (
     case "init":
       return out(afterStage({ ...s, trunk: g!.branch, best: g!.sha }, s.stage, now));
     case "stage": {
+      const artFits = (cap: number) => fit(s, now, cap, BUILD_RESERVE_MS + FLOOR_MS) >= FLOOR_MS;
+      if (t.phase === "role" && t.name === "art" && res.kind === "done") {
+        if (artFits(CAP.artReview))
+          return out({ ...s, task: { ...t, phase: "review", thread: res.threadId } });
+        logs.push("art review skipped: the budget leaves no room before the first build");
+        return out({ ...s, task: { ...t, phase: "commit", thread: res.threadId } });
+      }
+      if (t.phase === "review") {
+        const text = res.kind === "done" ? textOf(res, ART_REVIEW) : "";
+        const verdict = parseArt(text);
+        if (verdict === null)
+          logs.push(
+            `art review declared no ART: KEEP or ART: REDO${res.kind === "failed" ? ` (${res.reason})` : ""}; keeping the art`,
+          );
+        if (verdict !== "REDO") return out({ ...s, task: { ...t, phase: "commit" } });
+        if (!artFits(CAP.artRedo)) {
+          logs.push("art review asked for a redo, but the budget leaves no room; keeping the art");
+          return out({ ...s, task: { ...t, phase: "commit" } });
+        }
+        logs.push("art review: REDO; one redo turn with its defect list");
+        const defects = text.replace(ART_LINE, "").trim().slice(0, 3000);
+        return out({ ...s, task: { ...t, phase: "redo", review: defects } });
+      }
+      if (t.phase === "redo") return out({ ...s, task: { ...t, phase: "commit" } });
       if (t.phase === "role") {
         if (t.block === null || res.kind !== "done")
           return out({ ...s, task: { ...t, phase: "commit" } });

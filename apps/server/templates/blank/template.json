@@ -3,7 +3,6 @@
   "name": "Blank",
   "description": "An empty Godot project: a camera, a light, a live state probe and Web, Windows and Linux export presets.",
   "dimension": "3d",
-  "testSuite": "res://tests/smoke_test.gd",
   "gameplayScene": "res://scenes/main.tscn",
   "probe": true
 }

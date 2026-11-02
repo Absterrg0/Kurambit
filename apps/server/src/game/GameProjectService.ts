@@ -261,7 +261,7 @@ const make = Effect.gen(function* () {
             const engineDirs =
               createEngine(input) === "three"
                 ? ["web/assets"]
-                : ["godot/assets/models", "godot/scripts", "godot/tests"];
+                : ["godot/assets/models", "godot/scripts"];
             for (const relative of [
               "art/blender",
               "art/scripts",

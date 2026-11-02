@@ -11,7 +11,7 @@ import {
 /** The engine a create request builds for. Omitted means the Godot native lane. */
 export const createEngine = (input: GameCreateInput): GameEngineId => input.engine ?? "godot";
 
-/** The manifest a new game starts from; the template names the suite and scene. */
+/** The manifest a new game starts from; the template names the gameplay scene. */
 export function scaffoldManifest(input: GameCreateInput): GameManifest {
   const engine = createEngine(input);
   const template = gameTemplateForEngine(engine);
@@ -22,7 +22,6 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
     brief: input.brief,
     artDirection: input.artDirection ?? "",
     template,
-    ...(templateEntry?.testSuite === undefined ? {} : { testSuite: templateEntry.testSuite }),
     ...(templateEntry?.gameplayScene === undefined
       ? {}
       : { gameplayScene: templateEntry.gameplayScene }),

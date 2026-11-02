@@ -209,11 +209,14 @@ const Task = Schema.Union([
   Schema.TaggedStruct("init", {}),
   Schema.TaggedStruct("stage", {
     name: Schema.Literals(["vision", "plan", "art", "build"]),
-    phase: Schema.Literals(["role", "commit", "boot", "reject"]),
+    // The art stage alone passes through an independent review and at most one redo.
+    phase: Schema.Literals(["role", "review", "redo", "commit", "boot", "reject"]),
     thread: Schema.NullOr(ThreadId),
     block: Schema.NullOr(Block),
     sha: Schema.String,
     why: Schema.String,
+    // The art director's defect list, the redo's direction. Older run.json files have none.
+    review: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   }),
   Schema.TaggedStruct("proto", {
     i: Schema.Number,

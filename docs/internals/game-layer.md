@@ -14,7 +14,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 - `GameProjectService` owns game records: create (blank scaffold), open, list, resolve, inventory.
 - `GameRun` owns the production loop. Every role is a fresh ordinary Kurambit thread on the game's
   project; state is `.studio/run.json` + `.studio/rounds.jsonl` plus git, so a crash resumes from
-  the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE lines.
+  the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
 - `GameBot` plays a model-written bot file in real time on a private display and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameToolchain` manages Blender/Godot installs; `GamePreview` serves builds;
@@ -58,7 +58,9 @@ the policy leads the next round's direction with them.
 Vision, two core-loop prototypes, a blind pick, plan, art, one full build, then rounds until a ship
 review says yes, the run stalls, the creator stops it, or an optional budget ends: builder block, boot check, tester play with a bot run,
 blind compare in both orders, keep or revert, reviewer notes for the next round. The only hard
-checks are boots, exports and keep-or-revert verdicts.
+checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
+renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
+committed; a missing verdict keeps the art.
 
 ## Why this shape
 
