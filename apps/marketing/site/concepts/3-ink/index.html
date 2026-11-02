@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kurambit · The fox's workshop</title>
+    <link rel="icon" href="../../favicon.ico" />
+    <link rel="stylesheet" href="../shared/fonts.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="../shared/concept.js" defer></script>
+  </head>
+  <body>
+    <aside class="spine" aria-hidden="true">
+      <span>Kurambit</span>
+      <span>Game studio</span>
+      <span>Est. 2026</span>
+    </aside>
+
+    <header class="top">
+      <a class="name" href="#">Kurambit</a>
+      <nav aria-label="Sections">
+        <a href="#plates">Plates</a>
+        <a href="#works">Works</a>
+        <a href="#guestbook">Guestbook</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <img class="kanji" src="../shared/kitsune.webp" alt="" width="600" height="496" />
+        <div class="hero-copy">
+          <p class="kicker">The fox's workshop · 狐の工房</p>
+          <h1>Games, made by an agent that <em>plays</em> them.</h1>
+          <p class="lede">
+            Kurambit is a quiet studio for your coding agent. Give it one line about a game. It
+            builds in Godot and Blender, plays every build, and lets a blind judge decide what
+            stays.
+          </p>
+          <a class="brush-link" href="#guestbook">Sign the guestbook</a>
+        </div>
+        <figure class="hero-fox">
+          <img
+            src="../../fox-ink.webp"
+            alt="Kurambit's fox, ink on paper"
+            width="760"
+            height="1150"
+          />
+          <span class="seal" aria-hidden="true"><img src="../shared/kitsune.webp" alt="" /></span>
+        </figure>
+      </section>
+
+      <section class="plates" id="plates">
+        <header class="plates-head">
+          <span class="count">I — IV</span>
+          <h2>Four strokes,<br />every round.</h2>
+        </header>
+        <ol>
+          <li data-reveal>
+            <span class="numeral">I</span>
+            <h3>The brief</h3>
+            <p>
+              One line is enough. “A small game about a lighthouse keeper guiding ships through
+              fog.”
+            </p>
+          </li>
+          <li data-reveal>
+            <span class="numeral">II</span>
+            <h3>The making</h3>
+            <p>Your agent writes the engine project and models in Blender, keeping every source.</p>
+          </li>
+          <li data-reveal>
+            <span class="numeral">III</span>
+            <h3>The playing</h3>
+            <p>A separate tester sits with each build and notes what it truly saw.</p>
+          </li>
+          <li data-reveal>
+            <span class="numeral">IV</span>
+            <h3>The judging</h3>
+            <p>Two builds, unsigned. Only the better one is kept.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="works" id="works">
+        <header class="plates-head">
+          <span class="count">Works</span>
+          <h2>From the studio.</h2>
+        </header>
+        <div class="scrolls">
+          <figure class="scroll" data-reveal>
+            <div class="paper">
+              <img
+                src="../shared/games/lighthouse.jpg"
+                alt="Lighthouse Keeper: a lighthouse beam sweeping over a dark sea"
+                loading="lazy"
+              />
+            </div>
+            <figcaption>
+              <b>Lighthouse Keeper</b><span>“guiding ships through fog”</span>
+            </figcaption>
+          </figure>
+          <figure class="scroll tall" data-reveal>
+            <div class="paper">
+              <img
+                src="../shared/games/key-art.webp"
+                alt="Hollow Reach: a lantern-lit monastery on a cliff at dusk"
+                loading="lazy"
+              />
+            </div>
+            <figcaption>
+              <b>Hollow Reach</b><span>“ring the three old bells and wake the valley”</span>
+            </figcaption>
+          </figure>
+          <figure class="scroll" data-reveal>
+            <div class="paper">
+              <img
+                src="../shared/games/fireflies.jpg"
+                alt="Fireflies: a figure in a dark meadow among glowing fireflies"
+                loading="lazy"
+              />
+            </div>
+            <figcaption><b>Fireflies</b><span>“collecting fireflies in a meadow”</span></figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="guestbook" id="guestbook">
+        <div class="gb-inner">
+          <span class="count">Guestbook</span>
+          <h2>The doors open <em>slowly.</em></h2>
+          <p>
+            We let a few studios in at a time. Leave your name in the book and we will write when
+            there is a seat for you.
+          </p>
+          <form class="book" data-waitlist data-source="ink" data-done="Thank you" novalidate>
+            <label>
+              <span>Name</span>
+              <input
+                type="text"
+                name="name"
+                autocomplete="name"
+                maxlength="80"
+                placeholder="Hokusai"
+              />
+            </label>
+            <label>
+              <span>Email</span>
+              <input
+                type="email"
+                name="email"
+                autocomplete="email"
+                maxlength="254"
+                placeholder="you@studio.com"
+                required
+              />
+            </label>
+            <input
+              class="hp"
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              aria-hidden="true"
+            />
+            <button type="submit"><span data-label>Sign</span></button>
+            <p class="status" data-status role="status" aria-live="polite">
+              Kept privately. One letter when your invite is ready.
+            </p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Kurambit · open source · © <span data-year>2026</span></span>
+      <span
+        ><a href="https://github.com/Absterrg0/Kurambit">GitHub</a> ·
+        <a href="../../privacy">Privacy</a></span
+      >
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kurambit · Insert brief to continue</title>
+    <link rel="icon" href="../../favicon.ico" />
+    <link rel="stylesheet" href="../shared/fonts.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="../shared/concept.js" defer></script>
+  </head>
+  <body>
+    <div class="crt" aria-hidden="true"></div>
+
+    <header class="hud">
+      <span>1UP <b>000700</b></span>
+      <nav aria-label="Sections">
+        <a href="#attract">Attract</a>
+        <a href="#howto">How to play</a>
+        <a href="#party">Party</a>
+        <a href="#scores">Hall</a>
+      </nav>
+      <span>HI-SCORE <b>999999</b></span>
+    </header>
+
+    <main>
+      <section class="title">
+        <canvas
+          class="sprite"
+          data-dither
+          data-src="../../fox-ink.webp"
+          data-ink="#f1e9d8"
+          data-accent="#ff5a2a"
+          data-cells="70"
+          aria-label="Kurambit's fox as a pixel sprite"
+          role="img"
+        ></canvas>
+        <h1 class="logo" aria-label="Kurambit">KURAMBIT</h1>
+        <p class="sub">A game studio that plays what it builds</p>
+        <a class="start" href="#scores">▶ PRESS START</a>
+        <p class="credit">
+          © <span data-year>2026</span> KURAMBIT · OPEN SOURCE · INSERT BRIEF TO CONTINUE
+        </p>
+      </section>
+
+      <section class="attract" id="attract">
+        <div class="cabinet">
+          <div class="marquee">
+            <span>NOW PLAYING</span>
+            <strong id="now-playing">LIGHTHOUSE KEEPER</strong>
+          </div>
+          <div class="bezel">
+            <div class="screen">
+              <video
+                id="attract-video"
+                muted
+                playsinline
+                autoplay
+                data-base="../shared/games/"
+                data-cycle="lighthouse,lantern,beekeeper,belfry,fireflies"
+                data-names="LIGHTHOUSE KEEPER,TIDEWAKE,BEEKEEPER,HOLLOW REACH,FIREFLIES"
+                data-label="#now-playing"
+              ></video>
+              <span class="scan" aria-hidden="true"></span>
+            </div>
+          </div>
+          <div class="panel">
+            <span class="stick" aria-hidden="true"><i></i></span>
+            <button
+              type="button"
+              class="arcade-btn red"
+              data-cycle-target="attract-video"
+              data-step="-1"
+              aria-label="Previous game"
+            >
+              ◀
+            </button>
+            <button
+              type="button"
+              class="arcade-btn amber"
+              data-cycle-target="attract-video"
+              data-step="1"
+              aria-label="Next game"
+            >
+              ▶
+            </button>
+          </div>
+        </div>
+        <div class="attract-copy">
+          <h2>ATTRACT MODE</h2>
+          <p>
+            Every game on this screen was built by Kurambit from a single sentence, then played and
+            judged before it was kept.
+          </p>
+          <p class="dim">Real captures. No mockups.</p>
+        </div>
+      </section>
+
+      <section class="howto" id="howto">
+        <h2 class="section-title">HOW TO PLAY</h2>
+        <ol class="stages">
+          <li class="stage">
+            <span class="stage-n">1-1</span>
+            <h3>BRIEF</h3>
+            <p>Type the game you want in a sentence or two.</p>
+          </li>
+          <li class="stage">
+            <span class="stage-n">1-2</span>
+            <h3>BUILD</h3>
+            <p>Your agent builds it in Godot, models it in Blender.</p>
+          </li>
+          <li class="stage">
+            <span class="stage-n">1-3</span>
+            <h3>PLAYTEST</h3>
+            <p>A separate tester plays every build for real.</p>
+          </li>
+          <li class="stage boss">
+            <span class="stage-n">BOSS</span>
+            <h3>BLIND JUDGE</h3>
+            <p>Two builds, no labels. Worse never ships.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="party" id="party">
+        <h2 class="section-title">SELECT YOUR AGENT</h2>
+        <ul class="roster">
+          <li><span class="portrait">CX</span>CODEX</li>
+          <li><span class="portrait">CC</span>CLAUDE CODE</li>
+          <li><span class="portrait">CU</span>CURSOR</li>
+          <li><span class="portrait">GB</span>GROK BUILD</li>
+          <li><span class="portrait">OC</span>OPENCODE</li>
+          <li><span class="portrait">AG</span>ANTIGRAVITY</li>
+        </ul>
+        <p class="dim center">
+          Bring the one you already pay for. One is enough to clear the game.
+        </p>
+      </section>
+
+      <section class="scores" id="scores">
+        <h2 class="section-title">ENTER YOUR NAME</h2>
+        <form
+          class="entry"
+          data-waitlist
+          data-source="arcade"
+          data-busy="SAVING..."
+          data-done="SAVED ✓"
+          novalidate
+        >
+          <label for="arcade-email" class="prompt">EMAIL &gt;</label>
+          <input
+            id="arcade-email"
+            type="email"
+            name="email"
+            autocomplete="email"
+            maxlength="254"
+            placeholder="player1@studio.com"
+            required
+          />
+          <input
+            class="hp"
+            type="text"
+            name="website"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+          />
+          <button type="submit" class="arcade-key"><span data-label>[A] JOIN</span></button>
+          <p class="status" data-status role="status" aria-live="polite">
+            WAITLIST OPEN · ONE EMAIL WHEN YOUR INVITE IS READY
+          </p>
+        </form>
+
+        <table class="hall">
+          <caption>
+            HALL OF GAMES · MADE BY KURAMBIT
+          </caption>
+          <thead>
+            <tr>
+              <th>RANK</th>
+              <th>GAME</th>
+              <th>GENRE</th>
+              <th>ENGINE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1ST</td>
+              <td>HOLLOW REACH</td>
+              <td>3D CLIMBER</td>
+              <td>GODOT</td>
+            </tr>
+            <tr>
+              <td>2ND</td>
+              <td>LIGHTHOUSE KEEPER</td>
+              <td>ARCADE</td>
+              <td>GODOT</td>
+            </tr>
+            <tr>
+              <td>3RD</td>
+              <td>TIDEWAKE</td>
+              <td>ROGUELIKE</td>
+              <td>GODOT</td>
+            </tr>
+            <tr>
+              <td>4TH</td>
+              <td>BEEKEEPER</td>
+              <td>DEFENSE</td>
+              <td>GODOT</td>
+            </tr>
+            <tr>
+              <td>5TH</td>
+              <td>FIREFLIES</td>
+              <td>COZY 3D</td>
+              <td>THREE.JS</td>
+            </tr>
+            <tr class="you">
+              <td>6TH</td>
+              <td>YOUR GAME</td>
+              <td>???</td>
+              <td>???</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>GAME OVER? <b>CONTINUE</b></span>
+      <span
+        ><a href="https://github.com/Absterrg0/Kurambit">GITHUB</a> ·
+        <a href="../../privacy">PRIVACY</a></span
+      >
+    </footer>
+  </body>
+</html>
