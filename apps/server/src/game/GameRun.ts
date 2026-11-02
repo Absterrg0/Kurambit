@@ -374,12 +374,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         "Secret store",
       );
     const needProject = (operation: string, path: string) =>
-      needService(
-        Effect.serviceOption(ProjectService.ProjectService),
-        operation,
-        path,
-        "Projects",
-      );
+      needService(Effect.serviceOption(ProjectService.ProjectService), operation, path, "Projects");
 
     const resolveGame = Effect.fn("GameRun.resolveGame")(function* (threadId: ThreadId) {
       const projects = yield* needProjects("resolve-game", String(threadId));
@@ -569,23 +564,22 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
       });
 
-    // The game's own source and assets live under godot/. Bots, notes and
+    // The game's own source and assets live under its engine directory
+    // (godot/ for native games, web/ for three.js games). Bots, notes and
     // skill-pack files never count as game change: a round with no change
     // here is no real change (T25 merged a .studio-only round as unjudged).
-    // Generated Godot sidecars never count either: import/uid writes and the
-    // .godot cache are not builder progress.
-    const gamePaths = [
-      "godot",
-      ":(exclude)godot/**/*.import",
-      ":(exclude)godot/**/*.uid",
-      ":(exclude)godot/.godot",
+    const gamePaths = (projectDir: string) => [
+      projectDir,
+      `:(exclude)${projectDir}/**/*.import`,
+      `:(exclude)${projectDir}/**/*.uid`,
+      `:(exclude)${projectDir}/.godot`,
     ];
-    const gameLinesSince = (root: string, sha: string): Effect.Effect<number> =>
+    const gameLinesSince = (root: string, sha: string, projectDir: string): Effect.Effect<number> =>
       Effect.sync(() => {
         try {
           const stat = NodeChildProcess.execFileSync(
             "git",
-            ["diff", "--numstat", `${sha}..HEAD`, "--", ...gamePaths],
+            ["diff", "--numstat", `${sha}..HEAD`, "--", ...gamePaths(projectDir)],
             { cwd: root, env: strippedEnv() },
           ).toString();
           let total = 0;
@@ -602,13 +596,16 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
       });
 
-    // Binary diffs report no text lines, so line counts cannot decide change:
-    // use the diff exit status and fail loudly on diff errors (unknown, not unchanged).
     const gameChangedSince = (
       root: string,
       sha: string,
+      projectDir: string,
     ): Effect.Effect<boolean, GameRunError> =>
-      gitExec(root, ["diff", "--quiet", `${sha}..HEAD`, "--", ...gamePaths], 60_000).pipe(
+      gitExec(
+        root,
+        ["diff", "--quiet", `${sha}..HEAD`, "--", ...gamePaths(projectDir)],
+        60_000,
+      ).pipe(
         Effect.flatMap((result) =>
           result.exitCode === 0
             ? Effect.succeed(false)
@@ -638,19 +635,6 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
       return false;
     });
-
-    // Create-or-enter a round branch, reading the git exit code: the git process
-    // resolves successfully either way, so a plain checkout fallback never runs
-    // on effect-level errors alone. (T30's worktree lane helper supersedes this
-    // at integration; kept here so committed history builds standalone.)
-    const checkoutBranch = (root: string, key: string): Effect.Effect<void> =>
-      gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
-        Effect.flatMap((created) =>
-          created.exitCode === 0
-            ? Effect.void
-            : gitExec(root, ["checkout", "-q", key], 60_000).pipe(Effect.asVoid),
-        ),
-      );
 
     // Blind judging never touches the live tree: each build gets a detached
     // worktree under ignored `.studio/worktrees/`, opened as its own game so
@@ -717,20 +701,91 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
 
     // Failed work is saved on rejected/<label>, never thrown away.
+    // A checkout that only creates-or-enters must read the exit code: the
+    // git process resolves successfully either way, so an Effect-level catch
+    // never fires and the plain checkout would silently never run (the R1
+    // resume built on main and recorded a phantom merge failure).
+    const checkoutBranch = (root: string, key: string): Effect.Effect<void> =>
+      gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
+        Effect.flatMap((created) =>
+          created.exitCode === 0
+            ? Effect.void
+            : gitExec(root, ["checkout", "-q", key], 60_000).pipe(Effect.asVoid),
+        ),
+      );
+
     const rejectWork = Effect.fn("GameRun.rejectWork")(function* (
       root: string,
       best: string,
       label: string,
       why: string,
     ) {
-      yield* gitExec(root, ["checkout", "-qb", `rejected/${label}`], 60_000).pipe(
-        Effect.catch(() => gitExec(root, ["checkout", "-q", `rejected/${label}`], 60_000)),
-      );
+      yield* checkoutBranch(root, `rejected/${label}`);
       yield* commitAll(root, `rejected ${label}: ${why.slice(0, 120)}`);
       if (yield* checkoutRef(root, "main", `reject ${label}`)) {
         if (best.length > 0) yield* resetMainTo(root, best);
       }
     });
+
+    // Initial prototype adoption, pick paths only (never judged rounds): ff-only
+    // first for linear history, then a --no-ff merge recording the selection.
+    // Adoption is claimed only on a merge success plus an ancestor fact. A failed
+    // merge aborts verified-clean (no MERGE_HEAD left) or fails loudly preserving
+    // work; builders never run on conflicts.
+    const adoptProtoBase = (
+      root: string,
+      base: string,
+      selected: string,
+      why: string,
+    ): Effect.Effect<{ merged: boolean; mainSha: string; ancestor: boolean }, GameRunError> =>
+      Effect.gen(function* () {
+        const cleanAbort = Effect.fn("GameRun.adoptAbort")(function* () {
+          const aborted = yield* gitExec(root, ["merge", "--abort"], 60_000);
+          const mergeHead = yield* gitOut(root, ["rev-parse", "--verify", "MERGE_HEAD"]);
+          if (aborted.exitCode === 0 && mergeHead.trim().length === 0) return true;
+          return yield* Effect.fail(
+            fail("pick-base", root, "abort-failed", `${selected} (${why})`),
+          );
+        });
+        const ancestryOf = (sha: string): Effect.Effect<boolean> =>
+          gitExec(root, ["merge-base", "--is-ancestor", sha, "HEAD"], 60_000).pipe(
+            Effect.map((r) => r.exitCode === 0),
+          );
+        if (!(yield* checkoutRef(root, "main", `pick base merge (${why})`)))
+          return { merged: false, mainSha: "", ancestor: false };
+        const ff = yield* gitExec(root, ["merge", "--ff-only", "-q", base], 60_000);
+        if (ff.exitCode === 0) {
+          const mainSha = yield* gitOut(root, ["rev-parse", "HEAD"]);
+          return { merged: true, mainSha, ancestor: yield* ancestryOf(base) };
+        }
+        const noe = yield* gitExec(
+          root,
+          ["merge", "-q", "--no-ff", "-m", `pick base ${selected} (${why}, unjudged)`, base],
+          60_000,
+        );
+        if (noe.exitCode === 0) {
+          const mainSha = yield* gitOut(root, ["rev-parse", "HEAD"]);
+          const ancestor = yield* ancestryOf(base);
+          if (ancestor) {
+            yield* logLine(root, `pick base ${selected} merged with history (${why}, unjudged)`);
+            return { merged: true, mainSha, ancestor: true };
+          }
+          // A merge commit always parents the base, so this is unreachable in
+          // practice; treat as unadopted without touching the good tree.
+          yield* logLine(
+            root,
+            `pick base ${selected} merged but ancestry unverified; treating as unadopted`,
+          );
+          return { merged: false, mainSha, ancestor: false };
+        }
+        yield* logLine(
+          root,
+          `pick base merge failed (${noe.stdout.slice(0, 200)}); verifying abort`,
+        );
+        yield* cleanAbort();
+        const mainSha = yield* gitOut(root, ["rev-parse", "HEAD"]);
+        return { merged: false, mainSha, ancestor: yield* ancestryOf(base) };
+      });
 
     const readNextMd = (root: string): Effect.Effect<string> =>
       Effect.promise(() =>
@@ -793,12 +848,26 @@ export const layer = (options: { readonly stateDir: string }) => {
         const agentsPath = NodePath.join(root, "AGENTS.md");
         const existing = await NodeFSP.readFile(agentsPath, "utf8").catch(() => "");
         if (!/studio-skills\//.test(existing)) {
-          const line = `\n\n## Studio skills (read the ones your role needs)\n\nSkill pack in ./studio-skills, one line each: planning (look, cut to the ask, plan and rungs); game-foundations (boundaries, state ownership, data-driven content); godot-game (engine rules, CLI, export); playtest (smoke/feature/regression/visual passes, report separately); art-pipeline (key art first, every asset as a file); audio (effects plus a music loop as files); art-director (would you ship this, defects, DO NOT REGRESS, one big move); stranger (first minute cold).\n`;
+          const line = `\n\n## Studio skills (read the ones your role needs)\n\nSkill pack in ./studio-skills, one line each: planning (look, cut to the ask, plan and rungs); game-foundations (boundaries, state ownership, data-driven content); godot-game (engine rules, CLI, export); three (three.js browser lane: static project, studio bridge, export); playtest (smoke/feature/regression/visual passes, report separately); art-pipeline (key art first, every asset as a file); audio (effects plus a music loop as files); art-director (would you ship this, defects, DO NOT REGRESS, one big move); stranger (first minute cold).\n`;
           await NodeFSP.writeFile(agentsPath, `${existing}${line}`);
         }
       }).pipe(Effect.andThen(() => ensureRunStateIgnored(root)));
 
-    const stageDone = (root: string): Effect.Effect<Record<string, boolean>> =>
+    // The only engine-specific answers the loop needs: which directory holds
+    // the game's sources, and which explore target plays it. Everything else
+    // in the loop is engine-neutral; the services branch on the manifest.
+    const laneOf = (root: string): Effect.Effect<{ dir: string; explore: string }, GameRunError> =>
+      needProjects("read-manifest", root).pipe(
+        Effect.flatMap((projects) => Effect.option(projects.read(root))),
+        Effect.map((found) => {
+          if (found._tag === "Some" && found.value.engine.name === "three")
+            return { dir: found.value.godotProject, explore: "web" };
+          if (found._tag === "Some") return { dir: found.value.godotProject, explore: "native" };
+          return { dir: "godot", explore: "native" };
+        }),
+      );
+
+    const stageDone = (root: string, projectDir: string): Effect.Effect<Record<string, boolean>> =>
       Effect.promise(async () => {
         const exists = async (rel: string): Promise<boolean> =>
           NodeFSP.access(NodePath.join(root, rel))
@@ -820,7 +889,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             .map((name) => name.trim())
             .filter(Boolean),
         );
-        const assets = await NodeFSP.readdir(NodePath.join(root, "godot", "assets")).catch(
+        const assets = await NodeFSP.readdir(NodePath.join(root, projectDir, "assets")).catch(
           () => [] as string[],
         );
         return {
@@ -1420,11 +1489,9 @@ export const layer = (options: { readonly stateDir: string }) => {
       };
     });
 
-    // Game-file source identity for progress checks: the exact engine input bytes
-    // (generated sidecars excluded). Unknown snapshots fail explicitly.
-    const gameSourceVersion = (root: string) =>
+    const gameSourceVersion = (root: string, projectDir: string) =>
       Effect.tryPromise({
-        try: (signal) => snapshotBuildSource(root, "godot", { signal }),
+        try: (signal) => snapshotBuildSource(root, projectDir, { signal }),
         catch: () => fail("read-progress", root, "game-files-unreadable"),
       }).pipe(
         Effect.flatMap((snapshot) =>
@@ -1444,13 +1511,14 @@ export const layer = (options: { readonly stateDir: string }) => {
       tag: string,
       direction: string,
       blockMs: number,
+      lane: { dir: string },
     ) {
       const continued = "Continue where you left off. Reply briefly, then keep working.";
       const end = Date.now() + blockMs;
-      let versions = yield* gameSourceVersion(root);
+      let versions = yield* gameSourceVersion(root, lane.dir);
       let quietTurns = 0;
       const first =
-        `${BUILD_RULE}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
+        `${buildRule(lane.dir)}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
         `Note learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
       const launched = yield* launchRole(
         root,
@@ -1517,7 +1585,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           continue;
         }
         failState.consec = 0;
-        const after = yield* gameSourceVersion(root);
+        const after = yield* gameSourceVersion(root, lane.dir);
         const changed = after !== versions;
         quietTurns = changed ? 0 : quietTurns + 1;
         versions = after;
@@ -1544,22 +1612,25 @@ export const layer = (options: { readonly stateDir: string }) => {
     // Plain code facts for reviewers. States numbers, never interprets them.
     // The bot's fastest finish is a plain fact with no length target beside
     // it; the reviewer decides what it means.
-    const codeFacts = (root: string): Effect.Effect<string> =>
+    const codeFacts = (root: string, lane: { dir: string }): Effect.Effect<string> =>
       Effect.promise(async () => {
-        const gd: Array<{ f: string; n: number }> = [];
+        const isWeb = lane.dir !== "godot";
+        const codeExts = isWeb ? [".js", ".mjs"] : [".gd"];
+        const sources: Array<{ f: string; n: number }> = [];
         const walk = async (dir: string): Promise<void> => {
           for (const entry of await NodeFSP.readdir(dir, { withFileTypes: true }).catch(() => [])) {
             const full = NodePath.join(dir, entry.name);
             if (entry.isDirectory()) {
-              if (entry.name !== ".godot" && entry.name !== "builds") await walk(full);
-            } else if (entry.name.endsWith(".gd")) {
+              if (entry.name !== ".godot" && entry.name !== "builds" && entry.name !== "vendor")
+                await walk(full);
+            } else if (codeExts.some((ext) => entry.name.endsWith(ext))) {
               const text = await NodeFSP.readFile(full, "utf8").catch(() => "");
-              gd.push({ f: NodePath.relative(root, full), n: text.split("\n").length });
+              sources.push({ f: NodePath.relative(root, full), n: text.split("\n").length });
             }
           }
         };
-        await walk(NodePath.join(root, "godot"));
-        gd.sort((a, b) => b.n - a.n);
+        await walk(NodePath.join(root, lane.dir));
+        sources.sort((a, b) => b.n - a.n);
         const count = async (re: RegExp): Promise<number> => {
           let found = 0;
           const walkFiles = async (dir: string): Promise<void> => {
@@ -1572,7 +1643,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               } else if (re.test(entry.name) && !entry.name.endsWith(".import")) found += 1;
             }
           };
-          await walkFiles(NodePath.join(root, "godot"));
+          await walkFiles(NodePath.join(root, lane.dir));
           return found;
         };
         const images = await count(/\.(png|jpg|jpeg|webp|svg)$/i);
@@ -1583,7 +1654,9 @@ export const layer = (options: { readonly stateDir: string }) => {
           const out = await new Promise<string>((resolve) => {
             const child = NodeChildProcess.spawn(
               "grep",
-              ["-rho", "res://[^\"' )]*", NodePath.join(root, "godot")],
+              isWeb
+                ? ["-rho", `from\\s*["']\\.\\/[^"']*["']`, NodePath.join(root, lane.dir)]
+                : ["-rho", "res://[^\"' )]*", NodePath.join(root, lane.dir)],
               { env: strippedEnv() },
             );
             let text = "";
@@ -1598,10 +1671,11 @@ export const layer = (options: { readonly stateDir: string }) => {
           refs = 0;
         }
         const top =
-          gd
+          sources
             .slice(0, 5)
             .map((entry) => `${entry.f} ${entry.n} lines`)
-            .join("; ") || "no gd files";
+            .join("; ") || (isWeb ? "no js files" : "no gd files");
+        const refWord = isWeb ? "relative imports" : "res:// references";
         // Bot-run facts: fastest finish anyone managed, how many runs
         // reached the ending. Testers append one JSON line per game_bot_run.
         let botLine = "no bot runs recorded yet";
@@ -1655,7 +1729,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         } catch {
           // No map yet; leave the default.
         }
-        return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} res:// references. Bots: ${botLine}. Art map: ${artMap}.`;
+        return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} ${refWord}. Bots: ${botLine}. Art map: ${artMap}.`;
       });
 
     // The tester explores with Jev only when the key is actually there.
@@ -1736,9 +1810,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
         if (state.round <= stored.rounds.length) return headBest;
         const reachable = (sha: string): Effect.Effect<boolean> =>
-          sha.trim().length > 0
-            ? shaReachable(root, sha)
-            : Effect.succeed(false as boolean);
+          sha.trim().length > 0 ? shaReachable(root, sha) : Effect.succeed(false as boolean);
         // HEAD here may be the unjudged candidate: only verified shas decide.
         // The round base predates the round's work, so it is a safe baseline
         // even though it was never judged as a candidate.
@@ -1751,9 +1823,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             `round state unrecoverable for ${state.key}: best and base unreachable;` +
               ` work preserved on branch; failing loudly`,
           );
-          return yield* Effect.fail(
-            fail("recover-round", root, "unreachable-refs", state.key),
-          );
+          return yield* Effect.fail(fail("recover-round", root, "unreachable-refs", state.key));
         }
         yield* preserveRecoveryDirt(root, stored, state.key);
         const best = bestOk ? state.bestSha : state.baseSha;
@@ -1817,13 +1887,11 @@ export const layer = (options: { readonly stateDir: string }) => {
       stored: StoredRun,
     ): Generator<Effect.Effect<unknown, GameRunError>, string, never> {
       yield* ensureGameScaffold(root);
-      // Native single-engine tree: the only engine directory is godot.
-      // (T30's manifest-driven laneOf supersedes this at integration.)
-      const lane = { dir: "godot" };
+      const lane = yield* laneOf(root);
       const deadline =
         stored.budgetMinutes === null ? Infinity : Date.now() + stored.budgetMinutes * 60_000;
       const remaining = (): number => deadline - Date.now();
-      const done = yield* stageDone(root);
+      const done = yield* stageDone(root, lane.dir);
       let best = yield* gitOut(root, ["rev-parse", "HEAD"]);
       best = yield* recoverRoundState(root, stored, best);
       let stallStreak = stored.stallStreak;
@@ -1901,6 +1969,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           const playerNotes = `.studio/play-${label}.md`;
           const wt = yield* ensureWorktree(root, sha, label);
           if (wt === null) return null;
+          let owned: { projectId: ProjectId; threadId: ThreadId } | null = null;
           return yield* Effect.gen(function* () {
             yield* ensureGameScaffold(wt);
             const opened = yield* openWorktreeGame(wt);
@@ -1916,6 +1985,9 @@ export const layer = (options: { readonly stateDir: string }) => {
               playerNotes,
               wt,
             );
+            // Reports and evidence are retained in memory from here on, so the
+            // temporary project can go once its role is terminal.
+            owned = { projectId: opened.projectId, threadId: played.threadId };
             return played;
           }).pipe(
             Effect.catch((cause) =>
@@ -2118,7 +2190,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           projectId,
           key,
           `studio ${key}`,
-          `${BUILD_RULE_SHORT}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./godot on this branch with placeholder art only: something winnable and losable. Keep the boot clean. Do not use subagents. Do not commit.`,
+          `${buildRule(lane.dir)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane.dir} on this branch with placeholder art only: something winnable and losable. Keep the boot clean. Do not use subagents. Do not commit.`,
         );
         const protoWait = yield* waitRole(
           root,
@@ -2129,9 +2201,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           "Continue where you left off. Reply briefly, then keep working.",
         );
         if (protoWait.end !== null) return protoWait.end;
-        yield* gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
-          Effect.catch(() => gitExec(root, ["checkout", "-q", key], 60_000)),
-        );
+        yield* checkoutBranch(root, key);
         const sha = yield* commitAll(root, key);
         if (sha !== null) {
           const boot = yield* bootCheck(launched.threadId);
@@ -2140,7 +2210,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         yield* checkoutRef(root, "main", "proto cleanup");
         if (best.length > 0) yield* resetMainTo(root, best);
       }
-      if ((yield* stageDone(root)).pick !== true) {
+      if ((yield* stageDone(root, lane.dir)).pick !== true) {
         const usable = (yield* gitOut(root, ["branch", "--list", "--format=%(refname:short)"]))
           .split("\n")
           .map((name) => name.trim())
@@ -2165,15 +2235,14 @@ export const layer = (options: { readonly stateDir: string }) => {
             );
             const verdict = pickResult.verdict;
             const winner = verdict === "B" ? bSha : aSha;
-            if (yield* checkoutRef(root, "main", "pick merge")) {
-              const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", winner], 60_000);
-              if (merged.exitCode !== 0)
-                yield* logLine(
-                  root,
-                  `pick merge failed (${merged.stdout.slice(0, 200)}); staying on best`,
-                );
-              best = yield* gitOut(root, ["rev-parse", "HEAD"]);
-            }
+            const adopted = yield* adoptProtoBase(root, winner, verdict, "pick winner");
+            if (adopted.mainSha.length > 0) best = adopted.mainSha;
+            yield* logLine(
+              root,
+              adopted.merged && adopted.ancestor
+                ? `pick winner ${verdict} adopted at ${adopted.mainSha.slice(0, 8)}`
+                : `pick winner ${verdict} not adopted (main ${adopted.mainSha.slice(0, 8) || "unreached"}); staying on best`,
+            );
           } else if (pickResult.verdict === "TIE") {
             // TIE compares honestly but creation needs a base: ask the synthesis
             // thread which prototype to continue. A selection, not a win; the tie
@@ -2200,7 +2269,10 @@ export const layer = (options: { readonly stateDir: string }) => {
                 "Finish the selection: one SELECT line plus reasons.",
               );
               if (selectWaited.end !== null) return selectWaited.end;
-              const selectText = yield* assistantText(compareEntry.threadId as ThreadId, selectRunId);
+              const selectText = yield* assistantText(
+                compareEntry.threadId as ThreadId,
+                selectRunId,
+              );
               selected = parseSelect(selectText);
               selectReasons = selectText
                 .split("\n")
@@ -2213,44 +2285,44 @@ export const layer = (options: { readonly stateDir: string }) => {
             const tieNotes = "notes" in pickResult ? (pickResult.notes ?? "") : "";
             if (selected === "A" || selected === "B") {
               const base = selected === "B" ? bSha : aSha;
-              if (yield* checkoutRef(root, "main", "pick base merge")) {
-                const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", base], 60_000);
-                if (merged.exitCode !== 0)
-                  yield* logLine(
-                    root,
-                    `pick base merge failed (${merged.stdout.slice(0, 200)}); staying on merge-base`,
-                  );
-                best = yield* gitOut(root, ["rev-parse", "HEAD"]);
-              }
+              const adopted = yield* adoptProtoBase(root, base, selected, "tie-selected");
+              const basedOn =
+                adopted.merged && adopted.ancestor
+                  ? `${selected} adopted at ${adopted.mainSha.slice(0, 8)}`
+                  : `current main ${adopted.mainSha.slice(0, 8) || "unreached"} (base not adopted)`;
+              if (adopted.mainSha.length > 0) best = adopted.mainSha;
               yield* Effect.promise(() =>
                 NodeFSP.writeFile(
                   NodePath.join(root, ".studio", "pick.txt"),
-                  `${tieNotes}\nSELECT: ${selected} (continuation choice on tied comparison; no demonstrated preference)\n${selectReasons}\n`,
+                  `${tieNotes}\nSELECT: ${selected} (continuation choice on tied comparison; no demonstrated preference)\n${selectReasons}\nBase: ${basedOn}\n`,
                 ),
               );
               yield* logLine(
                 root,
-                `pick tie: continuing with ${selected} as unjudged base (no demonstrated preference)`,
+                adopted.merged && adopted.ancestor
+                  ? `pick tie: continuing with ${selected} as unjudged base (${basedOn})`
+                  : `pick tie: selection ${selected} recorded but not adopted; building from ${basedOn}`,
               );
             } else {
               yield* Effect.promise(() =>
                 NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), tieNotes),
               );
-              yield* logLine(root, "pick tie unresolved: building from merge-base with tie recorded");
-            }
-          }
-          else
-            yield* logLine(root, "pick incomplete: no prototype selected without play evidence");
-        } else if (usable.length === 1) {
-          if (yield* checkoutRef(root, "main", "pick merge single")) {
-            const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", usable[0]!], 60_000);
-            if (merged.exitCode !== 0)
               yield* logLine(
                 root,
-                `pick merge failed (${merged.stdout.slice(0, 200)}); staying on best`,
+                "pick tie unresolved: building from merge-base with tie recorded",
               );
-            best = yield* gitOut(root, ["rev-parse", "HEAD"]);
-          }
+            }
+          } else
+            yield* logLine(root, "pick incomplete: no prototype selected without play evidence");
+        } else if (usable.length === 1) {
+          const adopted = yield* adoptProtoBase(root, usable[0]!, "single", "single prototype");
+          if (adopted.mainSha.length > 0) best = adopted.mainSha;
+          yield* logLine(
+            root,
+            adopted.merged && adopted.ancestor
+              ? `pick single prototype adopted at ${adopted.mainSha.slice(0, 8)}`
+              : "pick single prototype not adopted; building from current main",
+          );
         }
         stored.stage = "pick";
         yield* writeStored(root, stored);
@@ -2261,11 +2333,11 @@ export const layer = (options: { readonly stateDir: string }) => {
       // core experience good, and what done means for the scope the brief
       // asks for. No content list, no length target: quality of what exists
       // is the goal, and adding levels is the creator's job, not the loop's.
-      if ((yield* stageDone(root)).plan !== true) {
+      if ((yield* stageDone(root, lane.dir)).plan !== true) {
         const planEnd = yield* singleStage(
           "plan",
           "plan",
-          `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (target native). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Plan the depth the core needs; avoid filler and length targets. More content is the creator's choice. Do not write game code. Do not use subagents. Do not commit.`,
+          `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (default target). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Plan the depth the core needs; avoid filler and length targets. More content is the creator's choice. Do not write game code. Do not use subagents. Do not commit.`,
           5 * 60_000,
         );
         if (planEnd !== null) return planEnd;
@@ -2277,11 +2349,11 @@ export const layer = (options: { readonly stateDir: string }) => {
       }
 
       // 4. Art. For 3D that means the game_blender_* tools.
-      if ((yield* stageDone(root)).art !== true) {
+      if ((yield* stageDone(root, lane.dir)).art !== true) {
         const artEnd = yield* singleStage(
           "art",
           "art",
-          `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Render the game's asset set as files in godot/assets (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. A 3D game needs real 3D models made with the game_blender_* tools and exported as GLB (rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`,
+          `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Render the game's asset set as files in ${lane.dir}/assets (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. ${lane.dir === "godot" ? "A 3D game needs real 3D models made with the game_blender_* tools and exported as GLB (rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. " : "Code-built meshes and local files only: the export is a static copy, so everything the game needs must be a file under web/. "}Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`,
           8 * 60_000,
         );
         if (artEnd !== null) return artEnd;
@@ -2310,8 +2382,9 @@ export const layer = (options: { readonly stateDir: string }) => {
             creatorThreadId,
             projectId,
             "build",
-            FIRST_DIRECTION,
+            firstDirection(lane.dir, `${lane.dir}/assets`),
             blockMs,
+            lane,
           );
           if (buildBlock.end !== null) return buildBlock.end;
           const sha = yield* commitAll(root, "build");
@@ -2338,7 +2411,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         const roundStart = Date.now();
         const nextMd = yield* readNextMd(root);
         const pickNotes = nextMd.length > 0 ? "" : yield* readPick(root);
-        const concreteAsk = `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under godot/; notes, bots and skill files do not count.`;
+        const concreteAsk = `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane.dir}/; notes, bots and skill files do not count.`;
         const direction =
           nextMd.length > 0
             ? nextMd
@@ -2390,7 +2463,10 @@ export const layer = (options: { readonly stateDir: string }) => {
           const exists =
             (yield* gitOut(root, ["rev-parse", "--verify", pendingBranch])).trim().length > 0;
           if (!exists) {
-            yield* logLine(root, `round ${round}: pending ${pendingBranch} pruned; continuing from main`);
+            yield* logLine(
+              root,
+              `round ${round}: pending ${pendingBranch} pruned; continuing from main`,
+            );
             stored.pending = null;
           } else {
             yield* checkoutBranch(root, pendingBranch);
@@ -2422,10 +2498,11 @@ export const layer = (options: { readonly stateDir: string }) => {
           `${round}`,
           direction,
           blockMs,
+          lane,
         );
         if (roundBlock.end !== null) return roundBlock.end;
         yield* commitAll(root, key);
-        if (!(yield* gameChangedSince(root, best))) {
+        if (!(yield* gameChangedSince(root, best, lane.dir))) {
           // One short replace attempt with a concrete prompt before calling
           // it stalled: the last block changed no game files.
           const retryMs =
@@ -2439,23 +2516,24 @@ export const layer = (options: { readonly stateDir: string }) => {
               creatorThreadId,
               projectId,
               `${round}b`,
-              `The last block changed no game files under godot/. Address the named top flaw now: ${direction} ${concreteAsk} Verify with game_check. No subagents. No commits.`,
+              `The last block changed no game files under ${lane.dir}/. Address the named top flaw now: ${direction} ${concreteAsk} Verify with game_check. No subagents. No commits.`,
               retryMs,
+              lane,
             );
             if (retry.end !== null) return retry.end;
             yield* commitAll(root, `${key}-retry`);
           }
         }
-        if (!(yield* gameChangedSince(root, best))) {
+        if (!(yield* gameChangedSince(root, best, lane.dir))) {
           yield* checkoutRef(root, "main", `round ${round} stall`);
           yield* logLine(
             root,
-            `round ${round}: stalled (no game-code change under godot/ after replace attempt)`,
+            `round ${round}: stalled (no game-code change under ${lane.dir}/ after replace attempt)`,
           );
-          record.note = "stalled (no game-code change under godot/ after replace attempt)";
+          record.note = `stalled (no game-code change under ${lane.dir}/ after replace attempt)`;
           record.durationMs = Date.now() - roundStart;
           yield* appendRound(root, stored, record);
-          stored.lastFailure = `round ${round}: no game-code change under godot/ after replace attempt`;
+          stored.lastFailure = `round ${round}: no game-code change under ${lane.dir}/ after replace attempt`;
           stallStreak += 1;
           stored.stallStreak = stallStreak;
           yield* writeStored(root, stored);
@@ -2476,7 +2554,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           if (stallStreak >= 3) return "stalled";
           continue;
         }
-        record.linesChanged = yield* gameLinesSince(root, best);
+        record.linesChanged = yield* gameLinesSince(root, best, lane.dir);
 
         // Tester: plays, writes bots, tries to reach the ending, plays
         // roughly, writes .studio/tester-<n>.md. The service records every
@@ -2499,7 +2577,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           creatorThreadId,
           projectId,
           `tester-${round}`,
-          `${PLAYBOOK}Play the game in this folder freely: start it with game_explore_start (target native), get past the menu, push as far as you can, try to win and to lose. ${winBotAsk} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${round}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`,
+          `${PLAYBOOK}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${winBotAsk} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${round}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`,
           `Read .studio/tester-${round}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. Prior flaw for this round: ${move} State whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached. You may only write that notes file.`,
           TESTER_CAP_MS,
           `.studio/tester-${round}.md`,
@@ -2696,7 +2774,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         // working systems, no bugs. Never a push for more levels or length.
         // The reviewer gets the code facts plus the player report (facts
         // from bot runs across the game) among its facts.
-        const facts = yield* codeFacts(root);
+        const facts = yield* codeFacts(root, lane);
         const playerText = yield* readPlayerReport(root);
         const playerFacts =
           playerText.length > 0
@@ -2771,13 +2849,15 @@ export const layer = (options: { readonly stateDir: string }) => {
       // own engine path (no scope surgery, no directory heuristics). Anything
       // else is recorded skipped with the backend message; other export
       // failures stay failures, never skipped.
-      const targets = yield* game.exportTargets(creatorThreadId).pipe(
-        Effect.catch(() =>
-          logLine(root, "finishExports targets unresolved; asking Web and Linux").pipe(
-            Effect.as({ targets: ["Web", "Linux"] as const, displayName: "Game" }),
+      const targets = yield* game
+        .exportTargets(creatorThreadId)
+        .pipe(
+          Effect.catch(() =>
+            logLine(root, "finishExports targets unresolved; asking Web and Linux").pipe(
+              Effect.as({ targets: ["Web", "Linux"] as const, displayName: "Game" }),
+            ),
           ),
-        ),
-      );
+        );
       type ExportRow = {
         ok: boolean;
         skipped: null | "unsupported-target";
@@ -3157,10 +3237,10 @@ export const layer = (options: { readonly stateDir: string }) => {
 // model anything. Shell Godot/Blender do not exist for these threads.
 const TOOL_RULE =
   "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
-const BUILD_RULE = `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under godot/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;
-const BUILD_RULE_SHORT = BUILD_RULE;
+const buildRule = (projectDir: string) =>
+  `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under ${projectDir}/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;
 
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
-const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
-const FIRST_DIRECTION =
-  "Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in godot/assets for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. End with something a player notices in the first minute; game files under godot/ only.";
+const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
+const firstDirection = (projectDir: string, assetsDir: string) =>
+  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${assetsDir} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. End with something a player notices in the first minute; game files under ${projectDir}/ only.`;
