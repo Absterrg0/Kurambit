@@ -1,0 +1,11 @@
+{
+  "name": "kurambit-site",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

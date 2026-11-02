@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Privacy · Kurambit</title>
+    <meta name="description" content="How Kurambit handles the details you give the waitlist." />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="page">
+      <header class="bar">
+        <a class="brand" href="/" aria-label="Kurambit home">
+          <img src="fox-head-ink.webp" alt="" width="26" height="26" />
+          <span>Kurambit</span>
+        </a>
+        <a class="btn btn-small" href="/#join">Join the waitlist</a>
+      </header>
+      <main class="prose">
+        <span class="mono-label">Privacy</span>
+        <h1>Your details stay <em>with us.</em></h1>
+        <p>
+          This note covers the waitlist on kurambit.com. The Kurambit app itself runs on your own
+          machine and keeps its data there.
+        </p>
+
+        <h2>What we collect</h2>
+        <p>
+          Your email address, and if you choose to share them, your name and what describes you
+          best. We also keep the time you signed up and which form you used.
+        </p>
+        <p>
+          To stop abuse we keep a one-way, keyed hash of your IP address for a short rate-limit
+          window. We never store the address itself, and the hash cannot be turned back into it.
+        </p>
+
+        <h2>Why</h2>
+        <p>
+          Only to contact you about Kurambit: your invite, and the occasional launch update. We do
+          not sell, rent or share your details, and we do not add you to anyone else's list.
+        </p>
+
+        <h2>Where it lives</h2>
+        <p>
+          In a private Postgres database that only the Kurambit server can reach, over encrypted
+          connections. The list is never published, and no page on this site can read it.
+        </p>
+
+        <h2>Leaving the list</h2>
+        <p>
+          Reply to any email from us, or write to us through
+          <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>, and we will delete your
+          details.
+        </p>
+
+        <h2>Cookies and tracking</h2>
+        <p>This site sets no cookies and runs no third-party trackers or analytics scripts.</p>
+      </main>
+      <footer class="foot">
+        <a class="brand brand-small" href="/" aria-label="Kurambit home">
+          <img src="fox-head-ink.webp" alt="" width="20" height="20" />
+          <span>Kurambit</span>
+        </a>
+        <span class="mono-label">© <span data-year>2026</span> Kurambit</span>
+      </footer>
+    </div>
+  </body>
+</html>

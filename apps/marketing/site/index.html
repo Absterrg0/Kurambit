@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#13110f" />
-    <title>Kurambit — a game studio that plays what it builds</title>
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f5f3ee" />
+    <title>Kurambit · A game studio that plays what it builds</title>
     <meta
       name="description"
-      content="Kurambit turns the coding agent you already use into a game studio. It builds with Godot and Blender, plays every build, and keeps a change only when a blind comparison says it is better."
+      content="Describe a game. Kurambit builds it with the coding agent you already use, play-tests every build, and keeps a change only when a blind judge says it is better. Join the waitlist."
     />
-    <meta property="og:title" content="Kurambit" />
+    <meta property="og:title" content="Kurambit · A game studio that plays what it builds" />
     <meta
       property="og:description"
-      content="A game studio that plays what it builds. Open source, local, bring your own agent."
+      content="An open-source game studio run by your coding agent. Godot, Blender and three.js, with every build play-tested and judged blind. Join the waitlist."
     />
     <meta property="og:image" content="https://kurambit.com/og.png" />
     <meta property="og:url" content="https://kurambit.com/" />
@@ -21,7 +21,6 @@
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <link rel="preload" href="fox-light.webp" as="image" />
     <link
       rel="preload"
       href="fonts/instrument-serif.woff2"
@@ -29,176 +28,99 @@
       type="font/woff2"
       crossorigin
     />
+    <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
   </head>
   <body>
-    <header class="nav">
-      <a class="brand" href="#top" aria-label="Kurambit home">
-        <img src="fox-head-light.webp" alt="" width="28" height="28" />
-        <span>Kurambit</span>
-      </a>
-      <nav aria-label="Sections">
-        <a href="#loop">The loop</a>
-        <a href="#tools">Tools</a>
-        <a href="#agents">Agents</a>
-        <a href="#open">Open source</a>
-      </nav>
-      <a class="button button-small button-ghost" href="https://github.com/Absterrg0/Kurambit">
-        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
-          <path
-            fill="currentColor"
-            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-          />
-        </svg>
-        GitHub
-      </a>
-    </header>
+    <div class="page">
+      <header class="bar">
+        <a class="brand" href="/" aria-label="Kurambit home">
+          <img src="fox-head-ink.webp" alt="" width="26" height="26" />
+          <span>Kurambit</span>
+        </a>
+        <nav class="bar-nav" aria-label="Sections">
+          <a href="#loop">The loop</a>
+          <a href="#studio">Studio</a>
+          <a href="#tools">Tools</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <a class="btn btn-small" href="#join">Join the waitlist</a>
+      </header>
 
-    <main id="top">
-      <section class="hero ink">
-        <div class="hero-copy">
-          <p class="eyebrow">
-            <span class="seal" aria-hidden="true"></span> Open-source AI game studio
-          </p>
-          <h1>A game studio that <em>plays</em> what it builds.</h1>
-          <p class="lede">
-            Describe a game. Kurambit puts the coding agent you already use to work in Godot and
-            Blender, plays every build with a separate tester, and keeps a change only when a blind
-            comparison says it is better.
-          </p>
-          <div class="actions">
-            <a class="button button-primary" href="https://github.com/Absterrg0/Kurambit#run-it"
-              >Get started</a
-            >
-            <a class="button button-ghost" href="#loop">See how it works</a>
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="tag">
+              <span class="pulse" aria-hidden="true"></span>Private beta · waitlist open
+            </p>
+            <h1 id="hero-title">
+              Describe a game.<br />
+              Kurambit builds it, <em>plays&nbsp;it</em>, and keeps only what gets better.
+            </h1>
+            <p class="lede">
+              An open-source game studio run by the coding agent you already use. It works in Godot
+              and Blender, play-tests every build with a separate tester, and judges each change
+              blind.
+            </p>
+            <form class="waitlist" data-waitlist data-source="hero" novalidate>
+              <div class="field">
+                <label class="sr-only" for="email-hero">Email address</label>
+                <input
+                  id="email-hero"
+                  type="email"
+                  name="email"
+                  placeholder="you@yourstudio.com"
+                  autocomplete="email"
+                  maxlength="254"
+                  required
+                />
+                <div class="hp" aria-hidden="true">
+                  <label
+                    >Website <input type="text" name="website" tabindex="-1" autocomplete="off"
+                  /></label>
+                </div>
+                <button class="btn btn-primary" type="submit">
+                  <span data-label>Join the waitlist</span>
+                  <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+                    <path
+                      d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <p class="form-note" data-status role="status" aria-live="polite">
+                One email when your invite is ready. Never shared. <a href="/privacy">Privacy</a>
+              </p>
+            </form>
           </div>
-          <p class="fineprint">
-            Linux desktop app today · games export to Windows, Linux and the web
-          </p>
-        </div>
-        <figure class="hero-art">
-          <img src="fox-light.webp" alt="Kurambit's fox, drawn in ink" width="760" height="1150" />
-        </figure>
-      </section>
 
-      <section class="ink showcase" aria-label="The app">
-        <div class="window">
-          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-          <img
-            src="app-home.webp"
-            alt="Kurambit's games home, with game covers and a New game tile"
-            width="1920"
-            height="827"
-            loading="lazy"
-          />
-        </div>
-        <div class="window window-float">
-          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-          <img
-            src="app-thread.webp"
-            alt="A game open in Kurambit: the Stage on the left, the agent's work on the right"
-            width="1920"
-            height="1200"
-            loading="lazy"
-          />
-        </div>
-      </section>
+          <figure class="hero-art">
+            <div class="screen">
+              <span class="hud hud-tl">KURAMBIT.EXE</span>
+              <span class="hud hud-tr"><span class="rec" aria-hidden="true"></span>PLAYTEST</span>
+              <span class="hud hud-bl">ROUND 07 / 12</span>
+              <span class="hud hud-br">VERDICT · KEEP</span>
+              <canvas
+                id="fox"
+                role="img"
+                aria-label="Kurambit's fox drawn in dithered pixels"
+              ></canvas>
+            </div>
+            <figcaption>
+              1-bit ordered dither, drawn live. Move your cursor over the fox.
+            </figcaption>
+          </figure>
+        </section>
 
-      <section class="paper" id="loop">
-        <div class="section-head">
-          <p class="eyebrow eyebrow-ink">The loop</p>
-          <h2>Not a prompt box. <em>A studio</em> with a process.</h2>
-          <p class="lede lede-ink">
-            Anyone can ask a model for a game. Kurambit wraps the model in the habits of a real
-            team, and runs them every round so a weak build never ships.
-          </p>
-        </div>
-        <ol class="loop">
-          <li>
-            <span class="step">01</span>
-            <h3>Brief</h3>
-            <p>A name, a genre, an art direction. One paragraph is enough to start.</p>
-          </li>
-          <li>
-            <span class="step">02</span>
-            <h3>Build</h3>
-            <p>
-              Your agent writes the engine project and models assets in Blender, keeping every
-              source editable.
-            </p>
-          </li>
-          <li>
-            <span class="step">03</span>
-            <h3>Play</h3>
-            <p>
-              A separate tester session plays each build and reports what it actually saw, not what
-              it hoped.
-            </p>
-          </li>
-          <li>
-            <span class="step">04</span>
-            <h3>Judge</h3>
-            <p>Builds are compared blind. A tie or a worse build is reverted, never merged.</p>
-          </li>
-          <li>
-            <span class="step">05</span>
-            <h3>Keep going</h3>
-            <p>
-              Rounds continue until the budget ends, leaving a game shaped like a Steam demo for you
-              to polish.
-            </p>
-          </li>
-        </ol>
-      </section>
-
-      <section class="ink" id="tools">
-        <div class="section-head">
-          <p class="eyebrow">Real tools, real files</p>
-          <h2>Everything it makes, <em>you can open.</em></h2>
-        </div>
-        <div class="cards">
-          <article class="card">
-            <h3>Godot 4.7</h3>
-            <p>
-              Native games with scenes and scripts you can open in the editor. Kurambit installs a
-              pinned, checksum-verified copy for you.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Blender 4.5 LTS</h3>
-            <p>
-              Every model keeps its <code>.blend</code> source and the script that made it, next to
-              the engine-ready export.
-            </p>
-          </article>
-          <article class="card">
-            <h3>three.js</h3>
-            <p>A quick browser lane for small ideas you want to play and share in minutes.</p>
-          </article>
-          <article class="card">
-            <h3>Play and export</h3>
-            <p>
-              Play the real build inside the app, ask for changes in plain words, and export
-              Windows, Linux and web builds.
-            </p>
-          </article>
-        </div>
-        <p class="aside">
-          Every game is its own git repository. Move it, fork it, or keep working without Kurambit.
-        </p>
-      </section>
-
-      <section class="paper" id="agents">
-        <div class="split">
-          <div class="section-head">
-            <p class="eyebrow eyebrow-ink">Bring your own agent</p>
-            <h2>No new subscription. <em>Use what you have.</em></h2>
-            <p class="lede lede-ink">
-              Kurambit drives the agent you already sign in to. One model is enough for the whole
-              loop; add more only if you want a second opinion.
-            </p>
-          </div>
-          <ul class="agents">
+        <section class="agents" aria-label="Works with your agent">
+          <span class="mono-label">Runs on the agent you already pay for</span>
+          <ul>
             <li>Codex</li>
             <li>Claude Code</li>
             <li>Cursor</li>
@@ -206,50 +128,362 @@
             <li>OpenCode</li>
             <li>Antigravity</li>
           </ul>
-        </div>
-      </section>
+        </section>
 
-      <section class="ink closing" id="open">
-        <img
-          class="closing-art"
-          src="fox-light.webp"
-          alt=""
-          width="760"
-          height="1150"
-          loading="lazy"
-        />
-        <div class="section-head center">
-          <p class="eyebrow">Open source · local first</p>
-          <h2>Your machine. Your games. <em>Your keys.</em></h2>
-          <p class="lede">
-            Kurambit runs on your computer and keeps its data there. The code is MIT licensed and
-            every line is on GitHub.
-          </p>
-          <div class="actions center">
-            <a class="button button-primary" href="https://github.com/Absterrg0/Kurambit"
-              >View on GitHub</a
-            >
-            <a
-              class="button button-ghost"
-              href="https://github.com/Absterrg0/Kurambit/tree/main/docs/user"
-              >Read the guides</a
-            >
+        <section class="section" id="loop" aria-labelledby="loop-title">
+          <header class="section-head">
+            <span class="index">01</span>
+            <span class="mono-label">The loop</span>
+            <h2 id="loop-title">Not a prompt box. <em>A studio with a process.</em></h2>
+            <p>
+              Anyone can ask a model for a game. Kurambit wraps it in the habits of a real team and
+              runs them every round, so a worse build never lands.
+            </p>
+          </header>
+          <div class="loop">
+            <ol class="steps">
+              <li>
+                <span class="step-n">01</span>
+                <div>
+                  <h3>Brief</h3>
+                  <p>A sentence or two about the game you want. Genre, mood, art direction.</p>
+                </div>
+              </li>
+              <li>
+                <span class="step-n">02</span>
+                <div>
+                  <h3>Build</h3>
+                  <p>
+                    Your agent writes the engine project and models assets in Blender, keeping every
+                    source editable.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span class="step-n">03</span>
+                <div>
+                  <h3>Play</h3>
+                  <p>A separate tester session plays the build and reports what it actually saw.</p>
+                </div>
+              </li>
+              <li>
+                <span class="step-n">04</span>
+                <div>
+                  <h3>Judge</h3>
+                  <p>
+                    Two builds, compared blind. Ties and worse builds are reverted, never merged.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span class="step-n">05</span>
+                <div>
+                  <h3>Keep going</h3>
+                  <p>
+                    Rounds continue until the budget ends, leaving a demo-shaped game for you to
+                    polish.
+                  </p>
+                </div>
+              </li>
+            </ol>
+
+            <figure class="receipt-wrap">
+              <div class="receipt" aria-label="An example round receipt">
+                <p class="r-center r-title">KURAMBIT STUDIO</p>
+                <p class="r-center">ROUND RECEIPT · NO. 0007</p>
+                <hr />
+                <dl>
+                  <div>
+                    <dt>Game</dt>
+                    <dd>Hollow Reach</dd>
+                  </div>
+                  <div>
+                    <dt>Engine</dt>
+                    <dd>Godot 4.7</dd>
+                  </div>
+                  <div>
+                    <dt>Builder</dt>
+                    <dd>your agent · 14m</dd>
+                  </div>
+                  <div>
+                    <dt>Build</dt>
+                    <dd>web, linux</dd>
+                  </div>
+                </dl>
+                <hr />
+                <dl>
+                  <div>
+                    <dt>Tester played</dt>
+                    <dd>4m 12s</dd>
+                  </div>
+                </dl>
+                <p class="r-note">· reached the terrace<br />· ramp edge clipped once</p>
+                <dl>
+                  <div>
+                    <dt>Judge (blind)</dt>
+                    <dd>A vs B</dd>
+                  </div>
+                  <div>
+                    <dt>Picked</dt>
+                    <dd>B</dd>
+                  </div>
+                </dl>
+                <p class="r-note">“the climb reads clearly now”</p>
+                <hr />
+                <dl class="r-total">
+                  <div>
+                    <dt>Verdict</dt>
+                    <dd>KEEP</dd>
+                  </div>
+                </dl>
+                <hr />
+                <p class="r-center r-small">worse builds are reverted</p>
+                <div class="barcode" aria-hidden="true"></div>
+              </div>
+              <figcaption>
+                Every round leaves a record of what was played and why it was kept.
+              </figcaption>
+            </figure>
           </div>
-        </div>
-      </section>
-    </main>
+        </section>
 
-    <footer class="footer">
-      <span class="brand brand-small">
-        <img src="fox-head-light.webp" alt="" width="20" height="20" />
-        Kurambit
-      </span>
-      <span>MIT licensed · © <span data-year>2026</span> Kurambit contributors</span>
-    </footer>
-    <script>
-      for (const node of document.querySelectorAll("[data-year]")) {
-        node.textContent = String(new Date().getFullYear());
-      }
-    </script>
+        <section class="section" id="studio" aria-labelledby="studio-title">
+          <header class="section-head">
+            <span class="index">02</span>
+            <span class="mono-label">Inside the studio</span>
+            <h2 id="studio-title">Your game on a stage. <em>The agent at your side.</em></h2>
+            <p>
+              Watch the game come together, play the real build in the app, and ask for changes in
+              plain words. Every session stays on your machine.
+            </p>
+          </header>
+          <div class="shots">
+            <figure class="window window-main">
+              <div class="window-bar" aria-hidden="true">
+                <i></i><i></i><i></i><span>Hollow Reach</span>
+              </div>
+              <img
+                src="app-game-light.webp"
+                alt="A game open in Kurambit: the stage with the game's poster and a Build and play button, the agent's work on the right"
+                width="1440"
+                height="900"
+                loading="lazy"
+              />
+            </figure>
+            <figure class="window window-side">
+              <div class="window-bar" aria-hidden="true">
+                <i></i><i></i><i></i><span>Home</span>
+              </div>
+              <img
+                src="app-home-light.webp"
+                alt="Kurambit's home: a brief box asking what we are making today, with game covers below"
+                width="1440"
+                height="900"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section class="section" id="tools" aria-labelledby="tools-title">
+          <header class="section-head">
+            <span class="index">03</span>
+            <span class="mono-label">Real tools, real files</span>
+            <h2 id="tools-title">Everything it makes, <em>you can open.</em></h2>
+            <p>
+              No black boxes. Each game is its own git repository with editable sources, so you can
+              keep working with or without Kurambit.
+            </p>
+          </header>
+          <div class="carts">
+            <article class="cart" data-cart="godot">
+              <div class="cart-label"><span>GODOT</span><span>4.7</span></div>
+              <h3>Native games</h3>
+              <p>
+                Scenes and scripts you can open in the editor. Kurambit installs a pinned, verified
+                copy for you.
+              </p>
+              <ul>
+                <li>GDScript</li>
+                <li>2D + 3D</li>
+                <li>.exe export</li>
+              </ul>
+            </article>
+            <article class="cart" data-cart="blender">
+              <div class="cart-label"><span>BLENDER</span><span>4.5 LTS</span></div>
+              <h3>Real 3D assets</h3>
+              <p>
+                Every model keeps its .blend source and the script that made it, next to the
+                engine-ready export.
+              </p>
+              <ul>
+                <li>.blend</li>
+                <li>.glb</li>
+                <li>scripted</li>
+              </ul>
+            </article>
+            <article class="cart" data-cart="three">
+              <div class="cart-label"><span>THREE.JS</span><span>WEB</span></div>
+              <h3>Browser lane</h3>
+              <p>A quick lane for small ideas you want to play and share with a link in minutes.</p>
+              <ul>
+                <li>instant</li>
+                <li>shareable</li>
+                <li>webgl</li>
+              </ul>
+            </article>
+            <article class="cart" data-cart="export">
+              <div class="cart-label"><span>EXPORT</span><span>SHIP</span></div>
+              <h3>Play, then ship</h3>
+              <p>
+                Play the real build inside the app, then export Windows, Linux and web builds when
+                it feels right.
+              </p>
+              <ul>
+                <li>windows</li>
+                <li>linux</li>
+                <li>web</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="faq" aria-labelledby="faq-title">
+          <header class="section-head">
+            <span class="index">04</span>
+            <span class="mono-label">Questions</span>
+            <h2 id="faq-title">Good to know.</h2>
+          </header>
+          <div class="faq">
+            <details>
+              <summary>When can I use Kurambit?</summary>
+              <p>
+                We are letting people in small batches so every new studio gets a good first game.
+                Join the waitlist and we will email you when your invite is ready.
+              </p>
+            </details>
+            <details>
+              <summary>What do I need?</summary>
+              <p>
+                A Linux x86_64 machine today and one signed-in coding agent: Codex, Claude Code,
+                Cursor, Grok Build, OpenCode or Antigravity. Kurambit installs Godot and Blender for
+                you.
+              </p>
+            </details>
+            <details>
+              <summary>What does it cost?</summary>
+              <p>
+                Kurambit is open source under the MIT license. It runs on the agent subscription you
+                already have; one model is enough for the whole loop.
+              </p>
+            </details>
+            <details>
+              <summary>Can it make any kind of game?</summary>
+              <p>
+                Any genre. One brief aims for a game shaped like a Steam demo: something you can
+                play, judge and keep improving with the studio.
+              </p>
+            </details>
+            <details>
+              <summary>What happens to my email?</summary>
+              <p>
+                It is stored privately and used only to contact you about Kurambit. It is never sold
+                or shared, and you can ask to be removed at any time.
+                <a href="/privacy">Read the privacy note.</a>
+              </p>
+            </details>
+            <details>
+              <summary>Is the code open?</summary>
+              <p>
+                Yes. Every line is on <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>.
+              </p>
+            </details>
+          </div>
+        </section>
+
+        <section class="cta" id="join" aria-labelledby="join-title">
+          <img class="cta-fox" src="fox-ink.webp" alt="" width="760" height="1150" loading="lazy" />
+          <div class="cta-copy">
+            <span class="mono-label">Waitlist</span>
+            <h2 id="join-title">Be first in <em>the studio.</em></h2>
+            <p>Tell us a little about you and we will send your invite as soon as there is room.</p>
+            <form class="waitlist waitlist-full" data-waitlist data-source="footer" novalidate>
+              <div class="grid-2">
+                <label class="input">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="you@yourstudio.com"
+                    autocomplete="email"
+                    maxlength="254"
+                    required
+                  />
+                </label>
+                <label class="input">
+                  <span>Name <i>optional</i></span>
+                  <input
+                    type="text"
+                    name="name"
+                    placeholder="Ada"
+                    autocomplete="name"
+                    maxlength="80"
+                  />
+                </label>
+              </div>
+              <fieldset class="roles">
+                <legend>I am</legend>
+                <label
+                  ><input type="radio" name="role" value="player" /><span
+                    >Curious player</span
+                  ></label
+                >
+                <label
+                  ><input type="radio" name="role" value="indie" checked /><span
+                    >Indie developer</span
+                  ></label
+                >
+                <label
+                  ><input type="radio" name="role" value="studio" /><span
+                    >Part of a studio</span
+                  ></label
+                >
+                <label
+                  ><input type="radio" name="role" value="other" /><span
+                    >Something else</span
+                  ></label
+                >
+              </fieldset>
+              <div class="hp" aria-hidden="true">
+                <label
+                  >Website <input type="text" name="website" tabindex="-1" autocomplete="off"
+                /></label>
+              </div>
+              <div class="cta-submit">
+                <button class="btn btn-primary btn-large" type="submit">
+                  <span data-label>Request an invite</span>
+                </button>
+                <p class="form-note" data-status role="status" aria-live="polite">
+                  Stored privately, used only for your invite.
+                </p>
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <a class="brand brand-small" href="/" aria-label="Kurambit home">
+          <img src="fox-head-ink.webp" alt="" width="20" height="20" />
+          <span>Kurambit</span>
+        </a>
+        <nav aria-label="Footer">
+          <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>
+          <a href="/privacy">Privacy</a>
+          <a href="#join">Waitlist</a>
+        </nav>
+        <span class="mono-label">MIT · © <span data-year>2026</span> Kurambit</span>
+      </footer>
+    </div>
   </body>
 </html>
