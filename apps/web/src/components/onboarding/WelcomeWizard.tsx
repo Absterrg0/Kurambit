@@ -258,7 +258,9 @@ function AgentsStep({
       title="Connect your agents"
       description="Choose the agent that builds your games. You can add more later."
     >
-      <ScrollArea scrollFade className="mt-5 h-auto max-h-[min(32rem,55dvh)]">
+      {/* The list gets what the dialog's header, title and button leave, so the
+          button stays on screen on short windows. */}
+      <ScrollArea scrollFade className="mt-5 h-auto max-h-[min(32rem,calc(100dvh-24rem))]">
         <div className="space-y-5 pr-3">
           {environmentIds.map((environmentId) => (
             <ConnectedAgentsStep

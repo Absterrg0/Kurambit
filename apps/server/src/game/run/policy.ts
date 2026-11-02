@@ -529,12 +529,18 @@ const step = (state: RunState, task: Task, s: Step): Planned => ({
   step: s,
 });
 
-// Where the next direction comes from: the last review, else a plain repeat
-// of the previous one (said so), else the pick's findings, else the plan.
+// Where the next direction comes from: the creator's notes first, then the
+// last review, else a plain repeat of the previous one (said so), else the
+// pick's findings, else the plan.
 const roundDirection = (state: RunState) => {
   const prior = state.lastDirection || (state.rounds.at(-1)?.move ?? "");
-  const repeating = state.next.length === 0 && state.rounds.length > 0 && prior.length > 0;
-  const direction = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, state.lane);
+  const repeating =
+    state.steer.length === 0 &&
+    state.next.length === 0 &&
+    state.rounds.length > 0 &&
+    prior.length > 0;
+  const base = repeating ? prior : Roles.roundBase(state.next, state.pickNotes, state.lane);
+  const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
   return { direction, repeating };
 };
 
@@ -616,7 +622,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       if (remaining(state, input.now) < ROUND_RESERVE_MS) return end("budget");
       const { direction, repeating } = roundDirection(state);
       const move = direction.slice(0, 300);
-      const next: Round = { ...r, direction, repeating, move, record: { ...r.record, move } };
+      const steer = state.steer.length === 0 ? {} : { steer: state.steer };
+      const next: Round = {
+        ...r,
+        direction,
+        repeating,
+        move,
+        record: { ...r.record, move, ...steer },
+      };
       const from = state.pending?.branch ?? null;
       return run({ _tag: "start-round", trunk: state.trunk, key: `round-${n}`, from }, next);
     }
@@ -846,7 +859,8 @@ export const applyResult = (
       if (t.phase === "play" && res.kind === "done")
         return out({ ...s, task: { ...t, phase: "write", thread: res.threadId } });
       const text = res.kind === "done" ? textOf(res, ".studio/ship.md") : "";
-      if (parseShip(text) === "YES") return out({ ...s, ending: "ready" });
+      // A creator note that arrived during the ship review still gets its round.
+      if (parseShip(text) === "YES" && s.steer.length === 0) return out({ ...s, ending: "ready" });
       const reasons =
         text
           .split(/SHIP:\s*(?:YES|NO)/i)
@@ -908,9 +922,11 @@ const applyRound = (
       };
       if (ms < FLOOR_MS) return leaveRound({ ...s, pending }, round);
       const direction = Roles.roundDirection(r.direction, r.repeating, lane);
+      // Only the notes this round read are used up; later ones wait for the next.
       return {
         ...s,
         pending,
+        steer: s.steer.slice(r.record.steer?.length ?? 0),
         task: { ...round, phase: "block", block: newBlock(`${r.n}`, direction, false, ms) },
       };
     }
@@ -1183,7 +1199,12 @@ const finishRound = (
     lastDirection: r.direction,
     ending,
   };
-  if (ending === null && state.stallStreak < 3 && parseStatus(next) === "ready")
+  if (
+    ending === null &&
+    state.stallStreak < 3 &&
+    state.steer.length === 0 &&
+    parseStatus(next) === "ready"
+  )
     return { ...state, task: { _tag: "ship", n: r.n, phase: "play", thread: null } };
   return { ...state, task: newRound(state, now) };
 };

@@ -1,4 +1,5 @@
 // The run's persisted record: `.studio/run.json` holds one RunState, decoded on every load.
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { RunId, ThreadId } from "@kurambit/contracts";
 
@@ -21,6 +22,7 @@ const RoundRecord = Schema.Struct({
   linesChanged: Schema.Number,
   testerNote: Schema.optionalKey(Schema.String),
   note: Schema.optionalKey(Schema.String),
+  steer: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type RoundRecord = typeof RoundRecord.Type;
 
@@ -268,6 +270,9 @@ const RunState = Schema.Struct({
   pickNotes: Schema.String,
   next: Schema.String,
   lastDirection: Schema.String,
+  // The creator's notes for the next round, folded in from .studio/steer.jsonl
+  // by the driver. Older run.json files have none.
+  steer: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   task: Task,
   inFlight: Schema.NullOr(Step),
 });
@@ -341,6 +346,7 @@ export const freshState = (
   pickNotes: "",
   next: "",
   lastDirection: "",
+  steer: [],
   task: { _tag: "init" },
   inFlight: null,
 });

@@ -37,6 +37,17 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
 }
 
 /**
+ * The creator's own session and a live production run share this folder; the
+ * run's builder edits it and its git resets would undo the session's edits.
+ */
+export const CREATOR_SESSION_SECTION = `## The creator's session and the production run
+
+This section is for the creator's own session on this game. A session the production run launched for one of its roles follows its prompt instead.
+
+A production run may be working on this game; game_run_status says whether one is live and what it is doing. While one is live, do not edit the game's files: the run is changing them and its commits and resets would collide with yours. Pass the creator's requests to the run with game_run_steer and tell them the run's next round takes it up. When no run is live, work on the game directly as usual.
+`;
+
+/**
  * Files the studio owns for every game. The starter template's project tree
  * supplies the engine sources; see templates.ts.
  */
@@ -60,7 +71,7 @@ Use the game_* tools to check, play, export and package the game; never run Godo
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
-    "AGENTS.md": projectLine,
+    "AGENTS.md": `${projectLine}\n${CREATOR_SESSION_SECTION}`,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore":
       "builds/\ngodot/.godot/\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\n.studio/player-report.md\n.studio/pick.txt\n.studio/next.md\n.studio/ship.md\n.studio/exports.json\n.studio/final-video.json\n.studio/tester-*.md\n.studio/reviewer-*.md\n.studio/worktrees/\nPICK-NOTES.md\nJUDGE-NOTES.md\n",

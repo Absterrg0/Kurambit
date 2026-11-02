@@ -3,8 +3,9 @@
 
 // Role threads have no local engine binaries and must never look for any:
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
+// The game's AGENTS.md also speaks to the creator's own session; a role follows its prompt.
 const TOOL_RULE =
-  "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
+  "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYTEST_LINE = "Read ./studio-skills/playtest.md before you play. ";
 const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default target) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
@@ -45,6 +46,10 @@ export const roundBase = (next: string, pickNotes: string, lane: string): string
     : pickNotes.length > 0
       ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks:\n${pickNotes}\n${concreteAsk(lane)}`
       : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. ${concreteAsk(lane)}`;
+
+/** The creator's own notes lead the round; the review's direction follows as far as it fits. */
+export const steered = (notes: ReadonlyArray<string>, base: string): string =>
+  `The creator asked for this; it comes first this round:\n${notes.map((note) => `- ${note}`).join("\n")}\nThen, where it fits alongside that, the last direction:\n${base}`;
 
 export const roundDirection = (base: string, repeating: boolean, lane: string): string =>
   repeating

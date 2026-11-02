@@ -276,6 +276,33 @@ describe("rounds", () => {
   });
 });
 
+describe("steering", () => {
+  it("puts the creator's notes ahead of next.md at round start and clears them once used", () => {
+    const start = atRound({ next: "fix the jump", steer: ["make the frogs faster"] });
+    const planned = Policy.plan(start, { now: T0, coin: 0, id: "s" });
+    if (planned.kind !== "step" || planned.state.task._tag !== "round")
+      throw new Error("expected a round start");
+    const direction = planned.state.task.direction;
+    expect(direction.indexOf("make the frogs faster")).toBeGreaterThanOrEqual(0);
+    expect(direction.indexOf("make the frogs faster")).toBeLessThan(
+      direction.indexOf("fix the jump"),
+    );
+    expect(planned.state.task.repeating).toBe(false);
+    // A note that arrives while the round starts waits for the next one.
+    const arrived = { ...planned.state, steer: [...planned.state.steer, "and add a boss"] };
+    const { state } = drive(arrived, roundResponder("A", "B"), (s) => s.rounds.length === 1);
+    expect(state.rounds[0]?.steer).toEqual(["make the frogs faster"]);
+    expect(state.steer).toEqual(["and add a boss"]);
+  });
+
+  it("reads an older run.json without notes as having none", () => {
+    const encoded = State.encodeRunState(atRound());
+    const { steer: _steer, ...older } = encoded;
+    const loaded = State.loadState(JSON.stringify(older), "");
+    expect(loaded.kind === "v3" && loaded.state.steer).toEqual([]);
+  });
+});
+
 describe("budget", () => {
   it("does not start a round that cannot fit", () => {
     const planned = Policy.plan(atRound({ budgetEndsAt: T0 + 21 * MIN }), {
