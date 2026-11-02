@@ -110,7 +110,13 @@ const waitPort = async (port: number, timeoutMs: number): Promise<boolean> => {
   return false;
 };
 
-/** Blender never sees the real HOME/config: everything lives under the game. */
+/** Blender never sees the real HOME/config: everything lives under the game.
+ * Live session children (Xvfb, Blender, the pinned MCP server) build on the
+ * allowlisted engine base, so model-driven `execute_blender_code` cannot read
+ * server secrets; only the intentional BLENDERMCP_* addon keys are added, at
+ * the spawn sites. The one-shot addon installer below is different: it
+ * fetches the pinned package over the network, so it keeps proxy/cert
+ * variables (see toolNetworkEnv). */
 const sessionEnv = (
   homeDir: string,
   display: string | null,
@@ -118,7 +124,7 @@ const sessionEnv = (
 ): NodeJS.ProcessEnv => {
   const fakeHome = NodePath.join(homeDir, "home");
   const env: NodeJS.ProcessEnv = {
-    ...GameProcesses.headlessEnvironment(process.env),
+    ...GameProcesses.engineChildEnv(),
     ...extra,
   };
   env.HOME = fakeHome;
@@ -139,6 +145,31 @@ const stringEnv = (env: NodeJS.ProcessEnv): Record<string, string> => {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) out[key] = value;
+  }
+  return out;
+};
+
+/**
+ * Network configuration the pinned-tool installer may need. The uvx
+ * addon-install child fetches over HTTPS, so proxy and CA variables ride
+ * that one child only; live engine children never see them.
+ */
+const toolNetworkEnv = (): NodeJS.ProcessEnv => {
+  const out: NodeJS.ProcessEnv = {};
+  for (const name of [
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+  ] as const) {
+    const value = process.env[name];
+    if (value !== undefined) out[name] = value;
   }
   return out;
 };
@@ -377,9 +408,13 @@ const make = Effect.gen(function* () {
           {
             ...sessionEnv(homeDir, null),
             BLENDERMCP_ADDONS_DIR: addonsDir,
+            // Fixed installer argv, fetched over the network: proxy/cert
+            // variables ride this child only.
+            ...toolNetworkEnv(),
           },
           uv.binDir,
         ),
+        envMode: "replace",
       });
       if (installed.exitCode !== 0)
         return yield* opError(
@@ -401,6 +436,7 @@ const make = Effect.gen(function* () {
         operation: "blender-live-enable",
         timeoutMs: 120_000,
         env: sessionEnv(homeDir, null),
+        envMode: "replace",
       });
       if (enable.exitCode !== 0)
         return yield* opError(
@@ -472,10 +508,12 @@ const make = Effect.gen(function* () {
       // One child of the pinned server per game, telemetry off, over stdio.
       // The addon reads Sketchfab/Poly Pizza keys from BLENDERMCP_* env, so
       // keys set in Game Tools ride the Blender and MCP environments below.
+      // The MCP child serves tool calls to the model, so it gets the
+      // allowlisted base plus only those intentional addon keys.
       const mcpEnv = stringEnv(
         withBinDir(
           {
-            ...GameProcesses.headlessEnvironment(process.env),
+            ...GameProcesses.engineChildEnv(),
             TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
             DISABLE_TELEMETRY: "true",
             LIBGL_ALWAYS_SOFTWARE: "1",

@@ -3,6 +3,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
@@ -53,6 +54,37 @@ export const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.Proc
   for (const name of DISPLAY_VARIABLES) delete headless[name];
   return headless;
 };
+/**
+ * Allowlisted base environment for children that execute engine or game
+ * code (native Godot explore/bot runs, live Blender, headless Chromium).
+ * Only process lookup, home, scratch, locale and heap knobs cross the
+ * boundary; server secrets, provider credentials and unrelated tool
+ * configuration stay behind. Display routes never cross here: a caller adds
+ * a DISPLAY only for the private display it owns. Callers add exactly what
+ * their child owns on top: per-run XDG/HOME isolation, GL
+ * software-rendering flags, or intentional addon keys. Tool/install children
+ * that fetch over the network keep the broader headless environment instead,
+ * where proxy/cert variables may be required.
+ */
+export const engineChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const source = process.env;
+  const env: NodeJS.ProcessEnv = {};
+  if (source.PATH !== undefined) env.PATH = source.PATH;
+  if (source.HOME !== undefined) env.HOME = source.HOME;
+  env.LANG = source.LANG ?? "C.UTF-8";
+  if (source.LC_ALL !== undefined) env.LC_ALL = source.LC_ALL;
+  if (source.NODE_OPTIONS !== undefined) env.NODE_OPTIONS = source.NODE_OPTIONS;
+  // Windows process launch needs its own runtime knobs; never secrets.
+  if (source.SYSTEMROOT !== undefined) env.SYSTEMROOT = source.SYSTEMROOT;
+  if (source.WINDIR !== undefined) env.WINDIR = source.WINDIR;
+  if (source.PATHEXT !== undefined) env.PATHEXT = source.PATHEXT;
+  if (source.TEMP !== undefined) env.TEMP = source.TEMP;
+  if (source.TMP !== undefined) env.TMP = source.TMP;
+  // Scratch stays on disk beside the other run evidence, never RAM-backed /tmp.
+  env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
+  if (extra !== undefined) for (const [key, value] of Object.entries(extra)) env[key] = value;
+  return env;
+};
 interface ProcessInput {
   root: string;
   executable: string;
@@ -62,6 +94,17 @@ interface ProcessInput {
   cwd?: string;
   /** Extra variables merged over the base environment for this child only; never leaked globally. */
   env?: NodeJS.ProcessEnv | undefined;
+  /**
+   * Which base the child environment replaces. "inherit" (default) keeps the
+   * existing behavior: the headless server environment with per-child
+   * `env` overlaid, for generic tool/install/git children that may need
+   * network, proxy, or cert configuration. "replace" starts from an empty
+   * environment so `env` IS the child environment: omitted keys are absent,
+   * not merely overlaid. Engine code-execution children must use "replace"
+   * with an allowlisted env (see engineChildEnv); "replace" without an
+   * explicit `env` leaves the child with nothing and fails loudly.
+   */
+  envMode?: "inherit" | "replace" | undefined;
   /**
    * Linux only: spawn the child as a process-group leader and signal the whole
    * group on stop, timeout and disposal, so wrapper-spawned descendants (an
@@ -104,7 +147,13 @@ const make = Effect.gen(function* () {
     });
     const child = NodeChildProcess.spawn(input.executable, [...input.args], {
       cwd: input.cwd ?? input.root,
-      env: { ...headlessEnvironment(process.env), ...input.env },
+      // "replace" starts from nothing so omitted keys are actually absent in
+      // the spawned child; "inherit" keeps the headless server base for
+      // generic tool/install/git children.
+      env:
+        input.envMode === "replace"
+          ? { ...input.env }
+          : { ...headlessEnvironment(process.env), ...input.env },
       stdio: ["ignore", "pipe", "pipe"],
       // A wrapper (xvfb-run) leaves its display server and engine child in the
       // group; group signalling is the only way to own all of them by PID.
