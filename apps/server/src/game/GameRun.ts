@@ -144,6 +144,15 @@ type StoredRun = {
   shipNoReasons: string;
   rounds: RoundRecord[];
   threads: ThreadRef[];
+  // Explicit pending candidate: an inconclusive round's branch refined by later
+  // rounds against the same judged base. Never merged without a decisive win,
+  // never the base itself. Null when no pending line is open.
+  pending: {
+    branch: string;
+    round: number;
+    verdicts: VerdictRef[];
+    streak: number;
+  } | null;
 };
 
 const newRunId = (): string =>
@@ -2211,6 +2220,8 @@ export const layer = (options: { readonly stateDir: string }) => {
 
       // 6. Rounds until an ending.
       let round = stored.rounds.length;
+      // Pre-durability run.json files have no pending field; normalize once.
+      if (stored.pending === undefined) stored.pending = null;
       for (;;) {
         if (yield* stopRequested(root)) return "stopped";
         if (stored.budgetMinutes !== null && remaining() < 4 * 60_000 + 18 * 60_000)
@@ -2263,9 +2274,34 @@ export const layer = (options: { readonly stateDir: string }) => {
           if (stallStreak >= 3) return "stalled";
           continue;
         }
-        yield* gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
-          Effect.catch(() => gitExec(root, ["checkout", "-q", key], 60_000)),
-        );
+        // Refine an open pending candidate against the same judged base instead
+        // of rebuilding from main: enter its branch so the new round branch
+        // grows from pending work. Best stays main; promotion still needs a
+        // decisive win, and ff-only merge stays viable while main never moves.
+        if (stored.pending !== null) {
+          const pendingBranch = stored.pending.branch;
+          const exists =
+            (yield* gitOut(root, ["rev-parse", "--verify", pendingBranch])).trim().length > 0;
+          if (!exists) {
+            yield* logLine(root, `round ${round}: pending ${pendingBranch} pruned; continuing from main`);
+            stored.pending = null;
+          } else {
+            yield* checkoutBranch(root, pendingBranch);
+            const onBranch = yield* gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
+            if (onBranch.trim() !== pendingBranch) {
+              yield* logLine(
+                root,
+                `round ${round}: cannot reach pending ${pendingBranch}; continuing from main`,
+              );
+              stored.pending = null;
+            } else
+              yield* logLine(
+                root,
+                `round ${round}: refining pending ${pendingBranch} against best ${best.slice(0, 8)}`,
+              );
+          }
+        }
+        yield* checkoutBranch(root, key);
         const blockMs =
           stored.budgetMinutes === null
             ? BLOCK_MS
@@ -2445,6 +2481,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         const bestWinsBoth = order1.verdict === "B" && order2.verdict === "A";
         const noVerdicts = order1.verdict === "NONE" || order2.verdict === "NONE";
         const candidateWinsBoth = order1.verdict === "A" && order2.verdict === "B";
+        let reviewedBuild = "the current best on main";
         if (bestWinsBoth) {
           if (yield* checkoutRef(root, "main", `round ${round} reject`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
@@ -2453,6 +2490,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.note = `${record.note ?? ""} rejected: best won both orders`.trim();
           stored.lastFailure = `round ${round}: rejected, best won both orders`;
           stallStreak += 1;
+          stored.pending = null;
+          reviewedBuild = "the current best on main (last candidate rejected; best won both)";
         } else if (noVerdicts) {
           if (yield* checkoutRef(root, "main", `round ${round} unjudged`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
@@ -2464,6 +2503,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.unjudged = true;
           record.kept = false;
           record.note = `${record.note ?? ""} no judge verdicts after retry; kept on branch`.trim();
+          stored.pending = null;
+          reviewedBuild = `the current best on main (last round unjudged; its candidate stays on branch ${key})`;
           stored.lastFailure =
             `round ${round}: ${order1.verdict === "NONE" ? order1.reason : order2.reason}`.slice(
               0,
@@ -2485,6 +2526,20 @@ export const layer = (options: { readonly stateDir: string }) => {
           }
           record.kept = false;
           record.inconclusive = true;
+          // Open pending line: later rounds refine this candidate against the
+          // same judged base instead of rebuilding from main. Three consecutive
+          // inconclusives drop the line and count one stall: not converging.
+          const streak = (stored.pending !== null ? stored.pending.streak : 0) + 1;
+          if (streak >= 3) {
+            stored.pending = null;
+            stallStreak += 1;
+            record.note =
+              `${record.note ?? ""} inconclusive (${split}); pending dropped after 3 inconclusive rounds`.trim();
+            yield* logLine(root, `round ${round}: pending dropped after 3 inconclusive rounds`);
+          } else {
+            stored.pending = { branch: key, round, verdicts: record.verdicts, streak };
+          }
+          reviewedBuild = `the current best on main (last round inconclusive ${split}; its candidate stays on branch ${key} unmerged; the top flaw below is still open)`;
           yield* logLine(
             root,
             `round ${round}: inconclusive ${split}; best stands, kept on branch ${key}`,
@@ -2495,6 +2550,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           record.note =
             `${record.note ?? ""} merge skipped (cannot reach main); kept on branch`.trim();
           stallStreak += 1;
+          stored.pending = null;
+          reviewedBuild = `the unmerged candidate on branch ${key} (merge skipped: cannot reach main)`;
         } else {
           const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", key], 60_000);
           if (merged.exitCode !== 0) {
@@ -2505,10 +2562,14 @@ export const layer = (options: { readonly stateDir: string }) => {
             record.kept = false;
             record.note = `${record.note ?? ""} merge failed; kept on branch`.trim();
             stallStreak += 1;
+            stored.pending = null;
+            reviewedBuild = `the unmerged candidate on branch ${key} (merge failed; best on main is unchanged)`;
           } else {
             best = candidate;
             record.kept = true;
             stallStreak = 0;
+            stored.pending = null;
+            reviewedBuild = "the kept build (just merged to main)";
             // Keep the pre-round base: the fallback needs it exactly when the
             // candidate is unreachable.
             const prevState = yield* readRoundState(root);
@@ -2540,8 +2601,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           creatorThreadId,
           projectId,
           `reviewer-${round}`,
-          `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): it is the kept build. Read PLAN.md and .studio/tester-${round}.md. Code facts: ${facts}.${playerFacts} After every couple of plays, append what you did and felt to .studio/reviewer-${round}.md. You may only write that notes file. Do not change game files. Do not use subagents.`,
-          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
+          `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): ${reviewedBuild}. Read PLAN.md and .studio/tester-${round}.md. Code facts: ${facts}.${playerFacts} After every couple of plays, append what you did and felt to .studio/reviewer-${round}.md. You may only write that notes file. Do not change game files. Do not use subagents.`,
+          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Prior round worked from: ${move} Verdicts ${order1.verdict}/${order2.verdict} (${record.kept ? "kept" : record.inconclusive === true ? "inconclusive, flaw still open" : "rejected/unjudged"}). State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
           REVIEWER_CAP_MS,
           `.studio/reviewer-${round}.md`,
         );
@@ -2599,10 +2660,17 @@ export const layer = (options: { readonly stateDir: string }) => {
       // from the best real tester or bot run whether or not it won, and the
       // record says which run it came from.
       const game = yield* needGame("export", root);
-      // Unsupported targets are refused by the backend before any work: its
-      // target check precedes all import/export machinery, so reading that
-      // refusal keeps the backend authoritative with zero side effects and no
-      // scope surgery (merging the engine service breaks server boot).
+      // Ask only targets the backend declares, resolved through the service's
+      // own engine path (no scope surgery, no directory heuristics). Anything
+      // else is recorded skipped with the backend message; other export
+      // failures stay failures, never skipped.
+      const targets = yield* game.exportTargets(creatorThreadId).pipe(
+        Effect.catch(() =>
+          logLine(root, "finishExports targets unresolved; asking Web and Linux").pipe(
+            Effect.as({ targets: ["Web", "Linux"] as const, displayName: "Game" }),
+          ),
+        ),
+      );
       type ExportRow = {
         ok: boolean;
         skipped: null | "unsupported-target";
@@ -2617,24 +2685,25 @@ export const layer = (options: { readonly stateDir: string }) => {
             message: result.message,
             path: result.path,
           })),
-          Effect.catch((cause) =>
-            cause.reason === "invalid-input"
-              ? Effect.succeed({
-                  ok: false as boolean,
-                  skipped: "unsupported-target" as const,
-                  message: cause.detail ?? `${target} export refused as unsupported`,
-                  path: null as string | null,
-                })
-              : Effect.succeed({
-                  ok: false as boolean,
-                  skipped: null as null | "unsupported-target",
-                  message: `${target} export errored`,
-                  path: null as string | null,
-                }),
-          ),
+          Effect.orElseSucceed(() => ({
+            ok: false as boolean,
+            skipped: null as null | "unsupported-target",
+            message: `${target} export errored`,
+            path: null as string | null,
+          })),
         );
-      const web: ExportRow = yield* runTarget("Web");
-      const linux: ExportRow = yield* runTarget("Linux");
+      const skipTarget = (target: "Web" | "Linux"): ExportRow => ({
+        ok: false as boolean,
+        skipped: "unsupported-target" as const,
+        message: `${targets.displayName} games export ${targets.targets.join(", ")} only; ${target} skipped`,
+        path: null as string | null,
+      });
+      const web: ExportRow = targets.targets.includes("Web")
+        ? yield* runTarget("Web")
+        : skipTarget("Web");
+      const linux: ExportRow = targets.targets.includes("Linux")
+        ? yield* runTarget("Linux")
+        : skipTarget("Linux");
       const nonEmpty = (path: string): Effect.Effect<boolean> =>
         Effect.promise(() =>
           NodeFSP.stat(path)
@@ -2834,6 +2903,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           shipNoReasons: "",
           rounds: [],
           threads: [],
+          pending: null,
         };
         const roundsText = yield* Effect.promise(() =>
           NodeFSP.readFile(runPaths(root).rounds, "utf8").catch(() => ""),
@@ -2871,6 +2941,15 @@ export const layer = (options: { readonly stateDir: string }) => {
               }).pipe(Effect.ignore),
             ),
             Effect.tap(() => finishExports(root, input.threadId).pipe(Effect.ignore)),
+            // A failed loop must never end silently (observed: a failed boot check
+            // left ending null with no log and no next role). Record cause plus
+            // lastFailure through existing bookkeeping, then let the failure stand.
+            Effect.tapErrorCause((cause) =>
+              logLine(root, `run loop failed: ${String(cause).slice(0, 500)}`).pipe(
+                Effect.andThen(() => noteRouteFailure(root, "run loop failed; see run.log")),
+                Effect.ignore,
+              ),
+            ),
             Effect.ensuring(
               Effect.sync(() => {
                 if (active.get(root)?.runId === run.runId) active.delete(root);

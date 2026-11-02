@@ -198,6 +198,18 @@ export class GameService extends Context.Service<
       target: "Web" | "Linux" | "Windows",
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
+     * Which export targets the game's engine backend declares, with its display
+     * name. Internal loop fact resolved through the existing engine path; not
+     * an MCP tool. Runs no processes.
+     */
+    readonly exportTargets: (threadId: ThreadId) => Effect.Effect<
+      {
+        targets: ReadonlyArray<"Web" | "Linux" | "Windows">;
+        displayName: string;
+      },
+      GameOperationError
+    >;
+    /**
      * Packages the already exported Windows release as a ZIP. It never exports;
      * a missing or unusable release is an error and leaves earlier files alone.
      */
@@ -1996,6 +2008,13 @@ const make = Effect.gen(function* () {
     import: (threadId) => withRoot(threadId, "Import", importGame),
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) => runExport(root, target)),
+    exportTargets: (threadId) =>
+      withRoot(threadId, "Export targets", (root) =>
+        Effect.gen(function* () {
+          const { backend } = yield* engine(root);
+          return { targets: backend.exportTargets, displayName: backend.displayName };
+        }),
+      ),
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", (root) =>
         Effect.gen(function* () {
