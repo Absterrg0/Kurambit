@@ -11,6 +11,7 @@ import {
   SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
+import { KurambitMark, KurambitWordmark } from "../brand/KurambitBrand";
 import { Badge } from "../ui/badge";
 import {
   SidebarFooter,
@@ -113,16 +114,11 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
 
 function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   return (
-    <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-      <span className="shrink-0">Game</span>
-      <span
-        className={cn(
-          "truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1",
-          onBackdrop ? "text-white/70" : "text-muted-foreground",
-        )}
-      >
-        Studio
-      </span>
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <KurambitMark className="size-6 shrink-0" tone={onBackdrop ? "light" : "auto"} />
+      <KurambitWordmark
+        className={cn("truncate text-xs", onBackdrop ? "text-white/90" : "text-foreground")}
+      />
     </span>
   );
 }

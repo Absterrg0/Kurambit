@@ -164,9 +164,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans:
+    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
-    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    "Geist Mono Variable", ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  /* Brand moments only: page titles, empty states and the wordmark. */
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
 }
 
 @theme inline {
@@ -213,13 +217,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
       transparent calc(var(--chat-composer-attachment-overlap) + 10px)
     );
   --color-zinc-25: oklch(99.2% 0 0);
+  --color-vermilion: #d4552b;
+  /* The letterbox around a running game: darker than the stage it sits on. */
+  --color-frame: #0b0a08;
+  /* Uppercase brand labels: the wordmark and section eyebrows. */
+  --tracking-brand: 0.14em;
+  --tracking-eyebrow: 0.18em;
+  --color-washi: #ece4d6;
+  --color-sumi: #13110f;
   /* The game viewport, like an engine's stage: always dark, in both themes,
      because a light letterbox around a rendered game looks broken. Kept off
      pure black so the frame reads as a picture on a surface, not a hole. */
-  --color-stage: oklch(22% 0.006 255);
-  --color-stage-foreground: oklch(96% 0 0);
-  --color-stage-muted: oklch(72% 0 0);
-  --color-stage-subtle: oklch(48% 0 0);
+  --color-stage: #161411;
+  --color-stage-foreground: #ece4d6;
+  --color-stage-muted: #a39888;
+  --color-stage-subtle: #6e655a;
   --animate-skeleton: skeleton 2.4s infinite;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
@@ -654,38 +666,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     background-color: color-mix(in oklab, var(--primary) 45%, transparent);
   }
   :root {
-    /* Keep the original Kurambit artwork palettes as the defaults. Built-in
-       themes override them with their own pigments in the components layer. */
-    --stage-art-top: oklch(0.782169 0.123386 240.226);
-    --stage-art-mid: oklch(0.616111 0.195824 259.735);
-    --stage-art-bottom: oklch(0.441553 0.232394 265.474);
-    --stage-art-highlight: oklch(0.951597 0.037289 215.482);
-    --stage-art-secondary: oklch(0.794668 0.12136 235.46);
-    --stage-art-tertiary: oklch(0.678991 0.170261 275.365);
-    --stage-art-line: oklch(0.959666 0.029238 218.179);
-    --stage-art-celeste-highlight: oklch(0.968763 0.045822 196.42);
-    --stage-art-celeste-secondary: oklch(0.827395 0.126071 211.26);
-    --stage-art-violet-highlight: oklch(0.895381 0.053248 286.447);
-    --stage-art-grid-line: oklch(0.966822 0.01757 239.99);
-    --stage-night-base-top: oklch(0.283792 0.117327 297.201);
-    --stage-night-base-mid: oklch(0.227147 0.086086 277.99);
-    --stage-night-base-bottom: oklch(0.200528 0.055699 261.216);
-    --stage-night-top: var(--stage-night-base-top);
-    --stage-night-mid: var(--stage-night-base-mid);
-    --stage-night-bottom: var(--stage-night-base-bottom);
-    --stage-night-highlight: oklch(0.707246 0.157418 252.091);
-    --stage-night-secondary: oklch(0.600473 0.182225 277.296);
-    --stage-night-tertiary: oklch(0.62583 0.210886 305.994);
-    --stage-night-line: oklch(0.938794 0.029114 273.103);
-    --stage-night-glow-highlight: oklch(0.553749 0.176543 271.958);
-    --stage-night-glow-secondary: oklch(0.345571 0.117466 273.568);
-    --stage-night-sparkle: oklch(0.880867 0.057747 269.011);
-
-    @variant dark {
-      --stage-art-top: oklch(0.581473 0.149124 256.9);
-      --stage-art-mid: oklch(0.456509 0.159377 261.945);
-      --stage-art-bottom: oklch(0.291327 0.136578 267.649);
-    }
+    /* Channel artwork: sumi ink with vermilion for dev, indigo night for nightly. */
+    --stage-art-top: #9a3a1a;
+    --stage-art-mid: #5c2311;
+    --stage-art-bottom: #23140d;
+    --stage-art-highlight: #f0a27f;
+    --stage-art-secondary: #e5622f;
+    --stage-art-line: #f3e9db;
+    --stage-night-top: #1f2742;
+    --stage-night-bottom: #121624;
+    --stage-night-highlight: #8fa4d8;
+    --stage-night-line: #ece4d6;
+    --stage-night-sparkle: #e6e1f0;
   }
 
   * {
@@ -731,7 +723,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
      vellum, forest drafting paper, marine cyanotype, copper, and violet ink.
      These colors stay deliberately deep at the top edge so the white stage
      wordmark and controls retain contrast in both appearance modes. */
-  html[data-theme-id="kurambit-chat"] {
+  html[data-theme-id="sakura"] {
     --stage-art-top: oklch(0.760675 0.141361 348.019);
     --stage-art-mid: oklch(0.588093 0.188832 353.138);
     --stage-art-bottom: oklch(0.383959 0.135096 348.656);
@@ -859,11 +851,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     }
   }
 
-  :is(
-    html[data-theme-id="kurambit-chat"],
-    html[data-theme-id="ocean"],
-    html[data-theme-id="iris"]
-  ) {
+  :is(html[data-theme-id="sakura"], html[data-theme-id="ocean"], html[data-theme-id="iris"]) {
     --stage-night-top: color-mix(in oklch, var(--stage-art-top) 38%, var(--stage-night-base-top));
     --stage-night-mid: color-mix(in oklch, var(--stage-art-mid) 38%, var(--stage-night-base-mid));
     --stage-night-bottom: color-mix(
@@ -886,7 +874,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   }
 
   :is(
-    html[data-theme-id="kurambit-chat"],
+    html[data-theme-id="sakura"],
     html[data-theme-id="grove"],
     html[data-theme-id="ocean"],
     html[data-theme-id="ember"],
@@ -1097,8 +1085,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
-  --background: var(--color-zinc-25);
+  --radius: 0.75rem;
+  --background: #f3ece0;
   --app-chrome-background: var(--background);
   --toolbar-background: var(--app-chrome-background);
   --toolbar-foreground: var(--foreground);
@@ -1107,102 +1095,114 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --toolbar-control-foreground: var(--foreground);
   --toolbar-control-hover: var(--accent);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-zinc-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
-  --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-800);
-  --primary: oklch(0.488 0.217 264);
-  --primary-foreground: var(--color-white);
-  --secondary: var(--color-zinc-50);
-  --secondary-foreground: var(--color-zinc-800);
-  --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
-  --placeholder: var(--muted-foreground);
+  --foreground: #23201b;
+  --card: #fbf7f0;
+  --card-foreground: #23201b;
+  --popover: #fdfaf5;
+  --popover-foreground: #23201b;
+  --primary: #c24a1f;
+  --primary-foreground: #fff8f0;
+  --secondary: #f0e8da;
+  --secondary-foreground: #23201b;
+  --muted: #f0e8da;
+  --muted-foreground: #796e61;
+  --placeholder: #998d7e;
   --secondary-label: var(--muted-foreground);
-  --icon-muted: var(--muted-foreground);
-  --message-surface: var(--accent);
+  --icon-muted: #897d6f;
+  --message-surface: #eae2d4;
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
-  --message-action-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
-  --accent: var(--color-zinc-100);
-  --accent-foreground: var(--color-zinc-900);
-  --error: var(--color-red-500);
-  --error-foreground: var(--color-red-700);
+  --message-action-hover: #ad3f18;
+  --accent: #eae1d2;
+  --accent-foreground: #1a1714;
+  --error: #d2352b;
+  --error-foreground: #a3241c;
   --tool-error-icon: var(--error);
   --error-surface: color-mix(in srgb, var(--error) 8%, transparent);
   --destructive: var(--error);
-  --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
+  --border: #e2d7c5;
+  --input: #d3c6b1;
   --ring: var(--primary);
   --destructive-foreground: var(--error-foreground);
-  --info: var(--color-blue-500);
-  --info-foreground: var(--color-blue-700);
-  --success: var(--color-emerald-500);
-  --success-foreground: var(--color-emerald-700);
-  --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  --info: #3d6f94;
+  --info-foreground: #2c5878;
+  --success: #4f8a4b;
+  --success-foreground: #3a6c37;
+  --warning: #d98b12;
+  --warning-foreground: #94590a;
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --update: var(--primary);
-  --update-foreground: var(--primary);
+  --update-foreground: #a83d17;
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
   /* Keep every sidebar primitive on the same light surface hierarchy, including
-     portaled mobile sheets and settings navigation outside the app sidebar. */
-  --sidebar: var(--color-zinc-50);
+     portaled sheets and settings navigation outside the app sidebar. */
+  --sidebar: #ece4d6;
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
-  --sidebar-border: var(--border);
+  --sidebar-control-surface: #e3d9c8;
+  --sidebar-row-hover: #e6ddcd;
+  --sidebar-row-active: #f8f3ea;
+  --sidebar-row-selected: #f8f3ea;
+  --sidebar-border: #ddd1be;
   --sidebar-stage-fade: var(--sidebar);
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
   --code-foreground: var(--foreground);
-  --terminal-background: var(--background);
+  --terminal-background: #f7f1e7;
   --terminal-foreground: var(--foreground);
-  --terminal-cursor: rgb(38 56 78);
-  --terminal-selection-background: rgb(37 63 99 / 20%);
+  --terminal-cursor: #c24a1f;
+  --terminal-selection-background: rgb(194 74 31 / 18%);
 
   @variant dark {
     color-scheme: dark;
-    /* Keep controls and floating surfaces close to the neutral-black canvas.
-       Borders and hover states provide separation without milky gray fills. */
-    --background: var(--color-neutral-950);
-    --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --foreground: var(--color-neutral-100);
-    --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --card-foreground: var(--color-neutral-100);
-    --popover: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --popover-foreground: var(--color-neutral-100);
-    --primary: oklch(0.571 0.21 264);
-    --secondary: --alpha(var(--color-white) / 3%);
-    --secondary-foreground: var(--color-neutral-100);
-    --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
-    --accent: --alpha(var(--color-white) / 4%);
-    --accent-foreground: var(--color-neutral-100);
-    --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --error-foreground: var(--color-red-400);
-    --tool-error-icon: #fca5a5;
+    /* Sumi ink: warm near-black surfaces separated by hairline borders rather
+       than grey fills, with vermilion reserved for actions and focus. */
+    --background: #13110f;
+    --surface-raised: #1d1a17;
+    --foreground: #ece4d6;
+    --card: #1a1714;
+    --card-foreground: #ece4d6;
+    --popover: #1e1b18;
+    --popover-foreground: #ece4d6;
+    --primary: #d4552b;
+    --primary-foreground: #fff4ea;
+    --secondary: #1f1b18;
+    --secondary-foreground: #ece4d6;
+    --muted: #1f1b18;
+    --muted-foreground: #978c7e;
+    --placeholder: #7b7166;
+    --icon-muted: #887d70;
+    --message-surface: #221e1a;
+    --message-action-hover: #e0633a;
+    --accent: #24201c;
+    --accent-foreground: #f3ecdf;
+    --error: #f0584c;
+    --error-foreground: #ff7b6e;
+    --tool-error-icon: #ff9a8f;
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --info-foreground: var(--color-blue-400);
-    --success-foreground: var(--color-emerald-400);
-    --warning-foreground: var(--color-amber-400);
+    --border: #2a2520;
+    --input: #342e28;
+    --ring: #e5622f;
+    --info: #6f9cc0;
+    --info-foreground: #8db5d4;
+    --success: #7fb26f;
+    --success-foreground: #9cc98c;
+    --warning: #e8a23a;
+    --warning-foreground: #f2b85a;
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
-    --update-foreground: var(--color-blue-400);
+    --update: #e5622f;
+    --update-foreground: #f08055;
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-    --sidebar: var(--card);
-    --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: var(--accent);
-    --sidebar-row-active: var(--accent);
-    --sidebar-row-selected: var(--muted);
-    --sidebar-stage-fade: var(--card);
-    --terminal-cursor: rgb(180 203 255);
-    --terminal-selection-background: rgb(180 203 255 / 25%);
+    --sidebar: #0f0d0b;
+    --sidebar-control-surface: #191613;
+    --sidebar-row-hover: #1a1714;
+    --sidebar-row-active: #24201c;
+    --sidebar-row-selected: #1f1b18;
+    --sidebar-border: #1e1a17;
+    --sidebar-stage-fade: var(--sidebar);
+    --terminal-background: #13110f;
+    --terminal-cursor: #e5622f;
+    --terminal-selection-background: rgb(229 98 47 / 22%);
   }
 }
 
@@ -1210,43 +1210,43 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
    zinc hierarchy: zinc-50 navigation, zinc-25 hover, and white selected/raised
    surfaces. */
 [data-app-sidebar] {
-  --background: var(--color-zinc-25);
-  --foreground: var(--color-zinc-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
-  --accent: var(--color-zinc-100);
-  --accent-foreground: var(--color-zinc-900);
-  --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
-  --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
-  --sidebar: var(--color-zinc-50);
-  --sidebar-foreground: var(--color-zinc-800);
-  --sidebar-muted-foreground: var(--color-zinc-500);
-  --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
-  --sidebar-border: var(--color-zinc-200);
+  --background: #f3ece0;
+  --foreground: #23201b;
+  --card: #fbf7f0;
+  --card-foreground: #23201b;
+  --accent: #eae1d2;
+  --accent-foreground: #1a1714;
+  --muted: #f0e8da;
+  --muted-foreground: #796e61;
+  --border: #e2d7c5;
+  --input: #d3c6b1;
+  --sidebar: #ece4d6;
+  --sidebar-foreground: #23201b;
+  --sidebar-muted-foreground: #796e61;
+  --sidebar-control-surface: #e3d9c8;
+  --sidebar-row-hover: #e6ddcd;
+  --sidebar-row-active: #f8f3ea;
+  --sidebar-row-selected: #f8f3ea;
+  --sidebar-border: #ddd1be;
   --sidebar-stage-fade: var(--sidebar);
 
   @variant dark {
-    --background: #000;
-    --foreground: #f1f3f7;
-    --card: #000;
+    --background: #0f0d0b;
+    --foreground: #e8e0d2;
+    --card: #0f0d0b;
     --card-foreground: var(--foreground);
-    --accent: #191a1d;
-    --accent-foreground: #f7f9ff;
-    --muted: #0a0a0a;
-    --muted-foreground: #a3a3a3;
-    --border: rgb(255 255 255 / 8%);
-    --input: rgb(255 255 255 / 18%);
+    --accent: #24201c;
+    --accent-foreground: #f3ecdf;
+    --muted: #191613;
+    --muted-foreground: #8f8476;
+    --border: rgb(236 228 214 / 7%);
+    --input: rgb(236 228 214 / 14%);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 6%, transparent);
+    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
     --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
     --sidebar-border: var(--border);
     --sidebar-stage-fade: var(--card);
@@ -1477,10 +1477,10 @@ html[data-theme-id] :is(.chat-markdown, .composer-tiptap) .chat-markdown-codeblo
   color: color-mix(in srgb, var(--code-foreground) 72%, transparent);
 }
 
-/* Kurambit Chat renders inline code and compact chat artifacts with its translucent
+/* Sakura renders inline code and compact chat artifacts with its translucent
    secondary surface flattened over the light chat canvas. The raw muted and
    secondary tokens are substantially darker than those visible pixels. */
-html[data-theme-id="kurambit-chat"] {
+html[data-theme-id="sakura"] {
   @variant light {
     & .chat-markdown :not(pre) > code,
     & [data-changed-files-state],
@@ -1526,9 +1526,9 @@ html[data-theme-id] [data-app-sidebar] {
   }
 }
 
-/* Kurambit Chat's panel divider is deliberately pink, and its resize affordance
+/* Sakura's panel divider is deliberately pink, and its resize affordance
    keeps that color while hovered. Do not neutralize this branded edge. */
-html[data-theme-id="kurambit-chat"] [data-app-sidebar] {
+html[data-theme-id="sakura"] [data-app-sidebar] {
   @variant dark {
     border-color: var(--contrast-sidebar-border);
   }
@@ -1696,10 +1696,10 @@ body {
   --surface-grain-size: 256px 256px;
 }
 
-/* The live Kurambit Chat texture is a 128px grayscale tile with a constant 7/255
+/* The Sakura texture is a 128px grayscale tile with a constant 7/255
    alpha. Keep our procedural texture cheap while matching that scale and
    strength for the branded preset. */
-html[data-theme-id="kurambit-chat"] {
+html[data-theme-id="sakura"] {
   --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 128 128' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.02745'/%3E%3C/svg%3E");
   --surface-grain-size: 128px 128px;
 }

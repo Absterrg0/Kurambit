@@ -28,7 +28,7 @@ import {
   subscribeToThemePreview,
   subscribeToCustomThemes,
   themeAllowsSidebarArtwork,
-  KURAMBIT_CHAT_THEME,
+  SAKURA_THEME,
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
@@ -164,31 +164,31 @@ describe("theme files", () => {
     },
   );
 
-  it("keeps stock dark controls in the neutral-black surface hierarchy", () => {
+  it("keeps stock dark controls in the warm ink surface hierarchy", () => {
     expectThemeColors(getStandardThemeColors("dark"), {
-      canvas: "#0a0a0a",
-      surface: "#111111",
-      surfaceRaised: "#111111",
-      surfaceOverlay: "#111111",
-      toolbarControl: "#111111",
-      secondary: "#111111",
-      muted: "#111111",
-      accentSurface: "#141414",
+      canvas: "#13110f",
+      surface: "#1a1714",
+      surfaceRaised: "#1d1a17",
+      surfaceOverlay: "#1e1b18",
+      toolbarControl: "#1b1815",
+      secondary: "#1f1b18",
+      muted: "#1f1b18",
+      accentSurface: "#24201c",
     });
   });
 
   it("keeps the stock sidebar and chat on distinct surfaces in both appearances", () => {
     expectThemeColors(getStandardThemeColors("light"), {
-      canvas: "#fcfcfc",
-      sidebar: "#fafafa",
-      sidebarRowActive: "#ffffff",
-      messageSurface: "#f4f4f5",
+      canvas: "#f3ece0",
+      sidebar: "#ece4d6",
+      sidebarRowActive: "#f8f3ea",
+      messageSurface: "#eae2d4",
     });
     expectThemeColors(getStandardThemeColors("dark"), {
-      canvas: "#0a0a0a",
-      sidebar: "#000000",
-      sidebarRowActive: "#1a1b1b",
-      messageSurface: "#141414",
+      canvas: "#13110f",
+      sidebar: "#0f0d0b",
+      sidebarRowActive: "#24201c",
+      messageSurface: "#221e1a",
     });
   });
 
@@ -292,7 +292,7 @@ describe("theme files", () => {
       colors: {
         canvas: canonical("#07152f"),
         accent: canonical("#67c2ff"),
-        placeholder: canonical("#968d9f"),
+        placeholder: canonical("#7b7166"),
       },
     });
   });
@@ -371,13 +371,13 @@ describe("theme files", () => {
 
   it("canonicalizes the explicitly exported theme", () => {
     const serialized = serializeThemeFile({
-      ...KURAMBIT_CHAT_THEME,
-      colors: { ...KURAMBIT_CHAT_THEME.colors, accent: "hsl(263 70% 58%)" },
+      ...SAKURA_THEME,
+      colors: { ...SAKURA_THEME.colors, accent: "hsl(263 70% 58%)" },
     });
     expect(JSON.parse(serialized)).toMatchObject({
       version: THEME_FILE_VERSION,
-      id: KURAMBIT_CHAT_THEME.id,
-      name: KURAMBIT_CHAT_THEME.label,
+      id: SAKURA_THEME.id,
+      name: SAKURA_THEME.label,
       appearance: "light",
       colors: { accent: canonical("hsl(263 70% 58%)") },
     });
@@ -429,7 +429,7 @@ describe("theme files", () => {
       },
     });
 
-    applyThemeColorPreview(KURAMBIT_CHAT_THEME.colors, "light");
+    applyThemeColorPreview(SAKURA_THEME.colors, "light");
     expect(getThemePreviewSidebarArtwork()).toBe(false);
     expect(listener).toHaveBeenCalledTimes(1);
 
@@ -458,19 +458,19 @@ describe("theme files", () => {
       canvas: canonical("#101827"),
       text: canonical("#eef5ff"),
     });
-    expect(getThemeModes(KURAMBIT_CHAT_THEME)).toEqual(["light", "dark"]);
-    expect(resolveThemeAppearance(KURAMBIT_CHAT_THEME.id, true, true)).toBe("dark");
-    expect(resolveDesktopTheme(KURAMBIT_CHAT_THEME.id, true)).toBe("system");
-    expect(resolveThemeAppearance(KURAMBIT_CHAT_THEME.id, false, false, "dark")).toBe("dark");
-    expect(resolveDesktopTheme(KURAMBIT_CHAT_THEME.id, false, "dark")).toBe("dark");
+    expect(getThemeModes(SAKURA_THEME)).toEqual(["light", "dark"]);
+    expect(resolveThemeAppearance(SAKURA_THEME.id, true, true)).toBe("dark");
+    expect(resolveDesktopTheme(SAKURA_THEME.id, true)).toBe("system");
+    expect(resolveThemeAppearance(SAKURA_THEME.id, false, false, "dark")).toBe("dark");
+    expect(resolveDesktopTheme(SAKURA_THEME.id, false, "dark")).toBe("dark");
     expect(JSON.parse(serializeThemeFile(theme)).variants.dark).toMatchObject({
       canvas: canonical("#101827"),
       text: canonical("#eef5ff"),
     });
   });
 
-  it("keeps the Kurambit Chat palette faithful and readable", () => {
-    expectThemeColors(KURAMBIT_CHAT_THEME.colors, {
+  it("keeps the Sakura palette faithful and readable", () => {
+    expectThemeColors(SAKURA_THEME.colors, {
       canvas: "#fdf7fd",
       chrome: "#fdf7fd",
       toolbarBorder: "#efbdeb",
@@ -485,7 +485,7 @@ describe("theme files", () => {
       accentSurface: "#f3e6f5",
       sidebar: "#f2e1f4",
     });
-    expectThemeColors(KURAMBIT_CHAT_THEME.variants!.dark!, {
+    expectThemeColors(SAKURA_THEME.variants!.dark!, {
       canvas: "#1f1a24",
       chrome: "#1f1a24",
       surface: "#29232d",
@@ -499,7 +499,7 @@ describe("theme files", () => {
     });
 
     for (const mode of ["light", "dark"] as const) {
-      const colors = getThemeColorsForMode(KURAMBIT_CHAT_THEME, mode)!;
+      const colors = getThemeColorsForMode(SAKURA_THEME, mode)!;
       expect(contrastRatio(colors.text, colors.canvas)).toBeGreaterThanOrEqual(7);
       expect(contrastRatio(colors.textMuted, colors.canvas)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(colors.messageForeground, colors.messageSurface)).toBeGreaterThanOrEqual(
@@ -514,7 +514,7 @@ describe("theme files", () => {
   });
 
   it("includes the dual-mode maintainer themes", () => {
-    for (const theme of [KURAMBIT_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of [SAKURA_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
       expect(getThemeDefinition(theme.id)).toBe(theme);
       expect(getThemeModes(theme)).toEqual(["light", "dark"]);
       expect(theme.sidebarArtwork).toBe(true);
@@ -527,7 +527,7 @@ describe("theme files", () => {
         expect(colors).not.toBeNull();
         expect(contrastRatio(colors!.text, colors!.canvas)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeGreaterThanOrEqual(4.5);
-        if (theme !== KURAMBIT_CHAT_THEME) {
+        if (theme !== SAKURA_THEME) {
           expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeLessThan(5.5);
           expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeCloseTo(
             mode === "dark" ? 5.082 : 4.705,
@@ -1075,12 +1075,12 @@ describe("stored theme preferences", () => {
     }
   });
 
-  it("resolves the legacy kurambit-chat-dark preference to dark Kurambit Chat", () => {
-    expect(getThemeDefinition("kurambit-chat-dark")).toBe(KURAMBIT_CHAT_THEME);
-    expect(getThemePreferenceMode("kurambit-chat-dark")).toBe("dark");
-    expect(resolveThemeAppearance("kurambit-chat-dark", true, false)).toBe("dark");
-    expect(resolveDesktopTheme("kurambit-chat-dark", false)).toBe("dark");
-    expect(isKnownThemePreference("kurambit-chat-dark")).toBe(true);
+  it("resolves the legacy sakura-dark preference to dark Sakura", () => {
+    expect(getThemeDefinition("sakura-dark")).toBe(SAKURA_THEME);
+    expect(getThemePreferenceMode("sakura-dark")).toBe("dark");
+    expect(resolveThemeAppearance("sakura-dark", true, false)).toBe("dark");
+    expect(resolveDesktopTheme("sakura-dark", false)).toBe("dark");
+    expect(isKnownThemePreference("sakura-dark")).toBe(true);
   });
 
   it("resolves legacy kurambit-prefixed ids onto the renamed themes", () => {
@@ -1094,7 +1094,7 @@ describe("stored theme preferences", () => {
       expect(isKnownThemePreference(legacy)).toBe(true);
       expect(canonicalThemePreference(legacy)).toBe(theme.id);
     }
-    expect(canonicalThemePreference("kurambit-chat-dark")).toBe("kurambit-chat-dark");
+    expect(canonicalThemePreference("sakura-dark")).toBe("sakura-dark");
     expect(
       parseThemeHalves(JSON.stringify({ light: "kurambit-ocean", dark: "kurambit-grove" })),
     ).toEqual({
@@ -1104,7 +1104,7 @@ describe("stored theme preferences", () => {
   });
 
   it("recognizes only preferences the runtime can render", () => {
-    for (const preference of ["light", "dark", "system", KURAMBIT_CHAT_THEME.id, GROVE_THEME.id]) {
+    for (const preference of ["light", "dark", "system", SAKURA_THEME.id, GROVE_THEME.id]) {
       expect(isKnownThemePreference(preference)).toBe(true);
     }
     expect(isKnownThemePreference(`${GROVE_THEME.id}:dark`)).toBe(false);
@@ -1154,8 +1154,8 @@ describe("stored theme preferences", () => {
 
 describe("singleAppearanceOf", () => {
   it("reports the only half a theme can claim, and null for a pair", () => {
-    const { variants: _pair, ...base } = KURAMBIT_CHAT_THEME;
+    const { variants: _pair, ...base } = SAKURA_THEME;
     expect(singleAppearanceOf({ ...base, id: "x", appearance: "dark" })).toBe("dark");
-    expect(singleAppearanceOf(KURAMBIT_CHAT_THEME)).toBe(null);
+    expect(singleAppearanceOf(SAKURA_THEME)).toBe(null);
   });
 });

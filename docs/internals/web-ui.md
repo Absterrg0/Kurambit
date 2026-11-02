@@ -20,6 +20,11 @@ Style with Tailwind classes in the component that renders the element.
 - No `style={{ ... }}` or inline `<style>` for static values a class covers. Values computed at
   runtime are fine.
 - Theme-only rules use `@variant dark` and `@variant light`, not `.dark` selectors.
+- The default Sumi palette (ink, washi paper, vermilion) lives in three places that must agree:
+  the `:root` tokens in `index.css`, `KURAMBIT_LIGHT_THEME_COLORS` and `KURAMBIT_DARK_THEME_COLORS`
+  in [`themePalettes.ts`](../../packages/shared/src/themePalettes.ts), which seed theme files and
+  HTML renders, and the boot script in [`index.html`](../../apps/web/index.html), which paints the
+  window before React mounts. A change to one without the others shows the old color for a frame.
 
 ## Composition
 

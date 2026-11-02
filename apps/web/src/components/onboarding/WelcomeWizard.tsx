@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { KurambitMark, KurambitWordmark } from "../brand/KurambitBrand";
 import type {
   EnvironmentId,
   ProviderInstanceId,
@@ -153,11 +154,9 @@ export function WelcomeWizard({
         <WizardHeader
           title="Set up Kurambit"
           identity={
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="Kurambit">
-              <span className="text-2xl font-medium tracking-tight">Game</span>
-              <span className="text-2xl font-medium tracking-tight text-muted-foreground">
-                Studio
-              </span>
+            <div className="flex items-center gap-2.5" role="img" aria-label="Kurambit">
+              <KurambitMark className="size-9" />
+              <KurambitWordmark className="text-sm" />
             </div>
           }
         >

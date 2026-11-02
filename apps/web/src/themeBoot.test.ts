@@ -8,7 +8,7 @@ import {
   invalidateCustomThemes,
   isKnownThemePreference,
   resolveThemeAppearance,
-  KURAMBIT_CHAT_THEME,
+  SAKURA_THEME,
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
@@ -153,14 +153,14 @@ describe("index.html boot script", () => {
   }> = [
     { name: "no stored preference on a dark OS", storage: {}, prefersDark: true },
     {
-      name: "Kurambit Chat follows a dark OS",
-      storage: { [THEME_STORAGE_KEY]: "kurambit-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      name: "Sakura follows a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "sakura", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     },
     {
-      name: "an explicit global dark mode applies to Kurambit Chat",
+      name: "an explicit global dark mode applies to Sakura",
       storage: {
-        [THEME_STORAGE_KEY]: "kurambit-chat",
+        [THEME_STORAGE_KEY]: "sakura",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "dark",
         [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "false",
       },
@@ -192,8 +192,8 @@ describe("index.html boot script", () => {
       prefersDark: true,
     },
     {
-      name: "legacy kurambit-chat-dark resolves to dark Kurambit Chat",
-      storage: { [THEME_STORAGE_KEY]: "kurambit-chat-dark" },
+      name: "legacy sakura-dark resolves to dark Sakura",
+      storage: { [THEME_STORAGE_KEY]: "sakura-dark" },
       prefersDark: true,
     },
     {
@@ -256,10 +256,10 @@ describe("index.html boot script", () => {
 
   it("marks built-in and custom themes on the document element", () => {
     const chat = runBootScript({
-      storage: { [THEME_STORAGE_KEY]: "kurambit-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      storage: { [THEME_STORAGE_KEY]: "sakura", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     });
-    expect(chat.themeId).toBe("kurambit-chat");
+    expect(chat.themeId).toBe("sakura");
     expect(chat.themeSelected).toBe("true");
     expect(chat.isDark).toBe(true);
 
@@ -336,7 +336,7 @@ describe("index.html boot script", () => {
   });
 
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [KURAMBIT_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of [SAKURA_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
       expect(theme.appearance).toBe("light");
       for (const mode of ["light", "dark"] as const) {
         const colors = getThemeColorsForMode(theme, mode);
@@ -361,7 +361,7 @@ describe("index.html boot script", () => {
 
   it("applies the matching half of an automatic mix to the splash", () => {
     const storage = {
-      [THEME_STORAGE_KEY]: "kurambit-chat",
+      [THEME_STORAGE_KEY]: "sakura",
       [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
       "kurambit:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
     };
@@ -375,9 +375,9 @@ describe("index.html boot script", () => {
 
     const light = runBootScript({ storage, prefersDark: false });
     expect(light.isDark).toBe(false);
-    expect(light.themeId).toBe("kurambit-chat");
+    expect(light.themeId).toBe("sakura");
     expect(light.bootVariables["--boot-background"]).toBe(
-      getThemeColorsForMode(KURAMBIT_CHAT_THEME, "light")!.canvas,
+      getThemeColorsForMode(SAKURA_THEME, "light")!.canvas,
     );
   });
 
@@ -422,7 +422,7 @@ describe("index.html boot script", () => {
   it("resolves a legacy-prefixed mix half onto the renamed theme", () => {
     const boot = runBootScript({
       storage: {
-        [THEME_STORAGE_KEY]: "kurambit-chat",
+        [THEME_STORAGE_KEY]: "sakura",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
         "kurambit:theme-halves:v1": JSON.stringify({ dark: "kurambit-grove" }),
       },
@@ -438,13 +438,13 @@ describe("index.html boot script", () => {
   it("ignores a mix half that names an unknown theme", () => {
     const boot = runBootScript({
       storage: {
-        [THEME_STORAGE_KEY]: "kurambit-chat",
+        [THEME_STORAGE_KEY]: "sakura",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
         "kurambit:theme-halves:v1": JSON.stringify({ dark: "gone-theme" }),
       },
       prefersDark: true,
     });
-    expect(boot.themeId).toBe("kurambit-chat");
+    expect(boot.themeId).toBe("sakura");
     expect(boot.isDark).toBe(true);
   });
 
@@ -486,8 +486,8 @@ describe("index.html boot script", () => {
 
     expect(boot.themeId).toBeUndefined();
     expect(boot.themeSelected).toBeUndefined();
-    expect(boot.backgroundColor).toBe("#ffffff");
-    expect(boot.metaContent).toBe("#ffffff");
+    expect(boot.backgroundColor).toBe("#f3ece0");
+    expect(boot.metaContent).toBe("#f3ece0");
   });
 
   it("leaves unknown preferences unthemed so the runtime default applies", () => {

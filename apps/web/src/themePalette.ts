@@ -8,7 +8,7 @@ import {
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
-  KURAMBIT_CHAT_THEME,
+  SAKURA_THEME,
   KURAMBIT_LIGHT_THEME_COLORS,
   KURAMBIT_DARK_THEME_COLORS,
   RESERVED_THEME_IDS,
@@ -20,17 +20,10 @@ import {
   type ThemeVariants,
 } from "@kurambit/shared/themePalettes";
 
-export {
-  EMBER_THEME,
-  GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
-  KURAMBIT_CHAT_THEME,
-  THEME_COLOR_ROLES,
-};
+export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, SAKURA_THEME, THEME_COLOR_ROLES };
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
-export const KURAMBIT_CHAT_THEME_ID = "kurambit-chat" as const;
+export const SAKURA_THEME_ID = "sakura" as const;
 const GROVE_THEME_ID = "grove" as const;
 export const OCEAN_THEME_ID = "ocean" as const;
 const EMBER_THEME_ID = "ember" as const;
@@ -41,7 +34,7 @@ export const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "kurambit:theme-follow-system";
 export const THEME_APPEARANCE_MODE_STORAGE_KEY = "kurambit:theme-appearance-mode";
 export const THEME_HALVES_STORAGE_KEY = "kurambit:theme-halves:v1";
 
-const LEGACY_KURAMBIT_CHAT_DARK_THEME_ID = "kurambit-chat-dark";
+const LEGACY_SAKURA_DARK_THEME_ID = "sakura-dark";
 
 export const ThemePreference = Schema.String;
 export type ThemePreference = typeof ThemePreference.Type;
@@ -290,7 +283,7 @@ export function subscribeToCustomThemes(listener: () => void): () => void {
 }
 
 const LEGACY_THEME_ID_ALIASES: Readonly<Record<string, string>> = {
-  [LEGACY_KURAMBIT_CHAT_DARK_THEME_ID]: KURAMBIT_CHAT_THEME_ID,
+  [LEGACY_SAKURA_DARK_THEME_ID]: SAKURA_THEME_ID,
   "kurambit-grove": GROVE_THEME_ID,
   "kurambit-ocean": OCEAN_THEME_ID,
   "kurambit-ember": EMBER_THEME_ID,
@@ -302,7 +295,7 @@ function normalizeThemeId(themeId: string): string {
 }
 
 export function canonicalThemePreference(theme: string): string {
-  return theme === LEGACY_KURAMBIT_CHAT_DARK_THEME_ID ? theme : normalizeThemeId(theme);
+  return theme === LEGACY_SAKURA_DARK_THEME_ID ? theme : normalizeThemeId(theme);
 }
 
 function themeIdFromPreference(theme: ThemePreference): string {
@@ -310,7 +303,7 @@ function themeIdFromPreference(theme: ThemePreference): string {
 }
 
 function legacyThemeMode(theme: ThemePreference): ThemeAppearance | null {
-  return theme === LEGACY_KURAMBIT_CHAT_DARK_THEME_ID ? "dark" : null;
+  return theme === LEGACY_SAKURA_DARK_THEME_ID ? "dark" : null;
 }
 
 export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors {
@@ -808,7 +801,7 @@ function standardMutedThemeText(
 }
 
 export function getDefaultThemeColors(appearance: ThemeAppearance): ThemeColors {
-  return appearance === "dark" ? KURAMBIT_CHAT_THEME.variants!.dark! : KURAMBIT_CHAT_THEME.colors;
+  return getStandardThemeColors(appearance);
 }
 
 export function updateThemeColorFamily(

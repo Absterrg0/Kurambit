@@ -116,7 +116,7 @@ export function GamePlaySurface({
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-stage p-3 [container-type:size]"
     >
       <div
-        className="relative overflow-hidden rounded-lg bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10"
+        className="relative overflow-hidden rounded-lg bg-frame shadow-2xl shadow-black/60 ring-1 ring-washi/10"
         style={frameStyle(viewport)}
       >
         {playing ? (

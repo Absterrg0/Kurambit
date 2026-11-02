@@ -1,4 +1,5 @@
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
+import { KurambitMark } from "./brand/KurambitBrand";
+import { Empty, EmptyDescription, EmptyHeader } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
 import { isElectron } from "../env";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
@@ -20,9 +21,10 @@ export function NoActiveThreadState() {
         </WorkspacePageHeader>
 
         <Empty className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12">
+          <div className="flex w-full max-w-lg flex-col items-center gap-6 px-8 py-12">
+            <KurambitMark className="size-20 opacity-80" />
             <EmptyHeader className="max-w-none">
-              <EmptyTitle>Pick a thread to continue</EmptyTitle>
+              <h2 className="font-display text-3xl">Pick a thread to continue</h2>
               <EmptyDescription>
                 Select an existing thread or create a new one to get started.
               </EmptyDescription>

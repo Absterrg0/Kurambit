@@ -6,28 +6,28 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#13110f" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       (() => {
-        const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#0a0a0a";
+        const LIGHT_BACKGROUND = "#f3ece0";
+        const DARK_BACKGROUND = "#13110f";
         const CUSTOM_THEMES_STORAGE_KEY = "kurambit:themes:v1";
         const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "kurambit:theme-follow-system";
         const THEME_APPEARANCE_MODE_STORAGE_KEY = "kurambit:theme-appearance-mode";
         const THEME_HALVES_STORAGE_KEY = "kurambit:theme-halves:v1";
         const SPLASH_COLORS = {
           light: {
-            background: "#ffffff",
-            foreground: "#262626",
-            accent: "#4f46e5",
+            background: "#f3ece0",
+            foreground: "#23201b",
+            accent: "#c24a1f",
           },
           dark: {
-            background: "#0a0a0a",
-            foreground: "#f5f5f5",
-            accent: "#818cf8",
+            background: "#13110f",
+            foreground: "#ece4d6",
+            accent: "#d4552b",
           },
         };
         // These are the runtime defaults used to complete a custom palette
@@ -36,22 +36,22 @@
         // app colors before React mounts.
         const DEFAULT_THEME_PALETTES = {
           light: {
-            background: "oklch(0.982446 0.010114 325.653)",
-            foreground: "oklch(0.325698 0.116116 325.037)",
-            accent: "oklch(0.591646 0.217985 0.584)",
-            chrome: "oklch(0.982446 0.010114 325.653)",
+            background: "oklch(0.94529 0.017668 81.331)",
+            foreground: "oklch(0.24507 0.010282 80.609)",
+            accent: "oklch(0.565557 0.163221 38.55)",
+            chrome: "oklch(0.94529 0.017668 81.331)",
           },
           dark: {
-            background: "oklch(0.22813 0.020366 307.469)",
-            foreground: "oklch(0.980735 0.004092 301.426)",
-            accent: "oklch(0.460685 0.185347 4.099)",
-            chrome: "oklch(0.22813 0.020366 307.469)",
+            background: "oklch(0.179239 0.005212 67.486)",
+            foreground: "oklch(0.92137 0.020639 81.78)",
+            accent: "oklch(0.609409 0.169702 37.995)",
+            chrome: "oklch(0.179239 0.005212 67.486)",
           },
         };
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
-          "kurambit-chat": {
+          sakura: {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
               foreground: "oklch(0.325698 0.116116 325.037)",
@@ -123,7 +123,7 @@
           },
         };
         // Keep the built-in mode list in sync with the runtime so the selected
-        // Kurambit Chat palette is visible before React has mounted.
+        // Sakura palette is visible before React has mounted.
         const BUILT_IN_THEME_MODES = Object.fromEntries(
           Object.entries(BUILT_IN_THEME_PALETTES).map(([id, palettes]) => [
             id,
@@ -134,12 +134,12 @@
           "system",
           "light",
           "dark",
-          "kurambit-chat",
+          "sakura",
           "grove",
           "ocean",
           "ember",
           "iris",
-          "kurambit-chat-dark",
+          "sakura-dark",
           "kurambit-grove",
           "kurambit-ocean",
           "kurambit-ember",
@@ -219,20 +219,20 @@
         try {
           const storedTheme = window.localStorage.getItem("kurambit:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          // Older builds stored the dark Kurambit Chat palette as its own theme id
+          // Older builds stored the dark Sakura palette as its own theme id
           // and every maintainer theme under a kurambit- prefix; keep those
           // preferences readable. Mirrors the runtime's legacy alias table.
           const LEGACY_THEME_IDS = {
-            "kurambit-chat-dark": "kurambit-chat",
+            "sakura-dark": "sakura",
             "kurambit-grove": "grove",
             "kurambit-ocean": "ocean",
             "kurambit-ember": "ember",
             "kurambit-iris": "iris",
           };
-          const isLegacyKurambitChatDark = storedTheme === "kurambit-chat-dark";
+          const isLegacySakuraDark = storedTheme === "sakura-dark";
           const themeId =
             storedTheme === null ? "" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
-          const legacyMode = isLegacyKurambitChatDark ? "dark" : null;
+          const legacyMode = isLegacySakuraDark ? "dark" : null;
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);
           const themeModes =
@@ -411,14 +411,14 @@
       }
 
       body {
-        background: #ffffff;
-        color: #262626;
+        background: #f3ece0;
+        color: #23201b;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       }
 
       html.dark body {
-        background: #0a0a0a;
-        color: #f5f5f5;
+        background: #13110f;
+        color: #ece4d6;
       }
 
       #boot-shell {

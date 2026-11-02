@@ -13,6 +13,7 @@ import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadShells } from "../../state/entities";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
 import type { EnvironmentId, GameSummary } from "@kurambit/contracts";
+import { KurambitMark } from "../brand/KurambitBrand";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -22,6 +23,7 @@ import { useGameDialogStore } from "./gameDialogStore";
 import {
   formatGameEditedAt,
   gameInitial,
+  gamePigment,
   gameTemplateAppearance,
   newestThreadByProject,
 } from "./gameLibrary.logic";
@@ -68,14 +70,14 @@ export function GamesHome() {
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-          <div className="mx-auto flex w-full max-w-[86rem] flex-col gap-8 px-8 py-8">
-            <header className="flex flex-wrap items-end justify-between gap-4">
-              <div className="flex min-w-0 flex-col gap-1">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Gamepad2Icon className="size-3.5" aria-hidden />
-                  Kurambit
+          <div className="mx-auto flex w-full max-w-[86rem] flex-col gap-8 px-10 pt-10 pb-12">
+            <header className="flex flex-wrap items-end justify-between gap-6 border-b border-border pb-8">
+              <div className="flex min-w-0 flex-col gap-3">
+                <span className="flex items-center gap-2 text-2xs font-semibold tracking-eyebrow text-muted-foreground uppercase">
+                  <span aria-hidden className="size-2.5 rounded-xs bg-primary" />
+                  Studio
                 </span>
-                <h1 className="text-2xl font-semibold tracking-tight">Your games</h1>
+                <h1 className="font-display text-5xl leading-none tracking-tight">Your games</h1>
                 <p className="max-w-xl text-sm text-muted-foreground">
                   {games.length === 0
                     ? "Describe a game and your agent designs and builds it with Blender and Godot."
@@ -171,12 +173,12 @@ function GameGrid({
       <button
         type="button"
         onClick={() => onNewGame()}
-        className="group flex min-h-56 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 p-6 text-center transition-colors hover:border-foreground/25 hover:bg-accent/40"
+        className="group flex min-h-48 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border p-6 text-center transition-colors hover:border-primary/50 hover:bg-primary/[0.04]"
       >
-        <span className="flex size-11 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors group-hover:text-foreground">
+        <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
           <PlusIcon className="size-5" aria-hidden />
         </span>
-        <span className="font-medium text-sm">New game</span>
+        <span className="font-display text-2xl leading-none">New game</span>
         <span className="text-xs text-muted-foreground">Start from a real, playable template</span>
       </button>
     </div>
@@ -187,29 +189,29 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
   const appearance = gameTemplateAppearance(card.game.template);
   const initial = gameInitial(card.game.name);
   const progress = gameProgress(card.game);
+  const [pigment, ink] = gamePigment(card.game.name);
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-xs transition-[border-color,box-shadow,transform] hover:border-foreground/20 hover:shadow-md"
+      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left transition-[border-color,box-shadow,translate] hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg"
     >
-      <span className="relative block aspect-[16/10] overflow-hidden bg-muted">
+      <span
+        className="relative block aspect-[16/10] overflow-hidden"
+        style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
+      >
+        <span aria-hidden className="surface-grain absolute inset-0 mix-blend-overlay" />
         <span
           aria-hidden
-          className={`flex size-full items-center justify-center bg-gradient-to-br ${appearance.coverClassName}`}
+          className="absolute -right-2 -bottom-6 font-display text-9xl leading-none text-washi/85 transition-transform duration-300 group-hover:-translate-y-1"
         >
-          <span
-            className={`flex size-14 items-center justify-center rounded-2xl text-lg font-semibold ${appearance.initialClassName}`}
-          >
-            {initial}
-          </span>
+          {initial}
         </span>
-        <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-black/0 to-black/0" />
         {progress.kind === "building" ? (
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="absolute left-3 top-3 rounded-full border border-info/40 bg-black/60 px-2 py-0.5 text-2xs font-medium text-stage-foreground shadow-sm backdrop-blur-sm" />
+                <span className="absolute left-3 top-3 rounded-full border border-washi/20 bg-sumi/60 px-2 py-0.5 text-2xs font-medium text-washi shadow-sm backdrop-blur-sm" />
               }
             >
               {progress.label}
@@ -217,12 +219,12 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
             <TooltipPopup>{progress.detail}</TooltipPopup>
           </Tooltip>
         ) : null}
-        <span className="absolute bottom-3 left-3 flex items-center gap-1.5 text-2xs font-medium text-white/90 drop-shadow">
-          <Gamepad2Icon className="size-3.5" aria-hidden />
+        <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-sumi/45 px-2 py-0.5 text-2xs font-medium text-washi/90 backdrop-blur-sm">
+          <Gamepad2Icon className="size-3" aria-hidden />
           {appearance.label}
         </span>
       </span>
-      <span className="flex flex-col gap-1 p-4">
+      <span className="flex flex-col gap-1 px-4 pt-3.5 pb-4">
         <span className="flex min-w-0 items-center justify-between gap-2">
           <span className="min-w-0 truncate font-medium text-sm">{card.game.name}</span>
           <ArrowUpRightIcon
@@ -231,7 +233,7 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
           />
         </span>
         <span className="text-xs text-muted-foreground">
-          {appearance.label} · {formatGameEditedAt(gameActivityTimestamp(card))}
+          {formatGameEditedAt(gameActivityTimestamp(card))}
         </span>
       </span>
     </button>
@@ -246,18 +248,18 @@ function GamesEmptyState({
   onOpenGame: () => void;
 }) {
   return (
-    <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:py-10">
-      <div className="flex min-w-0 flex-col items-start gap-4">
+    <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:py-10">
+      <div className="flex min-w-0 flex-col items-start gap-5">
         <Badge variant="outline">
           <SparklesIcon className="size-3" aria-hidden />
           Your first game is one sentence away
         </Badge>
-        <h2 className="max-w-md text-3xl font-semibold tracking-tight text-balance">
-          Describe it. Your agent builds it. Then you play it.
+        <h2 className="max-w-lg font-display text-5xl leading-none text-balance">
+          Describe it. Your agent builds it. <em className="text-primary">Then you play it.</em>
         </h2>
         <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-          Kurambit turns a brief into a real game — a Godot native project with Blender-made art, or
-          a quick three.js browser game. Watch the agent work, and play every revision right here.
+          Kurambit turns a brief into a real game: a native Godot project with Blender-made art, or
+          a quick three.js browser game. Every build is played and judged before it lands.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="lg" onClick={() => onNewGame()}>
@@ -269,15 +271,15 @@ function GamesEmptyState({
             Open a game folder
           </Button>
         </div>
-        <ol className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground">
+        <ol className="mt-3 grid w-full max-w-lg gap-0 border-t border-border text-sm text-muted-foreground">
           {[
             "Describe your game in a few sentences.",
             "Start a production run and watch the agent build.",
             "Play, ask for changes, and export when it feels right.",
           ].map((item, index) => (
-            <li key={item} className="flex items-start gap-2.5">
-              <span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-card text-2xs font-medium text-foreground">
-                {index + 1}
+            <li key={item} className="flex items-baseline gap-4 border-b border-border py-3">
+              <span className="font-display text-xl leading-none text-primary">
+                {String(index + 1).padStart(2, "0")}
               </span>
               <span>{item}</span>
             </li>
@@ -285,9 +287,7 @@ function GamesEmptyState({
         </ol>
       </div>
       <div className="hidden items-center justify-center lg:flex">
-        <span className="flex size-40 items-center justify-center rounded-3xl bg-gradient-to-br from-stage-subtle/20 via-stage-muted/10 to-transparent">
-          <Gamepad2Icon className="size-16 text-muted-foreground" aria-hidden />
-        </span>
+        <KurambitMark variant="full" className="h-[26rem] w-auto opacity-90" />
       </div>
     </div>
   );

@@ -9,10 +9,28 @@ export interface GameTemplateAppearance {
 export const gameTemplateAppearance = (
   template: GameSummary["template"],
 ): GameTemplateAppearance => ({
-  label: template === "blank-three" ? "Blank (browser)" : "Blank",
-  initialClassName: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-300",
-  coverClassName: "from-zinc-500/20 via-zinc-400/10 to-transparent",
+  label: template === "blank-three" ? "three.js" : "Godot",
+  initialClassName: "bg-foreground/8 text-foreground/80",
+  coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
 });
+
+/** Traditional ink pigments for game covers: indigo, moss, ochre, vermilion, wisteria, sumi. */
+const GAME_PIGMENTS = [
+  ["#2c3b5c", "#121826"],
+  ["#3f4f31", "#161c12"],
+  ["#7a5524", "#21170a"],
+  ["#8a3418", "#24100a"],
+  ["#4d3a5c", "#1a1320"],
+  ["#45403a", "#151310"],
+] as const;
+
+/** A stable pigment per game, so a cover keeps its color across sessions and machines. */
+export const gamePigment = (name: string): readonly [string, string] => {
+  // FNV-1a: short names still spread across the palette.
+  let hash = 0x811c9dc5;
+  for (const char of name) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
+  return GAME_PIGMENTS[hash % GAME_PIGMENTS.length]!;
+};
 
 /** The New game dialog and the server derive the folder name the same way. */
 export const gameSlug = (name: string): string =>

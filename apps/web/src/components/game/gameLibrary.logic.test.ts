@@ -54,9 +54,10 @@ describe("formatGameEditedAt", () => {
 });
 
 describe("gameTemplateAppearance", () => {
-  it("names the blank starter", () => {
-    expect(gameTemplateAppearance("blank").label).toBe("Blank");
-    expect(gameTemplateAppearance(null).label).toBe("Blank");
+  it("names the engine each starter uses", () => {
+    expect(gameTemplateAppearance("blank").label).toBe("Godot");
+    expect(gameTemplateAppearance(null).label).toBe("Godot");
+    expect(gameTemplateAppearance("blank-three").label).toBe("three.js");
   });
 });
 

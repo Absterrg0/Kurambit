@@ -70,16 +70,16 @@ describe("theme failure handling", () => {
     }
   });
 
-  it("reads the persisted Kurambit Chat theme preference", async () => {
+  it("reads the persisted Sakura theme preference", async () => {
     vi.stubGlobal("window", {
       localStorage: createStorage({
-        getItem: () => "kurambit-chat",
+        getItem: () => "sakura",
       }),
     });
 
     const { readThemePreference } = await import("./useTheme");
 
-    expect(readThemePreference()).toBe("kurambit-chat");
+    expect(readThemePreference()).toBe("sakura");
   });
 
   it("falls back during initial theme application and logs only safe attributes", async () => {
