@@ -639,6 +639,19 @@ export const layer = (options: { readonly stateDir: string }) => {
       return false;
     });
 
+    // Create-or-enter a round branch, reading the git exit code: the git process
+    // resolves successfully either way, so a plain checkout fallback never runs
+    // on effect-level errors alone. (T30's worktree lane helper supersedes this
+    // at integration; kept here so committed history builds standalone.)
+    const checkoutBranch = (root: string, key: string): Effect.Effect<void> =>
+      gitExec(root, ["checkout", "-qb", key], 60_000).pipe(
+        Effect.flatMap((created) =>
+          created.exitCode === 0
+            ? Effect.void
+            : gitExec(root, ["checkout", "-q", key], 60_000).pipe(Effect.asVoid),
+        ),
+      );
+
     // Blind judging never touches the live tree: each build gets a detached
     // worktree under ignored `.studio/worktrees/`, opened as its own game so
     // the judge thread plays it through the game_* tools. Worktrees are
@@ -1804,11 +1817,13 @@ export const layer = (options: { readonly stateDir: string }) => {
       stored: StoredRun,
     ): Generator<Effect.Effect<unknown, GameRunError>, string, never> {
       yield* ensureGameScaffold(root);
-      const lane = yield* laneOf(root);
+      // Native single-engine tree: the only engine directory is godot.
+      // (T30's manifest-driven laneOf supersedes this at integration.)
+      const lane = { dir: "godot" };
       const deadline =
         stored.budgetMinutes === null ? Infinity : Date.now() + stored.budgetMinutes * 60_000;
       const remaining = (): number => deadline - Date.now();
-      const done = yield* stageDone(root, lane.dir);
+      const done = yield* stageDone(root);
       let best = yield* gitOut(root, ["rev-parse", "HEAD"]);
       best = yield* recoverRoundState(root, stored, best);
       let stallStreak = stored.stallStreak;

@@ -2009,10 +2009,12 @@ const make = Effect.gen(function* () {
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) => runExport(root, target)),
     exportTargets: (threadId) =>
-      withRoot(threadId, "Export targets", (root) =>
+      withRoot(threadId, "Export targets", (_root) =>
         Effect.gen(function* () {
-          const { backend } = yield* engine(root);
-          return { targets: backend.exportTargets, displayName: backend.displayName };
+          // Native single-engine tree: Godot releases Web, Linux and Windows
+          // (product tool descriptions). T30's backend exportTargets and
+          // displayName fields supersede this at integration.
+          return { targets: ["Web", "Linux", "Windows"] as const, displayName: "Godot" };
         }),
       ),
     packageWindows: (threadId) =>
