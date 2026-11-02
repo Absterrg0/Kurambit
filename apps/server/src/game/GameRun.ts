@@ -28,6 +28,7 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
+import * as GameEngine from "./GameEngine.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import * as Templates from "./templates.ts";
@@ -39,6 +40,7 @@ import {
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
   operation: Schema.String,
@@ -87,6 +89,7 @@ const RUN_STATE_IGNORES = [
   ".studio/worktrees/",
   ".studio/comparisons/",
   ".studio/play-*.md",
+  ".studio/round-state.json",
   "PICK-NOTES.md",
   "JUDGE-NOTES.md",
 ] as const; // An instantly failed turn never reached the model (provider or session
@@ -113,6 +116,18 @@ type RoundRecord = {
   note?: string;
 };
 type ThreadRef = { role: string; threadId: string; startedAt: string };
+
+// The persisted recovery point for one round: the known best and the base the
+// round starts from, plus the branch partial work belongs to. Written before
+// any tree touch each round; bestSha refreshed on merge. Ignored by git, so it
+// never blocks a checkout itself.
+type RoundState = {
+  round: number;
+  key: string;
+  baseSha: string;
+  bestSha: string;
+  phase: string;
+};
 
 type StoredRun = {
   runId: string;
@@ -149,6 +164,23 @@ const readJsonFile = async <T>(path: string, fallback: T): Promise<T> => {
     return JSON.parse(await NodeFSP.readFile(path, "utf8")) as T;
   } catch {
     return fallback;
+  }
+};
+
+// State writes go through a unique same-directory temp file plus rename, so a
+// crash never leaves a torn run.json or rounds.jsonl behind: readers treat a
+// missing file as empty, and rename is atomic on one filesystem. Concurrent
+// writers each own their temp path, so nobody truncates or renames another
+// writer's inode; a crash orphan keeps a tmp.* name no reader ever opens.
+const writeJsonAtomic = async (file: string, text: string): Promise<void> => {
+  await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp.${process.pid}.${NodeCrypto.randomUUID()}`;
+  try {
+    await NodeFSP.writeFile(tmp, text);
+    await NodeFSP.rename(tmp, file);
+  } catch (error) {
+    await NodeFSP.rm(tmp, { force: true }).catch(() => undefined);
+    throw error;
   }
 };
 
@@ -306,12 +338,21 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
     const needGame = (operation: string, path: string) =>
       needService(Effect.serviceOption(GameService.GameService), operation, path, "Game service");
+    const needEngine = (operation: string, path: string) =>
+      needService(Effect.serviceOption(GameEngine.GameEngine), operation, path, "Game engine");
     const needSecrets = (operation: string, path: string) =>
       needService(
         Effect.serviceOption(ServerSecretStore.ServerSecretStore),
         operation,
         path,
         "Secret store",
+      );
+    const needProject = (operation: string, path: string) =>
+      needService(
+        Effect.serviceOption(ProjectService.ProjectService),
+        operation,
+        path,
+        "Projects",
       );
 
     const resolveGame = Effect.fn("GameRun.resolveGame")(function* (threadId: ThreadId) {
@@ -342,9 +383,26 @@ export const layer = (options: { readonly stateDir: string }) => {
       Effect.promise(() => readJsonFile<StoredRun | null>(runPaths(root).run, null));
 
     const writeStored = (root: string, stored: StoredRun): Effect.Effect<void> =>
+      Effect.promise(() =>
+        writeJsonAtomic(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`),
+      );
+
+    // The rounds journal is the authority for round metadata on resume: a crash
+    // between appendRound's two writes leaves the journal one record ahead of
+    // the snapshot, and only the journal tells the truth then. Stage,
+    // stallStreak, ending and threads stay with the snapshot.
+    const reconcileJournal = (root: string, resumed: StoredRun): Effect.Effect<void> =>
       Effect.promise(async () => {
-        await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
-        await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+        const text = await NodeFSP.readFile(runPaths(root).rounds, "utf8").catch(() => "");
+        const records: RoundRecord[] = [];
+        for (const line of text.split("\n").filter(Boolean)) {
+          try {
+            records.push(JSON.parse(line) as RoundRecord);
+          } catch {
+            // Skip torn lines, as the fresh-run path does.
+          }
+        }
+        if (records.length > resumed.rounds.length) resumed.rounds = records;
       });
 
     const markRoleThread = (threadId: ThreadId): Effect.Effect<void> =>
@@ -367,8 +425,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             threadId: String(threadId),
             startedAt: new Date().toISOString(),
           });
-          await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
-          await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+          await writeJsonAtomic(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
         }),
       );
 
@@ -379,15 +436,14 @@ export const layer = (options: { readonly stateDir: string }) => {
     ): Effect.Effect<void> =>
       Effect.promise(async () => {
         stored.rounds.push(record);
-        await NodeFSP.mkdir(runPaths(root).dir, { recursive: true });
         // The file mirrors run.json's array (full rewrite, not blind
         // append): branch checkouts between rounds can clobber trailing
         // lines, and the rewrite heals that (T26: round 3's line).
-        await NodeFSP.writeFile(
+        await writeJsonAtomic(
           runPaths(root).rounds,
           stored.rounds.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
         );
-        await NodeFSP.writeFile(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
+        await writeJsonAtomic(runPaths(root).run, `${JSON.stringify(stored, null, 2)}\n`);
       });
 
     const stopRequested = (root: string): Effect.Effect<boolean> =>
@@ -396,6 +452,24 @@ export const layer = (options: { readonly stateDir: string }) => {
           .then(() => true)
           .catch(() => false),
       );
+
+    const roundStatePath = (root: string): string =>
+      NodePath.join(root, ".studio", "round-state.json");
+
+    const writeRoundState = (root: string, state: RoundState): Effect.Effect<void, GameRunError> =>
+      Effect.promise(() =>
+        writeJsonAtomic(roundStatePath(root), `${JSON.stringify(state, null, 2)}\n`),
+      ).pipe(
+        Effect.mapError((cause) =>
+          fail("write-round-state", root, "state-unwritten", String(cause).slice(0, 200)),
+        ),
+      );
+
+    const readRoundState = (root: string): Effect.Effect<RoundState | null> =>
+      Effect.promise(() => readJsonFile<RoundState | null>(roundStatePath(root), null));
+
+    const shaReachable = (root: string, sha: string): Effect.Effect<boolean> =>
+      gitExec(root, ["cat-file", "-e", sha], 60_000).pipe(Effect.map((r) => r.exitCode === 0));
 
     const gitExec = (
       root: string,
@@ -1123,13 +1197,15 @@ export const layer = (options: { readonly stateDir: string }) => {
     // One wait plus the usage-limit pause. `end` is null while the run goes on.
     // An instantly failed turn backs off here too, so judging and writing
     // roles never spin; builder blocks add replacement on top.
+    // Authority: the loop fiber owns the in-memory record; this touches only
+    // lastFailure (last-writer-wins there alone), never rounds or threads.
     const noteRouteFailure = (root: string, reason: string): Effect.Effect<void> =>
       Effect.promise(async () => {
         const path = NodePath.join(root, ".studio", "run.json");
         try {
           const current = JSON.parse(await NodeFSP.readFile(path, "utf8")) as StoredRun;
           current.lastFailure = reason;
-          await NodeFSP.writeFile(path, `${JSON.stringify(current, null, 2)}\n`);
+          await writeJsonAtomic(path, `${JSON.stringify(current, null, 2)}\n`);
         } catch {
           // Never fail a run on bookkeeping.
         }
@@ -1564,6 +1640,125 @@ export const layer = (options: { readonly stateDir: string }) => {
       return { ok: false as const, detail: "check failed" };
     });
 
+    // Resume from the persisted recovery point, never from an unjudged HEAD. A
+    // crash after commitAll but before appendRound leaves the candidate on HEAD
+    // with no record; a dirty stop mid-builder leaves partial work in the tree.
+    // Either way the partial work is preserved on its own round branch and the
+    // run continues with a verified best, so the candidate is judged instead of
+    // silently adopted. A crash after a judged merge (phase 'merged') repeats
+    // one honest round with real verdicts instead of stalling; that best is
+    // judged, so trusting it is not the unjudged-adoption defect. Returns the
+    // best to run with, or fails loudly with work preserved on its branch (the
+    // tree may be left on the round branch, never promoted to main).
+    const recoverRoundState = (
+      root: string,
+      stored: StoredRun,
+      headBest: string,
+    ): Effect.Effect<string, GameRunError> =>
+      Effect.gen(function* () {
+        const state = yield* readRoundState(root);
+        if (state === null) {
+          const branch = yield* gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
+          if (branch.trim() === "main") return headBest;
+          // Off main with no recovery point, the branch tip may be an unjudged
+          // candidate: never return it. Main is the judged line (candidates
+          // live on round branches), so fall back to it explicitly; without a
+          // reachable main, preserve work and fail loudly.
+          const mainSha = yield* gitOut(root, ["rev-parse", "main"]);
+          if (mainSha.trim().length > 0 && (yield* shaReachable(root, mainSha.trim()))) {
+            yield* logLine(
+              root,
+              `no round recovery point; HEAD on ${branch.trim()}, falling back to main` +
+                ` ${mainSha.trim().slice(0, 8)} explicitly`,
+            );
+            return mainSha.trim();
+          }
+          const here = branch.trim();
+          const key = here.length > 0 && here !== "HEAD" ? here : "recovered-work";
+          yield* preserveRecoveryDirt(root, stored, key);
+          yield* logLine(
+            root,
+            `no round recovery point and no reachable main; work preserved on branch;` +
+              ` failing loudly`,
+          );
+          return yield* Effect.fail(fail("recover-round", root, "no-point-no-main", branch));
+        }
+        if (state.round <= stored.rounds.length) return headBest;
+        const reachable = (sha: string): Effect.Effect<boolean> =>
+          sha.trim().length > 0
+            ? shaReachable(root, sha)
+            : Effect.succeed(false as boolean);
+        // HEAD here may be the unjudged candidate: only verified shas decide.
+        // The round base predates the round's work, so it is a safe baseline
+        // even though it was never judged as a candidate.
+        const bestOk = yield* reachable(state.bestSha);
+        const baseOk = yield* reachable(state.baseSha);
+        if (!bestOk && !baseOk) {
+          yield* preserveRecoveryDirt(root, stored, state.key);
+          yield* logLine(
+            root,
+            `round state unrecoverable for ${state.key}: best and base unreachable;` +
+              ` work preserved on branch; failing loudly`,
+          );
+          return yield* Effect.fail(
+            fail("recover-round", root, "unreachable-refs", state.key),
+          );
+        }
+        yield* preserveRecoveryDirt(root, stored, state.key);
+        const best = bestOk ? state.bestSha : state.baseSha;
+        yield* logLine(
+          root,
+          `recovered ${state.key} (${state.phase}): running with` +
+            ` ${bestOk ? "best" : "round base; best unverified"} ${best.slice(0, 8)}` +
+            ` for unrecorded round ${state.round}`,
+        );
+        return best;
+      });
+
+    // Snapshot tree dirt onto the given branch: stop any still-live owned role
+    // first (its turn may still be writing), prove the branch identity before
+    // committing, require the commit, and require the return to main. Any
+    // failure ends recovery loudly with work preserved on its branch; the tree
+    // may be left on the round branch, never promoted to main.
+    const preserveRecoveryDirt = (
+      root: string,
+      stored: StoredRun,
+      key: string,
+    ): Effect.Effect<void, GameRunError> =>
+      Effect.gen(function* () {
+        const dirt = yield* gitOut(root, ["status", "--porcelain=v1", "--", "."]);
+        if (dirt.trim().length === 0) return;
+        const latest =
+          stored.threads.length > 0 ? stored.threads[stored.threads.length - 1] : undefined;
+        if (latest !== undefined) {
+          // A null result means no live thread; anything live is stopped here.
+          yield* liveRoleThread(stored, latest.role).pipe(
+            Effect.mapError(() => fail("recover-round", root, "role-stop", latest.role)),
+          );
+        }
+        yield* checkoutBranch(root, key);
+        const onBranch = yield* gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
+        if (onBranch.trim() !== key)
+          return yield* Effect.fail(
+            fail(
+              "recover-round",
+              root,
+              "branch-verify",
+              `expected ${key}, on ${onBranch.trim() || "?"}`,
+            ),
+          );
+        const sha = yield* commitAll(root, `${key} recovered`);
+        const head = yield* gitOut(root, ["rev-parse", "HEAD"]);
+        if (sha === null || head.trim() !== sha.trim() || head.trim().length === 0)
+          return yield* Effect.fail(
+            fail("recover-round", root, "commit-verify", `${key} at ${head.trim() || "?"}`),
+          );
+        if (!(yield* checkoutRef(root, "main", "recovery cleanup")))
+          return yield* Effect.fail(
+            fail("recover-round", root, "main-unreachable", `${key} at ${head.trim()}`),
+          );
+      });
+
     const runLoop = Effect.fn("GameRun.runLoop")(function* (
       root: string,
       projectId: ProjectId,
@@ -1571,11 +1766,13 @@ export const layer = (options: { readonly stateDir: string }) => {
       stored: StoredRun,
     ): Generator<Effect.Effect<unknown, GameRunError>, string, never> {
       yield* ensureGameScaffold(root);
+      const lane = yield* laneOf(root);
       const deadline =
         stored.budgetMinutes === null ? Infinity : Date.now() + stored.budgetMinutes * 60_000;
       const remaining = (): number => deadline - Date.now();
-      const done = yield* stageDone(root);
+      const done = yield* stageDone(root, lane.dir);
       let best = yield* gitOut(root, ["rev-parse", "HEAD"]);
+      best = yield* recoverRoundState(root, stored, best);
       let stallStreak = stored.stallStreak;
 
       // Open one worktree checkout as its own game so a role thread can play
@@ -1593,6 +1790,52 @@ export const layer = (options: { readonly stateDir: string }) => {
           )) as unknown as { projectId: ProjectId; threadId: ThreadId; root: string };
         return opened;
       });
+      // Temporary judge projects are owned by this comparison: once the sample
+      // role is terminal and its reports/evidence are retained in memory, delete
+      // exactly that project through the project service, then drop its
+      // worktree. Unconfirmed termination or delete keeps the worktree for
+      // recovery. No raw DB deletes, no arbitrary paths, no sleeps — and no
+      // finalization-code changes (the T31 refresh/index-lock causal order is
+      // unproven). Never fails: every failure retains and logs.
+      const closeSampleProject = (
+        root: string,
+        label: string,
+        projectId: ProjectId,
+        threadId: ThreadId,
+      ): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const retain = (why: string): Effect.Effect<void> =>
+            logLine(root, `sample ${label} retained (${why}); keeping worktree`);
+          const threadsOpt = yield* Effect.option(needThreads("close-sample", String(threadId)));
+          if (threadsOpt._tag === "None") return yield* retain("thread service unavailable");
+          const projection = (yield* threadsOpt.value
+            .getThreadProjection(threadId)
+            .pipe(Effect.orElseSucceed(() => null))) as unknown as {
+            thread: { projectId: ProjectId };
+            runs: Array<{ id: RunId; status: string }>;
+          } | null;
+          const latest =
+            projection !== null && projection.runs.length > 0
+              ? projection.runs[projection.runs.length - 1]
+              : undefined;
+          if (
+            latest === undefined ||
+            !TERMINAL_RUN.has(latest.status) ||
+            String(projection?.thread.projectId) !== String(projectId)
+          )
+            return yield* retain("role not terminal");
+          const projectsOpt = yield* Effect.option(needProject("close-sample", String(threadId)));
+          if (projectsOpt._tag === "None") return yield* retain("project service unavailable");
+          const deleted = yield* Effect.option(
+            projectsOpt.value.delete({
+              commandId: CommandId.make(NodeCrypto.randomUUID()),
+              projectId,
+              force: true,
+            }),
+          );
+          if (deleted._tag === "None") return yield* retain("project delete unconfirmed");
+          yield* dropWorktree(root, label);
+        });
       const compareBuilds = Effect.fn("GameRun.compareBuilds")(function* (
         tag: string,
         aSha: string,
@@ -1629,11 +1872,12 @@ export const layer = (options: { readonly stateDir: string }) => {
                     Effect.as(null),
                   ),
             ),
-            Effect.onExit((exit) =>
-              Exit.isSuccess(exit)
-                ? dropWorktree(root, label)
-                : logLine(root, `sample ${label} retained for recovery after interrupted handoff`),
-            ),
+            Effect.onExit((exit) => {
+              const target = owned;
+              return Exit.isSuccess(exit) && target !== null
+                ? closeSampleProject(root, label, target.projectId, target.threadId)
+                : logLine(root, `sample ${label} retained for recovery after interrupted handoff`);
+            }),
           );
         });
         const playAFirst = NodeCrypto.randomInt(2) === 0;
@@ -1997,6 +2241,15 @@ export const layer = (options: { readonly stateDir: string }) => {
           durationMs: 0,
           linesChanged: 0,
         };
+        // The recovery point goes down before any tree touch: known best, base
+        // and the branch partial work belongs to.
+        yield* writeRoundState(root, {
+          round,
+          key,
+          baseSha: best,
+          bestSha: best,
+          phase: "round-start",
+        });
         // Every round writes a record or it doesn't count: a blocked start
         // records a real stall round with the reason instead of burning a
         // sleep, and three in a row end the run naming that cause.
@@ -2259,6 +2512,17 @@ export const layer = (options: { readonly stateDir: string }) => {
             best = candidate;
             record.kept = true;
             stallStreak = 0;
+            // Keep the pre-round base: the fallback needs it exactly when the
+            // candidate is unreachable.
+            const prevState = yield* readRoundState(root);
+            const prevBase = prevState?.baseSha ?? "";
+            yield* writeRoundState(root, {
+              round,
+              key,
+              baseSha: prevBase.trim().length > 0 ? prevBase : candidate,
+              bestSha: candidate,
+              phase: "merged",
+            });
           }
         }
 
@@ -2338,43 +2602,117 @@ export const layer = (options: { readonly stateDir: string }) => {
       // from the best real tester or bot run whether or not it won, and the
       // record says which run it came from.
       const game = yield* needGame("export", root);
-      const web = yield* game.export(creatorThreadId, "Web").pipe(
-        Effect.map((result) => ({
-          ok: result.success,
-          message: result.message,
-          path: result.path,
-        })),
-        Effect.orElseSucceed(() => ({
-          ok: false as const,
-          message: "web export errored",
-          path: null as string | null,
-        })),
+      // Ask only for targets the lane's backend declares: a three.js ending
+      // must not record a guaranteed-false Linux row. Capability facts come
+      // from the engine backend, never directory names. Unresolvable engine ->
+      // the old both-targets behavior, logged, so endings keep working.
+      const laneExport = yield* Effect.gen(function* () {
+        const fallback = {
+          supported: ["Web", "Linux"] as const,
+          displayName: "Game",
+        };
+        const projects = yield* needProjects("export", root);
+        const manifest = yield* Effect.option(projects.read(root));
+        const engineName = manifest._tag === "Some" ? manifest.value.engine.name : "godot";
+        const engines = yield* Effect.option(needEngine("export", root));
+        if (engines._tag === "None") return fallback;
+        const backend = yield* Effect.option(engines.value.backendFor(engineName));
+        if (backend._tag === "None") return fallback;
+        return {
+          supported: backend.value.exportTargets,
+          displayName: backend.value.displayName,
+        };
+      }).pipe(
+        Effect.catch(() =>
+          Effect.succeed({ supported: ["Web", "Linux"] as const, displayName: "Game" }),
+        ),
+        Effect.tap((lane) =>
+          logLine(root, `finishExports ${lane.displayName} targets: ${lane.supported.join(", ")}`),
+        ),
       );
-      const linux = yield* game.export(creatorThreadId, "Linux").pipe(
-        Effect.map((result) => ({
-          ok: result.success,
-          message: result.message,
-          path: result.path,
-        })),
-        Effect.orElseSucceed(() => ({
-          ok: false as const,
-          message: "linux export errored",
+      const supported = laneExport.supported;
+      const displayName = laneExport.displayName;
+      type ExportRow = {
+        ok: boolean;
+        skipped: null | "unsupported-target";
+        message: string;
+        path: string | null;
+      };
+      const runTarget = (target: "Web" | "Linux"): Effect.Effect<ExportRow, GameRunError> =>
+        game.export(creatorThreadId, target).pipe(
+          Effect.map((result) => ({
+            ok: result.success,
+            skipped: null as null | "unsupported-target",
+            message: result.message,
+            path: result.path,
+          })),
+          Effect.orElseSucceed(() => ({
+            ok: false as boolean,
+            skipped: null as null | "unsupported-target",
+            message: `${displayName} ${target} export errored`,
+            path: null as string | null,
+          })),
+        );
+      const skipTarget = (target: "Web" | "Linux"): Effect.Effect<ExportRow> =>
+        Effect.succeed({
+          ok: false as boolean,
+          skipped: "unsupported-target" as const,
+          message: `${displayName} games export ${supported.join(", ")} only; ${target} skipped`,
           path: null as string | null,
-        })),
-      );
+        });
+      const web: ExportRow = supported.includes("Web")
+        ? yield* runTarget("Web")
+        : yield* skipTarget("Web");
+      const linux: ExportRow = supported.includes("Linux")
+        ? yield* runTarget("Linux")
+        : yield* skipTarget("Linux");
       const nonEmpty = (path: string): Effect.Effect<boolean> =>
         Effect.promise(() =>
           NodeFSP.stat(path)
             .then((stat) => stat.isFile() && stat.size > 4096)
             .catch(() => false),
         );
+      // A static three.js entry is a few hundred bytes of HTML; what proves
+      // the build is real is the whole directory's substance, not the entry alone.
+      const webSubstance = (directory: string): Effect.Effect<boolean> =>
+        Effect.promise(async () => {
+          let total = 0;
+          const stack = [NodePath.join(root, directory)];
+          for (let guard = 0; guard < 1000; guard += 1) {
+            const current = stack.pop();
+            if (current === undefined) break;
+            for (const entry of await NodeFSP.readdir(current, { withFileTypes: true }).catch(
+              () => [],
+            )) {
+              const full = NodePath.join(current, entry.name);
+              if (entry.isDirectory()) stack.push(full);
+              else if (entry.isFile())
+                total += (await NodeFSP.stat(full).catch(() => null))?.size ?? 0;
+            }
+          }
+          return total > 4096;
+        });
       const webDir = yield* Effect.promise(() =>
         NodeFSP.readFile(NodePath.join(root, "builds/web-selected.json"), "utf8")
           .then((text) => (JSON.parse(text) as { directory?: string }).directory ?? null)
           .catch(() => null),
       );
       const webIndex = webDir === null ? null : NodePath.join(root, webDir, "index.html");
-      const webOk = web.ok && webIndex !== null && (yield* nonEmpty(webIndex));
+      const webIndexPresent =
+        webIndex === null
+          ? false
+          : yield* Effect.promise(() =>
+              NodeFSP.stat(webIndex)
+                .then((stat) => stat.isFile() && stat.size > 0)
+                .catch(() => false),
+            );
+      const webOk =
+        web.ok &&
+        webIndexPresent &&
+        webDir !== null &&
+        (yield* nonEmpty(webIndex!).pipe(
+          Effect.flatMap((entry) => (entry ? Effect.succeed(true) : webSubstance(webDir))),
+        ));
       const linuxBin = NodePath.join(root, "builds/linux/game.x86_64");
       const linuxOk = linux.ok && (yield* nonEmpty(linuxBin));
       yield* logLine(
@@ -2508,6 +2846,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         // A stale ending from the previous fiber would lie about the resumed
         // run (T28 showed `stalled` across resumes); the loop sets it again.
         resumedRun.ending = null;
+        yield* reconcileJournal(root, resumedRun);
         yield* writeStored(root, resumedRun);
       } else {
         stored = {
@@ -2552,8 +2891,10 @@ export const layer = (options: { readonly stateDir: string }) => {
               Effect.promise(async () => {
                 const current = await readJsonFile<StoredRun | null>(runPaths(root).run, null);
                 if (current !== null) {
+                  // Authority: only the ending scalar here; rounds were already
+                  // journaled by appendRound before the loop returned.
                   current.ending = ending as string;
-                  await NodeFSP.writeFile(
+                  await writeJsonAtomic(
                     runPaths(root).run,
                     `${JSON.stringify(current, null, 2)}\n`,
                   );
