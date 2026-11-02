@@ -13,8 +13,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   preview, exploration sessions, bot runs. Operations are exclusive per game and reported as events.
 - `GameProjectService` owns game records: create (blank scaffold), open, list, resolve, inventory.
 - `GameRun` owns the production loop. Every role is a fresh ordinary Kurambit thread on the game's
-  project; state is `.studio/run.json` + `.studio/rounds.jsonl` plus git, so a crash resumes from
-  the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
+  project with a `role` lineage under the creator's chat. `role` only groups: sidebars, game opens
+  and session lists skip it, and it has none of the subagent run takeover, controls or completion
+  delivery, which would tie a role to the creator's live turn. State is `.studio/run.json` +
+  `.studio/rounds.jsonl` plus git, so a crash resumes from the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
 - `GameBot` plays a model-written bot file in real time on a private display and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameToolchain` manages Blender/Godot installs; `GamePreview` serves builds;

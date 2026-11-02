@@ -321,6 +321,34 @@ it("routes only enrolled workflow members after the root turn ends", () => {
   );
 });
 
+it("never takes a role child into the parent's run", () => {
+  const threadId = ThreadId.make("thread:role-parent");
+  const identity: RunExecutionService.ProviderEventRouteIdentity = {
+    threadId,
+    runId: RunId.make("run:role-parent"),
+    attemptId: RunAttemptId.make("attempt:role-parent"),
+    providerThreadId: ProviderThreadId.make("provider-thread:role-parent"),
+  };
+  const roleChild = ThreadId.make("thread:role-parent:tester");
+  const [accepted, state] = RunExecutionService.routeProviderEvent(
+    {
+      type: "app_thread.created",
+      driver,
+      appThread: {
+        id: roleChild,
+        lineage: { parentThreadId: threadId, relationshipToParent: "role", rootThreadId: threadId },
+      },
+    } as ProviderAdapter.ProviderAdapterV2Event,
+    identity,
+    RunExecutionService.makeProviderEventRoutingState({
+      identity,
+      providerTurnId: ProviderTurnId.make("provider-turn:role-parent"),
+    }),
+  );
+  assert.isFalse(accepted);
+  assert.isFalse(state.ownedThreadIds.has(roleChild));
+});
+
 it("does not route a superseded attempt through a reused provider thread", () => {
   const threadId = ThreadId.make("thread:shared-runtime:restart");
   const providerThreadId = ProviderThreadId.make("provider-thread:shared-runtime:restart");

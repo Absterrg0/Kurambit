@@ -6,7 +6,11 @@ import type {
   ScopedThreadRef,
   ThreadId,
 } from "@kurambit/contracts";
-import { isProviderNativeSubagentThread, OrchestrationV2ThreadShell } from "@kurambit/contracts";
+import {
+  isNestedThread,
+  isProviderNativeSubagentThread,
+  OrchestrationV2ThreadShell,
+} from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 
@@ -394,8 +398,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
       for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
-          continue;
+        if (thread.archivedAt !== null || isNestedThread(thread)) continue;
         next.push(scopedThread(environmentId, thread, subagentRequests));
       }
     }

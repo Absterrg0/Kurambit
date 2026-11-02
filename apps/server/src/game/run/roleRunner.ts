@@ -50,6 +50,8 @@ export type RoleContext = {
   readonly root: string;
   readonly lane: string;
   readonly projectId: ProjectId;
+  /** Role threads group under the creator's chat, so they never read as sessions of the game. */
+  readonly creator: ThreadId;
   readonly runId: string;
   readonly selection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
@@ -227,6 +229,11 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   } else {
     for (const file of step.clear)
       yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
+    // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
+    const creatorLive = yield* threads.getThreadShell(ctx.creator).pipe(
+      Effect.map((shell) => shell !== null && shell.deletedAt === null),
+      Effect.orElseSucceed(() => false),
+    );
     const launched = yield* deps.launches
       .launch({
         commandId: CommandId.make(`studio:${ctx.runId}:${step.id}${gone ? ":relaunch" : ""}`),
@@ -243,6 +250,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         initialMessage: { text: step.prompt, attachments: [] },
         createdBy: "user",
         creationSource: "server",
+        ...(creatorLive ? { parentThreadId: ctx.creator } : {}),
       })
       .pipe(Effect.option);
     if (Option.isNone(launched))

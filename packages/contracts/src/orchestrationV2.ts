@@ -97,9 +97,17 @@ export const OrchestrationV2ProviderRef = Schema.Struct({
 });
 export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
+/**
+ * `role` records a parent only for grouping (a game run's role threads under the creator's
+ * chat). It carries none of the subagent semantics: no event takeover, no parent controls,
+ * no completion delivery.
+ */
+export const OrchestrationV2ThreadRelationship = Schema.Literals(["fork", "subagent", "role"]);
+export type OrchestrationV2ThreadRelationship = typeof OrchestrationV2ThreadRelationship.Type;
+
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
-  relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
+  relationshipToParent: Schema.NullOr(OrchestrationV2ThreadRelationship),
   rootThreadId: ThreadId,
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
@@ -414,6 +422,12 @@ export const OrchestrationV2AppThread = Schema.Struct({
   deletedAt: Schema.NullOr(Schema.DateTimeUtc),
 });
 export type OrchestrationV2AppThread = typeof OrchestrationV2AppThread.Type;
+
+/** Subagent and role threads belong to a parent thread: never list one as a session of its own. */
+export function isNestedThread(thread: Pick<OrchestrationV2AppThread, "lineage">): boolean {
+  const relationship = thread.lineage.relationshipToParent;
+  return relationship === "subagent" || relationship === "role";
+}
 
 /**
  * The provider owns its conversation, so it cannot take messages; Kurambit delegate_task children
@@ -2558,6 +2572,8 @@ export const OrchestrationV2Command = Schema.Union([
     interactionMode: ProviderInteractionMode,
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    /** Groups the new thread as a `role` child of a thread in the same project. */
+    parentThreadId: Schema.optional(ThreadId),
     importedNativeThread: Schema.optional(
       Schema.Struct({
         ref: Schema.Struct({

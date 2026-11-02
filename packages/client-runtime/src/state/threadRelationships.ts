@@ -5,7 +5,7 @@ import type {
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
-export type ThreadRelationshipKind = "parent" | "fork" | "subagent" | "transfer";
+export type ThreadRelationshipKind = "parent" | "fork" | "subagent" | "role" | "transfer";
 
 export interface ThreadRelationshipNode {
   readonly threadId: ThreadId;
@@ -88,7 +88,11 @@ export function deriveThreadRelationshipGraph(input: {
     addEdge({
       sourceThreadId: parentThreadId,
       targetThreadId: thread.id,
-      kind: thread.lineage.relationshipToParent === "subagent" ? "subagent" : "fork",
+      kind:
+        thread.lineage.relationshipToParent === "subagent" ||
+        thread.lineage.relationshipToParent === "role"
+          ? thread.lineage.relationshipToParent
+          : "fork",
       status: thread.activityRunStatus ?? thread.status,
     });
   }

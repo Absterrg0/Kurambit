@@ -2179,6 +2179,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    const parentThreadId = command.parentThreadId;
+    const roleParent =
+      parentThreadId === undefined
+        ? null
+        : yield* projectionStore.getThread(parentThreadId).pipe(
+            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+            Effect.mapError(
+              (cause) => new OrchestratorProjectionError({ threadId: parentThreadId, cause }),
+            ),
+          );
+    if (
+      parentThreadId !== undefined &&
+      (roleParent === null ||
+        roleParent.deletedAt !== null ||
+        roleParent.projectId !== command.projectId)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Parent thread ${parentThreadId} is not a live thread in project ${command.projectId}.`,
+      });
+    }
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
@@ -2192,11 +2214,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
-      lineage: {
-        parentThreadId: null,
-        relationshipToParent: null,
-        rootThreadId: command.threadId,
-      },
+      lineage:
+        roleParent === null
+          ? { parentThreadId: null, relationshipToParent: null, rootThreadId: command.threadId }
+          : {
+              parentThreadId: roleParent.id,
+              relationshipToParent: "role",
+              rootThreadId: roleParent.lineage.rootThreadId,
+            },
       forkedFrom: null,
       createdAt: now,
       updatedAt: now,

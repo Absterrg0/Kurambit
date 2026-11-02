@@ -22,7 +22,6 @@ import {
   getSidebarThreadIdsToPrewarm,
   hasUnseenCompletion,
   isContextMenuPointerDown,
-  isSidebarSubagentThread,
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -425,6 +424,16 @@ describe("sidebar thread lineage helpers", () => {
         relationshipToParent: "fork",
       },
     });
+    const gameRunRole = makeThreadFixture({
+      id: ThreadId.make("thread-role"),
+      environmentId,
+      projectId,
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "role",
+      },
+    });
     const archived = makeThreadFixture({
       id: ThreadId.make("thread-archived"),
       environmentId,
@@ -439,24 +448,10 @@ describe("sidebar thread lineage helpers", () => {
 
     expect(
       filterSidebarV2VisibleThreads(
-        [root, subagent, fork, archived, otherProject],
+        [root, subagent, fork, gameRunRole, archived, otherProject],
         new Set([`${environmentId}:${projectId}`]),
       ).map((thread) => thread.id),
     ).toEqual([parentId, fork.id]);
-  });
-
-  it("identifies subagent threads so the sidebar can hide them", () => {
-    const parentId = ThreadId.make("thread-parent");
-    const subagent = makeThreadFixture({
-      lineage: {
-        rootThreadId: parentId,
-        parentThreadId: parentId,
-        relationshipToParent: "subagent",
-      },
-    });
-
-    expect(isSidebarSubagentThread(subagent)).toBe(true);
-    expect(isSidebarSubagentThread(makeThreadFixture())).toBe(false);
   });
 
   it("resolves the parent thread for fork sidebar affordances", () => {

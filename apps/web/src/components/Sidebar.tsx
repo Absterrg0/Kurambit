@@ -68,6 +68,7 @@ import {
 } from "@kurambit/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  isNestedThread,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -460,6 +461,7 @@ function useSidebarThreads(input: {
     (thread) =>
       thread.deletedAt === null &&
       thread.archivedAt === null &&
+      !isNestedThread(thread) &&
       gameProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
   );
   const gameThreadsByProjectKey = new Map<string, EnvironmentThreadShell[]>();

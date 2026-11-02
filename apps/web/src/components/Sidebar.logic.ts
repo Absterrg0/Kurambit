@@ -8,7 +8,12 @@ import {
 } from "@kurambit/client-runtime/state/runtime";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
-import type { ContextMenuItem, EnvironmentId, ThreadId } from "@kurambit/contracts";
+import {
+  isNestedThread,
+  type ContextMenuItem,
+  type EnvironmentId,
+  type ThreadId,
+} from "@kurambit/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
 import { planPinnedReorder } from "@kurambit/client-runtime/state/thread-sort";
@@ -513,10 +518,6 @@ export function buildMultiSelectThreadContextMenuItems(input: {
   ];
 }
 
-export function isSidebarSubagentThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
-  return thread.lineage.relationshipToParent === "subagent";
-}
-
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
     environmentId: string;
@@ -526,7 +527,7 @@ export function filterSidebarV2VisibleThreads<
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      !isSidebarSubagentThread(thread) &&
+      !isNestedThread(thread) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
