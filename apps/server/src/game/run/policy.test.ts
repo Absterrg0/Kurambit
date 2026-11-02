@@ -48,7 +48,7 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   sourceAfter: `s${step.id}`,
   botsBefore: 0,
   botsAfter: 1,
-  bot: "",
+  bot: null,
   ...patch,
 });
 const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
@@ -76,21 +76,25 @@ const drive = (
 ) => {
   let state = start;
   const steps: string[] = [];
+  const logs: string[] = [];
   for (let guard = 0; guard < 200 && !until(state) && state.ending === null; guard += 1) {
     const planned = Policy.plan(state, { now, coin: 0.3, id: `id${guard}` });
-    if (planned.kind === "end") return { state: { ...state, ending: planned.reason }, steps };
+    if (planned.kind === "end") return { state: { ...state, ending: planned.reason }, steps, logs };
+    logs.push(...(planned.logs ?? []));
     state = planned.state;
     const s = planned.step;
     steps.push(
       s.kind === "role" ? s.role.replace(/-[0-9a-z]+$/, "") : s.kind === "git" ? s.op._tag : s.kind,
     );
-    state = Policy.applyResult(state, s, respond(s, state), {
+    const applied = Policy.applyResult(state, s, respond(s, state), {
       now,
       coin: 0.3,
       id: `a${guard}`,
-    }).state;
+    });
+    logs.push(...applied.logs);
+    state = applied.state;
   }
-  return { state, steps };
+  return { state, steps, logs };
 };
 
 // A responder for a whole round. v1 answers order 1 (A=candidate), v2 order 2 (A=best).
@@ -308,11 +312,15 @@ describe("rounds", () => {
 describe("bot facts", () => {
   // The tester's turns report the bot they ran; each build's bot outcome is keyed by sha.
   const withBot =
-    (outcomes: Record<string, Policy.StepResult>, bot = ".studio/bot/win.mjs"): Responder =>
+    (
+      outcomes: Record<string, Policy.StepResult>,
+      bot = ".studio/bot/win.mjs",
+      decider: "policy" | "jev" = "policy",
+    ): Responder =>
     (step, state) => {
       if (step.kind === "role" && step.role.startsWith("tester"))
         return done(step, {
-          bot: step.read.length === 0 ? bot : "",
+          bot: step.read.length === 0 ? { file: bot, decider } : null,
           files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough to count"])),
         });
       return roundResponder("A", "B", { bot: (sha) => outcomes[sha]! })(step, state);
@@ -348,8 +356,9 @@ describe("bot facts", () => {
     expect(prompts).toHaveLength(2);
     for (const prompt of prompts) {
       expect(prompt).toContain("not how play feels");
+      expect(prompt).toContain("wrote that bot against one of these two builds");
       expect(prompt).toContain(
-        'ended won after 148 seconds of game time. Final probe values: {"jars":5}',
+        'for up to 150 seconds of real time and ended won after 148 seconds of game time. Final probe values: {"jars":5}',
       );
       expect(prompt).toContain(
         'ended timed out after 148 seconds of game time. Final probe values: {"jars":2}',
@@ -369,36 +378,93 @@ describe("bot facts", () => {
     expect(prompts.every((p) => !p.includes("Bot facts"))).toBe(true);
   });
 
-  it("reports a bot that cannot run on one build as a fact and still judges the round", () => {
-    const { steps, prompts, state } = comparePrompts(
+  it("withholds bot facts from both reports when the bot errors on one build", () => {
+    const { steps, prompts, state, logs } = comparePrompts(
       withBot({
-        cand: fact("lost", { level: 3 }),
-        best: fact("error", {}, "bot file does not load: no node named Jar"),
+        cand: fact("error", {}, "bot file does not load: no node named Jar"),
+        best: fact("lost", { level: 3 }),
       }),
     );
-    expect(steps.filter((s) => s === "bot")).toHaveLength(2);
+    // The candidate's run errors first, so the best's run is skipped.
+    expect(steps.filter((s) => s === "bot")).toHaveLength(1);
     expect(steps.filter((s) => s === "compare")).toHaveLength(2);
     for (const prompt of prompts) {
-      expect(prompt).toContain(
-        "could not run on this build (bot file does not load: no node named Jar)",
-      );
-      expect(prompt).toContain(
-        'ended lost after 148 seconds of game time. Final probe values: {"level":3}',
-      );
+      expect(prompt).not.toContain("Bot facts");
+      expect(prompt).not.toContain("bot facts");
+      expect(prompt).not.toContain("no node named Jar");
     }
+    expect(logs.join("\n")).toContain(
+      "bot facts withheld from both reports: the bot could not run on cand: bot file does not load",
+    );
     expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
   });
 
-  it("skips bot facts when the budget fits judging but not the bot runs", () => {
-    const budget = { budgetEndsAt: T0 + 30 * MIN };
+  it("withholds bot facts when only the second build's run errors", () => {
+    const { steps, prompts } = comparePrompts(
+      withBot({ cand: fact("won", { jars: 5 }), best: fact("error", {}, "no probe") }),
+    );
+    expect(steps.filter((s) => s === "bot")).toHaveLength(2);
+    expect(prompts.every((p) => !p.includes("Bot facts") && !p.includes('{"jars":5}'))).toBe(true);
+  });
+
+  it("replays the tester's play bot with its decider", () => {
+    const deciders: string[] = [];
+    const respond = withBot(
+      { cand: fact("won", {}), best: fact("won", {}) },
+      ".studio/bot/win.mjs",
+      "jev",
+    );
+    comparePrompts((step, state) => {
+      if (step.kind === "bot") deciders.push(step.decider);
+      return respond(step, state);
+    });
+    expect(deciders).toEqual(["jev", "jev"]);
+  });
+
+  it("decides the bot's budget at the bot move, after the plays", () => {
+    const budget = { budgetEndsAt: T0 + 60 * MIN };
+    const respond = withBot({ cand: fact("won", {}), best: fact("won", {}) });
     const atRestore = drive(
       atRound(budget),
-      withBot({}),
+      respond,
       (s) => s.task._tag === "round" && s.task.phase === "restore",
     ).state;
-    const { steps } = drive(atRestore, withBot({}), () => false, T0 + 8 * MIN);
+    // Enough at restore for judging and both bot runs; the plays then use up
+    // the clock, which the bot move sees.
+    let clock = T0 + 20 * MIN;
+    const late: Responder = (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("sample")) clock += 8 * MIN;
+      return respond(step, state);
+    };
+    const steps: string[] = [];
+    const logs: string[] = [];
+    let state = atRestore;
+    for (let guard = 0; guard < 40 && state.rounds.length === 0; guard += 1) {
+      const planned = Policy.plan(state, { now: clock, coin: 0.3, id: `b${guard}` });
+      if (planned.kind === "end") break;
+      logs.push(...(planned.logs ?? []));
+      steps.push(
+        planned.step.kind === "role" ? planned.step.role.split("-")[0]! : planned.step.kind,
+      );
+      const applied = Policy.applyResult(
+        planned.state,
+        planned.step,
+        late(planned.step, planned.state),
+        { now: clock, coin: 0.3, id: `c${guard}` },
+      );
+      logs.push(...applied.logs);
+      state = applied.state;
+    }
+    expect(steps).toContain("sample");
     expect(steps).toContain("compare");
     expect(steps).not.toContain("bot");
+    expect(logs).toContain(
+      "bot facts withheld: the budget leaves no time for the bot runs; judging on play reports",
+    );
+    // With the same start and no time spent in play, the bot runs.
+    expect(drive(atRestore, respond, (s) => s.rounds.length === 1, T0 + 20 * MIN).steps).toContain(
+      "bot",
+    );
   });
 });
 
@@ -548,7 +614,7 @@ describe("resume", () => {
     const respond: Responder = (step, s) =>
       step.kind === "role" && step.role.startsWith("tester")
         ? done(step, {
-            bot: ".studio/bot/win.mjs",
+            bot: { file: ".studio/bot/win.mjs", decider: "policy" },
             files: Object.fromEntries(step.read.map((f) => [f, "tester notes long enough"])),
           })
         : roundResponder("A", "B")(step, s);

@@ -1,6 +1,6 @@
 // PURE. Every loop decision: stage order, round structure, keep or revert, stalls, the
 // pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
-import type { ThreadId } from "@kurambit/contracts";
+import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
 import * as Roles from "./roles.ts";
 import type {
   Block,
@@ -43,10 +43,10 @@ const CAP = {
 };
 // Both blind plays plus both comparator verdicts, uncorrected.
 const COMPARE_MIN_MS = 2 * (CAP.judge + CAP.write) + 2 * CAP.write;
-// The round's bot plays each build this long in real time, a fresh checkout
-// and engine import included in its share; skipped when the budget lacks it.
+// The round's bot plays each build for up to this long in real time; one run's
+// share adds a fresh checkout and engine import. Skipped when the budget lacks it.
 const BOT_SECONDS = 150;
-const BOT_FACTS_MS = 2 * (BOT_SECONDS * 1000 + 2 * MIN);
+const BOT_RUN_MS = BOT_SECONDS * 1000 + 2 * MIN;
 // A round needs its block plus tester, judging and review.
 const ROUND_RESERVE_MS = 22 * MIN;
 const FLOOR_MS = 2 * MIN;
@@ -70,8 +70,8 @@ export type RoleDone = {
   readonly sourceAfter: string;
   readonly botsBefore: number;
   readonly botsAfter: number;
-  /** The bot file this turn last ran, "" when it ran none. */
-  readonly bot: string;
+  /** The play bot this turn last ran and its decider, null when it ran none. */
+  readonly bot: { readonly file: string; readonly decider: GameBotDecider } | null;
 };
 /** One shape for every git op; each op fills the fields it knows. */
 export type GitOutcome = {
@@ -98,7 +98,13 @@ export type StepResult =
   | { readonly kind: "note" };
 
 export type Planned =
-  | { readonly kind: "step"; readonly state: RunState; readonly step: Step }
+  | {
+      readonly kind: "step";
+      readonly state: RunState;
+      readonly step: Step;
+      /** Decisions made while planning, for the run log. */
+      readonly logs?: ReadonlyArray<string>;
+    }
   | { readonly kind: "end"; readonly reason: string };
 export type Applied = {
   readonly state: RunState;
@@ -156,8 +162,8 @@ export const advancePending = (
 const validatePlayEvidence = (a: Evidence | null, b: Evidence | null): string | null => {
   if (a === null || b === null || a.executedInputSteps === 0 || b.executedInputSteps === 0)
     return "Both builds did not receive recorded hands-on input.";
-  if (a.nominalMs > 120_000 || b.nominalMs > 120_000)
-    return "A play sample exceeded the equal 120-second input budget.";
+  if (a.nominalMs > Roles.SAMPLE_INPUT_MS || b.nominalMs > Roles.SAMPLE_INPUT_MS)
+    return `A play sample exceeded the equal ${Roles.SAMPLE_INPUT_MS / 1000}-second input budget.`;
   return null;
 };
 
@@ -257,6 +263,7 @@ const newCompare = (
   xFirst: boolean,
   orders: Side[],
   bot = "",
+  botDecider: GameBotDecider = "policy",
 ): Compare => ({
   question,
   x,
@@ -265,7 +272,9 @@ const newCompare = (
   orders,
   samples: [],
   bot,
+  botDecider,
   bots: [],
+  botWithheld: "",
   judges: [],
 });
 const lastSample = (c: Compare, side: Side): Sample | null =>
@@ -298,7 +307,7 @@ const compareMove = (c: Compare): CompareMove => {
     lastSample(c, "y")?.evidence ?? null,
   );
   if (gate !== null) return { kind: "done", gate };
-  if (c.bot.length > 0)
+  if (c.bot.length > 0 && c.botWithheld === "")
     for (const side of ["x", "y"] as const)
       if (!c.bots.some((b) => b.side === side)) return { kind: "bot", side };
   for (const aIs of c.orders) {
@@ -317,18 +326,35 @@ const finalJudge = (c: Compare, aIs: Side): Judge | null => {
   return retry !== undefined && retry.verdict !== "NONE" ? retry : (first ?? null);
 };
 
-// Facts beside each anonymous report; an error is a fact about the bot on that build.
+// Comparators see bot facts only when the bot ran on both builds: a bot that
+// fails on one build would name that build, and the bot is the candidate's tester's.
+const botsShown = (c: Compare): boolean =>
+  c.bot.length > 0 && c.botWithheld === "" && c.bots.length === 2;
 const botReport = (c: Compare, side: Side): string => {
   const f = c.bots.find((b) => b.side === side);
-  if (f === undefined) return "";
-  if (f.ending === "error")
-    return `\nBot facts: the scripted bot could not run on this build (${f.note || "no detail"}).`;
-  return `\nBot facts: the scripted bot played this build for ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.`;
+  if (!botsShown(c) || f === undefined) return "";
+  return `\nBot facts: the scripted bot played this build for up to ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.`;
 };
 
-const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; step: Step } => {
+const compareStep = (
+  id: number,
+  c: Compare,
+  input: Inputs,
+  state: RunState,
+): { cmp: Compare; step: Step; logs: string[] } => {
   const move = compareMove(c);
-  if (move.kind === "bot")
+  if (move.kind === "bot") {
+    // Decided here, after the plays and their replays: the runs still owed
+    // must fit and leave both verdicts their time.
+    const owed = (2 - c.bots.length) * BOT_RUN_MS;
+    if (fit(state, input.now, owed, 2 * CAP.write) < owed) {
+      const why = "the budget leaves no time for the bot runs";
+      const next = compareStep(id, { ...c, botWithheld: why }, input, state);
+      return {
+        ...next,
+        logs: [`bot facts withheld: ${why}; judging on play reports`, ...next.logs],
+      };
+    }
     return {
       cmp: c,
       step: {
@@ -336,9 +362,12 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
         id,
         sha: move.side === "x" ? c.x : c.y,
         file: c.bot,
+        decider: c.botDecider,
         seconds: BOT_SECONDS,
       },
+      logs: [],
     };
+  }
   if (move.kind === "sample") {
     const at = move.side === "x" ? c.x : c.y;
     if (move.current === null) {
@@ -357,7 +386,7 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
         prompt: Roles.samplePlay(c.question, sampleFile(s)),
         capMs: CAP.judge,
       });
-      return { cmp: { ...c, samples: [...c.samples, s] }, step };
+      return { cmp: { ...c, samples: [...c.samples, s] }, step, logs: [] };
     }
     const s = move.current;
     if (s.phase === "more")
@@ -371,6 +400,7 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
           prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
           capMs: CAP.judge,
         }),
+        logs: [],
       };
     const step = role(id, {
       role: `sample-${s.label}`,
@@ -382,7 +412,7 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
       read: [sampleFile(s)],
       release: true,
     });
-    return { cmp: c, step };
+    return { cmp: c, step, logs: [] };
   }
   if (move.kind === "judge") {
     if (move.current === null) {
@@ -411,12 +441,12 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
           report(other),
           j.aFirst,
           judgeFile(j),
-          c.bots.length > 0,
+          botsShown(c),
         ),
         capMs: CAP.write,
         read: [judgeFile(j)],
       });
-      return { cmp: { ...c, judges: [...c.judges, j] }, step };
+      return { cmp: { ...c, judges: [...c.judges, j] }, step, logs: [] };
     }
     const j = move.current;
     const step = role(id, {
@@ -427,7 +457,7 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
       capMs: CAP.write,
       read: [judgeFile(j)],
     });
-    return { cmp: c, step };
+    return { cmp: c, step, logs: [] };
   }
   throw new Error("compareStep called on a finished comparison");
 };
@@ -436,11 +466,12 @@ const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
   if (res.kind === "bot") {
     const move = compareMove(c);
     if (move.kind !== "bot") return c;
-    if (res.fact.ending === "error")
-      logs.push(
-        `bot facts: the bot could not run on ${move.side === "x" ? c.x : c.y}: ${res.fact.note}`,
-      );
-    return { ...c, bots: [...c.bots, { side: move.side, ...res.fact }] };
+    const bots = [...c.bots, { side: move.side, ...res.fact }];
+    if (res.fact.ending !== "error") return { ...c, bots };
+    // Either build failing withholds both reports' facts, so the other run is skipped.
+    const botWithheld = `the bot could not run on ${(move.side === "x" ? c.x : c.y).slice(0, 12)}: ${res.fact.note || "no detail"}`;
+    logs.push(`bot facts withheld from both reports: ${botWithheld}`);
+    return { ...c, bots, botWithheld };
   }
   const si = c.samples.findIndex((s) => s.phase !== "done");
   if (si >= 0) {
@@ -518,7 +549,8 @@ const comparisonFile = (
         evidence: side((s) => s?.evidence ?? null),
         players: side((s) => s?.thread ?? null),
         reports: side((s) => s?.notes ?? ""),
-        bot: c.bot.length === 0 ? null : c.bot,
+        bot: c.bot.length === 0 ? null : { file: c.bot, decider: c.botDecider },
+        botWithheld: c.botWithheld === "" ? null : c.botWithheld,
         bots: {
           [names.x]: c.bots.find((b) => b.side === "x") ?? null,
           [names.y]: c.bots.find((b) => b.side === "y") ?? null,
@@ -559,6 +591,7 @@ const newRound = (state: RunState, now: number): Round => {
     thread: null,
     botsBefore: 0,
     bot: "",
+    botDecider: "policy",
     testerNotes: "",
     cmp: null,
     outcome: "",
@@ -614,10 +647,11 @@ const afterStage = (state: RunState, done: string, now: number): RunState => {
 };
 
 const end = (reason: string): Planned => ({ kind: "end", reason });
-const step = (state: RunState, task: Task, s: Step): Planned => ({
+const step = (state: RunState, task: Task, s: Step, logs: ReadonlyArray<string> = []): Planned => ({
   kind: "step",
   state: { ...state, task, seq: s.id, inFlight: s },
   step: s,
+  ...(logs.length > 0 ? { logs } : {}),
 });
 
 // Where the next direction comes from: the creator's notes first, then the
@@ -640,7 +674,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
   const id = state.seq + 1;
   const t = state.task;
   const lane = state.lane;
-  const go = (s: Step, task: Task = t) => step(state, task, s);
+  const go = (s: Step, task: Task = t, logs: ReadonlyArray<string> = []) =>
+    step(state, task, s, logs);
   const run = (op: GitOp, task: Task = t) => go(git(id, op), task);
   const act = (spec: RoleSpec) => go(role(id, spec));
   const reject = (label: string, why: string) =>
@@ -696,8 +731,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           prompt: Roles.SELECT,
           capMs: CAP.write,
         });
-      const made = compareStep(id, t.cmp, input);
-      return go(made.step, { ...t, cmp: made.cmp });
+      const made = compareStep(id, t.cmp, input, state);
+      return go(made.step, { ...t, cmp: made.cmp }, made.logs);
     }
     case "ship":
       return t.phase === "play"
@@ -766,8 +801,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "restore":
       return run({ _tag: "restore-commit", sha: r.candidate, message: r.branch });
     case "compare": {
-      const made = compareStep(id, r.cmp!, input);
-      return go(made.step, { ...r, cmp: made.cmp });
+      const made = compareStep(id, r.cmp!, input, state);
+      return go(made.step, { ...r, cmp: made.cmp }, made.logs);
     }
     case "outcome":
       return r.outcome === "merge"
@@ -1136,24 +1171,24 @@ const applyRound = (
             phase: "tester-write",
             thread: res.threadId,
             botsBefore: res.botsBefore,
-            bot: res.bot || r.bot,
+            ...testedBot(res, r),
           })
         : at({ phase: "restore" });
     case "tester-write":
     case "tester-duty": {
-      const bot = (res.kind === "done" && res.bot) || r.bot;
+      const bot = testedBot(res, r);
       const notes = res.kind === "done" ? textOf(res, `.studio/tester-${r.n}.md`) : "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
       if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
-        return at({ phase: "tester-duty", testerNotes, bot });
+        return at({ phase: "tester-duty", testerNotes, ...bot });
       }
       const testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
       const note = testerNotes.length > 20 ? r.record.note : noteOf(r, "tester write failed");
       return at({
         phase: "restore",
         testerNotes,
-        bot,
+        ...bot,
         record: { ...r.record, testerNote, ...(note === undefined ? {} : { note }) },
       });
     }
@@ -1166,16 +1201,14 @@ const applyRound = (
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
-      const botFits = remaining(s, now) >= COMPARE_MIN_MS + BOT_FACTS_MS;
-      if (r.bot.length > 0 && !botFits)
-        logs.push(`round ${r.n}: budget leaves no time for bot facts; judging on play reports`);
       const cmp = newCompare(
         question,
         r.candidate,
         s.best,
         bit(input.coin, 0),
         ["x", "y"],
-        botFits ? r.bot : "",
+        r.bot,
+        r.botDecider,
       );
       return at({ phase: "compare", cmp });
     }
@@ -1252,6 +1285,12 @@ const applyRound = (
       );
   }
 };
+
+// A tester turn's play bot replaces the round's; a turn that ran none keeps it.
+const testedBot = (res: StepResult, r: Round): Pick<Round, "bot" | "botDecider"> =>
+  res.kind === "done" && res.bot !== null
+    ? { bot: res.bot.file, botDecider: res.bot.decider }
+    : { bot: r.bot, botDecider: r.botDecider };
 
 const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): RunState => {
   const c = r.cmp!;

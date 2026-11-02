@@ -580,6 +580,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             return yield* save({ ...state, ending: planned.reason });
           }
           yield* save(planned.state);
+          for (const line of planned.logs ?? []) yield* log(line);
           yield* log(describe(planned.step));
           const result = yield* execute(planned.step);
           yield* log(`  ${summarize(result)}`);

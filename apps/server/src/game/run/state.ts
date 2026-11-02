@@ -1,7 +1,7 @@
 // The run's persisted record: `.studio/run.json` holds one RunState, decoded on every load.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { RunId, ThreadId } from "@kurambit/contracts";
+import { GameBotDecider, RunId, ThreadId } from "@kurambit/contracts";
 
 const Verdict = Schema.Struct({
   order: Schema.String,
@@ -99,6 +99,9 @@ const GitOp = Schema.Union([
 ]);
 export type GitOp = typeof GitOp.Type;
 
+// The decider the tester's bot ran with. Older run.json files have none: policy.
+const BotDecider = GameBotDecider.pipe(Schema.withDecodingDefaultKey(Effect.succeed("policy")));
+
 const Step = Schema.Union([
   RoleStep,
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GitOp }),
@@ -110,6 +113,7 @@ const Step = Schema.Union([
     id: Schema.Number,
     sha: Schema.String,
     file: Schema.String,
+    decider: BotDecider,
     seconds: Schema.Number,
   }),
   Schema.Struct({
@@ -183,7 +187,10 @@ const Compare = Schema.Struct({
   samples: Schema.Array(Sample),
   // Older run.json files have no bot facts.
   bot: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  botDecider: BotDecider,
   bots: Schema.Array(BotFact).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  // Why the comparators got no bot facts although the round had a bot; "" when they did.
+  botWithheld: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   judges: Schema.Array(Judge),
 });
 export type Compare = typeof Compare.Type;
@@ -225,6 +232,7 @@ const Round = Schema.TaggedStruct("round", {
   botsBefore: Schema.Number,
   // The bot file the tester last ran this round. Older run.json files have none.
   bot: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  botDecider: BotDecider,
   testerNotes: Schema.String,
   cmp: Schema.NullOr(Compare),
   outcome: Schema.Literals(["", "merge", "drop", "hold"]),
