@@ -129,6 +129,16 @@ export class GameService extends Context.Service<
   GameService,
   {
     readonly cancelThread: (threadId: ThreadId) => Effect.Effect<void, GameOperationError>;
+    readonly finishExploration: (threadId: ThreadId) => Effect.Effect<
+      {
+        sessions: number;
+        actions: number;
+        executedInputSteps: number;
+        nominalMs: number;
+        images: number;
+      },
+      GameOperationError
+    >;
     readonly status: (
       threadId: ThreadId,
       options?: { readonly checkSources?: boolean | undefined },
@@ -972,11 +982,18 @@ const make = Effect.gen(function* () {
       });
       yield* processes.stop(session.root).pipe(Effect.ignore);
     });
-  // One live session globally, plus the close summaries of recently closed
-  // ones so a racing second close still answers. No session survives a server
-  // restart: both maps live only in this process.
+  // Worktree judges own different roots; a session in one game must not
+  // consume another game's play budget. The thread lease still owns input.
   const exploreStartLock = Semaphore.makeUnsafe(1);
-  let exploreLive: ExploreSession | null = null;
+  const exploreLive = new Map<string, ExploreSession>();
+  const emptyExploreEvidence = () => ({
+    sessions: 0,
+    actions: 0,
+    executedInputSteps: 0,
+    nominalMs: 0,
+    images: 0,
+  });
+  const exploreEvidence = new Map<string, ReturnType<typeof emptyExploreEvidence>>();
   /**
    * Releases a session's player and scratch. The caller holds the session
    * lock; the transition is uninterruptible once it starts so a cancelled
@@ -1008,7 +1025,23 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        if (exploreLive === session) exploreLive = null;
+        if (exploreLive.get(session.root) === session) exploreLive.delete(session.root);
+        const owner = String(session.threadId);
+        const evidence = exploreEvidence.get(owner) ?? emptyExploreEvidence();
+        evidence.sessions += 1;
+        evidence.actions += session.actions.length;
+        evidence.executedInputSteps += session.actions.reduce(
+          (sum, action) => sum + action.executedInputSteps,
+          0,
+        );
+        evidence.nominalMs += session.totalNominalMs;
+        evidence.images += session.images;
+        exploreEvidence.delete(owner);
+        exploreEvidence.set(owner, evidence);
+        if (exploreEvidence.size > 128) {
+          const oldest = exploreEvidence.keys().next().value;
+          if (oldest !== undefined) exploreEvidence.delete(oldest);
+        }
         const result = {
           sessionId: session.id,
           reason,
@@ -1028,18 +1061,19 @@ const make = Effect.gen(function* () {
       }),
     );
   const exploreReap = Effect.gen(function* () {
-    const live = exploreLive;
-    if (live === null || live.closed) return;
-    yield* live.lock.withPermits(1)(
-      Effect.gen(function* () {
-        if (live.closed || exploreLive !== live) return;
-        const now = yield* Clock.currentTimeMillis;
-        if (now < live.wallDeadlineMs && now < live.lastActiveMs + GAME_EXPLORE_BOUNDS.idleTtlMs)
-          return;
-        const reason = now >= live.wallDeadlineMs ? "wall-expired" : "idle-expired";
-        yield* exploreFinalize(live, reason).pipe(Effect.ignore);
-      }),
-    );
+    for (const live of exploreLive.values()) {
+      if (live.closed) continue;
+      yield* live.lock.withPermits(1)(
+        Effect.gen(function* () {
+          if (live.closed || exploreLive.get(live.root) !== live) return;
+          const now = yield* Clock.currentTimeMillis;
+          if (now < live.wallDeadlineMs && now < live.lastActiveMs + GAME_EXPLORE_BOUNDS.idleTtlMs)
+            return;
+          const reason = now >= live.wallDeadlineMs ? "wall-expired" : "idle-expired";
+          yield* exploreFinalize(live, reason).pipe(Effect.ignore);
+        }),
+      );
+    }
   });
   /** Idle and wall-clock expiry sweep. One scoped fiber owns it; sessions never sleep in a caller. */
   const exploreLease = (session: ExploreSession, root: string, threadId: ThreadId) => {
@@ -1356,7 +1390,7 @@ const make = Effect.gen(function* () {
           errors: clean.errors.map((error) => ({ ...error })),
         });
       }
-      exploreLive = live;
+      exploreLive.set(root, live);
       const noPicture =
         " Runs headless without a picture (xvfb-run was not found on PATH): state, text, ui and errors stay available.";
       return {
@@ -1380,12 +1414,13 @@ const make = Effect.gen(function* () {
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     exploreStartLock.withPermits(1)(
       Effect.gen(function* () {
-        if (exploreLive !== null)
-          return yield* exploreInvalid(
-            exploreLive.id,
-            "Another exploration session is already open; close it with game_explore_close before starting a new one. Only one live exploration session exists per host.",
-          );
         const root = yield* projects.resolve(threadId);
+        const existing = exploreLive.get(root);
+        if (existing !== undefined)
+          return yield* exploreInvalid(
+            existing.id,
+            "Another exploration session is open for this game; its owning thread must close it before this game starts another.",
+          );
         return yield* exploreStartNative(threadId, root, input);
       }),
     );
@@ -1575,8 +1610,8 @@ const make = Effect.gen(function* () {
     );
   const exploreAct = (threadId: ThreadId, input: typeof GameExploreActInput.Type) =>
     Effect.gen(function* () {
-      const session = exploreLive;
-      if (session === null || session.id !== input.sessionId)
+      const session = [...exploreLive.values()].find((live) => live.id === input.sessionId);
+      if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
           "That exploration session is unknown or expired; start a new one with game_explore_start.",
@@ -1611,7 +1646,7 @@ const make = Effect.gen(function* () {
         return yield* exploreInvalid(session.id, nativeIssues.join("\n"));
       return yield* session.lock.withPermits(1)(
         Effect.gen(function* () {
-          if (session.closed || exploreLive !== session)
+          if (session.closed || exploreLive.get(session.root) !== session)
             return yield* exploreInvalid(
               session.id,
               "That exploration session is closed or expired; start a new one with game_explore_start.",
@@ -1663,8 +1698,8 @@ const make = Effect.gen(function* () {
   const exploreClose = (threadId: ThreadId, input: typeof GameExploreCloseInput.Type) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
-      const session = exploreLive;
-      if (session === null || session.id !== input.sessionId)
+      const session = [...exploreLive.values()].find((live) => live.id === input.sessionId);
+      if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
           "That exploration session is unknown or expired; start a new one with game_explore_start.",
@@ -1780,7 +1815,7 @@ const make = Effect.gen(function* () {
     return yield* exclusive(root, name, work(root));
   });
   // Idle and wall-clock expiry without a caller: one scoped fiber sweeps the
-  // single live session. Production timers own it; every act/close also
+  // live sessions. Production timers own it; every act/close also
   // checks the same deadlines lazily.
   yield* Effect.forkScoped(
     Effect.gen(function* () {
@@ -1858,6 +1893,14 @@ const make = Effect.gen(function* () {
     });
   return GameService.of({
     events: operations.events,
+    finishExploration: Effect.fn("GameService.finishExploration")(function* (threadId) {
+      const root = yield* projects.resolve(threadId);
+      const live = exploreLive.get(root);
+      if (live !== undefined && String(live.threadId) === String(threadId))
+        yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
+      const evidence = exploreEvidence.get(String(threadId)) ?? emptyExploreEvidence();
+      return evidence;
+    }),
     cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
       const root = yield* projects.resolve(threadId).pipe(
         Effect.catchTags({
@@ -1871,8 +1914,8 @@ const make = Effect.gen(function* () {
         yield* cancel(root);
         // A cancelled turn also releases the game's exploration session: the
         // browser belongs to the user, not to a turn that is going away.
-        const live = exploreLive;
-        if (live !== null && live.root === root)
+        const live = exploreLive.get(root);
+        if (live !== undefined && String(live.threadId) === String(threadId))
           yield* live.lock.withPermits(1)(exploreFinalize(live, "cancelled")).pipe(Effect.ignore);
       }
     }),

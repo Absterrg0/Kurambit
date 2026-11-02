@@ -253,7 +253,7 @@ const StopTool = Tool.make("game_stop", {
  */
 const ExploreStartTool = Tool.make("game_explore_start", {
   description:
-    "Open a bounded native exploration session on this thread's game: the real main scene runs under Godot with the game paused between acts, and observes probe, visible text, interactive controls, errors and (with xvfb on PATH) a picture. Nothing is exported. Returns a session id for game_explore_act. Only one live session exists per host: close it before starting another.",
+    "Open a bounded native exploration session on this thread's game: the real main scene runs under Godot with the game paused between acts, and observes probe, visible text, interactive controls, errors and (with xvfb on PATH) a picture. Nothing is exported. Returns a session id for game_explore_act. Only one live session exists per game: its owning thread must close it before that game starts another.",
   parameters: GameExploreStartInput,
   success: GameExploreStartResult,
   failure,

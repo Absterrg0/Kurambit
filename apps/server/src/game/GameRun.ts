@@ -10,6 +10,7 @@ import * as NodeURL from "node:url";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -83,6 +84,8 @@ const RUN_STATE_IGNORES = [
   ".studio/tester-*.md",
   ".studio/reviewer-*.md",
   ".studio/worktrees/",
+  ".studio/comparisons/",
+  ".studio/play-*.md",
   "PICK-NOTES.md",
   "JUDGE-NOTES.md",
 ] as const; // An instantly failed turn never reached the model (provider or session
@@ -935,7 +938,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           const left = deadline - Date.now();
           if (left <= 0) {
             yield* stopTurn(projectId, threadId, currentRunId, "Role play/work cap reached.");
-            return { replaced: false as const, restarts, capped: true };
+            return { replaced: false as const, restarts, runId: currentRunId, capped: true };
           }
           const slice = Math.min(60_000, left);
           const waited = (yield* threads
@@ -951,7 +954,8 @@ export const layer = (options: { readonly stateDir: string }) => {
               ),
             )) as unknown as { run: { id: RunId; status: string } | null; timedOut: boolean };
           if (waited.run !== null && waited.run.id !== undefined) currentRunId = waited.run.id;
-          if (!waited.timedOut) return { replaced: false as const, restarts, capped: false };
+          if (!waited.timedOut)
+            return { replaced: false as const, restarts, runId: currentRunId, capped: false };
           const sequence = (yield* threads.getThreadEventSequence(threadId).pipe(
             Effect.mapError((cause) =>
               fail("watch-thread", String(threadId), "thread-read", String(cause)),
@@ -971,7 +975,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               currentRunId,
               "Role watchdog replacing stalled thread.",
             );
-            return { replaced: true as const, restarts, capped: false };
+            return { replaced: true as const, restarts, runId: currentRunId, capped: false };
           }
           restarts += 1;
           lastGrowth = Date.now();
@@ -1040,9 +1044,14 @@ export const layer = (options: { readonly stateDir: string }) => {
       } | null;
       if (records === null) return { instant: false, reason: "", cls: null as string | null };
       const run = latestExecutedRun(records.runs);
-      if (run === null || run.status !== "failed")
-        return { instant: false, reason: "", cls: null as string | null };
+      if (run === null) return { instant: false, reason: "", cls: null as string | null };
       const failure = latestRootProviderFailure(run, records.turnItems);
+      if (run.status !== "failed")
+        return {
+          instant: false,
+          reason: failure === null ? "" : `${failure.class}: ${failure.message}`.slice(0, 300),
+          cls: (failure?.class ?? null) as string | null,
+        };
       const text = yield* assistantText(threadId, run.id);
       const wallMs =
         run.startedAt !== null && run.completedAt !== null
@@ -1116,11 +1125,19 @@ export const layer = (options: { readonly stateDir: string }) => {
       never
     > {
       const waited = yield* waitWithWatchdog(projectId, threadId, runId, capMs, continueText);
+      const game = yield* needGame("finish-play", String(threadId));
+      yield* game
+        .finishExploration(threadId)
+        .pipe(Effect.mapError(() => fail("finish-play", String(threadId), "close-failed")));
       if (waited.capped) yield* logLine(root, `role cap: ${threadId}; run terminal before handoff`);
-      const limit = yield* pauseOnUsageLimit(threadId, undefined);
+      const limit = yield* pauseOnUsageLimit(threadId, waited.runId ?? runId);
       if (limit !== "ok")
         return { replaced: waited.replaced, restarts: waited.restarts, end: limit };
       const outcome = yield* latestOutcome(threadId);
+      if (outcome.cls === "usage_limit") {
+        yield* noteRouteFailure(root, outcome.reason);
+        return { replaced: waited.replaced, restarts: waited.restarts, end: "usage-limit" };
+      }
       if (!outcome.instant) {
         routeHealth.consec = 0;
         return { replaced: waited.replaced, restarts: waited.restarts, end: null };
@@ -1131,8 +1148,6 @@ export const layer = (options: { readonly stateDir: string }) => {
         root,
         `instant-failed turn (${outcome.reason}) [run-wide ${routeHealth.consec}]`,
       );
-      if (outcome.cls === "usage_limit")
-        return { replaced: waited.replaced, restarts: waited.restarts, end: "usage-limit" };
       yield* Effect.sleep("30 seconds");
       if (routeHealth.consec >= 8) {
         yield* logLine(root, `provider route down (${outcome.reason}): pausing run`);
@@ -1153,6 +1168,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       writePrompt: string,
       playCapMs: number,
       notesRel: string | null,
+      notesRoot: string = root,
     ) {
       const continued = "Continue where you left off. Reply briefly, then keep working.";
       const launched = yield* launchRole(
@@ -1211,6 +1227,10 @@ export const layer = (options: { readonly stateDir: string }) => {
             end: retryWait.end,
           };
       }
+      const game = yield* needGame("finish-play", String(activeThreadId));
+      const playEvidence = yield* game
+        .finishExploration(activeThreadId)
+        .pipe(Effect.mapError(() => fail("finish-play", String(activeThreadId), "close-failed")));
       const writeRunId = yield* sendTurn(
         projectId,
         activeThreadId,
@@ -1227,6 +1247,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       if (written.end !== null)
         return {
           threadId: activeThreadId,
+          playEvidence,
           notes: "",
           wrote: false as const,
           restarts,
@@ -1235,7 +1256,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       let notes = "";
       if (notesRel !== null) {
         notes = yield* Effect.promise(() =>
-          NodeFSP.readFile(NodePath.join(root, notesRel), "utf8").catch(() => ""),
+          NodeFSP.readFile(NodePath.join(notesRoot, notesRel), "utf8").catch(() => ""),
         );
         notes = notes.trim();
       }
@@ -1244,6 +1265,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         if (fallback.trim().length > 20)
           return {
             threadId: activeThreadId,
+            playEvidence,
             notes: fallback,
             wrote: true as const,
             restarts,
@@ -1253,6 +1275,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       return {
         threadId: activeThreadId,
         notes,
+        playEvidence,
         wrote: (notes.trim().length > 20) as boolean,
         restarts,
         end: null as string | null,
@@ -1520,69 +1543,161 @@ export const layer = (options: { readonly stateDir: string }) => {
           )) as unknown as { projectId: ProjectId; threadId: ThreadId; root: string };
         return opened;
       });
-      // Judge bot artifacts made in a worktree belong to the live game:
-      // copy new bot-results lines plus their run dirs (paths rewritten to
-      // the live root) so the player report sees judge exploration.
-      const importJudgeRuns = (liveRoot: string, wt: string): Effect.Effect<number> =>
-        Effect.promise(async () => {
-          const rel = NodePath.join(".studio", "bot-results.jsonl");
-          const livePath = NodePath.join(liveRoot, rel);
-          const wtPath = NodePath.join(wt, rel);
-          const liveText = await NodeFSP.readFile(livePath, "utf8").catch(() => "");
-          const known = new Set<string>();
-          for (const line of liveText.split("\n").filter(Boolean)) {
-            try {
-              const row = JSON.parse(line) as { runId?: unknown };
-              if (typeof row.runId === "string") known.add(row.runId);
-            } catch {
-              /* skip bad lines */
-            }
-          }
-          const wtText = await NodeFSP.readFile(wtPath, "utf8").catch(() => "");
-          const freshLines: string[] = [];
-          const freshIds: string[] = [];
-          for (const line of wtText.split("\n").filter(Boolean)) {
-            try {
-              const row = JSON.parse(line) as { runId?: unknown };
-              if (typeof row.runId === "string" && !known.has(row.runId)) {
-                known.add(row.runId);
-                freshLines.push(line);
-                freshIds.push(row.runId);
-              }
-            } catch {
-              /* skip bad lines */
-            }
-          }
-          if (freshLines.length > 0)
-            await NodeFSP.appendFile(livePath, `${freshLines.join("\n")}\n`).catch(() => undefined);
-          let imported = 0;
-          for (const runId of freshIds) {
-            const name = `game-bot-${runId}`;
-            const from = NodePath.join(wt, "builds/logs", name);
-            const to = NodePath.join(liveRoot, "builds/logs", name);
-            try {
-              await NodeFSP.rm(to, { recursive: true, force: true });
-              await NodeFSP.cp(from, to, { recursive: true });
-              for (const entry of ["trace.json", "summary.json"]) {
-                const file = NodePath.join(to, entry);
-                const text = await NodeFSP.readFile(file, "utf8").catch(() => null);
-                if (text !== null && text.includes(wt))
-                  await NodeFSP.writeFile(file, text.split(wt).join(liveRoot)).catch(
-                    () => undefined,
-                  );
-              }
-              imported += 1;
-            } catch {
-              /* one bad run dir never breaks the judging */
-            }
-          }
-          return imported;
-        }).pipe(
-          Effect.catch(() => Effect.succeed(0)),
-          Effect.tap((count) =>
-            count > 0 ? logLine(liveRoot, `imported ${count} judge bot run(s)`) : Effect.void,
-          ),
+      const compareBuilds = Effect.fn("GameRun.compareBuilds")(function* (
+        tag: string,
+        aSha: string,
+        bSha: string,
+        question: string,
+      ) {
+        const comparisonId = `${tag}-${NodeCrypto.randomUUID()}`;
+        const sample = Effect.fn("GameRun.playSample")(function* (sha: string) {
+          const label = NodeCrypto.randomUUID();
+          const playerNotes = `.studio/play-${label}.md`;
+          const wt = yield* ensureWorktree(root, sha, label);
+          if (wt === null) return null;
+          return yield* Effect.gen(function* () {
+            yield* ensureGameScaffold(wt);
+            const opened = yield* openWorktreeGame(wt);
+            const played = yield* playThenWrite(
+              root,
+              stored,
+              creatorThreadId,
+              opened.projectId,
+              `sample-${label}`,
+              `${PLAYBOOK}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and 120-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw; multiple sessions share the same 120 seconds. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${playerNotes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`,
+              `Rewrite ${playerNotes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${playerNotes}.`,
+              JUDGE_CAP_MS,
+              playerNotes,
+              wt,
+            );
+            return played;
+          }).pipe(
+            Effect.catch((cause) =>
+              cause.operation === "stop-turn" || cause.operation === "finish-play"
+                ? Effect.fail(cause)
+                : logLine(root, `sample ${label} could not finish: ${cause.reason}`).pipe(
+                    Effect.as(null),
+                  ),
+            ),
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit)
+                ? dropWorktree(root, label)
+                : logLine(root, `sample ${label} retained for recovery after interrupted handoff`),
+            ),
+          );
+        });
+        const playAFirst = NodeCrypto.randomInt(2) === 0;
+        const first = yield* sample(playAFirst ? aSha : bSha);
+        if (first?.end != null) return { verdict: "NONE", reason: "", end: first.end };
+        const second = yield* sample(playAFirst ? bSha : aSha);
+        if (second?.end != null) return { verdict: "NONE", reason: "", end: second.end };
+        const a = playAFirst ? first : second;
+        const b = playAFirst ? second : first;
+        const evidenceOf = (played: typeof a) =>
+          played !== null && "playEvidence" in played ? (played.playEvidence ?? null) : null;
+        const aEvidence = evidenceOf(a);
+        const bEvidence = evidenceOf(b);
+        const presentAFirst = NodeCrypto.randomInt(2) === 0;
+        const evidence = {
+          aSha,
+          bSha,
+          playOrder: playAFirst ? "A,B" : "B,A",
+          presentation: presentAFirst ? "A,B" : "B,A",
+          A: aEvidence,
+          B: bEvidence,
+          players: { A: a?.threadId ?? null, B: b?.threadId ?? null },
+          reports: { A: a?.notes ?? "", B: b?.notes ?? "" },
+        };
+        yield* Effect.promise(async () => {
+          const dir = NodePath.join(root, ".studio", "comparisons");
+          await NodeFSP.mkdir(dir, { recursive: true });
+          await NodeFSP.writeFile(
+            NodePath.join(dir, `${comparisonId}.json`),
+            JSON.stringify(evidence, null, 2) + "\n",
+          );
+        });
+        if (
+          a === null ||
+          b === null ||
+          aEvidence === null ||
+          bEvidence === null ||
+          aEvidence.executedInputSteps === 0 ||
+          bEvidence.executedInputSteps === 0
+        )
+          return {
+            verdict: "NONE",
+            reason: "Both builds did not receive recorded hands-on input.",
+            end: null as string | null,
+          };
+        if (aEvidence.nominalMs > 120_000 || bEvidence.nominalMs > 120_000)
+          return {
+            verdict: "NONE",
+            reason: "A play sample exceeded the equal 120-second input budget.",
+            end: null as string | null,
+          };
+        const reports = {
+          A: `Build A. Recorded play: ${JSON.stringify(aEvidence)}\n${a.notes}`,
+          B: `Build B. Recorded play: ${JSON.stringify(bEvidence)}\n${b.notes}`,
+        };
+        const notesRel = `.studio/comparisons/${comparisonId}.md`;
+        const launched = yield* launchRole(
+          root,
+          stored,
+          creatorThreadId,
+          projectId,
+          `compare-${comparisonId}`,
+          "studio blind comparison",
+          `Compare these two independent play reports. Shared question: ${question} Which build better handles that flaw, and is better to play overall? Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports, not the game folder, sources or Git. Write ${notesRel}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${presentAFirst ? reports.A + "\n\n" + reports.B : reports.B + "\n\n" + reports.A}`,
         );
+        const waited = yield* waitRole(
+          root,
+          projectId,
+          launched.threadId,
+          launched.runId,
+          WRITE_CAP_MS,
+          `Finish only ${notesRel} with the comparison and reasons.`,
+        );
+        if (waited.end !== null) return { verdict: "NONE", reason: "", end: waited.end };
+        const readComparison = () =>
+          Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, notesRel), "utf8").catch(() => ""),
+          );
+        let notes = yield* readComparison();
+        if (parseCompare(notes) === null) {
+          const correction = yield* sendTurn(
+            projectId,
+            launched.threadId,
+            `Correct only the format of ${notesRel}, using the reports already provided. Put your declaration COMPARE: A or COMPARE: B or COMPARE: TIE alone on its own line. Put reasons in a separate paragraph below it. Do not play again or collect new evidence.`,
+          );
+          const corrected = yield* waitRole(
+            root,
+            projectId,
+            launched.threadId,
+            correction,
+            WRITE_CAP_MS,
+            `Finish only the comparison file ${notesRel}.`,
+          );
+          if (corrected.end !== null) return { verdict: "NONE", reason: "", end: corrected.end };
+          notes = yield* readComparison();
+        }
+        const lines = notes.split("\n");
+        const at = lines.findLastIndex((line) => /^COMPARE:\s*(A|B|TIE)\s*$/i.test(line));
+        const reason =
+          at < 0
+            ? ""
+            : lines
+                .slice(at + 1)
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 500);
+        return {
+          verdict: parseCompare(notes) ?? "NONE",
+          reason,
+          notes,
+          end: null as string | null,
+        };
+      });
 
       const singleStage = Effect.fn("GameRun.singleStage")(function* (
         key: string,
@@ -1683,103 +1798,24 @@ export const layer = (options: { readonly stateDir: string }) => {
           .split("\n")
           .map((name) => name.trim())
           .filter((name) => /^(rejected\/)?proto-\d+$/.test(name));
-        // Blind pick: the picker plays build A then build B inside one
-        // detached worktree, labelled only A/B. The live tree is never
-        // swapped, so no stash is ever needed.
+        // Prototype labels, playback order and report presentation are
+        // randomized independently; each player sees only one worktree.
         if (usable.length >= 2) {
-          const aSha = usable[0]!;
-          const bSha = usable[1]!;
-          const wtPick = yield* ensureWorktree(root, aSha, "pick");
-          if (wtPick === null) {
-            yield* logLine(root, "pick: worktree for build A failed; skipping blind pick");
-          } else {
-            const pickResult = yield* Effect.gen(function* () {
-              const opened = yield* openWorktreeGame(wtPick).pipe(
-                Effect.catch((cause) =>
-                  Effect.gen(function* () {
-                    yield* logLine(root, `pick: cannot open worktree game: ${cause.message}`);
-                    return null;
-                  }),
-                ),
-              );
-              if (opened === null) return { verdict: "NONE" as string, playedB: false as boolean };
-              const wtProject = opened.projectId;
-              const launched = yield* launchRole(
-                root,
-                stored,
-                creatorThreadId,
-                wtProject,
-                "pick",
-                "studio pick",
-                `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native), about two minutes. After every couple of plays, append what you did and felt to PICK-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, what you learned, where it got boring, whether you wanted another go. Write one line COMPARE: A in PICK-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
-              );
-              const pickWait1 = yield* waitRole(
-                root,
-                wtProject,
-                launched.threadId,
-                launched.runId,
-                JUDGE_CAP_MS,
-                "Continue where you left off. Reply briefly, then keep working.",
-              );
-              if (pickWait1.end !== null)
-                return { verdict: "NONE", playedB: false, end: pickWait1.end };
-              const swapped = yield* gitExec(wtPick, ["checkout", "-q", "-f", bSha], 60_000).pipe(
-                Effect.map((r) => r.exitCode === 0),
-              );
-              if (!swapped) {
-                yield* logLine(
-                  root,
-                  "pick: worktree checkout of build B failed; keeping A-only notes",
-                );
-              } else {
-                const secondRunId = yield* sendTurn(
-                  wtProject,
-                  launched.threadId,
-                  "Build B is now checked out in this folder. Play it the same way, about two minutes, appending to PICK-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
-                );
-                const pickWait2 = yield* waitRole(
-                  root,
-                  wtProject,
-                  launched.threadId,
-                  secondRunId,
-                  JUDGE_CAP_MS,
-                  "Continue where you left off. Reply briefly, then keep working.",
-                );
-                if (pickWait2.end !== null)
-                  return { verdict: "NONE", playedB: true, end: pickWait2.end };
-              }
-              const writeRunId = yield* sendTurn(
-                wtProject,
-                launched.threadId,
-                "Stop playing, now write it. Rewrite PICK-NOTES.md with what you did and felt in each build in your own words, copy it to .studio/pick.txt, and end PICK-NOTES.md with exactly one line COMPARE: A or COMPARE: B plus reasons on following lines. You may only write PICK-NOTES.md and .studio/pick.txt. Judge only from play.",
-              );
-              const pickWait3 = yield* waitRole(
-                root,
-                wtProject,
-                launched.threadId,
-                writeRunId,
-                WRITE_CAP_MS,
-                "Continue where you left off. Reply briefly, then keep working.",
-              );
-              if (pickWait3.end !== null)
-                return { verdict: "NONE", playedB: true, end: pickWait3.end };
-              const pickText = yield* Effect.promise(() =>
-                NodeFSP.readFile(NodePath.join(wtPick, ".studio", "pick.txt"), "utf8").catch(
-                  () => "",
-                ),
-              );
-              if (pickText.trim().length > 0)
-                yield* Effect.promise(() =>
-                  NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), pickText).catch(
-                    () => undefined,
-                  ),
-                );
-              return { verdict: parseCompare(pickText) ?? "NONE", playedB: true };
-            }).pipe(Effect.ensuring(dropWorktree(root, "pick")));
-            if ((pickResult as { end?: string | null }).end !== undefined) {
-              const end = (pickResult as { end: string | null }).end;
-              if (end !== null) return end;
-            }
+          const reverse = NodeCrypto.randomInt(2) === 0;
+          const aSha = usable[reverse ? 1 : 0]!;
+          const bSha = usable[reverse ? 0 : 1]!;
+          const pickResult = yield* compareBuilds(
+            "pick",
+            aSha,
+            bSha,
+            "Which core loop is better to play and worth building on? Consider decisions, meaningful failure, control, boredom and wanting another go.",
+          );
+          if (pickResult.end !== null) return pickResult.end;
+          if (pickResult.verdict !== "NONE") {
+            const pickText = "notes" in pickResult ? (pickResult.notes ?? "") : "";
+            yield* Effect.promise(() =>
+              NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), pickText),
+            );
             const verdict = pickResult.verdict;
             const winner = verdict === "B" ? bSha : aSha;
             if (yield* checkoutRef(root, "main", "pick merge")) {
@@ -1791,7 +1827,8 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               best = yield* gitOut(root, ["rev-parse", "HEAD"]);
             }
-          } // end picked-pair block (skipped when the pick worktree failed)
+          } else
+            yield* logLine(root, "pick incomplete: no prototype selected without play evidence");
         } else if (usable.length === 1) {
           if (yield* checkoutRef(root, "main", "pick merge single")) {
             const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", usable[0]!], 60_000);
@@ -2061,123 +2098,13 @@ export const layer = (options: { readonly stateDir: string }) => {
         record.testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
         if (!testerWrote) record.note = `${record.note ?? ""} tester write failed`.trim();
 
-        // Blind compare by a fresh thread that plays candidate and best, in
-        // both orders, inside one detached worktree per judging: build A is
-        // checked out, played, then build B force-checked out over it and
-        // played by the same thread. The live tree is never swapped. Judge
-        // bot runs are imported into the live game afterwards. The candidate
-        // merges unless best wins both. Rejected work stays on a branch.
-        const judgeOne = Effect.fn("GameRun.judgeOne")(function* (
-          tag: string,
-          firstSha: string,
-          secondSha: string,
-        ) {
-          const label = `${key}-${tag}`;
-          const wt = yield* ensureWorktree(root, firstSha, label);
-          if (wt === null)
-            return {
-              verdict: "NONE",
-              reason: `worktree for first build failed (${firstSha.slice(0, 8)})`,
-              end: null as string | null,
-            };
-          return yield* Effect.gen(function* () {
-            const opened = yield* openWorktreeGame(wt).pipe(
-              Effect.catch((cause) =>
-                Effect.gen(function* () {
-                  yield* logLine(root, `round ${round}: judge ${tag} cannot open worktree game`);
-                  return null;
-                }),
-              ),
-            );
-            if (opened === null)
-              return {
-                verdict: "NONE",
-                reason: "worktree game would not open",
-                end: null as string | null,
-              };
-            const wtProject = opened.projectId;
-            const launched = yield* launchRole(
-              root,
-              stored,
-              creatorThreadId,
-              wtProject,
-              `judge-${tag}`,
-              `studio judge ${tag}`,
-              `${PLAYBOOK}Play build A in this folder now with game_explore_start (target native) and game_bot_run, about two minutes. After every couple of plays, append what you did and felt to JUDGE-NOTES.md in this folder: decisions, whether choices mattered, whether you could fail, where it got boring, whether you wanted another go. Write one line COMPARE: A in JUDGE-NOTES.md early and update it if play changes your mind. Judge only from play. Do not change game files. Do not use subagents.`,
-            );
-            const judgeWait1 = yield* waitRole(
-              root,
-              wtProject,
-              launched.threadId,
-              launched.runId,
-              JUDGE_CAP_MS,
-              "Continue where you left off. Reply briefly, then keep working.",
-            );
-            if (judgeWait1.end !== null)
-              return { verdict: "NONE", reason: "", end: judgeWait1.end as string | null };
-            const swapped = yield* gitExec(wt, ["checkout", "-q", "-f", secondSha], 60_000).pipe(
-              Effect.map((r) => r.exitCode === 0),
-            );
-            if (!swapped) {
-              yield* logLine(
-                root,
-                `round ${round}: judge ${tag} worktree checkout of second build failed`,
-              );
-              return {
-                verdict: "NONE",
-                reason: `worktree checkout of second build failed (${secondSha.slice(0, 8)})`,
-                end: null as string | null,
-              };
-            }
-            const secondRunId = yield* sendTurn(
-              wtProject,
-              launched.threadId,
-              "Build B is now checked out in this folder. Play it the same way with game_explore_start (target native) and game_bot_run, about two minutes, appending to JUDGE-NOTES.md. Update your COMPARE line if play changes your mind. Do not change game files.",
-            );
-            const judgeWait2 = yield* waitRole(
-              root,
-              wtProject,
-              launched.threadId,
-              secondRunId,
-              JUDGE_CAP_MS,
-              "Continue where you left off. Reply briefly, then keep working.",
-            );
-            if (judgeWait2.end !== null)
-              return { verdict: "NONE", reason: "", end: judgeWait2.end as string | null };
-            const writeRunId = yield* sendTurn(
-              wtProject,
-              launched.threadId,
-              "Stop playing, now write it. Rewrite JUDGE-NOTES.md so it states what you did and felt in build A and build B in your own words and ends with COMPARE: A or COMPARE: B or COMPARE: TIE plus reasons on following lines. You may only write JUDGE-NOTES.md.",
-            );
-            const judgeWait3 = yield* waitRole(
-              root,
-              wtProject,
-              launched.threadId,
-              writeRunId,
-              WRITE_CAP_MS,
-              "Continue where you left off. Reply briefly, then keep working.",
-            );
-            if (judgeWait3.end !== null)
-              return { verdict: "NONE", reason: "", end: judgeWait3.end as string | null };
-            const notes = yield* Effect.promise(() =>
-              NodeFSP.readFile(NodePath.join(wt, "JUDGE-NOTES.md"), "utf8").catch(() => ""),
-            );
-            yield* importJudgeRuns(root, wt);
-            const verdict = parseCompare(notes);
-            const lines = notes.split("\n");
-            const at = lines.findLastIndex((line) => /^COMPARE:\s*(A|B|TIE)\s*$/i.test(line));
-            const reason =
-              at >= 0
-                ? lines
-                    .slice(at + 1)
-                    .join(" ")
-                    .replace(/\s+/g, " ")
-                    .trim()
-                    .slice(0, 500)
-                : "";
-            return { verdict: verdict ?? "NONE", reason, end: null as string | null };
-          }).pipe(Effect.ensuring(dropWorktree(root, label)));
-        });
+        const judgeOne = (tag: string, firstSha: string, secondSha: string) =>
+          compareBuilds(
+            tag,
+            firstSha,
+            secondSha,
+            `The prior reviewer named this unresolved play weakness and direction, not a claim about either build: ${direction}. Is it better handled, and is the game better to play overall?`,
+          );
         let order1 = yield* judgeOne(`${key}-1`, candidate, best);
         if (order1.end !== null) return order1.end;
         // A missing verdict gets one retry; a round with no verdicts is
@@ -2660,6 +2587,6 @@ const BUILD_RULE = `${TOOL_RULE}Make the smallest change that fixes this block's
 const BUILD_RULE_SHORT = BUILD_RULE;
 
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
-const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use long holds for movement; quick taps are unreliable. `;
+const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
 const FIRST_DIRECTION =
   "Read VISION.md and PLAN.md first. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in godot/assets for every visual and sound. End with something a player notices in the first minute; game files under godot/ only.";
