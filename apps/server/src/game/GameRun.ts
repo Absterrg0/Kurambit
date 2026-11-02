@@ -28,7 +28,6 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
-import * as GameEngine from "./GameEngine.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import * as Templates from "./templates.ts";
@@ -338,8 +337,6 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
     const needGame = (operation: string, path: string) =>
       needService(Effect.serviceOption(GameService.GameService), operation, path, "Game service");
-    const needEngine = (operation: string, path: string) =>
-      needService(Effect.serviceOption(GameEngine.GameEngine), operation, path, "Game engine");
     const needSecrets = (operation: string, path: string) =>
       needService(
         Effect.serviceOption(ServerSecretStore.ServerSecretStore),
@@ -2602,36 +2599,10 @@ export const layer = (options: { readonly stateDir: string }) => {
       // from the best real tester or bot run whether or not it won, and the
       // record says which run it came from.
       const game = yield* needGame("export", root);
-      // Ask only for targets the lane's backend declares: a three.js ending
-      // must not record a guaranteed-false Linux row. Capability facts come
-      // from the engine backend, never directory names. Unresolvable engine ->
-      // the old both-targets behavior, logged, so endings keep working.
-      const laneExport = yield* Effect.gen(function* () {
-        const fallback = {
-          supported: ["Web", "Linux"] as const,
-          displayName: "Game",
-        };
-        const projects = yield* needProjects("export", root);
-        const manifest = yield* Effect.option(projects.read(root));
-        const engineName = manifest._tag === "Some" ? manifest.value.engine.name : "godot";
-        const engines = yield* Effect.option(needEngine("export", root));
-        if (engines._tag === "None") return fallback;
-        const backend = yield* Effect.option(engines.value.backendFor(engineName));
-        if (backend._tag === "None") return fallback;
-        return {
-          supported: backend.value.exportTargets,
-          displayName: backend.value.displayName,
-        };
-      }).pipe(
-        Effect.catch(() =>
-          Effect.succeed({ supported: ["Web", "Linux"] as const, displayName: "Game" }),
-        ),
-        Effect.tap((lane) =>
-          logLine(root, `finishExports ${lane.displayName} targets: ${lane.supported.join(", ")}`),
-        ),
-      );
-      const supported = laneExport.supported;
-      const displayName = laneExport.displayName;
+      // Unsupported targets are refused by the backend before any work: its
+      // target check precedes all import/export machinery, so reading that
+      // refusal keeps the backend authoritative with zero side effects and no
+      // scope surgery (merging the engine service breaks server boot).
       type ExportRow = {
         ok: boolean;
         skipped: null | "unsupported-target";
@@ -2646,26 +2617,24 @@ export const layer = (options: { readonly stateDir: string }) => {
             message: result.message,
             path: result.path,
           })),
-          Effect.orElseSucceed(() => ({
-            ok: false as boolean,
-            skipped: null as null | "unsupported-target",
-            message: `${displayName} ${target} export errored`,
-            path: null as string | null,
-          })),
+          Effect.catch((cause) =>
+            cause.reason === "invalid-input"
+              ? Effect.succeed({
+                  ok: false as boolean,
+                  skipped: "unsupported-target" as const,
+                  message: cause.detail ?? `${target} export refused as unsupported`,
+                  path: null as string | null,
+                })
+              : Effect.succeed({
+                  ok: false as boolean,
+                  skipped: null as null | "unsupported-target",
+                  message: `${target} export errored`,
+                  path: null as string | null,
+                }),
+          ),
         );
-      const skipTarget = (target: "Web" | "Linux"): Effect.Effect<ExportRow> =>
-        Effect.succeed({
-          ok: false as boolean,
-          skipped: "unsupported-target" as const,
-          message: `${displayName} games export ${supported.join(", ")} only; ${target} skipped`,
-          path: null as string | null,
-        });
-      const web: ExportRow = supported.includes("Web")
-        ? yield* runTarget("Web")
-        : yield* skipTarget("Web");
-      const linux: ExportRow = supported.includes("Linux")
-        ? yield* runTarget("Linux")
-        : yield* skipTarget("Linux");
+      const web: ExportRow = yield* runTarget("Web");
+      const linux: ExportRow = yield* runTarget("Linux");
       const nonEmpty = (path: string): Effect.Effect<boolean> =>
         Effect.promise(() =>
           NodeFSP.stat(path)
