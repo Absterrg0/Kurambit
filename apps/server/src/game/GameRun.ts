@@ -106,6 +106,7 @@ type RoundRecord = {
   verdicts: VerdictRef[];
   kept: boolean;
   unjudged?: boolean;
+  inconclusive?: boolean;
   durationMs: number;
   linesChanged: number;
   testerNote?: string;
@@ -1860,7 +1861,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             "Which core loop is better to play and worth building on? Consider decisions, meaningful failure, control, boredom and wanting another go.",
           );
           if (pickResult.end !== null) return pickResult.end;
-          if (pickResult.verdict !== "NONE") {
+          if (pickResult.verdict === "A" || pickResult.verdict === "B") {
             const pickText = "notes" in pickResult ? (pickResult.notes ?? "") : "";
             yield* Effect.promise(() =>
               NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), pickText),
@@ -1876,7 +1877,12 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               best = yield* gitOut(root, ["rev-parse", "HEAD"]);
             }
-          } else
+          } else if (pickResult.verdict === "TIE")
+            yield* logLine(
+              root,
+              "pick inconclusive (TIE): no prototype merged without demonstrated preference",
+            );
+          else
             yield* logLine(root, "pick incomplete: no prototype selected without play evidence");
         } else if (usable.length === 1) {
           if (yield* checkoutRef(root, "main", "pick merge single")) {
@@ -2188,6 +2194,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         });
         const bestWinsBoth = order1.verdict === "B" && order2.verdict === "A";
         const noVerdicts = order1.verdict === "NONE" || order2.verdict === "NONE";
+        const candidateWinsBoth = order1.verdict === "A" && order2.verdict === "B";
         if (bestWinsBoth) {
           if (yield* checkoutRef(root, "main", `round ${round} reject`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
@@ -2213,6 +2220,25 @@ export const layer = (options: { readonly stateDir: string }) => {
               300,
             );
           stallStreak += 1;
+        } else if (!candidateWinsBoth) {
+          // Inconclusive (tie or split): a tie is an honest non-finding, never
+          // a keep. The judged best stands, the candidate stays on its branch
+          // for the record, and the loop continues with the same weakness. No
+          // stall increment: judging completed with verdicts.
+          const split = `${order1.verdict}/${order2.verdict}`;
+          if (yield* checkoutRef(root, "main", `round ${round} inconclusive`)) {
+            record.note =
+              `${record.note ?? ""} inconclusive (${split}); best stands, kept on branch ${key}`.trim();
+          } else {
+            record.note =
+              `${record.note ?? ""} inconclusive (${split}); cannot reach main; kept on branch`.trim();
+          }
+          record.kept = false;
+          record.inconclusive = true;
+          yield* logLine(
+            root,
+            `round ${round}: inconclusive ${split}; best stands, kept on branch ${key}`,
+          );
         } else if (!(yield* checkoutRef(root, "main", `round ${round} merge`))) {
           yield* logLine(root, `round ${round}: cannot reach main; kept on branch ${key}`);
           record.kept = false;
