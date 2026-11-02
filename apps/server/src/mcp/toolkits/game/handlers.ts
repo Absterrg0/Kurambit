@@ -42,13 +42,6 @@ const handlers = {
       return yield* game.blenderAssetsImport(scope.thread.threadId, input);
     }),
   ),
-  game_blender_generate: McpToolAccess.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      const scope = yield* caller;
-      const game = yield* GameService.GameService;
-      return yield* game.blenderGenerate(scope.thread.threadId, input);
-    }),
-  ),
   game_blender_export: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;
@@ -56,25 +49,11 @@ const handlers = {
       return yield* game.blenderExport(scope.thread.threadId, input);
     }),
   ),
-  game_godot_import: McpToolAccess.actsAsCaller(() =>
-    Effect.gen(function* () {
-      const scope = yield* caller;
-      const game = yield* GameService.GameService;
-      return yield* game.import(scope.thread.threadId);
-    }),
-  ),
   game_import: McpToolAccess.actsAsCaller(() =>
     Effect.gen(function* () {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
       return yield* game.import(scope.thread.threadId);
-    }),
-  ),
-  game_godot_check: McpToolAccess.actsAsCaller(() =>
-    Effect.gen(function* () {
-      const scope = yield* caller;
-      const game = yield* GameService.GameService;
-      return yield* game.check(scope.thread.threadId);
     }),
   ),
   game_check: McpToolAccess.actsAsCaller(() =>

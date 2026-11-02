@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This module owns the headless-Chromium boundary for the three.js lane.
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError, THREE_VIEWPORT } from "@kurambit/contracts";
@@ -111,7 +110,3 @@ export const chromiumProfileDir = async (runDir: string): Promise<string> => {
 };
 
 export const threeViewport = (): { width: number; height: number } => ({ ...THREE_VIEWPORT });
-
-export const chromiumTmpEnv = (): NodeJS.ProcessEnv => ({
-  TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
-});

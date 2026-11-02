@@ -3,7 +3,6 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { engineChildEnv } from "./GameProcesses.ts";
 
@@ -104,14 +103,13 @@ export const serveGameDirectory = async (
 
 /**
  * A clean room for Chromium and its children: the allowlisted engine base
- * plus the pinned scratch and heap knobs, and nothing else. No desktop
+ * plus the heap knob, and nothing else. No desktop
  * display leaks in (headless runs own no DISPLAY), and page JS stays
  * sandboxed with no environment to read; only the utility processes that
  * launch the browser see this.
  */
 export const chromiumChildEnv = (): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = { ...engineChildEnv() };
-  env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
   env.NODE_OPTIONS = "--max-old-space-size=1536";
   return env;
 };

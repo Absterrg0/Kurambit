@@ -1,5 +1,5 @@
 /**
- * The check script Godot runs headlessly for `game_godot_check`. It is a
+ * The check script Godot runs headlessly for `game_check`. It is a
  * string, not an asset, so the packed server archive carries it without a
  * second asset-copy rule. GameService writes it under the game's ignored
  * `builds/logs/` tree and passes the result path and the game's declared

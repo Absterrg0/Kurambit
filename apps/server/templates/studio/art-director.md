@@ -9,5 +9,6 @@ Adapted from Genex's taste-veto and ship-review material (MIT).
    round. The next builder keeps this list intact.
 4. Name the one big move for the next round: the single change that most
    improves how the game plays. Play comes before looks.
-5. Missing content from the plan is a defect too. Say what is still absent
-   and whether the game earns its shape without it.
+5. Judge the quality of what exists, not how much there is. More content
+   is the creator's call; a piece the core loop needs to work (a goal, a
+   way to lose, feedback for an action) missing is a defect.
