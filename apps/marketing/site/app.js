@@ -1,4 +1,4 @@
-// Kurambit site: the dithered fox, clips that play only on screen, reveals and the waitlist.
+// Kurambit site: the hero reel, clips that play only on screen, the dithered fox and the waitlist.
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -6,10 +6,107 @@ for (const node of document.querySelectorAll("[data-year]")) {
   node.textContent = String(new Date().getFullYear());
 }
 
-/* ---------- Dithered fox ---------- */
+/* ---------- Hero reel: three real games, one brief at a time ---------- */
 
-const INK = "#f1e9d8";
-const ACCENT = "#ff5a2a";
+const reel = document.querySelector("[data-reel]");
+if (reel) {
+  const DWELL = 9000;
+  const videos = new Map(
+    [...reel.querySelectorAll("[data-reel-video]")].map((v) => [v.dataset.reelVideo, v]),
+  );
+  const picks = [...reel.querySelectorAll("[data-reel-pick]")];
+  const brief = reel.querySelector("[data-reel-brief]");
+  const label = reel.querySelector("[data-reel-label]");
+  let timer = 0;
+  let current = picks[0].dataset.reelPick;
+
+  const show = (key) => {
+    current = key;
+    for (const [k, video] of videos) {
+      video.classList.toggle("is-on", k === key);
+      if (k === key) {
+        if (video.preload === "none") video.preload = "auto";
+        video.play().catch(() => {});
+      } else {
+        // Let the crossfade finish before the old clip stops.
+        setTimeout(() => k !== current && video.pause(), 1300);
+      }
+    }
+    for (const pick of picks) {
+      const on = pick.dataset.reelPick === key;
+      pick.setAttribute("aria-pressed", String(on));
+      if (on) {
+        brief.textContent = pick.dataset.brief;
+        label.textContent = pick.dataset.label;
+      }
+    }
+  };
+
+  const next = () => {
+    const i = picks.findIndex((p) => p.dataset.reelPick === current);
+    show(picks[(i + 1) % picks.length].dataset.reelPick);
+  };
+
+  const schedule = () => {
+    clearInterval(timer);
+    if (!reduceMotion && !reel.hasAttribute("data-reel-paused")) timer = setInterval(next, DWELL);
+  };
+
+  reel.style.setProperty("--reel-ms", `${DWELL}ms`);
+  if (reduceMotion) reel.setAttribute("data-reel-paused", "");
+
+  for (const pick of picks) {
+    pick.addEventListener("click", () => {
+      // A choice is a choice: stop cycling once the visitor picks a game.
+      reel.setAttribute("data-reel-paused", "");
+      clearInterval(timer);
+      show(pick.dataset.reelPick);
+    });
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearInterval(timer);
+      videos.get(current)?.pause();
+    } else {
+      videos
+        .get(current)
+        ?.play()
+        .catch(() => {});
+      schedule();
+    }
+  });
+
+  // Warm the second clip once the first is playing, so the first cut is clean.
+  videos.get(current)?.addEventListener(
+    "playing",
+    () => {
+      const second = picks[1] && videos.get(picks[1].dataset.reelPick);
+      if (second && second.preload === "none") second.preload = "auto";
+    },
+    { once: true },
+  );
+
+  schedule();
+}
+
+/* ---------- Clips play only while visible ---------- */
+
+const clips = document.querySelectorAll("video[data-autoplay]");
+if ("IntersectionObserver" in window && !reduceMotion) {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const { target, isIntersecting } of entries) {
+        if (isIntersecting) target.play().catch(() => {});
+        else target.pause();
+      }
+    },
+    { threshold: 0.2 },
+  );
+  for (const video of clips) observer.observe(video);
+}
+
+/* ---------- Dithered fox ---------- */
 
 // 8x8 Bayer matrix, normalised to thresholds in (0, 1).
 const BAYER = [
@@ -19,9 +116,9 @@ const BAYER = [
 ].map((value) => (value + 0.5) / 64);
 
 function dither(canvas) {
-  const ink = canvas.dataset.ink ?? INK;
-  const accentColor = canvas.dataset.accent ?? ACCENT;
-  const cellsAcross = Number(canvas.dataset.cells ?? 70);
+  const ink = canvas.dataset.ink ?? "#f6efdc";
+  const accentColor = canvas.dataset.accent ?? "#ff4030";
+  const cellsAcross = Number(canvas.dataset.cells ?? 72);
   const image = new Image();
   image.src = canvas.dataset.src;
   const context = canvas.getContext("2d");
@@ -117,8 +214,23 @@ function dither(canvas) {
     requestAnimationFrame(step);
   }
 
-  image.addEventListener("load", boot);
-  if (image.complete) boot();
+  // Draw when the fox scrolls into view, so the reveal is seen rather than wasted at load.
+  const start = () => {
+    image.addEventListener("load", boot);
+    if (image.complete) boot();
+  };
+  if ("IntersectionObserver" in window) {
+    const once = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        once.disconnect();
+        start();
+      }
+    });
+    once.observe(canvas);
+  } else {
+    start();
+  }
+
   canvas.addEventListener("pointermove", (event) => {
     const rect = canvas.getBoundingClientRect();
     pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -135,41 +247,7 @@ function dither(canvas) {
   });
 }
 
-for (const canvas of document.querySelectorAll("canvas.fox, canvas[data-dither]")) dither(canvas);
-
-/* ---------- Clips play only while visible; sections ease in ---------- */
-
-const videos = document.querySelectorAll("video[data-autoplay]");
-const reveals = document.querySelectorAll("[data-reveal]");
-
-if ("IntersectionObserver" in window) {
-  if (!reduceMotion) {
-    const videoObserver = new IntersectionObserver(
-      (entries) => {
-        for (const { target, isIntersecting } of entries) {
-          if (isIntersecting) target.play().catch(() => {});
-          else target.pause();
-        }
-      },
-      { threshold: 0.25 },
-    );
-    for (const video of videos) videoObserver.observe(video);
-  }
-
-  const revealObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        entry.target.classList.add("in");
-        revealObserver.unobserve(entry.target);
-      }
-    },
-    { threshold: 0.08 },
-  );
-  for (const node of reveals) revealObserver.observe(node);
-} else {
-  for (const node of reveals) node.classList.add("in");
-}
+for (const canvas of document.querySelectorAll("canvas[data-dither]")) dither(canvas);
 
 /* ---------- Waitlist ---------- */
 
@@ -190,7 +268,7 @@ for (const form of document.querySelectorAll("[data-waitlist]")) {
   const button = form.querySelector("button[type=submit]");
   const label = button.querySelector("[data-label]");
   const idleLabel = label.textContent;
-  const defaultNote = status.textContent;
+  const defaultNote = status.innerHTML;
 
   const show = (tone, key) => {
     status.dataset.tone = tone;
@@ -200,7 +278,7 @@ for (const form of document.querySelectorAll("[data-waitlist]")) {
   form.addEventListener("input", () => {
     if (status.dataset.tone === "error") {
       delete status.dataset.tone;
-      status.textContent = defaultNote;
+      status.innerHTML = defaultNote;
     }
   });
 
