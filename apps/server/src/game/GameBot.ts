@@ -941,7 +941,7 @@ const make = Effect.gen(function* () {
           args.videoPath,
         ],
         {
-          env: { ...displayEnv, TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp") },
+          env: displayEnv,
           detached: false,
           stdio: ["ignore", ffmpegLog, ffmpegLog],
         },
@@ -1011,7 +1011,7 @@ const make = Effect.gen(function* () {
         {
           env: {
             PATH: process.env.PATH ?? "",
-            TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
+            ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
             NODE_OPTIONS: "--max-old-space-size=1536",
             HOME: NodeOS.homedir(),
             LANG: process.env.LANG ?? "C.UTF-8",
@@ -1620,7 +1620,7 @@ const make = Effect.gen(function* () {
         ffmpeg,
         ["-y", "-i", videoPath, "-vf", "fps=1/5", NodePath.join(framesDir, "frame-%03d.png")],
         {
-          env: { ...headlessEnv(), TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp") },
+          env: headlessEnv(),
           stdio: "ignore",
         },
       );
@@ -1654,10 +1654,7 @@ const make = Effect.gen(function* () {
   };
 
   /** Stills extraction runs fixed ffmpeg args on already-written video: allowlisted engine base only. */
-  const headlessEnv = (): NodeJS.ProcessEnv => ({
-    ...engineChildEnv(),
-    TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
-  });
+  const headlessEnv = (): NodeJS.ProcessEnv => engineChildEnv();
 
   /** The frozen-screen probe runs on the extracted frames, never per tick. */
   const frozenScreenFinding = async (
@@ -1819,7 +1816,7 @@ const make = Effect.gen(function* () {
         {
           env: {
             PATH: process.env.PATH ?? "",
-            TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
+            ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
             NODE_OPTIONS: "--max-old-space-size=1536",
             HOME: NodeOS.homedir(),
             LANG: process.env.LANG ?? "C.UTF-8",
@@ -2315,7 +2312,7 @@ const make = Effect.gen(function* () {
               args.videoPath,
             ],
             {
-              env: { ...headlessEnv(), TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp") },
+              env: headlessEnv(),
               stdio: "ignore",
             },
           );

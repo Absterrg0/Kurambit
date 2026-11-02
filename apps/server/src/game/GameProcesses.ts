@@ -3,7 +3,6 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
@@ -80,8 +79,7 @@ export const engineChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => 
   if (source.PATHEXT !== undefined) env.PATHEXT = source.PATHEXT;
   if (source.TEMP !== undefined) env.TEMP = source.TEMP;
   if (source.TMP !== undefined) env.TMP = source.TMP;
-  // Scratch stays on disk beside the other run evidence, never RAM-backed /tmp.
-  env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
+  if (source.TMPDIR !== undefined) env.TMPDIR = source.TMPDIR;
   if (extra !== undefined) for (const [key, value] of Object.entries(extra)) env[key] = value;
   return env;
 };

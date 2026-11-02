@@ -53,8 +53,6 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderAssetsImportInput,
   type GameBlenderAssetsImportResult,
-  type GameBlenderGenerateInput,
-  type GameBlenderGenerateResult,
   type GameBotRunInput,
   type GameBotRunResult,
   type GameBotReportResult,
@@ -184,18 +182,13 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameBlenderAssetsImportResult, GameOperationError>;
     /**
      * Live Blender scene: export the named objects (or every mesh) as a GLB
-     * under godot/ the game can load, saving the .blend source. Run
-     * game_import after so Godot sees it.
+     * under the engine directory, saving the .blend source. Run game_import
+     * after.
      */
     readonly blenderExport: (
       threadId: ThreadId,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
-    /** Live Blender scene: forward to the upstream generator; reports clearly when none is available. */
-    readonly blenderGenerate: (
-      threadId: ThreadId,
-      input: GameBlenderGenerateInput,
-    ) => Effect.Effect<GameBlenderGenerateResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly export: (
       threadId: ThreadId,
@@ -2618,8 +2611,6 @@ const make = Effect.gen(function* () {
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
       withRoot(threadId, "Blender export", (root) => liveBlender.exportGlb(root, input)),
-    blenderGenerate: (threadId, input) =>
-      withRoot(threadId, "Blender generate", (root) => liveBlender.generate(root, input)),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {

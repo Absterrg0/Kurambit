@@ -70,7 +70,7 @@ export const GameBlenderAssetsImportResult = Schema.Struct({
   text: Schema.String,
   /** Game-relative .blend source that stays in the game. */
   blend: Schema.optionalKey(Schema.String),
-  /** Game-relative GLB under godot/ the game can load; run game_import after. */
+  /** Game-relative GLB under the engine directory the game can load; run game_import after. */
   export: Schema.optionalKey(Schema.String),
 });
 export type GameBlenderAssetsImportResult = typeof GameBlenderAssetsImportResult.Type;
@@ -82,8 +82,9 @@ export const GameBlenderExportInput = Schema.Struct({
    */
   objects: Schema.optionalKey(Schema.Array(Schema.String)),
   /**
-   * Game-relative destination, which must sit under `godot/` and end with
-   * `.glb`. Omitted means `godot/assets/blender/scene.glb`.
+   * Game-relative destination, which must sit under the engine directory
+   * (`godot/` or `web/`) and end with `.glb`. Omitted means
+   * `<engine dir>/assets/blender/scene.glb`.
    */
   file: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
 });
@@ -92,16 +93,7 @@ export const GameBlenderExportResult = Schema.Struct({
   text: Schema.String,
   /** Game-relative .blend source that stays in the game. */
   blend: Schema.String,
-  /** Game-relative GLB under godot/ the game can load; run game_import after. */
+  /** Game-relative GLB under the engine directory the game can load; run game_import after. */
   export: Schema.String,
 });
 export type GameBlenderExportResult = typeof GameBlenderExportResult.Type;
-export const GameBlenderGenerateInput = Schema.Struct({
-  prompt: Schema.optionalKey(Schema.String),
-  image: Schema.optionalKey(Schema.String),
-  name: Schema.optionalKey(Schema.String),
-  provider: Schema.optionalKey(Schema.String),
-});
-export type GameBlenderGenerateInput = typeof GameBlenderGenerateInput.Type;
-export const GameBlenderGenerateResult = Schema.Struct({ text: Schema.String });
-export type GameBlenderGenerateResult = typeof GameBlenderGenerateResult.Type;

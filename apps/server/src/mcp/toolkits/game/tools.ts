@@ -16,8 +16,6 @@ import {
   GameBlenderAssetsSearchResult,
   GameBlenderAssetsImportInput,
   GameBlenderAssetsImportResult,
-  GameBlenderGenerateInput,
-  GameBlenderGenerateResult,
   GameCheckResult,
   GameOperationFailure,
   GameStatus,
@@ -76,7 +74,7 @@ const GameStatusTool = Tool.make("game_status", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderCodeTool = Tool.make("game_blender_code", {
   description:
-    "Run Python bpy code in this game's live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do. The .blend source is saved in the game after each call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions.",
+    "Run Python bpy code in this game's live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do, including rendering PNGs and writing WAVs with numpy and wave. Relative paths resolve from the game root; print every path you write. A Python error fails the call with its traceback. The .blend source is saved in the game after each successful call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions.",
   parameters: GameBlenderCodeInput,
   success: GameBlenderCodeResult,
   failure,
@@ -120,7 +118,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under godot/assets/blender/ that the game can load; run game_import after so Godot sees it. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -129,20 +127,9 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-const BlenderGenerateTool = Tool.make("game_blender_generate", {
-  description:
-    "Forward to the upstream 3D generator (pinned mcp-for-blender generate_3d, adapted): one new textured model from a text prompt or an image. No generator is configured on this machine (no Premium, no Tripo/Hunyuan/Hyper3D/Meshy key), so this reports that clearly instead of generating. Wire a key to enable it later; the seam already forwards prompt, image, name and provider.",
-  parameters: GameBlenderGenerateInput,
-  success: GameBlenderGenerateResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under godot/ that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to godot/assets/blender/scene.glb. The .blend source is saved in the game with the export. Run game_import after so Godot sees it.",
+    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb. The .blend source is saved in the game with the export. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,
@@ -152,9 +139,9 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
-const ImportTool = Tool.make("game_godot_import", {
+const ImportTool = Tool.make("game_import", {
   description:
-    "Run a real headless editor import in this thread's game. Call after every asset transfer or engine change. game_import is the preferred neutral name and behaves identically. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
+    "Run a real headless engine import in this thread's game. Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
   success: GameActionResult,
   failure,
   failureMode: "return",
@@ -162,31 +149,9 @@ const ImportTool = Tool.make("game_godot_import", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-/** Preferred neutral name for the editor import; the godot-named tool is its legacy alias. */
-const ImportNeutralTool = Tool.make("game_import", {
+const CheckTool = Tool.make("game_check", {
   description:
-    "Run a real headless engine import in this thread's game. Call after every asset transfer or engine change. Identical to game_godot_import (its legacy alias): returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-const CheckTool = Tool.make("game_godot_check", {
-  description:
-    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. game_check is the preferred neutral name and behaves identically. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest.",
-  success: GameCheckResult,
-  failure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
-/** Preferred neutral name for the static and boot check; the godot-named tool is its legacy alias. */
-const CheckNeutralTool = Tool.make("game_check", {
-  description:
-    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Identical to game_godot_check (its legacy alias). Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest. On a three.js game this loads the static page in headless Chromium and reports console and page errors instead.",
+    "Fast static and boot check for this thread's game. Imports, then loads every .gd, .tscn and .tres, runs the main scene and the gameplay scene game.json declares for 120 physics frames each, and reports parse/load/runtime errors with file:line. Also returns lint warnings for InputMap actions used but not defined, and errors for a player in the `player` group without a direct, enabled CollisionShape with a shape, or a CharacterBody without a CollisionShape. Reports which entries ran. Start every build or fix loop with this; it catches more than a bare import and much faster than a playtest. On a three.js game this loads the static page in headless Chromium and reports console and page errors instead.",
   success: GameCheckResult,
   failure,
   failureMode: "return",
@@ -323,12 +288,9 @@ export const GameToolkit = Toolkit.make(
   BlenderSceneTool,
   BlenderAssetsSearchTool,
   BlenderAssetsImportTool,
-  BlenderGenerateTool,
   BlenderExportTool,
   ImportTool,
-  ImportNeutralTool,
   CheckTool,
-  CheckNeutralTool,
   ExportTool,
   PackageWindowsTool,
   PackageWebTool,

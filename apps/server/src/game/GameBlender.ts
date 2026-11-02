@@ -3,7 +3,6 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -13,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   GameOperationError,
   type GameBlenderAssetsImportInput,
@@ -23,21 +23,36 @@ import {
   type GameBlenderCodeResult,
   type GameBlenderExportInput,
   type GameBlenderExportResult,
-  type GameBlenderGenerateInput,
-  type GameBlenderGenerateResult,
   type GameBlenderLookInput,
   type GameBlenderLookResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
 } from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
 const BLEND_REL = "art/blender/live.blend";
-const EXPORT_DIR = "godot/assets/blender";
+const SESSION_FILE = "session.json";
+
+/**
+ * Per-tool request timeouts. The SDK's 60 s default fails imports and long
+ * execs while Blender keeps working, so the agent retries and duplicates
+ * work. The pinned server already bounds each Blender command at 180 s;
+ * import_asset chains downloads and several commands.
+ */
+const CALL_TIMEOUT_MS: Record<string, number> = {
+  execute_blender_code: 10 * 60_000,
+  import_asset: 10 * 60_000,
+  look: 5 * 60_000,
+  get_scene_info: 2 * 60_000,
+  search_assets: 2 * 60_000,
+};
+const STILL_WORKING =
+  "Blender may still be finishing this call. Inspect the scene with game_blender_scene or game_blender_look before retrying, so the work is not done twice.";
 
 /** Addon keys the service can pass straight through: the pinned addon's
  * config getter reads BLENDERMCP_SKETCHFAB_API_KEY /
@@ -132,7 +147,6 @@ const sessionEnv = (
   env.XDG_CACHE_HOME = NodePath.join(fakeHome, ".cache");
   env.XDG_DATA_HOME = NodePath.join(fakeHome, ".local", "share");
   env.XDG_RUNTIME_DIR = NodePath.join(homeDir, "runtime");
-  env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
   env.LIBGL_ALWAYS_SOFTWARE = "1";
   env.LP_NUM_THREADS = "2";
   env.DISABLE_TELEMETRY = "true";
@@ -219,11 +233,108 @@ type McpContent = {
   }>;
 };
 
+type McpResult = McpContent & { readonly isError?: boolean };
+
 const textOf = (result: McpContent): string =>
   (result.content ?? [])
     .filter((entry) => entry.type === "text")
     .map((entry) => entry.text ?? "")
     .join("\n");
+
+/**
+ * What a live session left on disk so a later server can reap it: the
+ * in-memory map dies with the server, the detached children do not.
+ */
+interface SessionRecord {
+  readonly port: number;
+  readonly display: string;
+  readonly blender: string;
+  readonly bootPy: string;
+  readonly xvfb: string;
+  readonly uvx: string;
+  readonly blenderPid?: number;
+  readonly xvfbPid?: number;
+  readonly mcpPid?: number;
+}
+
+const readCmdline = async (pid: number): Promise<string[] | null> => {
+  try {
+    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`, "utf8");
+    const argv = raw.split("\0").filter((part) => part !== "");
+    return argv.length === 0 ? null : argv;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A recorded pid is ours only while its argv still names the binary we
+ * launched and this session's own boot script, display or port; a reused
+ * pid or another game's session never matches. Without /proc nothing
+ * verifies, so nothing is killed.
+ */
+const recordedOwners = (
+  record: SessionRecord,
+): Array<{ pid: number; owns: (argv: string[]) => boolean }> => {
+  const out: Array<{ pid: number; owns: (argv: string[]) => boolean }> = [];
+  if (record.mcpPid !== undefined)
+    out.push({
+      pid: record.mcpPid,
+      // uvx re-execs as its sibling `uv tool uvx ...`, so match the directory.
+      owns: (argv) =>
+        argv[0] !== undefined &&
+        NodePath.dirname(argv[0]) === NodePath.dirname(record.uvx) &&
+        argv.includes(PINNED_PKG) &&
+        argv[argv.indexOf("--port") + 1] === String(record.port),
+    });
+  if (record.blenderPid !== undefined)
+    out.push({
+      pid: record.blenderPid,
+      owns: (argv) => argv[0] === record.blender && argv.includes(record.bootPy),
+    });
+  if (record.xvfbPid !== undefined)
+    out.push({
+      pid: record.xvfbPid,
+      owns: (argv) => argv[0] === record.xvfb && argv[1] === record.display,
+    });
+  return out;
+};
+
+/** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
+const reapRecorded = async (homeDir: string): Promise<void> => {
+  const file = NodePath.join(homeDir, SESSION_FILE);
+  let record: SessionRecord;
+  try {
+    record = JSON.parse(await NodeFSP.readFile(file, "utf8")) as SessionRecord;
+  } catch {
+    return;
+  }
+  const owned = async () => {
+    const live: number[] = [];
+    for (const { pid, owns } of recordedOwners(record)) {
+      const argv = await readCmdline(pid);
+      if (argv !== null && owns(argv)) live.push(pid);
+    }
+    return live;
+  };
+  const signal = (pids: number[], name: NodeJS.Signals) => {
+    for (const pid of pids) {
+      try {
+        process.kill(pid, name);
+      } catch {
+        /* gone */
+      }
+    }
+  };
+  let live = await owned();
+  signal(live, "SIGTERM");
+  for (let waited = 0; live.length > 0 && waited < 5_000; waited += 100) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    live = await owned();
+  }
+  signal(live, "SIGKILL");
+  await NodeFSP.rm(file, { force: true });
+};
 
 export class GameBlender extends Context.Service<
   GameBlender,
@@ -248,11 +359,7 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderAssetsImportInput,
     ) => Effect.Effect<GameBlenderAssetsImportResult, GameOperationError>;
-    readonly generate: (
-      root: string,
-      input: GameBlenderGenerateInput,
-    ) => Effect.Effect<GameBlenderGenerateResult, GameOperationError>;
-    /** Live Blender scene: export named objects (or every mesh) as a GLB under godot/. */
+    /** Live Blender scene: export named objects (or every mesh) as a GLB under the engine directory. */
     readonly exportGlb: (
       root: string,
       input: GameBlenderExportInput,
@@ -265,6 +372,7 @@ export class GameBlender extends Context.Service<
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
+  const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const sessions = new Map<string, Session>();
 
@@ -299,14 +407,19 @@ const make = Effect.gen(function* () {
     }
   };
 
-  const drop = (root: string): void => {
+  const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/blender-live");
+
+  /** Ends the in-memory session, then reaps whatever the record still names (a previous server's session included). */
+  const drop = async (root: string): Promise<void> => {
     const session = sessions.get(root);
-    if (session === undefined) return;
-    sessions.delete(root);
-    killPid(session.mcpPid);
-    killPid(session.blenderPid);
-    killPid(session.xvfbPid);
-    void session.client.close().catch(() => undefined);
+    if (session !== undefined) {
+      sessions.delete(root);
+      killPid(session.mcpPid);
+      killPid(session.blenderPid);
+      killPid(session.xvfbPid);
+      void session.client.close().catch(() => undefined);
+    }
+    await reapRecorded(homeDirOf(root));
   };
 
   const failMissingUv = (): GameOperationError =>
@@ -371,18 +484,31 @@ const make = Effect.gen(function* () {
         existing.lastActive = now;
         return existing;
       }
-      if (existing !== undefined) drop(root);
+      yield* Effect.promise(() => drop(root));
       const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
+      const xvfbPath = yield* Effect.promise(() =>
+        GameProcesses.findExecutable("Xvfb", {
+          pathEnv: process.env.PATH,
+          override: process.env.KURAMBIT_XVFB,
+        }),
+      );
+      if (xvfbPath === null)
+        return yield* opError(
+          "blender-live",
+          "Xvfb",
+          "tool-missing",
+          "Xvfb is needed for the live Blender's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
+        );
       const addonKeys = yield* readAddonKeyEnv;
-      const homeDir = NodePath.join(root, "builds/logs/blender-live");
+      const homeDir = homeDirOf(root);
       const port = portFor(root);
       if (yield* Effect.promise(() => portFree(port)).pipe(Effect.map((free) => !free)))
         return yield* opError(
           "blender-live",
           `${root}:${port}`,
           "busy",
-          `The live Blender port ${port} is taken. Stop this game's live session with game_stop and retry.`,
+          `The live Blender port ${port} is held by a process this server cannot verify as this game's Blender. Close it, then retry.`,
         );
       yield* Effect.tryPromise({
         try: async () => {
@@ -455,7 +581,26 @@ const make = Effect.gen(function* () {
           "No free private Xvfb display (:119–:249).",
         );
       const display = `:${displayNum}`;
-      const xvfb = NodeChildProcess.spawn("Xvfb", [display, "-screen", "0", "1280x800x24"], {
+      const bootPy = NodePath.join(homeDir, "boot_server.py");
+      let record: SessionRecord = {
+        port,
+        display,
+        blender: blender.path,
+        bootPy,
+        xvfb: xvfbPath,
+        uvx: uv.uvx,
+      };
+      // Written as each pid appears, so a crash mid-start still leaves the
+      // next ensure or game_stop something to reap.
+      const remember = (pids: Partial<SessionRecord>) =>
+        Effect.tryPromise({
+          try: () => {
+            record = { ...record, ...pids };
+            return NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), JSON.stringify(record));
+          },
+          catch: (cause) => opError("blender-live", SESSION_FILE, "io", undefined, cause),
+        });
+      const xvfb = NodeChildProcess.spawn(xvfbPath, [display, "-screen", "0", "1280x800x24"], {
         env: sessionEnv(homeDir, null),
         detached: true,
         stdio: "ignore",
@@ -465,19 +610,29 @@ const make = Effect.gen(function* () {
         return yield* opError("blender-live", display, "io", "Xvfb did not start.");
       }
       const xvfbPid = xvfb.pid;
-      const bootPy = NodePath.join(homeDir, "boot_server.py");
+      yield* remember({ xvfbPid });
       yield* Effect.tryPromise({
         try: () =>
           NodeFSP.writeFile(
             bootPy,
-            `import bpy\nbpy.ops.preferences.addon_enable(module='blender_mcp')\nscene = bpy.context.scene\nscene.blendermcp_port = ${port}\nscene.blendermcp_use_polyhaven = True\nscene.blendermcp_auto_start_server = True\nbpy.ops.blendermcp.start_server()\nprint("STUDIO_BLENDER_READY port=${port}")\n`,
+            `import bpy\nbpy.context.preferences.filepaths.save_version = 0\nbpy.ops.preferences.addon_enable(module='blender_mcp')\nscene = bpy.context.scene\nscene.blendermcp_port = ${port}\nscene.blendermcp_use_polyhaven = True\nscene.blendermcp_auto_start_server = True\nbpy.ops.blendermcp.start_server()\nprint("STUDIO_BLENDER_READY port=${port}")\n`,
           ),
         catch: (cause) => opError("blender-live", bootPy, "io", undefined, cause),
       });
       const logPath = NodePath.join(homeDir, "blender.log");
+      // A new session reopens the saved source; starting from Blender's
+      // default scene would overwrite live.blend on the next save.
+      const blendPath = NodePath.join(root, BLEND_REL);
+      const reopen = yield* Effect.promise(() =>
+        NodeFSP.access(blendPath)
+          .then(() => [blendPath])
+          .catch(() => [] as string[]),
+      );
       const spawned = yield* Effect.sync(() => {
         const logFd = NodeFS.openSync(logPath, "w");
-        const child = NodeChildProcess.spawn(blender.path, ["--python", bootPy], {
+        // cwd is the game root so relative paths in model code land in the game.
+        const child = NodeChildProcess.spawn(blender.path, [...reopen, "--python", bootPy], {
+          cwd: root,
           env: withBinDir({ ...sessionEnv(homeDir, display), ...addonKeys }, uv.binDir),
           detached: true,
           stdio: ["ignore", logFd, logFd],
@@ -495,6 +650,7 @@ const make = Effect.gen(function* () {
         return yield* opError("blender-live", root, "io", "Blender did not start.");
       }
       const blenderPid = spawned;
+      yield* remember({ blenderPid });
       if (!(yield* Effect.promise(() => waitPort(port, 90_000)))) {
         killPid(blenderPid);
         killPid(xvfbPid);
@@ -514,7 +670,6 @@ const make = Effect.gen(function* () {
         withBinDir(
           {
             ...GameProcesses.engineChildEnv(),
-            TMPDIR: NodePath.join(NodeOS.homedir(), ".gs-tmp"),
             DISABLE_TELEMETRY: "true",
             LIBGL_ALWAYS_SOFTWARE: "1",
             ...addonKeys,
@@ -522,10 +677,14 @@ const make = Effect.gen(function* () {
           uv.binDir,
         ),
       );
+      // The server logs every command it relays; keep that beside the
+      // session instead of in Kurambit's own stderr.
+      const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
       const transport = new StdioClientTransport({
         command: uv.uvx,
         args: [PINNED_PKG, "--port", String(port)],
         env: mcpEnv,
+        stderr: mcpLog,
       });
       const client = new Client({ name: "kurambit-game-blender", version: "1.0.0" }, {});
       const connected = yield* Effect.tryPromise({
@@ -538,10 +697,30 @@ const make = Effect.gen(function* () {
             "Could not start the pinned MCP server over stdio.",
             cause,
           ),
-      });
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            killPid(blenderPid);
+            killPid(xvfbPid);
+          }),
+        ),
+        Effect.ensuring(Effect.sync(() => NodeFS.closeSync(mcpLog))),
+      );
       void connected;
+      const mcpPid = transport.pid;
+      if (mcpPid === null) {
+        void client.close().catch(() => undefined);
+        killPid(blenderPid);
+        killPid(xvfbPid);
+        return yield* opError(
+          "blender-live",
+          PINNED_PKG,
+          "io",
+          "The pinned MCP server connected but reported no pid, so it could not be stopped later.",
+        );
+      }
+      yield* remember({ mcpPid });
       const startedAt = yield* Clock.currentTimeMillis;
-      const mcpPid = (transport as unknown as { _process?: { pid?: number } })._process?.pid ?? -1;
       const session: Session = {
         root,
         display,
@@ -558,27 +737,63 @@ const make = Effect.gen(function* () {
       return session;
     });
 
-  const callText = (
+  /**
+   * One tool call with a timeout that fits the tool. The pinned server
+   * reports Python and download failures as plain text ("Error executing
+   * code: ...", "Error: ...") with isError false, so both forms fail here.
+   */
+  const call = (
     root: string,
     name: string,
     args: Record<string, unknown>,
-  ): Effect.Effect<string, GameOperationError> =>
+  ): Effect.Effect<McpResult, GameOperationError> =>
     Effect.gen(function* () {
       const session = yield* ensure(root);
       const result = (yield* Effect.tryPromise({
-        try: () => session.client.callTool({ name, arguments: args }),
+        try: () =>
+          session.client.callTool({ name, arguments: args }, undefined, {
+            timeout: CALL_TIMEOUT_MS[name] ?? 2 * 60_000,
+            resetTimeoutOnProgress: true,
+            onprogress: () => undefined,
+          }),
         catch: (cause) =>
           opError(
             "blender-live",
             root,
             "command-failed",
-            `Blender did not answer '${name}'.`,
+            cause instanceof McpError && cause.code === ErrorCode.RequestTimeout
+              ? `Blender did not answer '${name}' within ${Math.round((CALL_TIMEOUT_MS[name] ?? 120_000) / 1000)}s. ${STILL_WORKING}`
+              : `Blender did not answer '${name}'.`,
             cause,
           ),
-      })) as McpContent;
+      })) as McpResult;
       session.lastActive = yield* Clock.currentTimeMillis;
-      return textOf(result);
+      const text = textOf(result);
+      if (result.isError === true || /^\s*error\b/i.test(text))
+        return yield* opError(
+          "blender-live",
+          name,
+          "command-failed",
+          // The server's own 180 s socket timeout surfaces as one of these.
+          (/Timeout waiting for Blender response|No data received|Incomplete JSON response/.test(
+            text,
+          )
+            ? `${STILL_WORKING}\n`
+            : "") +
+            (text.trim() === "" ? `Blender reported an error for '${name}'.` : text.slice(0, 4000)),
+        );
+      return result;
     });
+
+  const callText = (
+    root: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): Effect.Effect<string, GameOperationError> => call(root, name, args).pipe(Effect.map(textOf));
+
+  /** The game's engine project directory (godot/ or web/), from the manifest. */
+  const exportDirOf = (root: string) =>
+    projects.read(root).pipe(Effect.map((manifest) => `${manifest.godotProject}/assets/blender`));
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
@@ -601,13 +816,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* Effect.sleep("60 seconds");
       const now = yield* Clock.currentTimeMillis;
-      for (const [root, session] of sessions) if (now - session.lastActive > IDLE_MS) drop(root);
+      for (const [root, session] of sessions)
+        if (now - session.lastActive > IDLE_MS) yield* Effect.promise(() => drop(root));
     }),
   ).pipe(Effect.forkDetach);
   yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const root of [...sessions.keys()]) drop(root);
-    }),
+    Effect.promise(() => Promise.all([...sessions.keys()].map(drop))),
   );
 
   return GameBlender.of({
@@ -619,33 +833,17 @@ const make = Effect.gen(function* () {
       }),
     look: (root, input) =>
       Effect.gen(function* () {
-        const session = yield* ensure(root);
-        const result = (yield* Effect.tryPromise({
-          try: () =>
-            session.client.callTool({
-              name: "look",
-              arguments: {
-                ...(input.mode === undefined ? {} : { mode: input.mode }),
-                ...(input.target === undefined ? {} : { target: input.target }),
-                ...(input.views === undefined ? {} : { views: input.views }),
-                ...(input.distance === undefined ? {} : { distance: input.distance }),
-                ...(input.shading === undefined ? {} : { shading: input.shading }),
-                ...(input.frames === undefined ? {} : { frames: input.frames }),
-                ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
-                ...(input.view === undefined ? {} : { view: input.view }),
-                max_size: input.maxSize ?? 768,
-              },
-            }),
-          catch: (cause) =>
-            opError(
-              "blender-live",
-              root,
-              "command-failed",
-              "Blender did not answer 'look'.",
-              cause,
-            ),
-        })) as McpContent;
-        session.lastActive = yield* Clock.currentTimeMillis;
+        const result = yield* call(root, "look", {
+          ...(input.mode === undefined ? {} : { mode: input.mode }),
+          ...(input.target === undefined ? {} : { target: input.target }),
+          ...(input.views === undefined ? {} : { views: input.views }),
+          ...(input.distance === undefined ? {} : { distance: input.distance }),
+          ...(input.shading === undefined ? {} : { shading: input.shading }),
+          ...(input.frames === undefined ? {} : { frames: input.frames }),
+          ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
+          ...(input.view === undefined ? {} : { view: input.view }),
+          max_size: input.maxSize ?? 768,
+        });
         const text = textOf(result);
         const image = (result.content ?? []).find((entry) => entry.type === "image");
         if (image?.data === undefined)
@@ -696,7 +894,7 @@ const make = Effect.gen(function* () {
             .toLowerCase()
             .replace(/[^a-z0-9_-]+/g, "-")
             .slice(0, 60) || "asset";
-        const exportRel = `${EXPORT_DIR}/${safe}.glb`;
+        const exportRel = `${yield* exportDirOf(root)}/${safe}.glb`;
         const absolute = NodePath.join(root, exportRel);
         yield* Effect.tryPromise({
           try: () => NodeFSP.mkdir(NodePath.dirname(absolute), { recursive: true }),
@@ -718,28 +916,25 @@ const make = Effect.gen(function* () {
             text: `${text}\nSaved .blend source: ${blend}\nGLB export failed: ${exported.slice(0, 500)}`,
           };
         return {
-          text: `${text}\nSaved .blend source: ${blend}\nRun game_import so Godot sees it.`,
+          text: `${text}\nSaved .blend source: ${blend}\nExported ${exportRel}. Run game_import after.`,
           blend,
           export: exportRel,
         };
-      }),
-    generate: (root, input) =>
-      Effect.gen(function* () {
-        const text = yield* callText(root, "generate_3d", { ...input });
-        return { text };
       }),
     exportGlb: (root, input) =>
       Effect.gen(function* () {
         // Thin path from the live scene to a GLB the game can load: select
         // the named objects (or every mesh) and run the glTF exporter, then
         // save the .blend source like every other scene-changing call.
-        const file = input.file ?? "godot/assets/blender/scene.glb";
-        if (!file.startsWith("godot/") || !file.endsWith(".glb") || file.includes(".."))
+        const manifest = yield* projects.read(root);
+        const engineDir = manifest.godotProject;
+        const file = input.file ?? `${engineDir}/assets/blender/scene.glb`;
+        if (!file.startsWith(`${engineDir}/`) || !file.endsWith(".glb") || file.includes(".."))
           return yield* opError(
             "blender-export",
             file,
             "invalid-input",
-            "The destination must be a game-relative path under godot/ ending with .glb.",
+            `The destination must be a game-relative path under ${engineDir}/ ending with .glb.`,
           );
         const absolute = NodePath.join(root, file);
         const names = input.objects ?? [];
@@ -768,12 +963,12 @@ const make = Effect.gen(function* () {
           return yield* opError("blender-export", file, "command-failed", exported.slice(0, 1000));
         const blend = yield* saveBlend(root);
         return {
-          text: `${exported}\nSaved .blend source: ${blend}\nRun game_import so Godot sees it.`,
+          text: `${exported}\nSaved .blend source: ${blend}\nRun game_import after.`,
           blend,
           export: file,
         };
       }),
-    stop: (root) => Effect.sync(() => drop(root)),
+    stop: (root) => Effect.promise(() => drop(root)),
   });
 });
 
