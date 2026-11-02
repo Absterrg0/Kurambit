@@ -18,6 +18,8 @@ import {
   GameBlenderAssetsImportResult,
   GameCheckResult,
   GameOperationFailure,
+  GameRunStatusResult,
+  GameRunSteerResult,
   GameStatus,
   GameExploreStartInput,
   GameExploreActInput,
@@ -34,6 +36,7 @@ import {
   GameWindowsPackage,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
+import * as GameRun from "../../../game/GameRun.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -281,6 +284,34 @@ const BotViewTool = Tool.make("game_bot_view", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const runDependencies = [
+  GameRun.GameRun,
+  McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
+];
+const RunStatusTool = Tool.make("game_run_status", {
+  description:
+    "Whether this game's production run is live, what it is doing now (step), its rounds with verdicts and the creator notes waiting for the next round. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
+  success: GameRunStatusResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const RunSteerTool = Tool.make("game_run_steer", {
+  description:
+    "Pass the creator's request to this game's live production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. Fails plainly when no run is live: then work on the game directly. Say the creator's request in their words, one request per call.",
+  parameters: Schema.Struct({
+    text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
+  }),
+  success: GameRunSteerResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 /** The studio toolkit: status, export and play-level tools for every thread. */
 export const GameToolkit = Toolkit.make(
   GameStatusTool,
@@ -302,4 +333,6 @@ export const GameToolkit = Toolkit.make(
   BotRunTool,
   BotViewTool,
   BotReportTool,
+  RunStatusTool,
+  RunSteerTool,
 );

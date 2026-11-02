@@ -50,6 +50,12 @@ line says where the run is; the rounds list shows each round's move, whether it 
 judges' verdicts and the tester's note; role threads link to the sessions that did the work.
 **Stop run** ends it; rejected work stays on its branch.
 
+While a run is live, steer it instead of editing the game yourself: type what should change into
+**Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
+the run. The round in progress finishes as planned; the next round starts with your note, ahead of
+the reviewer's direction, and the rounds list shows what you asked. When no run is live, your agent
+works on the game directly.
+
 ## Play and revise
 
 A game opens on its latest session: the game owns the middle of the window and the chat is docked to

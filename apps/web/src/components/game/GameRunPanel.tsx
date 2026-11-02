@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { PlayIcon, RefreshCwIcon, SquareIcon } from "lucide-react";
-import type { GameRunStatusResult, ScopedThreadRef, ThreadId } from "@kurambit/contracts";
+import { PlayIcon, RefreshCwIcon, SendIcon, SquareIcon } from "lucide-react";
+import {
+  gameRunRoleLabel,
+  type GameRunStatusResult,
+  type ScopedThreadRef,
+  type ThreadId,
+} from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
@@ -12,7 +17,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 
-/** The smallest working surface for a production run: start, status, stop. */
+/** The smallest working surface for a production run: start, status, steer, stop. */
 export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const navigate = useNavigate();
   const statusQuery = useEnvironmentQuery(
@@ -24,6 +29,10 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const canRun = useAtomValue(gameEnvironment.runStart.permissionAtom(threadRef.environmentId));
   const runStart = useAtomCommand(gameEnvironment.runStart, { reportFailure: false });
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
+  const canSteer = useAtomValue(gameEnvironment.runSteer.permissionAtom(threadRef.environmentId));
+  const runSteer = useAtomCommand(gameEnvironment.runSteer, { reportFailure: false });
+  const [note, setNote] = useState("");
+  const [steerMessage, setSteerMessage] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
   const [budgetMinutes, setBudgetMinutes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -69,6 +78,23 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     setBusy(false);
     if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
     else statusQuery.refresh();
+  };
+  const steer = async () => {
+    if (busy || note.trim().length === 0) return;
+    setBusy(true);
+    setError(null);
+    const result = await runSteer({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, text: note.trim() },
+    });
+    setBusy(false);
+    if (result._tag === "Failure") {
+      setError(String(squashAtomCommandFailure(result)));
+      return;
+    }
+    setNote("");
+    setSteerMessage(result.value.message);
+    statusQuery.refresh();
   };
   const openThread = (id: string) => {
     void navigate({
@@ -148,17 +174,59 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             </div>
           </div>
         ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || !canRun}
-            onClick={() => void stop()}
-          >
-            <SquareIcon className="size-3.5" aria-hidden="true" />
-            {busy ? "Stopping…" : "Stop run"}
-          </Button>
+          <div className="space-y-2">
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void steer();
+              }}
+            >
+              <Input
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="Steer the next round: what should change?"
+                disabled={busy || !canSteer}
+                aria-label="Steer the next round"
+                className="min-w-0 flex-1"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                disabled={busy || !canSteer || note.trim().length === 0}
+              >
+                <SendIcon className="size-3.5" aria-hidden="true" />
+                Steer
+              </Button>
+            </form>
+            {steerMessage ? <p className="text-2xs text-muted-foreground">{steerMessage}</p> : null}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || !canRun}
+              onClick={() => void stop()}
+            >
+              <SquareIcon className="size-3.5" aria-hidden="true" />
+              {busy ? "Working…" : "Stop run"}
+            </Button>
+          </div>
         )}
       </section>
+
+      {(status?.steer.length ?? 0) > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium">Waiting for the next round</h3>
+          <ul className="space-y-1 rounded-lg border border-border bg-card p-3">
+            {status?.steer.map((pending, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- notes may repeat and never reorder
+              <li key={index} className="text-xs text-muted-foreground">
+                You asked: {pending}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {(status?.rounds.length ?? 0) > 0 ? (
         <section className="space-y-2">
@@ -185,6 +253,16 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                     {round.linesChanged > 0 ? ` · ${round.linesChanged} lines` : ""}
                   </span>
                 </div>
+                {round.steer.length > 0 ? (
+                  <ul className="space-y-0.5">
+                    {round.steer.map((asked, index) => (
+                      // oxlint-disable-next-line react/no-array-index-key -- notes may repeat and never reorder
+                      <li key={index} className="text-2xs text-foreground">
+                        You asked: {asked}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <p className="line-clamp-3 text-xs text-muted-foreground">{round.move}</p>
                 {round.verdicts.length > 0 ? (
                   <ul className="space-y-0.5">
@@ -225,10 +303,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                   onClick={() => openThread(thread.threadId)}
                   className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-left text-xs hover:border-foreground/25"
                 >
-                  <span className="font-medium">{thread.role}</span>
-                  <span className="truncate font-mono text-2xs text-muted-foreground">
-                    {thread.threadId}
-                  </span>
+                  <span className="truncate font-medium">{gameRunRoleLabel(thread.role)}</span>
                   <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
                     {thread.startedAt ? new Date(thread.startedAt).toLocaleString() : ""}
                   </span>

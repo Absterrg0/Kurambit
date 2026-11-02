@@ -12,13 +12,16 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
   ProviderInstanceId,
+  gameRunRoleLabel,
   type GameCreateInput,
   type GameProjectResult,
   type GameRunStartInput,
   type GameRunStatusResult,
+  type GameRunSteerResult,
   type ModelSelection,
   type ProjectId,
   type RunId,
@@ -30,6 +33,7 @@ import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
+import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 import { reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
@@ -57,6 +61,7 @@ const RUN_STATE_IGNORES = [
   ".studio/run.json",
   ".studio/rounds.jsonl",
   ".studio/stop",
+  ".studio/steer.jsonl",
   ".studio/run.log",
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",
@@ -78,7 +83,11 @@ const RUN_STATE_IGNORES = [
 // A shipped or stalled run starts over (keeping its history); every other ending resumes.
 const CONTINUABLE = new Set([null, "budget", "usage-limit", "provider-down", "stopped", "failed"]);
 
-const SKILLS_LINE = `\n\n## Studio skills (read the ones your role needs)\n\nSkill pack in ./studio-skills, one line each: planning (look, cut to the ask, plan and rungs); game-foundations (boundaries, state ownership, data-driven content); godot-game (engine rules, CLI, export); three (three.js browser lane: static project, studio bridge, export); playtest (smoke/feature/regression/visual passes, report separately); art-pipeline (key art first, every asset as a file); audio (effects plus a music loop as files); art-director (would you ship this, defects, DO NOT REGRESS, one big move); stranger (first minute cold).\n`;
+// The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
+const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
+const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
+const STALE_SKILLS =
+  /\n*## Studio skills \(read the ones your role needs\)\n\nSkill pack in \.\/studio-skills, one line each:[^\n]*\n/;
 
 const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch(() => null);
@@ -101,6 +110,7 @@ const paths = (root: string) => ({
   run: NodePath.join(root, ".studio", "run.json"),
   rounds: NodePath.join(root, ".studio", "rounds.jsonl"),
   stop: NodePath.join(root, ".studio", "stop"),
+  steer: NodePath.join(root, ".studio", "steer.jsonl"),
   log: NodePath.join(root, ".studio", "run.log"),
   next: NodePath.join(root, ".studio", "next.md"),
 });
@@ -111,6 +121,56 @@ const logLine = (root: string, line: string): Effect.Effect<void> =>
       NodeFSP.appendFile(paths(root).log, `${new Date().toISOString()} ${line}\n`),
     ),
   ).pipe(Effect.ignore);
+
+/** One JSON string per line; a torn or foreign line is skipped. */
+const parseSteer = (text: string): string[] =>
+  text.split("\n").flatMap((line) => {
+    if (line.trim().length === 0) return [];
+    try {
+      const note: unknown = JSON.parse(line);
+      return typeof note === "string" && note.trim().length > 0 ? [note] : [];
+    } catch {
+      return [];
+    }
+  });
+
+const currentStep = (state: State.RunState): string => {
+  const t = state.task;
+  const step = state.inFlight;
+  if (step?.kind === "role") {
+    const label = gameRunRoleLabel(step.role);
+    return t._tag === "round" && !label.includes("round") ? `Round ${t.n} · ${label}` : label;
+  }
+  switch (t._tag) {
+    case "init":
+      return "Setting up";
+    case "stage":
+      return t.name === "build" ? "First full build" : gameRunRoleLabel(t.name);
+    case "proto":
+      return `Prototype ${t.i + 1}`;
+    case "pick":
+      return "Blind pick of the prototypes";
+    case "round":
+      return `Round ${t.n} · ${t.phase.replace("-", " ")}`;
+    case "ship":
+      return `Ship review after round ${t.n}`;
+    case "leave":
+      return "Wrapping up at the budget";
+  }
+};
+
+// When a note takes effect: a round's direction is fixed once it starts.
+const steerWhen = (state: State.RunState | null): string => {
+  const t = state?.task;
+  if (t?._tag === "round" && t.phase === "start" && state?.inFlight === null)
+    return `Round ${t.n} starts with it.`;
+  if (t?._tag === "round")
+    return `Round ${t.n} is in progress and finishes as planned; round ${t.n + 1} starts with it.`;
+  if (t?._tag === "ship")
+    return "A ship review is in progress; the next round starts with it before the run can end.";
+  if (t?._tag === "leave") return "The run is ending at its budget; a resumed run starts with it.";
+  return "The run is still making its first build; its first round starts with it.";
+};
 
 const causeText = (cause: Cause.Cause<unknown>): string => {
   const squashed: unknown = Cause.squash(cause);
@@ -181,6 +241,11 @@ export class GameRun extends Context.Service<
     readonly runStop: (
       threadId: ThreadId,
     ) => Effect.Effect<{ stopped: boolean; message: string }, GameRunError>;
+    /** Queue a creator note for the live run's next round. Fails when no run is live. */
+    readonly runSteer: (
+      threadId: ThreadId,
+      text: string,
+    ) => Effect.Effect<GameRunSteerResult, GameRunError>;
     /** MCP catalog role: "run" for threads this service launched, else null. */
     readonly toolRole: (caller: { readonly threadId: ThreadId }) => Effect.Effect<"run" | null>;
   }
@@ -211,6 +276,9 @@ export const layer = (options: { readonly stateDir: string }) => {
     // One slot per game root, claimed before runStart's first yield so two
     // starts can never both fork a loop.
     const active = new Map<string, RunSlot>();
+    // Serializes appends to a steer file with the driver taking it, so no note
+    // lands between the driver's read and its removal.
+    const steerLock = Semaphore.makeUnsafe(1);
 
     const resolveGame = Effect.fn("GameRun.resolveGame")(function* (threadId: ThreadId) {
       const projects = yield* need(
@@ -305,9 +373,12 @@ export const layer = (options: { readonly stateDir: string }) => {
           NodePath.join(root, ".studio", "bot", "kit"),
           { recursive: true },
         ).catch(() => undefined);
-        const agents = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
-        if (!agents.includes("studio-skills/"))
-          await NodeFSP.writeFile(NodePath.join(root, "AGENTS.md"), `${agents}${SKILLS_LINE}`);
+        const before = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
+        let agents = before.replace(STALE_SKILLS, "");
+        if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
+        if (!agents.includes("game_run_steer"))
+          agents = `${agents.trimEnd()}\n\n${CREATOR_SESSION_SECTION}`;
+        if (agents !== before) await NodeFSP.writeFile(NodePath.join(root, "AGENTS.md"), agents);
         const ignore = (await readText(NodePath.join(root, ".gitignore"))) ?? "";
         const present = new Set(ignore.split("\n").map((line) => line.trim()));
         const missing = RUN_STATE_IGNORES.filter((line) => !present.has(line));
@@ -344,6 +415,19 @@ export const layer = (options: { readonly stateDir: string }) => {
         state = next;
         return persist(root, next, written);
       };
+      // Creator notes become run state before the policy sees them; the
+      // policy uses them at the next round start and never touches files.
+      const takeSteer = steerLock.withPermits(1)(
+        Effect.gen(function* () {
+          const notes = parseSteer(
+            (yield* Effect.promise(() => readText(paths(root).steer))) ?? "",
+          );
+          if (notes.length === 0) return;
+          yield* save({ ...state, steer: [...state.steer, ...notes] });
+          yield* log(`creator steer: ${notes.length} note(s) for the next round`);
+          yield* Effect.promise(() => NodeFSP.rm(paths(root).steer, { force: true }));
+        }),
+      );
       const inputs = (): Policy.Inputs => ({
         now: Date.now(),
         coin: NodeCrypto.randomInt(2 ** 30) / 2 ** 30,
@@ -443,6 +527,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         yield* save(state);
         for (;;) {
           if (yield* stopRequested(root)) return yield* save({ ...state, ending: "stopped" });
+          yield* takeSteer;
           const planned = Policy.plan(state, inputs());
           if (planned.kind === "end") {
             yield* log(`run ended: ${planned.reason}`);
@@ -452,6 +537,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           yield* log(describe(planned.step));
           const result = yield* execute(planned.step);
           yield* log(`  ${summarize(result)}`);
+          // Again before the result lands: a ship verdict must see a note sent during its turn.
+          yield* takeSteer;
           const applied = Policy.applyResult(
             state,
             state.inFlight ?? planned.step,
@@ -550,6 +637,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           stage: prior === null ? State.legacyResumeStage("starting", rounds.length) : prior.stage,
           pickNotes: prior?.pickNotes ?? "",
           lastDirection: prior?.lastDirection ?? "",
+          steer: prior?.steer ?? [],
           next,
         };
         if (prior !== null)
@@ -653,8 +741,10 @@ export const layer = (options: { readonly stateDir: string }) => {
           active: false,
           runId: null,
           stage: "none",
+          step: null,
           ending: null,
           rounds: [],
+          steer: [],
           threads: [],
           message:
             loaded.kind === "none"
@@ -667,10 +757,13 @@ export const layer = (options: { readonly stateDir: string }) => {
       const ending =
         !running && (yield* stopRequested(root)) ? "stopped" : running ? null : state.ending;
       const failure = state.lastFailure.length > 0 ? ` Last failure: ${state.lastFailure}` : "";
+      const step = running ? currentStep(state) : null;
+      const queued = parseSteer((yield* Effect.promise(() => readText(paths(root).steer))) ?? "");
       return {
         active: running,
         runId: state.runId,
         stage: state.stage,
+        step,
         ending,
         rounds: state.rounds.map((r) => ({
           round: r.round,
@@ -682,11 +775,13 @@ export const layer = (options: { readonly stateDir: string }) => {
           testerNote: r.testerNote ?? null,
           durationMs: r.durationMs,
           note: r.note ?? null,
+          steer: r.steer ?? [],
         })),
+        steer: [...state.steer, ...queued],
         threads: state.threads,
         message:
           ending === null
-            ? `Run ${state.runId} at stage ${state.stage} with ${state.rounds.length} rounds.${failure}`
+            ? `Run ${state.runId}: ${step ?? state.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`
             : `Run ${state.runId} ended: ${ending}.${failure}`,
       } satisfies GameRunStatusResult;
     });
@@ -704,6 +799,38 @@ export const layer = (options: { readonly stateDir: string }) => {
         message:
           "The run was stopped. Rejected work stays on its branch; the folder holds all state.",
       };
+    });
+
+    const runSteer = Effect.fn("GameRun.runSteer")(function* (threadId: ThreadId, text: string) {
+      const { root } = yield* resolveGame(threadId);
+      const note = text.trim().slice(0, 4000);
+      if (note.length === 0)
+        return yield* new GameRunError({
+          operation: "run-steer",
+          path: root,
+          reason: "empty-note",
+          detail: "The note is empty.",
+        });
+      if (!active.has(root))
+        return yield* new GameRunError({
+          operation: "run-steer",
+          path: root,
+          reason: "no-live-run",
+          detail: "No live run for this game. Work on the game directly, or start a run first.",
+        });
+      const queued = yield* steerLock.withPermits(1)(
+        Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(paths(root).steer), { recursive: true });
+          await NodeFSP.appendFile(paths(root).steer, `${JSON.stringify(note)}\n`);
+          return parseSteer((await readText(paths(root).steer)) ?? "").length;
+        }),
+      );
+      const loaded = yield* load(root);
+      const state = loaded.kind === "v3" ? loaded.state : null;
+      return {
+        pending: (state?.steer.length ?? 0) + queued,
+        message: `Noted for the production run. ${steerWhen(state)}`,
+      } satisfies GameRunSteerResult;
     });
 
     const toolRole = (caller: { readonly threadId: ThreadId }): Effect.Effect<"run" | null> =>
@@ -737,7 +864,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       return created;
     });
 
-    return GameRun.of({ runStart, createGame, runStatus, runStop, toolRole });
+    return GameRun.of({ runStart, createGame, runStatus, runStop, runSteer, toolRole });
   });
   return Layer.effect(GameRun, make);
 };

@@ -73,6 +73,10 @@ export const gameEnvironment = {
     label: "game:runStop",
     tag: WS_METHODS.gameRunStop,
   }),
+  runSteer: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runSteer",
+    tag: WS_METHODS.gameRunSteer,
+  }),
   events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:create",

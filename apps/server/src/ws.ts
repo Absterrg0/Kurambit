@@ -1774,6 +1774,19 @@ const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.gameRunSteer]: ({ threadId, text }) =>
+          gameRun.runSteer(threadId, text).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-steer",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameRun.createGame(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),

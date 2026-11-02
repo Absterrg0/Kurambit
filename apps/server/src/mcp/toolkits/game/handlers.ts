@@ -1,4 +1,6 @@
+import { GameOperationError } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
+import * as GameRun from "../../../game/GameRun.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -6,6 +8,14 @@ import { GameToolkit, GameBlenderLookToolkit } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
+const runFailure = (cause: GameRun.GameRunError) =>
+  new GameOperationError({
+    operation: `game-${cause.operation}`,
+    path: cause.path,
+    reason: "command-failed",
+    detail: cause.message,
+    cause,
+  });
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
@@ -138,6 +148,22 @@ const handlers = {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
       return yield* game.botReport(scope.thread.threadId);
+    }),
+  ),
+  game_run_status: McpToolAccess.readsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      return yield* runs.runStatus(scope.thread.threadId).pipe(Effect.mapError(runFailure));
+    }),
+  ),
+  game_run_steer: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      return yield* runs
+        .runSteer(scope.thread.threadId, input.text)
+        .pipe(Effect.mapError(runFailure));
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
