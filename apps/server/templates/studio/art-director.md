@@ -12,3 +12,4 @@ Adapted from Genex's taste-veto and ship-review material (MIT).
 5. Judge the quality of what exists, not how much there is. More content
    is the creator's call; a piece the core loop needs to work (a goal, a
    way to lose, feedback for an action) missing is a defect.
+6. Animation frames that barely differ and flat single-color backgrounds are defects.

@@ -1,9 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Plain filesystem facts read from the game folder; bot-result rows are tolerant per line.
 // Plain facts for reviewers and testers. States numbers, never interprets them.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { strippedEnv } from "./git.ts";
+import { assetUseSummary, readAssetUse } from "./assetUse.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
@@ -23,17 +22,6 @@ const walk = async (
     } else await visit(full, entry.name);
   }
 };
-
-const grepCount = (args: ReadonlyArray<string>) =>
-  new Promise<number>((resolve) => {
-    const child = NodeChildProcess.spawn("grep", [...args], { env: strippedEnv() });
-    let text = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      text += chunk.toString("utf8");
-    });
-    child.on("close", () => resolve(text.split("\n").filter(Boolean).length));
-    child.on("error", () => resolve(0));
-  });
 
 // The bot's fastest finish is a plain fact with no length target beside it;
 // the reviewer decides what it means.
@@ -71,6 +59,10 @@ const botLine = async (root: string): Promise<string> => {
   return `${lines.length} bot runs (${explores} exploration, deciders: ${[...deciders].join("/") || "none"}), ${wins} reached the ending${fastest === null ? "" : `, fastest finish ${fastest.toFixed(1)}s`}, ${findings} detector findings`;
 };
 
+/** Which asset files the code loads and how much it draws itself, bounded for a prompt. */
+export const assetFacts = async (root: string, lane: string): Promise<string> =>
+  assetUseSummary(await readAssetUse(root, lane), lane);
+
 /** Code facts plus the player report, as one sentence block for the reviewer. */
 export const reviewerFacts = async (root: string, lane: string): Promise<string> => {
   const web = lane !== "godot";
@@ -97,24 +89,13 @@ export const reviewerFacts = async (root: string, lane: string): Promise<string>
     [".godot", "builds"],
   );
   sources.sort((a, b) => b.n - a.n);
-  const refs = await grepCount(
-    web
-      ? ["-rho", `from\\s*["']\\.\\/[^"']*["']`, NodePath.join(root, lane)]
-      : ["-rho", "res://[^\"' )]*", NodePath.join(root, lane)],
-  );
   const top =
     sources
       .slice(0, 5)
       .map((s) => `${s.f} ${s.n} lines`)
       .join("; ") || (web ? "no js files" : "no gd files");
-  // Art must record which file serves which use; code counts entries only.
-  const assets = await readText(NodePath.join(root, "ASSETS.md"));
-  const artMap =
-    assets.length === 0
-      ? "ASSETS.md missing"
-      : `ASSETS.md with ${assets.split("\n").filter((l) => l.trim().length > 0).length} non-empty lines (unverified)`;
   const report = (await readText(NodePath.join(root, ".studio", "player-report.md")))
     .trim()
     .slice(0, 3000);
-  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} ${web ? "relative imports" : "res:// references"}. Bots: ${await botLine(root)}. Art map: ${artMap}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
+  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)} Bots: ${await botLine(root)}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
 };

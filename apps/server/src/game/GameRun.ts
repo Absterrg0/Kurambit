@@ -35,11 +35,12 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
-import { reviewerFacts } from "./run/facts.ts";
+import { assetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
 import { makeGit } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { runRole, type RoleDeps } from "./run/roleRunner.ts";
+import { artFacts } from "./run/roles.ts";
 import * as State from "./run/state.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
@@ -465,21 +466,28 @@ export const layer = (options: { readonly stateDir: string }) => {
       const execute = (step: State.Step) => {
         switch (step.kind) {
           case "role":
-            return runRole(
-              d.deps,
-              {
-                root,
-                lane: state.lane,
-                projectId: d.projectId,
-                runId: state.runId,
-                selection: d.selection,
-                runtimeMode: d.runtimeMode,
-                budgetEndsAt: state.budgetEndsAt,
-                attach,
-                log,
-              },
-              step,
-            );
+            return Effect.gen(function* () {
+              // The art director judges files, so it also gets the static asset-use facts.
+              const prompt =
+                step.role === "art-director"
+                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => assetFacts(root, state.lane)))}`
+                  : step.prompt;
+              return yield* runRole(
+                d.deps,
+                {
+                  root,
+                  lane: state.lane,
+                  projectId: d.projectId,
+                  runId: state.runId,
+                  selection: d.selection,
+                  runtimeMode: d.runtimeMode,
+                  budgetEndsAt: state.budgetEndsAt,
+                  attach,
+                  log,
+                },
+                { ...step, prompt },
+              );
+            });
           case "git":
             // A git op always finishes: a stop waits for it rather than leaving a half-moved tree.
             return git.run(step.op).pipe(
