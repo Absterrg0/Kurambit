@@ -6,6 +6,11 @@
     <title>{{GAME_NAME}}</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./style.css" />
+    <!-- Vendored addons import the bare "three"; this maps it to the same file
+         main.js imports, so every module shares one three.js instance. -->
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+    </script>
   </head>
   <body>
     <canvas id="game" aria-label="{{GAME_NAME}}"></canvas>

@@ -8,6 +8,9 @@ exported with the same `game_*` tools as a Godot game.
 2. The file the browser loads is the file you edit: `web/index.html`,
    `web/main.js`, `web/style.css`, `web/assets/` for every visual and sound.
    Nothing loads from the network at runtime.
+   Models are GLB files under `web/assets/`, loaded with the vendored
+   `GLTFLoader` (`import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"`,
+   mapped by the import map in `index.html`). Keep the import map.
 3. Never launch your own browser. Check, play, export, bot-test and package
    ONLY with the `game_*` tools (`game_check` to check, `game_export`
    to export).
