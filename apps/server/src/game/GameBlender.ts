@@ -802,8 +802,10 @@ const make = Effect.gen(function* () {
         try: () => NodeFSP.mkdir(NodePath.dirname(absolute), { recursive: true }),
         catch: (cause) => opError("blender-live", BLEND_REL, "io", undefined, cause),
       });
+      // Compressed: live.blend is committed with the game after every exec, and
+      // an uncompressed scene adds ~10 MB of history each time.
       const text = yield* callText(root, "execute_blender_code", {
-        code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(absolute)})\nprint("STUDIO_SAVED")\n`,
+        code: `import bpy\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(absolute)}, compress=True)\nprint("STUDIO_SAVED")\n`,
       });
       if (!text.includes("STUDIO_SAVED"))
         return yield* opError("blender-live", BLEND_REL, "command-failed", text.slice(0, 1000));
