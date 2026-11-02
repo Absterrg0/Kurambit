@@ -7,8 +7,7 @@ import type { ProjectScopedServerSettingKey, ServerSettings } from "./settings.t
 
 export const KURAMBIT_PROJECT_FILE_NAME = "kurambit.json";
 
-export const KURAMBIT_PROJECT_FILE_SCHEMA_URL =
-  "https://absterrg0.github.io/Kurambit/schema/kurambit.json";
+export const KURAMBIT_PROJECT_FILE_SCHEMA_URL = "https://kurambit.com/schema/kurambit.json";
 
 const KURAMBIT_PROJECT_FILE_PATH_MAX_LENGTH = 512;
 const KURAMBIT_PROJECT_FILE_MAX_SCRIPTS = 50;

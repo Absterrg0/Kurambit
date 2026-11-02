@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://absterrg0.github.io/Kurambit/">Website</a> ·
+  <a href="https://kurambit.com/">Website</a> ·
   <a href="./docs/user/making-games.md">Making games</a> ·
   <a href="./docs/README.md">Docs</a>
 </p>

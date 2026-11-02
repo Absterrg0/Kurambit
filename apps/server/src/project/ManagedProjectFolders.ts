@@ -182,7 +182,7 @@ function namedProjectReadme(name: string): string {
     "",
     `# ${name}`,
     "",
-    "Created in [Kurambit](https://absterrg0.github.io/Kurambit/).",
+    "Created in [Kurambit](https://kurambit.com/).",
     "",
   ].join("\n");
 }

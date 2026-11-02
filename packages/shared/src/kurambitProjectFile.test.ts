@@ -14,7 +14,7 @@ describe("buildKurambitProjectFileJsonSchema", () => {
     const schema = buildKurambitProjectFileJsonSchema();
 
     expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
-    expect(schema.$id).toBe("https://absterrg0.github.io/Kurambit/schema/kurambit.json");
+    expect(schema.$id).toBe("https://kurambit.com/schema/kurambit.json");
     expect(schema.type).toBe("object");
     expect(schema.additionalProperties).toBe(false);
   });

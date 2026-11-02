@@ -136,7 +136,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself.
 - `apps/web` - React/Vite UI. `apps/desktop` wraps it in Electron.
-- `apps/marketing` - the static marketing site, published to GitHub Pages. `assets/` holds the brand artwork and every icon rendered from it.
+- `apps/marketing` - the static marketing site in `site/`, deployed to kurambit.com by Vercel from `main`. `assets/` holds the brand artwork and every icon rendered from it.
 - `apps/server/src/game` - the game layer: toolchain, game projects, Blender/Godot operations, processes, preview and playtest. Its MCP tools are in `apps/server/src/mcp/toolkits/game`.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.

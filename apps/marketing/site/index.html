@@ -15,13 +15,21 @@
       property="og:description"
       content="A game studio that plays what it builds. Open source, local, bring your own agent."
     />
-    <meta property="og:image" content="https://absterrg0.github.io/Kurambit/og.png" />
-    <meta property="og:url" content="https://absterrg0.github.io/Kurambit/" />
+    <meta property="og:image" content="https://kurambit.com/og.png" />
+    <meta property="og:url" content="https://kurambit.com/" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="preload" href="fox-light.webp" as="image" />
+    <link
+      rel="preload"
+      href="fonts/instrument-serif.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="nav">
@@ -238,6 +246,10 @@
       </span>
       <span>MIT licensed · © <span data-year>2026</span> Kurambit contributors</span>
     </footer>
-    <script type="module" src="/src/main.ts"></script>
+    <script>
+      for (const node of document.querySelectorAll("[data-year]")) {
+        node.textContent = String(new Date().getFullYear());
+      }
+    </script>
   </body>
 </html>
