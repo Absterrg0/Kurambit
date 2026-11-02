@@ -129,7 +129,8 @@ const Sample = Schema.Struct({
   side: Side,
   label: Schema.String,
   thread: Schema.NullOr(ThreadId),
-  phase: Schema.Literals(["play", "write", "done"]),
+  // "more": one extra play turn when the first used little of the budget.
+  phase: Schema.Literals(["play", "more", "write", "done"]),
   notes: Schema.String,
   evidence: Schema.NullOr(Evidence),
 });

@@ -20,6 +20,9 @@ import type {
 } from "./state.ts";
 
 const MIN = 60_000;
+// A blind player that used less than half its input budget saw only the
+// opening; a weak model often stops there, so judges never see late flaws.
+const PLAY_FLOOR_MS = 60_000;
 const CAP = {
   block: 25 * MIN,
   fullBuild: 40 * MIN,
@@ -321,6 +324,18 @@ const compareStep = (id: number, c: Compare, input: Inputs): { cmp: Compare; ste
       return { cmp: { ...c, samples: [...c.samples, s] }, step };
     }
     const s = move.current;
+    if (s.phase === "more")
+      return {
+        cmp: c,
+        step: role(id, {
+          role: `sample-${s.label}`,
+          title: "studio sample",
+          thread: s.thread,
+          at,
+          prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
+          capMs: CAP.judge,
+        }),
+      };
     const step = role(id, {
       role: `sample-${s.label}`,
       title: "studio sample",
@@ -382,13 +397,22 @@ const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
       res.kind !== "done"
         ? { ...s, phase: "done", notes: "", evidence: null }
         : s.phase === "play"
-          ? { ...s, thread: res.threadId, phase: "write", evidence: res.evidence }
-          : {
+          ? {
               ...s,
-              phase: "done",
-              notes: textOf(res, sampleFile(s)),
-              evidence: res.evidence ?? s.evidence,
-            };
+              thread: res.threadId,
+              // Evidence is cumulative per thread, so the second turn adds to it.
+              phase:
+                res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS ? "more" : "write",
+              evidence: res.evidence,
+            }
+          : s.phase === "more"
+            ? { ...s, phase: "write", evidence: res.evidence ?? s.evidence }
+            : {
+                ...s,
+                phase: "done",
+                notes: textOf(res, sampleFile(s)),
+                evidence: res.evidence ?? s.evidence,
+              };
     if (res.kind === "failed") logs.push(`sample ${s.label} could not finish: ${res.reason}`);
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);

@@ -98,6 +98,9 @@ export const roundQuestion = (direction: string): string =>
 export const samplePlay = (question: string, notes: string): string =>
   `${PLAYBOOK}${PLAYTEST_LINE}You are independently playing one game build. You do not know its identity or another sample's result. Use real input with game_explore_start/act/close. You have the same six-minute wall allowance and 120-second total in-game input budget as the other player. Aim to use that input budget to investigate the named flaw; multiple sessions share the same 120 seconds. Do not substitute screenshots or bots for hands-on play. Shared question: ${question} Append what you actually did, reached and felt to ${notes}. Include uncertainty and what you did not reach. Judge from play, without reading source files, Git history or earlier reviews. Do not change game files. Do not use subagents.`;
 
+export const sampleMore = (usedSeconds: number, notes: string): string =>
+  `You used about ${usedSeconds} seconds of your 120-second input budget, so your evidence covers only the opening. Keep playing this build with real input (game_explore_start/act/close): push toward an ending, a win or a loss, or the furthest state you can reach, and try an approach you have not tried yet. Append what you did and reached to ${notes}. Same rules as before: judge from play only, change no game files, no subagents.`;
+
 export const sampleWrite = (notes: string): string =>
   `Stop playing, now write it. Rewrite ${notes} with your actual actions, decisions, failures, boredom, desire to replay, and the furthest state reached. Address the shared question with observations, separating facts from uncertainty. Do not compare to an unseen build or declare a winner. You may only write ${notes}.`;
 

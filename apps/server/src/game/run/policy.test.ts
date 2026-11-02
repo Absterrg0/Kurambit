@@ -11,7 +11,7 @@ const goodEvidence = {
   sessions: 1,
   actions: 4,
   executedInputSteps: 4,
-  nominalMs: 30_000,
+  nominalMs: 90_000,
   images: 4,
 };
 
@@ -261,6 +261,23 @@ describe("rounds", () => {
       (s) => s.task._tag === "round" && s.task.phase === "compare",
     );
     expect(steps.filter((s) => s === "tester")).toHaveLength(3);
+  });
+
+  it("sends a player that used little of its play budget back for one more turn", () => {
+    // Cumulative evidence per thread: 12s after the first turn, 80s after the second.
+    const shortPlay: Responder = (step, state) =>
+      step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
+        ? done(step, {
+            evidence: {
+              ...goodEvidence,
+              nominalMs: step.prompt.includes("You used about") ? 80_000 : 12_000,
+            },
+          })
+        : roundResponder("A", "B")(step, state);
+    const { state, steps } = drive(atRound(), shortPlay, (s) => s.rounds.length === 1);
+    // Per build: play, one more play, write.
+    expect(steps.filter((s) => s === "sample")).toHaveLength(6);
+    expect(state.rounds[0]?.kept).toBe(true);
   });
 
   it("marks a round unjudged when play evidence fails the gate even after a replay", () => {
