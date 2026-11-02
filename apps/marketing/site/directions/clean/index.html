@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Kurambit · Clean</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/directions/shared/base.css" />
+    <link rel="stylesheet" href="/directions/clean/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top">
+          <img src="/fox-head-ink.webp" alt="" width="22" height="22" />
+          Kurambit
+        </a>
+        <nav aria-label="Sections">
+          <a href="#product">Product</a>
+          <a href="#loop">How it works</a>
+          <a href="#games">Games</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="btn btn-ghost" href="https://github.com/Absterrg0/Kurambit">GitHub</a>
+          <a class="btn btn-dark" href="#join">Join waitlist</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero wrap">
+        <a class="pill" href="#join">
+          <span class="pill-dot"></span>
+          Private beta · Waitlist open
+          <span class="pill-arrow" aria-hidden="true">→</span>
+        </a>
+        <h1>The game studio that <br />plays what it builds.</h1>
+        <p class="lede">
+          Describe a game in a sentence. Your coding agent builds it in Godot and Blender, a
+          separate tester plays every build, and a blind judge keeps only what's better.
+        </p>
+        <form class="signup" data-waitlist data-source="clean-hero" novalidate>
+          <label class="sr-only" for="email-hero">Email address</label>
+          <input
+            id="email-hero"
+            type="email"
+            name="email"
+            placeholder="you@studio.com"
+            autocomplete="email"
+            maxlength="254"
+            required
+          />
+          <input
+            class="hp"
+            type="text"
+            name="website"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+          />
+          <button class="btn btn-accent" type="submit">
+            <span data-label>Join waitlist</span>
+          </button>
+          <p class="note" data-status role="status" aria-live="polite">
+            Open source · MIT · Linux first
+          </p>
+        </form>
+      </section>
+
+      <section class="product wrap" id="product">
+        <div class="stage-frame">
+          <div class="window">
+            <div class="window-bar"><i></i><i></i><i></i><span>Hollow Reach — Kurambit</span></div>
+            <div class="window-body">
+              <img
+                src="/media/app-studio.webp"
+                alt="Kurambit with Hollow Reach open: the game stage in the middle, the agent's work on the right"
+                width="2400"
+                height="1500"
+              />
+              <video
+                class="window-stage"
+                muted
+                loop
+                playsinline
+                preload="none"
+                data-autoplay
+                poster="/media/games/hollow-reach-hd.jpg"
+                src="/media/games/hollow-reach-hd.webm"
+              ></video>
+            </div>
+          </div>
+        </div>
+        <div class="agents">
+          <span>Runs on the agent you already pay for</span>
+          <ul>
+            <li>Codex</li>
+            <li>Claude Code</li>
+            <li>Cursor</li>
+            <li>Grok Build</li>
+            <li>OpenCode</li>
+            <li>Antigravity</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="loop wrap" id="loop" data-reveal>
+        <header class="head">
+          <p class="kicker">How it works</p>
+          <h2>Not a prompt box.<br />A studio with a process.</h2>
+          <p class="sub">
+            Anyone can ask a model for a game. Kurambit runs the habits of a real team around it,
+            every round, until the budget ends.
+          </p>
+        </header>
+        <div class="bento">
+          <article class="card card-wide">
+            <div class="card-copy">
+              <span class="step">01 · Brief</span>
+              <h3>One sentence is enough.</h3>
+              <p>Genre, mood, art direction. Kurambit turns it into a plan your agent can build.</p>
+            </div>
+            <div class="brief">
+              <span class="brief-label">New game</span>
+              <p>
+                a small game about a lighthouse keeper guiding ships through fog<span
+                  class="caret"
+                ></span>
+              </p>
+              <div class="brief-foot">
+                <span>Godot · Web + Linux</span><span class="brief-go">Build ↵</span>
+              </div>
+            </div>
+          </article>
+          <article class="card">
+            <div class="card-copy">
+              <span class="step">02 · Build</span>
+              <h3>Real projects, real sources.</h3>
+              <p>Scenes, scripts and .blend files you can open and keep.</p>
+            </div>
+            <ul class="tree">
+              <li><span class="t-dir">lighthouse/</span></li>
+              <li><span class="t-file">game.json</span><em>+12</em></li>
+              <li><span class="t-file">scenes/harbour.tscn</span><em>+340</em></li>
+              <li><span class="t-file">scripts/beam.gd</span><em>+118</em></li>
+              <li><span class="t-file">art/lighthouse.blend</span><em>new</em></li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="card-copy">
+              <span class="step">03 · Play</span>
+              <h3>A tester plays every build.</h3>
+              <p>A separate session plays it and reports what it actually saw.</p>
+            </div>
+            <figure class="clip">
+              <video
+                muted
+                loop
+                playsinline
+                preload="none"
+                data-autoplay
+                poster="/media/games/lighthouse.jpg"
+                src="/media/games/lighthouse.webm"
+              ></video>
+              <figcaption>“Beam reaches the ships. Fog hides the second wreck.”</figcaption>
+            </figure>
+          </article>
+          <article class="card card-wide">
+            <div class="card-copy">
+              <span class="step">04 · Judge</span>
+              <h3>Compared blind. Worse never lands.</h3>
+              <p>Two builds, no labels. Ties and regressions are reverted, never merged.</p>
+            </div>
+            <div class="versus">
+              <figure>
+                <img src="/media/games/belfry.jpg" alt="" width="640" height="360" loading="lazy" />
+                <figcaption>Build A</figcaption>
+              </figure>
+              <figure class="picked">
+                <img
+                  src="/media/games/hollow-reach-hd.jpg"
+                  alt=""
+                  width="960"
+                  height="540"
+                  loading="lazy"
+                />
+                <figcaption>Build B <b>Kept</b></figcaption>
+              </figure>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="games wrap" id="games" data-reveal>
+        <header class="head head-row">
+          <div>
+            <p class="kicker">Made with Kurambit</p>
+            <h2>Five sentences. Five games.</h2>
+          </div>
+          <p class="sub">
+            Every one began as the brief under it, and was played and judged round after round.
+          </p>
+        </header>
+        <div class="shelf">
+          <figure class="game game-lead">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/belfry.jpg"
+              src="/media/games/belfry.webm"
+            ></video>
+            <figcaption>
+              <b>Hollow Reach</b
+              ><span
+                >a third-person 3D exploration game about ringing three old bells to wake the
+                valley</span
+              >
+            </figcaption>
+          </figure>
+          <figure class="game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/fireflies.jpg"
+              src="/media/games/fireflies.webm"
+            ></video>
+            <figcaption>
+              <b>Fireflies</b
+              ><span>a cosy 3D browser game about collecting fireflies in a meadow</span>
+            </figcaption>
+          </figure>
+          <figure class="game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/lantern.jpg"
+              src="/media/games/lantern.webm"
+            ></video>
+            <figcaption>
+              <b>Tidewake</b><span>a top-down roguelite as the tide brings creatures ashore</span>
+            </figcaption>
+          </figure>
+          <figure class="game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/beekeeper.jpg"
+              src="/media/games/beekeeper.webm"
+            ></video>
+            <figcaption>
+              <b>Beekeeper</b><span>a small game about guarding hives through a storm</span>
+            </figcaption>
+          </figure>
+          <figure class="game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/lighthouse.jpg"
+              src="/media/games/lighthouse.webm"
+            ></video>
+            <figcaption>
+              <b>Lighthouse Keeper</b><span>a small game about guiding ships through fog</span>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="faq wrap" id="faq" data-reveal>
+        <header class="head">
+          <p class="kicker">FAQ</p>
+          <h2>Good questions.</h2>
+        </header>
+        <div class="faq-list">
+          <details>
+            <summary>When can I use Kurambit?</summary>
+            <p>
+              We're letting people in small batches so every new studio gets a good first game. Join
+              the waitlist and we'll email you when your invite is ready.
+            </p>
+          </details>
+          <details>
+            <summary>What do I need?</summary>
+            <p>
+              A Linux x86_64 machine today and one signed-in coding agent. Kurambit installs Godot
+              and Blender for you, and games export to Windows, Linux and the web.
+            </p>
+          </details>
+          <details>
+            <summary>What does it cost?</summary>
+            <p>
+              Kurambit is open source under the MIT license and runs on the agent subscription you
+              already have. One model is enough for the whole loop.
+            </p>
+          </details>
+          <details>
+            <summary>Do I own what it makes?</summary>
+            <p>
+              Yes. Every game is its own git repository with editable sources, scripts and .blend
+              files.
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <section class="final wrap" id="join" data-reveal>
+        <div class="final-card">
+          <canvas
+            class="final-fox"
+            data-dither
+            data-src="/fox-ink.webp"
+            data-ink="#1a1917"
+            data-accent="#e2552a"
+            data-cells="64"
+            aria-hidden="true"
+          ></canvas>
+          <div class="final-copy">
+            <h2>Be first in the studio.</h2>
+            <p>Kurambit opens in small batches. Leave your email and we'll send your invite.</p>
+            <form class="signup" data-waitlist data-source="clean-final" novalidate>
+              <label class="sr-only" for="email-final">Email address</label>
+              <input
+                id="email-final"
+                type="email"
+                name="email"
+                placeholder="you@studio.com"
+                autocomplete="email"
+                maxlength="254"
+                required
+              />
+              <input
+                class="hp"
+                type="text"
+                name="website"
+                tabindex="-1"
+                autocomplete="off"
+                aria-hidden="true"
+              />
+              <button class="btn btn-dark" type="submit">
+                <span data-label>Join waitlist</span>
+              </button>
+              <p class="note" data-status role="status" aria-live="polite">
+                One email when you're in. Never shared.
+              </p>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot wrap">
+      <span class="brand"
+        ><img src="/fox-head-ink.webp" alt="" width="18" height="18" />Kurambit</span
+      >
+      <nav aria-label="Footer">
+        <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+      <span class="foot-copy">MIT · © <span data-year>2026</span></span>
+    </footer>
+  </body>
+</html>

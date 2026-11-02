@@ -19,6 +19,8 @@ const BAYER = [
 ].map((value) => (value + 0.5) / 64);
 
 function dither(canvas) {
+  const ink = canvas.dataset.ink ?? INK;
+  const accentColor = canvas.dataset.accent ?? ACCENT;
   const cellsAcross = Number(canvas.dataset.cells ?? 70);
   const image = new Image();
   image.src = canvas.dataset.src;
@@ -92,7 +94,7 @@ function dither(canvas) {
           v += near * 0.2;
         }
         if (v > t) {
-          context.fillStyle = accent[i] || near > 0.55 ? ACCENT : INK;
+          context.fillStyle = accent[i] || near > 0.55 ? accentColor : ink;
           context.fillRect(px, py, size, size);
         }
       }
@@ -133,7 +135,7 @@ function dither(canvas) {
   });
 }
 
-for (const canvas of document.querySelectorAll("canvas.fox")) dither(canvas);
+for (const canvas of document.querySelectorAll("canvas.fox, canvas[data-dither]")) dither(canvas);
 
 /* ---------- Clips play only while visible; sections ease in ---------- */
 

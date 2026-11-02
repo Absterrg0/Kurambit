@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Kurambit · Isometric</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/directions/shared/base.css" />
+    <link rel="stylesheet" href="/directions/isometric/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="nav wrap">
+      <a class="brand" href="#top"
+        ><img src="/fox-head-ink.webp" alt="" width="22" height="22" />Kurambit</a
+      >
+      <nav aria-label="Sections">
+        <a href="#loop">The stack</a>
+        <a href="#games">Games</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>
+      </nav>
+      <a class="block-btn block-btn-sm" href="#join">Join waitlist</a>
+    </header>
+
+    <main id="top">
+      <section class="hero wrap">
+        <div class="hero-copy">
+          <p class="tag"><span></span>Private beta · Open source</p>
+          <h1>One sentence in.<br />A tested game out.</h1>
+          <p class="lede">
+            Kurambit stacks a real studio's process on the coding agent you already use. Brief,
+            build, play, judge. Every round, and only better builds land.
+          </p>
+          <form class="signup" data-waitlist data-source="iso-hero" novalidate>
+            <label class="sr-only" for="email-hero">Email address</label>
+            <input
+              id="email-hero"
+              type="email"
+              name="email"
+              placeholder="you@studio.com"
+              autocomplete="email"
+              maxlength="254"
+              required
+            />
+            <input
+              class="hp"
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              aria-hidden="true"
+            />
+            <button class="block-btn" type="submit"><span data-label>Join waitlist</span></button>
+            <p class="note" data-status role="status" aria-live="polite">
+              Linux first · MIT · One email when you're in
+            </p>
+          </form>
+        </div>
+
+        <div
+          class="scene"
+          aria-label="The Kurambit loop as four stacked layers: brief, build, play, judge"
+          role="img"
+        >
+          <div class="iso">
+            <div class="slab slab-judge">
+              <div class="judge">
+                <span class="j-box">A</span>
+                <span class="j-box j-keep">B</span>
+                <b>KEEP B</b>
+              </div>
+            </div>
+            <div class="slab slab-play">
+              <video
+                muted
+                loop
+                playsinline
+                preload="none"
+                data-autoplay
+                poster="/media/games/lighthouse.jpg"
+                src="/media/games/lighthouse.webm"
+              ></video>
+            </div>
+            <div class="slab slab-build">
+              <pre>
+harbour.tscn  +340
+beam.gd       +118
+fog.gdshader   +46
+lighthouse.blend
+ship.blend</pre>
+            </div>
+            <div class="slab slab-brief">
+              <p>“a small game about a lighthouse keeper guiding ships through fog”</p>
+            </div>
+          </div>
+          <ol class="labels" aria-hidden="true">
+            <li class="l-brief"><i>01</i>Brief</li>
+            <li class="l-build"><i>02</i>Build</li>
+            <li class="l-play"><i>03</i>Play</li>
+            <li class="l-judge"><i>04</i>Judge</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="agents wrap">
+        <span>Runs on the agent you already pay for</span>
+        <ul>
+          <li>Codex</li>
+          <li>Claude Code</li>
+          <li>Cursor</li>
+          <li>Grok Build</li>
+          <li>OpenCode</li>
+          <li>Antigravity</li>
+        </ul>
+      </section>
+
+      <section class="loop wrap" id="loop" data-reveal>
+        <header class="head">
+          <p class="tag"><span></span>The stack</p>
+          <h2>Four layers, every round.</h2>
+          <p class="lede">
+            Anyone can ask a model for a game. Kurambit wraps it in the habits of a real team, and
+            keeps going until the budget ends.
+          </p>
+        </header>
+        <ol class="steps">
+          <li>
+            <svg viewBox="0 0 80 72" aria-hidden="true">
+              <g class="cube" transform="translate(0 24)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+            </svg>
+            <b>Brief</b>
+            <p>A sentence or two. Genre, mood, art direction.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 80 72" aria-hidden="true">
+              <g class="cube" transform="translate(0 24)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube" transform="translate(0 4)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+            </svg>
+            <b>Build</b>
+            <p>Your agent writes the Godot project and models assets in Blender.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 80 72" aria-hidden="true">
+              <g class="cube" transform="translate(0 24)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube" transform="translate(0 4)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube cube-hot" transform="translate(0 -16)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+            </svg>
+            <b>Play</b>
+            <p>A separate tester session plays the build and reports what it saw.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 80 72" aria-hidden="true">
+              <g class="cube" transform="translate(0 24)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube" transform="translate(0 4)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube" transform="translate(0 -16)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+              <g class="cube cube-hot" transform="translate(0 -36)">
+                <path class="ct" d="M40 0 72 16 40 32 8 16Z" />
+                <path class="cl" d="M8 16 40 32v16L8 32Z" />
+                <path class="cr" d="M72 16 40 32v16l32-16Z" />
+              </g>
+            </svg>
+            <b>Judge</b>
+            <p>Two builds compared blind. Ties and worse builds are reverted.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="studio wrap" data-reveal>
+        <div class="block window">
+          <img
+            src="/media/app-studio.webp"
+            alt="Kurambit with Hollow Reach open"
+            width="2400"
+            height="1500"
+            loading="lazy"
+          />
+          <video
+            class="window-stage"
+            muted
+            loop
+            playsinline
+            preload="none"
+            data-autoplay
+            poster="/media/games/hollow-reach-hd.jpg"
+            src="/media/games/hollow-reach-hd.webm"
+          ></video>
+        </div>
+        <div class="studio-copy">
+          <p class="tag"><span></span>The studio</p>
+          <h2>Your game in the middle. The agent at your side.</h2>
+          <p class="lede">
+            Play the real build inside the app, watch every step the agent takes, and ask for
+            changes in plain words. Everything stays on your machine.
+          </p>
+        </div>
+      </section>
+
+      <section class="games wrap" id="games" data-reveal>
+        <header class="head">
+          <p class="tag"><span></span>Made with Kurambit</p>
+          <h2>Five sentences. Five games.</h2>
+        </header>
+        <div class="blocks">
+          <figure class="block game game-wide">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/belfry.jpg"
+              src="/media/games/belfry.webm"
+            ></video>
+            <figcaption>
+              <b>Hollow Reach</b><span>“…ring the three old bells and wake the valley”</span>
+            </figcaption>
+          </figure>
+          <figure class="block game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/fireflies.jpg"
+              src="/media/games/fireflies.webm"
+            ></video>
+            <figcaption>
+              <b>Fireflies</b><span>“…collecting fireflies in a meadow”</span>
+            </figcaption>
+          </figure>
+          <figure class="block game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/lantern.jpg"
+              src="/media/games/lantern.webm"
+            ></video>
+            <figcaption>
+              <b>Tidewake</b><span>“…as the tide brings creatures ashore”</span>
+            </figcaption>
+          </figure>
+          <figure class="block game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/beekeeper.jpg"
+              src="/media/games/beekeeper.webm"
+            ></video>
+            <figcaption><b>Beekeeper</b><span>“…guarding hives through a storm”</span></figcaption>
+          </figure>
+          <figure class="block game">
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              data-autoplay
+              poster="/media/games/lighthouse.jpg"
+              src="/media/games/lighthouse.webm"
+            ></video>
+            <figcaption>
+              <b>Lighthouse Keeper</b><span>“…guiding ships through fog”</span>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="faq wrap" id="faq" data-reveal>
+        <header class="head">
+          <p class="tag"><span></span>FAQ</p>
+          <h2>Questions.</h2>
+        </header>
+        <div class="faq-grid">
+          <div class="block qa">
+            <b>When can I use it?</b>
+            <p>We let people in small batches. Join the waitlist and we'll email your invite.</p>
+          </div>
+          <div class="block qa">
+            <b>What do I need?</b>
+            <p>
+              Linux x86_64 today and one signed-in coding agent. Kurambit installs Godot and Blender
+              for you.
+            </p>
+          </div>
+          <div class="block qa">
+            <b>What does it cost?</b>
+            <p>Kurambit is MIT-licensed and runs on the agent subscription you already have.</p>
+          </div>
+          <div class="block qa">
+            <b>Who owns the games?</b>
+            <p>You. Each game is its own git repository with editable sources and .blend files.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="final wrap" id="join" data-reveal>
+        <div class="pedestal">
+          <canvas
+            data-dither
+            data-src="/fox-ink.webp"
+            data-ink="#1c1a17"
+            data-accent="#ff5a2a"
+            data-cells="56"
+            aria-hidden="true"
+          ></canvas>
+          <div class="plinth">
+            <div class="iso iso-plinth"><div class="slab"></div></div>
+          </div>
+        </div>
+        <div class="final-copy">
+          <h2>Be first in the studio.</h2>
+          <p class="lede">
+            Kurambit opens in small batches. Leave your email and we'll send your invite.
+          </p>
+          <form class="signup" data-waitlist data-source="iso-final" novalidate>
+            <label class="sr-only" for="email-final">Email address</label>
+            <input
+              id="email-final"
+              type="email"
+              name="email"
+              placeholder="you@studio.com"
+              autocomplete="email"
+              maxlength="254"
+              required
+            />
+            <input
+              class="hp"
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              aria-hidden="true"
+            />
+            <button class="block-btn" type="submit"><span data-label>Join waitlist</span></button>
+            <p class="note" data-status role="status" aria-live="polite">
+              Never shared. <a href="/privacy">Privacy</a>
+            </p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot wrap">
+      <span class="brand"
+        ><img src="/fox-head-ink.webp" alt="" width="18" height="18" />Kurambit</span
+      >
+      <a href="https://github.com/Absterrg0/Kurambit">GitHub</a>
+      <a href="/privacy">Privacy</a>
+      <span class="foot-copy">MIT · © <span data-year>2026</span></span>
+    </footer>
+  </body>
+</html>

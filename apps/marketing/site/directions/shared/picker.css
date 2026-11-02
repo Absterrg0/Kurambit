@@ -1,0 +1,85 @@
+body {
+  background: #f4f2ee;
+  color: #121110;
+}
+
+.picker {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 72px 0 96px;
+}
+
+.picker header p:first-child {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #74706a;
+}
+
+.picker h1 {
+  margin-top: 12px;
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+
+.picker .sub {
+  max-width: 34rem;
+  margin-top: 10px;
+  font-size: 17px;
+  color: #74706a;
+}
+
+.picker ol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  margin-top: 48px;
+}
+
+.picker a {
+  display: block;
+  text-decoration: none;
+}
+
+.picker img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgb(18 17 16 / 10%),
+    0 20px 40px -24px rgb(18 17 16 / 35%);
+  transition: transform 200ms ease;
+}
+
+.picker a:hover img {
+  transform: translateY(-3px);
+}
+
+.picker span {
+  display: block;
+  margin-top: 14px;
+  font-size: 15px;
+  color: #74706a;
+}
+
+.picker i {
+  margin-right: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-style: normal;
+  color: #e2552a;
+}
+
+.picker b {
+  margin-right: 8px;
+  font-weight: 600;
+  color: #121110;
+}
+
+@media (max-width: 760px) {
+  .picker ol {
+    grid-template-columns: 1fr;
+  }
+}
