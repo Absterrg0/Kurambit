@@ -16,7 +16,7 @@ import {
   type PreviewAutomationTypeInput,
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { constVoid } from "effect/Function";
 import type { CDPSession, Frame, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
@@ -248,7 +248,7 @@ const openReaders = async (page: Page, cdp: CDPSession) => {
         ids(frameTree).map(async (frameId) => {
           const world = await session.send("Page.createIsolatedWorld", {
             frameId,
-            worldName: "t3-preview",
+            worldName: "kurambit-preview",
           });
           return world.executionContextId;
         }),
@@ -458,7 +458,7 @@ const capture = async (
   const accessibilityTree = (dotted ? maskTree(tree, dotted) : tree)
     .slice(0, MAX_VISIBLE_TEXT_LENGTH)
     .replace(/\[ref=((?:f\d+)?e\d+)\]/g, (_match, nativeRef: string) => {
-      const ref = `t3-${generation}-${nativeRef}`;
+      const ref = `kurambit-${generation}-${nativeRef}`;
       state.refs.set(ref, nativeRef);
       return `[ref=${ref}]`;
     });
@@ -852,7 +852,7 @@ export const RECORDING_ENCODER_SCRIPT = `(() => {
       context.restore();
     }
   };
-  window.__t3Recorder = {
+  window.__kurambitRecorder = {
     async frame(base64, cssWidth) {
       if (tooLarge) return false;
       const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));

@@ -1,5 +1,5 @@
 import * as Option from "effect/Option";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/shell";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -24,22 +24,22 @@ import {
   type ThreadId,
   type RunId,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+} from "@kurambit/contracts";
+import { worktreeSetupAgentStarted } from "@kurambit/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import { parseScopedThreadKey } from "@kurambit/client-runtime/environment";
+import { resolveAssetUrl } from "@kurambit/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@kurambit/client-runtime/state/runtime";
+import { videoMimeType } from "@kurambit/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@t3tools/shared/codexArtifactTemplates";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@kurambit/shared/codexArtifactTemplates";
+import { presentThreadShell } from "@kurambit/client-runtime/state/shell";
 import {
   type ChatMessage,
   isImageAttachment,
@@ -67,7 +67,7 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 
-export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
+export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "kurambit:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
@@ -227,7 +227,7 @@ export function shouldReleaseTimelineAnchorForToolActivity(input: {
 export {
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
-} from "@t3tools/client-runtime/worktree-setup";
+} from "@kurambit/client-runtime/worktree-setup";
 
 export function resolveWorktreeSetupProgress(input: {
   threadId: ThreadId;

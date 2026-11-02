@@ -1,4 +1,4 @@
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@kurambit/shared/inlineSkills";
 import {
   Extension,
   findChildren,
@@ -24,15 +24,15 @@ import type {
   AssistantCitation,
   ComposerContextClipboardFragment,
   ServerProviderSkill,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
-} from "@t3tools/shared/assistantCitations";
+} from "@kurambit/shared/assistantCitations";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@kurambit/shared/composerContextClipboard";
 import {
   createContext,
   use,

@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadDetailSnapshot, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadDetailSnapshot, ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
@@ -62,4 +62,4 @@ export class ThreadSnapshotLoader extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<ThreadSnapshotLoadResult>;
   }
->()("@t3tools/client-runtime/state/threadSnapshotHttp/ThreadSnapshotLoader") {}
+>()("@kurambit/client-runtime/state/threadSnapshotHttp/ThreadSnapshotLoader") {}

@@ -1,4 +1,4 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import type { InteractionUpdate, RunResult } from "@cursor/sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -7,7 +7,7 @@ import {
   ThreadId,
   type ModelSelection,
   type ProviderReplayTranscript,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -15,20 +15,20 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import { ProviderAdapterDriverCreateError } from "@t3tools/provider-core/server/adapterDriver";
+import * as TestProviderHost from "@kurambit/provider-testing/TestProviderHost";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import { ProviderAdapterDriverCreateError } from "@kurambit/provider-core/server/adapterDriver";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
-import { CursorAdapterV2Driver } from "@t3tools/provider-cursor/server";
-import * as CursorAgentSdk from "@t3tools/provider-cursor/server/CursorAgentSdk";
+import { CursorAdapterV2Driver } from "@kurambit/provider-cursor/server";
+import * as CursorAgentSdk from "@kurambit/provider-cursor/server/CursorAgentSdk";
 import {
   CURSOR_DEFAULT_INSTANCE_ID,
   CURSOR_DRIVER_KIND,
   cursorSdkModelSelection,
   makeCursorAgentOptions,
-} from "@t3tools/provider-cursor/testing";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@kurambit/provider-cursor/testing";
+import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import type { RuntimePolicyV2Override } from "../RuntimePolicy.ts";
 
 const CursorAgentSdkReplayTranscript = Schema.Struct({
@@ -522,7 +522,7 @@ export function layer(
     HostProcess.Environment,
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cursor-replay-home-" });
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-cursor-replay-home-" });
       return { HOME: home };
     }).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));

@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge } from "@kurambit/contracts";
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { HttpClient } from "effect/http";
@@ -41,7 +41,7 @@ describe("primary environment HTTP layer", { concurrent: false }, () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
-        location: { origin: "game-studio://app" },
+        location: { origin: "kurambit://app" },
         desktopBridge: {
           getLocalEnvironmentBootstrap: () => ({
             label: "Local environment",

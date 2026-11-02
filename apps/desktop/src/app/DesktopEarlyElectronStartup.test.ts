@@ -13,11 +13,11 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("reads the persisted linux password-store preference before Electron is ready", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { GAME_STUDIO_HOME: "/home/user/.t3-test" },
+      env: { KURAMBIT_HOME: "/home/user/.kurambit-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.t3-test/userdata/desktop-settings.json");
+        assert.equal(path, "/home/user/.kurambit-test/userdata/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "kwallet6" });
       },
     });
@@ -27,7 +27,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("accepts JSONC in the early desktop settings file", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { GAME_STUDIO_HOME: "/home/user/.t3-test" },
+      env: { KURAMBIT_HOME: "/home/user/.kurambit-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: () => `{
@@ -54,7 +54,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("preserves absolute root paths when resolving early settings", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { GAME_STUDIO_HOME: "/" },
+      env: { KURAMBIT_HOME: "/" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
@@ -69,27 +69,27 @@ describe("DesktopEarlyElectronStartup", () => {
   it("resolves the early linux Electron switches", () => {
     const options = resolveEarlyLinuxElectronOptions({
       env: {
-        GAME_STUDIO_HOME: "/home/user/.t3-test",
+        KURAMBIT_HOME: "/home/user/.kurambit-test",
         XDG_CURRENT_DESKTOP: "niri",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
       },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.t3-test/userdata/desktop-settings.json");
+        assert.equal(path, "/home/user/.kurambit-test/userdata/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "auto" });
       },
     });
 
     assert.deepEqual(options, {
       isDevelopment: true,
-      linuxWmClass: "game-studio-dev",
-      linuxDesktopEntryName: "game-studio-dev.desktop",
+      linuxWmClass: "kurambit-dev",
+      linuxDesktopEntryName: "kurambit-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });
 
-  it("keeps implicit development state under ~/.game-studio/dev when GAME_STUDIO_HOME is unset", () => {
+  it("keeps implicit development state under ~/.kurambit/dev when KURAMBIT_HOME is unset", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
       env: {
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
@@ -97,7 +97,7 @@ describe("DesktopEarlyElectronStartup", () => {
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.game-studio/dev/desktop-settings.json");
+        assert.equal(path, "/home/user/.kurambit/dev/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "kwallet" });
       },
     });
@@ -105,16 +105,16 @@ describe("DesktopEarlyElectronStartup", () => {
     assert.equal(preference, "kwallet");
   });
 
-  it("treats whitespace-only GAME_STUDIO_HOME as unconfigured in development", () => {
+  it("treats whitespace-only KURAMBIT_HOME as unconfigured in development", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
       env: {
-        GAME_STUDIO_HOME: "   ",
+        KURAMBIT_HOME: "   ",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
       },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
-        assert.equal(path, "/home/user/.game-studio/dev/desktop-settings.json");
+        assert.equal(path, "/home/user/.kurambit/dev/desktop-settings.json");
         return JSON.stringify({ linuxPasswordStore: "gnome-libsecret" });
       },
     });

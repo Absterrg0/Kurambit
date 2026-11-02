@@ -5,7 +5,7 @@ import {
   type ProjectListEntriesResult,
   ProjectReadFileError,
   type ProjectReadFileResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -99,7 +99,7 @@ vi.mock("~/state/queries", () => ({
 }));
 
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
-import { useT3ProjectFileState } from "~/hooks/useT3ProjectFileScripts";
+import { useKurambitProjectFileState } from "~/hooks/useKurambitProjectFileScripts";
 import { useProjectEntriesQuery, useProjectFileQuery } from "./projectFilesQueryState";
 
 const environmentId = EnvironmentId.make("environment-1");
@@ -171,7 +171,7 @@ describe("project query refresh", () => {
     }
   });
 
-  it("keeps t3.json and the file tree loading until the file grant arrives", () => {
+  it("keeps kurambit.json and the file tree loading until the file grant arrives", () => {
     authorizationMocks.sessionAtom = Atom.make(AsyncResult.initial());
     const registry = AtomRegistry.make();
     atomHooks.registry = registry;
@@ -183,11 +183,11 @@ describe("project query refresh", () => {
       Atom.make(AsyncResult.success(file(JSON.stringify(config)))),
     );
     projectMocks.listEntries.mockReturnValue(
-      Atom.make(AsyncResult.success(projectEntries(["t3.json"]))),
+      Atom.make(AsyncResult.success(projectEntries(["kurambit.json"]))),
     );
     projectMocks.optimisticFile.mockReturnValue(Atom.make(null));
     try {
-      expect(useProjectFileQuery(environmentId, "/repo", "t3.json")).toMatchObject({
+      expect(useProjectFileQuery(environmentId, "/repo", "kurambit.json")).toMatchObject({
         data: null,
         error: null,
         isPending: true,
@@ -197,20 +197,20 @@ describe("project query refresh", () => {
         error: null,
         isPending: true,
       });
-      expect(useT3ProjectFileState(environmentId, "/repo").status).toBe("loading");
+      expect(useKurambitProjectFileState(environmentId, "/repo").status).toBe("loading");
       expect(projectMocks.readFile).not.toHaveBeenCalled();
       expect(projectMocks.listEntries).not.toHaveBeenCalled();
 
       authorizationMocks.sessionAtom = Atom.make(
         AsyncResult.success({ authenticated: true, scopes: [AuthFilesystemReadScope] }),
       );
-      expect(useT3ProjectFileState(environmentId, "/repo")).toEqual({
+      expect(useKurambitProjectFileState(environmentId, "/repo")).toEqual({
         status: "valid",
         file: config,
         scripts: config.scripts,
       });
       expect(useProjectEntriesQuery(environmentId, "/repo")).toMatchObject({
-        data: projectEntries(["t3.json"]),
+        data: projectEntries(["kurambit.json"]),
         error: null,
         isPending: false,
       });
@@ -221,7 +221,7 @@ describe("project query refresh", () => {
   });
 
   it.each(["connected", "offline"] as const)(
-    "preserves cached t3.json defaults and scripts during a granted refresh while %s",
+    "preserves cached kurambit.json defaults and scripts during a granted refresh while %s",
     (phase) => {
       authorizationMocks.phase = phase;
       authorizationMocks.sessionAtom = Atom.make(
@@ -241,11 +241,11 @@ describe("project query refresh", () => {
       );
       projectMocks.optimisticFile.mockReturnValue(Atom.make(null));
       try {
-        expect(useProjectFileQuery(environmentId, "/repo", "t3.json")).toMatchObject({
+        expect(useProjectFileQuery(environmentId, "/repo", "kurambit.json")).toMatchObject({
           error: null,
           isPending: true,
         });
-        expect(useT3ProjectFileState(environmentId, "/repo")).toEqual({
+        expect(useKurambitProjectFileState(environmentId, "/repo")).toEqual({
           status: "valid",
           file: config,
           scripts: config.scripts,
@@ -297,12 +297,12 @@ describe("project query refresh", () => {
     atomHooks.registry = registry;
     projectMocks.optimisticFile.mockReturnValue(Atom.make(null));
     try {
-      expect(useProjectFileQuery(environmentId, "/repo", "t3.json", false)).toMatchObject({
+      expect(useProjectFileQuery(environmentId, "/repo", "kurambit.json", false)).toMatchObject({
         data: null,
         error: null,
         isPending: false,
       });
-      expect(useT3ProjectFileState(environmentId, null).status).toBe("missing");
+      expect(useKurambitProjectFileState(environmentId, null).status).toBe("missing");
       expect(projectMocks.readFile).not.toHaveBeenCalled();
     } finally {
       registry.dispose();

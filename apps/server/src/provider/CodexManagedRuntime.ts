@@ -1,5 +1,5 @@
 import { resolveManagedCodexHomeLayout } from "./CodexManagedHome.ts";
-import { CodexSettings, ProviderSetupError, type ProviderInstanceId } from "@t3tools/contracts";
+import { CodexSettings, ProviderSetupError, type ProviderInstanceId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -88,13 +88,13 @@ export const makeCodexManagedRuntime = Effect.fn("makeCodexManagedRuntime")(func
           }),
       ),
     );
-    // Ambient CLI overrides cannot redirect a T3-owned token to a different provider.
+    // Ambient CLI overrides cannot redirect a Kurambit-owned token to a different provider.
     const environment: NodeJS.ProcessEnv = {
       ...options.environment,
       ACCESS_TOKEN: credentials.accessToken,
       CODEX_HOME: homePath,
     };
-    delete environment.T3CODE_CODEX_LAUNCH_ARGS;
+    delete environment.KURAMBIT_CODEX_LAUNCH_ARGS;
     delete environment.OPENAI_API_KEY;
     delete environment.OPENAI_BASE_URL;
     return {

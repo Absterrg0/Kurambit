@@ -1,4 +1,4 @@
-import { settlePromise } from "@t3tools/client-runtime/state/runtime";
+import { settlePromise } from "@kurambit/client-runtime/state/runtime";
 import { useState } from "react";
 
 import {
@@ -23,7 +23,7 @@ export function NotificationSettings() {
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while Game Studio is open."
+        "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while Kurambit is open."
       }
       control={
         <Select

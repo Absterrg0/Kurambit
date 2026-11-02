@@ -1,7 +1,7 @@
-import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
-import type { RemoteEnvironmentRequestError } from "@t3tools/client-runtime/rpc";
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
-import { currentDesktopBootstrapToken } from "@t3tools/shared/desktopBootstrapToken";
+import { bootstrapRemoteBearerSession } from "@kurambit/client-runtime/authorization";
+import type { RemoteEnvironmentRequestError } from "@kurambit/client-runtime/rpc";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@kurambit/contracts";
+import { currentDesktopBootstrapToken } from "@kurambit/shared/desktopBootstrapToken";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -61,7 +61,7 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
   {
     readonly getBearerToken: Effect.Effect<string, DesktopLocalEnvironmentAuthError>;
   }
->()("@t3tools/desktop/backend/DesktopLocalEnvironmentAuth") {}
+>()("@kurambit/desktop/backend/DesktopLocalEnvironmentAuth") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
           httpBaseUrl: config.httpBaseUrl.href,
           credential,
           clientMetadata: {
-            label: "Game Studio Desktop",
+            label: "Kurambit Desktop",
             deviceType: "desktop",
           },
         }).pipe(

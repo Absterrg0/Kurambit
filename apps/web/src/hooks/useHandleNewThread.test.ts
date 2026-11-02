@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { RuntimeMode } from "@t3tools/contracts";
+import type { RuntimeMode } from "@kurambit/contracts";
 
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
@@ -103,16 +103,16 @@ vi.mock("@effect/atom-react", () => ({
       ? { newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin }
       : testServerConfigs(),
 }));
-vi.mock("@t3tools/client-runtime/environment", () => ({
+vi.mock("@kurambit/client-runtime/environment", () => ({
   scopedProjectKey: () => "remote-project",
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
+vi.mock("@kurambit/contracts", () => ({
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
-vi.mock("@t3tools/shared/projectSettings", () => ({
+vi.mock("@kurambit/shared/projectSettings", () => ({
   resolveProjectSettings: (
     settings: Record<string, unknown>,
     _projectId: unknown,
@@ -158,8 +158,8 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   hasExplicitComposerModelSelection: () => false,
   resolveNewThreadModelSelectionOverride: () => null,
 }));
-vi.mock("../lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFile: () => testState.projectFileRead,
+vi.mock("../lib/kurambitProjectFileDefaults", () => ({
+  readKurambitProjectFile: () => testState.projectFileRead,
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",

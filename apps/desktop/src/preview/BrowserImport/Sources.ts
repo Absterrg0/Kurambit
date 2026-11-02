@@ -1,6 +1,6 @@
-import type { BrowserImportSourceId, BrowserImportSourceProfile } from "@t3tools/contracts";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import type { BrowserImportSourceId, BrowserImportSourceProfile } from "@kurambit/contracts";
+import * as NodeSqliteClient from "@kurambit/shared/nodeSqliteClient";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

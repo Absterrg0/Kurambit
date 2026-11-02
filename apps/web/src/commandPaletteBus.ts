@@ -1,11 +1,11 @@
-import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@kurambit/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;
   readonly threads: PullRequestLinkedThreadsResult["threads"];
 }
 
-const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
+const COMMAND_PALETTE_OPEN_EVENT = "kurambit:open-command-palette";
 
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";

@@ -1,4 +1,4 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
+import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -23,7 +23,7 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
     learned: Schema.optionalKey(Schema.Literal(true)),
-    authorization: Schema.optionalKey(Schema.Literal("t3-connect")),
+    authorization: Schema.optionalKey(Schema.Literal("kurambit-connect")),
     /**
      * "tailscale" on a learned route the server found on its Tailscale
      * interface. A bare 100.64.0.0/10 address could belong to any VPN.

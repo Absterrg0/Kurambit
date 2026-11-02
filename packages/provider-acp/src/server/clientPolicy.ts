@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import type { ProviderRequestKind, RuntimeMode } from "@t3tools/contracts";
+import type { ProviderRequestKind, RuntimeMode } from "@kurambit/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -221,7 +221,7 @@ export function acpMcpToolApprovalElicitationDisposition(
   ) {
     return undefined;
   }
-  // This request comes from T3's authenticated, scope-checked MCP endpoint,
+  // This request comes from Kurambit's authenticated, scope-checked MCP endpoint,
   // not an arbitrary provider command. Let explicit approval mode surface it
   // to the user and otherwise allow the endpoint to enforce its own policy.
   return acpPolicyRequiresApproval(runtimePolicy) ? "ask" : "allow";

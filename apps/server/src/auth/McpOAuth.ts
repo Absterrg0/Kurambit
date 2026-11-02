@@ -13,8 +13,8 @@ import {
   type AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-} from "@t3tools/contracts";
-import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
+} from "@kurambit/contracts";
+import { encodeOAuthScope } from "@kurambit/shared/oauthScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -40,7 +40,7 @@ import {
 
 /**
  * Every URL is derived from the request's own origin, so the same server
- * answers correctly over loopback, Tailscale Serve and a T3 Connect tunnel.
+ * answers correctly over loopback, Tailscale Serve and a relay tunnel.
  * Client registration is stateless: a client id is its signed metadata, so an
  * unauthenticated caller cannot grow server state.
  */
@@ -77,7 +77,7 @@ export const protectedResourceMetadata = (
   authorization_servers: [urls.issuer],
   scopes_supported: MCP_OAUTH_SCOPES,
   bearer_methods_supported: ["header"],
-  resource_name: "T3 Code",
+  resource_name: "Kurambit",
 });
 
 export const authorizationServerMetadata = (
@@ -218,7 +218,7 @@ export class McpOAuth extends Context.Service<
       readonly token: AuthMcpTokenRequest;
     }) => Effect.Effect<AuthMcpTokenResult, AuthMcpTokenError>;
   }
->()("t3/auth/McpOAuth") {}
+>()("kurambit/auth/McpOAuth") {}
 
 const redirectWith = (redirectUri: string, params: Record<string, string | undefined>) => {
   const url = new URL(redirectUri);

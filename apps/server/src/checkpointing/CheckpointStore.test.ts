@@ -3,8 +3,8 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ThreadId, type VcsError } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ThreadId, type VcsError } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -20,7 +20,7 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ServerConfig from "../config.ts";
 
 const layerServerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-checkpoint-store-test-",
+  prefix: "kurambit-checkpoint-store-test-",
 });
 const layerVcsProcessTest = VcsProcess.layer.pipe(Layer.provide(NodeServices.layer));
 const layerVcsDriverTest = VcsDriverRegistry.layer.pipe(Layer.provide(layerVcsProcessTest));

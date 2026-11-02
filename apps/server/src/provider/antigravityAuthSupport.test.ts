@@ -4,8 +4,8 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ProviderInstanceId } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -18,7 +18,7 @@ import * as Ndjson from "effect/encoding/Ndjson";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as AcpErrors from "effect-acp/errors";
-import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import { symlinksSupported } from "@kurambit/shared/testing/symlinks";
 
 import {
   ANTIGRAVITY_AUTH_BROWSER_MARKER,
@@ -51,10 +51,10 @@ const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown
 describe("Antigravity process environment", () => {
   const profile: AntigravityProfile = {
     platform: "linux",
-    geminiHome: "/t3/userdata/providers/antigravity/profile",
-    acpDirectory: "/t3/userdata/providers/antigravity/profile/antigravity-acp",
-    tokenPath: "/t3/userdata/providers/antigravity/profile/antigravity-acp/acp_token.json",
-    tempDirectory: "/t3/userdata/providers/antigravity/profile/antigravity-acp/tmp",
+    geminiHome: "/kurambit/userdata/providers/antigravity/profile",
+    acpDirectory: "/kurambit/userdata/providers/antigravity/profile/antigravity-acp",
+    tokenPath: "/kurambit/userdata/providers/antigravity/profile/antigravity-acp/acp_token.json",
+    tempDirectory: "/kurambit/userdata/providers/antigravity/profile/antigravity-acp/tmp",
     browserCommand: "managed-browser-helper",
   };
 
@@ -269,7 +269,7 @@ describe("Antigravity process environment", () => {
       const deepestMember =
         "google3\\cloud\\developer_experience\\antigravity_extensions\\acp_server\\_private__agy_acp_server_bin.lazy_imports_info.json";
       const directories = yield* resolveAntigravityInstanceDirectories(
-        "C:\\Users\\a-twenty-char-person\\.t3\\userdata",
+        "C:\\Users\\a-twenty-char-person\\.kurambit\\userdata",
         ProviderInstanceId.make("antigravity"),
       );
       const extracted = (tempDirectory: string) =>
@@ -565,11 +565,11 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         profileDirectory: path.join(directory, "profile"),
         baseEnv: { PATH: path.dirname(process.execPath) },
       });
-      expect(profile.browserCommand).not.toContain("/packaged/t3");
+      expect(profile.browserCommand).not.toContain("/packaged/kurambit");
       expect(yield* fs.exists(profile.acpDirectory)).toBe(true);
     }).pipe(
       Effect.provideService(HostProcess.IsExecutable, true),
-      Effect.provideService(HostProcess.ExecutablePath, "/packaged/t3"),
+      Effect.provideService(HostProcess.ExecutablePath, "/packaged/kurambit"),
     ),
   );
 

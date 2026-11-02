@@ -1,4 +1,4 @@
-import type { ServerConfig, ServerConfigStreamEvent } from "@t3tools/contracts";
+import type { ServerConfig, ServerConfigStreamEvent } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 

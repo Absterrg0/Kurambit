@@ -1,5 +1,5 @@
 import { assert, it, vi } from "@effect/vitest";
-import { CheckpointScopeId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, RunId, ThreadId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";

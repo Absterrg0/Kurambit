@@ -13,10 +13,10 @@ const makeProbeRuntime = makeGrokAcpRuntime({
   grokSettings: { binaryPath: "grok" },
   environment: process.env,
   cwd: process.cwd(),
-  clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
+  clientInfo: { name: "kurambit-grok-probe", version: "0.0.0" },
 });
 
-describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
+describe.runIf(process.env.KURAMBIT_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
   it.effect("initialize and authenticate against real grok agent stdio", () =>
     Effect.gen(function* () {
       const runtime = yield* makeProbeRuntime;
@@ -57,7 +57,7 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect.skipIf(process.env.T3_GROK_LIVE_TURN !== "1")(
+  it.effect.skipIf(process.env.KURAMBIT_GROK_LIVE_TURN !== "1")(
     "finishes a real Grok turn and streams its answer",
     () =>
       Effect.gen(function* () {
@@ -68,7 +68,7 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
           environment: process.env,
           cwd,
           runtimeMode: "approval-required",
-          clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
+          clientInfo: { name: "kurambit-grok-probe", version: "0.0.0" },
         });
         yield* runtime.start();
         const chunks: string[] = [];
@@ -82,11 +82,11 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
           return Effect.void;
         }).pipe(Effect.forkChild);
         const result = yield* runtime.prompt({
-          prompt: [{ type: "text", text: "Reply exactly GROK_T3_OK. Do not use any tools." }],
+          prompt: [{ type: "text", text: "Reply exactly GROK_KURAMBIT_OK. Do not use any tools." }],
         });
         yield* runtime.drainEvents;
         expect(result.stopReason).toBe("end_turn");
-        expect(chunks.join("")).toContain("GROK_T3_OK");
+        expect(chunks.join("")).toContain("GROK_KURAMBIT_OK");
         yield* Fiber.interrupt(events);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

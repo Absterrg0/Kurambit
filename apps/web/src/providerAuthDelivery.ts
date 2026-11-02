@@ -1,4 +1,4 @@
-import { readCodexAuthDelivery } from "@t3tools/shared/codexAuthHandoff";
+import { readCodexAuthDelivery } from "@kurambit/shared/codexAuthHandoff";
 
 let pending: ReturnType<typeof readCodexAuthDelivery>;
 

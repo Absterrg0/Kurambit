@@ -1,4 +1,4 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import { presentThreadShell } from "@kurambit/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -59,9 +59,9 @@ import {
   type SidebarSection,
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
 
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@kurambit/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -78,16 +78,16 @@ describe("resolveSidebarRowAccessibility", () => {
     {
       title: "Can you audit the UI?",
       statusLabel: "Working",
-      projectDisplayName: "Game Studio",
+      projectDisplayName: "Kurambit",
       isActive: true,
-      expected: { label: "Can you audit the UI?, Working, Game Studio", current: "page" },
+      expected: { label: "Can you audit the UI?, Working, Kurambit", current: "page" },
     },
     {
       title: "The audit is done",
       statusLabel: null,
-      projectDisplayName: "Game Studio",
+      projectDisplayName: "Kurambit",
       isActive: false,
-      expected: { label: "The audit is done, Game Studio", current: undefined },
+      expected: { label: "The audit is done, Kurambit", current: undefined },
     },
     {
       title: "Untitled task",
@@ -651,7 +651,7 @@ describe("createThreadJumpHintVisibilityController", () => {
 
 describe("getSidebarThreadIdsToPrewarm", () => {
   it("returns only the first visible thread ids up to the prewarm limit", () => {
-    expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "t3"], 2)).toEqual(["t1", "t2"]);
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "kurambit"], 2)).toEqual(["t1", "t2"]);
   });
 
   it("returns all visible thread ids when they fit within the limit", () => {
@@ -992,14 +992,14 @@ describe("resolveSidebarThreadStatus", () => {
 describe("pullRequestMatchesSearchQuery", () => {
   const branchPullRequest = {
     projectId: ProjectId.make("project"),
-    repository: "pingdotgg/t3code",
+    repository: "Absterrg0/Kurambit",
     number: 123,
-    url: "https://github.com/pingdotgg/t3code/pull/123",
+    url: "https://github.com/Absterrg0/Kurambit/pull/123",
   };
 
   it("matches when every query token appears in the PR's terms", () => {
     expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "123")).toBe(true);
-    expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "pingdotgg/t3code #123")).toBe(
+    expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "Absterrg0/Kurambit #123")).toBe(
       true,
     );
   });

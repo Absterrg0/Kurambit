@@ -4,16 +4,16 @@ import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import type {
   GitRunStackedActionResult,
   GitStackedAction,
   VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { type MouseEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   CheckIcon,
@@ -88,7 +88,7 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import { resolvePathLinkTarget } from "@kurambit/shared/fileLinks";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -98,7 +98,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
+import { formatDiffCount } from "@kurambit/client-runtime/diff-count";
 
 interface GitActionsControlProps {
   presentation?: "toolbar" | "menu";

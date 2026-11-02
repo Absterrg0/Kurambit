@@ -2,8 +2,8 @@ import type {
   GitRunStackedActionResult,
   GitStackedAction,
   VcsStatusResult,
-} from "@t3tools/contracts";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+} from "@kurambit/contracts";
+import { isTemporaryWorktreeBranch } from "@kurambit/shared/git";
 
 export type GitActionIconName = "commit" | "push";
 
@@ -265,4 +265,4 @@ export function resolveLiveThreadBranchUpdate(input: {
   };
 }
 
-export { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
+export { resolveAutoFeatureBranchName } from "@kurambit/shared/git";

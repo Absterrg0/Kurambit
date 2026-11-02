@@ -1,5 +1,5 @@
 import * as TestClock from "effect/testing/TestClock";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kurambit/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import * as Effect from "effect/Effect";
@@ -58,7 +58,7 @@ const makeHarness = Effect.fn("TestAuthorization.makeHarness")(function* (input:
         Layer.mergeAll(
           RpcHttp.layerRemoteHttpClient(fetch.fetchFn),
           Layer.succeed(ClientCapabilities.ClientPresentation, {
-            metadata: { label: "Game Studio", deviceType: "desktop", os: "linux" },
+            metadata: { label: "Kurambit", deviceType: "desktop", os: "linux" },
           }),
         ),
       ),
@@ -92,7 +92,9 @@ describe("Local bearer authorization", () => {
       expect(first.socketUrl).toContain("wsTicket=first-ticket");
       expect(second.socketUrl).toContain("wsTicket=second-ticket");
       expect(
-        harness.fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/t3/environment")),
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/kurambit/environment"),
+        ),
       ).toHaveLength(1);
       expect(
         harness.fetch.calls.filter(([url]) => String(url).endsWith("/api/auth/websocket-ticket")),
@@ -138,7 +140,9 @@ describe("Local bearer authorization", () => {
         }),
       );
       expect(
-        harness.fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/t3/environment")),
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/kurambit/environment"),
+        ),
       ).toHaveLength(2);
     }),
   );

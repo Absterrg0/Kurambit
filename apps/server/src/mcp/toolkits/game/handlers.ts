@@ -4,9 +4,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { GameToolkit, GameBlenderLookToolkit } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
-  Effect.flatMap((context) =>
-    McpInvocationContext.requireThreadScope(context, "Game Studio tools"),
-  ),
+  Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
 const handlers = {
   game_status: McpToolAccess.readsAsCaller((input) =>

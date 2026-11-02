@@ -3,8 +3,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
-import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -30,7 +30,7 @@ export class ServerAlreadyRunningError extends Schema.TaggedError<ServerAlreadyR
   override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
 
   override get message(): string {
-    return `A T3 Code server already owns ${this.stateDir}. Stop that server, or use a separate T3 home and pair with it, then retry. No server was stopped.`;
+    return `A Kurambit server already owns ${this.stateDir}. Stop that server, or use a separate Kurambit home and pair with it, then retry. No server was stopped.`;
   }
 }
 

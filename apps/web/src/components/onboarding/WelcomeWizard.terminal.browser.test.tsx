@@ -2,7 +2,7 @@ import { RegistryContext } from "@effect/atom-react";
 import {
   BearerConnectionTarget,
   PrimaryConnectionTarget,
-} from "@t3tools/client-runtime/connection";
+} from "@kurambit/client-runtime/connection";
 import {
   AuthTerminalOperateScope,
   DEFAULT_SERVER_SETTINGS,
@@ -17,8 +17,8 @@ import {
   type TerminalCloseInput,
   type TerminalOpenInput,
   type TerminalWriteInput,
-} from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+} from "@kurambit/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { act } from "react";
@@ -52,7 +52,7 @@ const state = vi.hoisted(() => ({
 // Session grants come from per-test atoms so a test can revoke or regrant mid-flow; the
 // real scope checks in ~/state/session read them through the app registry, which the
 // wizard is also rendered with.
-vi.mock(import("@t3tools/client-runtime/state/session"), async (original) => {
+vi.mock(import("@kurambit/client-runtime/state/session"), async (original) => {
   const actual = await original();
   return {
     ...actual,
@@ -162,7 +162,7 @@ const session = (scopes: readonly AuthEnvironmentScope[]): AuthSessionState => (
     policy: "remote-reachable",
     bootstrapMethods: ["one-time-token"],
     sessionMethods: ["bearer-access-token"],
-    sessionCookieName: "t3_session",
+    sessionCookieName: "kurambit_session",
   },
 });
 function setAccess(environmentId: EnvironmentId, allowed: boolean) {
@@ -430,6 +430,6 @@ describe("welcome agent terminal setup", () => {
       writing.resolve(AsyncResult.success(undefined));
     });
     expect(state.close).not.toHaveBeenCalled();
-    expect(pageText()).toContain("Set up Game Studio");
+    expect(pageText()).toContain("Set up Kurambit");
   });
 });

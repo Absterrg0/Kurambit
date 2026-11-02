@@ -3,7 +3,7 @@ import {
   AuthStandardClientScopes,
   type AuthCreatePairingCredentialInput,
   EnvironmentHttpApi,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -30,7 +30,7 @@ class AuthTestApi extends HttpApi.make("environment")
   .add(EnvironmentHttpApi.groups.auth)
   .add(EnvironmentHttpApi.groups.mcpOAuth) {}
 
-const layerConfig = ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-oauth-test-" });
+const layerConfig = ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-mcp-oauth-test-" });
 const layerEnvironmentAuth = EnvironmentAuth.layer.pipe(
   Layer.provide(Sqlite.layerMemory),
   Layer.provideMerge(ServerSecretStore.layer),

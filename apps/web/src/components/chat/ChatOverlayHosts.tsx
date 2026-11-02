@@ -1,4 +1,4 @@
-import type { MessageId } from "@t3tools/contracts";
+import type { MessageId } from "@kurambit/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import { useEffect } from "react";

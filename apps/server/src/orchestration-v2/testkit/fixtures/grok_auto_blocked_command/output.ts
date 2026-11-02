@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { ProviderReplayTranscript } from "@t3tools/contracts";
+import type { ProviderReplayTranscript } from "@kurambit/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import {
@@ -42,7 +42,7 @@ export function assertGrokAutoBlockedCommandOutput(
   assert.deepEqual(
     frames.find(({ frame }) => frame.method === "initialize")?.frame.params?._meta,
     { clientType: "extension" },
-    "T3 must tell Grok it can show permission prompts",
+    "Kurambit must tell Grok it can show permission prompts",
   );
 
   const commands = projection.turnItems.flatMap((item) =>

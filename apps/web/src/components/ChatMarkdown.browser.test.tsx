@@ -1,6 +1,6 @@
-import { EnvironmentId } from "@t3tools/contracts";
-import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
-import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
+import { EnvironmentId } from "@kurambit/contracts";
+import { searchableMessageSegments } from "@kurambit/shared/threadFindText";
+import { countThreadSearchOccurrences } from "@kurambit/shared/threadSearch";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -22,7 +22,7 @@ vi.mock(import("../state/server"), async (original) => {
 });
 // A standard client session, so environment-owned file links can open.
 vi.mock(import("../state/session"), async (original) => {
-  const { AuthStandardClientScopes } = await import("@t3tools/contracts");
+  const { AuthStandardClientScopes } = await import("@kurambit/contracts");
   const granted = new Set<string>(AuthStandardClientScopes);
   const hasScope = (environmentId: unknown, scope: string) =>
     environmentId !== null && granted.has(scope);
@@ -140,7 +140,7 @@ describe("ChatMarkdown bare anchor placeholders", () => {
 describe("ChatMarkdown context references", () => {
   it("renders text and image references through the chip renderer, with readable fallback", async () => {
     const text =
-      "See [Terminal output](t3-context://v1/terminal/term-1) and ![Error image](t3-context://v1/image/img-1).";
+      "See [Terminal output](kurambit-context://v1/terminal/term-1) and ![Error image](kurambit-context://v1/image/img-1).";
     const { container, rerender } = await render(
       <ChatMarkdown
         cwd={undefined}
@@ -167,7 +167,7 @@ describe("ChatMarkdown context references", () => {
     await render(
       <ChatMarkdown
         cwd={undefined}
-        text="See [**Bold** `code`](t3-context://v1/terminal/term-1)."
+        text="See [**Bold** `code`](kurambit-context://v1/terminal/term-1)."
         renderContextReference={({ kind, label }) => {
           seen.push(`${kind}: ${label}`);
           return <button>{label}</button>;
@@ -191,7 +191,7 @@ describe("ChatMarkdown favicon privacy", () => {
     }
     await rerender(markdown("https://example.com"));
     expect(container.querySelectorAll("img")).toHaveLength(1);
-    await rerender(markdown("https://github.com/pingdotgg/t3code/pull/1"));
+    await rerender(markdown("https://github.com/Absterrg0/Kurambit/pull/1"));
     expect(container.querySelectorAll("img")).toHaveLength(0);
     expect(container.querySelector("a svg")).not.toBeNull();
   });
@@ -705,7 +705,7 @@ describe("ChatMarkdown thread find", () => {
   const frame = () =>
     act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   const activeHighlights = () =>
-    [...(CSS.highlights.get("t3-thread-find-active") ?? [])].map((range) =>
+    [...(CSS.highlights.get("kurambit-thread-find-active") ?? [])].map((range) =>
       (range as Range).toString(),
     );
 
@@ -743,13 +743,13 @@ describe("ChatMarkdown thread find", () => {
     expect(openStates()).toEqual(["false", "false", "false"]);
     expect(container.textContent).toContain("nothing here");
     expect(activeHighlights()).toEqual(["needle"]);
-    expect(CSS.highlights.get("t3-thread-find")?.size ?? 0).toBe(0);
+    expect(CSS.highlights.get("kurambit-thread-find")?.size ?? 0).toBe(0);
 
     await show("needle", 1);
     await frame();
     await frame();
     expect(openStates()).toEqual(["false", "true", "true"]);
-    expect(CSS.highlights.get("t3-thread-find-active")?.size).toBe(1);
+    expect(CSS.highlights.get("kurambit-thread-find-active")?.size).toBe(1);
   });
 
   it("keeps Mermaid diagrams rendered until find selects a match in their source", async () => {
@@ -791,7 +791,7 @@ describe("ChatMarkdown thread find", () => {
     },
     { text: '```ts title="src/needle.ts"\nconst a = 1;\n```', query: "needle", count: 0 },
     { text: "```weirdlang\nconst a = 1;\n```", query: "weirdlang", count: 0 },
-    { text: "Use $test-t3-app now", query: "T3 App Testing", count: 1 },
+    { text: "Use $test-kurambit-app now", query: "Kurambit App Testing", count: 1 },
     { text: "`/tmp/file.ts:42`", query: "file.ts · L42", count: 1, user: true, lineBreaks: true },
     { text: "> [!NOTE]\n> Searchable alert", query: "Searchable alert", count: 1 },
     {
@@ -811,7 +811,7 @@ describe("ChatMarkdown thread find", () => {
   ])(
     "highlights the indexed occurrences of $query in $text",
     async ({ text, query, count, lineBreaks, user, withTemplate }) => {
-      const skills = [{ name: "test-t3-app", displayName: "T3 App Testing" }];
+      const skills = [{ name: "test-kurambit-app", displayName: "Kurambit App Testing" }];
       const container = document.body.appendChild(document.createElement("div"));
       const root = createRoot(container);
       roots.push(root);

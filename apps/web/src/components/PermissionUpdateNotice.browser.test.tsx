@@ -39,7 +39,7 @@ import { PermissionUpdateNotice } from "./PermissionUpdateNotice";
 
 let root: Root;
 let container: HTMLDivElement;
-const storageKey = () => `t3code:permission-update:v1:env-${state.id}`;
+const storageKey = () => `kurambit:permission-update:v1:env-${state.id}`;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

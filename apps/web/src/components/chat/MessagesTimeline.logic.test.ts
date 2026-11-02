@@ -1,5 +1,5 @@
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { ThreadId, type WorktreeSetupSnapshot } from "@t3tools/contracts";
+import { shouldPreserveAssistantLineBreaks } from "@kurambit/shared/markdownPipeline";
+import { ThreadId, type WorktreeSetupSnapshot } from "@kurambit/contracts";
 import {
   CheckpointRef,
   NodeId,
@@ -11,7 +11,7 @@ import {
   RuntimeRequestId,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import {
   deriveTimelineEntriesFromVisibleTurnItems,
@@ -22,8 +22,8 @@ import {
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, RunId } from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { EnvironmentId, MessageId, RunId } from "@kurambit/contracts";
+import { serializeAssistantCitation } from "@kurambit/shared/assistantCitations";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
@@ -166,7 +166,7 @@ describe("work entry labels", () => {
   ] as const)("uses the same friendly %s label in both views", (toolLifecycleStatus, label) => {
     const browserEntry = {
       ...entry,
-      toolTitle: "T3-code.preview_click",
+      toolTitle: "kurambit.preview_click",
       detail: '{"ok":true}',
       toolLifecycleStatus,
     };
@@ -189,7 +189,7 @@ describe("work entry labels", () => {
       toolLifecycleStatus,
       structuredPayload: {
         type: "dynamic_tool",
-        toolName: "t3-code.t3_thread_read",
+        toolName: "kurambit.kurambit_thread_read",
         input: { threadId: " thread-child ", view: "activity" },
       } as never,
     };
@@ -202,13 +202,17 @@ describe("work entry labels", () => {
     const payload = (toolName: string, input: unknown) => ({
       structuredPayload: { type: "dynamic_tool", toolName, input } as never,
     });
-    expect(threadReadTargetId(payload("t3-code.t3_thread_wait", { threadId: "t" }))).toBeNull();
-    expect(threadReadTargetId(payload("t3-code.t3_thread_read", { threadId: "  " }))).toBeNull();
-    expect(threadReadTargetId(payload("t3-code.t3_thread_read", null))).toBeNull();
+    expect(
+      threadReadTargetId(payload("kurambit.kurambit_thread_wait", { threadId: "t" })),
+    ).toBeNull();
+    expect(
+      threadReadTargetId(payload("kurambit.kurambit_thread_read", { threadId: "  " })),
+    ).toBeNull();
+    expect(threadReadTargetId(payload("kurambit.kurambit_thread_read", null))).toBeNull();
   });
 
   it("uses the active summary state for legacy tools without a lifecycle status", () => {
-    const browserEntry = { ...entry, toolTitle: "T3-code.preview_click" };
+    const browserEntry = { ...entry, toolTitle: "kurambit.preview_click" };
     expect(liveWorkEntryLabel(browserEntry, undefined, true)).toBe(
       "Clicking in the preview browser",
     );
@@ -220,7 +224,7 @@ describe("work entry labels", () => {
   it("keeps the latest live activity in the present tense after the call completes", () => {
     const browserEntry = {
       ...entry,
-      toolTitle: "T3-code.preview_click",
+      toolTitle: "kurambit.preview_click",
       toolLifecycleStatus: "completed" as const,
     };
     expect(liveWorkEntryLabel(browserEntry, undefined, true)).toBe(
@@ -372,7 +376,7 @@ describe("work entry labels", () => {
             entry: {
               ...entry,
               itemType: "dynamic_tool",
-              toolData: { server: "t3-code", tool },
+              toolData: { server: "kurambit", tool },
             },
           },
         ],
@@ -803,7 +807,7 @@ describe("deriveMessagesTimelineRows", () => {
       toolSource: { key: "mcp:node_repl", name: "node repl", kind: "integration" as const },
       input: {
         title: "Restrict the breakpoint to Git actions",
-        code: "await sky.type_text({app:'Game Studio (Nightly)',text:'debug(ga.run)'});",
+        code: "await sky.type_text({app:'Kurambit (Nightly)',text:'debug(ga.run)'});",
       },
     };
     const entries = deriveTimelineEntriesFromVisibleTurnItems({
@@ -831,7 +835,7 @@ describe("deriveMessagesTimelineRows", () => {
         id: TurnItemId.make("list"),
         status: "completed",
         title: "Custom provider title",
-        toolName: "T3-code.t3_project_list",
+        toolName: "kurambit.kurambit_project_list",
         input: {},
         output: { projects: [] },
       },
@@ -841,7 +845,7 @@ describe("deriveMessagesTimelineRows", () => {
         id: TurnItemId.make("clone"),
         status: "completed",
         title: "Custom provider title",
-        toolName: "mcp__t3_code__t3_project_clone",
+        toolName: "mcp__kurambit__kurambit_project_clone",
         input: {},
         output: { cwd: "/tmp/repo" },
       },
@@ -851,7 +855,7 @@ describe("deriveMessagesTimelineRows", () => {
         id: TurnItemId.make("failed-clone"),
         status: "completed",
         title: "Custom provider title",
-        toolName: "t3_project_clone",
+        toolName: "kurambit_project_clone",
         input: {},
         output: { isError: true },
       },
@@ -872,7 +876,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(
       resolveTimelineToolPresentation(items[1]!.type === "dynamic_tool" ? items[1].toolName : null)
         ?.logo,
-    ).toBe("t3-code");
+    ).toBe("kurambit");
     const rows = deriveMessagesTimelineRows({
       timelineEntries: entries,
       isWorking: false,
@@ -3237,7 +3241,7 @@ describe("deriveMessagesTimelineRows", () => {
           toolCallId: `call-${index}`,
           createdAt,
           runId,
-          label: "t3-code.preview_snapshot",
+          label: "kurambit.preview_snapshot",
           tone: "tool" as const,
           toolLifecycleStatus:
             isWorking && index === 999 ? ("inProgress" as const) : ("completed" as const),
@@ -3599,24 +3603,24 @@ describe("computeStableMessagesTimelineRows", () => {
 });
 
 describe("resolveTimelineToolPresentation", () => {
-  it("pretty prints Claude and Cursor T3 MCP tool names", () => {
-    expect(resolveTimelineToolPresentation("mcp__t3-code__t3_thread_read")).toEqual({
-      displayName: "Read a T3 thread",
-      logo: "t3-code",
+  it("pretty prints Claude and Cursor Kurambit MCP tool names", () => {
+    expect(resolveTimelineToolPresentation("mcp__kurambit__kurambit_thread_read")).toEqual({
+      displayName: "Read a Kurambit thread",
+      logo: "kurambit",
     });
   });
 
-  it("pretty prints Codex T3 MCP tool names", () => {
-    expect(resolveTimelineToolPresentation("t3-code.create_threads")).toEqual({
-      displayName: "Create T3 threads",
-      logo: "t3-code",
+  it("pretty prints Codex Kurambit MCP tool names", () => {
+    expect(resolveTimelineToolPresentation("kurambit.create_threads")).toEqual({
+      displayName: "Create Kurambit threads",
+      logo: "kurambit",
     });
   });
 
-  it("pretty prints bare T3 MCP toolkit names", () => {
+  it("pretty prints bare Kurambit MCP toolkit names", () => {
     expect(resolveTimelineToolPresentation("list_scheduled_tasks")).toEqual({
       displayName: "List scheduled tasks",
-      logo: "t3-code",
+      logo: "kurambit",
     });
   });
 
@@ -4235,7 +4239,7 @@ describe("streaming v2 row projection", () => {
         {
           runId: source.historyRunId,
           checkpointTurnCount: 1,
-          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/history"),
+          checkpointRef: CheckpointRef.make("refs/kurambit/checkpoints/history"),
           status: "ready",
           files: [],
           assistantMessageId: MessageId.make("history-assistant"),
@@ -4647,7 +4651,7 @@ describe("linked timeline resources", () => {
               runId,
               type: "dynamic_tool",
               status: failed ? "failed" : status,
-              toolName: "t3-code.delegate_task",
+              toolName: "kurambit.delegate_task",
               input: { task: taskId === "b" ? "a" : taskId, role },
               ...(status === "completed"
                 ? {
@@ -5466,7 +5470,7 @@ describe("shouldCollapseUserMessage", () => {
       (_, index) =>
         `[file${index}.ts](/workspace/projects/example/packages/some/deeply/nested/directory/file${index}.ts)`,
     );
-    const text = `Compare ${links.join(", ")} with [terminal 1](t3-context://v1/terminal/${"a".repeat(36)}).`;
+    const text = `Compare ${links.join(", ")} with [terminal 1](kurambit-context://v1/terminal/${"a".repeat(36)}).`;
 
     expect(text.length).toBeGreaterThan(600);
     expect(shouldCollapseUserMessage(text)).toBe(false);

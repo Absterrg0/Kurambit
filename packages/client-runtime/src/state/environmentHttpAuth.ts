@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import {
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { FetchHttpClient, type HttpMethod } from "effect/http";
 import type { PreparedConnection } from "../connection/model.ts";
 import {

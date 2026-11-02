@@ -3,15 +3,15 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { GameOperationError, THREE_VIEWPORT } from "@t3tools/contracts";
+import { GameOperationError, THREE_VIEWPORT } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
 
-export const GAME_STUDIO_CHROME_OVERRIDE = "GAME_STUDIO_CHROME";
+export const KURAMBIT_CHROME_OVERRIDE = "KURAMBIT_CHROME";
 
 /** Headless Chromium for the three.js lane: explicit override first, then the host install. */
 export const findChromium = async (): Promise<string | null> => {
   const pathEnv = process.env.PATH ?? "";
-  const override = process.env[GAME_STUDIO_CHROME_OVERRIDE];
+  const override = process.env[KURAMBIT_CHROME_OVERRIDE];
   if (override !== undefined && override.trim() !== "") {
     const hit = await findExecutable(NodePath.basename(override.trim()), {
       pathEnv: NodePath.dirname(override.trim()) + NodePath.delimiter + pathEnv,
@@ -98,7 +98,7 @@ export const requireChromium = (operation: string, path: string) =>
         path,
         reason: "tool-missing",
         detail:
-          "Headless Chromium is needed to play this three.js game, and none was found. Install Google Chrome (or Chromium), or point GAME_STUDIO_CHROME at its executable.",
+          "Headless Chromium is needed to play this three.js game, and none was found. Install Google Chrome (or Chromium), or point KURAMBIT_CHROME at its executable.",
       });
     return executable;
   });

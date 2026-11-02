@@ -1,5 +1,5 @@
-import { AuthOrchestrationOperateScope, EnvironmentId, type EditorId } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { AuthOrchestrationOperateScope, EnvironmentId, type EditorId } from "@kurambit/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import { AsyncResult } from "effect/reactivity";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -150,7 +150,7 @@ it.each(["local-exec", "remote-links"] as const)(
     byLabel("Open in Cursor");
     await click(byLabel("Choose editor"));
     await click(menuItems().find((item) => item.textContent?.includes("VS Code"))!);
-    expect(window.localStorage.getItem("t3code:last-editor")).toBe('"vscode"');
+    expect(window.localStorage.getItem("kurambit:last-editor")).toBe('"vscode"');
     const openButton = byLabel("Open in VS Code");
     expect(state.run).not.toHaveBeenCalled();
     expect(state.openUrl).not.toHaveBeenCalled();

@@ -5,7 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   benchmarkServerSpawn,
   externalServerOrigin,
@@ -129,9 +129,9 @@ describe("benchmarkServerSpawn", () => {
   const spawn = (): BenchmarkServerSpawn =>
     benchmarkServerSpawn({
       checkout: "/checkout",
-      homeDir: "/checkout/.t3/benchmark-server",
+      homeDir: "/checkout/.kurambit/benchmark-server",
       sandbox: {
-        runtimeDirectory: "/checkout/.t3/run/display-sandbox",
+        runtimeDirectory: "/checkout/.kurambit/run/display-sandbox",
         environment: sandboxDisplayEnvironment(
           {
             PATH: "/usr/bin",
@@ -139,7 +139,7 @@ describe("benchmarkServerSpawn", () => {
             WAYLAND_DISPLAY: "wayland-0",
             XAUTHORITY: "/run/user/1000/xauth",
           },
-          "/checkout/.t3/run/display-sandbox",
+          "/checkout/.kurambit/run/display-sandbox",
         ),
       },
     });
@@ -147,7 +147,7 @@ describe("benchmarkServerSpawn", () => {
   it("starts the server with the sandboxed environment, not the operator's", () => {
     const spec = spawn();
     for (const name of DISPLAY_VARIABLES) assert.equal(spec.env[name], undefined);
-    assert.equal(spec.env.XDG_RUNTIME_DIR, "/checkout/.t3/run/display-sandbox");
+    assert.equal(spec.env.XDG_RUNTIME_DIR, "/checkout/.kurambit/run/display-sandbox");
     assert.equal(spec.env.PATH, "/usr/bin");
   });
 
@@ -157,7 +157,7 @@ describe("benchmarkServerSpawn", () => {
       NodePath.join("/checkout", "apps/server/src/bin.ts"),
       "serve",
       "--base-dir",
-      "/checkout/.t3/benchmark-server",
+      "/checkout/.kurambit/benchmark-server",
     ]);
   });
 });

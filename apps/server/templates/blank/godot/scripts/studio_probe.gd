@@ -1,4 +1,4 @@
-## Read-only snapshot hook for Game Studio's web playtest. The browser calls
+## Read-only snapshot hook for Kurambit's web playtest. The browser calls
 ## `window.__studioProbe()` and gets JSON: GameState's public primitive members,
 ## the world position of the first node in the `player` group, and the text the
 ## visible Label, RichTextLabel and Button nodes show (so the playtest can tell

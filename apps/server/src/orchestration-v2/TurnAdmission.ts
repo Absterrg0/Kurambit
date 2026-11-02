@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ProjectId, ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -22,6 +22,6 @@ export interface TurnAdmissionThread {
 
 export class TurnAdmission extends Context.Reference<{
   readonly admit: (thread: TurnAdmissionThread) => Effect.Effect<void, TurnAdmissionRejectedError>;
-}>("t3/orchestration-v2/TurnAdmission", {
+}>("kurambit/orchestration-v2/TurnAdmission", {
   defaultValue: () => ({ admit: () => Effect.void }),
 }) {}

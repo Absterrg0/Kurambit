@@ -1,14 +1,14 @@
 // @effect-diagnostics nodeBuiltinImport:off - plain local servers stand in for LAN services.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ThreadId } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   HTML_RENDER_MEASURE_FONTS,
   HTML_RENDER_MEASURE_WIDTHS,
   htmlRenderTheme,
-} from "@t3tools/shared/htmlRender";
-import { T3_CODE_DARK_THEME_COLORS } from "@t3tools/shared/themePalettes";
+} from "@kurambit/shared/htmlRender";
+import { KURAMBIT_DARK_THEME_COLORS } from "@kurambit/shared/themePalettes";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
@@ -26,7 +26,7 @@ import * as ServerConfig from "../config.ts";
 import * as HtmlRender from "./HtmlRender.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 
-const TEST_BROWSER_ENV = "T3CODE_TEST_HEADLESS_SHELL";
+const TEST_BROWSER_ENV = "KURAMBIT_TEST_HEADLESS_SHELL";
 
 const layerHtmlRender = (
   executable?: string,
@@ -47,7 +47,7 @@ const layerHtmlRender = (
         }),
       ),
     ),
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-html-render-" })),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-html-render-" })),
     Layer.provideMerge(NodeServices.layer),
   );
 const layerTest = layerHtmlRender();
@@ -60,7 +60,9 @@ describe("HtmlRender", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const htmlRender = yield* HtmlRender.HtmlRender;
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-html-images-" });
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "kurambit-html-images-",
+      });
       const png = path.join(directory, "shot.png");
       const svg = path.join(directory, "logo.svg");
       yield* fileSystem.writeFile(png, PNG_BYTES);
@@ -89,8 +91,12 @@ describe("HtmlRender", () => {
       expect(prepared).toContain(`['${pngUri}', \`${svgUri}\`]`);
       expect(prepared).not.toContain(directory);
       for (const src of kept) expect(prepared).toContain(`<img src="${src}">`);
-      expect(prepared.indexOf("<head>")).toBeLessThan(prepared.indexOf('<style id="t3-theme">'));
-      expect(prepared.indexOf('<style id="t3-theme">')).toBeLessThan(prepared.indexOf("<title>"));
+      expect(prepared.indexOf("<head>")).toBeLessThan(
+        prepared.indexOf('<style id="kurambit-theme">'),
+      );
+      expect(prepared.indexOf('<style id="kurambit-theme">')).toBeLessThan(
+        prepared.indexOf("<title>"),
+      );
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -99,7 +105,9 @@ describe("HtmlRender", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const htmlRender = yield* HtmlRender.HtmlRender;
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-html-images-" });
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "kurambit-html-images-",
+      });
       const svg = path.join(directory, "styled.svg");
       const source = [
         '<?xml version="1.0"?>',
@@ -120,7 +128,9 @@ describe("HtmlRender", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const htmlRender = yield* HtmlRender.HtmlRender;
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-html-images-" });
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "kurambit-html-images-",
+      });
       const folder = path.join(directory, "folder.png");
       yield* fileSystem.makeDirectory(folder);
       const missing = path.join(directory, "missing.jpg");
@@ -188,7 +198,7 @@ describe("HtmlRender", () => {
       });
       expect(stored?.endsWith(".html")).toBe(true);
       const html = yield* fileSystem.readFileString(stored ?? "");
-      expect(html).toContain('<style id="t3-theme">');
+      expect(html).toContain('<style id="kurambit-theme">');
       expect(html).toContain("<p>Quarterly revenue</p>");
     }).pipe(Effect.provide(layerTest)),
   );
@@ -238,7 +248,7 @@ describe("HtmlRender", () => {
           const preview = yield* htmlRender.preview({
             html: [
               '<!doctype html><html><head></head><body><div id="page" tabindex="0" style="height:300px;background:var(--accent)"></div>',
-              '<img src="/nonexistent/t3-missing.png" hidden>',
+              '<img src="/nonexistent/kurambit-missing.png" hidden>',
               "<script>",
               "const root = getComputedStyle(document.documentElement);",
               'const page = document.getElementById("page"); page.focus();',
@@ -260,7 +270,7 @@ describe("HtmlRender", () => {
             width: 400,
             contentHeight: 300,
             capturedHeight: 300,
-            missingImages: ["/nonexistent/t3-missing.png"],
+            missingImages: ["/nonexistent/kurambit-missing.png"],
           });
           // Headless Chrome prefers light, so a dark background proves the theme fragment applied.
           expect(preview.consoleMessages).toEqual(
@@ -270,7 +280,7 @@ describe("HtmlRender", () => {
               { level: "info", text: HTML_RENDER_MEASURE_FONTS.sans },
               {
                 level: "warning",
-                text: htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark").variables["--background"],
+                text: htmlRenderTheme(KURAMBIT_DARK_THEME_COLORS, "dark").variables["--background"],
               },
               { level: "error", text: "boom" },
               {
@@ -294,7 +304,9 @@ describe("HtmlRender", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const htmlRender = yield* HtmlRender.HtmlRender;
-          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-html-files-" });
+          const directory = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "kurambit-html-files-",
+          });
           const secret = path.join(directory, "secret.js");
           yield* fileSystem.writeFileString(secret, 'window.secret = "abc123";');
           const secretUrl = NodeURL.pathToFileURL(secret).href;

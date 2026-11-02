@@ -1,9 +1,9 @@
-import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId } from "@kurambit/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 

@@ -2,7 +2,7 @@
 
 import * as NodeChildProcess from "node:child_process";
 
-import type { SnapShotModifier } from "@t3tools/contracts";
+import type { SnapShotModifier } from "@kurambit/contracts";
 
 const MAC_MODIFIER_PAIR_DEVICE_MASKS: Record<SnapShotModifier, readonly [number, number]> = {
   shift: [0x2, 0x4],
@@ -12,7 +12,7 @@ const MAC_MODIFIER_PAIR_DEVICE_MASKS: Record<SnapShotModifier, readonly [number,
 };
 
 // The CoreGraphics query connects osascript to the window server, which registers it as a
-// foreground app attributed to Game Studio. Go background-only first so it never gets a Dock tile.
+// foreground app attributed to Kurambit. Go background-only first so it never gets a Dock tile.
 const POLLER_SCRIPT = `
 ObjC.import("AppKit");
 $.NSApplication.sharedApplication.setActivationPolicy($.NSApplicationActivationPolicyProhibited);

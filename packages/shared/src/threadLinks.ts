@@ -1,12 +1,12 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-export const THREAD_LINK_PROTOCOL = "t3-thread";
+export const THREAD_LINK_PROTOCOL = "kurambit-thread";
 const THREAD_LINK_HREF_PREFIX = `${THREAD_LINK_PROTOCOL}://v1/`;
 // Code comes first in the alternation so a link written inside a code span or fence is skipped.
 const THREAD_LINK_OUTSIDE_CODE =
-  /(?<fence>(`{3,}|~{3,})[\s\S]*?(?:\2|$))|(?<span>(`+)[^\n]*?\4)|\[[^\]\n]*\]\((?<href>t3-thread:\/\/v1\/[^\s)]+)\)/g;
+  /(?<fence>(`{3,}|~{3,})[\s\S]*?(?:\2|$))|(?<span>(`+)[^\n]*?\4)|\[[^\]\n]*\]\((?<href>kurambit-thread:\/\/v1\/[^\s)]+)\)/g;
 
 const decodeThreadId = Schema.decodeUnknownOption(ThreadId);
 

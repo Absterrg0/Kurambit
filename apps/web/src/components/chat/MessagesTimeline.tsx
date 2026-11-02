@@ -1,11 +1,11 @@
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { shouldPreserveAssistantLineBreaks } from "@kurambit/shared/markdownPipeline";
 import { MarkdownFindContext, findRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
 import { PullRequestGlyph } from "../historyChangeIcons";
-import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
+import type { WorktreeSetupSnapshot } from "@kurambit/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -13,7 +13,7 @@ import {
   getQuestionAnswerText,
   getQuestionTextPreview,
   hasQuestionAnswer,
-} from "@t3tools/client-runtime/work-log/user-input";
+} from "@kurambit/client-runtime/work-log/user-input";
 import {
   deriveTimelineMinimapItems,
   resolveTimelineMinimapPreview,
@@ -32,42 +32,42 @@ import {
   type RunId,
   ThreadId,
   type ToolActivityIcon,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+} from "@kurambit/contracts";
+import { parseScopedThreadKey, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+import { resolveUserMessagePresentation } from "@kurambit/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
-import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { canForkProjectedAssistantItem } from "@kurambit/client-runtime/state/thread-workflows";
+import { notificationChildThreadId } from "@kurambit/client-runtime/state/thread-execution";
+import { replaceComposerContextReferences } from "@kurambit/shared/composerContextReferences";
 import {
   liveThoughtLine,
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
+} from "@kurambit/client-runtime/work-log/presentation";
+import { resolveWorkGroupScrollAnchor } from "@kurambit/client-runtime/work-log/scroll-anchor";
 import {
   turnItemHasDetail,
   turnItemNeedsDetailFetch,
-} from "@t3tools/client-runtime/work-log/item-detail";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+} from "@kurambit/client-runtime/work-log/item-detail";
+import { formatAttachmentSize } from "@kurambit/client-runtime/state/attachments";
 import {
   subagentGroupSummary,
   summarizeSubagentStatuses,
-} from "@t3tools/client-runtime/state/subagent-display";
-import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
+} from "@kurambit/client-runtime/state/subagent-display";
+import type { WorkflowOpening } from "@kurambit/client-runtime/state/subagentRuntime";
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
-import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
-import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
-import { formatDuration } from "@t3tools/shared/orchestrationTiming";
-import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
-import { claudeSkillInvocation, isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+import { resolveChatListAnchoredEndSpace } from "@kurambit/shared/chatList";
+import { toolActivityFaviconUrl } from "@kurambit/shared/favicon";
+import { formatDuration } from "@kurambit/shared/orchestrationTiming";
+import { getProjectFaviconCacheKey } from "@kurambit/shared/projectFavicon";
+import { claudeSkillInvocation, isJavaScriptReplTool } from "@kurambit/shared/toolActivity";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
@@ -98,7 +98,7 @@ import {
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@kurambit/shared/codexArtifactTemplates";
 import {
   type ChatMessage,
   type ChatFileAttachment,
@@ -156,7 +156,7 @@ import type {
   ComposerContextId,
   ComposerContextRecord,
   KnownComposerContextRecord,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { Button, InlineButton } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
@@ -260,12 +260,12 @@ import {
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
-} from "@t3tools/shared/composerContextReferences";
+} from "@kurambit/shared/composerContextReferences";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
   encodeComposerContextFragment,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@kurambit/shared/composerContextClipboard";
 import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
@@ -275,7 +275,7 @@ import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@kurambit/contracts/settings";
 import {
   formatChatTimestampTooltip,
   formatDayAwareTimestamp,
@@ -2229,12 +2229,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         >
           Sent by automation
         </p>
-      ) : userMessage.attribution === "t3code" ? (
+      ) : userMessage.attribution === "kurambit" ? (
         <p
           className="me-1 text-2xs text-muted-foreground/70"
-          data-user-message-attribution="t3code"
+          data-user-message-attribution="kurambit"
         >
-          Sent by Game Studio
+          Sent by Kurambit
         </p>
       ) : userMessage.attribution === "agent" ? (
         <p className="me-1 text-2xs text-muted-foreground/70" data-user-message-attribution="agent">
@@ -2599,7 +2599,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>Game Studio</MessageAuthorHeading>
+        <MessageAuthorHeading>Kurambit</MessageAuthorHeading>
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
@@ -3868,7 +3868,7 @@ function toolGroupSummaryIconName(
     case "command":
       return "terminal";
     case "thread-create":
-      return "t3-code";
+      return "kurambit";
     case "browser":
       return "browser";
     case "device":
@@ -4771,7 +4771,7 @@ type WorkEntryIconName =
   | "square-pen"
   | "terminal"
   | "pull-request"
-  | "t3-code"
+  | "kurambit"
   | "wrench"
   | "x"
   | "zap";
@@ -4964,7 +4964,7 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <Code2Icon className={className} aria-hidden />;
     case "device":
       return <SmartphoneIcon className={className} aria-hidden />;
-    case "t3-code":
+    case "kurambit":
       return <Gamepad2Icon className={className} aria-hidden />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
@@ -5105,7 +5105,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
       case "background_task":
         return "zap";
       case "system":
-        return "t3-code";
+        return "kurambit";
       default:
         source satisfies never;
         return "zap";
@@ -5602,7 +5602,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
 function QuestionAnswerHistory({
   answer,
 }: {
-  answer: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  answer: import("@kurambit/contracts").UserInputAttachmentAnswerPayload;
 }) {
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const attachments = Object.values(answer.attachmentsByQuestionId).flat();

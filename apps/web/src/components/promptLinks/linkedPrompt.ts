@@ -1,4 +1,4 @@
-import type { LinkedPrompt } from "@t3tools/shared/promptLinks";
+import type { LinkedPrompt } from "@kurambit/shared/promptLinks";
 
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 
@@ -9,7 +9,7 @@ export function warnAboutHiddenCharacters(prompt: LinkedPrompt): void {
   toastManager.add({
     type: "warning",
     title: "This prompt had hidden characters, it may be malicious",
-    description: `Game Studio removed ${prompt.hiddenCharacters} hidden character${prompt.hiddenCharacters === 1 ? "" : "s"}. Read the prompt before you send it.`,
+    description: `Kurambit removed ${prompt.hiddenCharacters} hidden character${prompt.hiddenCharacters === 1 ? "" : "s"}. Read the prompt before you send it.`,
     timeout: 0,
   });
 }

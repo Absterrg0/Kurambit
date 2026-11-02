@@ -1,21 +1,21 @@
-# Installs an explicitly selected Game Studio CLI archive.
-# Set T3CODE_RELEASE_BASE_URL, T3CODE_VERSION, and T3CODE_INSTALL_BIN_DIR.
-# GAME_STUDIO_HOME defaults to ~/.game-studio. The internal executable is t3.
+# Installs an explicitly selected Kurambit CLI archive.
+# Set KURAMBIT_RELEASE_BASE_URL, KURAMBIT_VERSION, and KURAMBIT_INSTALL_BIN_DIR.
+# KURAMBIT_HOME defaults to ~/.kurambit. The internal executable is kurambit.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$baseUrl = $env:T3CODE_RELEASE_BASE_URL
-$t3Home = if ($env:GAME_STUDIO_HOME) { $env:GAME_STUDIO_HOME } else { Join-Path $HOME ".game-studio" }
-$binDir = $env:T3CODE_INSTALL_BIN_DIR
+$baseUrl = $env:KURAMBIT_RELEASE_BASE_URL
+$kurambitHome = if ($env:KURAMBIT_HOME) { $env:KURAMBIT_HOME } else { Join-Path $HOME ".kurambit" }
+$binDir = $env:KURAMBIT_INSTALL_BIN_DIR
 
 function Fail([string] $message) {
-  Write-Error "t3 install: $message"
+  Write-Error "kurambit install: $message"
   exit 1
 }
 
-if (-not $baseUrl) { Fail "Set T3CODE_RELEASE_BASE_URL to a Game Studio release source." }
-if (-not $binDir) { Fail "Set T3CODE_INSTALL_BIN_DIR to a dedicated Game Studio bin directory." }
-if (-not $env:T3CODE_VERSION) { Fail "Set T3CODE_VERSION to the exact Game Studio release." }
+if (-not $baseUrl) { Fail "Set KURAMBIT_RELEASE_BASE_URL to a Kurambit release source." }
+if (-not $binDir) { Fail "Set KURAMBIT_INSTALL_BIN_DIR to a dedicated Kurambit bin directory." }
+if (-not $env:KURAMBIT_VERSION) { Fail "Set KURAMBIT_VERSION to the exact Kurambit release." }
 $baseUrl = $baseUrl.TrimEnd("/")
 
 $terminal = -not [Console]::IsErrorRedirected -and $env:TERM -ne "dumb"
@@ -102,7 +102,7 @@ if ($interactive) {
   [Console]::Error.WriteLine()
   for ($i = 0; $i -lt $mark.Length; $i++) {
     $row = $mark[$i].Replace('#', [char]0x2588).Replace('^', [char]0x2580).Replace('_', [char]0x2584)
-    $label = if ($i -eq 1) { "     ${bold}Game Studio$reset" } elseif ($i -eq 2) { "     ${muted}CLI installer$reset" } else { "" }
+    $label = if ($i -eq 1) { "     ${bold}Kurambit$reset" } elseif ($i -eq 2) { "     ${muted}CLI installer$reset" } else { "" }
     [Console]::Error.WriteLine("  $bold$row$reset$label")
   }
   [Console]::Error.WriteLine()
@@ -119,18 +119,18 @@ $arch = switch ($rawArch) {
   default { Fail "unsupported architecture $rawArch" }
 }
 
-$channel = if ($env:T3CODE_CHANNEL) { $env:T3CODE_CHANNEL } else { "stable" }
-$version = $env:T3CODE_VERSION
+$channel = if ($env:KURAMBIT_CHANNEL) { $env:KURAMBIT_CHANNEL } else { "stable" }
+$version = $env:KURAMBIT_VERSION
 if ($version -match '-preview\.') {
-  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set T3CODE_CHANNEL=stable (the default) for a supported build."
-  if ($channel -ne "preview" -and -not $env:T3CODE_VERSION) {
+  Write-Warning "kurambit $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set KURAMBIT_CHANNEL=stable (the default) for a supported build."
+  if ($channel -ne "preview" -and -not $env:KURAMBIT_VERSION) {
     Fail "refusing a preview build that was not explicitly requested"
   }
 }
 
-$stem = "t3-$version-win32-$arch"
+$stem = "kurambit-$version-win32-$arch"
 $archive = "$stem.zip"
-$versionsDir = Join-Path $t3Home "runtime\versions"
+$versionsDir = Join-Path $kurambitHome "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
 
@@ -142,14 +142,14 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
   New-Item -ItemType Directory -Path $staging | Out-Null
   try {
     if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
-    [Console]::Error.WriteLine("  ${muted}Installing$reset Game Studio $bold$version$reset`n")
+    [Console]::Error.WriteLine("  ${muted}Installing$reset Kurambit $bold$version$reset`n")
     Step "Downloading..."
     try {
       Fetch "$baseUrl/v$version/SHA256SUMS" (Join-Path $staging "SHA256SUMS")
     } catch {
       $status = $_.Exception.Response.StatusCode.value__
       if ($status -eq 404) {
-        Fail "t3 $version has no release archive for win32-$arch; releases before the self-contained CLI can only be installed with 'npm install -g t3@$version'"
+        Fail "kurambit $version has no release archive for win32-$arch; releases before the self-contained CLI can only be installed with 'npm install -g kurambit@$version'"
       }
       throw
     }
@@ -163,7 +163,7 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
     $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $staging $archive)).Hash.ToLowerInvariant()
     if ($actual -ne $expected) { Fail "checksum mismatch for $archive" }
 
-    Step "Extracting Game Studio..."
+    Step "Extracting Kurambit..."
     # The archive module reads the global preference, not the caller's local scope.
     $savedProgress = $global:ProgressPreference
     try {
@@ -174,7 +174,7 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
     Get-ChildItem (Join-Path $staging $stem) | Move-Item -Destination $staging
     Remove-Item (Join-Path $staging $stem), (Join-Path $staging $archive), (Join-Path $staging "SHA256SUMS") -Recurse -Force
 
-    & (Join-Path $staging "t3.exe") --version | Out-Null
+    & (Join-Path $staging "kurambit.exe") --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "the downloaded executable does not run" }
     Set-Content -Path (Join-Path $staging ".install-complete") -Value $version -NoNewline
 
@@ -186,16 +186,16 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
   }
 }
 
-Step "Setting up the t3 command..."
+Step "Setting up the kurambit command..."
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$shim = Join-Path $binDir "t3.cmd"
+$shim = Join-Path $binDir "kurambit.cmd"
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
-[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 'kurambit.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
 if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
-[Console]::Error.WriteLine("  ${green}Installed Game Studio $version$reset`n")
+[Console]::Error.WriteLine("  ${green}Installed Kurambit $version$reset`n")
 if (($env:PATH -split ";") -notcontains $binDir) {
-  Write-Host "  Add $binDir to your PATH, then run ${bold}t3$reset.`n"
+  Write-Host "  Add $binDir to your PATH, then run ${bold}kurambit$reset.`n"
 } else {
-  Write-Host "  Run ${bold}t3$reset to get started.`n"
+  Write-Host "  Run ${bold}kurambit$reset to get started.`n"
 }

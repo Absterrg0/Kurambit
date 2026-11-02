@@ -1,4 +1,4 @@
-import { ORCHESTRATION_PROTOCOL_HEADER } from "@t3tools/contracts";
+import { ORCHESTRATION_PROTOCOL_HEADER } from "@kurambit/contracts";
 
 export const browserApiCorsAllowedMethods = ["GET", "POST", "OPTIONS"] as const;
 export const browserApiCorsAllowedHeaders = [
@@ -10,4 +10,4 @@ export const browserApiCorsAllowedHeaders = [
   ORCHESTRATION_PROTOCOL_HEADER,
 ] as const;
 
-export const DESKTOP_RENDERER_ORIGINS = ["game-studio://app", "game-studio-dev://app"] as const;
+export const DESKTOP_RENDERER_ORIGINS = ["kurambit://app", "kurambit-dev://app"] as const;

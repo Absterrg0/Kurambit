@@ -1,0 +1,11 @@
+{
+  "iconPath": "assets/prod/kurambit-web-apple-touch-180.png",
+  "scripts": [
+    {
+      "name": "Setup Worktree",
+      "command": "node scripts/setup-worktree.ts",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    }
+  ]
+}

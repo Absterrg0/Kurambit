@@ -30,10 +30,10 @@ import {
   type RuntimeRequestId,
   type ThreadTokenUsageSnapshot,
   type ThreadId,
-} from "@t3tools/contracts";
-import { AgentScope, AgentScopeThreadId } from "@t3tools/shared/AgentScope";
-import { modelSelectionsEqual } from "@t3tools/shared/model";
-import { type SelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
+} from "@kurambit/contracts";
+import { AgentScope, AgentScopeThreadId } from "@kurambit/shared/AgentScope";
+import { modelSelectionsEqual } from "@kurambit/shared/model";
+import { type SelfInvocation, selfInvocationArgs } from "@kurambit/shared/nodeRuntime";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -56,12 +56,12 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import { formatReadToolLabel, formatSearchToolLabel } from "@t3tools/shared/toolActivity";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { formatReadToolLabel, formatSearchToolLabel } from "@kurambit/shared/toolActivity";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
 import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpBridge.ts";
-import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import { mcpToolPresentation } from "@kurambit/provider-core/server/mcpToolPresentation";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as McpProviderSession from "@kurambit/provider-core/server/mcpSession";
 import {
   applyAcpAgentTerminalUpdate,
   acpContentBlockDisplayText,
@@ -92,32 +92,32 @@ import {
 import { ACP_EMPTY_OPTION_VALUE, ACP_SESSION_MODE_OPTION_ID } from "./sessionConfig.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 import {
-  t3AcpPromptWithInstructions,
-  type T3AcpInstructionState,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+  kurambitAcpPromptWithInstructions,
+  type KurambitAcpInstructionState,
+} from "@kurambit/provider-core/server/orchestrationInstructions";
+import { buildRuntimeInstructions } from "@kurambit/provider-core/server/runtimeInstructions";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import type * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
 import {
   type BackgroundWork,
   type BackgroundWorkReport,
   backgroundWorkNotification,
-} from "@t3tools/provider-core/server/notification";
+} from "@kurambit/provider-core/server/notification";
 import {
   makeProviderFailure,
   makeProviderRetryTurnItem,
-} from "@t3tools/provider-core/server/failure";
-import { acpSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@kurambit/provider-core/server/failure";
+import { acpSelectionTransition } from "@kurambit/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
-} from "@t3tools/provider-core/server/attachmentPrompt";
+} from "@kurambit/provider-core/server/attachmentPrompt";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@kurambit/provider-core/server/subagentProjection";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 
 export const ACP_PROTOCOL = "acp.ndjson-jsonrpc" as const;
 
@@ -250,7 +250,7 @@ export interface AcpAdapterV2Flavor {
     | undefined;
   /**
    * Grok's Auto mode only asks about what its own classifier refused, so those
-   * must reach the user instead of being approved by T3's policy.
+   * must reach the user instead of being approved by Kurambit's policy.
    */
   readonly permissionDisposition?: (
     policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
@@ -478,7 +478,7 @@ export const AcpProviderCapabilitiesV2 = {
     appCanCheckpointFilesystem: true,
     supportsNestedCheckpointScopes: true,
     // ACP defines no conversation truncation, so rollback resets the provider
-    // conversation: T3 restores checkpointed state and the next turn starts a
+    // conversation: Kurambit restores checkpointed state and the next turn starts a
     // fresh agent session without the rolled-back context.
     providerCanRollbackConversation: true,
     providerRollbackReturnsSnapshot: true,
@@ -546,29 +546,29 @@ function acpMcpContext(
   }
   // Agents that advertise optional http support still routinely fail to wire
   // injected http servers through to their backend (codex-acp 1.2.0 and pi-acp
-  // both drop them), so every ACP session gets the `t3 acp-mcp-bridge` stdio
-  // server, which forwards JSON-RPC to T3's authenticated MCP endpoint.
+  // both drop them), so every ACP session gets the `kurambit acp-mcp-bridge` stdio
+  // server, which forwards JSON-RPC to Kurambit's authenticated MCP endpoint.
   return {
     servers: [
       {
-        name: "t3-code",
+        name: "kurambit",
         command: self.command,
         args: [...selfInvocationArgs(self, ["acp-mcp-bridge"])],
         env: [
           { name: "ELECTRON_RUN_AS_NODE", value: "1" },
-          { name: "T3_ACP_MCP_ENDPOINT", value: session.endpoint },
-          { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
+          { name: "KURAMBIT_ACP_MCP_ENDPOINT", value: session.endpoint },
+          { name: "KURAMBIT_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
         ],
       },
     ],
-    acpServers: [{ type: "acp", name: "t3-code", serverId: "t3-code" }],
+    acpServers: [{ type: "acp", name: "kurambit", serverId: "kurambit" }],
     endpoint: session.endpoint,
     authorization: session.authorizationHeader,
     processEnvironment: {
-      T3_ACP_MCP_ENDPOINT: session.endpoint,
-      T3_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
-      T3_ACP_MCP_NODE: self.command,
-      ...(self.entrypoint === undefined ? {} : { T3_ACP_MCP_ENTRYPOINT: self.entrypoint }),
+      KURAMBIT_ACP_MCP_ENDPOINT: session.endpoint,
+      KURAMBIT_ACP_MCP_AUTHORIZATION: session.authorizationHeader,
+      KURAMBIT_ACP_MCP_NODE: self.command,
+      ...(self.entrypoint === undefined ? {} : { KURAMBIT_ACP_MCP_ENTRYPOINT: self.entrypoint }),
     },
   };
 }
@@ -1465,7 +1465,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               agentTerminalsById.get(sessionScopedId(sessionId, terminalId))?.command;
             return command === undefined ? [] : [command];
           });
-        // Client terminals (Devin) run with the T3 server's privileges, so they
+        // Client terminals (Devin) run with the Kurambit server's privileges, so they
         // are policy-checked against the active turn policy; a command the user
         // already approved satisfies an "ask" disposition.
         const clientPolicyGrants = makeAcpClientPolicyGrants();
@@ -1492,7 +1492,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* Ref.make<AcpSessionRuntime.AcpSessionRuntimeStartResult | null>(null);
         const activeSelection = yield* Ref.make<ModelSelection | null>(null);
         const activeInteractionMode = yield* Ref.make<ProviderInteractionMode | null>(null);
-        const promptInstructionStates = yield* Ref.make(new Map<string, T3AcpInstructionState>());
+        const promptInstructionStates = yield* Ref.make(
+          new Map<string, KurambitAcpInstructionState>(),
+        );
         const runtimeRestartRequired = yield* Ref.make(false);
         const runtimeTeardownState = yield* Ref.make<AcpRuntimeTeardownState>({ _tag: "Idle" });
         const runtimeCallbackGeneration = yield* Ref.make(0);
@@ -1884,7 +1886,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               elicitation: { form: {}, ...(flavor.onUrlElicitation ? { url: {} } : {}) },
               ...(flavor.clientCapabilitiesMeta ? { _meta: flavor.clientCapabilitiesMeta } : {}),
             },
-            clientInfo: { name: "t3-code", version: "0.0.0" },
+            clientInfo: { name: "kurambit", version: "0.0.0" },
             onTermination,
             onOutgoingResponseFailure: (requestId, error) =>
               Ref.modify(nativeResponseAcknowledgements, (current) => {
@@ -5102,8 +5104,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               Effect.fail(
                 EffectAcpErrors.AcpRequestError.internalError(
                   disposition === "ask"
-                    ? `The active T3 runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
-                    : `The active T3 runtime policy does not allow ${operation}.`,
+                    ? `The active Kurambit runtime policy requires approval for ${operation}. Request permission with session/request_permission before retrying.`
+                    : `The active Kurambit runtime policy does not allow ${operation}.`,
                 ),
               ),
             ),
@@ -6308,15 +6310,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasT3Mcp: (yield* readMcpContext(turnInput.threadId)).servers.length > 0,
-          } satisfies T3AcpInstructionState;
+            hasKurambitMcp: (yield* readMcpContext(turnInput.threadId)).servers.length > 0,
+          } satisfies KurambitAcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({
             text: turnInput.message.text,
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: host.resolveAttachmentPath,
           });
-          const text = t3AcpPromptWithInstructions({
+          const text = kurambitAcpPromptWithInstructions({
             prompt: messageText,
             state: instructionState,
             ...(previousInstructionState === undefined

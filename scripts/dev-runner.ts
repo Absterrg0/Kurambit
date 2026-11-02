@@ -4,10 +4,10 @@ import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NetService from "@t3tools/shared/Net";
-import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@t3tools/shared/devHome";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import * as NetService from "@kurambit/shared/Net";
+import { resolveGitWorktreePath, resolveWorktreeKurambitHome } from "@kurambit/shared/devHome";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { resolveSpawnCommand } from "@kurambit/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Hash from "effect/Hash";
@@ -61,27 +61,27 @@ export function isProxiableBindHost(host: string): boolean {
   );
 }
 
-export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(NodeOS.homedir(), ".game-studio"),
+export const DEFAULT_KURAMBIT_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(NodeOS.homedir(), ".kurambit"),
 );
 
 const MODE_ARGS = {
   dev: [
     "run",
-    "--filter=@t3tools/contracts",
-    "--filter=@t3tools/web",
-    "--filter=t3",
+    "--filter=@kurambit/contracts",
+    "--filter=@kurambit/web",
+    "--filter=kurambit",
     "--parallel",
     "dev",
   ],
-  "dev:server": ["run", "--filter=t3", "dev"],
-  "dev:web": ["run", "--filter=@t3tools/web", "dev"],
-  "dev:desktop": ["run", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "dev"],
+  "dev:server": ["run", "--filter=kurambit", "dev"],
+  "dev:web": ["run", "--filter=@kurambit/web", "dev"],
+  "dev:desktop": ["run", "--filter=@kurambit/desktop", "--filter=@kurambit/web", "dev"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
 /**
- * `role` matters because only the backend honours `--host`/`T3CODE_HOST`; the
+ * `role` matters because only the backend honours `--host`/`KURAMBIT_HOST`; the
  * web port is always loopback.
  */
 type PortAvailabilityCheck<R = never> = (
@@ -114,7 +114,7 @@ export class DevRunnerConfigurationError extends Schema.TaggedError<DevRunnerCon
 export class DevRunnerInvalidPortOffsetError extends Schema.TaggedError<DevRunnerInvalidPortOffsetError>()(
   "DevRunnerInvalidPortOffsetError",
   {
-    configKey: Schema.Literal("T3CODE_PORT_OFFSET"),
+    configKey: Schema.Literal("KURAMBIT_PORT_OFFSET"),
     portOffset: Schema.Number,
     minimum: Schema.Number,
   },
@@ -204,8 +204,8 @@ const optionalIntegerConfig = (name: string): Config.Config<number | undefined> 
     Config.map((value) => Option.getOrUndefined(value)),
   );
 const OffsetConfig = Config.all({
-  portOffset: optionalIntegerConfig("T3CODE_PORT_OFFSET"),
-  devInstance: optionalStringConfig("T3CODE_DEV_INSTANCE"),
+  portOffset: optionalIntegerConfig("KURAMBIT_PORT_OFFSET"),
+  devInstance: optionalStringConfig("KURAMBIT_DEV_INSTANCE"),
 });
 
 export function resolveOffset(config: {
@@ -220,7 +220,7 @@ export function resolveOffset(config: {
     if (config.portOffset < 0) {
       return Effect.fail(
         new DevRunnerInvalidPortOffsetError({
-          configKey: "T3CODE_PORT_OFFSET",
+          configKey: "KURAMBIT_PORT_OFFSET",
           portOffset: config.portOffset,
           minimum: 0,
         }),
@@ -228,7 +228,7 @@ export function resolveOffset(config: {
     }
     return Effect.succeed({
       offset: config.portOffset,
-      source: `T3CODE_PORT_OFFSET=${config.portOffset}`,
+      source: `KURAMBIT_PORT_OFFSET=${config.portOffset}`,
     });
   }
 
@@ -237,12 +237,12 @@ export function resolveOffset(config: {
     if (/^\d+$/.test(seed)) {
       return Effect.succeed({
         offset: Number(seed),
-        source: `numeric T3CODE_DEV_INSTANCE=${seed}`,
+        source: `numeric KURAMBIT_DEV_INSTANCE=${seed}`,
       });
     }
 
     const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
-    return Effect.succeed({ offset, source: `hashed T3CODE_DEV_INSTANCE=${seed}` });
+    return Effect.succeed({ offset, source: `hashed KURAMBIT_DEV_INSTANCE=${seed}` });
   }
 
   const worktreePath = config.worktreePath?.trim();
@@ -263,7 +263,7 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
       return path.resolve(configured);
     }
 
-    return yield* DEFAULT_T3_HOME;
+    return yield* DEFAULT_KURAMBIT_HOME;
   });
 }
 
@@ -272,7 +272,7 @@ interface CreateDevRunnerEnvInput {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly serverOffset: number;
   readonly webOffset: number;
-  readonly t3Home: string | undefined;
+  readonly kurambitHome: string | undefined;
   readonly browser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
@@ -286,7 +286,7 @@ export function createDevRunnerEnv({
   baseEnv,
   serverOffset,
   webOffset,
-  t3Home,
+  kurambitHome,
   browser,
   autoBootstrapProjectFromCwd,
   logWebSocketEvents,
@@ -297,7 +297,7 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    const configuredBaseDir = t3Home?.trim() || undefined;
+    const configuredBaseDir = kurambitHome?.trim() || undefined;
     const resolvedBaseDir = yield* resolveBaseDir(configuredBaseDir);
     const isDesktopMode = mode === "dev:desktop";
 
@@ -309,23 +309,22 @@ export function createDevRunnerEnv({
         `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
     };
 
-    delete output.T3CODE_HOME;
     if (configuredBaseDir !== undefined) {
-      output.GAME_STUDIO_HOME = resolvedBaseDir;
+      output.KURAMBIT_HOME = resolvedBaseDir;
     } else {
-      delete output.GAME_STUDIO_HOME;
+      delete output.KURAMBIT_HOME;
     }
 
     // A dev-runner server is never launcher-managed. When the shell that runs
-    // this script was itself spawned by the machine's managed t3 service (an
-    // agent working inside T3 Code), these leak through and the child server
-    // fails startup with "The service launcher started a different t3 version"
+    // this script was itself spawned by the machine's managed kurambit service (an
+    // agent working inside Kurambit), these leak through and the child server
+    // fails startup with "The service launcher started a different kurambit version"
     // (serviceLauncherClient.ts resolveStartup).
-    delete output.T3_SERVICE_LAUNCHER_CONTEXT;
-    delete output.T3_BOOT_SERVICE_UNIT;
+    delete output.KURAMBIT_SERVICE_LAUNCHER_CONTEXT;
+    delete output.KURAMBIT_BOOT_SERVICE_UNIT;
 
     if (!isDesktopMode) {
-      output.T3CODE_PORT = String(serverPort);
+      output.KURAMBIT_PORT = String(serverPort);
       // HOST is Vite's own bind address, and the desktop branch below is the
       // only place we set it. An inherited one (an exported HOST, a container,
       // a `HOST=0.0.0.0 npm start` habit) would otherwise reach Vite and pin
@@ -342,58 +341,58 @@ export function createDevRunnerEnv({
         // which merges `.env`/`.env.local` *under* this env, so a developer
         // with either URL in their `.env` would get it back and silently lose
         // single-origin mode.
-        output.T3CODE_SINGLE_ORIGIN_DEV = "1";
+        output.KURAMBIT_SINGLE_ORIGIN_DEV = "1";
       } else {
         output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
         output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-        delete output.T3CODE_SINGLE_ORIGIN_DEV;
+        delete output.KURAMBIT_SINGLE_ORIGIN_DEV;
       }
     } else {
-      output.T3CODE_PORT = String(serverPort);
+      output.KURAMBIT_PORT = String(serverPort);
       output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
       output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
       // Desktop pins the renderer to loopback on purpose; an ambient marker
       // must not make Vite drop those URLs.
-      delete output.T3CODE_SINGLE_ORIGIN_DEV;
-      delete output.T3CODE_MODE;
-      delete output.T3CODE_NO_BROWSER;
-      delete output.T3CODE_HOST;
-      delete output.T3CODE_DEV_AUTH_TOKEN;
+      delete output.KURAMBIT_SINGLE_ORIGIN_DEV;
+      delete output.KURAMBIT_MODE;
+      delete output.KURAMBIT_NO_BROWSER;
+      delete output.KURAMBIT_HOST;
+      delete output.KURAMBIT_DEV_AUTH_TOKEN;
     }
 
     if (!isDesktopMode && host !== undefined) {
-      output.T3CODE_HOST = host;
+      output.KURAMBIT_HOST = host;
     }
 
     if (!isDesktopMode) {
-      output.T3CODE_NO_BROWSER = browser === true ? "0" : "1";
+      output.KURAMBIT_NO_BROWSER = browser === true ? "0" : "1";
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
-      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
+      output.KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
     } else {
-      delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
+      delete output.KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
-      output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
+      output.KURAMBIT_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
-      delete output.T3CODE_LOG_WS_EVENTS;
+      delete output.KURAMBIT_LOG_WS_EVENTS;
     }
 
     if (mode === "dev") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
+      output.KURAMBIT_MODE = "web";
+      delete output.KURAMBIT_DESKTOP_WS_URL;
     }
 
     if (mode === "dev:server" || mode === "dev:web") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
+      output.KURAMBIT_MODE = "web";
+      delete output.KURAMBIT_DESKTOP_WS_URL;
     }
 
     if (isDesktopMode) {
       output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
-      delete output.T3CODE_DESKTOP_WS_URL;
+      delete output.KURAMBIT_DESKTOP_WS_URL;
     }
 
     return output;
@@ -574,7 +573,7 @@ export function resolveModePortOffsets<R = NetService.NetService>({
 
 interface DevRunnerCliInput {
   readonly mode: DevMode;
-  readonly t3Home: string | undefined;
+  readonly kurambitHome: string | undefined;
   readonly browser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
@@ -591,7 +590,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       Effect.mapError(
         (cause) =>
           new DevRunnerConfigurationError({
-            configKeys: ["T3CODE_PORT_OFFSET", "T3CODE_DEV_INSTANCE"],
+            configKeys: ["KURAMBIT_PORT_OFFSET", "KURAMBIT_DEV_INSTANCE"],
             cause,
           }),
       ),
@@ -623,22 +622,22 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const hostEnvironment = yield* HostProcess.Environment;
     // A dev server started inside a worktree defaults to that worktree's own
-    // (gitignored) `.t3` — see @t3tools/shared/devHome for why this must
-    // outrank an ambient GAME_STUDIO_HOME. `--home-dir` still wins.
-    const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcess.WorkingDirectory);
+    // (gitignored) `.kurambit` — see @kurambit/shared/devHome for why this must
+    // outrank an ambient KURAMBIT_HOME. `--home-dir` still wins.
+    const worktreeHome = yield* resolveWorktreeKurambitHome(yield* HostProcess.WorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
     // as one would skip the worktree default and land on the shared home —
     // exactly the outcome this precedence exists to prevent.
-    const resolvedT3Home =
-      (input.t3Home?.trim() || undefined) ??
+    const resolvedKurambitHome =
+      (input.kurambitHome?.trim() || undefined) ??
       worktreeHome ??
-      (hostEnvironment.GAME_STUDIO_HOME?.trim() || undefined);
+      (hostEnvironment.KURAMBIT_HOME?.trim() || undefined);
     const env = yield* createDevRunnerEnv({
       mode: input.mode,
       baseEnv: hostEnvironment,
       serverOffset,
       webOffset,
-      t3Home: resolvedT3Home,
+      kurambitHome: resolvedKurambitHome,
       browser: input.browser,
       autoBootstrapProjectFromCwd: input.autoBootstrapProjectFromCwd,
       logWebSocketEvents: input.logWebSocketEvents,
@@ -651,10 +650,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       serverOffset !== offset || webOffset !== offset
         ? ` selectedOffset(server=${serverOffset},web=${webOffset})`
         : "";
-    const baseDir = env.GAME_STUDIO_HOME ?? (yield* DEFAULT_T3_HOME);
+    const baseDir = env.KURAMBIT_HOME ?? (yield* DEFAULT_KURAMBIT_HOME);
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${baseDir}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.KURAMBIT_PORT)} webPort=${String(env.PORT)} baseDir=${baseDir}`,
     );
 
     // Before the share block: --dry-run only resolves and prints. Sharing would
@@ -718,9 +717,9 @@ const devRunnerCli = Command.make("dev-runner", {
   mode: Argument.Literals("mode", DEV_RUNNER_MODES).pipe(
     Argument.withDescription("Development mode to run."),
   ),
-  t3Home: Flag.String("home-dir").pipe(
+  kurambitHome: Flag.String("home-dir").pipe(
     Flag.withDescription(
-      "Explicit Game Studio data directory; runtime state is stored under userdata (equivalent to GAME_STUDIO_HOME). Inside a git worktree this defaults to that worktree's own .t3 so dev state stays off the shared home.",
+      "Explicit Kurambit data directory; runtime state is stored under userdata (equivalent to KURAMBIT_HOME). Inside a git worktree this defaults to that worktree's own .kurambit so dev state stays off the shared home.",
     ),
     Flag.optional,
     Flag.map(Option.getOrUndefined),
@@ -731,23 +730,23 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   autoBootstrapProjectFromCwd: Flag.Boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
-      "Auto-bootstrap toggle (equivalent to T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
+      "Auto-bootstrap toggle (equivalent to KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
     ),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
+    Flag.withFallbackConfig(optionalBooleanConfig("KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
   ),
   logWebSocketEvents: Flag.Boolean("log-websocket-events").pipe(
-    Flag.withDescription("WebSocket event logging toggle (equivalent to T3CODE_LOG_WS_EVENTS)."),
+    Flag.withDescription("WebSocket event logging toggle (equivalent to KURAMBIT_LOG_WS_EVENTS)."),
     Flag.withAlias("log-ws-events"),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_LOG_WS_EVENTS")),
+    Flag.withFallbackConfig(optionalBooleanConfig("KURAMBIT_LOG_WS_EVENTS")),
   ),
   host: Flag.String("host").pipe(
-    Flag.withDescription("Server host/interface override (forwards to T3CODE_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOST")),
+    Flag.withDescription("Server host/interface override (forwards to KURAMBIT_HOST)."),
+    Flag.withFallbackConfig(optionalStringConfig("KURAMBIT_HOST")),
   ),
   port: Flag.Int("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Server port override (forwards to T3CODE_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("T3CODE_PORT")),
+    Flag.withDescription("Server port override (forwards to KURAMBIT_PORT)."),
+    Flag.withFallbackConfig(optionalPortConfig("KURAMBIT_PORT")),
   ),
   devUrl: Flag.String("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),

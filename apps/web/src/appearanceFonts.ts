@@ -8,7 +8,7 @@ import {
   MIN_CODE_FONT_SIZE,
   MIN_INTERFACE_FONT_SIZE,
   MIN_PROMPT_FONT_SIZE,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 export const DEFAULT_SANS_FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
@@ -18,7 +18,7 @@ export const DEFAULT_SANS_FONT_STACK =
 export const DEFAULT_CODE_FONT_STACK =
   '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace';
 
-export const TYPOGRAPHY_ADVANCED_STORAGE_KEY = "t3code:typography-advanced";
+export const TYPOGRAPHY_ADVANCED_STORAGE_KEY = "kurambit:typography-advanced";
 
 export function resolveTerminalFontPreference(input: {
   readonly advanced: boolean;

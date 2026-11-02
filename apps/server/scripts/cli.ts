@@ -11,7 +11,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@kurambit/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,
@@ -131,10 +131,10 @@ const buildExeCmd = Command.make(
           cwd: serverDir,
           env: {
             ...process.env,
-            T3CODE_PACK_EXE: "1",
+            KURAMBIT_PACK_EXE: "1",
             ...Option.match(config.target, {
               onNone: () => ({}),
-              onSome: (target) => ({ T3CODE_PACK_EXE_TARGET: target }),
+              onSome: (target) => ({ KURAMBIT_PACK_EXE_TARGET: target }),
             }),
           },
           stdout: config.verbose ? "inherit" : "ignore",
@@ -152,7 +152,7 @@ const buildExeCmd = Command.make(
         return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
       }
       yield* Effect.log(
-        "[cli] Built dist-exe/t3 (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
+        "[cli] Built dist-exe/kurambit (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
       );
     }),
 ).pipe(
@@ -162,7 +162,7 @@ const buildExeCmd = Command.make(
 );
 
 /**
- * Publishes the `t3.tgz` launcher scripts/build-npm-launcher.ts produced. The
+ * Publishes the `kurambit.tgz` launcher scripts/build-npm-launcher.ts produced. The
  * launcher downloads its executable from the GitHub Release, so the release
  * workflow runs this only after that release is published.
  */
@@ -183,7 +183,7 @@ const publishCmd = Command.make(
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
       const packagesDir = path.resolve(config.packagesDir);
-      const launcherTarball = path.join(packagesDir, "t3.tgz");
+      const launcherTarball = path.join(packagesDir, "kurambit.tgz");
       if (!(yield* fs.exists(launcherTarball))) {
         return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
       }
@@ -192,7 +192,7 @@ const publishCmd = Command.make(
       if (config.provenance) args.push("--provenance");
       if (config.dryRun) args.push("--dry-run");
       const spawnCommand = yield* resolveSpawnCommand("npm", [...args, launcherTarball]);
-      yield* Effect.log(`[cli] npm ${args.join(" ")} t3.tgz`);
+      yield* Effect.log(`[cli] npm ${args.join(" ")} kurambit.tgz`);
       yield* runCommand(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           cwd: packagesDir,
@@ -202,10 +202,10 @@ const publishCmd = Command.make(
         }),
       );
     }),
-).pipe(Command.withDescription("Publish the t3 launcher to npm."));
+).pipe(Command.withDescription("Publish the kurambit launcher to npm."));
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("Kurambit server build & publish CLI."),
   Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
 );
 

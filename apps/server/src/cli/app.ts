@@ -8,9 +8,9 @@ import {
   DesktopAppActivationResponse,
   type DesktopAppActivationPlatform,
   type DesktopAppActivationRequest,
-} from "@t3tools/contracts";
-import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@kurambit/contracts";
+import { resolveDesktopAppControlAddress } from "@kurambit/shared/desktopAppControl";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
@@ -32,7 +32,7 @@ export class DesktopAppSshUnsupportedError extends Schema.TaggedError<DesktopApp
   {},
 ) {
   override get message(): string {
-    return "`t3 app` only controls a desktop app on the same machine. It cannot run over SSH.";
+    return "`kurambit app` only controls a desktop app on the same machine. It cannot run over SSH.";
   }
 }
 
@@ -41,7 +41,7 @@ export class DesktopAppPlatformUnsupportedError extends Schema.TaggedError<Deskt
   { platform: Schema.String },
 ) {
   override get message(): string {
-    return `\`t3 app\` is not supported on ${this.platform}.`;
+    return `\`kurambit app\` is not supported on ${this.platform}.`;
   }
 }
 
@@ -55,7 +55,7 @@ export class DesktopAppUnreachableError extends Schema.TaggedError<DesktopAppUnr
   },
 ) {
   override get message(): string {
-    return "Could not reach the Game Studio desktop app. Start or update the desktop app on this machine, then run `t3 app` again. A running Game Studio server is not enough.";
+    return "Could not reach the Kurambit desktop app. Start or update the desktop app on this machine, then run `kurambit app` again. A running Kurambit server is not enough.";
   }
 }
 
@@ -69,7 +69,7 @@ export class DesktopAppRequestFailedError extends Schema.TaggedError<DesktopAppR
   },
 ) {
   override get message(): string {
-    return `Game Studio could not open ${this.workspaceRoot} (${this.code}).`;
+    return `Kurambit could not open ${this.workspaceRoot} (${this.code}).`;
   }
 }
 
@@ -174,7 +174,10 @@ function sendDesktopAppActivationRequest(input: {
 }
 
 const appEnvironment = Config.all({
-  t3Home: Config.String("GAME_STUDIO_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  kurambitHome: Config.String("KURAMBIT_HOME").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   sshConnection: Config.String("SSH_CONNECTION").pipe(Config.option),
   sshTty: Config.String("SSH_TTY").pipe(Config.option),
 });
@@ -193,9 +196,9 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   }
 
   const path = yield* Path.Path;
-  const configuredBaseDir = Option.getOrUndefined(flags.baseDir) ?? environment.t3Home;
+  const configuredBaseDir = Option.getOrUndefined(flags.baseDir) ?? environment.kurambitHome;
   const baseDir = yield* resolveBaseDir(configuredBaseDir);
-  const allowDevFallback = Option.isNone(flags.baseDir) && !environment.t3Home?.trim();
+  const allowDevFallback = Option.isNone(flags.baseDir) && !environment.kurambitHome?.trim();
   const rawWorkspaceRoot =
     Option.getOrUndefined(flags.workspaceRoot) ?? (yield* HostProcess.WorkingDirectory);
   const workspaceRoot = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
@@ -244,7 +247,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
     });
   }
 
-  yield* Console.log(`Opened ${workspaceRoot} in Game Studio.`);
+  yield* Console.log(`Opened ${workspaceRoot} in Kurambit.`);
 });
 
 export const appCommand = Command.make("app", {
@@ -254,6 +257,6 @@ export const appCommand = Command.make("app", {
     Argument.optional,
   ),
 }).pipe(
-  Command.withDescription("Open a project in the running Game Studio desktop app."),
+  Command.withDescription("Open a project in the running Kurambit desktop app."),
   Command.withHandler(runAppCommand),
 );

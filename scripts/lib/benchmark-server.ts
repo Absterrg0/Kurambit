@@ -3,7 +3,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import type { DisplaySandbox } from "./display-sandbox.ts";
 
 /**

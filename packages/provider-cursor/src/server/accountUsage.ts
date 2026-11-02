@@ -1,4 +1,4 @@
-import type { UsageRecord } from "@t3tools/provider-core/server/usage";
+import type { UsageRecord } from "@kurambit/provider-core/server/usage";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -139,7 +139,7 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
         : typeof credentialSource === "string"
           ? "Cursor credentials could not be read."
           : CursorKeychain.isCursorKeychainTimeoutError(cause)
-            ? "Allow Keychain access on the Mac running T3 Code, then refresh."
+            ? "Allow Keychain access on the Mac running Kurambit, then refresh."
             : "Cursor Keychain credentials could not be read.",
     };
   }

@@ -7,7 +7,7 @@ import {
   OrchestrationV2ThreadBoundedSnapshot,
   OrchestrationV2ThreadTranscript,
   type OrchestrationV2ThreadHistoryPage,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 import * as Effect from "effect/Effect";
 
@@ -50,7 +50,7 @@ const AUTH = {
   policy: "remote-reachable",
   bootstrapMethods: ["one-time-token"],
   sessionMethods: ["dpop-access-token"],
-  sessionCookieName: "t3_session",
+  sessionCookieName: "kurambit_session",
 } satisfies AuthSessionState["auth"];
 const SESSION = {
   authenticated: true,

@@ -3,8 +3,8 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { AcpRegistrySettings } from "@t3tools/provider-acp-registry/settings";
+import { ProviderInstanceId } from "@kurambit/contracts";
+import { AcpRegistrySettings } from "@kurambit/provider-acp-registry/settings";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import type * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
 import {
   acpRegistryProbeFailure,
   acpRegistryProbeResult,
@@ -22,8 +22,8 @@ import {
   normalizeAcpRegistryAuthMethods,
   normalizeAcpRegistryCommands,
   probeAcpRegistryConfiguration,
-} from "@t3tools/provider-acp-registry/testing";
-import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
+} from "@kurambit/provider-acp-registry/testing";
+import * as AcpRegistrySupport from "@kurambit/provider-acp-registry/server/AcpRegistrySupport";
 
 const instanceId = ProviderInstanceId.make("acpRegistry_codex");
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -415,7 +415,7 @@ describe("ACP Registry probe", () => {
                 args: [mockAgentPath],
                 env: {
                   ...process.env,
-                  T3_ACP_COMMAND_ADVERTISEMENT_DELAY_MS: "25",
+                  KURAMBIT_ACP_COMMAND_ADVERTISEMENT_DELAY_MS: "25",
                 },
               },
             }),
@@ -479,8 +479,8 @@ describe("ACP Registry probe", () => {
             args: [mockAgentPath],
             env: {
               ...process.env,
-              T3_ACP_SESSION_LIFECYCLE: "1",
-              T3_ACP_AUTH_METHOD_ID: "mock-login",
+              KURAMBIT_ACP_SESSION_LIFECYCLE: "1",
+              KURAMBIT_ACP_AUTH_METHOD_ID: "mock-login",
             },
           },
         }),
@@ -533,7 +533,7 @@ describe("ACP Registry probe", () => {
           spawn: {
             command: "node",
             args: [mockAgentPath],
-            env: { ...process.env, T3_ACP_OMIT_SESSION_LIST_HANDLER: "1" },
+            env: { ...process.env, KURAMBIT_ACP_OMIT_SESSION_LIST_HANDLER: "1" },
           },
         }),
     });

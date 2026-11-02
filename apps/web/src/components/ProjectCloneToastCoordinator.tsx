@@ -1,17 +1,17 @@
 import { useParams } from "@tanstack/react-router";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@kurambit/client-runtime/environment";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   projectCloneDisplayName,
   projectCloneProgressSummary,
   type EnvironmentId,
   type ProjectCloneSnapshot,
   type ProjectId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { useEffect, useRef } from "react";
 
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";

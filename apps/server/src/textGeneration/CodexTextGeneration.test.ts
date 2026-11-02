@@ -8,15 +8,15 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@kurambit/shared/model";
 import { expect } from "vite-plus/test";
 
-import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
+import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@kurambit/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
+import { writeFakeCli } from "@kurambit/provider-testing/fakeCli";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -25,7 +25,7 @@ const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
 );
 
 const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3code-codex-text-generation-test-",
+  prefix: "kurambit-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 interface FakeCodexInput {
@@ -162,7 +162,7 @@ function withFakeCodexEnv<A, E, R>(
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
+    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
     const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
     const textGeneration = yield* makeCodexTextGeneration(
@@ -371,7 +371,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     ),
   );
 
-  it.effect("uses T3CODE_CODEX_LAUNCH_ARGS for codex exec over settings", () =>
+  it.effect("uses KURAMBIT_CODEX_LAUNCH_ARGS for codex exec over settings", () =>
     withFakeCodexEnv(
       {
         output: JSON.stringify({
@@ -379,7 +379,10 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
           body: "",
         }),
         launchArgs: "--enable settings-feature",
-        environment: { ...process.env, T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
+        environment: {
+          ...process.env,
+          KURAMBIT_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
+        },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",
       },

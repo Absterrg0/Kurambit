@@ -25,7 +25,7 @@ import {
   RunId,
   RuntimeRequestId,
   TurnItemId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -36,17 +36,17 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { toolOutputImages } from "@t3tools/shared/toolOutput";
+import { toolOutputImages } from "@kurambit/shared/toolOutput";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
 import {
   makeProviderEventRoutingState,
   type ProviderEventRouteIdentity,
@@ -108,7 +108,7 @@ const makeSharedWorktree = Effect.gen(function* () {
     "-m",
     "initial",
   ]);
-  yield* command(repo, ["worktree", "add", "-b", "t3/abcd1234", worktreePath]);
+  yield* command(repo, ["worktree", "add", "-b", "kurambit/abcd1234", worktreePath]);
   return { repo, worktreePath, command };
 });
 const modelSelection = {
@@ -560,7 +560,7 @@ layer("ProviderEventIngestorV2", (it) => {
                     parentCheckpointId: null,
                     ordinalWithinScope: input.ordinal,
                     appRunOrdinal: input.ordinal,
-                    ref: CheckpointRef.make(`refs/t3/checkpoints/rewound/${input.ordinal}`),
+                    ref: CheckpointRef.make(`refs/kurambit/checkpoints/rewound/${input.ordinal}`),
                     status: "ready" as const,
                     files: [],
                     capturedAt: now,
@@ -638,7 +638,7 @@ layer("ProviderEventIngestorV2", (it) => {
             createdAt: now,
             updatedAt: now,
           },
-          retainedNativeTurnIds: ["turn-started-outside-t3", "kept-turn"],
+          retainedNativeTurnIds: ["turn-started-outside-kurambit", "kept-turn"],
         },
       });
 
@@ -1562,7 +1562,7 @@ layer("ProviderEventIngestorV2", (it) => {
         type: "image",
         file: { base64: readBase64, type: "image/png", originalSize: 30_000 },
       });
-      const screenshot = toolItem("turn-item:screenshot", 2, "mcp__t3-code__device_screenshot", {
+      const screenshot = toolItem("turn-item:screenshot", 2, "mcp__kurambit__device_screenshot", {
         content: [
           {
             type: "image",
@@ -1781,7 +1781,7 @@ layer("ProviderEventIngestorV2", (it) => {
         if (rootEvent.type !== "thread.created") throw new Error("Expected thread fixture");
         const parent = {
           ...rootEvent.payload,
-          branch: "t3/abcd1234",
+          branch: "kurambit/abcd1234",
           worktreePath,
         };
         yield* eventSink.write({ events: [{ ...rootEvent, payload: parent }] });
@@ -1906,8 +1906,8 @@ layer("ProviderEventIngestorV2", (it) => {
           scenario === "explicit"
             ? "child-feature"
             : scenario === "legacy"
-              ? "t3-abcd1234"
-              : "t3/abcd1234";
+              ? "kurambit-abcd1234"
+              : "kurambit/abcd1234";
         if (scenario === "explicit" || scenario === "legacy")
           yield* command(worktreePath, ["branch", "-m", branch]);
         if (scenario === "detached") yield* command(worktreePath, ["checkout", "--detach"]);
@@ -1975,7 +1975,7 @@ layer("ProviderEventIngestorV2", (it) => {
       const { repo, worktreePath: sharedPath, command } = yield* makeSharedWorktree;
       const isolatedPath = `${sharedPath}-isolated`;
       yield* command(sharedPath, ["branch", "-m", "generated-branch"]);
-      yield* command(repo, ["worktree", "add", "-b", "t3/abcd1234", isolatedPath]);
+      yield* command(repo, ["worktree", "add", "-b", "kurambit/abcd1234", isolatedPath]);
       const actualPath =
         worktreePath === "/repo/shared" ? sharedPath : worktreePath === null ? null : isolatedPath;
       const now = yield* DateTime.now;
@@ -1992,7 +1992,7 @@ layer("ProviderEventIngestorV2", (it) => {
       const offered: OrchestrationV2AppThread = {
         ...rootEvent.payload,
         id: childThreadId,
-        branch: "t3/abcd1234",
+        branch: "kurambit/abcd1234",
         worktreePath: actualPath,
         lineage: {
           parentThreadId: rootEvent.threadId,

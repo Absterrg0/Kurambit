@@ -3,7 +3,7 @@ import {
   type EditorId,
   type EnvironmentId,
   type RemoteOpenTarget,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
@@ -140,7 +140,7 @@ export async function openRemoteEditorUrl(url: string): Promise<boolean> {
   return true;
 }
 
-const REMOTE_OPEN_HINT_KEY = "t3code:remote-open-hint-seen";
+const REMOTE_OPEN_HINT_KEY = "kurambit:remote-open-hint-seen";
 
 export function useRemoteOpenHint(): readonly [seen: boolean, markSeen: () => void] {
   const [seen, setSeen] = useLocalStorage(REMOTE_OPEN_HINT_KEY, false, Schema.Boolean);

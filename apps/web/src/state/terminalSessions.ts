@@ -5,7 +5,7 @@ import {
   selectRunningSubprocessTerminalIds,
   type KnownTerminalSession,
   type TerminalSessionState,
-} from "@t3tools/client-runtime/state/terminal";
+} from "@kurambit/client-runtime/state/terminal";
 import {
   ThreadId,
   AuthTerminalReadScope,
@@ -13,7 +13,7 @@ import {
   type EnvironmentId,
   type TerminalAttachInput,
   type TerminalSummary,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 import { useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";

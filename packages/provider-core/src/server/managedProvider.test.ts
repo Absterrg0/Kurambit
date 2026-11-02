@@ -4,8 +4,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+} from "@kurambit/contracts";
+import { createModelCapabilities } from "@kurambit/shared/model";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -105,10 +105,10 @@ function layerProviderHost(input: {
     ProviderHost.ProviderHost.of({
       paths: {
         cwd: process.cwd(),
-        baseDir: "/t3",
-        stateDir: "/t3/userdata",
-        providerStatusCacheDir: "/t3/caches",
-        attachmentsDir: "/t3/userdata/attachments",
+        baseDir: "/kurambit",
+        stateDir: "/kurambit/userdata",
+        providerStatusCacheDir: "/kurambit/caches",
+        attachmentsDir: "/kurambit/userdata/attachments",
       },
       settings: input.settings ?? {
         get: Effect.succeed(DEFAULT_SERVER_SETTINGS),

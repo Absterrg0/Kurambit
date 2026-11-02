@@ -39,14 +39,14 @@ describe("sanitizeLinkedPrompt", () => {
 describe("parseNewThreadLink", () => {
   it("reads a shared prompt with its optional repository and model", () => {
     const result = parseNewThreadLink(
-      "?prompt=Rate+me&repo=https://github.com/pingdotgg/t3code.git&provider=Codex&model=gpt-5",
+      "?prompt=Rate+me&repo=https://github.com/Absterrg0/Kurambit.git&provider=Codex&model=gpt-5",
     );
     expect(result).toEqual({
       ok: true,
       value: {
         kind: "new",
         prompt: { text: "Rate me", hiddenCharacters: 0 },
-        repository: { owner: "pingdotgg", name: "t3code" },
+        repository: { owner: "Absterrg0", name: "Kurambit" },
         provider: "codex",
         model: "gpt-5",
       },
@@ -55,15 +55,15 @@ describe("parseNewThreadLink", () => {
 
   it("reads a pull request link, whose prompt is optional", () => {
     for (const pr of [
-      "pingdotgg/t3code/42",
-      "pingdotgg/t3code%2342",
-      "https://github.com/pingdotgg/t3code/pull/42/files",
+      "Absterrg0/Kurambit/42",
+      "Absterrg0/Kurambit%2342",
+      "https://github.com/Absterrg0/Kurambit/pull/42/files",
     ]) {
       expect(parseNewThreadLink(`?pr=${pr}`)).toEqual({
         ok: true,
         value: {
           kind: "pull-request",
-          pullRequest: { owner: "pingdotgg", name: "t3code", number: 42 },
+          pullRequest: { owner: "Absterrg0", name: "Kurambit", number: 42 },
           prompt: null,
         },
       });
@@ -94,7 +94,7 @@ describe("link round trips", () => {
   it("builds a link that parses back to the same prompt", () => {
     const link = buildNewThreadLink({
       prompt: "Swear count & rating?",
-      repository: { owner: "pingdotgg", name: "t3code" },
+      repository: { owner: "Absterrg0", name: "Kurambit" },
       provider: "claudeAgent",
       model: "opus",
     });
@@ -107,20 +107,20 @@ describe("link round trips", () => {
   });
 
   it("maps app scheme and hosted links to in-app paths, and nothing else", () => {
-    expect(promptLinkAppPath("game-studio://new?prompt=hi")).toBe("/new?prompt=hi");
-    expect(promptLinkAppPath("game-studio-dev://threads/env-1/thread-1")).toBe("/env-1/thread-1");
-    expect(promptLinkAppPath("https://app.t3.codes/env-1/thread-1?prompt=go")).toBe(
+    expect(promptLinkAppPath("kurambit://new?prompt=hi")).toBe("/new?prompt=hi");
+    expect(promptLinkAppPath("kurambit-dev://threads/env-1/thread-1")).toBe("/env-1/thread-1");
+    expect(promptLinkAppPath("https://example.com/env-1/thread-1?prompt=go")).toBe(
       "/env-1/thread-1?prompt=go",
     );
-    expect(promptLinkAppPath("https://app.t3.codes/settings/general")).toBeNull();
+    expect(promptLinkAppPath("https://example.com/settings/general")).toBeNull();
     expect(promptLinkAppPath("https://evil.test/new?prompt=hi")).toBeNull();
-    expect(promptLinkAppPath("game-studio://app/index.html")).toBeNull();
+    expect(promptLinkAppPath("kurambit://app/index.html")).toBeNull();
   });
 
   it("hands an in-app path to the installed app", () => {
-    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("game-studio://new?prompt=hi");
+    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("kurambit://new?prompt=hi");
     expect(promptLinkDeepLink("/env-1/thread-1?prompt=hi")).toBe(
-      "game-studio://threads/env-1/thread-1?prompt=hi",
+      "kurambit://threads/env-1/thread-1?prompt=hi",
     );
   });
 });

@@ -7,7 +7,7 @@ import type {
   ProjectId,
   ScopedProjectRef,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 export interface DesktopAppActivationProject {
   readonly id: ProjectId;
@@ -85,7 +85,7 @@ export async function handleDesktopAppActivationRequest(
       return failure(
         request.requestId,
         "project-create-failed",
-        errorMessage(error, "Game Studio could not add the project."),
+        errorMessage(error, "Kurambit could not add the project."),
       );
     }
   }
@@ -99,7 +99,7 @@ export async function handleDesktopAppActivationRequest(
       return failure(
         request.requestId,
         "thread-open-failed",
-        "Game Studio could not open a new thread for the project.",
+        "Kurambit could not open a new thread for the project.",
       );
     }
     return {
@@ -113,7 +113,7 @@ export async function handleDesktopAppActivationRequest(
     return failure(
       request.requestId,
       "thread-open-failed",
-      errorMessage(error, "Game Studio could not open a new thread for the project."),
+      errorMessage(error, "Kurambit could not open a new thread for the project."),
     );
   }
 }

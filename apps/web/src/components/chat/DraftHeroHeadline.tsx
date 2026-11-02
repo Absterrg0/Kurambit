@@ -1,8 +1,8 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@kurambit/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@kurambit/client-runtime/environment";
+import { isScratchProject } from "@kurambit/client-runtime/state/projects";
 import { FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
@@ -40,7 +40,7 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings } from "@kurambit/shared/projectSettings";
 
 const OPEN_GAME_VALUE = "open-game";
 
@@ -72,7 +72,7 @@ export function DraftHeroHeadline({
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  // A project without a game manifest is not useful in Game Studio, so the
+  // A project without a game manifest is not useful in Kurambit, so the
   // empty state opens the game folder dialog rather than the generic flow.
   const openGameFolder = () => useGameDialogStore.getState().show("open");
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();

@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import { scopeThreadRef } from "@kurambit/client-runtime/environment";
+import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { registerSettleAndAdvance, settleAndAdvance } from "./settleAndAdvance";

@@ -17,7 +17,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type UserInputAttachments,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -32,7 +32,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { dispatchCommand, sendToThread } from "./ThreadMessageIntake.ts";
 
 const layerIntakeTest = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-question-intake-",
+  prefix: "kurambit-question-intake-",
 }).pipe(Layer.provideMerge(NodeServices.layer), Layer.provideMerge(ServerSettings.layerTest()));
 
 const layerFailingDispatch = (captured: OrchestrationV2ServerCommand[]) =>

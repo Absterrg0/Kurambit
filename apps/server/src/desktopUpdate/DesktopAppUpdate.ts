@@ -2,7 +2,7 @@ import {
   ServerSelfUpdateError,
   type ServerSelfUpdateProgressStage,
   type ServerSelfUpdateResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,7 +23,7 @@ export class DesktopAppUpdate extends Context.Service<
       onHandoffAccepted?: () => Effect.Effect<void>,
     ) => Effect.Effect<never, ServerSelfUpdateError>;
   }
->()("t3/desktopUpdate/DesktopAppUpdate") {}
+>()("kurambit/desktopUpdate/DesktopAppUpdate") {}
 
 export const make = () =>
   Effect.succeed(
@@ -31,11 +31,11 @@ export const make = () =>
       available: false,
       run: () =>
         Effect.fail(
-          new ServerSelfUpdateError({ reason: "Desktop updates are unavailable in Game Studio." }),
+          new ServerSelfUpdateError({ reason: "Desktop updates are unavailable in Kurambit." }),
         ),
       commit: () =>
         Effect.fail(
-          new ServerSelfUpdateError({ reason: "Desktop updates are unavailable in Game Studio." }),
+          new ServerSelfUpdateError({ reason: "Desktop updates are unavailable in Kurambit." }),
         ),
     }),
   );

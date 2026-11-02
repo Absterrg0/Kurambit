@@ -29,7 +29,7 @@ import {
   type GameBlenderLookResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -260,7 +260,7 @@ export class GameBlender extends Context.Service<
     /** Stop one game's live session by root; game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
->()("t3/game/GameBlender") {}
+>()("kurambit/game/GameBlender") {}
 
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
@@ -527,7 +527,7 @@ const make = Effect.gen(function* () {
         args: [PINNED_PKG, "--port", String(port)],
         env: mcpEnv,
       });
-      const client = new Client({ name: "t3-game-blender", version: "1.0.0" }, {});
+      const client = new Client({ name: "kurambit-game-blender", version: "1.0.0" }, {});
       const connected = yield* Effect.tryPromise({
         try: () => client.connect(transport),
         catch: (cause) =>

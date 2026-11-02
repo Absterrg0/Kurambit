@@ -1,10 +1,10 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -12,7 +12,7 @@ import {
   type EnvironmentId,
   type VcsRef,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
 import {
   useDeferredValue,

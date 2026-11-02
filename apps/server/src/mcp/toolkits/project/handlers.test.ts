@@ -6,7 +6,7 @@ import {
   ThreadId,
   type OrchestrationV2ThreadShell,
   type Project as ProjectRecord,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -82,7 +82,7 @@ it.effect("attributes a launched thread's first message to the calling thread", 
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
       NodeServices.layer,
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-source-link-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-source-link-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     );
@@ -94,7 +94,7 @@ it.effect("attributes a launched thread's first message to the calling thread", 
       ),
     );
     const result = yield* toolkit
-      .handle("t3_thread_launch", { title: "Audit", message: "Review the change" })
+      .handle("kurambit_thread_launch", { title: "Audit", message: "Review the change" })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
     expect(result.at(-1)?.result).toMatchObject({ projectId, modelSelection });
     expect(launchedSender).toBe(sourceThreadId);
@@ -157,7 +157,7 @@ it.effect("launches a scratch thread into the Scratch project", () =>
       }),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
       NodeServices.layer,
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-scratch-launch-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-scratch-launch-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     );
@@ -168,9 +168,9 @@ it.effect("launches a scratch thread into the Scratch project", () =>
         ),
       ),
     );
-    const handle = (params: Parameters<typeof toolkit.handle<"t3_thread_launch">>[1]) =>
+    const handle = (params: Parameters<typeof toolkit.handle<"kurambit_thread_launch">>[1]) =>
       toolkit
-        .handle("t3_thread_launch", params)
+        .handle("kurambit_thread_launch", params)
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
 
     const result = yield* handle({ title: "Notes", scratch: true, message: "Draft a list" });
@@ -261,7 +261,7 @@ it.effect("starts a project from just a title when workspaceRoot is omitted", ()
       }),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
       NodeServices.layer,
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-named-project-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-named-project-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     );
@@ -272,9 +272,9 @@ it.effect("starts a project from just a title when workspaceRoot is omitted", ()
         ),
       ),
     );
-    const handle = (params: Parameters<typeof toolkit.handle<"t3_project_create">>[1]) =>
+    const handle = (params: Parameters<typeof toolkit.handle<"kurambit_project_create">>[1]) =>
       toolkit
-        .handle("t3_project_create", params)
+        .handle("kurambit_project_create", params)
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
 
     const result = yield* handle({ title: "Pinball Stats" });
@@ -362,7 +362,7 @@ const clientLaunchHarness = (input: {
     Layer.provideMerge(GitVcsDriver.layer),
     Layer.provideMerge(VcsProcess.layer),
     Layer.provideMerge(
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-client-launch-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-client-launch-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     ),
@@ -383,9 +383,9 @@ it.effect("a client launches at its ceiling with the project's default model", (
         McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
       ),
     );
-    const handle = (params: Parameters<typeof toolkit.handle<"t3_thread_launch">>[1]) =>
+    const handle = (params: Parameters<typeof toolkit.handle<"kurambit_thread_launch">>[1]) =>
       toolkit
-        .handle("t3_thread_launch", params)
+        .handle("kurambit_thread_launch", params)
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
     const result = yield* handle({ title: "Fix", projectId, message: "Fix the bug" });
@@ -406,7 +406,7 @@ it.effect("a launch binds only an existing checkout that is one of the project's
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-launch-worktree-" });
+    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-launch-worktree-" });
     const repo = path.join(root, "repo");
     const worktree = path.join(root, "feature");
     const outside = path.join(root, "outside");
@@ -434,7 +434,7 @@ it.effect("a launch binds only an existing checkout that is one of the project's
     );
     const launchInto = (worktreePath: string) =>
       toolkit
-        .handle("t3_thread_launch", {
+        .handle("kurambit_thread_launch", {
           title: "Fix",
           projectId,
           workspaceStrategy: { type: "existing_worktree", worktreePath },
@@ -468,7 +468,7 @@ it.effect("a launch into a new worktree creates nothing when its base ref has no
       runtimeModeCeiling: "auto",
       launched,
       checkWorktreeBase: ({ projectId, workspaceStrategy }) =>
-        workspaceStrategy.type === "worktree" && workspaceStrategy.baseRef === "t3/renamed"
+        workspaceStrategy.type === "worktree" && workspaceStrategy.baseRef === "kurambit/renamed"
           ? Effect.fail(
               new ThreadLaunch.ThreadLaunchBaseRefError({
                 projectId,
@@ -486,17 +486,17 @@ it.effect("a launch into a new worktree creates nothing when its base ref has no
     );
     const launchFrom = (baseRef: string) =>
       toolkit
-        .handle("t3_thread_launch", {
+        .handle("kurambit_thread_launch", {
           title: "Fix",
           projectId,
           workspaceStrategy: { type: "worktree", baseRef, startFromOrigin: false },
         })
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
-    const refused = (yield* launchFrom("t3/renamed")).at(-1)?.result;
+    const refused = (yield* launchFrom("kurambit/renamed")).at(-1)?.result;
     expect(refused).toMatchObject({ code: "invalid_request" });
     expect((refused as { message: string }).message).toContain(
-      'Base ref "t3/renamed" does not resolve to a commit in project "Client target" (/projects/client-target). No thread was created.',
+      'Base ref "kurambit/renamed" does not resolve to a commit in project "Client target" (/projects/client-target). No thread was created.',
     );
     expect(launched).toHaveLength(0);
 

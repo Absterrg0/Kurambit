@@ -5,7 +5,7 @@ import {
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
   type ScopedThreadRef,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   type HtmlRenderShortcut,
   htmlRenderShortcutsMessage,
@@ -16,12 +16,12 @@ import {
   readHtmlRenderImageRequest,
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
-} from "@t3tools/shared/htmlRender";
+} from "@kurambit/shared/htmlRender";
 import {
   isMacPlatform,
   matchesKeybindingShortcut,
   normalizeEventKey,
-} from "@t3tools/shared/keybindings";
+} from "@kurambit/shared/keybindings";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { useOpenLink } from "~/browser/useOpenLink";

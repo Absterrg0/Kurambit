@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@kurambit/contracts";
 
 import { claudeBackgroundSubagentAfterRootInput } from "./claude_background_subagent_after_root/input.ts";
 import { assertClaudeBackgroundSubagentAfterRootOutput } from "./claude_background_subagent_after_root/output.ts";
@@ -586,7 +586,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
     buildInput: planQuestionsInput,
     providers: [
       // Grok Build still elicits with the pre-1.0 session/elicitation wire
-      // method the current spec removed; T3 supports standard ACP only, so
+      // method the current spec removed; Kurambit supports standard ACP only, so
       // the scenario covers the registry driver until Grok ships
       // elicitation/create.
       {

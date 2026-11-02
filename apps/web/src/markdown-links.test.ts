@@ -53,9 +53,9 @@ describe("rewriteMarkdownFileUriHref", () => {
   it("normalizes file uri hrefs for windows drive paths", () => {
     expect(
       rewriteMarkdownFileUriHref(
-        "file:///D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69",
+        "file:///D:/Programme/kurambit/apps/web/src/components/chat/OpenInPicker.tsx#L69",
       ),
-    ).toBe("D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69");
+    ).toBe("D:/Programme/kurambit/apps/web/src/components/chat/OpenInPicker.tsx#L69");
   });
 
   it("preserves file uri authorities as windows UNC paths", () => {
@@ -72,8 +72,10 @@ describe("rewriteMarkdownFileUriHref", () => {
 
   it("unwraps angle-bracketed file uri hrefs", () => {
     expect(
-      rewriteMarkdownFileUriHref(" <file:///D:/Programme/t3code/apps/web/src/markdown-links.ts> "),
-    ).toBe("D:/Programme/t3code/apps/web/src/markdown-links.ts");
+      rewriteMarkdownFileUriHref(
+        " <file:///D:/Programme/kurambit/apps/web/src/markdown-links.ts> ",
+      ),
+    ).toBe("D:/Programme/kurambit/apps/web/src/markdown-links.ts");
   });
 });
 
@@ -293,7 +295,7 @@ describe("directory paths with a trailing separator", () => {
 });
 
 it("routes the project-root code link to the workspace explorer", () => {
-  const cwd = "/Users/saphid/.t3/worktrees/ov2-standalone-20260918";
+  const cwd = "/Users/saphid/.kurambit/worktrees/ov2-standalone-20260918";
   expect(resolveInlineCodeFileLinkMeta(cwd, cwd)).toMatchObject({
     workspaceRelativePath: ".",
     filePath: cwd,

@@ -2,7 +2,7 @@
 // OSCrypt primitives the module under test decrypts.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqliteClient from "@kurambit/shared/nodeSqliteClient";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -102,7 +102,7 @@ describe("readChromiumCookieDatabase", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const directory = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3code-missing-key-",
+          prefix: "kurambit-missing-key-",
         });
         const filename = `${directory}/Cookies`;
         const key = Buffer.from("0123456789abcdef");
@@ -155,7 +155,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const key = Buffer.from("0123456789abcdef");
@@ -207,7 +207,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const key = Buffer.from("0123456789abcdef");
@@ -248,7 +248,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const cbcV10 = Buffer.from("0123456789abcdef");
@@ -294,7 +294,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const cbcV10 = Buffer.from("0123456789abcdef");
@@ -342,7 +342,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const key = Buffer.from("0123456789abcdef");
@@ -374,7 +374,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
 
@@ -398,7 +398,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const filename = `${directory}/Cookies`;
       const key = Buffer.from("0123456789abcdef");
@@ -436,7 +436,7 @@ describe("readChromiumCookieDatabase", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-chromium-cookies-",
+        prefix: "kurambit-chromium-cookies-",
       });
       const legacyFilename = `${directory}/LegacyCookies`;
       const chipsFilename = `${directory}/ChipsCookies`;

@@ -1,4 +1,4 @@
-import type { ProviderUserInputAnswers, UserInputQuestion } from "@t3tools/contracts";
+import type { ProviderUserInputAnswers, UserInputQuestion } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -8,8 +8,8 @@ import * as Schema from "effect/Schema";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
-import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
+import type * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
+import type { AcpToolCallState } from "@kurambit/provider-acp/server/runtimeModel";
 
 const xAiStopReasonMissingMetaKey = "xAiStopReasonMissing";
 export const xAiRateLimitedErrorCode = -32003;
@@ -77,7 +77,7 @@ export function xAiPromptCompleteFromSessionUpdate(
 
 /**
  * Grok answers a finished background command in its own turn, tagging every
- * frame with a `task-completed-*` prompt id instead of the one T3 sent.
+ * frame with a `task-completed-*` prompt id instead of the one Kurambit sent.
  */
 export function isXAiTaskCompletedWakeNotification(
   notification: EffectAcpSchema.SessionNotification,
@@ -969,8 +969,8 @@ export interface XAiExitPlanModeResponse {
 }
 
 /**
- * Client captured the plan for T3's proposed-plan card. Abandon the native
- * Grok plan-approval gate so the turn unblocks; the user implements via T3 UI.
+ * Client captured the plan for Kurambit's proposed-plan card. Abandon the native
+ * Grok plan-approval gate so the turn unblocks; the user implements via Kurambit UI.
  */
 export function makeXAiExitPlanModeCapturedResponse(feedback?: string): XAiExitPlanModeResponse {
   return {
@@ -1472,7 +1472,7 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
     let nextPromptFallbackId = 0;
     const allocatePromptFallbackId = Effect.sync(() => {
       nextPromptFallbackId += 1;
-      return `t3-xai-prompt-${nextPromptFallbackId}`;
+      return `kurambit-xai-prompt-${nextPromptFallbackId}`;
     });
     const pendingXAiPromptCompletionsRef = yield* Ref.make<
       ReadonlyArray<PendingXAiPromptCompletion>

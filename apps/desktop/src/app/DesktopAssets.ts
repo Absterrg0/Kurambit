@@ -34,7 +34,7 @@ export class DesktopAssets extends Context.Service<
       fileName: string,
     ) => Effect.Effect<Option.Option<string>, DesktopAssetProbeError>;
   }
->()("@t3tools/desktop/app/DesktopAssets") {}
+>()("@kurambit/desktop/app/DesktopAssets") {}
 
 const resolveResourcePath = Effect.fn("desktop.assets.resolveResourcePath")(function* (
   fileName: string,
@@ -63,14 +63,14 @@ const resolveResourcePath = Effect.fn("desktop.assets.resolveResourcePath")(func
 
 const sourceTreeIconFileNames = {
   dev: {
-    ico: "blueprint-windows.ico",
-    macPng: "blueprint-macos-1024.png",
-    universalPng: "blueprint-universal-1024.png",
+    ico: "kurambit-dev-windows.ico",
+    macPng: "kurambit-dev-macos-1024.png",
+    universalPng: "kurambit-dev-universal-1024.png",
   },
   prod: {
-    ico: "t3-black-windows.ico",
-    macPng: "black-macos-1024.png",
-    universalPng: "black-universal-1024.png",
+    ico: "kurambit-windows.ico",
+    macPng: "kurambit-macos-1024.png",
+    universalPng: "kurambit-universal-1024.png",
   },
 } as const;
 

@@ -1,8 +1,8 @@
-# Game Studio docs
+# Kurambit docs
 
-## Using Game Studio
+## Using Kurambit
 
-- [Making games](./user/game-studio.md)
+- [Making games](./user/making-games.md)
 - [Install](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
@@ -21,7 +21,7 @@
 
 ---
 
-## Working on Game Studio
+## Working on Kurambit
 
 Start with the [development runbook](./operations/development.md) and
 [contribution policy](../CONTRIBUTING.md).
@@ -31,7 +31,7 @@ source alone does not explain. Most code changes do not need an internal documen
 [documentation rules](../AGENTS.md#documentation) before adding one.
 
 - [Architecture overview](./internals/overview.md)
-- [Game layer](./internals/game-studio.md)
+- [Game layer](./internals/game-layer.md)
 - [Glossary](./internals/glossary.md)
 - [Connection runtime](./internals/connection-runtime.md)
 - [Providers](./internals/providers.md)

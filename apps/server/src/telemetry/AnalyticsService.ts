@@ -12,7 +12,7 @@ export class AnalyticsService extends Context.Service<
 
     readonly flush: Effect.Effect<void>;
   }
->()("t3/telemetry/AnalyticsService") {
+>()("kurambit/telemetry/AnalyticsService") {
   static readonly layerTest = Layer.succeed(
     AnalyticsService,
     AnalyticsService.of({
@@ -22,7 +22,7 @@ export class AnalyticsService extends Context.Service<
   );
 }
 
-// Game Studio has no product analytics sender, identity lookup, or background flush.
+// Kurambit has no product analytics sender, identity lookup, or background flush.
 export const make = Effect.succeed(
   AnalyticsService.of({ record: () => Effect.void, flush: Effect.void }),
 );

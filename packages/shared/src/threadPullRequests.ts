@@ -5,9 +5,9 @@ import type {
   ThreadLinkedPullRequest,
   ThreadPullRequestKey,
   ThreadPullRequestLink,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
-import { pullRequestHostOf } from "@t3tools/contracts";
+import { pullRequestHostOf } from "@kurambit/contracts";
 import { parseChangeRequestUrl } from "./changeRequestUrl.ts";
 import { canonicalRepositoryKey, sourceControlRepositorySelector } from "./sourceControl.ts";
 

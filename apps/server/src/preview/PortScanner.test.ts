@@ -5,8 +5,8 @@ import {
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
   PREVIEW_URL_MAX_LENGTH,
   type DiscoveredLocalServer,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Clock from "effect/Clock";
@@ -539,7 +539,7 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
   }).pipe(Effect.provide(layer));
 });
 
-effectIt.effect("probes a port only while T3 terminals own every listener on it", () => {
+effectIt.effect("probes a port only while Kurambit terminals own every listener on it", () => {
   const owned = `p1234\ncnode\nn[::1]:${LSOF_TEST_PORT}\n`;
   const unowned = `p5678\ncrpc\nn127.0.0.1:${LSOF_TEST_PORT}\n`;
   let stdout = unowned;

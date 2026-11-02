@@ -1,4 +1,8 @@
-import { EnvironmentId, ProviderDriverKind, type AcpRegistrySearchAgent } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  type AcpRegistrySearchAgent,
+} from "@kurambit/contracts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { userEvent } from "vite-plus/test/browser";
@@ -28,7 +32,7 @@ const preparedAgent = vi.hoisted((): AcpRegistrySearchAgent => ({
   integrity: "sha256",
 }));
 
-vi.mock(import("@t3tools/client-runtime/state/runtime"), async (original) => ({
+vi.mock(import("@kurambit/client-runtime/state/runtime"), async (original) => ({
   ...(await original()),
   squashAtomCommandFailure: () => new Error("The settings update failed."),
 }));

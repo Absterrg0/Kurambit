@@ -494,13 +494,13 @@ describe("GhosttyTerminalSurface visibility", () => {
       expect(openLink).toHaveBeenCalledOnce();
 
       vi.advanceTimersByTime(501);
-      surface.resetAndWrite("https://t3.codes");
+      surface.resetAndWrite("https://example.com");
       harness.flushFrame();
       harness.pointer("pointermove", 5, 0, modifiers);
       expect(surface.canvas.style.cursor).toBe("pointer");
       harness.pointer("pointerdown", 5, 1, modifiers);
       harness.pointer("pointerup", 5, 0, modifiers);
-      expect(openLink).toHaveBeenLastCalledWith("https://t3.codes", expect.any(Event));
+      expect(openLink).toHaveBeenLastCalledWith("https://example.com", expect.any(Event));
     },
   );
 
@@ -1008,7 +1008,7 @@ describe("terminalLinkAtPositionWithRange", () => {
     const cells = [
       cell("🙂"),
       cell(""),
-      ...Array.from("https://t3.codes", (character) => cell(character)),
+      ...Array.from("https://example.com", (character) => cell(character)),
     ];
     const row: GhosttyRow = {
       cells,
@@ -1020,9 +1020,9 @@ describe("terminalLinkAtPositionWithRange", () => {
       wrapsToNext: false,
     };
 
-    expect(terminalLinkAtPositionWithRange([row], 0, 2)?.text).toBe("https://t3.codes");
+    expect(terminalLinkAtPositionWithRange([row], 0, 2)?.text).toBe("https://example.com");
     expect(terminalLinkAtPositionWithRange([row], 0, cells.length - 1)?.text).toBe(
-      "https://t3.codes",
+      "https://example.com",
     );
     expect(terminalLinkAtPositionWithRange([row], 0, 0)).toBeNull();
     expect(terminalLinkAtPositionWithRange([row], 0, 8)?.range).toEqual({
@@ -1067,32 +1067,34 @@ describe("terminalLinkAtPositionWithRange", () => {
     });
     const headCut = [row("ple.com/missing", true), row("head", true)];
     expect(terminalLinkAtPositionWithRange(headCut, 0, 4)).toBeNull();
-    const tailCut = [row("https://t3.codes", false, true)];
+    const tailCut = [row("https://example.com", false, true)];
     expect(terminalLinkAtPositionWithRange(tailCut, 0, 8)).toBeNull();
-    const complete = [row("https://t3.codes", false), row("", false)];
-    expect(terminalLinkAtPositionWithRange(complete, 0, 8)?.text).toBe("https://t3.codes");
+    const complete = [row("https://example.com", false), row("", false)];
+    expect(terminalLinkAtPositionWithRange(complete, 0, 8)?.text).toBe("https://example.com");
     const wideFull: GhosttyRow = {
       cells: [
         { ...cell("🙂"), wide: 1 },
         { ...cell(""), wide: 2 },
-        ...Array.from("https://t3.code", (character) => cell(character)),
+        ...Array.from("https://kurambit.code", (character) => cell(character)),
       ],
-      text: "🙂 https://t3.code",
+      text: "🙂 https://kurambit.code",
       isWrapContinuation: false,
       wrapsToNext: true,
     };
     expect(terminalLinkAtPositionWithRange([wideFull], 0, 8)).toBeNull();
     const unwrittenTail: GhosttyRow = {
       cells: [
-        ...Array.from("https://t3.codes", (character) => cell(character)),
+        ...Array.from("https://example.com", (character) => cell(character)),
         cell(""),
         cell(""),
       ],
-      text: "https://t3.codes",
+      text: "https://example.com",
       isWrapContinuation: false,
       wrapsToNext: false,
     };
-    expect(terminalLinkAtPositionWithRange([unwrittenTail], 0, 8)?.text).toBe("https://t3.codes");
+    expect(terminalLinkAtPositionWithRange([unwrittenTail], 0, 8)?.text).toBe(
+      "https://example.com",
+    );
   });
 });
 

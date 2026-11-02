@@ -3,26 +3,26 @@ import type {
   EnvironmentProject,
   EnvironmentThread,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@kurambit/client-runtime/state/shell";
 import {
   EMPTY_THREAD_HISTORY_META,
   type EnvironmentThreadStatus,
   type ThreadHistoryMeta,
-} from "@t3tools/client-runtime/state/threads";
+} from "@kurambit/client-runtime/state/threads";
 import {
   arrayElementsEqual,
   parseThreadKey,
   threadKey,
-} from "@t3tools/client-runtime/state/entities";
-import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+} from "@kurambit/client-runtime/state/entities";
+import type { ScopedProjectRef, ScopedThreadRef } from "@kurambit/contracts";
 import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
   ThreadId,
-} from "@t3tools/contracts";
-import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
+} from "@kurambit/contracts";
+import type { ThreadCheckpointSummary } from "@kurambit/client-runtime/state/thread-checkpoints";
 import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";

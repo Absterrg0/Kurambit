@@ -6,9 +6,9 @@ import {
   type RunId,
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
-import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { modelSelectionCommandType } from "@kurambit/shared/model";
 
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -96,7 +96,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_search: McpToolAccess.reads((input) =>
+  kurambit_thread_search: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { caller } = yield* readCaller();
       const { projectId: requested, ...query } = input;
@@ -111,7 +111,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_fork: writesThread((input) =>
+  kurambit_thread_fork: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readThread(input.threadId);
       const commandId = yield* newCommandId();
@@ -131,7 +131,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence, targetThreadId };
     }),
   ),
-  t3_thread_merge_back: McpToolAccess.writesThreads(
+  kurambit_thread_merge_back: McpToolAccess.writesThreads(
     (input) => [input.targetThreadId, input.sourceThreadId],
     (input) =>
       Effect.gen(function* () {
@@ -151,7 +151,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         return { sequence: result.sequence, targetThreadId: input.targetThreadId };
       }),
   ),
-  t3_thread_transfers: McpToolAccess.reads((input) =>
+  kurambit_thread_transfers: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["contextTransfers"]);
       return {
@@ -166,7 +166,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_configuration: McpToolAccess.reads((input) =>
+  kurambit_thread_configuration: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const {
         projection: { thread },
@@ -179,7 +179,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_configure: writesThread((input) =>
+  kurambit_thread_configure: writesThread((input) =>
     Effect.gen(function* () {
       const {
         threads,
@@ -197,7 +197,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence };
     }),
   ),
-  t3_pending_request_list: McpToolAccess.reads((input) =>
+  kurambit_pending_request_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runtimeRequests"]);
       return {
@@ -207,13 +207,13 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_pending_request_read: McpToolAccess.reads((input) =>
+  kurambit_pending_request_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { item } = yield* readQuestion(input);
       return { requestId: input.requestId, questions: item.questions };
     }),
   ),
-  t3_pending_request_respond: writesThread((input) =>
+  kurambit_pending_request_respond: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readQuestion(input);
       const result = yield* threads
@@ -228,7 +228,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence };
     }),
   ),
-  t3_queue_list: McpToolAccess.reads((input) =>
+  kurambit_queue_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runs", "messages"]);
       const runs = queuedRunsInDeliveryOrder(projection);
@@ -243,7 +243,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_queue_read: McpToolAccess.reads((input) =>
+  kurambit_queue_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runs", "messages"]);
       const entry = queueEntry(projection, input.queuedRunId, 16000);
@@ -256,7 +256,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       );
     }),
   ),
-  t3_queue_edit: writesThread((input) =>
+  kurambit_queue_edit: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.edit",
@@ -264,14 +264,14 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       text: input.text,
     })),
   ),
-  t3_queue_cancel: writesThread((input) =>
+  kurambit_queue_cancel: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.cancel",
       runId: input.queuedRunId,
     })),
   ),
-  t3_queue_reorder: writesThread((input) =>
+  kurambit_queue_reorder: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.reorder",
@@ -279,7 +279,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       beforeRunId: input.beforeRunId,
     })),
   ),
-  t3_queue_promote_to_steer: writesThread((input) =>
+  kurambit_queue_promote_to_steer: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-message.promote-to-steer",
@@ -287,7 +287,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       targetRunId: input.targetRunId,
     })),
   ),
-  t3_thread_organize: writesThread((input) =>
+  kurambit_thread_organize: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection, caller } = yield* readThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };

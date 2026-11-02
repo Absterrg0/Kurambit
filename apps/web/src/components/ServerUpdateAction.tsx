@@ -2,15 +2,15 @@ import {
   AuthEnvironmentMaintainScope,
   type AuthSessionState,
   sessionGrantsScope,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type { AsyncResult } from "effect/reactivity";
 
 import type {
   EnvironmentId,
   ServerInstallation,
   ServerSelfUpdateCapability,
-} from "@t3tools/contracts";
-import type { ServerUpdateStage, ServerUpdateState } from "@t3tools/client-runtime/state/server";
+} from "@kurambit/contracts";
+import type { ServerUpdateStage, ServerUpdateState } from "@kurambit/client-runtime/state/server";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 

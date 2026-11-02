@@ -1,10 +1,10 @@
-import { AuthDiagnosticsReadScope } from "@t3tools/contracts";
-import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { AuthDiagnosticsReadScope } from "@kurambit/contracts";
+import { AuthEnvironmentMaintainScope } from "@kurambit/contracts";
 import type {
   EnvironmentId,
   ResourceTelemetryHistoryInput,
   ResourceTelemetrySnapshot,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 
 import { usePrimaryEnvironment } from "../state/environments";

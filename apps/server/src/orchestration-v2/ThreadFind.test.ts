@@ -14,14 +14,14 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2DomainEvent,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { vi } from "vite-plus/test";
-import * as ThreadFindText from "@t3tools/shared/threadFindText";
+import * as ThreadFindText from "@kurambit/shared/threadFindText";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -519,21 +519,21 @@ describe("V2 thread find", () => {
   it.effect("searches displayed skill labels and invalidates parsed text when labels change", () =>
     Effect.gen(function* () {
       const projection = yield* setup;
-      yield* putItems([item("skill", 1, "Use $test-t3-app now")]);
+      yield* putItems([item("skill", 1, "Use $test-kurambit-app now")]);
       const input = {
         threadId,
-        query: "T3 App Testing",
-        skills: [{ name: "test-t3-app", displayName: "T3 App Testing" }],
+        query: "Kurambit App Testing",
+        skills: [{ name: "test-kurambit-app", displayName: "Kurambit App Testing" }],
       };
       assert.equal((yield* projection.searchThread(input)).totalMatches, 1);
       assert.equal((yield* projection.searchThread({ ...input, skills: [] })).totalMatches, 0);
       yield* putItems(
-        [item("skill-plan", 2, "# Verify\nUse $test-t3-app now", "proposed_plan")],
+        [item("skill-plan", 2, "# Verify\nUse $test-kurambit-app now", "proposed_plan")],
         "plan",
       );
       assert.equal((yield* projection.searchThread(input)).totalMatches, 1);
       assert.equal(
-        (yield* projection.searchThread({ ...input, query: "$test-t3-app" })).totalMatches,
+        (yield* projection.searchThread({ ...input, query: "$test-kurambit-app" })).totalMatches,
         1,
       );
       assert.equal((yield* projection.searchThread({ ...input, query: "App" })).totalMatches, 2);

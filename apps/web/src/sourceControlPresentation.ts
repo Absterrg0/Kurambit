@@ -1,5 +1,5 @@
 import { GitBranchIcon } from "lucide-react";
-import type { SourceControlProviderInfo } from "@t3tools/contracts";
+import type { SourceControlProviderInfo } from "@kurambit/contracts";
 
 export function getSourceControlPresentation(_provider?: SourceControlProviderInfo | null) {
   return {

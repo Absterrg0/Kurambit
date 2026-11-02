@@ -1,5 +1,5 @@
-import type { AdvertisedEndpoint, DesktopServerExposureState } from "@t3tools/contracts";
-import { createAdvertisedEndpoint } from "@t3tools/shared/advertisedEndpoint";
+import type { AdvertisedEndpoint, DesktopServerExposureState } from "@kurambit/contracts";
+import { createAdvertisedEndpoint } from "@kurambit/shared/advertisedEndpoint";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,7 +21,7 @@ export class DesktopServerExposure extends Context.Service<
     }) => Effect.Effect<DesktopServerExposureState>;
     readonly getAdvertisedEndpoints: Effect.Effect<readonly AdvertisedEndpoint[]>;
   }
->()("@t3tools/desktop/backend/DesktopServerExposure") {}
+>()("@kurambit/desktop/backend/DesktopServerExposure") {}
 
 const state: DesktopServerExposureState = {
   mode: "local-only",

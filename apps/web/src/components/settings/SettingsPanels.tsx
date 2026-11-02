@@ -25,14 +25,14 @@ import {
   type ProviderInstanceId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@kurambit/contracts";
+import { scopeThreadRef } from "@kurambit/client-runtime/environment";
+import { presentThreadShell } from "@kurambit/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
@@ -58,9 +58,9 @@ import {
   MIN_TERMINAL_FONT_SIZE,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
-} from "@t3tools/contracts/settings";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kurambit/contracts/settings";
+import { resolveServerBackgroundActivitySettings } from "@kurambit/shared/backgroundActivitySettings";
+import { createModelSelection } from "@kurambit/shared/model";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
@@ -279,7 +279,7 @@ function AboutVersionSection() {
     <SettingsRow
       id={searchableSetting("app-version").id}
       title={<AboutVersionTitle />}
-      description="Current version of Game Studio. Install new versions manually."
+      description="Current version of Kurambit. Install new versions manually."
     />
   );
 }
@@ -2963,7 +2963,7 @@ export function GeneralSettingsPanel() {
         )}
         <SettingsRow
           title="Privacy"
-          description="Game Studio does not collect product usage analytics. Local diagnostics remain on this machine unless you configure an export."
+          description="Kurambit does not collect product usage analytics. Local diagnostics remain on this machine unless you configure an export."
         />
       </SettingsSection>
       <SettingsSection title="Diagnostics">
@@ -2988,7 +2988,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by Game Studio."
+          description="Notices for dependencies, assets, and optional tools used by Kurambit."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

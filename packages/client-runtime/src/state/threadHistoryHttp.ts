@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 
 import type { PreparedConnection } from "../connection/model.ts";

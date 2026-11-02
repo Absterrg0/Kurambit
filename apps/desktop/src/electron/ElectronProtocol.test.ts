@@ -42,11 +42,11 @@ describe("ElectronProtocol", () => {
       });
       const protocol = yield* ElectronProtocol.ElectronProtocol;
       yield* protocol.registerDesktopProtocol({
-        scheme: "game-studio",
+        scheme: "kurambit",
         assetDirectory: directory,
       });
       const request = (pathname: string, init?: RequestInit) =>
-        Effect.promise(() => handler!(new Request(`game-studio://app${pathname}`, init)));
+        Effect.promise(() => handler!(new Request(`kurambit://app${pathname}`, init)));
 
       const page = yield* request("/settings/connections");
       assert.equal(yield* Effect.promise(() => page.text()), "<html>app</html>");
@@ -80,18 +80,18 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "game-studio-dev",
+            scheme: "kurambit-dev",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
           });
           assert.isDefined(handler);
 
           const response = yield* Effect.promise(() =>
             handler!(
-              new Request("game-studio-dev://app/api/health?verbose=1", {
+              new Request("kurambit-dev://app/api/health?verbose=1", {
                 headers: {
                   accept: "application/json",
-                  origin: "game-studio-dev://app",
-                  referer: "game-studio-dev://app/",
+                  origin: "kurambit-dev://app",
+                  referer: "kurambit-dev://app/",
                   "sec-fetch-site": "same-origin",
                 },
               }),
@@ -108,18 +108,18 @@ describe("ElectronProtocol", () => {
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "img-src 'self' game-studio-dev: blob: data: http: https:",
+            "img-src 'self' kurambit-dev: blob: data: http: https:",
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "font-src 'self' game-studio-dev: data:",
+            "font-src 'self' kurambit-dev: data:",
           );
         }),
       );
 
       assert.deepEqual(
         handleMock.mock.calls.map((call) => call[0]),
-        ["game-studio-dev"],
+        ["kurambit-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
       const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
@@ -127,7 +127,7 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("origin"));
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
-      assert.deepEqual(unhandleMock.mock.calls, [["game-studio-dev"]]);
+      assert.deepEqual(unhandleMock.mock.calls, [["kurambit-dev"]]);
     }).pipe(Effect.provide(layerProtocol)),
   );
 
@@ -142,10 +142,10 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "game-studio",
+            scheme: "kurambit",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
           });
-          return yield* Effect.promise(() => handler!(new Request("game-studio://other/")));
+          return yield* Effect.promise(() => handler!(new Request("kurambit://other/")));
         }),
       );
 
@@ -168,11 +168,11 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "game-studio-dev",
+            scheme: "kurambit-dev",
             targetOrigin: new URL("http://127.0.0.1:5733/"),
           });
           const fiber = yield* Effect.forkChild(
-            Effect.promise(() => handler!(new Request("game-studio-dev://app/"))),
+            Effect.promise(() => handler!(new Request("kurambit-dev://app/"))),
           );
           yield* TestClock.adjust("50 millis");
           return yield* Fiber.join(fiber);
@@ -200,12 +200,12 @@ describe("ElectronProtocol", () => {
         Effect.gen(function* () {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
-            scheme: "game-studio-dev",
+            scheme: "kurambit-dev",
             targetOrigin: new URL("http://127.0.0.1:5733/"),
           });
           const fiber = yield* Effect.forkChild(
             Effect.promise(() =>
-              handler!(new Request("game-studio-dev://app/")).then(
+              handler!(new Request("kurambit-dev://app/")).then(
                 () => null,
                 (error: unknown) => error,
               ),
@@ -237,15 +237,15 @@ describe("ElectronProtocol", () => {
       const protocol = yield* ElectronProtocol.ElectronProtocol;
       const error = yield* Effect.scoped(
         protocol.registerDesktopProtocol({
-          scheme: "game-studio-dev",
+          scheme: "kurambit-dev",
           targetOrigin: new URL("http://127.0.0.1:3773/"),
         }),
       ).pipe(Effect.flip);
 
       assert.instanceOf(error, ElectronProtocol.ElectronProtocolRegistrationError);
-      assert.equal(error.scheme, "game-studio-dev");
+      assert.equal(error.scheme, "kurambit-dev");
       assert.strictEqual(error.cause, cause);
-      assert.equal(error.message, 'Failed to register Electron protocol scheme "game-studio-dev".');
+      assert.equal(error.message, 'Failed to register Electron protocol scheme "kurambit-dev".');
     }).pipe(Effect.provide(layerProtocol)),
   );
 
@@ -260,7 +260,7 @@ describe("ElectronProtocol", () => {
       const exit = yield* Effect.exit(
         Effect.scoped(
           protocol.registerDesktopProtocol({
-            scheme: "game-studio",
+            scheme: "kurambit",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
           }),
         ),
@@ -270,16 +270,16 @@ describe("ElectronProtocol", () => {
       if (exit._tag === "Failure") {
         const error = Cause.squash(exit.cause);
         assert.instanceOf(error, ElectronProtocol.ElectronProtocolUnregistrationError);
-        assert.equal(error.scheme, "game-studio");
+        assert.equal(error.scheme, "kurambit");
         assert.strictEqual(error.cause, cause);
-        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "game-studio".');
+        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "kurambit".');
       }
     }).pipe(Effect.provide(layerProtocol)),
   );
 
   it("keeps executable sources host-restricted while allowing runtime network resources", () => {
     const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
-      scheme: "game-studio",
+      scheme: "kurambit",
       targetOrigin: new URL("http://127.0.0.1:3773/"),
     });
     const directives = Object.fromEntries(
@@ -305,20 +305,14 @@ describe("ElectronProtocol", () => {
     ]);
     assert.deepEqual(directives["img-src"], [
       "'self'",
-      "game-studio:",
+      "kurambit:",
       "blob:",
       "data:",
       "http:",
       "https:",
     ]);
-    assert.deepEqual(directives["media-src"], [
-      "'self'",
-      "game-studio:",
-      "blob:",
-      "http:",
-      "https:",
-    ]);
+    assert.deepEqual(directives["media-src"], ["'self'", "kurambit:", "blob:", "http:", "https:"]);
     assert.deepEqual(directives["frame-src"], ["'self'", "blob:", "http:", "https:"]);
-    assert.deepEqual(directives["font-src"], ["'self'", "game-studio:", "data:"]);
+    assert.deepEqual(directives["font-src"], ["'self'", "kurambit:", "data:"]);
   });
 });

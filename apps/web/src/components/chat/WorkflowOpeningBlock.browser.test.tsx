@@ -1,5 +1,5 @@
-import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
-import { EnvironmentId } from "@t3tools/contracts";
+import type { WorkflowOpening } from "@kurambit/client-runtime/state/subagentRuntime";
+import { EnvironmentId } from "@kurambit/contracts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
@@ -115,10 +115,10 @@ it("folds a long script until it is opened", async () => {
 
 it("finds the workflow's name and opens a folded script on a match below the fold", async () => {
   await render(LONG_SCRIPT, "repo-check");
-  expect(CSS.highlights.get("t3-thread-find-active")?.size).toBe(1);
+  expect(CSS.highlights.get("kurambit-thread-find-active")?.size).toBe(1);
   expect(foldToggle()?.getAttribute("aria-expanded")).toBe("false");
 
   await render(LONG_SCRIPT, "TAILONLY");
-  expect(CSS.highlights.get("t3-thread-find-active")?.size).toBe(1);
+  expect(CSS.highlights.get("kurambit-thread-find-active")?.size).toBe(1);
   expect(foldToggle()?.getAttribute("aria-expanded")).toBe("true");
 });

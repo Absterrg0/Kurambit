@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kurambit/contracts";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
@@ -76,24 +76,24 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: localEnvironmentId,
-          title: "Game Studio",
-          workspaceRoot: "/Users/theo/Projects/t3code",
+          title: "Kurambit",
+          workspaceRoot: "/Users/theo/Projects/kurambit",
         },
         {
           environmentId: remoteEnvironmentId,
-          title: "t3code",
-          workspaceRoot: "/srv/t3code",
+          title: "kurambit",
+          workspaceRoot: "/srv/kurambit",
         },
       ],
       locationByEnvironmentId: locations,
     });
 
     expect(metadata.searchTerms).toEqual([
-      "Game Studio",
-      "/Users/theo/Projects/t3code",
+      "Kurambit",
+      "/Users/theo/Projects/kurambit",
       "Local",
-      "t3code",
-      "/srv/t3code",
+      "kurambit",
+      "/srv/kurambit",
       "Build box",
     ]);
     expect(metadata.environmentLabels).toEqual(["Local", "Build box"]);
@@ -105,8 +105,8 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projectSearchItems: [
         {
           kind: "action",
-          value: "project:t3code",
-          title: "Game Studio",
+          value: "project:kurambit",
+          title: "Kurambit",
           searchTerms: metadata.searchTerms,
           icon: null,
           run: async () => undefined,
@@ -122,13 +122,13 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "Game Studio",
-          workspaceRoot: "/srv/t3code",
+          title: "Kurambit",
+          workspaceRoot: "/srv/kurambit",
         },
         {
           environmentId: remoteEnvironmentId,
-          title: "Game Studio worktree",
-          workspaceRoot: "/srv/t3code-feature",
+          title: "Kurambit worktree",
+          workspaceRoot: "/srv/kurambit-feature",
         },
       ],
       locationByEnvironmentId: locations,
@@ -143,13 +143,13 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "Game Studio",
-          workspaceRoot: "/srv/t3code",
+          title: "Kurambit",
+          workspaceRoot: "/srv/kurambit",
         },
         {
           environmentId: secondRemoteEnvironmentId,
-          title: "Game Studio mirror",
-          workspaceRoot: "/srv/mirror/t3code",
+          title: "Kurambit mirror",
+          workspaceRoot: "/srv/mirror/kurambit",
         },
       ],
       locationByEnvironmentId: new Map([
@@ -166,8 +166,8 @@ describe("buildCommandPaletteProjectMetadata", () => {
       projects: [
         {
           environmentId: remoteEnvironmentId,
-          title: "Game Studio",
-          workspaceRoot: "/srv/t3code",
+          title: "Kurambit",
+          workspaceRoot: "/srv/kurambit",
         },
       ],
       locationByEnvironmentId: new Map(),
@@ -349,7 +349,7 @@ describe("buildProjectActionItems", () => {
     const project = makeProject({ title: "fleet", workspaceRoot: "/Users/theo/Code/p/fleet" });
     const iconTitles: string[] = [];
     const [item] = buildProjectActionItems({
-      projects: [{ ...project, displayName: "t3dotgg/fleet" }],
+      projects: [{ ...project, displayName: "acme/fleet" }],
       valuePrefix: "project",
       icon: (candidate) => {
         iconTitles.push(candidate.title);
@@ -358,9 +358,9 @@ describe("buildProjectActionItems", () => {
       runProject: async () => undefined,
     });
 
-    expect(item?.title).toBe("t3dotgg/fleet");
+    expect(item?.title).toBe("acme/fleet");
     expect(item?.searchTerms).toEqual(
-      expect.arrayContaining(["t3dotgg/fleet", "fleet", "/Users/theo/Code/p/fleet"]),
+      expect.arrayContaining(["acme/fleet", "fleet", "/Users/theo/Code/p/fleet"]),
     );
     expect(iconTitles).toEqual(["fleet"]);
   });
@@ -463,7 +463,7 @@ describe("buildThreadActionItems", () => {
     ];
     const items = buildThreadActionItems({
       threads,
-      projectTitleById: new Map([[PROJECT_ID, "Game Studio"]]),
+      projectTitleById: new Map([[PROJECT_ID, "Kurambit"]]),
       sortOrder: "created_at",
       icon: null,
       getContentMatch: (thread) =>
@@ -612,7 +612,7 @@ describe("buildThreadActionItems", () => {
   it("keeps message excerpts searchable without replacing thread metadata", () => {
     const [item] = buildThreadActionItems({
       threads: [makeThread({ branch: "feat/search" })],
-      projectTitleById: new Map([[PROJECT_ID, "Game Studio"]]),
+      projectTitleById: new Map([[PROJECT_ID, "Kurambit"]]),
       sortOrder: "updated_at",
       icon: null,
       getContentMatch: () => ({
@@ -629,7 +629,7 @@ describe("buildThreadActionItems", () => {
       snippet: "The relay reconnect is now bounded.",
       query: "reconnect",
     });
-    expect(item?.description).toBe("Game Studio · #feat/search");
+    expect(item?.description).toBe("Kurambit · #feat/search");
   });
 
   it("surfaces threads when the query is their ID, without outranking title matches", () => {
@@ -645,7 +645,7 @@ describe("buildThreadActionItems", () => {
     });
     const items = buildThreadActionItems({
       threads: [idThread, titleThread],
-      projectTitleById: new Map([[PROJECT_ID, "Game Studio"]]),
+      projectTitleById: new Map([[PROJECT_ID, "Kurambit"]]),
       sortOrder: "updated_at",
       icon: null,
       runThread: async (_thread) => undefined,
@@ -669,7 +669,7 @@ describe("buildThreadActionItems", () => {
   it("prefers renderDescription when provided", () => {
     const [item] = buildThreadActionItems({
       threads: [makeThread({ branch: "feat/search", worktreePath: "/tmp/wt" })],
-      projectTitleById: new Map([[PROJECT_ID, "Game Studio"]]),
+      projectTitleById: new Map([[PROJECT_ID, "Kurambit"]]),
       sortOrder: "updated_at",
       icon: null,
       renderDescription: (thread, { projectTitle }) =>
@@ -677,7 +677,7 @@ describe("buildThreadActionItems", () => {
       runThread: async (_thread) => undefined,
     });
 
-    expect(item?.description).toBe("Game Studio:feat/search:wt");
+    expect(item?.description).toBe("Kurambit:feat/search:wt");
   });
 
   it("filters archived threads out of thread search items", () => {
@@ -783,8 +783,8 @@ describe("filterPinnedBrowseEntries", () => {
 it.each([
   "#10839",
   "10839",
-  "pingdotgg/t3code#10839",
-  "https://github.com/pingdotgg/t3code/pull/10839",
+  "Absterrg0/Kurambit#10839",
+  "https://github.com/Absterrg0/Kurambit/pull/10839",
 ])("finds linked threads from PR query %s", (query) => {
   const items = buildThreadActionItems({
     threads: [
@@ -793,9 +793,9 @@ it.each([
         pullRequests: [
           {
             host: "github.com",
-            repository: "pingdotgg/t3code",
+            repository: "Absterrg0/Kurambit",
             number: 10839,
-            url: "https://github.com/pingdotgg/t3code/pull/10839",
+            url: "https://github.com/Absterrg0/Kurambit/pull/10839",
             source: "manual",
             linkedAt: "2026-09-08T00:00:00Z",
             snapshot: null,

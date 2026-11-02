@@ -20,7 +20,7 @@ import {
   type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadProjection,
   type ProjectMutation,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -250,7 +250,7 @@ describe("V2 environment commands", () => {
             parentCheckpointId: null,
             ordinalWithinScope: 0,
             appRunOrdinal: null,
-            ref: CheckpointRef.make("refs/t3/thread-start"),
+            ref: CheckpointRef.make("refs/kurambit/thread-start"),
             status: "ready",
             files: [],
             capturedAt: v2Now,
@@ -797,7 +797,7 @@ describe("V2 environment commands", () => {
                       parentCheckpointId: null,
                       ordinalWithinScope: 0,
                       appRunOrdinal: null,
-                      ref: CheckpointRef.make("refs/t3/legacy-checkpoint"),
+                      ref: CheckpointRef.make("refs/kurambit/legacy-checkpoint"),
                       status,
                       files: [],
                       capturedAt: v2Now,

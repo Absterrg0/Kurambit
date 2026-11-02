@@ -1,4 +1,4 @@
-import type { GameStatus, ScopedThreadRef } from "@t3tools/contracts";
+import type { GameStatus, ScopedThreadRef } from "@kurambit/contracts";
 import {
   DownloadIcon,
   FolderOpenIcon,
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { useState } from "react";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSourceFreshnessLabel } from "./gameStageLogic";

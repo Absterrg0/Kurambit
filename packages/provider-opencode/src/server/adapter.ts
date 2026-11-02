@@ -9,9 +9,9 @@ import type {
   Todo as OpenCodeTodo,
   ToolPart,
 } from "@opencode-ai/sdk/v2";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { causeErrorTag } from "@t3tools/shared/observability";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { getModelSelectionStringOptionValue } from "@kurambit/shared/model";
+import { causeErrorTag } from "@kurambit/shared/observability";
 import {
   defaultInstanceIdForDriver,
   type ModelSelection,
@@ -35,7 +35,7 @@ import {
   type ProviderSessionId,
   type RuntimeRequestId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -54,32 +54,32 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import { mcpToolPresentation } from "@kurambit/provider-core/server/mcpToolPresentation";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
 import {
   structuralProtocolMethod,
   summarizeNativeProtocolPayload,
-} from "@t3tools/provider-core/server/nativeProtocolLogging";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+} from "@kurambit/provider-core/server/nativeProtocolLogging";
+import { mergeProviderInstanceEnvironment } from "@kurambit/provider-core/server/instanceEnvironment";
+import { kurambitOrchestrationSystemPrompt } from "@kurambit/provider-core/server/orchestrationInstructions";
+import { buildRuntimeInstructions } from "@kurambit/provider-core/server/runtimeInstructions";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
-import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@kurambit/provider-core/server/selectionTransition";
+import { providerMessageTextWithAttachmentPaths } from "@kurambit/provider-core/server/attachmentPrompt";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "@t3tools/provider-core/server/adapterDriver";
+} from "@kurambit/provider-core/server/adapterDriver";
 import {
   makeSubagentChildThread,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
+} from "@kurambit/provider-core/server/subagentProjection";
 import { openCodeToolTurnItem } from "./toolItems.ts";
 
 export { openCodeToolProjectionKind } from "./toolItems.ts";
@@ -958,12 +958,12 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
         });
 
         const mcpSession = yield* mcpSessions.read(input.threadId);
-        const hasT3Mcp = mcpSession !== undefined && !connection.external;
-        const orchestrationSystemPrompt = t3OrchestrationSystemPrompt(hasT3Mcp);
-        if (hasT3Mcp) {
+        const hasKurambitMcp = mcpSession !== undefined && !connection.external;
+        const orchestrationSystemPrompt = kurambitOrchestrationSystemPrompt(hasKurambitMcp);
+        if (hasKurambitMcp) {
           yield* OpenCodeRuntime.runOpenCodeSdk("mcp.add", () =>
             client.mcp.add({
-              name: "t3-code",
+              name: "kurambit",
               config: {
                 type: "remote",
                 url: mcpSession.endpoint,

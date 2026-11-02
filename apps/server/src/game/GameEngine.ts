@@ -8,7 +8,7 @@ import {
   type GameCheckIssue,
   type GameProcessResult,
   type GameViewport,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
@@ -136,7 +136,7 @@ export class GameEngine extends Context.Service<
      */
     readonly resolve: (root: string) => Effect.Effect<ResolvedGameEngine, GameOperationError>;
   }
->()("t3/game/GameEngine") {}
+>()("kurambit/game/GameEngine") {}
 
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;

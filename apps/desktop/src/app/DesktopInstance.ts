@@ -5,12 +5,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 
-import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/codexAuthHandoff";
+import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@kurambit/shared/codexAuthHandoff";
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
-import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { providerAuthReturnUrl } from "@kurambit/shared/providerAuthReturnUrl";
+import { promptLinkAppPath } from "@kurambit/shared/promptLinks";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -30,7 +30,7 @@ export class DesktopInstance extends Context.Service<
       | Scope.Scope
     >;
   }
->()("@t3tools/desktop/app/DesktopInstance") {}
+>()("@kurambit/desktop/app/DesktopInstance") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

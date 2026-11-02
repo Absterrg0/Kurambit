@@ -27,18 +27,18 @@ import {
   type ThreadId,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   hasProjectSettingsOverrides,
   resolveProjectSettings,
-} from "@t3tools/shared/projectSettings";
+} from "@kurambit/shared/projectSettings";
 import {
   mergeGitStatusParts,
   resolveAutoFeatureBranchName,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@kurambit/shared/git";
 
-import { GitManagerError } from "@t3tools/contracts";
+import { GitManagerError } from "@kurambit/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
   conventionalCommitsTextGenerationPolicy,
@@ -50,7 +50,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitManagerServiceError } from "@kurambit/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
 export interface GitActionProgressReporter {
@@ -96,7 +96,7 @@ export class GitManager extends Context.Service<
       options?: GitRunStackedActionOptions,
     ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
   }
->()("t3/git/GitManager") {}
+>()("kurambit/git/GitManager") {}
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;
 const MAX_PROGRESS_TEXT_LENGTH = 500;

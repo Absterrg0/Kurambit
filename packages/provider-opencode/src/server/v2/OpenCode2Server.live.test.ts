@@ -82,7 +82,9 @@ describe.runIf(binaryPath !== undefined)("OpenCode2Server live", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-opencode2-server-live-" });
+        const root = yield* fs.makeTempDirectoryScoped({
+          prefix: "kurambit-opencode2-server-live-",
+        });
         const first = path.join(root, "first");
         const second = path.join(root, "second");
         yield* fs.makeDirectory(first);

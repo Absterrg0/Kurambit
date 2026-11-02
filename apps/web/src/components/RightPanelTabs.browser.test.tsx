@@ -1,5 +1,5 @@
-import type { DesktopPreviewFavicon, PreviewSessionSnapshot } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import type { DesktopPreviewFavicon, PreviewSessionSnapshot } from "@kurambit/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";

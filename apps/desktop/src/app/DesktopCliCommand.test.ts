@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Cli from "./DesktopCliCommand.ts";
-it.effect("never installs or removes a global t3 command", () =>
+it.effect("never installs or removes a global kurambit command", () =>
   Effect.gen(function* () {
     const cli = yield* Cli.make;
     assert.isFalse((yield* cli.state).supported);

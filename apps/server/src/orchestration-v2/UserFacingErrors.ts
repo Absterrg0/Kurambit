@@ -1,4 +1,4 @@
-import { PROVIDER_DISPLAY_NAMES, type ProviderDriverKind } from "@t3tools/contracts";
+import { PROVIDER_DISPLAY_NAMES, type ProviderDriverKind } from "@kurambit/contracts";
 import * as Predicate from "effect/Predicate";
 
 const GENERIC_ERROR_PREFIXES = [

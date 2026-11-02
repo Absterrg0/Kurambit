@@ -1,5 +1,5 @@
 import { ComposerFooterModeControls } from "./ComposerFooterModeControls";
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@kurambit/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
@@ -36,7 +36,7 @@ import type {
   ServerProvider,
   ThreadId,
   SnapShotSource,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
@@ -46,20 +46,20 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
-} from "@t3tools/contracts";
-import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/contracts";
+import type { EnvironmentConnectionPresentation } from "@kurambit/client-runtime/connection";
+import { settlePromise, squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import {
   isPasteAsTextShortcut,
   nextPastedTextFileName,
   pastedTextDisposition,
   wouldTextPasteExceedLimit,
-} from "@t3tools/client-runtime/text-paste";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+} from "@kurambit/client-runtime/text-paste";
+import { serializeComposerFileLink } from "@kurambit/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
+import { createModelSelection, normalizeModelSlug } from "@kurambit/shared/model";
+import { USAGE_LIMITS_COMMAND } from "@kurambit/shared/usageLimits";
 import {
   memo,
   type ComponentProps,
@@ -157,7 +157,7 @@ import { compressImageForStash, prepareImageForAttachment } from "../../lib/imag
 import {
   fileAttachmentTooLargeMessage,
   formatAttachmentSize,
-} from "@t3tools/client-runtime/state/attachments";
+} from "@kurambit/client-runtime/state/attachments";
 import {
   attachmentsToReleaseOnUploadCapabilityLoss,
   composerOtherFilesForPresentation,
@@ -194,7 +194,7 @@ import { useComposerPathSearch } from "../../lib/composerPathSearchState";
 import {
   replaceComposerContextReferences,
   toKindScopedComposerContextId,
-} from "@t3tools/shared/composerContextReferences";
+} from "@kurambit/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
   resolveRestingComposerControlsLayout,
@@ -243,12 +243,12 @@ import {
   threadContextRecord,
   threadContextReference,
 } from "~/lib/composerContextRecords";
-import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThreadItems";
+import { matchComposerThreadItems } from "@kurambit/client-runtime/composerThreadItems";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
-import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@t3tools/contracts";
+import { encodeComposerContextFragment } from "@kurambit/shared/composerContextClipboard";
+import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@kurambit/contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";
@@ -1009,7 +1009,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "lucide-react";
-import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { proposedPlanTitle } from "@kurambit/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
@@ -1019,7 +1019,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import type { UnifiedSettings } from "@kurambit/contracts/settings";
 import {
   isVideoAttachment,
   type ChatMessage,
@@ -1042,7 +1042,7 @@ import type {
 import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
-} from "@t3tools/client-runtime/state/composer-dispatch";
+} from "@kurambit/client-runtime/state/composer-dispatch";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   getProviderSlashCommandsForSlashMenu,
@@ -1051,7 +1051,7 @@ import {
   hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@kurambit/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useMediaQuery } from "../../hooks/useMediaQuery";

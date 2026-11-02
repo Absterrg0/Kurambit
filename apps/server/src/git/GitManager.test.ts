@@ -12,7 +12,7 @@ import {
   EventId,
   type GitActionProgressEvent,
   type ModelSelection,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
@@ -26,7 +26,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/process";
 
-import { GitCommandError, TextGenerationError, ThreadId } from "@t3tools/contracts";
+import { GitCommandError, TextGenerationError, ThreadId } from "@kurambit/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -127,7 +127,7 @@ function createBareRemote(): Effect.Effect<
   FileSystem.FileSystem | Scope.Scope | GitVcsDriver.GitVcsDriver
 > {
   return Effect.gen(function* () {
-    const remoteDir = yield* makeTempDir("t3code-git-remote-");
+    const remoteDir = yield* makeTempDir("kurambit-git-remote-");
     yield* runGit(remoteDir, ["init", "--bare"]);
     return remoteDir;
   });
@@ -251,7 +251,7 @@ function makeManager(input?: {
 }) {
   const textGeneration = createTextGeneration(input?.textGeneration);
   const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
-    prefix: "t3-git-manager-test-",
+    prefix: "kurambit-git-manager-test-",
   });
 
   const layerServerSettings = ServerSettings.ServerSettingsService.layerTest(input?.serverSettings);
@@ -344,7 +344,7 @@ function makeManager(input?: {
 }
 
 const layerGitManagerTest = GitVcsDriver.layer.pipe(
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-git-manager-test-" })),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -370,7 +370,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status returns an explicit non-repo result for non-git directories", () =>
     Effect.gen(function* () {
-      const cwd = yield* makeTempDir("t3code-git-manager-non-repo-");
+      const cwd = yield* makeTempDir("kurambit-git-manager-non-repo-");
       const { manager } = yield* makeManager();
 
       const status = yield* manager.status({ cwd });
@@ -397,7 +397,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status returns an explicit non-repo result for deleted directories", () =>
     Effect.gen(function* () {
-      const rootDir = yield* makeTempDir("t3code-git-manager-missing-dir-");
+      const rootDir = yield* makeTempDir("kurambit-git-manager-missing-dir-");
       const cwd = NodePath.join(rootDir, "deleted-repo");
       yield* makeDirectory(cwd);
       yield* removePath(cwd);
@@ -427,7 +427,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates a commit when working tree is dirty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"] = undefined;
@@ -476,7 +476,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("preserves custom style when instructions are empty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"] = undefined;
@@ -509,7 +509,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("falls back when the dedicated source control writer is unavailable", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       const missingInstanceId = ProviderInstanceId.make("missing_writer");
@@ -549,7 +549,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("applies a V2-native thread's project settings to generated commit text", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nproject\n");
       const projectId = ProjectId.make("project:git-settings");
@@ -642,7 +642,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("includes local agent instructions when recent history is empty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* runGit(repoDir, ["init", "--initial-branch=main"]);
       yield* runGit(repoDir, ["config", "user.email", "test@example.com"]);
       yield* runGit(repoDir, ["config", "user.name", "Test User"]);
@@ -689,7 +689,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "a failed generation preserves staging changed while generating (paths: %s)",
     (filePaths) =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("kurambit-git-manager-");
         yield* initRepo(repoDir);
         NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nstaged\n");
         yield* runGit(repoDir, ["add", "README.md"]);
@@ -734,7 +734,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("uses custom commit message when provided", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ncustom\n");
       let generatedCount = 0;
@@ -777,7 +777,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("commits only selected files when filePaths is provided", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "a.txt"), "file a\n");
       NodeFS.writeFileSync(NodePath.join(repoDir, "b.txt"), "file b\n");
@@ -801,7 +801,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -859,7 +859,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     { branch: "fix/name", existingBranches: ["fix/name/child"], expected: "fix/name-2" },
   ])("commits on $expected when $branch has ref namespace collisions", (scenario) =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       const mainSha = (yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim();
       for (const branch of scenario.existingBranches) {
@@ -897,7 +897,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("featureBranch uses custom commit message and derives branch name", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ncustom-feature\n");
       let generatedCount = 0;
@@ -940,7 +940,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("skips commit when there are no uncommitted changes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -957,7 +957,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("featureBranch returns error when worktree is clean", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -978,7 +978,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("commits and pushes with upstream auto-setup when needed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/stacked-flow"]);
       const remoteDir = yield* createBareRemote();
@@ -1005,7 +1005,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("skips push when branch is already up to date", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/up-to-date"]);
       const remoteDir = yield* createBareRemote();
@@ -1026,7 +1026,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("pushes existing clean commits without rerunning commit logic", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/push-only"]);
       const remoteDir = yield* createBareRemote();
@@ -1053,7 +1053,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("pushes existing commits without committing dirty worktree changes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/push-dirty"]);
       const remoteDir = yield* createBareRemote();
@@ -1091,7 +1091,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("emits ordered progress events for commit hooks", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "hooked.txt"), "hooked\n");
       NodeFS.writeFileSync(
@@ -1154,7 +1154,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("emits action_failed when a commit hook rejects", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("kurambit-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "hook-failure.txt"), "broken\n");
       NodeFS.writeFileSync(

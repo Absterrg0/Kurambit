@@ -2,7 +2,7 @@ import {
   type ClientConnectionMethod,
   EnvironmentId,
   type ExecutionEnvironmentDescriptor,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { resolveRemoteWebSocketConnectionUrl } from "./remote.ts";
 import { environmentMismatchError, mapRemoteEnvironmentError } from "../connection/errors.ts";
 import { type ConnectionAttemptError } from "../connection/model.ts";
@@ -40,7 +40,7 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
       readonly connectionMethod: ClientConnectionMethod;
     }) => Effect.Effect<AuthorizedRemoteEnvironment, ConnectionAttemptError>;
   }
->()("@t3tools/client-runtime/authorization/service/RemoteEnvironmentAuthorization") {}
+>()("@kurambit/client-runtime/authorization/service/RemoteEnvironmentAuthorization") {}
 
 const fetchDescriptor = Effect.fn("clientRuntime.connection.remote.fetchDescriptor")(function* (
   httpBaseUrl: string,

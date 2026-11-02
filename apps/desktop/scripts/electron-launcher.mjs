@@ -10,18 +10,23 @@ const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 export const desktopDir = NodePath.resolve(__dirname, "..");
 const repoRoot = NodePath.resolve(desktopDir, "..", "..");
-const APP_DISPLAY_NAME = isDevelopment ? "Game Studio (Dev)" : "Game Studio";
-const APP_BUNDLE_ID = isDevelopment ? "dev.gamestudio.app.dev" : "dev.gamestudio.app";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["game-studio-dev"] : ["game-studio"];
+const APP_DISPLAY_NAME = isDevelopment ? "Kurambit (Dev)" : "Kurambit";
+const APP_BUNDLE_ID = isDevelopment ? "dev.kurambit.app.dev" : "dev.kurambit.app";
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["kurambit-dev"] : ["kurambit"];
 const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
   "dev",
-  "blueprint-macos-1024.png",
+  "kurambit-dev-macos-1024.png",
 );
-const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "black-macos-1024.png");
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+const productionMacIconPngPath = NodePath.join(
+  repoRoot,
+  "assets",
+  "prod",
+  "kurambit-macos-1024.png",
+);
+// oxlint-disable-next-line kurambit/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
 function setPlistString(plistPath, key, value) {
@@ -104,14 +109,14 @@ function shellSingleQuote(value) {
 export function makeDevelopmentEnvironmentScript(environment) {
   const envEntries = [
     ["VITE_DEV_SERVER_URL", environment.VITE_DEV_SERVER_URL],
-    ["T3CODE_PORT", environment.T3CODE_PORT],
-    ["GAME_STUDIO_HOME", environment.GAME_STUDIO_HOME],
-    ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
-    ["T3CODE_OTLP_TRACES_URL", environment.T3CODE_OTLP_TRACES_URL],
-    ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
-    ["T3CODE_OTLP_HEADERS", environment.T3CODE_OTLP_HEADERS],
-    ["T3CODE_OTLP_PROTOCOL", environment.T3CODE_OTLP_PROTOCOL],
-    ["GAME_STUDIO_APP_USER_MODEL_ID", APP_BUNDLE_ID],
+    ["KURAMBIT_PORT", environment.KURAMBIT_PORT],
+    ["KURAMBIT_HOME", environment.KURAMBIT_HOME],
+    ["KURAMBIT_COMMIT_HASH", environment.KURAMBIT_COMMIT_HASH],
+    ["KURAMBIT_OTLP_TRACES_URL", environment.KURAMBIT_OTLP_TRACES_URL],
+    ["KURAMBIT_OTLP_EXPORT_INTERVAL_MS", environment.KURAMBIT_OTLP_EXPORT_INTERVAL_MS],
+    ["KURAMBIT_OTLP_HEADERS", environment.KURAMBIT_OTLP_HEADERS],
+    ["KURAMBIT_OTLP_PROTOCOL", environment.KURAMBIT_OTLP_PROTOCOL],
+    ["KURAMBIT_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
     ...envEntries.map(
@@ -131,7 +136,7 @@ export function makeDevelopmentLauncherScript({
   return [
     "#!/bin/sh",
     `if [ -f ${shellSingleQuote(environmentFilePath)} ]; then . ${shellSingleQuote(environmentFilePath)}; fi`,
-    `exec ${shellSingleQuote(electronBinaryPath)} --game-studio-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+    `exec ${shellSingleQuote(electronBinaryPath)} --kurambit-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
     "",
   ].join("\n");
 }
@@ -263,9 +268,8 @@ export function resolveMacBundleInfoPlistStrings(executableName) {
     CFBundleExecutable: executableName,
     CFBundleIconFile: "icon.icns",
     NSScreenCaptureUsageDescription:
-      "Game Studio captures the active window when you use the snapshot shortcut.",
-    NSDocumentsFolderUsageDescription:
-      "Game Studio reads project files you open in the desktop app.",
+      "Kurambit captures the active window when you use the snapshot shortcut.",
+    NSDocumentsFolderUsageDescription: "Kurambit reads project files you open in the desktop app.",
   };
 }
 
@@ -397,7 +401,7 @@ function buildMacLauncher(electronBinaryPath) {
   patchHelperBundleInfoPlists(targetAppBundlePath);
   if (isDevelopment) {
     // Launching the node_modules copy makes macOS associate the process (and Dock label) with
-    // Electron.app even though this bundle's Info.plist has the Game Studio name. Its conventional
+    // Electron.app even though this bundle's Info.plist has the Kurambit name. Its conventional
     // executable name also keeps Electron's default-app runtime in development mode instead of
     // making app.isPackaged report true.
     writeDevelopmentEnvironmentScript();

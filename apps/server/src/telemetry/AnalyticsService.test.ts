@@ -36,9 +36,9 @@ it.effect("never sends or reads identity even when inherited analytics is enable
       ConfigProvider.layer(
         ConfigProvider.fromEnv({
           env: {
-            T3CODE_TELEMETRY_ENABLED: "true",
-            T3CODE_POSTHOG_HOST: "https://us.i.posthog.com",
-            T3CODE_POSTHOG_KEY: "inherited-key",
+            KURAMBIT_TELEMETRY_ENABLED: "true",
+            KURAMBIT_POSTHOG_HOST: "https://us.i.posthog.com",
+            KURAMBIT_POSTHOG_KEY: "inherited-key",
           },
         }),
       ),

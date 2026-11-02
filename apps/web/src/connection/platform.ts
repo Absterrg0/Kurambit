@@ -2,7 +2,7 @@ import {
   ClientCapabilities,
   PlatformConnectionSource,
   Persistence,
-} from "@t3tools/client-runtime/platform";
+} from "@kurambit/client-runtime/platform";
 import {
   type ConnectionAttemptError,
   ConnectionTransientError,
@@ -12,11 +12,11 @@ import {
   PrimaryConnectionRegistration,
   PrimaryConnectionTarget,
   Wakeups,
-} from "@t3tools/client-runtime/connection";
+} from "@kurambit/client-runtime/connection";
 
-import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
-import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import { fetchRemoteEnvironmentDescriptor } from "@kurambit/client-runtime/environment";
+import { EnvironmentRpcRequestObserver } from "@kurambit/client-runtime/rpc";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@kurambit/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

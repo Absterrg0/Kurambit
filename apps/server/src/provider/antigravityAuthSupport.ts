@@ -1,9 +1,9 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Effect's symlink has no type argument, and Windows needs a junction to link without elevation.
 import * as NodeFSP from "node:fs/promises";
 
-import type { AntigravityAuthMethod, ProviderInstanceId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
+import type { AntigravityAuthMethod, ProviderInstanceId } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@kurambit/shared/nodeRuntime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
@@ -16,8 +16,8 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as AcpErrors from "effect-acp/errors";
 
-import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
-import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { collectUint8StreamText } from "@kurambit/provider-core/server/collectStreamText";
+import type * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
 import {
   antigravityUserSkillDirectories,
   resolveAntigravityUserHome,
@@ -25,7 +25,7 @@ import {
 
 export const ANTIGRAVITY_AUTH_STDOUT_PREFIX =
   "Open the following link to authenticate the ACP server: ";
-export const ANTIGRAVITY_AUTH_BROWSER_MARKER = "__T3_ANTIGRAVITY_AUTH_URL__";
+export const ANTIGRAVITY_AUTH_BROWSER_MARKER = "__KURAMBIT_ANTIGRAVITY_AUTH_URL__";
 export const ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE =
   "Sign in to Antigravity in Settings before you continue.";
 
@@ -58,7 +58,7 @@ const browserHelperSource =
   `process.stderr.on("error",()=>process.exit(0)).write(` +
   `"${ANTIGRAVITY_AUTH_BROWSER_MARKER}"+JSON.stringify(process.argv[1])+"\\n",` +
   `()=>process.exit(0))`;
-const browserPreflightUrl = "https://example.invalid/t3-antigravity-browser-preflight";
+const browserPreflightUrl = "https://example.invalid/kurambit-antigravity-browser-preflight";
 
 const removedEnvironmentKeys = new Set([
   "GEMINI_API_KEY",
@@ -215,7 +215,7 @@ function antigravityEnvironment(
         ? { GOOGLE_API_KEY: auth.apiKey }
         : {};
   // It unpacks about 1 GB into the system temp directory per launch and a force
-  // kill leaves that behind. Point it at a T3-owned directory so the driver can
+  // kill leaves that behind. Point it at a Kurambit-owned directory so the driver can
   // reclaim the space.
   const tempDirectory = runtimeTempDirectory ?? profile.tempDirectory;
   return {
@@ -233,7 +233,7 @@ function antigravityEnvironment(
 }
 
 /**
- * The agent reads its user-global skills under `GEMINI_HOME`, which T3 points
+ * The agent reads its user-global skills under `GEMINI_HOME`, which Kurambit points
  * at the private profile. Link the two skill directories back to the user's
  * real `~/.gemini` so global skills load, while MCP servers, hooks, and
  * credentials stay isolated.
@@ -320,7 +320,7 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
     helperExecutable.includes("%s")
   ) {
     return yield* authSupportError(
-      "The T3 runtime path cannot be used to suppress Antigravity browser launches.",
+      "The Kurambit runtime path cannot be used to suppress Antigravity browser launches.",
     );
   }
 

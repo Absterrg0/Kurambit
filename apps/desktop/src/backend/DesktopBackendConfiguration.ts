@@ -1,5 +1,5 @@
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
-import { currentDesktopBootstrapToken } from "@t3tools/shared/desktopBootstrapToken";
+import { parsePersistedServerObservabilitySettings } from "@kurambit/shared/serverSettings";
+import { currentDesktopBootstrapToken } from "@kurambit/shared/desktopBootstrapToken";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -40,7 +40,7 @@ export class DesktopBackendConfiguration extends Context.Service<
     readonly resolvePrimaryLabel: Effect.Effect<string>;
     readonly currentBootstrapToken: Effect.Effect<string, PlatformError.PlatformError>;
   }
->()("@t3tools/desktop/backend/DesktopBackendConfiguration") {}
+>()("@kurambit/desktop/backend/DesktopBackendConfiguration") {}
 
 interface BackendObservabilitySettings {
   readonly otlpTracesUrl: Option.Option<string>;
@@ -55,16 +55,16 @@ const emptyBackendObservabilitySettings: BackendObservabilitySettings = {
 };
 
 const DESKTOP_BACKEND_ENV_NAMES = [
-  "T3CODE_PORT",
-  "T3CODE_MODE",
-  "T3CODE_NO_BROWSER",
-  "T3CODE_HOST",
-  "T3CODE_DESKTOP_WS_URL",
-  "T3CODE_DESKTOP_LAN_ACCESS",
-  "T3CODE_DESKTOP_LAN_HOST",
-  "T3CODE_DESKTOP_HTTPS_ENDPOINTS",
-  "T3CODE_TAILSCALE_SERVE",
-  "T3CODE_TAILSCALE_SERVE_PORT",
+  "KURAMBIT_PORT",
+  "KURAMBIT_MODE",
+  "KURAMBIT_NO_BROWSER",
+  "KURAMBIT_HOST",
+  "KURAMBIT_DESKTOP_WS_URL",
+  "KURAMBIT_DESKTOP_LAN_ACCESS",
+  "KURAMBIT_DESKTOP_LAN_HOST",
+  "KURAMBIT_DESKTOP_HTTPS_ENDPOINTS",
+  "KURAMBIT_TAILSCALE_SERVE",
+  "KURAMBIT_TAILSCALE_SERVE_PORT",
 ] as const;
 
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
@@ -84,7 +84,7 @@ const logBackendObservabilitySettingsReadFailure = (
 };
 
 function resourceMonitorBinaryName(platform: NodeJS.Platform): string {
-  return platform === "win32" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
+  return platform === "win32" ? "kurambit-resource-monitor.exe" : "kurambit-resource-monitor";
 }
 
 const resolveResourceMonitorPath = Effect.fn(
@@ -198,7 +198,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       mode: "desktop" as const,
       noBrowser: true,
       port: backendExposure.port,
-      t3Home: environment.baseDir,
+      kurambitHome: environment.baseDir,
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
       desktopBootstrapSecret: input.bootstrapSecret,
@@ -232,7 +232,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
-        T3CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
+        KURAMBIT_CLI_PATH: Option.getOrUndefined(input.cliPath),
       },
       extendEnv: true,
       bootstrap,

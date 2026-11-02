@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { ScheduledTaskId, type EnvironmentId, type ScheduledTask } from "@t3tools/contracts";
+import { ScheduledTaskId, type EnvironmentId, type ScheduledTask } from "@kurambit/contracts";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";

@@ -1,5 +1,5 @@
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -23,7 +23,7 @@ import {
   ProviderTurnId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -46,7 +46,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import type { ProviderInstance } from "@kurambit/provider-core/server/driver";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -64,12 +64,12 @@ import * as RuntimeLayer from "./runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 
 const layerPlatformTest = Layer.merge(NodeServices.layer, Layer.empty);
 
 const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-orchestration-v2-runtime-layer-",
+  prefix: "kurambit-orchestration-v2-runtime-layer-",
 });
 
 const modelSelection = {
@@ -457,7 +457,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
-        worktreePath: `/tmp/t3-${name}`,
+        worktreePath: `/tmp/kurambit-${name}`,
       });
       yield* orchestrator.dispatch({
         type: "message.dispatch",
@@ -490,7 +490,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
               parentCheckpointId: null,
               ordinalWithinScope: 0,
               appRunOrdinal: null,
-              ref: CheckpointRef.make(`refs/t3/${name}`),
+              ref: CheckpointRef.make(`refs/kurambit/${name}`),
               status: "ready",
               files: [],
               capturedAt: now,
@@ -638,7 +638,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
                 parentCheckpointId: null,
                 ordinalWithinScope: 0,
                 appRunOrdinal: null,
-                ref: CheckpointRef.make(`refs/t3/runtime-rollback-${status}`),
+                ref: CheckpointRef.make(`refs/kurambit/runtime-rollback-${status}`),
                 status,
                 files: [],
                 capturedAt: now,

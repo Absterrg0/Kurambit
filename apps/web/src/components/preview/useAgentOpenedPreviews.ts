@@ -1,5 +1,5 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { ScopedThreadRef } from "@kurambit/contracts";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { useEffect, useRef } from "react";
 import { useClientSettings } from "../../hooks/useSettings";
 import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../../previewMiniPlayerStore";

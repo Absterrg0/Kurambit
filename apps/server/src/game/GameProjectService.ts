@@ -25,7 +25,7 @@ import {
   type GameOpenInput,
   type GameProjectResult,
   type GameSummary,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameOperations from "./GameOperations.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -74,7 +74,7 @@ export class GameProjectService extends Context.Service<
       GameOperationError
     >;
   }
->()("t3/game/GameProjectService") {}
+>()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
@@ -299,7 +299,7 @@ const make = Effect.gen(function* () {
           ["add", "."],
           [
             "-c",
-            "user.name=Game Studio",
+            "user.name=Kurambit",
             "-c",
             "user.email=studio@localhost",
             "commit",

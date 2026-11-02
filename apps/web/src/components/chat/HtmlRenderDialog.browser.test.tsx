@@ -2,9 +2,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
-import { htmlRenderTheme, HTML_RENDER_DEFAULT_FONTS } from "@t3tools/shared/htmlRender";
-import { T3_CODE_DARK_THEME_COLORS } from "@t3tools/shared/themePalettes";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { htmlRenderTheme, HTML_RENDER_DEFAULT_FONTS } from "@kurambit/shared/htmlRender";
+import { KURAMBIT_DARK_THEME_COLORS } from "@kurambit/shared/themePalettes";
+import { EnvironmentId, ThreadId } from "@kurambit/contracts";
 
 import "~/index.css";
 
@@ -42,7 +42,7 @@ vi.mock(import("../ui/toast"), async (original) => {
 vi.mock(import("~/hooks/useHtmlRenderTheme"), async (original) => ({
   ...(await original()),
   useHtmlRenderTheme: () =>
-    htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark", HTML_RENDER_DEFAULT_FONTS),
+    htmlRenderTheme(KURAMBIT_DARK_THEME_COLORS, "dark", HTML_RENDER_DEFAULT_FONTS),
 }));
 
 let root: Root;
@@ -168,7 +168,7 @@ it("routes links from the expanded page through its thread", async () => {
   await click("Open full screen");
   const frame = document.querySelector<HTMLIFrameElement>('[role="dialog"] iframe')!;
   frame.focus();
-  const url = "https://github.com/pingdotgg/t3code/pull/17561";
+  const url = "https://github.com/Absterrg0/Kurambit/pull/17561";
   await act(() => {
     window.dispatchEvent(
       new MessageEvent("message", {

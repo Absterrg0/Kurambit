@@ -7,8 +7,8 @@ import type {
   ServerConfig,
   SourceControlDiscoveryResult,
   SourceControlRepositoryInfo,
-} from "@t3tools/contracts";
-import { newProjectFolderName } from "@t3tools/shared/path";
+} from "@kurambit/contracts";
+import { newProjectFolderName } from "@kurambit/shared/path";
 
 import {
   appendBrowsePathSegment,

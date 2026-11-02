@@ -5,7 +5,7 @@ import {
   ThreadId,
   type ClientSettings,
   type DesktopPreviewBridge,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -76,7 +76,7 @@ beforeEach(() => {
   mocks.closeTab.mockReset().mockResolvedValue(undefined);
   mocks.registerWebview.mockReset().mockResolvedValue(undefined);
   mocks.getPreviewConfig.mockReset().mockResolvedValue({
-    partition: "persist:t3-preview-work",
+    partition: "persist:kurambit-preview-work",
     webPreferences: "contextIsolation=yes",
     preloadUrl: null,
   });
@@ -184,7 +184,7 @@ describe("HostedBrowserWebview settings hydration", () => {
     expect(acquire).toHaveBeenCalledExactlyOnceWith(runtimeTabId, undefined);
     expect(mocks.getPreviewConfig).toHaveBeenCalledExactlyOnceWith(threadRef.environmentId, "work");
     expect(guests()).toHaveLength(1);
-    expect(guest()?.getAttribute("partition")).toBe("persist:t3-preview-work");
+    expect(guest()?.getAttribute("partition")).toBe("persist:kurambit-preview-work");
     expect(guest()?.getAttribute("src")).toBe("https://example.com");
     expect(mocks.createTab).toHaveBeenCalledExactlyOnceWith(runtimeTabId, {
       zoomFactor: 1.25,

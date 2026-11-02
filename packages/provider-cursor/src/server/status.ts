@@ -5,9 +5,9 @@ import type {
   ServerProviderAuth,
   ServerProviderModel,
   ServerProviderState,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type { CursorSettings } from "../settings.ts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import { createModelCapabilities } from "@kurambit/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -20,7 +20,7 @@ import {
   buildServerProvider,
   providerModelsFromSettings,
   type ServerProviderDraft,
-} from "@t3tools/provider-core/server/snapshotProbe";
+} from "@kurambit/provider-core/server/snapshotProbe";
 import * as CursorSdkCatalog from "./CursorSdkCatalog.ts";
 
 const CURSOR_PRESENTATION = {
@@ -52,7 +52,7 @@ export function buildInitialCursorProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Cursor is disabled in T3 Code settings.",
+          message: "Cursor is disabled in Kurambit settings.",
         },
       });
     }
@@ -265,7 +265,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Cursor is disabled in T3 Code settings.",
+        message: "Cursor is disabled in Kurambit settings.",
       },
     });
   }

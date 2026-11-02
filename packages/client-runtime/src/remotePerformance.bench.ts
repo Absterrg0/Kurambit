@@ -4,7 +4,7 @@ import {
   MessageId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 
 import { HttpClient, HttpClientResponse } from "effect/http";
@@ -44,7 +44,7 @@ const target = new PrimaryConnectionTarget({
   wsBaseUrl: "wss://remote.example.test/ws",
 });
 const responses = {
-  "/.well-known/t3/environment": {
+  "/.well-known/kurambit/environment": {
     environmentId: target.environmentId,
     label: target.label,
     platform: { os: "linux", arch: "x64" },

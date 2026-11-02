@@ -9,7 +9,7 @@ import {
   RunId,
   RuntimeRequestId,
   TurnItemId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -79,9 +79,9 @@ describe("V2 client presentation", () => {
   it("preserves active ordering and both pull-request sources", () => {
     const linkedPullRequest = {
       projectId: v2ThreadShell.projectId,
-      repository: "pingdotgg/t3code",
+      repository: "Absterrg0/Kurambit",
       number: 42,
-      url: "https://github.com/pingdotgg/t3code/pull/42",
+      url: "https://github.com/Absterrg0/Kurambit/pull/42",
     };
     const branchPullRequest = { ...linkedPullRequest, number: 43 };
     const shell = presentThreadShell(environmentId, {

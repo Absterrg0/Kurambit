@@ -11,7 +11,7 @@ import {
   DesktopBrowserCommand,
   DesktopBrowserEvent,
   type DesktopBrowserCommand as DesktopBrowserCommandType,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -58,7 +58,7 @@ export class DesktopBrowserChannel extends Context.Service<
       pointer: { readonly phase: "move" | "click"; readonly x: number; readonly y: number },
     ) => Effect.Effect<void>;
   }
->()("t3/preview/DesktopBrowserChannel") {}
+>()("kurambit/preview/DesktopBrowserChannel") {}
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;

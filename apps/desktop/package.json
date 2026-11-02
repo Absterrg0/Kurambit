@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/desktop",
+  "name": "@kurambit/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,10 +14,10 @@
   "dependencies": {
     "@crowecawcaw/xa11y": "0.13.0",
     "@effect/platform-node": "catalog:",
+    "@kurambit/client-runtime": "workspace:*",
+    "@kurambit/contracts": "workspace:*",
+    "@kurambit/shared": "workspace:*",
     "@napi-rs/keyring": "^1.3.0",
-    "@t3tools/client-runtime": "workspace:*",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
     "dbus-next": "0.10.2",
     "effect": "catalog:",
     "electron": "44.4.5",
@@ -37,5 +37,5 @@
     "tailwindcss": "^4.0.0",
     "vite-plus": "catalog:"
   },
-  "productName": "Game Studio"
+  "productName": "Kurambit"
 }

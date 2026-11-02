@@ -1,8 +1,8 @@
 import {
   formatProviderSubagentStatus,
   type ProviderSubagentStatus,
-} from "@t3tools/client-runtime/state/thread-execution";
-import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
+} from "@kurambit/client-runtime/state/thread-execution";
+import { isOrchestrationV2WorkActive } from "@kurambit/contracts";
 import { ArrowUpLeftIcon } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 

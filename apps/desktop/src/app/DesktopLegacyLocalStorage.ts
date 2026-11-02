@@ -10,9 +10,9 @@ export class DesktopLegacyLocalStorage extends Context.Service<
     readonly take: Effect.Effect<Option.Option<Readonly<Record<string, string>>>>;
     readonly complete: Effect.Effect<void>;
   }
->()("@t3tools/desktop/app/DesktopLegacyLocalStorage") {}
+>()("@kurambit/desktop/app/DesktopLegacyLocalStorage") {}
 
-// Keep the IPC contract inert for existing renderers. Game Studio starts fresh.
+// Keep the IPC contract inert for existing renderers. Kurambit starts fresh.
 export const layer = Layer.succeed(DesktopLegacyLocalStorage, {
   load: () => Effect.void,
   take: Effect.succeed(Option.none()),

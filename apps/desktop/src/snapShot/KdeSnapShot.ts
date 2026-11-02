@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as Schema from "effect/Schema";
-import type { DesktopCaptureHelperState } from "@t3tools/contracts";
+import type { DesktopCaptureHelperState } from "@kurambit/contracts";
 
 import { escapeDesktopEntryExecArgument } from "../app/DesktopLinuxUrlHandler.ts";
 import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
@@ -14,9 +14,9 @@ import { readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
 export { isKdeCaptureSession } from "./linuxCaptureSession.ts";
 
-export const KDE_CAPTURE_EXECUTABLE = "t3-kde-snap-shot";
-const DESKTOP_FILE = "dev.gamestudio.app.KdeCapture.desktop";
-const MARKER = "X-GameStudio-Capture-Helper=true";
+export const KDE_CAPTURE_EXECUTABLE = "kurambit-kde-snap-shot";
+const DESKTOP_FILE = "dev.kurambit.app.KdeCapture.desktop";
+const MARKER = "X-Kurambit-Capture-Helper=true";
 const decodeCapabilities = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ feedbackAvailable: Schema.optional(Schema.Boolean) })),
 );
@@ -24,7 +24,7 @@ export type KdeCapturePaths = { readonly bundle: string; readonly dataHome: stri
 
 export function kdeCapturePaths(paths: KdeCapturePaths) {
   return {
-    executable: NodePath.join(paths.dataHome, "game-studio", "kde-capture", KDE_CAPTURE_EXECUTABLE),
+    executable: NodePath.join(paths.dataHome, "kurambit", "kde-capture", KDE_CAPTURE_EXECUTABLE),
     desktop: NodePath.join(paths.dataHome, "applications", DESKTOP_FILE),
   };
 }
@@ -33,7 +33,7 @@ export function kdeCaptureDesktopEntry(executable: string): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=Game Studio SnapShots",
+    "Name=Kurambit SnapShots",
     "NoDisplay=true",
     `Exec=${escapeDesktopEntryExecArgument(executable)} check`,
     // KService reads this custom property as a KConfig list, not an XDG ';' list.
@@ -115,8 +115,7 @@ export class KdeCaptureSetup {
       if (!bundle)
         return {
           status: "error",
-          message:
-            "The capture helper is missing from this build. Update or reinstall Game Studio.",
+          message: "The capture helper is missing from this build. Update or reinstall Kurambit.",
         };
       if (!installed.equals(bundle) || entry.toString() !== kdeCaptureDesktopEntry(executable))
         return {
@@ -161,7 +160,7 @@ export class KdeCaptureSetup {
       const bundle = await regularFile(this.paths.bundle);
       if (!bundle)
         throw new Error(
-          "The capture helper is missing from this build. Update or reinstall Game Studio.",
+          "The capture helper is missing from this build. Update or reinstall Kurambit.",
         );
       await NodeFSP.mkdir(directory, { recursive: true });
       await NodeFSP.mkdir(NodePath.dirname(desktop), { recursive: true });
@@ -220,7 +219,7 @@ export async function captureKdeWindow(
   if (state.status !== "ready")
     throw new Error(`${state.message} Open Settings → SnapShots to continue setup.`);
   const { executable } = kdeCapturePaths(paths);
-  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-kde-capture-"));
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kurambit-kde-capture-"));
   let retained = false;
   const cleanup = () => NodeFSP.rm(directory, { recursive: true, force: true });
   try {
@@ -254,7 +253,7 @@ export async function captureKdeWindow(
         activate: async (title) => {
           targetTitle = title;
           const activation = await NodeFSP.mkdtemp(
-            NodePath.join(NodeOS.tmpdir(), "t3-kde-activate-"),
+            NodePath.join(NodeOS.tmpdir(), "kurambit-kde-activate-"),
           );
           try {
             await run(

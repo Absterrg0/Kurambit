@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 import * as ServerConfig from "../config.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
@@ -40,7 +40,7 @@ describe("resolveNativeAppIcon", () => {
       }),
     );
     const layerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-      prefix: "t3-native-app-icon-test-",
+      prefix: "kurambit-native-app-icon-test-",
     });
     const layerDependencies = Layer.mergeAll(
       layerConfig,

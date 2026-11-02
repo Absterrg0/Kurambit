@@ -1,4 +1,4 @@
-import { createDelayedStatus, type ShownStatus } from "@t3tools/client-runtime/delayed-status";
+import { createDelayedStatus, type ShownStatus } from "@kurambit/client-runtime/delayed-status";
 import { useEffect, useState } from "react";
 
 export function useDelayedStatus<A>(key: string, value: A | null): A | null {

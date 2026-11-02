@@ -1,7 +1,7 @@
 "use client";
 
 import { useGameDialogStore } from "./game/gameDialogStore";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -16,21 +16,21 @@ import {
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
   type AddProjectRemoteSourceReadiness,
-} from "@t3tools/client-runtime/operations/projects";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+} from "@kurambit/client-runtime/operations/projects";
+import { connectionStatusText } from "@kurambit/client-runtime/connection";
+import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
+import { resolveThreadReferenceCopyTarget } from "@kurambit/shared/threadReference";
 import {
   canPreloadBrowsePath,
   createBrowseNavigationCoordinator,
   filterFilesystemBrowseEntries,
   getFilesystemBrowsePath,
-} from "@t3tools/client-runtime/state/filesystem";
+} from "@kurambit/client-runtime/state/filesystem";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -44,7 +44,7 @@ import {
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -100,7 +100,7 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import { useTheme } from "../hooks/useTheme";
 import { useCustomThemes } from "../hooks/useCustomThemes";
 import { useEnvironmentThemeDefinitions } from "../hooks/useEnvironmentTheme";
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
+import { BUILT_IN_THEMES } from "@kurambit/shared/themePalettes";
 import { getThemeDefinition } from "../themePalette";
 import {
   STANDARD_THEME_CARDS,
@@ -123,7 +123,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@kurambit/client-runtime/state/projects";
 import {
   useEnvironmentProviders,
   useEnvironments,
@@ -1967,7 +1967,7 @@ function OpenCommandPaletteDialog(props: {
         "grouping",
         "checkout",
         "remove",
-        "t3.json",
+        "kurambit.json",
       ],
       title: "Project settings",
       description: contextualProjectGroup.displayName,

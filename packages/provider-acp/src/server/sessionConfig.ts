@@ -1,16 +1,16 @@
-import type { ProviderOptionChoice, ProviderOptionDescriptor } from "@t3tools/contracts";
+import type { ProviderOptionChoice, ProviderOptionDescriptor } from "@kurambit/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
 import type { AcpSessionModeState } from "./runtimeModel.ts";
 
-export const ACP_SESSION_MODE_OPTION_ID = "_t3/session-mode";
+export const ACP_SESSION_MODE_OPTION_ID = "_kurambit/session-mode";
 
 /**
- * Agents use it for a real choice (GitHub Copilot's default agent), but T3
+ * Agents use it for a real choice (GitHub Copilot's default agent), but Kurambit
  * option IDs must be non-empty. The ACP adapter maps it back to `""` before
  * applying a selection.
  */
-export const ACP_EMPTY_OPTION_VALUE = "_t3/empty";
+export const ACP_EMPTY_OPTION_VALUE = "_kurambit/empty";
 
 const MAX_OPTION_DESCRIPTORS = 16;
 const MAX_OPTION_CHOICES = 64;
@@ -67,7 +67,7 @@ export function acpProviderOptionDescriptors(input: {
 
   for (const option of input.configOptions ?? []) {
     // "model" options surface as the model list; "collaboration_mode" options
-    // are driven by T3's own plan/build interaction mode in the ACP adapter.
+    // are driven by Kurambit's own plan/build interaction mode in the ACP adapter.
     if (option.category === "model" || option.category === "collaboration_mode") {
       continue;
     }

@@ -22,10 +22,10 @@ import {
   type RuntimeRequestId,
   type ServerProviderModel,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type { MuseSettings } from "../settings.ts";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { AgentScope } from "@kurambit/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@kurambit/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -38,10 +38,10 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import * as McpProviderSession from "@kurambit/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import { buildRuntimeInstructions } from "@kurambit/provider-core/server/runtimeInstructions";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import {
   MuseApproval,
@@ -69,25 +69,25 @@ import {
   type createMuseSdkHost,
   type MuseSdkHost,
 } from "./sdk.ts";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import type * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
 import {
   providerMessageTextWithAttachmentPaths,
   isProviderNativeImageAttachment,
-} from "@t3tools/provider-core/server/attachmentPrompt";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@kurambit/provider-core/server/attachmentPrompt";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import {
   backgroundWorkNotification,
   type BackgroundWorkReport,
-} from "@t3tools/provider-core/server/notification";
-import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@kurambit/provider-core/server/notification";
+import type * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@kurambit/provider-core/server/subagentProjection";
+import { turnScopedSelectionTransition } from "@kurambit/provider-core/server/selectionTransition";
 import { museItemStatus, museToolPresentation } from "./itemPresentation.ts";
 
 const MUSE_PROVIDER = ProviderDriverKind.make("muse");
@@ -1051,7 +1051,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       });
       /**
        * A workflow child's approval is runless: the turn that started the workflow
-       * may end long before the child asks, and T3 keeps a runless request on the
+       * may end long before the child asks, and Kurambit keeps a runless request on the
        * thread until Muse settles it.
        */
       const publishRequest = Effect.fnUntraced(function* (native: PendingRequest["native"]) {
@@ -1191,7 +1191,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         yield* emit({ type: "turn_item.updated", driver: MUSE_PROVIDER, turnItem: item });
         yield* updateSession("waiting");
         // Muse does not give workflow children the session's allowAll mode, so in full
-        // access T3 approves for them. If Muse rejects that, the request waits for the user.
+        // access Kurambit approves for them. If Muse rejects that, the request waits for the user.
         if (child && input.runtimePolicy.runtimeMode === "full-access")
           yield* decideApproval(entry, "accept").pipe(Effect.ignore, Effect.forkIn(scope));
       });
@@ -1734,9 +1734,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           const config = mcpSession
             ? {
                 mcpServers: {
-                  // Muse defaults to "required", which fails the whole run when T3's
+                  // Muse defaults to "required", which fails the whole run when Kurambit's
                   // tools cannot be reached. The agent should still work without them.
-                  "t3-code": {
+                  kurambit: {
                     transport: "streamableHttp",
                     mode: "optional",
                     url: mcpSession.endpoint,
@@ -1980,7 +1980,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 ],
                 displayText: turnInput.message.text || "Image attachment",
                 // A resumed session keeps the root it was created with; pin it to
-                // this thread's current checkout so edits land where T3 tracks them.
+                // this thread's current checkout so edits land where Kurambit tracks them.
                 workspaceRoots: [workspaceRoot],
                 ifBusy: "queue",
                 ...(effort ? { reasoningEffort: effort } : {}),
@@ -2251,7 +2251,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 }),
             ),
           ),
-        // Muse rejects forks at completed-turn boundaries (InvalidCut), so T3 uses
+        // Muse rejects forks at completed-turn boundaries (InvalidCut), so Kurambit uses
         // portable context handoff for forks and does not rewind Muse conversations.
         rollbackThread: (args) =>
           Effect.fail(
@@ -2259,7 +2259,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               driver: MUSE_PROVIDER,
               providerThreadId: args.providerThread.id,
               checkpointId: args.target.checkpointId,
-              cause: "Muse Code does not support conversation rollback in T3 Code.",
+              cause: "Muse Code does not support conversation rollback in Kurambit.",
             }),
           ),
         forkThread: (args) =>
@@ -2267,7 +2267,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             new ProviderAdapter.ProviderAdapterForkThreadError({
               driver: MUSE_PROVIDER,
               providerThreadId: args.sourceProviderThread.id,
-              cause: "Muse Code does not support native forks in T3 Code.",
+              cause: "Muse Code does not support native forks in Kurambit.",
             }),
           ),
       };

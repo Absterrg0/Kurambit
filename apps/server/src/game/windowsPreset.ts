@@ -132,7 +132,7 @@ export const planWindowsPreset = (
     const names = windows.map((section) => `"${section.name}"`).join(", ");
     return {
       ok: false,
-      detail: `This game has ${windows.length} Windows Desktop export presets (${names}). Keep one and remove the others, then export Windows again. Game Studio does not guess which preset to use.`,
+      detail: `This game has ${windows.length} Windows Desktop export presets (${names}). Keep one and remove the others, then export Windows again. Kurambit does not guess which preset to use.`,
     };
   }
   const reuse = windows[0];

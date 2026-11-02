@@ -3,12 +3,12 @@ interface MergeStorage {
   setItem(key: string, value: string): void;
 }
 
-const PROMPT_STASH_KEY = "t3code:prompt-stash:v2";
-const COMPOSER_DRAFTS_KEY = "t3code:composer-drafts:v1";
+const PROMPT_STASH_KEY = "kurambit:prompt-stash:v2";
+const COMPOSER_DRAFTS_KEY = "kurambit:composer-drafts:v1";
 const NOT_IMPORTED_KEYS = new Set([
   // Identifies one running install to the server; two apps must not share it.
-  "t3.backgroundActivity.clientId",
-  "t3code:snap-shot-setup-resume:v1",
+  "kurambit.backgroundActivity.clientId",
+  "kurambit:snap-shot-setup-resume:v1",
 ]);
 /** Matches MAX_STASH_ENTRIES in apps/web/src/promptStashStore.ts. */
 const MAX_STASH_ENTRIES = 20;

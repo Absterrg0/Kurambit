@@ -4,8 +4,8 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdateState,
-} from "@t3tools/contracts";
-import { ServerProviderUpdateError } from "@t3tools/contracts";
+} from "@kurambit/contracts";
+import { ServerProviderUpdateError } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -20,17 +20,17 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { SpawnExecutableResolution } from "@kurambit/shared/shell";
 
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderLatestVersions from "@kurambit/provider-core/server/ProviderLatestVersions";
 import {
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
-} from "@t3tools/provider-core/server/maintenanceResolver";
+} from "@kurambit/provider-core/server/maintenanceResolver";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
@@ -219,7 +219,7 @@ const makeTestRunner = (
     currentModels: {},
     compatibility: [CODEX_DRIVER, OPENCODE_DRIVER].map((driver) => ({
       driver,
-      t3CodeRange: ">=0.0.42",
+      kurambitRange: ">=0.0.42",
       ranges: [],
     })),
   },
@@ -988,7 +988,7 @@ it.effect("refuses incompatible latest versions and unapproved or unpinnable tar
     compatibility: [
       {
         driver: "codex",
-        t3CodeRange: ">=0.0.42",
+        kurambitRange: ">=0.0.42",
         recommendedVersion: "2.0.0",
         ranges: [
           { range: "=2.0.0", status: "supported" },

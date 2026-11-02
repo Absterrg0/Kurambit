@@ -1,4 +1,4 @@
-import type { GameSummary } from "@t3tools/contracts";
+import type { GameSummary } from "@kurambit/contracts";
 
 export type GameProgressKind = "building" | "idle";
 

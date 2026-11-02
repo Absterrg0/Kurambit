@@ -3,11 +3,11 @@ import {
   type DesktopCaptureConfigApplied,
   type DesktopCaptureConfigPreview,
   type DesktopSnapShotState,
-} from "@t3tools/contracts";
-import { parseKeybindingShortcut } from "@t3tools/shared/keybindings";
+} from "@kurambit/contracts";
+import { parseKeybindingShortcut } from "@kurambit/shared/keybindings";
 import { FileDiff } from "@pierre/diffs/react";
 import { parseDiffFromFile } from "@pierre/diffs";
-import { settlePromise } from "@t3tools/client-runtime/state/runtime";
+import { settlePromise } from "@kurambit/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import { useState } from "react";
 import { getDesktopSnapShotBridge } from "../../lib/desktopSnapShot";
@@ -217,7 +217,7 @@ export function CaptureShortcutConfig({
       ) : (
         <>
           <p className="text-muted-foreground">
-            Allow Game Studio to read your desktop settings. You'll review any changes here before
+            Allow Kurambit to read your desktop settings. You'll review any changes here before
             saving.
           </p>
           <Button
@@ -229,7 +229,7 @@ export function CaptureShortcutConfig({
           </Button>
           {!supported ? (
             <p className="text-xs text-muted-foreground">
-              Update Game Studio to finish setting up your shortcut.
+              Update Kurambit to finish setting up your shortcut.
             </p>
           ) : null}
         </>
@@ -243,7 +243,7 @@ export function CaptureShortcutConfig({
         <p role="status" className="text-muted-foreground">
           {state.shortcutPending
             ? "Connecting to your desktop…"
-            : "Restart Game Studio to finish connecting your shortcut."}
+            : "Restart Kurambit to finish connecting your shortcut."}
         </p>
       ) : null}
       <details className="text-xs text-muted-foreground">
@@ -262,7 +262,7 @@ export function CaptureShortcutConfig({
                 state.shortcutConfigPath ??
                 (niri ? "~/.config/niri/config.kdl" : "~/.config/hypr/hyprland.conf")}
             </p>
-            {niri ? <p>Game Studio also reads any files included by this file.</p> : null}
+            {niri ? <p>Kurambit also reads any files included by this file.</p> : null}
             {preview && preview.resolvedPath !== preview.path ? (
               <p className="break-all">Linked to {preview.resolvedPath}. The link will be kept.</p>
             ) : null}
@@ -323,8 +323,8 @@ export function CaptureShortcutConfig({
             {isCopied ? "Copied" : "Copy shortcut"}
           </Button>
           <p>
-            Turn capture off in Game Studio to stop it. Remove the shortcut from {desktop} to free
-            up the keys.
+            Turn capture off in Kurambit to stop it. Remove the shortcut from {desktop} to free up
+            the keys.
           </p>
           {state.shortcutActionRegistered === false ? (
             <p role="status">{state.shortcutMessage}</p>

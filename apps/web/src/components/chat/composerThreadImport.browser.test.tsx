@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kurambit/contracts";
 import { act, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vite-plus/test";

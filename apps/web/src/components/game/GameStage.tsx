@@ -19,9 +19,9 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import type { GameAction, ScopedThreadRef } from "@t3tools/contracts";
-import { GAME_TEMPLATES } from "@t3tools/contracts";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import type { GameAction, ScopedThreadRef } from "@kurambit/contracts";
+import { GAME_TEMPLATES } from "@kurambit/contracts";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";

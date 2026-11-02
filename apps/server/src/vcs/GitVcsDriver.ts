@@ -31,7 +31,7 @@ import {
   type VcsStatusInput,
   type VcsStatusResult,
   type WorktreeSubmodules,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   makeGitVcsDriverCore,
   PATCH_RENDER_PREFIX_ARGS,
@@ -129,7 +129,7 @@ export interface CreateWorktreeProgress {
   }) => Effect.Effect<void, never>;
   readonly onSubmodulesStarted?: () => Effect.Effect<void, never>;
   readonly onSubmodulesDisabled?: (input: {
-    source: "settings" | "t3.json";
+    source: "settings" | "kurambit.json";
   }) => Effect.Effect<void, never>;
   readonly onSubmoduleLine?: (line: string) => Effect.Effect<void, never>;
   readonly onSubmodulesFinished?: (input: {
@@ -142,7 +142,7 @@ export interface CreateWorktreeOptions {
   readonly progress?: CreateWorktreeProgress;
   /**
    * Null (or omitted, for callers without settings access) defers to the
-   * checkout's own t3.json.
+   * checkout's own kurambit.json.
    */
   readonly submodules?: WorktreeSubmodules | null;
   readonly worktreesDirectory?: string;
@@ -401,7 +401,7 @@ export class GitVcsDriver extends Context.Service<
     readonly initRepo: (input: VcsInitInput) => Effect.Effect<void, GitCommandError>;
     readonly listLocalBranchNames: (cwd: string) => Effect.Effect<string[], GitCommandError>;
   }
->()("t3/vcs/GitVcsDriver") {}
+>()("kurambit/vcs/GitVcsDriver") {}
 
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_RECOVERY_MAX_CANDIDATES = 64;
@@ -780,7 +780,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     });
 
   // Git renames loose objects and refs into place without fsync by default, so
-  // an unclean restart can leave 0-byte files under refs/t3/** that break every
+  // an unclean restart can leave 0-byte files under refs/kurambit/** that break every
   // later fetch and push. Checkpoint writes flush before they are published;
   // macOS defaults to writeout-only, which does not reach the disk either.
   const durableWrite = [
@@ -801,14 +801,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       ];
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
       const indexId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
-      const tempIndexPath = path.join(gitCommonDir, `t3-checkpoint-index-${indexId}`);
+      const tempIndexPath = path.join(gitCommonDir, `kurambit-checkpoint-index-${indexId}`);
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,
         GIT_INDEX_FILE: tempIndexPath,
-        GIT_AUTHOR_NAME: "T3 Code",
-        GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
-        GIT_COMMITTER_NAME: "T3 Code",
-        GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
+        GIT_AUTHOR_NAME: "Kurambit",
+        GIT_AUTHOR_EMAIL: "kurambit@users.noreply.github.com",
+        GIT_COMMITTER_NAME: "Kurambit",
+        GIT_COMMITTER_EMAIL: "kurambit@users.noreply.github.com",
       };
 
       const cleanupTempIndex = Effect.forEach(
@@ -1022,7 +1022,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           });
         }
 
-        const message = `t3 checkpoint ref=${input.checkpointRef}`;
+        const message = `kurambit checkpoint ref=${input.checkpointRef}`;
         // HEAD is the parent so listAuthoredPaths can see how HEAD moved between checkpoints.
         const commitTreeResult = yield* execute({
           operation,

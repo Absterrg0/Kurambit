@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";
@@ -16,10 +16,10 @@ import * as Schema from "effect/Schema";
 import {
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
-} from "@t3tools/contracts";
-import * as NetService from "@t3tools/shared/Net";
-import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
-import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
+} from "@kurambit/contracts";
+import * as NetService from "@kurambit/shared/Net";
+import { DEFAULT_SIGNAL_EXPORT } from "@kurambit/shared/observability";
+import * as OtelEnvironment from "@kurambit/shared/otelEnvironment";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { deriveServerPaths } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
@@ -49,7 +49,7 @@ const makeDesktopBootstrap = (
   mode: "desktop",
   noBrowser: true,
   port: 4888,
-  t3Home: "/tmp/t3-bootstrap-home",
+  kurambitHome: "/tmp/kurambit-bootstrap-home",
   host: "127.0.0.1",
   desktopBootstrapToken: "desktop-bootstrap-token",
   ...overrides,
@@ -74,7 +74,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
     const fs = yield* FileSystem.FileSystem;
-    const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
+    const filePath = yield* fs.makeTempFileScoped({
+      prefix: "kurambit-bootstrap-",
+      suffix: ".ndjson",
+    });
     const encoded = yield* encodeDesktopBootstrap(payload);
     yield* fs.writeFileString(filePath, `${encoded}\n`);
     return yield* Effect.acquireRelease(
@@ -96,7 +99,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-preflight-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-cli-preflight-" });
       for (const [name, pid, mode, rejectRunningServer] of [
         ["stale", 2_147_483_647, "web", true],
         ["desktop", process.pid, "desktop", true],
@@ -142,7 +145,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("enables a trimmed reusable auth token only for web dev mode", () =>
     Effect.gen(function* () {
       const baseDir = yield* FileSystem.FileSystem.pipe(
-        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "t3-cli-dev-auth-" })),
+        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "kurambit-cli-dev-auth-" })),
       );
       const flags = {
         mode: Option.some("web" as const),
@@ -159,7 +162,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const layerConfig = ConfigProvider.layer(
         ConfigProvider.fromEnv({
           env: {
-            T3CODE_DEV_AUTH_TOKEN: "  reusable-dev-auth-token-that-is-long-enough  ",
+            KURAMBIT_DEV_AUTH_TOKEN: "  reusable-dev-auth-token-that-is-long-enough  ",
           },
         }),
       );
@@ -184,7 +187,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const secret = "short-secret";
       const baseDir = yield* FileSystem.FileSystem.pipe(
-        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "t3-cli-dev-auth-invalid-" })),
+        Effect.flatMap((fs) =>
+          fs.makeTempDirectoryScoped({ prefix: "kurambit-cli-dev-auth-invalid-" }),
+        ),
       );
       const flags = {
         mode: Option.some("web" as const),
@@ -199,7 +204,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: Option.none<boolean>(),
       };
       const layerConfig = ConfigProvider.layer(
-        ConfigProvider.fromEnv({ env: { T3CODE_DEV_AUTH_TOKEN: secret } }),
+        ConfigProvider.fromEnv({ env: { KURAMBIT_DEV_AUTH_TOKEN: secret } }),
       );
       const error = yield* resolveServerConfig(flags, Option.none()).pipe(
         Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)),
@@ -222,32 +227,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("ignores inherited T3CODE_HOME and resolves a fresh default home", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fs.makeTempDirectoryScoped({ prefix: "game-studio-home-" });
-      const resolved = yield* resolveServerConfig(
-        { ...minimalDesktopFlags(home), baseDir: Option.none() },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_HOME: "/live-t3" } })),
-            NetService.layer,
-          ),
-        ),
-        Effect.provideService(HostProcess.HomeDirectory, home),
-      );
-      assert.equal(resolved.baseDir, path.join(home, ".game-studio"));
-      assert.equal(resolved.stateDir, path.join(home, ".game-studio", "userdata"));
-    }),
-  );
-
   it.effect("falls back to effect/config values when flags are omitted", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-env-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-env-base");
       const derivedPaths = yield* deriveExplicitServerPaths(
         baseDir,
         new URL("http://127.0.0.1:5173"),
@@ -272,18 +255,17 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_LOG_LEVEL: "Warn",
-                  T3CODE_MODE: "desktop",
-                  T3CODE_PORT: "4001",
-                  T3CODE_HOST: "0.0.0.0",
-                  GAME_STUDIO_HOME: baseDir,
-                  T3CODE_HOME: "/live-t3",
+                  KURAMBIT_LOG_LEVEL: "Warn",
+                  KURAMBIT_MODE: "desktop",
+                  KURAMBIT_PORT: "4001",
+                  KURAMBIT_HOST: "0.0.0.0",
+                  KURAMBIT_HOME: baseDir,
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  T3CODE_DEV_ALLOWED_ORIGINS:
+                  KURAMBIT_DEV_ALLOWED_ORIGINS:
                     "https://host.example.ts.net, https://phone.example.ts.net ",
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KURAMBIT_NO_BROWSER: "true",
+                  KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+                  KURAMBIT_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -317,7 +299,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("uses CLI flags when provided", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-flags-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-flags-base");
       const derivedPaths = yield* deriveExplicitServerPaths(
         baseDir,
         new URL("http://127.0.0.1:4173"),
@@ -342,15 +324,15 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_LOG_LEVEL: "Warn",
-                  T3CODE_MODE: "desktop",
-                  T3CODE_PORT: "4001",
-                  T3CODE_HOST: "0.0.0.0",
-                  GAME_STUDIO_HOME: join(NodeOS.tmpdir(), "ignored-base"),
+                  KURAMBIT_LOG_LEVEL: "Warn",
+                  KURAMBIT_MODE: "desktop",
+                  KURAMBIT_PORT: "4001",
+                  KURAMBIT_HOST: "0.0.0.0",
+                  KURAMBIT_HOME: join(NodeOS.tmpdir(), "ignored-base"),
                   VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  T3CODE_NO_BROWSER: "false",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  T3CODE_LOG_WS_EVENTS: "false",
+                  KURAMBIT_NO_BROWSER: "false",
+                  KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+                  KURAMBIT_LOG_WS_EVENTS: "false",
                 },
               }),
             ),
@@ -383,7 +365,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("preserves explicit false CLI boolean flags over env and bootstrap values", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-false-flags");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-false-flags");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           noBrowser: true,
@@ -414,10 +396,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_BOOTSTRAP_FD: String(fd),
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KURAMBIT_BOOTSTRAP_FD: String(fd),
+                  KURAMBIT_NO_BROWSER: "true",
+                  KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KURAMBIT_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -451,12 +433,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const { join, resolve } = yield* Path.Path;
       // The resolver absolutises the configured home, so the expectation must
       // carry the host's drive on Windows.
-      const baseDir = resolve("/tmp/t3-bootstrap-home");
+      const baseDir = resolve("/tmp/kurambit-bootstrap-home");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
           host: "127.0.0.2",
-          t3Home: "/tmp/t3-bootstrap-home",
+          kurambitHome: "/tmp/kurambit-bootstrap-home",
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
           desktopTelemetryFd: 4,
@@ -488,7 +470,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_BOOTSTRAP_FD: String(fd),
+                  KURAMBIT_BOOTSTRAP_FD: String(fd),
                 },
               }),
             ),
@@ -529,7 +511,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("carries the desktop's shell environment handoff only when the envelope sets it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-shell-env-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-cli-config-shell-env-",
+      });
       const resolveWith = Effect.fn(function* (overrides: Partial<DesktopBackendBootstrapValue>) {
         const fd = yield* openBootstrapFd(makeDesktopBootstrap(overrides));
         return yield* resolveServerConfig(
@@ -560,7 +544,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-dirs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-cli-config-dirs-" });
       const customCwd = path.join(baseDir, "nested", "project");
 
       const resolved = yield* resolveServerConfig(
@@ -605,12 +589,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("applies flag then env precedence over bootstrap envelope values", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-env-wins");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-env-wins");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
           host: "127.0.0.2",
-          t3Home: "/tmp/t3-bootstrap-home",
+          kurambitHome: "/tmp/kurambit-bootstrap-home",
           noBrowser: false,
           desktopBootstrapToken: "desktop-token",
         }),
@@ -640,13 +624,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_MODE: "web",
-                  T3CODE_BOOTSTRAP_FD: String(fd),
-                  GAME_STUDIO_HOME: baseDir,
-                  T3CODE_HOME: "/live-t3",
-                  T3CODE_NO_BROWSER: "true",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
-                  T3CODE_LOG_WS_EVENTS: "true",
+                  KURAMBIT_MODE: "web",
+                  KURAMBIT_BOOTSTRAP_FD: String(fd),
+                  KURAMBIT_HOME: baseDir,
+                  KURAMBIT_NO_BROWSER: "true",
+                  KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KURAMBIT_LOG_WS_EVENTS: "true",
                 },
               }),
             ),
@@ -679,7 +662,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-settings-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-cli-config-settings-",
+      });
       const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
@@ -746,7 +731,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-otel-off-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-cli-config-otel-off-",
+      });
       const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
@@ -790,58 +777,62 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("lets T3CODE_OTEL_SDK_DISABLED=false override an ambient OTEL_SDK_DISABLED=true", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-otel-on-" });
-      const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
-      yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
-      yield* fs.writeFileString(
-        derivedPaths.settingsPath,
-        `${JSON.stringify({
-          observability: {
-            otlpTracesUrl: "http://localhost:4318/v1/traces",
+  it.effect(
+    "lets KURAMBIT_OTEL_SDK_DISABLED=false override an ambient OTEL_SDK_DISABLED=true",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "kurambit-cli-config-otel-on-",
+        });
+        const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
+        yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
+        yield* fs.writeFileString(
+          derivedPaths.settingsPath,
+          `${JSON.stringify({
+            observability: {
+              otlpTracesUrl: "http://localhost:4318/v1/traces",
+            },
+          })}\n`,
+        );
+
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.some("desktop"),
+            port: Option.some(4888),
+            host: Option.none(),
+            baseDir: Option.some(baseDir),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
           },
-        })}\n`,
-      );
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("desktop"),
-          port: Option.some(4888),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: { T3CODE_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
-              }),
+          Option.none(),
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({
+                  env: { KURAMBIT_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
+                }),
+              ),
+              NetService.layer,
             ),
-            NetService.layer,
           ),
-        ),
-      );
+        );
 
-      expect(resolved.otelEnvironment.disabled).toBe(false);
-      expect(resolved.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
-    }),
+        expect(resolved.otelEnvironment.disabled).toBe(false);
+        expect(resolved.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
+      }),
   );
 
   it.effect("forces noBrowser and disables auto-bootstrap for headless startup presentation", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-headless-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-headless-base");
       const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
 
       const resolved = yield* resolveServerConfig(
@@ -867,8 +858,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_NO_BROWSER: "false",
-                  T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
+                  KURAMBIT_NO_BROWSER: "false",
+                  KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
                 },
               }),
             ),
@@ -900,7 +891,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("decodes percent-encoded OTLP headers from env", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-otlp-headers-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-otlp-headers-base");
 
       const resolved = yield* resolveServerConfig(
         {
@@ -922,7 +913,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3",
+                  KURAMBIT_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=kurambit",
                 },
               }),
             ),
@@ -933,7 +924,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved.otlpTracesExport.headers).toEqual({
         authorization: "Basic abc==",
-        "x-tenant": "t3",
+        "x-tenant": "kurambit",
       });
     }),
   );
@@ -941,7 +932,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("keeps whitespace-separated pairs and literal equals signs in OTLP headers", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-otlp-headers-loose-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-otlp-headers-loose-base");
 
       const resolved = yield* resolveServerConfig(
         {
@@ -963,8 +954,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  T3CODE_OTLP_HEADERS: "authorization=Bearer abc==, x-tenant=t3",
-                  T3CODE_OTLP_TRACES_URL: "http://collector.internal:4318",
+                  KURAMBIT_OTLP_HEADERS: "authorization=Bearer abc==, x-tenant=kurambit",
+                  KURAMBIT_OTLP_TRACES_URL: "http://collector.internal:4318",
                 },
               }),
             ),
@@ -975,7 +966,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved.otlpTracesExport.headers).toEqual({
         authorization: "Bearer abc==",
-        "x-tenant": "t3",
+        "x-tenant": "kurambit",
       });
       expect(resolved.otlpTracesUrl).toBe("http://collector.internal:4318");
     }),
@@ -984,7 +975,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("gives every signal the protocol named without one", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-otlp-protocol-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-otlp-protocol-base");
 
       const resolved = yield* resolveServerConfig(
         {
@@ -1004,7 +995,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         Effect.provide(
           Layer.mergeAll(
             ConfigProvider.layer(
-              ConfigProvider.fromEnv({ env: { T3CODE_OTLP_PROTOCOL: "http/protobuf" } }),
+              ConfigProvider.fromEnv({ env: { KURAMBIT_OTLP_PROTOCOL: "http/protobuf" } }),
             ),
             NetService.layer,
           ),
@@ -1022,7 +1013,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   it.effect("reads the OTLP logs URL from env", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-otlp-logs-url-base");
+      const baseDir = join(NodeOS.tmpdir(), "kurambit-cli-config-otlp-logs-url-base");
 
       const resolved = yield* resolveServerConfig(
         {
@@ -1043,7 +1034,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           Layer.mergeAll(
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
-                env: { T3CODE_OTLP_LOGS_URL: "http://collector.internal:4318/v1/logs" },
+                env: { KURAMBIT_OTLP_LOGS_URL: "http://collector.internal:4318/v1/logs" },
               }),
             ),
             NetService.layer,
@@ -1069,13 +1060,13 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   });
 
   it.effect(
-    "resolves each signal's endpoint through T3CODE_OTLP_*_URL, an OTEL endpoint, the bootstrap envelope, and persisted Settings, in that order",
+    "resolves each signal's endpoint through KURAMBIT_OTLP_*_URL, an OTEL endpoint, the bootstrap envelope, and persisted Settings, in that order",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const baseDir = yield* fs.makeTempDirectoryScoped({
-          prefix: "t3-cli-config-otel-precedence-",
+          prefix: "kurambit-cli-config-otel-precedence-",
         });
         const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
         yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
@@ -1105,8 +1096,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
               ConfigProvider.layer(
                 ConfigProvider.fromEnv({
                   env: {
-                    T3CODE_OTLP_TRACES_URL: "http://t3:4318/v1/traces",
-                    T3CODE_OTLP_HEADERS: "x-key=secret",
+                    KURAMBIT_OTLP_TRACES_URL: "http://kurambit:4318/v1/traces",
+                    KURAMBIT_OTLP_HEADERS: "x-key=secret",
                     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-traces:4318/custom",
                     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-metrics:4318/custom",
                     OTEL_EXPORTER_OTLP_HEADERS: "x-key=otel",
@@ -1118,7 +1109,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           ),
         );
 
-        expect(resolved.otlpTracesUrl).toBe("http://t3:4318/v1/traces");
+        expect(resolved.otlpTracesUrl).toBe("http://kurambit:4318/v1/traces");
         expect(resolved.otlpTracesExport.headers).toEqual({ "x-key": "secret" });
         expect(resolved.otlpMetricsUrl).toBe("http://otel-metrics:4318/custom");
         expect(resolved.otlpMetricsExport).toEqual({
@@ -1138,7 +1129,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const baseDir = yield* fs.makeTempDirectoryScoped({
-          prefix: "t3-cli-config-otel-off-",
+          prefix: "kurambit-cli-config-otel-off-",
         });
         const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
         yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
@@ -1165,7 +1156,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
               ConfigProvider.layer(
                 ConfigProvider.fromEnv({
                   env: {
-                    T3CODE_OTLP_TRACES_URL: "http://t3:4318/v1/traces",
+                    KURAMBIT_OTLP_TRACES_URL: "http://kurambit:4318/v1/traces",
                     OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318",
                     OTEL_EXPORTER_OTLP_HEADERS: "x-key=%zz",
                   },
@@ -1176,7 +1167,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           ),
         );
 
-        expect(resolved.otlpTracesUrl).toBe("http://t3:4318/v1/traces");
+        expect(resolved.otlpTracesUrl).toBe("http://kurambit:4318/v1/traces");
         expect(resolved.otlpMetricsUrl).toBeUndefined();
         expect(resolved.otlpLogsUrl).toBeUndefined();
       }),

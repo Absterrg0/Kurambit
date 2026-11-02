@@ -1,4 +1,4 @@
-import type { ClientConnectionMethod, EnvironmentId } from "@t3tools/contracts";
+import type { ClientConnectionMethod, EnvironmentId } from "@kurambit/contracts";
 import type { RemoteEnvironmentAuthError } from "../authorization/remote.ts";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import {

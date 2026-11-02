@@ -9,10 +9,10 @@ import {
   type ServerLifecycleWelcomePayload,
   type ServerProvider,
   type ServerSettings,
-} from "@t3tools/contracts";
-import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
-import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
-import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
+} from "@kurambit/contracts";
+import { createServerEnvironmentAtoms } from "@kurambit/client-runtime/state/server";
+import { createEnvironmentServerConfigsAtom } from "@kurambit/client-runtime/state/shell";
+import { mergeWithDefaultKeybindings } from "@kurambit/shared/keybindings";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 

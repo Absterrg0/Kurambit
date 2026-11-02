@@ -1,9 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off - Hosted handoff test uses a real localhost listener without an OpenAI account.
 import * as NodeHttp from "node:http";
 import * as NodePath from "@effect/platform-node/NodePath";
-import { codexAuthHandoffUrl, readCodexAuthDelivery } from "@t3tools/shared/codexAuthHandoff";
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { codexAuthHandoffUrl, readCodexAuthDelivery } from "@kurambit/shared/codexAuthHandoff";
+import { EnvironmentId, ProviderInstanceId } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,7 +42,7 @@ const layerDesktopInstance = (
   },
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
-    stateDir: "/tmp/t3-state",
+    stateDir: "/tmp/kurambit-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
     platform,
@@ -79,7 +79,7 @@ describe("DesktopInstance", () => {
     "selects the profile before acquiring its lock (development: %s)",
     (isDevelopment) => {
       const events: string[] = [];
-      // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- Startup must acquire the profile lock without yielding to Electron readiness.
+      // oxlint-disable-next-line kurambit/no-manual-effect-runtime-in-tests -- Startup must acquire the profile lock without yielding to Electron readiness.
       Effect.runSync(
         Effect.scoped(
           Layer.build(
@@ -88,7 +88,7 @@ describe("DesktopInstance", () => {
         ),
       );
       assert.deepEqual(events, [
-        `setPath:userData:/tmp/app-data/game-studio${isDevelopment ? "-dev" : ""}`,
+        `setPath:userData:/tmp/app-data/kurambit${isDevelopment ? "-dev" : ""}`,
         "requestSingleInstanceLock",
       ]);
     },
@@ -171,19 +171,19 @@ it.effect(
       const clerk = yield* DesktopInstance.DesktopInstance;
       yield* clerk.configure;
       const event = { preventDefault: vi.fn() };
-      listeners.get("open-url")!(event, "game-studio-dev://app/auth/callback?code=clerk-code");
-      listeners.get("open-url")!(event, "game-studio://app/welcome");
+      listeners.get("open-url")!(event, "kurambit-dev://app/auth/callback?code=clerk-code");
+      listeners.get("open-url")!(event, "kurambit://app/welcome");
       assert.equal(loadURL.mock.calls.length, 0);
       assert.equal(event.preventDefault.mock.calls.length, 0);
       listeners.get("second-instance")!({}, [
-        "t3",
-        "game-studio-dev://app/settings/providers?instanceId=work&code=never-forward",
+        "kurambit",
+        "kurambit-dev://app/settings/providers?instanceId=work&code=never-forward",
       ]);
       yield* Effect.promise(() => revealed.promise);
       assert.deepEqual(loadURL.mock.calls, [
-        ["game-studio-dev://app/settings/providers?instanceId=work"],
+        ["kurambit-dev://app/settings/providers?instanceId=work"],
       ]);
-      listeners.get("open-url")!(event, "game-studio-dev://app/welcome#agents:machine-id");
+      listeners.get("open-url")!(event, "kurambit-dev://app/welcome#agents:machine-id");
       assert.equal(event.preventDefault.mock.calls.length, 1);
     }).pipe(
       Effect.scoped,
@@ -218,7 +218,7 @@ it.effect.each(["startup", "open-url"] as const)(
       }).toString();
       const request = {
         authorizationUrl: authorize.toString(),
-        returnUrl: "https://app.t3.codes/welcome#agents:remote-one",
+        returnUrl: "https://example.com/welcome#agents:remote-one",
         environmentId: EnvironmentId.make("remote-one"),
         instanceId: ProviderInstanceId.make("work"),
         flowId: "flow-one",
@@ -265,7 +265,10 @@ it.effect.each(["startup", "open-url"] as const)(
         assert.strictEqual(delivery?.returnUrl, request.returnUrl);
       }).pipe(
         Effect.provide(layerDesktopInstance(true, [], "darwin", undefined, shell)),
-        Effect.provideService(HostProcess.Arguments, entry === "startup" ? ["t3", link] : ["t3"]),
+        Effect.provideService(
+          HostProcess.Arguments,
+          entry === "startup" ? ["kurambit", link] : ["kurambit"],
+        ),
         Effect.provideService(ElectronApp.ElectronApp, electronApp),
         Effect.provideService(
           ElectronWindow.ElectronWindow,
@@ -297,20 +300,20 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       };
       assert.strictEqual(open("https://example.com/page"), 1);
       assert.strictEqual(open("http://localhost:3000/"), 1);
-      assert.strictEqual(open("game-studio://new?prompt=hi"), 1);
-      assert.strictEqual(open("game-studio://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open("kurambit://new?prompt=hi"), 1);
+      assert.strictEqual(open("kurambit://threads/env-1/thread-1"), 1);
       assert.strictEqual(open("mailto:hello@example.com"), 0);
-      assert.strictEqual(open("game-studio://somewhere-else"), 0);
+      assert.strictEqual(open("kurambit://somewhere-else"), 0);
       yield* Effect.yieldNow;
       assert.deepStrictEqual(received, [
         "https://example.com/page",
         "http://localhost:3000/",
-        "game-studio://new?prompt=hi",
-        "game-studio://threads/env-1/thread-1",
+        "kurambit://new?prompt=hi",
+        "kurambit://threads/env-1/thread-1",
       ]);
     }).pipe(
       Effect.provide(layerDesktopInstance(true, [], "darwin")),
-      Effect.provideService(HostProcess.Arguments, ["t3"]),
+      Effect.provideService(HostProcess.Arguments, ["kurambit"]),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(
         ElectronWindow.ElectronWindow,

@@ -4,51 +4,54 @@ import * as NodeDns from "node:dns";
 import * as NodeOS from "node:os";
 import * as NodeSea from "node:sea";
 
-export const Platform = Context.Reference<NodeJS.Platform>("@t3tools/shared/HostProcess/Platform", {
-  defaultValue: () => process.platform,
-});
+export const Platform = Context.Reference<NodeJS.Platform>(
+  "@kurambit/shared/HostProcess/Platform",
+  {
+    defaultValue: () => process.platform,
+  },
+);
 
 export const Architecture = Context.Reference<NodeJS.Architecture>(
-  "@t3tools/shared/HostProcess/Architecture",
+  "@kurambit/shared/HostProcess/Architecture",
   {
     defaultValue: () => process.arch,
   },
 );
 
-export const Hostname = Context.Reference<string>("@t3tools/shared/HostProcess/Hostname", {
+export const Hostname = Context.Reference<string>("@kurambit/shared/HostProcess/Hostname", {
   defaultValue: () => NodeOS.hostname(),
 });
 
 export const HomeDirectory = Context.Reference<string>(
-  "@t3tools/shared/HostProcess/HomeDirectory",
+  "@kurambit/shared/HostProcess/HomeDirectory",
   {
     defaultValue: () => NodeOS.homedir(),
   },
 );
 
 export const Environment = Context.Reference<NodeJS.ProcessEnv>(
-  "@t3tools/shared/HostProcess/Environment",
+  "@kurambit/shared/HostProcess/Environment",
   {
     defaultValue: () => process.env,
   },
 );
 
 export const WorkingDirectory = Context.Reference<string>(
-  "@t3tools/shared/HostProcess/WorkingDirectory",
+  "@kurambit/shared/HostProcess/WorkingDirectory",
   {
     defaultValue: () => process.cwd(),
   },
 );
 
 export const ExecutablePath = Context.Reference<string>(
-  "@t3tools/shared/HostProcess/ExecutablePath",
+  "@kurambit/shared/HostProcess/ExecutablePath",
   {
     defaultValue: () => process.execPath,
   },
 );
 
 export const Arguments = Context.Reference<ReadonlyArray<string>>(
-  "@t3tools/shared/HostProcess/Arguments",
+  "@kurambit/shared/HostProcess/Arguments",
   {
     defaultValue: () => process.argv,
   },
@@ -56,16 +59,19 @@ export const Arguments = Context.Reference<ReadonlyArray<string>>(
 
 /**
  * The command the shell was given, before Node resolved it to the binary:
- * `t3` for a PATH lookup, `./t3` or the launcher symlink for an explicit
+ * `kurambit` for a PATH lookup, `./kurambit` or the launcher symlink for an explicit
  * path. `process.argv[0]` and `execPath` are always the resolved binary.
  */
-export const InvokedAs = Context.Reference<string>("@t3tools/shared/HostProcess/InvokedAs", {
+export const InvokedAs = Context.Reference<string>("@kurambit/shared/HostProcess/InvokedAs", {
   defaultValue: () => process.argv0,
 });
 
-export const IsExecutable = Context.Reference<boolean>("@t3tools/shared/HostProcess/IsExecutable", {
-  defaultValue: () => NodeSea.isSea(),
-});
+export const IsExecutable = Context.Reference<boolean>(
+  "@kurambit/shared/HostProcess/IsExecutable",
+  {
+    defaultValue: () => NodeSea.isSea(),
+  },
+);
 
 /**
  * Every IP address this machine answers to: the interface addresses, plus
@@ -76,7 +82,7 @@ export const IsExecutable = Context.Reference<boolean>("@t3tools/shared/HostProc
  * will write that one.
  */
 export const Addresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
-  "@t3tools/shared/HostProcess/Addresses",
+  "@kurambit/shared/HostProcess/Addresses",
   {
     defaultValue: () =>
       Effect.gen(function* () {
@@ -95,7 +101,7 @@ export const Addresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
 );
 
 /** Undefined on platforms without POSIX uids (Windows). */
-export const UserId = Context.Reference<number | undefined>("@t3tools/shared/HostProcess/UserId", {
+export const UserId = Context.Reference<number | undefined>("@kurambit/shared/HostProcess/UserId", {
   defaultValue: () => process.getuid?.(),
 });
 

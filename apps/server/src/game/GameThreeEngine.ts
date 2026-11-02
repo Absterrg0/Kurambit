@@ -12,7 +12,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameProcessResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { insideGame } from "./GameProjectService.ts";
 import { commandDetail } from "./commandDetail.ts";
 import {

@@ -1,5 +1,5 @@
-import type { RunId, ScopedThreadRef } from "@t3tools/contracts";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { useEffect, useRef } from "react";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "../rightPanelStore";

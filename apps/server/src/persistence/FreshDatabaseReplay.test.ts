@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { CommandId, EventId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { CommandId, EventId, ProjectId, ProviderInstanceId, ThreadId } from "@kurambit/contracts";
+import * as NodeSqliteClient from "@kurambit/shared/nodeSqliteClient";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

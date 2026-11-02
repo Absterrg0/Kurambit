@@ -28,11 +28,11 @@ const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {
     platform: "linux",
     isPackaged: true,
     isDevelopment: false,
-    displayName: "T3 Code (Alpha)",
-    linuxDesktopEntryName: "game-studio.desktop",
-    linuxWmClass: "game-studio",
+    displayName: "Kurambit (Alpha)",
+    linuxDesktopEntryName: "kurambit.desktop",
+    linuxWmClass: "kurambit",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
-    appImagePath: Option.some("/home/alice/Applications/T3-Code.AppImage"),
+    appImagePath: Option.some("/home/alice/Applications/Kurambit.AppImage"),
     path,
     ...overrides,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
@@ -160,48 +160,48 @@ const emptyRecording = (): RecordedRegistration => ({
 describe("DesktopLinuxUrlHandler", () => {
   it("renders a scheme-handler desktop entry with freedesktop Exec quoting", () => {
     const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-      displayName: "T3 Code (Nightly)",
-      execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
-      scheme: "game-studio",
-      iconPath: "/home/al ice/icons/T3\\x.png",
+      displayName: "Kurambit (Nightly)",
+      execTarget: '/home/al ice/Apps/Kurambit "100%" $HOME\\x.AppImage',
+      scheme: "kurambit",
+      iconPath: "/home/al ice/icons/Kurambit\\x.png",
     });
 
     assert.include(entry, "[Desktop Entry]");
-    assert.include(entry, "Name=T3 Code (Nightly)");
+    assert.include(entry, "Name=Kurambit (Nightly)");
     assert.include(
       entry,
-      'Exec="/home/al ice/Apps/T3 \\\\"100%%\\\\" \\\\$HOME\\\\\\\\x.AppImage" %U',
+      'Exec="/home/al ice/Apps/Kurambit \\\\"100%%\\\\" \\\\$HOME\\\\\\\\x.AppImage" %U',
     );
     assert.include(entry, "NoDisplay=true");
     assert.notInclude(entry, "StartupWMClass=");
-    assert.include(entry, "MimeType=x-scheme-handler/game-studio;");
-    assert.include(entry, "Icon=/home/al ice/icons/T3\\\\x.png");
+    assert.include(entry, "MimeType=x-scheme-handler/kurambit;");
+    assert.include(entry, "Icon=/home/al ice/icons/Kurambit\\\\x.png");
   });
 
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "write-desktop-entry",
-      scheme: "game-studio",
-      desktopEntryPath: "/home/alice/.local/share/applications/game-studio.desktop",
+      scheme: "kurambit",
+      desktopEntryPath: "/home/alice/.local/share/applications/kurambit.desktop",
       cause: new Error("boom"),
     });
     assert.equal(
       writeError.message,
-      "Failed to register the game-studio:// URL handler (step: write-desktop-entry).",
+      "Failed to register the kurambit:// URL handler (step: write-desktop-entry).",
     );
     assert.equal(
       writeError.desktopEntryPath,
-      "/home/alice/.local/share/applications/game-studio.desktop",
+      "/home/alice/.local/share/applications/kurambit.desktop",
     );
 
     const exitError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "set-default-handler",
-      scheme: "game-studio",
+      scheme: "kurambit",
       exitCode: 4,
     });
     assert.equal(
       exitError.message,
-      "Failed to register the game-studio:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
+      "Failed to register the kurambit:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
     );
   });
 
@@ -217,13 +217,13 @@ describe("DesktopLinuxUrlHandler", () => {
         assert.equal(recorded.files.length, 1);
         assert.equal(
           recorded.files[0]?.path,
-          "/home/alice/.local/share/applications/game-studio.desktop",
+          "/home/alice/.local/share/applications/kurambit.desktop",
         );
         assert.include(
           recorded.files[0]?.content,
-          'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
+          'Exec="/home/alice/Applications/Kurambit.AppImage" %U',
         );
-        assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/game-studio;");
+        assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/kurambit;");
         assert.deepEqual(recorded.commands, [
           {
             command: "update-desktop-database",
@@ -231,7 +231,7 @@ describe("DesktopLinuxUrlHandler", () => {
           },
           {
             command: "xdg-mime",
-            args: ["default", "game-studio.desktop", "x-scheme-handler/game-studio"],
+            args: ["default", "kurambit.desktop", "x-scheme-handler/kurambit"],
           },
         ]);
       });
@@ -257,10 +257,10 @@ describe("DesktopLinuxUrlHandler", () => {
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-          displayName: "T3 Code (Alpha)",
-          execTarget: "/home/alice/Applications/T3-Code.AppImage",
-          scheme: "game-studio",
-          iconPath: "/home/alice/.local/share/icons/game-studio.desktop.png",
+          displayName: "Kurambit (Alpha)",
+          execTarget: "/home/alice/Applications/Kurambit.AppImage",
+          scheme: "kurambit",
+          iconPath: "/home/alice/.local/share/icons/kurambit.desktop.png",
         }),
       });
 
@@ -273,7 +273,7 @@ describe("DesktopLinuxUrlHandler", () => {
         },
         {
           command: "xdg-mime",
-          args: ["default", "game-studio.desktop", "x-scheme-handler/game-studio"],
+          args: ["default", "kurambit.desktop", "x-scheme-handler/kurambit"],
         },
       ]);
     });
@@ -281,20 +281,20 @@ describe("DesktopLinuxUrlHandler", () => {
 
   it.effect("installs a persistent icon even when the desktop entry is already current", () => {
     const recorded = emptyRecording();
-    const iconPath = "/home/alice/.local/share/icons/game-studio.desktop.png";
+    const iconPath = "/home/alice/.local/share/icons/kurambit.desktop.png";
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
-        iconSource: "/tmp/.mount_T3/resources/icon.png",
+        iconSource: "/tmp/.mount_Kurambit/resources/icon.png",
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-          displayName: "T3 Code (Alpha)",
-          execTarget: "/home/alice/Applications/T3-Code.AppImage",
-          scheme: "game-studio",
+          displayName: "Kurambit (Alpha)",
+          execTarget: "/home/alice/Applications/Kurambit.AppImage",
+          scheme: "kurambit",
           iconPath,
         }),
       });
       assert.deepEqual(recorded.files, []);
       assert.deepEqual(recorded.copies, [
-        { source: "/tmp/.mount_T3/resources/icon.png", destination: iconPath },
+        { source: "/tmp/.mount_Kurambit/resources/icon.png", destination: iconPath },
       ]);
       assert.equal(recorded.commands.at(-1)?.command, "xdg-mime");
     });
@@ -304,7 +304,7 @@ describe("DesktopLinuxUrlHandler", () => {
     const recorded = emptyRecording();
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
-        iconSource: "/tmp/.mount_T3/resources/icon.png",
+        iconSource: "/tmp/.mount_Kurambit/resources/icon.png",
         iconCopyError: PlatformError.systemError({
           _tag: "PermissionDenied",
           module: "FileSystem",
@@ -329,14 +329,14 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(unpackaged, {
         environment: {
           isPackaged: false,
-          linuxDesktopEntryName: "game-studio-dev.desktop",
+          linuxDesktopEntryName: "kurambit-dev.desktop",
         },
       });
 
       assert.deepEqual(nonLinux.files, []);
       assert.equal(
         unpackaged.files[0]?.path,
-        "/home/alice/.local/share/applications/game-studio-dev.desktop",
+        "/home/alice/.local/share/applications/kurambit-dev.desktop",
       );
       assert.deepEqual(unpackaged.commands, []);
     });
@@ -356,7 +356,7 @@ describe("DesktopLinuxUrlHandler", () => {
           module: "FileSystem",
           method: "writeFileString",
           description: "read-only filesystem",
-          pathOrDescriptor: "/home/alice/.local/share/applications/game-studio.desktop",
+          pathOrDescriptor: "/home/alice/.local/share/applications/kurambit.desktop",
         }),
       });
 

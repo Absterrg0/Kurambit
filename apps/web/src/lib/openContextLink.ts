@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@kurambit/contracts";
 import { useOpenLink } from "../browser/useOpenLink";
 
 export function useOpenContextLink(threadRef?: ScopedThreadRef) {

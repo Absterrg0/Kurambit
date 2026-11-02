@@ -7,8 +7,8 @@ import {
   type OrchestrationProjectShell,
   type ServerConfig,
   type ServerConfigStreamEvent,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -181,7 +181,7 @@ const makeParkedWindowsLauncher = Effect.gen(function* () {
       Effect.provide(
         ConfigProvider.layer(
           ConfigProvider.fromEnv({
-            env: { PATH: "C:\\t3-late-editors-test", PATHEXT: ".EXE" },
+            env: { PATH: "C:\\kurambit-late-editors-test", PATHEXT: ".EXE" },
           }),
         ),
       ),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@kurambit/contracts";
 
 import type { ComposerFileAttachment } from "../../composerDraftStore";
 import {
@@ -16,8 +16,8 @@ describe("resolveMarkdownMediaPreview", () => {
   });
 
   it.each([
-    ["game-studio:", "https:"],
-    ["game-studio-dev:", "https:"],
+    ["kurambit:", "https:"],
+    ["kurambit-dev:", "https:"],
     ["http:", "http:"],
     ["https:", "https:"],
   ])(

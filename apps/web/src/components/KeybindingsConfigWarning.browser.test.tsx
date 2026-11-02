@@ -4,7 +4,7 @@ import {
   EnvironmentId,
   type AuthEnvironmentScope,
   type AuthSessionState,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock(import("@t3tools/client-runtime/state/session"), async (original) => {
+vi.mock(import("@kurambit/client-runtime/state/session"), async (original) => {
   const actual = await original();
   return {
     ...actual,
@@ -49,7 +49,7 @@ const session = (scopes: readonly AuthEnvironmentScope[]): AuthSessionState => (
     policy: "remote-reachable",
     bootstrapMethods: ["one-time-token"],
     sessionMethods: ["bearer-access-token"],
-    sessionCookieName: "t3_session",
+    sessionCookieName: "kurambit_session",
   },
 });
 const setScopes = (scopes: readonly AuthEnvironmentScope[]) =>
@@ -58,7 +58,7 @@ const button = () => container.querySelector("button")!;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  localStorage.setItem("t3code:last-editor", JSON.stringify("vscode"));
+  localStorage.setItem("kurambit:last-editor", JSON.stringify("vscode"));
   state.sessions.set(
     environmentId,
     Atom.make<SessionResult>(AsyncResult.success(session([AuthOrchestrationOperateScope]))).pipe(
@@ -86,7 +86,7 @@ it("updates a visible warning on revocation and blocks a click that raced it unt
       <RegistryContext.Provider value={appAtomRegistry}>
         <KeybindingsConfigWarning
           environmentId={environmentId}
-          configPath="/t3/keybindings.json"
+          configPath="/kurambit/keybindings.json"
           availableEditors={["vscode"]}
           message="Invalid shortcut"
         />
@@ -112,6 +112,6 @@ it("updates a visible warning on revocation and blocks a click that raced it unt
   await act(async () => button().click());
   expect(state.run).toHaveBeenCalledExactlyOnceWith({
     environmentId,
-    input: { cwd: "/t3/keybindings.json", editor: "vscode" },
+    input: { cwd: "/kurambit/keybindings.json", editor: "vscode" },
   });
 });

@@ -4,17 +4,17 @@
  * does, and the session is removed afterwards.
  */
 import { AbsolutePath, Location, Model, Provider, Session } from "@opencode/client/effect";
-import { TextGenerationError } from "@t3tools/contracts";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { TextGenerationError } from "@kurambit/contracts";
+import { getModelSelectionStringOptionValue } from "@kurambit/shared/model";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
-import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
+import * as TextGenerationOperations from "@kurambit/provider-core/server/textGenerationOperations";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
 
@@ -122,7 +122,7 @@ const runOnServer = (
       Effect.forkScoped,
     );
     const session = yield* client.session.create({
-      title: `T3 Code ${input.operation}`,
+      title: `Kurambit ${input.operation}`,
       location: Location.PublicRef.make({ directory: AbsolutePath.make(input.cwd) }),
       model: Model.Ref.make({
         providerID: Provider.ID.make(parsed.providerID),

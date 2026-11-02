@@ -10,11 +10,11 @@ const load = (env: Record<string, string>) =>
   OtelEnvironment.load.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))));
 
 const SPEC_OFF =
-  "OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it; set T3CODE_OTEL_SDK_DISABLED=false to export anyway";
-const T3_OFF =
-  "T3CODE_OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it";
+  "OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it; set KURAMBIT_OTEL_SDK_DISABLED=false to export anyway";
+const KURAMBIT_OFF =
+  "KURAMBIT_OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it";
 const specIgnored = (value: string) =>
-  `OTEL_SDK_DISABLED=${value} was read as false; the OpenTelemetry specification recognizes only the string true, so use OTEL_SDK_DISABLED=true or T3CODE_OTEL_SDK_DISABLED to say it any other way`;
+  `OTEL_SDK_DISABLED=${value} was read as false; the OpenTelemetry specification recognizes only the string true, so use OTEL_SDK_DISABLED=true or KURAMBIT_OTEL_SDK_DISABLED to say it any other way`;
 
 describe("OtelEnvironment", () => {
   it.effect.each([
@@ -40,35 +40,40 @@ describe("OtelEnvironment", () => {
       disabled: false,
       warnings: [specIgnored("yes")],
     },
-    { name: "t3 1", env: { T3CODE_OTEL_SDK_DISABLED: "1" }, disabled: true, warnings: [T3_OFF] },
     {
-      name: "t3 TRUE",
-      env: { T3CODE_OTEL_SDK_DISABLED: "TRUE" },
+      name: "kurambit 1",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "1" },
       disabled: true,
-      warnings: [T3_OFF],
+      warnings: [KURAMBIT_OFF],
     },
-    { name: "t3 n", env: { T3CODE_OTEL_SDK_DISABLED: "n" }, disabled: false, warnings: [] },
     {
-      name: "t3 false overrides spec true",
-      env: { T3CODE_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
+      name: "kurambit TRUE",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "TRUE" },
+      disabled: true,
+      warnings: [KURAMBIT_OFF],
+    },
+    { name: "kurambit n", env: { KURAMBIT_OTEL_SDK_DISABLED: "n" }, disabled: false, warnings: [] },
+    {
+      name: "kurambit false overrides spec true",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
       disabled: false,
       warnings: [],
     },
     {
-      name: "blank t3 falls through",
-      env: { T3CODE_OTEL_SDK_DISABLED: "  ", OTEL_SDK_DISABLED: "true" },
+      name: "blank kurambit falls through",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "  ", OTEL_SDK_DISABLED: "true" },
       disabled: true,
       warnings: [SPEC_OFF],
     },
     {
-      name: "unreadable t3 warns and falls through",
-      env: { T3CODE_OTEL_SDK_DISABLED: "maybe", OTEL_SDK_DISABLED: "true" },
+      name: "unreadable kurambit warns and falls through",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "maybe", OTEL_SDK_DISABLED: "true" },
       disabled: true,
-      warnings: ["T3CODE_OTEL_SDK_DISABLED=maybe is not a yes or a no and was ignored", SPEC_OFF],
+      warnings: ["KURAMBIT_OTEL_SDK_DISABLED=maybe is not a yes or a no and was ignored", SPEC_OFF],
     },
     {
-      name: "bad spec value still warns when t3 answered",
-      env: { T3CODE_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "yes" },
+      name: "bad spec value still warns when kurambit answered",
+      env: { KURAMBIT_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "yes" },
       disabled: false,
       warnings: [specIgnored("yes")],
     },
@@ -194,13 +199,13 @@ describe("OtelEnvironment", () => {
       {
         name: "the kill switch wins outright over a valid endpoint",
         env: {
-          T3CODE_OTEL_SDK_DISABLED: "true",
+          KURAMBIT_OTEL_SDK_DISABLED: "true",
           OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector:4318/base",
         },
         traces: "Unset",
         metrics: "Unset",
         logs: "Unset",
-        warnings: [T3_OFF],
+        warnings: [KURAMBIT_OFF],
       },
       {
         name: "an exporter of none turns off only its signal",
@@ -242,7 +247,7 @@ describe("OtelEnvironment", () => {
         warnings: [],
       },
       {
-        name: "an exporter T3 Code does not have is ignored with a warning",
+        name: "an exporter Kurambit does not have is ignored with a warning",
         env: {
           OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector:4318",
           OTEL_METRICS_EXPORTER: "prometheus",
@@ -251,7 +256,7 @@ describe("OtelEnvironment", () => {
         metrics: "https://collector:4318/v1/metrics",
         logs: "https://collector:4318/v1/logs",
         warnings: [
-          "OTEL_METRICS_EXPORTER names prometheus, which T3 Code does not export to, so it was ignored",
+          "OTEL_METRICS_EXPORTER names prometheus, which Kurambit does not export to, so it was ignored",
         ],
       },
       {
@@ -265,8 +270,8 @@ describe("OtelEnvironment", () => {
         metrics: "https://collector:4318/v1/metrics",
         logs: "https://collector:4318/v1/logs",
         warnings: [
-          "OTEL_TRACES_EXPORTER names console, which T3 Code does not export to, so it was ignored",
-          "OTEL_LOGS_EXPORTER names console, otlpp, which T3 Code does not export to, so they were ignored",
+          "OTEL_TRACES_EXPORTER names console, which Kurambit does not export to, so it was ignored",
+          "OTEL_LOGS_EXPORTER names console, otlpp, which Kurambit does not export to, so they were ignored",
         ],
       },
     ])("$name", ({ env, traces, metrics, logs, warnings }) =>
@@ -296,9 +301,9 @@ describe("OtelEnvironment", () => {
       },
       {
         name: "headers are comma-separated pairs with percent-encoded values",
-        env: { ...ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS: "api-key=a%20b,tenant=t3" },
-        traces: { protocol: "http/protobuf", headers: { "api-key": "a b", tenant: "t3" } },
-        logs: { protocol: "http/protobuf", headers: { "api-key": "a b", tenant: "t3" } },
+        env: { ...ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS: "api-key=a%20b,tenant=kurambit" },
+        traces: { protocol: "http/protobuf", headers: { "api-key": "a b", tenant: "kurambit" } },
+        logs: { protocol: "http/protobuf", headers: { "api-key": "a b", tenant: "kurambit" } },
         warnings: [],
       },
       {
@@ -388,9 +393,9 @@ describe("OtelEnvironment", () => {
   });
 
   describe("resolveSignalEndpoint", () => {
-    const t3Export = {
+    const kurambitExport = {
       protocol: "http/json",
-      headers: { "x-key": "t3" },
+      headers: { "x-key": "kurambit" },
       exportIntervalMs: 5_000,
     } as const;
     const withLogs = (logs: OtelEnvironment.OtelSignal, disabled = false) => ({
@@ -405,21 +410,21 @@ describe("OtelEnvironment", () => {
     });
     it.each([
       {
-        name: "T3CODE_OTLP_*_URL wins over an OTEL endpoint",
+        name: "KURAMBIT_OTLP_*_URL wins over an OTEL endpoint",
         otel: withLogs(otelExport),
-        t3Url: "http://t3:4318/v1/logs",
-        expected: { url: "http://t3:4318/v1/logs", export: t3Export },
+        kurambitUrl: "http://kurambit:4318/v1/logs",
+        expected: { url: "http://kurambit:4318/v1/logs", export: kurambitExport },
       },
       {
-        name: "T3CODE_OTLP_*_URL wins over a signal the OTEL variables turned off",
+        name: "KURAMBIT_OTLP_*_URL wins over a signal the OTEL variables turned off",
         otel: withLogs(OtelEnvironment.OtelSignal.Off()),
-        t3Url: "http://t3:4318/v1/logs",
-        expected: { url: "http://t3:4318/v1/logs", export: t3Export },
+        kurambitUrl: "http://kurambit:4318/v1/logs",
+        expected: { url: "http://kurambit:4318/v1/logs", export: kurambitExport },
       },
       {
         name: "an OTEL endpoint brings its headers and protocol over the fallback",
         otel: withLogs(otelExport),
-        t3Url: " ",
+        kurambitUrl: " ",
         expected: {
           url: "http://otel:4318/v1/logs",
           export: {
@@ -432,27 +437,27 @@ describe("OtelEnvironment", () => {
       {
         name: "a signal the OTEL variables turned off does not fall through",
         otel: withLogs(OtelEnvironment.OtelSignal.Off()),
-        t3Url: undefined,
+        kurambitUrl: undefined,
         expected: undefined,
       },
       {
         name: "an unset signal takes the first non-blank fallback",
         otel: withLogs(OtelEnvironment.OtelSignal.Unset()),
-        t3Url: undefined,
-        expected: { url: "http://settings:4318/v1/logs", export: t3Export },
+        kurambitUrl: undefined,
+        expected: { url: "http://settings:4318/v1/logs", export: kurambitExport },
       },
       {
         name: "the kill switch wins over everything",
         otel: withLogs(otelExport, true),
-        t3Url: "http://t3:4318/v1/logs",
+        kurambitUrl: "http://kurambit:4318/v1/logs",
         expected: undefined,
       },
-    ])("$name", ({ otel, t3Url, expected }) => {
+    ])("$name", ({ otel, kurambitUrl, expected }) => {
       assert.deepStrictEqual(
         OtelEnvironment.resolveSignalEndpoint(
           otel,
           "logs",
-          { url: t3Url, export: t3Export },
+          { url: kurambitUrl, export: kurambitExport },
           "",
           "http://settings:4318/v1/logs",
         ),
@@ -464,17 +469,26 @@ describe("OtelEnvironment", () => {
   it.effect("an exporter of none keeps the Settings endpoint from re-enabling its signal", () =>
     Effect.gen(function* () {
       const otel = yield* load({ OTEL_LOGS_EXPORTER: "none" });
-      const t3 = {
+      const kurambit = {
         url: undefined,
         export: { protocol: "http/json", headers: undefined, exportIntervalMs: 10_000 },
       } as const;
       assert.strictEqual(
-        OtelEnvironment.resolveSignalEndpoint(otel, "logs", t3, "http://settings:4318/v1/logs"),
+        OtelEnvironment.resolveSignalEndpoint(
+          otel,
+          "logs",
+          kurambit,
+          "http://settings:4318/v1/logs",
+        ),
         undefined,
       );
       assert.strictEqual(
-        OtelEnvironment.resolveSignalEndpoint(otel, "traces", t3, "http://settings:4318/v1/traces")
-          ?.url,
+        OtelEnvironment.resolveSignalEndpoint(
+          otel,
+          "traces",
+          kurambit,
+          "http://settings:4318/v1/traces",
+        )?.url,
         "http://settings:4318/v1/traces",
       );
     }),
@@ -490,7 +504,7 @@ describe("OtelEnvironment", () => {
           ConfigProvider.fromEnv({ env: { OTEL_RESOURCE_ATTRIBUTES: raw } }),
         );
         const otel = yield* OtelEnvironment.load.pipe(Effect.provide(layerEnv));
-        const resource = yield* OtlpResource.fromConfig({ serviceName: "t3" }).pipe(
+        const resource = yield* OtlpResource.fromConfig({ serviceName: "kurambit" }).pipe(
           Effect.provide(
             Layer.provide(
               OtelEnvironment.layerResourceAttributes(otel.resourceAttributes),

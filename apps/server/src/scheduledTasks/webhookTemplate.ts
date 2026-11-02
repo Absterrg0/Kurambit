@@ -24,7 +24,7 @@ export interface RenderedWebhookPrompt {
 }
 
 const CREDENTIAL_NAME =
-  /^(authorization|proxy-authorization|cookie|set-cookie|x-t3-relay-.*)$|token|secret|signature|key|password|auth|credential|hmac|jwt|assertion/i;
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-kurambit-relay-.*)$|token|secret|signature|key|password|auth|credential|hmac|jwt|assertion/i;
 const REDACTED = "[redacted]";
 
 export function redactHeaders(headers: Readonly<Record<string, string>>): Record<string, string> {
@@ -60,14 +60,15 @@ const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
  * Syntax an adapter or provider CLI may act on before the model reads the
  * prompt: `$name` skill mentions (any currency sign, after any character in
  * Codex and Pi), `@` file, agent and plugin mentions (after punctuation or
- * letters in some CLIs), a `/name` command word mid-text, and `t3-context:`
+ * letters in some CLIs), a `/name` command word mid-text, and `kurambit-context:`
  * links. A word joiner goes after every currency sign and `@`, after a `/`
- * that starts a single-segment word, and inside the `t3-context` scheme and
+ * that starts a single-segment word, and inside the `kurambit-context` scheme and
  * any `webhook-data` name, so a value can't forge a frame tag.
  * Checked against Claude Code 2.1.296, Codex 0.162.1, Pi 1.2.0 and dsh
  * 0.2.0-rc.2; other agents may parse more.
  */
-const MENTION = /[\p{Sc}@]|(?<=^|\s)\/(?=[^\s/]+(?:\s|$))|t3-context(?=:)|webhook(?=-data)/giu;
+const MENTION =
+  /[\p{Sc}@]|(?<=^|\s)\/(?=[^\s/]+(?:\s|$))|kurambit-context(?=:)|webhook(?=-data)/giu;
 
 function parseBody(request: WebhookRequest): unknown {
   const contentType = (request.headers["content-type"] ?? "").toLowerCase();

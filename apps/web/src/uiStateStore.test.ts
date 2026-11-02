@@ -1,4 +1,4 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ThreadId } from "@kurambit/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -149,10 +149,10 @@ describe("uiStateStore pure functions", () => {
   });
 
   it("stores the sidebar project scope and resets it to all projects", () => {
-    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code");
+    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/Absterrg0/Kurambit");
 
-    expect(scoped.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
-    expect(setSidebarProjectScopeKey(scoped, "github.com/pingdotgg/t3code")).toBe(scoped);
+    expect(scoped.sidebarProjectScopeKey).toBe("github.com/Absterrg0/Kurambit");
+    expect(setSidebarProjectScopeKey(scoped, "github.com/Absterrg0/Kurambit")).toBe(scoped);
     expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
     expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
   });
@@ -339,14 +339,14 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" }));
+    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/Absterrg0/Kurambit" }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
     expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/pingdotgg/t3code",
+      "github.com/Absterrg0/Kurambit",
     );
   });
 

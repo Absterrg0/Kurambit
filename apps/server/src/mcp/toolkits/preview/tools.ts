@@ -25,7 +25,7 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationUploadInput,
   PreviewAutomationWaitForInput,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { Tool, Toolkit } from "effect/ai";
@@ -98,7 +98,7 @@ const PreviewDialogTool = browserTool(
 const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
     description:
-      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://t3.chat'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
+      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://kurambit.chat'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
     parameters: PreviewAutomationNavigateInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,

@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { ProviderInstanceId, ProviderSessionId, ThreadId } from "@t3tools/contracts";
-import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+import { ProviderInstanceId, ProviderSessionId, ThreadId } from "@kurambit/contracts";
+import { resolveSelfInvocation } from "@kurambit/shared/nodeRuntime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,32 +14,32 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as TestProviderHost from "@kurambit/provider-testing/TestProviderHost";
 import * as ServerSettings from "../../serverSettings.ts";
 import type {
   AcpRegistryAvailableCommands,
   AcpRegistryLiveConfiguration,
-} from "@t3tools/provider-acp-registry/testing";
-import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
-import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
-import { ACP_SESSION_MODE_OPTION_ID } from "@t3tools/provider-acp/server/sessionConfig";
-import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@kurambit/provider-acp-registry/testing";
+import * as AcpRegistrySupport from "@kurambit/provider-acp-registry/server/AcpRegistrySupport";
+import * as AcpRegistryRuntimeCoordinator from "@kurambit/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
+import { ACP_SESSION_MODE_OPTION_ID } from "@kurambit/provider-acp/server/sessionConfig";
+import * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import {
   decodeAcpReplayTranscript,
   makeAcpReplayCompletenessAssertion,
   makeAcpReplayRuntime,
 } from "./AcpAdapterV2.testkit.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import { BUILT_IN_PROVIDER_ADAPTER_DRIVER_KINDS_V2 } from "../builtInProviderAdapterDrivers.ts";
-import { AcpRegistryAdapterV2Driver } from "@t3tools/provider-acp-registry/server";
+import { AcpRegistryAdapterV2Driver } from "@kurambit/provider-acp-registry/server";
 import {
   ACP_REGISTRY_PROVIDER,
   makeAcpRegistryAdapterV2,
   acpRegistryPromptFailure,
-} from "@t3tools/provider-acp-registry/testing";
+} from "@kurambit/provider-acp-registry/testing";
 
 const registryUrl = "https://registry.test/registry.json";
 const decodeAcpRegistryAdapterSettings = Schema.decodeUnknownEffect(
@@ -168,7 +168,7 @@ describe("AcpRegistryAdapterV2", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const replayDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-acp-registry-mode-pick-",
+        prefix: "kurambit-acp-registry-mode-pick-",
       });
       const statusPath = path.join(replayDir, "status.json");
       const transcript = yield* decodeAcpReplayTranscript(
@@ -289,7 +289,7 @@ describe("AcpRegistryAdapterV2", () => {
                     command: process.execPath,
                     args: [mockAgentPath],
                     cwd: input.cwd,
-                    env: { T3_ACP_SESSION_LIFECYCLE: "1" },
+                    env: { KURAMBIT_ACP_SESSION_LIFECYCLE: "1" },
                   },
                   authMethodId: "test",
                 }).pipe(
@@ -358,8 +358,8 @@ describe("AcpRegistryAdapterV2", () => {
         instanceId,
         settings,
         environment: {
-          T3_ACP_SESSION_LIFECYCLE: "1",
-          T3_ACP_COMMAND_ADVERTISEMENT_DELAY_MS: "750",
+          KURAMBIT_ACP_SESSION_LIFECYCLE: "1",
+          KURAMBIT_ACP_COMMAND_ADVERTISEMENT_DELAY_MS: "750",
         },
       }).pipe(
         Effect.provide(

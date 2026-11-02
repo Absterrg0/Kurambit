@@ -4,9 +4,9 @@ import {
   AuthMcpApprovalError,
   AuthMcpClientAccess,
   type AuthMcpAuthorizationRequest,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import { isLoopbackHost } from "@kurambit/shared/preview";
 import { EyeIcon, type LucideIcon } from "lucide-react";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -235,8 +235,8 @@ export function ConnectAgentSurface() {
               value={pairingCode}
             />
             <p className="text-xs text-muted-foreground">
-              Create one in Settings → Connections, or run <code>t3 auth pairing create</code> on
-              this machine.
+              Create one in Settings → Connections, or run <code>kurambit auth pairing create</code>{" "}
+              on this machine.
             </p>
           </div>
         )}

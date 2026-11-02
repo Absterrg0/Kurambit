@@ -27,7 +27,7 @@ const hasDbus =
   NodeChildProcess.spawnSync("gdbus", ["help"]).status === 0;
 
 it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", async () => {
-  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-private-dbus-"));
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kurambit-private-dbus-"));
   let daemon: NodeChildProcess.ChildProcess | undefined;
   let server: MessageBus | undefined;
   const clients: LinuxCaptureConnection[] = [];
@@ -58,10 +58,7 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
     server = sessionBus({ busAddress: String(address) });
     server.on("error", () => undefined);
     await server.requestName("org.freedesktop.portal.Desktop", NameFlag.DO_NOT_QUEUE);
-    await server.requestName(
-      "org.gnome.Shell.Extensions.GameStudioSnapShot",
-      NameFlag.DO_NOT_QUEUE,
-    );
+    await server.requestName("org.gnome.Shell.Extensions.KurambitSnapShot", NameFlag.DO_NOT_QUEUE);
     await server.requestName("org.gnome.Shell", NameFlag.DO_NOT_QUEUE);
     await server.requestName("org.kde.KWin.ScreenShot2", NameFlag.DO_NOT_QUEUE);
     const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
@@ -167,13 +164,13 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
       setup.close();
     }
     const portal = connect();
-    expect(await portal.backend("dev.gamestudio.app")).toBe("screenshot-portal");
+    expect(await portal.backend("dev.kurambit.app")).toBe("screenshot-portal");
     expect(await portal.capturePortal()).toEqual({ png });
     expect(target).toBe(8);
     portalVersion = 2;
     const extension = connect();
-    expect(await extension.backend("dev.gamestudio.app")).toBe("gnome-extension");
-    expect(await extension.captureExtension("dev.gamestudio.app")).toMatchObject({
+    expect(await extension.backend("dev.kurambit.app")).toBe("gnome-extension");
+    expect(await extension.captureExtension("dev.kurambit.app")).toMatchObject({
       png,
       window: { processId: 42 },
     });
@@ -184,35 +181,35 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
         interface: "org.freedesktop.DBus",
         member: "GetNameOwner",
         signature: "s",
-        body: ["dev.gamestudio.app.SnapShot"],
+        body: ["dev.kurambit.app.SnapShot"],
       }),
     );
     expect(owner?.body[0]).toBe(clientName);
     extension.close();
     extensionVersion = 2;
     const updated = connect();
-    expect(await updated.backend("dev.gamestudio.app")).toBe("gnome-extension");
-    const snapshot = await updated.captureExtension("dev.gamestudio.app", {
+    expect(await updated.backend("dev.kurambit.app")).toBe("gnome-extension");
+    const snapshot = await updated.captureExtension("dev.kurambit.app", {
       flash: true,
       animate: true,
     });
     expect(snapshot.feedback?.animationStarted).toBe(true);
-    await snapshot.feedback!.activate("Game Studio");
+    await snapshot.feedback!.activate("Kurambit");
     await snapshot.feedback!.animateTo({ x: 0.1, y: 0.8, width: 0.2, height: 0.1 });
     await snapshot.feedback!.complete();
     expect(feedbackArgs).toEqual([true, true]);
-    expect(activateTitle).toBe("Game Studio");
+    expect(activateTitle).toBe("Kurambit");
     expect(animateFrame).toEqual([0.1, 0.8, 0.2, 0.1]);
     vi.stubEnv("XDG_CURRENT_DESKTOP", "KDE");
     const kde = connect();
-    expect(await kde.backend("dev.gamestudio.app")).toBe("kde");
+    expect(await kde.backend("dev.kurambit.app")).toBe("kde");
     expect(kde.feedbackAvailable).toBe(false);
     kde.close();
     const triggered = vi.fn();
     const failed = vi.fn();
     const niriBus = sessionBus({ busAddress: String(address) });
     stopNiriShortcut = await startNiriCaptureShortcut(
-      "dev.gamestudio.app.NiriTest",
+      "dev.kurambit.app.NiriTest",
       triggered,
       failed,
       niriBus,
@@ -221,11 +218,11 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
       "call",
       "--session",
       "--dest",
-      "dev.gamestudio.app.NiriTest.SnapShot",
+      "dev.kurambit.app.NiriTest.SnapShot",
       "--object-path",
-      "/com/t3tools/SnapShot",
+      "/com/kurambit/SnapShot",
       "--method",
-      "com.t3tools.SnapShot.Capture",
+      "dev.kurambit.SnapShot.Capture",
     ];
     await new Promise<void>((resolve, reject) => {
       NodeChildProcess.execFile(
@@ -242,9 +239,9 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
     expect(failed).not.toHaveBeenCalled();
     const invalid = server.call(
       new Message({
-        destination: "dev.gamestudio.app.NiriTest.SnapShot",
-        path: "/com/t3tools/SnapShot",
-        interface: "com.t3tools.SnapShot",
+        destination: "dev.kurambit.app.NiriTest.SnapShot",
+        path: "/com/kurambit/SnapShot",
+        interface: "dev.kurambit.SnapShot",
         member: "Capture",
         signature: "s",
         body: ["not allowed"],
@@ -254,7 +251,7 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
     expect(triggered).toHaveBeenCalledOnce();
     await expect(
       startNiriCaptureShortcut(
-        "dev.gamestudio.app.NiriTest",
+        "dev.kurambit.app.NiriTest",
         triggered,
         failed,
         sessionBus({ busAddress: String(address) }),
@@ -262,7 +259,7 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
     ).rejects.toThrow("already owns");
     stopNiriShortcut();
     const restarted = await startNiriCaptureShortcut(
-      "dev.gamestudio.app.NiriTest",
+      "dev.kurambit.app.NiriTest",
       triggered,
       failed,
       sessionBus({ busAddress: String(address) }),

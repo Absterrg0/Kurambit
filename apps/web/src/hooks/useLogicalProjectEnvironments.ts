@@ -1,11 +1,11 @@
-import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { availableScratchWorkspaceRoot } from "@kurambit/client-runtime/operations/projects";
+import { isScratchProject } from "@kurambit/client-runtime/state/projects";
+import type { EnvironmentProject } from "@kurambit/client-runtime/state/shell";
 import {
   type EnvironmentId,
   type ProjectId,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 import type { EnvironmentOption } from "../components/BranchToolbar.logic";
 import {

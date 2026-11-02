@@ -1,7 +1,7 @@
 import type {
   OrchestrationV2ProjectedTurnItem,
   OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 function isLocalTimelineRow(
   projection: Pick<OrchestrationV2ThreadProjection, "thread">,

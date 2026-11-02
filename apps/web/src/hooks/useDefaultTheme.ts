@@ -6,7 +6,7 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { getThemeDefinition, singleAppearanceOf, subscribeToCustomThemes } from "../themePalette";
 import { useTheme } from "./useTheme";
 
-const APPLIED_DEFAULT_THEME_STORAGE_PREFIX = "t3code:default-theme-applied:v2:";
+const APPLIED_DEFAULT_THEME_STORAGE_PREFIX = "kurambit:default-theme-applied:v2:";
 
 /**
  * One generation per set: keyed on when the theme was set, not just its value,

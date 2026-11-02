@@ -1,5 +1,5 @@
 import { Alert, AlertDescription } from "../ui/alert";
-import type { AuthSessionState } from "@t3tools/contracts";
+import type { AuthSessionState } from "@kurambit/contracts";
 
 import React, { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 

@@ -31,7 +31,7 @@ import {
   type ProviderInstanceId,
   type RunId,
   type RuntimeRequestId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -47,33 +47,33 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
 import * as OpenCode2Client from "./OpenCode2Client.ts";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
-import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
-import { causeErrorTag } from "@t3tools/shared/observability";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import { buildRuntimeInstructions } from "@kurambit/provider-core/server/runtimeInstructions";
+import { kurambitOrchestrationSystemPrompt } from "@kurambit/provider-core/server/orchestrationInstructions";
+import { SKILL_MENTION_PATTERN } from "@kurambit/shared/composerInlineTokens";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@kurambit/shared/model";
+import { causeErrorTag } from "@kurambit/shared/observability";
 
-import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { providerMessageTextWithAttachmentPaths } from "@kurambit/provider-core/server/attachmentPrompt";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import {
   backgroundWorkNotification,
   type BackgroundWorkReport,
-} from "@t3tools/provider-core/server/notification";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@kurambit/provider-core/server/notification";
+import * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@kurambit/provider-core/server/subagentProjection";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
+import { turnScopedSelectionTransition } from "@kurambit/provider-core/server/selectionTransition";
 import { OPENCODE_PROVIDER, openCodePermissionRequestKind } from "../adapter.ts";
 import { openCodeToolTurnItem } from "../toolItems.ts";
 
@@ -263,7 +263,7 @@ interface ThreadState {
   /**
    * Set when a turn ended here while OpenCode may still be running it: a Stop
    * that timed out, a prompt whose request failed without a clear answer, or a
-   * request T3 could not answer. Execution events carry only the session id,
+   * request Kurambit could not answer. Execution events carry only the session id,
    * so the next execution end belongs to that run; it clears this and ends no turn.
    */
   unsettled: boolean;
@@ -343,26 +343,28 @@ const rule = (action: string, effect: Rule["effect"]): Rule => ({ action, resour
  * tool namespace limit), and its router rejects adding one over 100, so a
  * thread id that does not fit is replaced by a digest of it.
  */
-export const t3McpServerName = Effect.fn("t3McpServerName")(function* (threadId: string) {
-  const name = `t3-code-${threadId.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}`;
+export const kurambitMcpServerName = Effect.fn("kurambitMcpServerName")(function* (
+  threadId: string,
+) {
+  const name = `kurambit-${threadId.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}`;
   if (name.length <= 64) return name;
   const crypto = yield* Crypto.Crypto;
   const digest = yield* crypto
     .digest("SHA-256", new TextEncoder().encode(threadId))
     .pipe(Effect.orDie);
-  return `t3-code-${Hex.encode(digest).slice(0, 16)}`;
+  return `kurambit-${Hex.encode(digest).slice(0, 16)}`;
 });
 
 /**
- * The rules that keep T3's MCP servers to their own thread, after the mode's:
- * the last matching rule wins, so every thread's T3 server is denied and then
+ * The rules that keep Kurambit's MCP servers to their own thread, after the mode's:
+ * the last matching rule wins, so every thread's Kurambit server is denied and then
  * this thread's own is allowed again, in every mode.
  */
 const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
   mcpServerName === null
     ? []
     : [
-        { action: "t3-code-*", resource: "*", effect: "deny" },
+        { action: "kurambit-*", resource: "*", effect: "deny" },
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
@@ -527,13 +529,13 @@ const isWakeTurn = (turn: OrchestrationV2ProviderTurn) =>
   turn.nativeTurnRef?.nativeId?.includes(":wake:") === true;
 
 const INTERRUPT_TIMEOUT = "10 seconds";
-const INSTRUCTIONS_KEY = "t3-code";
+const INSTRUCTIONS_KEY = "kurambit";
 const RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = "2 seconds";
 const RECONCILE_TIMEOUT = "15 seconds";
 const RECONNECT_WAIT = "30 seconds";
 const LOST_BACKGROUND =
-  "T3 Code lost its connection to OpenCode while this subagent ran, so its result is not shown.";
+  "Kurambit lost its connection to OpenCode while this subagent ran, so its result is not shown.";
 const INVENTORY_TIMEOUT = "5 seconds";
 const ACTIVE_CHECK_TIMEOUT = "5 seconds";
 /** Answers that mean the server refused a prompt; any other failure may have been accepted. */
@@ -564,13 +566,13 @@ type ModelRef = ReturnType<typeof Model.Ref.make>;
  * session with the item it already has, so a retried request never queues a second message, and a
  * turn knows the message fork and rollback cut at before OpenCode answers. The id is unique across
  * the whole server, which refuses it in any other session (409), so it names the session: another
- * T3 database or environment on the same server repeats thread ids and run ordinals, never session
+ * Kurambit database or environment on the same server repeats thread ids and run ordinals, never session
  * ids.
  */
 const turnPromptId = (sessionId: string, attemptId: string) =>
-  SessionMessage.ID.make(`msg_t3_turn_${sessionId}:${attemptId}`);
+  SessionMessage.ID.make(`msg_kurambit_turn_${sessionId}:${attemptId}`);
 const steerPromptId = (sessionId: string, messageId: string) =>
-  SessionMessage.ID.make(`msg_t3_steer_${sessionId}:${messageId}`);
+  SessionMessage.ID.make(`msg_kurambit_steer_${sessionId}:${messageId}`);
 
 const promptOf = (turn: OrchestrationV2ProviderTurn) => {
   const nativeId = turn.nativeTurnRef?.nativeId;
@@ -595,7 +597,7 @@ const boundaryAfter = (
       new ProviderAdapter.ProviderAdapterProtocolError({
         driver: OPENCODE_PROVIDER,
         detail:
-          "This OpenCode conversation has turns from an earlier T3 Code version, so it can't be cut there.",
+          "This OpenCode conversation has turns from an earlier Kurambit version, so it can't be cut there.",
       }),
     );
   }
@@ -669,7 +671,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
   const crypto = yield* Crypto.Crypto;
   const driver = OPENCODE_PROVIDER;
   const mcpServerNameFor = (threadId: string) =>
-    t3McpServerName(threadId).pipe(Effect.provideService(Crypto.Crypto, crypto));
+    kurambitMcpServerName(threadId).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
   const borrow = Effect.gen(function* () {
     const lent = yield* Deferred.make<
@@ -1540,7 +1542,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             }),
       });
       // A subagent's session is its call's to settle: a turn there is runless,
-      // and T3 has no terminal to wait on.
+      // and Kurambit has no terminal to wait on.
       if (state.subagent !== undefined) {
         const call = state.subagent.call;
         if (!call.background && terminal.status !== "completed") {
@@ -1590,7 +1592,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     });
 
     /**
-     * Ends the turn a request T3 could not answer would block, and stops the
+     * Ends the turn a request Kurambit could not answer would block, and stops the
      * session: OpenCode waits on an unanswered request forever. The stopped
      * run's end is its own, not the next turn's.
      */
@@ -1603,7 +1605,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       yield* finishTurn(state, {
         status: "failed",
         failure: makeProviderFailure({
-          message: "OpenCode is waiting on a request T3 Code couldn't answer.",
+          message: "OpenCode is waiting on a request Kurambit couldn't answer.",
           class: "provider_error",
         }),
       });
@@ -1621,7 +1623,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     });
 
     /**
-     * T3's own answers are only forgotten: the orchestrator already recorded them.
+     * Kurambit's own answers are only forgotten: the orchestrator already recorded them.
      */
     const settleRequest = Effect.fnUntraced(function* (
       entry: PendingRequest,
@@ -1674,7 +1676,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
 
     /**
      * Stops what a session still waits on when this runtime first loads it:
-     * T3 shows none of those requests (a restart or a closed session expired
+     * Kurambit shows none of those requests (a restart or a closed session expired
      * them), and OpenCode would wait on them forever.
      */
     const stopLeftoverRequests = Effect.fnUntraced(function* (state: ThreadState) {
@@ -1854,7 +1856,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       // Cancelling ends OpenCode's execution as a user stop, so the turn is
       // failed here with the reason and that stop's end is skipped.
-      yield* Effect.logWarning("Declined an OpenCode form T3 Code cannot show.", {
+      yield* Effect.logWarning("Declined an OpenCode form Kurambit cannot show.", {
         reason: mapped.unsupported,
       });
       const cancelled = yield* deliver(
@@ -1869,7 +1871,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       yield* finishTurn(asker, {
         status: "failed",
         failure: makeProviderFailure({
-          message: `OpenCode asked for ${mapped.unsupported}, which T3 Code can't show. The question was declined.`,
+          message: `OpenCode asked for ${mapped.unsupported}, which Kurambit can't show. The question was declined.`,
           class: "provider_error",
         }),
       });
@@ -2497,7 +2499,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   status: "failed",
                   failure: makeProviderFailure({
                     message:
-                      "OpenCode ended the turn with an error while T3 Code was reconnecting.",
+                      "OpenCode ended the turn with an error while Kurambit was reconnecting.",
                     class: "provider_error",
                   }),
                 }
@@ -2557,7 +2559,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       client = next.client;
       currentScope = scope;
       yield* Scope.close(previous, Exit.void);
-      // A restarted server forgot T3's MCP servers; the next turn adds them again.
+      // A restarted server forgot Kurambit's MCP servers; the next turn adds them again.
       for (const state of threads.values()) state.mcp = undefined;
       yield* lock.withPermit(reconcile).pipe(Effect.timeout(RECONCILE_TIMEOUT));
       return stream;
@@ -2603,7 +2605,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     // Subscribed before any session or prompt call, so no event of theirs is missed.
     yield* follow(yield* connection.events).pipe(Effect.forkScoped);
 
-    // A server T3 did not start keeps running after T3 stops, so stop the turns
+    // A server Kurambit did not start keeps running after Kurambit stops, so stop the turns
     // it would otherwise finish unseen. A spawned server stops with its owner.
     if (connection.external) {
       yield* Effect.addFinalizer(() =>
@@ -2792,7 +2794,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
 
     /**
      * Clears a staged revert and waits out the empty execution `clear` runs,
-     * which is no turn of T3's. 2.0.18 wakes the session after every clear,
+     * which is no turn of Kurambit's. 2.0.18 wakes the session after every clear,
      * with or without a stage (seen live), so that execution always comes.
      */
     const clearRevert = Effect.fnUntraced(function* (sessionId: string) {
@@ -2811,7 +2813,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     /**
      * If either fails or is interrupted the stage is cleared, since OpenCode commits a staged
      * revert on the next prompt; a clear that fails too is tried again before that prompt. Files
-     * stay where they are: T3 restores its own checkpoint when the user asked for files, and a
+     * stay where they are: Kurambit restores its own checkpoint when the user asked for files, and a
      * rewind without files must not touch them.
      */
     const rollBackTo = Effect.fnUntraced(function* (
@@ -2938,7 +2940,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const mcpSession = yield* mcpSessions.read(turnInput.threadId);
       const directory = turnInput.runtimePolicy.cwd ?? host.paths.cwd;
       const name = yield* mcpServerNameFor(turnInput.threadId);
-      // An external server may not reach T3's MCP endpoint, as with 1.x.
+      // An external server may not reach Kurambit's MCP endpoint, as with 1.x.
       const wanted =
         mcpSession === undefined || connection.external
           ? undefined
@@ -2968,7 +2970,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             Effect.timeout(INVENTORY_TIMEOUT),
             Effect.as(true),
             Effect.catchCause((cause) =>
-              Effect.logWarning("Could not add T3 Code's MCP server to OpenCode.", cause).pipe(
+              Effect.logWarning("Could not add Kurambit's MCP server to OpenCode.", cause).pipe(
                 Effect.as(false),
               ),
             ),
@@ -2977,7 +2979,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
-        t3OrchestrationSystemPrompt(state.mcp !== undefined),
+        kurambitOrchestrationSystemPrompt(state.mcp !== undefined),
       ]
         .filter((part) => part !== undefined && part.length > 0)
         .join("\n\n");
@@ -3236,7 +3238,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           Effect.orElseSucceed(() => []),
         );
         if (commands.some((entry) => entry.name === command.name)) {
-          // `session.command` takes no id of T3's and its answer carries none,
+          // `session.command` takes no id of Kurambit's and its answer carries none,
           // so the turn remembers where the history stood before it.
           const newest = yield* client.message.list({ sessionID, order: "desc", limit: 1 });
           yield* markBefore(sessionId, newest.data[0]?.id ?? null);
@@ -3518,7 +3520,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           if (started === undefined) return;
           const { state, sessionId, turn } = started;
           yield* submit(sessionId, turnInput, state, turn).pipe(
-            // Deleted outside T3: the thread is broken, and forgetting it makes
+            // Deleted outside Kurambit: the thread is broken, and forgetting it makes
             // the next turn resume, fail, and recreate it with a handoff.
             Effect.catchTags({
               SessionNotFoundError: () =>

@@ -3,7 +3,7 @@ import {
   type ChatAttachment,
   MessageId,
   OrchestratorMcpFailure,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -49,7 +49,7 @@ export const layer = McpToolAccess.toLayer(
   Effect.sync(() => {
     const uploadOwners = new Map<string, { readonly owner: string; readonly issuedAt: number }>();
     return {
-      t3_attachment_prepare_upload: McpToolAccess.writes((input) =>
+      kurambit_attachment_prepare_upload: McpToolAccess.writes((input) =>
         Effect.gen(function* () {
           const result = yield* Upload.issueAttachmentUploadUrl(input.upload).pipe(
             Effect.mapError(unavailable),
@@ -62,7 +62,7 @@ export const layer = McpToolAccess.toLayer(
           return result;
         }),
       ),
-      t3_attachment_discard: McpToolAccess.writes((input) =>
+      kurambit_attachment_discard: McpToolAccess.writes((input) =>
         Effect.gen(function* () {
           if (uploadOwners.get(input.attachmentId)?.owner !== (yield* uploadOwner)) {
             return yield* new OrchestratorMcpFailure({
@@ -75,7 +75,7 @@ export const layer = McpToolAccess.toLayer(
           return {};
         }),
       ),
-      t3_thread_send_attachments: McpToolAccess.writesThreads(
+      kurambit_thread_send_attachments: McpToolAccess.writesThreads(
         (input) => [input.threadId],
         (input) =>
           Effect.gen(function* () {

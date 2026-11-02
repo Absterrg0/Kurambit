@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as ModelManifest from "./ModelManifest.ts";
 import { expect, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -45,7 +45,7 @@ const makeHarness = Effect.fn("test.makeCodexInstallation")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const baseDir =
-    input.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "t3-codex-install-test-" }));
+    input.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "kurambitx-install-test-" }));
   const localDirectory = `${baseDir}/local`;
   const localBinaryPath = `${localDirectory}/codex`;
   const probeLog = `${baseDir}/local-probes.txt`;
@@ -230,7 +230,7 @@ it.effect("rechecks a cached local executable when the shared manifest policy ch
       compatibility: [
         {
           driver: "codex",
-          t3CodeRange: ">=0.0.42",
+          kurambitRange: ">=0.0.42",
           ranges: [
             { range: ">=0.156.1", status: "supported" },
             { range: "<0.156.1", status: "broken" },
@@ -409,7 +409,7 @@ it("publishes complete packages for all supported platforms", () => {
 it.live("startup removes only stale staging directories", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-codex-install-test-" });
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambitx-install-test-" });
     const managed = `${baseDir}/tools/codex`;
     const stale = ((yield* Clock.currentTimeMillis) - 25 * 60 * 60_000) / 1000;
     for (const name of [".install-stale", ".active-stale", ".install-live"]) {

@@ -1,5 +1,5 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
-import { defineProviderClient } from "@t3tools/provider-core/client";
+import { ProviderDriverKind } from "@kurambit/contracts";
+import { defineProviderClient } from "@kurambit/provider-core/client";
 
 import { CursorSettings } from "./settings.ts";
 

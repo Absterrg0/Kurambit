@@ -1,6 +1,6 @@
 import { BookmarkIcon, FileIcon, FileTextIcon } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
-import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { assistantCitationsToPlainText } from "@kurambit/shared/assistantCitations";
 
 import { RelativeTime } from "../RelativeTime";
 import { cn } from "~/lib/utils";

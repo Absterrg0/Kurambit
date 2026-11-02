@@ -1,6 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ProviderInstanceId, ProviderSetupError, type ProviderAuthState } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  ProviderSetupError,
+  type ProviderAuthState,
+} from "@kurambit/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -17,11 +21,11 @@ import {
   type AntigravityAuth,
   type AntigravityAuthRuntime,
 } from "./AntigravityAuth.ts";
-import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import type * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
 
 const instanceId = ProviderInstanceId.make("antigravity-auth-test");
-const owner = "t3-auth-session-owner";
-const otherOwner = "t3-auth-session-other";
+const owner = "kurambit-auth-session-owner";
+const otherOwner = "kurambit-auth-session-other";
 const authorizationUrl =
   "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A51234%2F&state=test-state";
 const callbackUrl = "http://127.0.0.1:51234/?state=test-state&code=test-code";

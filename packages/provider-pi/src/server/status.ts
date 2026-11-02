@@ -2,11 +2,11 @@ import {
   type CustomModelSetting,
   type ServerProvider,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type { PiSettings } from "../settings.ts";
-import { causeErrorTag } from "@t3tools/shared/observability";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { compareSemverVersions } from "@t3tools/shared/semver";
+import { causeErrorTag } from "@kurambit/shared/observability";
+import { resolveSpawnCommand } from "@kurambit/shared/shell";
+import { compareSemverVersions } from "@kurambit/shared/semver";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
@@ -25,7 +25,7 @@ import {
   piRecordField as recordField,
   piRecordString as recordString,
 } from "./rpc.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderLatestVersions from "@kurambit/provider-core/server/ProviderLatestVersions";
 import {
   buildServerProvider,
   isCommandMissingCause,
@@ -33,11 +33,11 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
   type ServerProviderDraft,
-} from "@t3tools/provider-core/server/snapshotProbe";
+} from "@kurambit/provider-core/server/snapshotProbe";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
-} from "@t3tools/provider-core/server/maintenanceResolver";
+} from "@kurambit/provider-core/server/maintenanceResolver";
 import {
   EMPTY_PI_MODEL_CAPABILITIES,
   thinkingCapabilitiesForPiModel,
@@ -227,7 +227,7 @@ export function buildInitialPiProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Pi is disabled in T3 Code settings.",
+          message: "Pi is disabled in Kurambit settings.",
         },
       });
     }
@@ -266,7 +266,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Pi is disabled in T3 Code settings.",
+        message: "Pi is disabled in Kurambit settings.",
       },
     });
   }
@@ -341,7 +341,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: `T3 Code could not determine the Pi version. Pi ${MINIMUM_PI_VERSION} or newer is required.`,
+        message: `Kurambit could not determine the Pi version. Pi ${MINIMUM_PI_VERSION} or newer is required.`,
       },
     });
   }
@@ -400,7 +400,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         status: "ready",
         auth: { status: "unknown" },
         message:
-          "Pi is available, but T3 Code could not refresh its models and commands. The live session will retry startup.",
+          "Pi is available, but Kurambit could not refresh its models and commands. The live session will retry startup.",
       },
     });
   }

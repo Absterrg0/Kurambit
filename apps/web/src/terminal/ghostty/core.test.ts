@@ -7,7 +7,7 @@ import {
   readTerminalOutputUpdate,
   terminalOutputText,
   type TerminalBufferState,
-} from "@t3tools/client-runtime/state/terminal";
+} from "@kurambit/client-runtime/state/terminal";
 
 import { writeTerminalOutputUpdate } from "../../components/ThreadTerminalDrawer";
 import { GHOSTTY_CELL_WIDE, GhosttyTerminalCore, ghosttyCellText } from "./core";
@@ -272,7 +272,7 @@ describe("GhosttyTerminalCore snapshots", () => {
       "\u0301界🙂",
       "\x1b[0",
       "m\r\n",
-      "\x1b]8;;https://t3.codes\x1b",
+      "\x1b]8;;https://example.com\x1b",
       "\\link",
       "\x1b]8;;\x1b",
       "\\\x1b[?1049h",

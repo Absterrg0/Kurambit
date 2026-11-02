@@ -3,7 +3,7 @@ import type {
   DesktopUpdateChannel,
   DesktopUpdateCheckResult,
   DesktopUpdateActionResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -48,9 +48,9 @@ export class DesktopUpdates extends Context.Service<
       expectedVersion: string,
     ) => Effect.Effect<DesktopPreparedUpdateInstallResult>;
   }
->()("@t3tools/desktop/updates/DesktopUpdates") {}
+>()("@kurambit/desktop/updates/DesktopUpdates") {}
 
-export const UPDATES_DISABLED_REASON = "Automatic updates are unavailable in Game Studio.";
+export const UPDATES_DISABLED_REASON = "Automatic updates are unavailable in Kurambit.";
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

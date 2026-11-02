@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -141,7 +141,7 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const baseDir =
-    options.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-test-" }));
+    options.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-agy-test-" }));
   const platform = options.platform ?? hostPlatform;
   const arch = options.arch ?? "x64";
   const archive = options.archive ?? completeArchive;
@@ -837,7 +837,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const baseDir = yield* fs
-          .makeTempDirectoryScoped({ prefix: "t3-agy-path-test-" })
+          .makeTempDirectoryScoped({ prefix: "kurambit-agy-path-test-" })
           .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
         const externalDirectory = path.join(baseDir, "external");
         const externalExecutable = path.join(externalDirectory, executableName);

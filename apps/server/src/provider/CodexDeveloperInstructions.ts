@@ -1,15 +1,15 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode } from "@kurambit/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import { buildRuntimeInstructions } from "@kurambit/provider-core/server/runtimeInstructions";
 
 import {
-  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
-  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+  KURAMBIT_BROWSER_TOOL_INSTRUCTIONS,
+  KURAMBIT_ORCHESTRATION_INSTRUCTIONS,
+} from "@kurambit/provider-core/server/orchestrationInstructions";
 
 // Only describe tools supplied to this turn so the agent can choose another browser driver when unavailable.
 const toolInstructions = (browserAvailable: boolean): string =>
-  browserAvailable ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "";
+  browserAvailable ? KURAMBIT_BROWSER_TOOL_INSTRUCTIONS : "";
 
 const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
@@ -178,11 +178,11 @@ export function buildCodexAdditionalContext(
   const tools = toolInstructions(toolsAvailable);
   // Separate keys keep each value under Codex's per-entry token cap.
   return {
-    t3_code_orchestration: { kind: "application", value: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
-    t3_code_runtime: {
+    kurambit_orchestration: { kind: "application", value: KURAMBIT_ORCHESTRATION_INSTRUCTIONS },
+    kurambit_runtime: {
       kind: "application",
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
     },
-    ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
+    ...(tools ? { kurambit_tools: { kind: "application", value: tools } } : {}),
   };
 }

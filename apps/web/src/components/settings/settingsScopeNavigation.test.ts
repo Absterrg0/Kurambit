@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId } from "@kurambit/contracts";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -12,9 +12,9 @@ import { resolveSettingsScope } from "./settingsScope";
 import { retainSettingsScope, validateSettingsRouteSearch } from "./settingsScopeNavigation";
 
 const checkoutSearch = {
-  project: "repository:t3code",
+  project: "repository:kurambit",
   machine: "remote-server",
-  checkout: "remote-server:/home/user/Game Studio",
+  checkout: "remote-server:/home/user/Kurambit",
 };
 
 function createSettingsRouter(initialEntry = "/settings/general") {
@@ -111,7 +111,7 @@ describe("settings scope navigation", () => {
       const router = createSettingsRouter();
       await router.navigate({ to, search: checkoutSearch });
 
-      const regroupedCheckout = { ...checkoutSearch, project: "separate:t3code" };
+      const regroupedCheckout = { ...checkoutSearch, project: "separate:kurambit" };
       await router.navigate({
         from: "/settings",
         to: router.state.location.pathname,

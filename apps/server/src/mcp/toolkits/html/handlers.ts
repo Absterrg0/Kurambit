@@ -1,4 +1,4 @@
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { OrchestratorMcpFailure } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 
 import * as HtmlRender from "../../../htmlRender/HtmlRender.ts";
@@ -20,7 +20,7 @@ const toFailure = (error: { readonly _tag: string; readonly message: string }) =
 
 const handlers = {
   // The headless browser runs on the host and can open local files, so only
-  // agents T3 launched, which already work on this machine, get it.
+  // agents Kurambit launched, which already work on this machine, get it.
   html_preview: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const htmlRender = yield* HtmlRender.HtmlRender;

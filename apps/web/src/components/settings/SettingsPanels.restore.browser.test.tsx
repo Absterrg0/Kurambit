@@ -1,4 +1,4 @@
-import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@kurambit/contracts";
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";

@@ -1,4 +1,4 @@
-import { DATABASE_COMPACTION_RECOMMENDED_BYTES } from "@t3tools/contracts";
+import { DATABASE_COMPACTION_RECOMMENDED_BYTES } from "@kurambit/contracts";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 
@@ -51,7 +51,7 @@ export const runDoctor = Effect.fn("runDoctor")(function* (
           {
             id: "legacy" as const,
             title: "Delete the database from before 0.1.0",
-            description: `Frees ${formatBytes(status.legacyDatabaseBytes)}. Your threads and settings are already in the current database.\n  Warning: after this, a T3 Code version before 0.1.0 starts with no threads or settings, so you can no longer roll back.`,
+            description: `Frees ${formatBytes(status.legacyDatabaseBytes)}. Your threads and settings are already in the current database.\n  Warning: after this, a Kurambit version before 0.1.0 starts with no threads or settings, so you can no longer roll back.`,
             // Never chosen for you: deleting it gives up rolling back.
             recommended: false,
           },
@@ -128,7 +128,7 @@ export const doctorCommand = Command.make("doctor", {
     Flag.withDefault(false),
   ),
 }).pipe(
-  Command.withDescription("Inspect this T3 Code data directory and repair it."),
+  Command.withDescription("Inspect this Kurambit data directory and repair it."),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const logLevel = yield* GlobalFlag.LogLevel;

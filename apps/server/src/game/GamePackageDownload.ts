@@ -3,7 +3,7 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@kurambit/contracts";
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,

@@ -5,7 +5,7 @@ import {
   EnvironmentId,
   ThreadId,
   type OrchestrationV2SearchThreadResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   ThreadFind,
   ThreadFindProvider,

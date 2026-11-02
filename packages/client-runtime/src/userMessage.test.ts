@@ -1,4 +1,4 @@
-import { ScheduledTaskId } from "@t3tools/contracts";
+import { ScheduledTaskId } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { resolveUserMessagePresentation } from "./userMessage.ts";
@@ -55,8 +55,8 @@ describe("resolveUserMessagePresentation", () => {
     }
   });
 
-  it("attributes older server-sent restart continuations to T3 Code, not another agent", () => {
-    const text = "Note: the T3 server restarted.";
+  it("attributes older server-sent restart continuations to Kurambit, not another agent", () => {
+    const text = "Note: the Kurambit server restarted.";
     expect(
       resolveUserMessagePresentation({
         role: "user",
@@ -64,7 +64,7 @@ describe("resolveUserMessagePresentation", () => {
         creationSource: "server",
         text,
       }),
-    ).toMatchObject({ attribution: "t3code" });
+    ).toMatchObject({ attribution: "kurambit" });
     for (const creationSource of ["mcp", "provider"] as const) {
       expect(
         resolveUserMessagePresentation({ role: "user", createdBy: "agent", creationSource, text }),

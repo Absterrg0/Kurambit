@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ProjectId, CommandId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, CommandId } from "@kurambit/contracts";
 
 import {
   buildProjectCreateCommand,
@@ -43,8 +43,8 @@ describe("add project shared logic", () => {
     expect(normalizePastedCloneUrl("imputnet/helium")).toBe(
       "https://github.com/imputnet/helium.git",
     );
-    expect(normalizePastedCloneUrl("  pingdotgg/t3code  ")).toBe(
-      "https://github.com/pingdotgg/t3code.git",
+    expect(normalizePastedCloneUrl("  Absterrg0/Kurambit  ")).toBe(
+      "https://github.com/Absterrg0/Kurambit.git",
     );
   });
 

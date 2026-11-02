@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
@@ -10,7 +10,7 @@ import * as Ref from "effect/Ref";
 import * as BrowserSession from "../BrowserSession.ts";
 import * as BrowserImport from "./BrowserImport.ts";
 import { BROWSER_IMPORT_SOURCES, sourcePathContext } from "./Sources.ts";
-import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import { symlinksSupported } from "@kurambit/shared/testing/symlinks";
 
 const helium = BROWSER_IMPORT_SOURCES.find((source) => source.id === "helium")!;
 
@@ -39,7 +39,7 @@ const layerRejectedBeforeSession = Layer.succeed(
 
 const withImporter = Effect.fnUntraced(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-" });
+  const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-import-" });
   const layerEnvironment = Layer.succeed(HostProcess.Environment, { HOME: home });
   const context = yield* sourcePathContext.pipe(
     Effect.provideService(HostProcess.Environment, { HOME: home }),
@@ -58,7 +58,7 @@ const withImporter = Effect.fnUntraced(function* () {
         Layer.provide(layerRejectedBeforeSession),
         Layer.provide(layerEnvironment),
         Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
-        Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/Applications/T3 Code.app")),
+        Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/Applications/Kurambit.app")),
         Layer.provide(NodeServices.layer),
       ),
     ),
@@ -82,7 +82,7 @@ describe("BrowserImport.importCookies", () => {
             sourceProfileDirectory: "../../../../secrets",
             targetProfileId: "default",
           },
-          scope: "persist:t3code-preview-test",
+          scope: "persist:kurambit-preview-test",
           persistent: true,
         })
         .pipe(Effect.flip);
@@ -109,7 +109,7 @@ describe("BrowserImport.importCookies", () => {
               sourceProfileDirectory: "Default",
               targetProfileId: "default",
             },
-            scope: "persist:t3code-preview-test",
+            scope: "persist:kurambit-preview-test",
             persistent: true,
           })
           .pipe(Effect.flip);

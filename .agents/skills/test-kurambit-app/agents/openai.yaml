@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kurambit App Testing"
+  short_description: "Test web and desktop in Kurambit's Browser panel"
+  default_prompt: "Use $test-kurambit-app to verify the affected web or desktop flow through Kurambit's Browser panel."

@@ -1,4 +1,4 @@
-import type { GameStatus } from "@t3tools/contracts";
+import type { GameStatus } from "@kurambit/contracts";
 
 /**
  * What the stage shows for the play surface. Ordered by what the user most

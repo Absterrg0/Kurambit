@@ -8,7 +8,7 @@ export interface PreviewPanelInlineSize {
   readonly handlers: ResizableWidthHandlers;
 }
 
-const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "t3code:preview-panel-width";
+const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "kurambit:preview-panel-width";
 const PREVIEW_PANEL_MIN_WIDTH = 360;
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7;
 /**

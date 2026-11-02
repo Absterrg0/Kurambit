@@ -12,15 +12,15 @@ import {
   type SourceControlCloneRepositoryResult,
   SourceControlProviderKind,
   type SourceControlRepositoryInfo,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@kurambit/provider-core/server/pathExpansion";
 import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,
 } from "../project/gitCloneProgress.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 function mapRepositoryError(operation: string, provider: SourceControlProviderKind) {
   return Effect.mapError((cause: unknown) =>
     isSourceControlRepositoryError(cause)
@@ -49,7 +49,7 @@ export class GitRepositoryService extends Context.Service<
       destinationPath: string,
     ) => Effect.Effect<void, SourceControlRepositoryError>;
   }
->()("t3/project/GitRepositoryService") {}
+>()("kurambit/project/GitRepositoryService") {}
 
 export interface SourceControlPreparedClone {
   readonly destinationPath: string;

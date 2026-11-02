@@ -1,12 +1,12 @@
 "use client";
 
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { settlePromise } from "@t3tools/client-runtime/state/runtime";
-import { previewStreamDownloadUrl } from "@t3tools/client-runtime/preview/server-browser-stream";
+import { scopeThreadRef, scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { settlePromise } from "@kurambit/client-runtime/state/runtime";
+import { previewStreamDownloadUrl } from "@kurambit/client-runtime/preview/server-browser-stream";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_BROWSER_PROFILE_ID,
@@ -17,8 +17,8 @@ import {
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   PREVIEW_ZOOM_LEVELS,
   type PreviewAdjustInput,
-} from "@t3tools/contracts";
-import { normalizePreviewUrl, resolveAddressBarInput } from "@t3tools/shared/preview";
+} from "@kurambit/contracts";
+import { normalizePreviewUrl, resolveAddressBarInput } from "@kurambit/shared/preview";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
@@ -1022,7 +1022,7 @@ export function PreviewView({
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <p className="max-w-sm text-sm text-muted-foreground">
-                This tab is open in the Game Studio desktop app.
+                This tab is open in the Kurambit desktop app.
               </p>
             </div>
           )

@@ -5,7 +5,7 @@ import {
   type GameConsoleMessage,
   type GameExploreStep,
   type GamePlaytestProbe,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import {
   READ_STUDIO_READY,
   READ_STUDIO_STATE,

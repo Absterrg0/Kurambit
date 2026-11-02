@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { GameOperationError } from "@t3tools/contracts";
+import { GameOperationError } from "@kurambit/contracts";
 
 const mime: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -28,7 +28,7 @@ export class GamePreview extends Context.Service<
     /** The URL of the build most recently selected for Play, or null. */
     readonly url: (root: string) => string | null;
   }
->()("t3/game/GamePreview") {}
+>()("kurambit/game/GamePreview") {}
 const make = Effect.gen(function* () {
   const servers = new Map<
     string,

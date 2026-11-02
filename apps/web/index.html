@@ -14,10 +14,10 @@
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#0a0a0a";
-        const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
-        const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
-        const THEME_APPEARANCE_MODE_STORAGE_KEY = "t3code:theme-appearance-mode";
-        const THEME_HALVES_STORAGE_KEY = "t3code:theme-halves:v1";
+        const CUSTOM_THEMES_STORAGE_KEY = "kurambit:themes:v1";
+        const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "kurambit:theme-follow-system";
+        const THEME_APPEARANCE_MODE_STORAGE_KEY = "kurambit:theme-appearance-mode";
+        const THEME_HALVES_STORAGE_KEY = "kurambit:theme-halves:v1";
         const SPLASH_COLORS = {
           light: {
             background: "#ffffff",
@@ -51,7 +51,7 @@
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
-          "t3-chat": {
+          "kurambit-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
               foreground: "oklch(0.325698 0.116116 325.037)",
@@ -123,7 +123,7 @@
           },
         };
         // Keep the built-in mode list in sync with the runtime so the selected
-        // T3 Chat palette is visible before React has mounted.
+        // Kurambit Chat palette is visible before React has mounted.
         const BUILT_IN_THEME_MODES = Object.fromEntries(
           Object.entries(BUILT_IN_THEME_PALETTES).map(([id, palettes]) => [
             id,
@@ -134,16 +134,16 @@
           "system",
           "light",
           "dark",
-          "t3-chat",
+          "kurambit-chat",
           "grove",
           "ocean",
           "ember",
           "iris",
-          "t3-chat-dark",
-          "t3-grove",
-          "t3-ocean",
-          "t3-ember",
-          "t3-iris",
+          "kurambit-chat-dark",
+          "kurambit-grove",
+          "kurambit-ocean",
+          "kurambit-ember",
+          "kurambit-iris",
         ];
         // Update every theme-color meta so any element another layer added
         // carries the resolved color too.
@@ -217,22 +217,22 @@
         };
 
         try {
-          const storedTheme = window.localStorage.getItem("t3code:theme");
+          const storedTheme = window.localStorage.getItem("kurambit:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          // Older builds stored the dark T3 Chat palette as its own theme id
-          // and every maintainer theme under a t3- prefix; keep those
+          // Older builds stored the dark Kurambit Chat palette as its own theme id
+          // and every maintainer theme under a kurambit- prefix; keep those
           // preferences readable. Mirrors the runtime's legacy alias table.
           const LEGACY_THEME_IDS = {
-            "t3-chat-dark": "t3-chat",
-            "t3-grove": "grove",
-            "t3-ocean": "ocean",
-            "t3-ember": "ember",
-            "t3-iris": "iris",
+            "kurambit-chat-dark": "kurambit-chat",
+            "kurambit-grove": "grove",
+            "kurambit-ocean": "ocean",
+            "kurambit-ember": "ember",
+            "kurambit-iris": "iris",
           };
-          const isLegacyT3ChatDark = storedTheme === "t3-chat-dark";
+          const isLegacyKurambitChatDark = storedTheme === "kurambit-chat-dark";
           const themeId =
             storedTheme === null ? "" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
-          const legacyMode = isLegacyT3ChatDark ? "dark" : null;
+          const legacyMode = isLegacyKurambitChatDark ? "dark" : null;
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);
           const themeModes =
@@ -477,13 +477,13 @@
         cursor: pointer;
       }
     </style>
-    <title>Game Studio (Beta)</title>
+    <title>Kurambit (Beta)</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="Game Studio splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Game Studio" />
+        <div id="boot-shell-card" aria-label="Kurambit splash screen">
+          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Kurambit" />
         </div>
       </div>
     </div>

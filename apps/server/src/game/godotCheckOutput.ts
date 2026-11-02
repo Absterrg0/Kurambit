@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import type { GameCheckIssue } from "@t3tools/contracts";
+import type { GameCheckIssue } from "@kurambit/contracts";
 
 /**
  * The checker script reports what it can see from inside Godot (unloadable

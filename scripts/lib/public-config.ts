@@ -21,7 +21,7 @@ export function loadRepoEnv({
   const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
   return Object.fromEntries(
     Object.entries({ ...rootEnv, ...localEnv, ...baseEnv }).filter(
-      ([name]) => !/(?:CLERK|RELAY|EXPO_PUBLIC|T3CODE_MOBILE_OTLP)/.test(name),
+      ([name]) => !/(?:CLERK|RELAY|EXPO_PUBLIC|KURAMBIT_MOBILE_OTLP)/.test(name),
     ),
   );
 }

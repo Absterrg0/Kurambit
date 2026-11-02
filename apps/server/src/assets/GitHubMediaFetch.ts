@@ -1,5 +1,5 @@
 import * as Mime from "effect/http/Mime";
-import { githubMediaFileName } from "@t3tools/shared/githubMedia";
+import { githubMediaFileName } from "@kurambit/shared/githubMedia";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

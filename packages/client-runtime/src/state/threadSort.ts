@@ -1,5 +1,5 @@
-import type { ProjectId } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type { ProjectId } from "@kurambit/contracts";
+import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
 import type { EnvironmentThreadShell } from "./models.ts";
 
 export interface ThreadSortInput {

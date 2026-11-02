@@ -6,7 +6,7 @@ import {
   type AuthEnvironmentScope,
   type AuthSessionState,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { act } from "react";
@@ -29,7 +29,7 @@ const state = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock(import("@t3tools/client-runtime/state/session"), async (original) => ({
+vi.mock(import("@kurambit/client-runtime/state/session"), async (original) => ({
   ...(await original()),
   createEnvironmentSessionAtoms: (() => ({
     sessionStateAtom: (id: EnvironmentId) => state.sessions.get(id)!,
@@ -64,7 +64,7 @@ const session = (scopes: ReadonlyArray<AuthEnvironmentScope>): AuthSessionState 
     policy: "remote-reachable",
     bootstrapMethods: ["one-time-token"],
     sessionMethods: ["bearer-access-token"],
-    sessionCookieName: "t3_session",
+    sessionCookieName: "kurambit_session",
   },
 });
 let root: Root;

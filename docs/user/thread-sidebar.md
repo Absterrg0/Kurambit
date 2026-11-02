@@ -10,7 +10,7 @@ and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. To continue in
 an existing worktree, use **New thread in this worktree** from the branch toolbar.
 
-When you change a new thread's project, T3 Code stays in the current environment
+When you change a new thread's project, Kurambit stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
 ### Start without a project
@@ -23,8 +23,8 @@ list. It starts on your current machine; before sending, pick another machine
 from the machine menu to move it there. To move a draft into a project, pick the
 project in the heading.
 
-Each thread without a project works in its own folder under `~/.t3/scratch` (the
-`scratch` folder of your T3 data directory), named after its date, the first words
+Each thread without a project works in its own folder under `~/.kurambit/scratch` (the
+`scratch` folder of your Kurambit data directory), named after its date, the first words
 of its first message, and a short id, like
 `2026-09-25-convert-these-pngs-to-webp-a1b2c3d4`. Deleting a thread keeps its
 folder, so the files the agent wrote stay until you delete them. Branch, worktree, and diff controls stay hidden because
@@ -99,7 +99,7 @@ position, so using **Un-settle** returns it to the top. Pinning and snoozing pre
 position until you move it again. Thread activity does not change the order. The settled shelf
 continues to use settlement time.
 
-If dragging is unavailable for one environment, update the T3 Code server running in that
+If dragging is unavailable for one environment, update the Kurambit server running in that
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
@@ -107,7 +107,7 @@ To generate a fresh title from the conversation, open a thread's menu and choose
 **Regenerate title**. The action is unavailable while title generation is in progress
 or when the connected environment needs a server update.
 
-Agents connected through T3 Code can use the same server-owned metadata workflow to
+Agents connected through Kurambit can use the same server-owned metadata workflow to
 rename a thread, regenerate its title, or link and unlink a pull request. These changes
 appear on web, desktop, and mobile without requiring the originating browser to remain
 open.
@@ -136,7 +136,7 @@ runs a command, such as a dev server, stays open.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a
-`t3.json` script, for example `cargo clean`. It runs each time a thread in its own
+`kurambit.json` script, for example `cargo clean`. It runs each time a thread in its own
 worktree settles, manually or automatically, even if a terminal there still runs a
 command such as a dev server. Threads in the project's main checkout skip it. Its terminal
 closes when the command succeeds and stays open when it fails.

@@ -228,7 +228,7 @@ export class EnvironmentSupervisor extends Context.Service<
     readonly disconnect: Effect.Effect<void>;
     readonly retryNow: Effect.Effect<void>;
   }
->()("@t3tools/client-runtime/connection/supervisor/EnvironmentSupervisor") {}
+>()("@kurambit/client-runtime/connection/supervisor/EnvironmentSupervisor") {}
 
 export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   entry: ConnectionCatalogEntry,

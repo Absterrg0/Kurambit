@@ -8,7 +8,7 @@ import {
   TriangleAlertIcon,
   WrenchIcon,
 } from "lucide-react";
-import type { GameViewport } from "@t3tools/contracts";
+import type { GameViewport } from "@kurambit/contracts";
 import { Button } from "../ui/button";
 import { GameElapsed } from "./GameElapsed";
 import type { GameStagePhase } from "./gameStageLogic";
@@ -205,7 +205,7 @@ function StageStateCard({
           </StageIcon>
           <StageCopy
             title="Game tools are not installed"
-            body="Game Studio builds and checks the game with Blender and Godot. Install them once, then come back and press Play."
+            body="Kurambit builds and checks the game with Blender and Godot. Install them once, then come back and press Play."
           />
           <Button size="sm" variant="outline" onClick={onOpenTools}>
             Open game tools settings

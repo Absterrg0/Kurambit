@@ -142,7 +142,7 @@ it(
   "starts the production server and registers the package tools with object inputs",
   { timeout: 45_000 },
   async () => {
-    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-mcp-startup-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kurambit-mcp-startup-"));
     const homeDir = NodePath.join(root, "home");
     const logPath = NodePath.join(root, "server.log");
     await NodeFSP.mkdir(homeDir, { recursive: true });
@@ -185,7 +185,7 @@ it(
 
       // A toolkit that failed to register usually leaves its names out entirely.
       for (const name of [
-        "t3_worktree_status",
+        "kurambit_worktree_status",
         "preview_status",
         "game_status",
         "game_package_windows",

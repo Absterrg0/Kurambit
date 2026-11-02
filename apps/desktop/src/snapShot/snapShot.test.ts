@@ -1,5 +1,5 @@
 import { it as effectIt } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -506,17 +506,17 @@ describe("findAccessibleWindow", () => {
   it.each(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])(
     "ignores a leading Wayland title spinner frame %s",
     (frame) => {
-      const windows = [{ name: `${frame} t3code`, bounds: captured.bounds }];
+      const windows = [{ name: `${frame} kurambit`, bounds: captured.bounds }];
 
-      expect(findAccessibleWindow(windows, { ...captured, title: "⠋ t3code" }, "wayland")).toBe(
+      expect(findAccessibleWindow(windows, { ...captured, title: "⠋ kurambit" }, "wayland")).toBe(
         windows[0],
       );
     },
   );
 
   it.each([
-    ["⠋ t3code", "t3code"],
-    ["t3code", "⠙ t3code"],
+    ["⠋ kurambit", "kurambit"],
+    ["kurambit", "⠙ kurambit"],
   ])("matches a Wayland spinner starting or stopping: %s → %s", (title, name) => {
     const windows = [{ name, bounds: captured.bounds }];
 
@@ -524,10 +524,10 @@ describe("findAccessibleWindow", () => {
   });
 
   it.each([
-    ["⠋ t3code", "⠙ private"],
-    ["t3code ⠋", "t3code ⠙"],
-    ["⠋t3code", "⠙t3code"],
-    ["⠁ t3code", "⠙ t3code"],
+    ["⠋ kurambit", "⠙ private"],
+    ["kurambit ⠋", "kurambit ⠙"],
+    ["⠋kurambit", "⠙kurambit"],
+    ["⠁ kurambit", "⠙ kurambit"],
     ["⠋", "⠋"],
   ])("does not guess a Wayland title match: %s → %s", (title, name) => {
     expect(
@@ -538,8 +538,8 @@ describe("findAccessibleWindow", () => {
   it("rejects matching spinners when the window sizes differ", () => {
     expect(
       findAccessibleWindow(
-        [{ name: "⠙ t3code", bounds: { ...captured.bounds, width: 400 } }],
-        { ...captured, title: "⠋ t3code" },
+        [{ name: "⠙ kurambit", bounds: { ...captured.bounds, width: 400 } }],
+        { ...captured, title: "⠋ kurambit" },
         "wayland",
       ),
     ).toBeUndefined();
@@ -547,20 +547,20 @@ describe("findAccessibleWindow", () => {
 
   it("rejects ambiguous normalized titles even if one matches the captured spinner exactly", () => {
     const windows = [
-      { name: "⠋ t3code", bounds: captured.bounds },
-      { name: "⠙ t3code", bounds: captured.bounds },
+      { name: "⠋ kurambit", bounds: captured.bounds },
+      { name: "⠙ kurambit", bounds: captured.bounds },
     ];
 
     expect(
-      findAccessibleWindow(windows, { ...captured, title: "⠋ t3code" }, "wayland"),
+      findAccessibleWindow(windows, { ...captured, title: "⠋ kurambit" }, "wayland"),
     ).toBeUndefined();
   });
 
   it("keeps exact title matching outside Wayland", () => {
     expect(
-      findAccessibleWindow([{ name: "⠙ t3code", bounds: captured.bounds }], {
+      findAccessibleWindow([{ name: "⠙ kurambit", bounds: captured.bounds }], {
         ...captured,
-        title: "⠋ t3code",
+        title: "⠋ kurambit",
       }),
     ).toBeUndefined();
   });
@@ -709,7 +709,7 @@ describe("isWaylandSession", () => {
           const { createServer } = await import("node:net");
           const { tmpdir } = await import("node:os");
           const { join } = await import("node:path");
-          const runtimeDirectory = await mkdtemp(join(tmpdir(), "t3-wayland-"));
+          const runtimeDirectory = await mkdtemp(join(tmpdir(), "kurambit-wayland-"));
           const socketPath = join(runtimeDirectory, "wayland-0");
           const server = createServer();
           try {
@@ -728,9 +728,9 @@ describe("isWaylandSession", () => {
                 XDG_SESSION_TYPE: "x11",
               }),
             ).toBe(false);
-            expect(isWaylandSession("linux", { XDG_RUNTIME_DIR: "/nonexistent-t3-test" })).toBe(
-              false,
-            );
+            expect(
+              isWaylandSession("linux", { XDG_RUNTIME_DIR: "/nonexistent-kurambit-test" }),
+            ).toBe(false);
           } finally {
             if (server.listening) {
               await new Promise<void>((resolve, reject) => {

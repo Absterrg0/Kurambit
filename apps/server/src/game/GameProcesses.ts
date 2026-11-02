@@ -9,8 +9,8 @@ import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { GameOperationError, type GameProcessResult } from "@t3tools/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
 
 interface Running {
   child: NodeChildProcess.ChildProcess;
@@ -28,7 +28,7 @@ interface Running {
 export const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
 /**
  * PATH discovery for standard executables. Env overrides exist for configured
- * tools (for example GAME_STUDIO_FFMPEG) and for tests.
+ * tools (for example KURAMBIT_FFMPEG) and for tests.
  */
 export const findExecutable = async (
   name: string,
@@ -123,7 +123,7 @@ export class GameProcesses extends Context.Service<
     readonly stop: (root: string) => Effect.Effect<void>;
     readonly list: (root: string) => readonly { pid: number; operation: string; logPath: string }[];
   }
->()("t3/game/GameProcesses") {}
+>()("kurambit/game/GameProcesses") {}
 
 const make = Effect.gen(function* () {
   const running = new Map<number, Running>();

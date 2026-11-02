@@ -6,7 +6,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -39,7 +39,7 @@ try {
   }
 } catch {}
 
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Electron exposes the client platform in its sandboxed preload process.
+// oxlint-disable-next-line kurambit/no-global-process-runtime -- Electron exposes the client platform in its sandboxed preload process.
 const clientPlatform = process.platform;
 
 if (clientPlatform === "darwin") {

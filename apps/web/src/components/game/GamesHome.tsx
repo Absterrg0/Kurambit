@@ -1,4 +1,4 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@kurambit/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRightIcon,
@@ -11,8 +11,8 @@ import {
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadShells } from "../../state/entities";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, GameSummary } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
+import type { EnvironmentId, GameSummary } from "@kurambit/contracts";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -73,7 +73,7 @@ export function GamesHome() {
               <div className="flex min-w-0 flex-col gap-1">
                 <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                   <Gamepad2Icon className="size-3.5" aria-hidden />
-                  Game Studio
+                  Kurambit
                 </span>
                 <h1 className="text-2xl font-semibold tracking-tight">Your games</h1>
                 <p className="max-w-xl text-sm text-muted-foreground">
@@ -256,9 +256,8 @@ function GamesEmptyState({
           Describe it. Your agent builds it. Then you play it.
         </h2>
         <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-          Game Studio turns a brief into a real game — a Godot native project with Blender-made art,
-          or a quick three.js browser game. Watch the agent work, and play every revision right
-          here.
+          Kurambit turns a brief into a real game — a Godot native project with Blender-made art, or
+          a quick three.js browser game. Watch the agent work, and play every revision right here.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="lg" onClick={() => onNewGame()}>

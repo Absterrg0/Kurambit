@@ -1,6 +1,6 @@
 import { RegistryContext } from "@effect/atom-react";
-import { EnvironmentId, ProviderInstanceId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
-import { mergeUsage } from "@t3tools/shared/usageMerge";
+import { EnvironmentId, ProviderInstanceId, USAGE_CONTRACT_VERSION } from "@kurambit/contracts";
+import { mergeUsage } from "@kurambit/shared/usageMerge";
 import type { Atom } from "effect/reactivity";
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -75,7 +75,7 @@ vi.mock(import("../../state/usage"), async (original) => {
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { UsagePage } from "./UsagePage";
 
-const PREFERENCES_KEY = "t3code:usage-page-preferences:v1";
+const PREFERENCES_KEY = "kurambit:usage-page-preferences:v1";
 let root: Root;
 let container: HTMLDivElement;
 // Limits refreshes are throttled per environment for the whole session, so each test

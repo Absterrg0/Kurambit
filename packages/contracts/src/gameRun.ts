@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { ThreadId } from "./baseSchemas.ts";
 
-/** Production loop as a T3 service: one game's run from vision to an ending. */
+/** Production loop as a Kurambit service: one game's run from vision to an ending. */
 
 export const GameRunStartInput = Schema.Struct({
   threadId: ThreadId,

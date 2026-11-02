@@ -1,6 +1,6 @@
 import * as NodeURL from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@t3tools/contracts";
+import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@kurambit/contracts";
 import {
   createOpencodeClient,
   type Agent,
@@ -31,15 +31,15 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
-import { isWindowsCommandNotFound } from "@t3tools/provider-core/server/snapshotProbe";
+import { signalProcessGroup } from "@kurambit/provider-core/server/processGroup";
+import { isWindowsCommandNotFound } from "@kurambit/provider-core/server/snapshotProbe";
 import * as OpenCodeServerLedger from "./OpenCodeServerLedger.ts";
-import { collectStreamAsString } from "@t3tools/provider-core/server/snapshotProbe";
-import * as NetService from "@t3tools/shared/Net";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { collectStreamAsString } from "@kurambit/provider-core/server/snapshotProbe";
+import * as NetService from "@kurambit/shared/Net";
+import { AgentScope } from "@kurambit/shared/AgentScope";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { compareSemverVersions, parseSemver } from "@kurambit/shared/semver";
+import { resolveSpawnCommand } from "@kurambit/shared/shell";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 
@@ -169,7 +169,7 @@ export const verifyOpenCodeServerVersion = Effect.fn("verifyOpenCodeServerVersio
       (cause) =>
         new OpenCodeRuntimeError({
           operation: "global.health",
-          detail: `OpenCode server returned an invalid health response. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          detail: `OpenCode server returned an invalid health response. Kurambit requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
           cause,
         }),
     ),
@@ -177,7 +177,7 @@ export const verifyOpenCodeServerVersion = Effect.fn("verifyOpenCodeServerVersio
   if (parseSemver(health.version) === null) {
     return yield* new OpenCodeRuntimeError({
       operation: "global.health",
-      detail: `OpenCode server returned an invalid version. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+      detail: `OpenCode server returned an invalid version. Kurambit requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
     });
   }
   if (compareSemverVersions(health.version, MINIMUM_OPENCODE_VERSION) < 0) {
@@ -292,7 +292,7 @@ export class OpenCodeRuntime extends Context.Service<
       readonly environment?: NodeJS.ProcessEnv;
     }) => Effect.Effect<ReadonlyArray<OpenCodeSkill>, OpenCodeRuntimeError>;
   }
->()("@t3tools/provider-opencode/server/OpenCodeRuntime") {}
+>()("@kurambit/provider-opencode/server/OpenCodeRuntime") {}
 
 function parseServerUrlFromOutput(output: string): string | null {
   for (const line of output.split("\n")) {

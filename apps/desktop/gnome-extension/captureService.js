@@ -1,4 +1,4 @@
-export const CLIENT_NAMES = ["dev.gamestudio.app.SnapShot", "dev.gamestudio.app.dev.SnapShot"];
+export const CLIENT_NAMES = ["dev.kurambit.app.SnapShot", "dev.kurambit.app.dev.SnapShot"];
 
 export function isWaylandSession(meta) {
   // GNOME 50 removed the X11 compositor and this API. GNOME 45–49 still need the check.
@@ -39,7 +39,7 @@ export class CaptureService {
           break;
         }
       }
-      if (!allowed) throw new Error("Only Game Studio may request a snapshot.");
+      if (!allowed) throw new Error("Only Kurambit may request a snapshot.");
       const pid = options ? await this._getProcessId(sender) : undefined;
       this._checkSession();
       const snapshot = await this._takeSnapshot(options?.animate ?? false);

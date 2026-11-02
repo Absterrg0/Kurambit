@@ -6,7 +6,7 @@ import {
   type ModelSelection,
   type ProviderOptionDescriptor,
   type OrchestrationV2ContextTransfer,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 

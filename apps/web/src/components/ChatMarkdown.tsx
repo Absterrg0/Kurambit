@@ -3,26 +3,26 @@ import {
   buildFileLinkParentSuffixByPath,
   fileLinkLabel,
   resolvePathLinkTarget,
-} from "@t3tools/shared/fileLinks";
+} from "@kurambit/shared/fileLinks";
 import {
   isWindowsDrivePathHref,
   normalizeMarkdownLinkDestination,
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
-} from "@t3tools/shared/markdownLinks";
-import { isAbsolutePath } from "@t3tools/shared/path";
-import { AuthFilesystemReadScope, AuthOrchestrationOperateScope } from "@t3tools/contracts";
+} from "@kurambit/shared/markdownLinks";
+import { isAbsolutePath } from "@kurambit/shared/path";
+import { AuthFilesystemReadScope, AuthOrchestrationOperateScope } from "@kurambit/contracts";
 import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
   CHAT_MARKDOWN_REHYPE_PLUGINS,
-} from "@t3tools/shared/markdownPipeline";
+} from "@kurambit/shared/markdownPipeline";
 import { useAtomValue } from "@effect/atom-react";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@kurambit/shared/composerContextClipboard";
 import {
   ChevronRightIcon,
   CodeIcon,
@@ -53,26 +53,26 @@ import {
   type ServerConfig,
   type ScopedThreadRef,
   type ServerProviderSkill,
-} from "@t3tools/contracts";
-import { faviconUrlForOrigin } from "@t3tools/shared/favicon";
-import { githubMediaFetchUrl } from "@t3tools/shared/githubMedia";
+} from "@kurambit/contracts";
+import { faviconUrlForOrigin } from "@kurambit/shared/favicon";
+import { githubMediaFetchUrl } from "@kurambit/shared/githubMedia";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   codexArtifactTemplatePresentationLabel,
   type CodexArtifactTemplate,
   type CodexArtifactTemplateKind,
-} from "@t3tools/shared/codexArtifactTemplates";
+} from "@kurambit/shared/codexArtifactTemplates";
 import {
   classifyMarkdownImageSource,
   markdownImageSourceFragment,
-} from "@t3tools/client-runtime/markdown-images";
-import { mediaFileReference, mediaUrlReference } from "@t3tools/client-runtime/media-reference";
-import { MISSING_FILE_ACCESS_MESSAGE } from "@t3tools/client-runtime/state/assets";
-import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
+} from "@kurambit/client-runtime/markdown-images";
+import { mediaFileReference, mediaUrlReference } from "@kurambit/client-runtime/media-reference";
+import { MISSING_FILE_ACCESS_MESSAGE } from "@kurambit/client-runtime/state/assets";
+import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@kurambit/shared/filePreview";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -102,15 +102,15 @@ import ReactMarkdown from "react-markdown";
 import { toHtml } from "hast-util-to-html";
 import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import { defaultUrlTransform } from "react-markdown";
-import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
-import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
-import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
+import { parseAssistantCitationHref } from "@kurambit/shared/assistantCitations";
+import { parseComposerContextHref } from "@kurambit/shared/composerContextReferences";
+import { parseThreadLinkHref } from "@kurambit/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import {
   artifactTemplateFromHastProperties,
   renderCodexInlineDirectivesAsMarkdown,
-} from "@t3tools/shared/codexMarkdownDirectives";
+} from "@kurambit/shared/codexMarkdownDirectives";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import {
   resolveMarkdownMediaPreview,
@@ -172,7 +172,7 @@ import {
   shouldOpenMarkdownFileLinkInEditor,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
-import { isMarkdownFileLinkLabel } from "@t3tools/shared/markdownLinks";
+import { isMarkdownFileLinkLabel } from "@kurambit/shared/markdownLinks";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";

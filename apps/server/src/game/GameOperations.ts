@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
-import type { GameOperationEvent, GameStatus } from "@t3tools/contracts";
+import type { GameOperationEvent, GameStatus } from "@kurambit/contracts";
 
 /** The status-shaped operation the stage renders. */
 export type GameOperation = NonNullable<GameStatus["operation"]>;
@@ -33,7 +33,7 @@ export class GameOperations extends Context.Service<
     readonly changed: (root: string, message: string) => Effect.Effect<void>;
     readonly events: Stream.Stream<GameOperationEvent>;
   }
->()("t3/game/GameOperations") {}
+>()("kurambit/game/GameOperations") {}
 
 export const layer = Layer.effect(
   GameOperations,

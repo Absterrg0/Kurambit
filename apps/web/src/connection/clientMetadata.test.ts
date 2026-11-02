@@ -80,7 +80,7 @@ describe("client telemetry metadata", () => {
         desktopBridge: { getClientPlatform: () => "darwin" },
       }),
     ).toEqual({
-      label: "Game Studio Desktop",
+      label: "Kurambit Desktop",
       deviceType: "desktop",
       os: "macOS",
       surface: "desktop",

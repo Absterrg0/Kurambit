@@ -3,7 +3,7 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Struct from "effect/Struct";
@@ -31,7 +31,7 @@ import {
  * Their private constructors only stop the type checker; this also stops
  * `Reflect.construct` and friends at runtime.
  */
-const builtHere: unique symbol = Symbol("t3/mcp/McpToolAccess/builtHere");
+const builtHere: unique symbol = Symbol("kurambit/mcp/McpToolAccess/builtHere");
 
 const refuseOutsideConstruction = (token: symbol) => {
   if (token !== builtHere) {
@@ -57,7 +57,7 @@ let handlersLayer: <Tools extends Record<string, Tool.Any>, EX, RX>(
 
 /**
  * Effect's own registration functions accept any handler, so the
- * `t3code/no-raw-mcp-registration` lint rule keeps Effect's `McpServer` inside
+ * `kurambit/no-raw-mcp-registration` lint rule keeps Effect's `McpServer` inside
  * McpHttpServer.
  */
 export class Declaration<out Handler> {

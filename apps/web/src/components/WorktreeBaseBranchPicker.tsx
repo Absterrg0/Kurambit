@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kurambit/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 

@@ -74,8 +74,8 @@ const flag = (
   );
 
 // `Config.Boolean`'s literals, which effect does not export on their own.
-const T3CODE_TRUE = ["true", "yes", "on", "1", "y"];
-const T3CODE_FALSE = ["false", "no", "off", "0", "n"];
+const KURAMBIT_TRUE = ["true", "yes", "on", "1", "y"];
+const KURAMBIT_FALSE = ["false", "no", "off", "0", "n"];
 
 const RESOURCE_ATTRIBUTES = "OTEL_RESOURCE_ATTRIBUTES";
 
@@ -172,7 +172,7 @@ const exporter = (name: string): Config.Config<Setting<Exporter>> =>
         ? { value }
         : {
             value,
-            warning: `${name} names ${ignored.join(", ")}, which T3 Code does not export to, so ${ignored.length === 1 ? "it was" : "they were"} ignored`,
+            warning: `${name} names ${ignored.join(", ")}, which Kurambit does not export to, so ${ignored.length === 1 ? "it was" : "they were"} ignored`,
           };
     }),
   );
@@ -247,11 +247,11 @@ const endpointSignal = (name: OtlpSignalName, own: Settings, generic: Settings):
 };
 
 export const load: Effect.Effect<OtelEnvironment> = Config.all({
-  t3: flag(
-    "T3CODE_OTEL_SDK_DISABLED",
-    T3CODE_TRUE,
-    T3CODE_FALSE,
-    (value) => `T3CODE_OTEL_SDK_DISABLED=${value} is not a yes or a no and was ignored`,
+  kurambit: flag(
+    "KURAMBIT_OTEL_SDK_DISABLED",
+    KURAMBIT_TRUE,
+    KURAMBIT_FALSE,
+    (value) => `KURAMBIT_OTEL_SDK_DISABLED=${value} is not a yes or a no and was ignored`,
   ),
   // The specification: a boolean it defines is true "only by the
   // case-insensitive string `true`", implementations "MUST NOT" accept other
@@ -261,7 +261,7 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
     ["true"],
     ["false"],
     (value) =>
-      `OTEL_SDK_DISABLED=${value} was read as false; the OpenTelemetry specification recognizes only the string true, so use OTEL_SDK_DISABLED=true or T3CODE_OTEL_SDK_DISABLED to say it any other way`,
+      `OTEL_SDK_DISABLED=${value} was read as false; the OpenTelemetry specification recognizes only the string true, so use OTEL_SDK_DISABLED=true or KURAMBIT_OTEL_SDK_DISABLED to say it any other way`,
   ),
   resource: resourceAttributes,
   generic: settings("OTEL_EXPORTER_OTLP_"),
@@ -274,8 +274,8 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
     logs: exporter("OTEL_LOGS_EXPORTER"),
   }),
 }).pipe(
-  Effect.map(({ t3, spec, resource, generic, exporters, ...own }) => {
-    const disabled = t3.value ?? spec.value ?? false;
+  Effect.map(({ kurambit, spec, resource, generic, exporters, ...own }) => {
+    const disabled = kurambit.value ?? spec.value ?? false;
     const signals = disabled
       ? undefined
       : {
@@ -287,16 +287,16 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
       signals === undefined ? [] : Object.values(signals).flatMap((resolved) => resolved.used),
     );
     const warnings = [
-      t3.warning,
+      kurambit.warning,
       spec.warning,
       resource.warning,
       ...Array.from(used, (setting) => setting.warning),
     ].filter((warning) => warning !== undefined);
     if (disabled) {
       warnings.push(
-        t3.value
-          ? "T3CODE_OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it"
-          : "OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it; set T3CODE_OTEL_SDK_DISABLED=false to export anyway",
+        kurambit.value
+          ? "KURAMBIT_OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it"
+          : "OTEL_SDK_DISABLED is set, so no telemetry is exported, whatever configured it; set KURAMBIT_OTEL_SDK_DISABLED=false to export anyway",
       );
     }
     return {
@@ -321,25 +321,25 @@ export interface SignalEndpoint {
 export const resolveSignalEndpoint = (
   otel: OtelEnvironment,
   signal: SignalName,
-  t3: { readonly url: string | undefined; readonly export: SignalExport },
+  kurambit: { readonly url: string | undefined; readonly export: SignalExport },
   ...fallbackUrls: ReadonlyArray<string | undefined>
 ): SignalEndpoint | undefined => {
   if (otel.disabled) {
     return undefined;
   }
-  const t3Url = blankAsUnset(t3.url);
-  if (t3Url !== undefined) {
-    return { url: t3Url, export: t3.export };
+  const kurambitUrl = blankAsUnset(kurambit.url);
+  if (kurambitUrl !== undefined) {
+    return { url: kurambitUrl, export: kurambit.export };
   }
   return OtelSignal.$match(otel[signal], {
     Export: ({ url, protocol, headers }): SignalEndpoint => ({
       url,
-      export: { protocol, headers, exportIntervalMs: t3.export.exportIntervalMs },
+      export: { protocol, headers, exportIntervalMs: kurambit.export.exportIntervalMs },
     }),
     Off: () => undefined,
     Unset: () => {
       const url = fallbackUrls.map(blankAsUnset).find((candidate) => candidate !== undefined);
-      return url === undefined ? undefined : { url, export: t3.export };
+      return url === undefined ? undefined : { url, export: kurambit.export };
     },
   });
 };

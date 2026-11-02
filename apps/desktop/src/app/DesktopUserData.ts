@@ -37,10 +37,7 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     readonly platform: NodeJS.Platform;
   }) {
     const path = yield* Path.Path;
-    // A fork profile must never inherit credentials or storage from T3 Code.
-    return path.join(
-      input.appDataDirectory,
-      input.isDevelopment ? "game-studio-dev" : "game-studio",
-    );
+    // A fork profile must never inherit credentials or storage from Kurambit.
+    return path.join(input.appDataDirectory, input.isDevelopment ? "kurambit-dev" : "kurambit");
   },
 );

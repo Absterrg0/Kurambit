@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   type ModelSelection,
   type ProjectScript,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
@@ -166,7 +166,7 @@ describe("planProjectCommand", () => {
   });
 
   it("limits monograms to two graphemes", () => {
-    for (const text of ["T3", "é", "किखि", "क्ष्म", "각"]) {
+    for (const text of ["K3", "é", "किखि", "क्ष्म", "각"]) {
       const monogram = { kind: "monogram", text, color: "violet" } as const;
       assert.deepEqual(payloadOf(update({ projectIcon: monogram })).projectIcon, monogram);
     }

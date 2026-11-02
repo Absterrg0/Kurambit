@@ -9,8 +9,8 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
-import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+} from "@kurambit/contracts";
+import { resolveSelfInvocation } from "@kurambit/shared/nodeRuntime";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -22,13 +22,13 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
-import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as TestProviderHost from "@kurambit/provider-testing/TestProviderHost";
+import type * as AcpSessionRuntime from "@kurambit/provider-acp/server/AcpSessionRuntime";
 import { makeAntigravityAcpRuntime } from "../../provider/acp/AntigravityAcpSupport.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import {
   makeAntigravityAcpAdapterFlavor,
   makeAntigravityAdapterV2,
@@ -161,7 +161,7 @@ describe("AntigravityAdapterV2 client file system", () => {
               command: process.execPath,
               args: [mockAgentPath],
               cwd: input.cwd,
-              env: { T3_ACP_ANTIGRAVITY: "1" },
+              env: { KURAMBIT_ACP_ANTIGRAVITY: "1" },
             },
           }).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
@@ -181,10 +181,10 @@ describe("AntigravityAdapterV2 client file system", () => {
         defaultModel: Effect.succeed(undefined),
       });
       const workspace = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-antigravity-workspace-",
+        prefix: "kurambit-antigravity-workspace-",
       });
       const outside = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-antigravity-outside-",
+        prefix: "kurambit-antigravity-outside-",
       });
       const outsideFile = path.join(outside, "secret.txt");
       yield* fileSystem.writeFileString(outsideFile, "secret");
@@ -302,7 +302,7 @@ describe("AntigravityAdapterV2 workspace changes", () => {
               command: process.execPath,
               args: [mockAgentPath],
               cwd: input.cwd,
-              env: { T3_ACP_ANTIGRAVITY: "1", T3_ACP_HANG_PROMPT_FOREVER: "1" },
+              env: { KURAMBIT_ACP_ANTIGRAVITY: "1", KURAMBIT_ACP_HANG_PROMPT_FOREVER: "1" },
             },
           }).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
@@ -317,8 +317,8 @@ describe("AntigravityAdapterV2 workspace changes", () => {
         withProcess: (_stop, task) => task,
         defaultModel: Effect.succeed(undefined),
       });
-      const workspaceA = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-ag-a-" });
-      const workspaceB = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-ag-b-" });
+      const workspaceA = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-ag-a-" });
+      const workspaceB = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-ag-b-" });
       yield* fileSystem.writeFileString(path.join(workspaceA, "a.txt"), "from a");
       yield* fileSystem.writeFileString(path.join(workspaceB, "b.txt"), "from b");
       const policyFor = (cwd: string) =>
@@ -443,7 +443,7 @@ describe("AntigravityAdapterV2 client file system under restrictive policies", (
                 command: process.execPath,
                 args: [mockAgentPath],
                 cwd: input.cwd,
-                env: { T3_ACP_ANTIGRAVITY: "1" },
+                env: { KURAMBIT_ACP_ANTIGRAVITY: "1" },
               },
             }).pipe(
               Effect.provideService(Crypto.Crypto, crypto),
@@ -463,10 +463,10 @@ describe("AntigravityAdapterV2 client file system under restrictive policies", (
           defaultModel: Effect.succeed(undefined),
         });
         const workspace = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3-ag-restrictive-",
+          prefix: "kurambit-ag-restrictive-",
         });
         const outside = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3-ag-restrictive-outside-",
+          prefix: "kurambit-ag-restrictive-outside-",
         });
         yield* fileSystem.writeFileString(path.join(workspace, "existing.ts"), "existing");
         const threadId = ThreadId.make(`thread-antigravity-restrictive-${policy.runtimeMode}`);

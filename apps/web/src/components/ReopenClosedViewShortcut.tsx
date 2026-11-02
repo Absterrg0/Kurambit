@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
 
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";

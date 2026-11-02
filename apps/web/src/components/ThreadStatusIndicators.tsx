@@ -1,5 +1,5 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { resolveEnvironmentMachineKind, type ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey, scopeThreadRef } from "@kurambit/client-runtime/environment";
+import { resolveEnvironmentMachineKind, type ScopedThreadRef } from "@kurambit/contracts";
 import { FolderGit2Icon, TerminalIcon } from "lucide-react";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";

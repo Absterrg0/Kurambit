@@ -6,27 +6,27 @@ import {
   ProviderReplayEntry,
   type ProviderReplayEntry as ProviderReplayEntryType,
   type ProviderReplayTranscript,
-} from "@t3tools/contracts";
-import { MuseSettings } from "@t3tools/provider-muse/settings";
+} from "@kurambit/contracts";
+import { MuseSettings } from "@kurambit/provider-muse/settings";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as TestProviderHost from "@kurambit/provider-testing/TestProviderHost";
 import {
   museInitializeParams,
   museServeArgs,
   museWorkspaceRoot,
   type MuseSdkHost,
   type MuseSdkHostOptions,
-} from "@t3tools/provider-muse/testing";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@kurambit/provider-muse/testing";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
-import { materializeReplayTranscriptWorkspace } from "@t3tools/provider-testing/replayTranscript";
-import { makeMuseAdapterV2 } from "@t3tools/provider-muse/server";
+import { materializeReplayTranscriptWorkspace } from "@kurambit/provider-testing/replayTranscript";
+import { makeMuseAdapterV2 } from "@kurambit/provider-muse/server";
 
 export const MUSE_PROVIDER_KIND = "muse";
 export const MUSE_MSP_REPLAY_PROTOCOL = "muse.msp-jsonl";
@@ -342,7 +342,7 @@ class MuseReplayController {
       if (host === undefined) return emitted;
       this.cursor += 1;
       emitted = true;
-      // Output a host wrote after T3 released it was never observed.
+      // Output a host wrote after Kurambit released it was never observed.
       if (!host.open) continue;
       const frame = entry.frame;
       // Responses carry the client's request id; server requests carry their own.

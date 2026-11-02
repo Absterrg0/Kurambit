@@ -1,5 +1,5 @@
-import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import { backgroundWorkHoldsCompletion } from "@kurambit/shared/orchestrationV2PendingBackgroundWork";
+import { threadPullRequestsOf } from "@kurambit/shared/threadPullRequests";
 import type {
   ThreadLinkedPullRequest,
   EnvironmentId,
@@ -15,7 +15,7 @@ import type {
   ProviderInstanceId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
@@ -119,12 +119,12 @@ export interface EnvironmentThreadShell {
   readonly unsettledAt: string | null;
   readonly snoozedUntil: string | null;
   readonly snoozedAt: string | null;
-  readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecovery | null;
+  readonly limitRecovery?: import("@kurambit/contracts").OrchestrationV2LimitRecovery | null;
   readonly pinnedAt: string | null;
   readonly autoSettleDisabledAt?: string | null;
   readonly pinOrderKey: string | null;
   readonly activeOrderKey: string | null;
-  readonly pullRequests: ReadonlyArray<import("@t3tools/contracts").ThreadPullRequestLink>;
+  readonly pullRequests: ReadonlyArray<import("@kurambit/contracts").ThreadPullRequestLink>;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly branchPullRequest?: ThreadLinkedPullRequest | null;
   /**

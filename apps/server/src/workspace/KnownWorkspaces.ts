@@ -1,5 +1,5 @@
 /**
- * KnownWorkspaces - the folders a client-named cwd may act in: a T3-managed
+ * KnownWorkspaces - the folders a client-named cwd may act in: a Kurambit-managed
  * worktree folder, a registered project, or a thread's worktree. Clients send
  * the thread's worktree, else the project root. A client also sets a thread's
  * worktree path, so one counts only under a managed folder or when git lists
@@ -7,7 +7,7 @@
  *
  * @module KnownWorkspaces
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -51,7 +51,7 @@ export class KnownWorkspaces extends Context.Service<
     /** Fails unless `cwd` exists and resolves inside a known workspace. */
     readonly assertContains: (cwd: string) => Effect.Effect<void, UnknownWorkspaceError>;
   }
->()("t3/workspace/KnownWorkspaces") {}
+>()("kurambit/workspace/KnownWorkspaces") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

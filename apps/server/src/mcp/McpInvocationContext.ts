@@ -7,7 +7,7 @@ import {
   type ProviderInstanceId,
   type RuntimeMode,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
@@ -52,7 +52,7 @@ export interface McpInvocationScope {
 export class McpInvocationContext extends Context.Service<
   McpInvocationContext,
   McpInvocationScope
->()("t3/mcp/McpInvocationContext") {}
+>()("kurambit/mcp/McpInvocationContext") {}
 
 export type McpCapabilityError<C extends McpCapability> = C extends "preview"
   ? PreviewAutomationUnavailableError
@@ -115,7 +115,7 @@ export const requireThreadMcpCapability = (
 const threadCallerRequired = (operation: string) =>
   new OrchestratorMcpFailure({
     code: "thread_credential_required",
-    message: `${operation} acts as the calling T3 thread, so it needs an agent running inside T3 Code. This MCP client signed in from outside a thread.`,
+    message: `${operation} acts as the calling Kurambit thread, so it needs an agent running inside Kurambit. This MCP client signed in from outside a thread.`,
   });
 
 export type McpThreadInvocationScope = McpInvocationScope & { readonly thread: McpThreadCaller };

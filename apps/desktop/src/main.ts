@@ -16,8 +16,8 @@ import * as Layer from "effect/Layer";
 
 import * as Electron from "electron";
 
-import * as NetService from "@t3tools/shared/Net";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NetService from "@kurambit/shared/Net";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import * as ElectronApp from "./electron/ElectronApp.ts";

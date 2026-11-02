@@ -1,7 +1,7 @@
 import { GameDialogHost } from "../components/game/GameEntry";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { type ServerLifecycleWelcomePayload } from "@kurambit/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@kurambit/client-runtime/environment";
 import {
   Outlet,
   Link,

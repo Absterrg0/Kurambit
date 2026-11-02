@@ -4,14 +4,14 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2Subagent,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import { reportLabel } from "@t3tools/provider-core/server/notification";
+import { reportLabel } from "@kurambit/provider-core/server/notification";
 
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -24,7 +24,7 @@ export class DelegatedTaskQuestionReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
->()("t3/orchestration-v2/DelegatedTaskQuestionReactor") {}
+>()("kurambit/orchestration-v2/DelegatedTaskQuestionReactor") {}
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -50,7 +50,7 @@ const make = Effect.gen(function* () {
       commandId: CommandId.make(`server:delegated-task-question:${key}`),
       threadId: task.threadId,
       messageId: MessageId.make(`message:delegated-task-question:${key}`),
-      text: `${situation} Read it with t3_pending_request_read using threadId ${task.childThreadId} and requestId ${request.id}. Answer it with t3_pending_request_respond when the answer follows from the task or the user's instructions; otherwise ask the user, then answer it. If it is no longer pending, it was answered or dismissed.`,
+      text: `${situation} Read it with kurambit_pending_request_read using threadId ${task.childThreadId} and requestId ${request.id}. Answer it with kurambit_pending_request_respond when the answer follows from the task or the user's instructions; otherwise ask the user, then answer it. If it is no longer pending, it was answered or dismissed.`,
       notification: {
         source: { kind: "delegated_task", taskIds: [task.id], childThreadId: task.childThreadId },
         outcome: "updated",

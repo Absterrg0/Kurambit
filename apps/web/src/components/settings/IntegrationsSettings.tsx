@@ -24,8 +24,8 @@ import {
   type BrowserImportSource,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+} from "@kurambit/contracts";
+import { PREVIEW_VIEWPORT_PRESETS } from "@kurambit/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -37,7 +37,7 @@ import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { isElectron } from "../../env";
 
 import { Badge } from "../ui/badge";
@@ -617,7 +617,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
 
 const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
   system: "Your default browser",
-  app: "Game Studio",
+  app: "Kurambit",
 };
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {

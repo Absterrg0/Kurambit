@@ -33,7 +33,7 @@ export const ResourceTelemetryProcessCategory = Schema.Literals([
   "electron-gpu",
   "electron-utility",
   "resource-monitor",
-  "unknown-t3",
+  "unknown-kurambit",
 ]);
 export type ResourceTelemetryProcessCategory = typeof ResourceTelemetryProcessCategory.Type;
 
@@ -400,7 +400,7 @@ export const ResourceTelemetryGroups = Schema.Struct({
   backend: ResourceTelemetryAggregate,
   electron: ResourceTelemetryAggregate,
   monitor: ResourceTelemetryAggregate,
-  allT3: ResourceTelemetryAggregate,
+  allKurambit: ResourceTelemetryAggregate,
 });
 export type ResourceTelemetryGroups = typeof ResourceTelemetryGroups.Type;
 

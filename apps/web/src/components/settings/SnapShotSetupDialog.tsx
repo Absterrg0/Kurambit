@@ -4,7 +4,7 @@ import {
   isModifierPairShortcut,
   type DesktopSnapShotSetupAction,
   type DesktopSnapShotState,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { useState, type ReactNode } from "react";
 import { MacAccessibilityIcon, MacScreenRecordingIcon } from "../Icons";
 import { CaptureShortcutConfig } from "./CaptureShortcutConfig";
@@ -30,7 +30,7 @@ const GNOME_ACCESS_COPY = {
   "not-installed": {
     title: "Install the extension",
     description:
-      "The Game Studio GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
+      "The Kurambit GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
   },
   "restart-required": {
     title: "Extension installed",
@@ -46,7 +46,7 @@ const GNOME_ACCESS_COPY = {
   },
   disabled: {
     title: "Enable the extension",
-    description: "Enable Game Studio SnapShots to start capturing windows.",
+    description: "Enable Kurambit SnapShots to start capturing windows.",
   },
   enabled: {
     title: "Capture is ready",
@@ -58,7 +58,7 @@ const GNOME_ACCESS_COPY = {
   },
   error: {
     title: "Couldn't set up the extension",
-    description: "Check Game Studio SnapShots in GNOME Extensions, then try again.",
+    description: "Check Kurambit SnapShots in GNOME Extensions, then try again.",
   },
 };
 
@@ -171,7 +171,7 @@ export function SnapShotSetupDialog({
                       ? "Update the capture helper"
                       : "Allow snapshots",
                   description:
-                    "Game Studio's capture helper lets you capture other apps and return to your draft. It's included with Game Studio.",
+                    "Kurambit's capture helper lets you capture other apps and return to your draft. It's included with Kurambit.",
                 }
           : backend === "niri"
             ? {
@@ -352,7 +352,7 @@ export function SnapShotSetupDialog({
                     </p>
                   ))}
                   {step === "access" && (backend === "gnome" || helperBackend) ? (
-                    <p>Included with Game Studio. No download needed.</p>
+                    <p>Included with Kurambit. No download needed.</p>
                   ) : null}
                   {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (
                     <Button

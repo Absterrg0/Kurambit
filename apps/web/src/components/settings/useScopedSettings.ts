@@ -1,9 +1,9 @@
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@kurambit/contracts";
 import { useEnvironmentsWithScope } from "../../state/session";
 import {
   requiredScopesForServerSettingsPatch,
   EnvironmentAuthorizationError,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { readEnvironmentScope } from "../../state/session";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -12,7 +12,7 @@ import {
   type ProjectScopedServerSettingKey,
   type ServerSettings,
   type UnifiedSettings,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 import {
   persistClientSettingsPatch,

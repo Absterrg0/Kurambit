@@ -3,17 +3,17 @@ import type {
   AtomCommandFailure,
   AtomCommandResult,
   AtomCommandSuccess,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import {
   VcsActionUnavailableError,
   type VcsActionOperation,
   type RunVcsStackedActionInput,
-} from "@t3tools/client-runtime/state/vcs";
+} from "@kurambit/client-runtime/state/vcs";
 import {
   AuthSourceControlWriteScope,
   EnvironmentAuthorizationError,
   type EnvironmentId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 

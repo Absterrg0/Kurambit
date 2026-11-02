@@ -4,11 +4,10 @@ export function providerAuthReturnUrl(value: string | undefined): string | undef
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    const desktop =
-      ["game-studio:", "game-studio-dev:"].includes(url.protocol) && url.host === "app";
+    const desktop = ["kurambit:", "kurambit-dev:"].includes(url.protocol) && url.host === "app";
     const web =
       ["http:", "https:"].includes(url.protocol) &&
-      (isLoopbackHost(url.hostname) || url.origin === "https://app.t3.codes");
+      (isLoopbackHost(url.hostname) || url.origin === "https://example.com");
     if (
       url.username ||
       url.password ||

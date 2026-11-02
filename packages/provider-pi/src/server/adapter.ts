@@ -1,7 +1,7 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { readToolOutputImage } from "@t3tools/shared/toolOutput";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import { AgentScope } from "@kurambit/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@kurambit/shared/model";
+import { readToolOutputImage } from "@kurambit/shared/toolOutput";
 import * as Predicate from "effect/Predicate";
 import {
   defaultInstanceIdForDriver,
@@ -22,7 +22,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderInstanceId,
   type OrchestrationV2ProviderTurnTokenUsage,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { PiSettings } from "../settings.ts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -39,24 +39,24 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import { mcpToolPresentation } from "@kurambit/provider-core/server/mcpToolPresentation";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
 import { parsePiCompactCommand, type PiCompactCommand } from "./commands.ts";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import { mergeProviderInstanceEnvironment } from "@kurambit/provider-core/server/instanceEnvironment";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
+import * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "@t3tools/provider-core/server/adapterDriver";
+} from "@kurambit/provider-core/server/adapterDriver";
 import {
   makeProviderFailure,
   makeProviderRetryTurnItem,
-} from "@t3tools/provider-core/server/failure";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@kurambit/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@kurambit/provider-core/server/selectionTransition";
 import {
   makePiRpcConnection,
   parsePiModelSlug,
@@ -68,7 +68,7 @@ import {
 } from "./rpc.ts";
 import {
   buildPiRpcLaunch,
-  materializePiT3McpExtension,
+  materializePiKurambitMcpExtension,
   resolvePiLaunchArgs,
 } from "./mcpInjection.ts";
 import { PI_FILE_CHANGE_TOOLS } from "./mcpExtensionSource.ts";
@@ -88,7 +88,7 @@ const STREAM_FLUSH_MS = 50;
 const PI_REQUEST_TIMEOUT_MS = 15_000;
 const PI_SESSION_TIMEOUT_MS = 60_000;
 const PI_UNSOLICITED_ACTIVITY_ERROR =
-  "Pi started agent work outside an active T3 turn. The session was stopped to prevent invisible tool execution.";
+  "Pi started agent work outside an active Kurambit turn. The session was stopped to prevent invisible tool execution.";
 const SETTLE_PROBE_MAX_ATTEMPTS = 3;
 const SETTLE_PROBE_RETRY_DELAY = Duration.millis(100);
 
@@ -461,7 +461,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       // hook. Materialize it even when this session has no MCP credential so
       // Supervised never silently degrades to unrestricted tool execution.
       const extensionPath = yield* provideCacheFs(
-        materializePiT3McpExtension(host.paths.providerStatusCacheDir),
+        materializePiKurambitMcpExtension(host.paths.providerStatusCacheDir),
       );
       const resolvedLaunchArgs = resolvePiLaunchArgs(options.settings.launchArgs);
       if (!resolvedLaunchArgs.ok) {
@@ -1362,7 +1362,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           ).pipe(
             Effect.andThen(
               Queue.offer(connection.events, {
-                type: "t3.ui_request_expired",
+                type: "kurambit.ui_request_expired",
                 requestId: String(requestId),
                 pending,
               }),
@@ -1595,7 +1595,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           Effect.matchEffect({
             onSuccess: (data) =>
               Queue.offer(connection.events, {
-                type: "t3.settle_probe",
+                type: "kurambit.settle_probe",
                 providerTurnId,
                 settleAfterAgentActivity,
                 settleProbeGeneration,
@@ -1607,7 +1607,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             // agent events for one.
             onFailure: () =>
               Queue.offer(connection.events, {
-                type: "t3.settle_probe",
+                type: "kurambit.settle_probe",
                 providerTurnId,
                 settleAfterAgentActivity,
                 settleProbeGeneration,
@@ -1639,7 +1639,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           threadState?.activeTurn === null &&
           pendingWake !== null &&
           !interactiveUiRequest &&
-          !String(event["type"]).startsWith("t3.") &&
+          !String(event["type"]).startsWith("kurambit.") &&
           event["type"] !== "response"
         ) {
           pendingWake.events.push(event);
@@ -2022,7 +2022,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             }
             return;
           }
-          case "t3.ui_request_expired": {
+          case "kurambit.ui_request_expired": {
             const requestId = recordString(event, "requestId");
             if (requestId === undefined) return;
             const pending = pendingPrompts.get(requestId);
@@ -2031,18 +2031,18 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             yield* cancelPrompt(pending, yield* DateTime.now);
             return;
           }
-          case "t3.flush_extension_errors": {
+          case "kurambit.flush_extension_errors": {
             for (const extensionError of outOfTurnExtensionErrors.splice(0)) {
               yield* emitExtensionError(extensionError);
             }
             return;
           }
-          case "t3.rollback_barrier": {
+          case "kurambit.rollback_barrier": {
             if (rollbackBarrier !== null && event["barrier"] === rollbackBarrier)
               yield* Deferred.succeed(rollbackBarrier, undefined);
             return;
           }
-          case "t3.settle_probe": {
+          case "kurambit.settle_probe": {
             const data = event["data"];
             const probeFailed = event["probeFailed"] === true;
             const settleAfterAgentActivity = event["settleAfterAgentActivity"] === true;
@@ -2448,7 +2448,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             // Resolved before the turn is installed: a failure here (an
             // unreadable attachment) must not leave `activeTurn` set, which
             // would reject every later turn as already active.
-            // Orchestration instructions reach pi through the T3 MCP
+            // Orchestration instructions reach pi through the Kurambit MCP
             // extension's before_agent_start system-prompt hook, never by
             // wrapping the user text: a wrapped first message would no
             // longer start with "/" and slash commands would stop expanding.
@@ -2569,7 +2569,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                 yield* finalizeTurn(state);
               }
               if (outOfTurnExtensionErrors.length > 0) {
-                yield* Queue.offer(connection.events, { type: "t3.flush_extension_errors" });
+                yield* Queue.offer(connection.events, { type: "kurambit.flush_extension_errors" });
               }
             }).pipe(
               sessionEventPermit.withPermits(1),
@@ -2908,7 +2908,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                   // RPC responses bypass the pump. Drain preceding native events
                   // before deciding whether this fork can replace their binding.
                   const queued = yield* Queue.offer(connection.events, {
-                    type: "t3.rollback_barrier",
+                    type: "kurambit.rollback_barrier",
                     barrier,
                   });
                   if (!queued) return yield* protocolError("Pi transport closed during rollback");

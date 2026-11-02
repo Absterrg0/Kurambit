@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.kurambit.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Kurambit</name>
+  <summary>Local desktop studio for creating games</summary>
+  <developer id="dev.kurambit">
+    <name>Kurambit contributors</name>
+  </developer>
+  <description>
+    <p>Create games locally with coding agents, Blender, and Godot.</p>
+  </description>
+  <launchable type="desktop-id">kurambit.desktop</launchable>
+  <icon type="stock">kurambit</icon>
+  <provides>
+    <binary>kurambit</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+</component>

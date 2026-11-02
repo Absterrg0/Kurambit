@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { GameSummary } from "@t3tools/contracts";
+import type { GameSummary } from "@kurambit/contracts";
 
 import {
   formatGameEditedAt,

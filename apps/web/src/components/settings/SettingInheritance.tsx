@@ -5,7 +5,7 @@ import {
   resolveEnvironmentMachineKind,
   type ServerSettings,
   type WorktreeSubmodules,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { CheckIcon, ChevronRightIcon, LayersIcon } from "lucide-react";
 import * as Equal from "effect/Equal";
 
@@ -23,7 +23,7 @@ import { isProjectScopedSettingKey } from "./scopedSettings";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 
 interface InheritanceLayer {
-  readonly key: "project" | "environment" | "t3.json" | "built-in";
+  readonly key: "project" | "environment" | "kurambit.json" | "built-in";
   readonly label: string;
   readonly value: string;
   readonly effective: boolean;
@@ -108,11 +108,11 @@ export function settingInheritanceLayers(
   });
   if (fileBacked && target.projectId !== null) {
     layers.push({
-      key: "t3.json",
-      label: "t3.json",
-      value: source === "t3.json" ? formatValue(key, target.settings[key]) : "Inherits",
-      effective: source === "t3.json",
-      set: source === "t3.json",
+      key: "kurambit.json",
+      label: "kurambit.json",
+      value: source === "kurambit.json" ? formatValue(key, target.settings[key]) : "Inherits",
+      effective: source === "kurambit.json",
+      set: source === "kurambit.json",
     });
   }
   // For a file-backed key the built-in is what the resolver produced with

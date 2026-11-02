@@ -1,20 +1,20 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { getCloneDestinationPath } from "@t3tools/client-runtime/operations/projects";
+import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
+import { getCloneDestinationPath } from "@kurambit/client-runtime/operations/projects";
 import {
   findPromptLinkProject,
   findPromptLinkPullRequestThread,
   resolvePromptLinkModelSelection,
-} from "@t3tools/client-runtime/prompt-links";
+} from "@kurambit/client-runtime/prompt-links";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+} from "@kurambit/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@kurambit/client-runtime/state/shell";
 import {
   type NewThreadLink,
   type PromptLinkRepository,
   promptLinkPullRequestUrl,
-} from "@t3tools/shared/promptLinks";
+} from "@kurambit/shared/promptLinks";
 import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
@@ -97,7 +97,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       replace: true,
     }).catch(() => null);
     if (opened === null) {
-      setState({ status: "failed", message: "Game Studio could not open a new thread." });
+      setState({ status: "failed", message: "Kurambit could not open a new thread." });
       return;
     }
     setState({ status: "opened" });
@@ -168,7 +168,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       setState({
         status: "failed",
         message:
-          "This machine cannot clone from a link. Update Game Studio on it, or clone the repository from the command palette.",
+          "This machine cannot clone from a link. Update Kurambit on it, or clone the repository from the command palette.",
       });
       return;
     }

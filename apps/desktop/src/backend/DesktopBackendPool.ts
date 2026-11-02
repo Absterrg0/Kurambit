@@ -64,7 +64,7 @@ export class DesktopBackendPool extends Context.Service<
       id: BackendInstanceId,
     ) => Effect.Effect<void, DesktopBackendPoolCannotUnregisterPrimaryError>;
   }
->()("@t3tools/desktop/backend/DesktopBackendPool") {}
+>()("@kurambit/desktop/backend/DesktopBackendPool") {}
 
 export type BackendInstanceFactoryRequirements =
   | FileSystem.FileSystem
@@ -124,8 +124,8 @@ export const layer = Layer.effect(
       onStateDirOwned: () =>
         electronDialog
           .showErrorBox(
-            "This Game Studio home is unavailable",
-            "Another Game Studio server is using this data directory. Stop that server and reopen Game Studio, or set a separate GAME_STUDIO_HOME.",
+            "This Kurambit home is unavailable",
+            "Another Kurambit server is using this data directory. Stop that server and reopen Kurambit, or set a separate KURAMBIT_HOME.",
           )
           .pipe(Effect.andThen(electronApp.quit)),
     });

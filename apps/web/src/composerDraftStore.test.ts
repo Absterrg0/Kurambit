@@ -3,7 +3,7 @@ import {
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@kurambit/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
@@ -17,12 +17,12 @@ import {
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ProviderOptionSelection,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@kurambit/contracts";
+import { createModelSelection } from "@kurambit/shared/model";
 import {
   collectAssistantCitations,
   serializeAssistantCitation,
-} from "@t3tools/shared/assistantCitations";
+} from "@kurambit/shared/assistantCitations";
 
 const CODEX_INSTANCE = ProviderInstanceId.make("codex");
 const CODEX_SECONDARY_INSTANCE = ProviderInstanceId.make("codex_secondary");
@@ -1012,7 +1012,7 @@ describe("composerDraftStore terminal contexts", () => {
     );
 
     expect(mergedState.draftsByThreadKey[threadKeyFor(threadId)]?.prompt).toBe(
-      "[Terminal 1 lines 4-5](t3-context://v1/terminal/terminal_ctx-rehydrated)",
+      "[Terminal 1 lines 4-5](kurambit-context://v1/terminal/terminal_ctx-rehydrated)",
     );
     expect(mergedState.draftsByThreadKey[threadKeyFor(threadId)]?.terminalContexts).toMatchObject([
       {
@@ -1084,7 +1084,7 @@ describe("composerDraftStore context persistence", () => {
     store.addTerminalContext(threadRef, terminal);
     store.addPreviewAnnotation(threadRef, annotation);
     const terminalLink = formatTerminalContextReference(terminal);
-    const prompt = `Inspect ${terminalLink}. Apply [Retry note](t3-context://v1/preview-annotation/preview-annotation_retry-note). Compare ${terminalLink} again.`;
+    const prompt = `Inspect ${terminalLink}. Apply [Retry note](kurambit-context://v1/preview-annotation/preview-annotation_retry-note). Compare ${terminalLink} again.`;
     store.setPrompt(threadRef, prompt);
     let state = useComposerDraftStore.getState();
     const merge = useComposerDraftStore.persist.getOptions().merge!;
@@ -1118,7 +1118,7 @@ describe("composerDraftStore context persistence", () => {
     const draft = state.draftsByThreadKey[scopedThreadKey(threadRef)];
     expect(draft?.previewAnnotations).toEqual([annotation]);
     expect(draft?.prompt).toContain(
-      "t3-context://v1/preview-annotation/preview-annotation_retry-note",
+      "kurambit-context://v1/preview-annotation/preview-annotation_retry-note",
     );
   });
 });
@@ -1203,7 +1203,7 @@ describe("composerDraftStore thread contexts", () => {
     expect(draft?.threadContexts).toEqual([attached]);
     expect(attached.label).toBe("Fix login flow");
     expect(draft?.prompt).toBe(
-      `Compare with [${attached.label}](t3-context://v1/thread/${attached.contextId}) `,
+      `Compare with [${attached.label}](kurambit-context://v1/thread/${attached.contextId}) `,
     );
 
     const merge = useComposerDraftStore.persist.getOptions().merge!;
@@ -3085,7 +3085,7 @@ describe("composerDraftStore inline context references", () => {
     text: "Why?",
     diff: "const x = 1;",
   };
-  const reviewLink = "[b.ts L4](t3-context://v1/review-comment/review-comment_rc-1)";
+  const reviewLink = "[b.ts L4](kurambit-context://v1/review-comment/review-comment_rc-1)";
   const annotation = {
     id: "ann-1",
     pageUrl: "http://localhost:3000/",
@@ -3098,7 +3098,8 @@ describe("composerDraftStore inline context references", () => {
     screenshot: null,
     createdAt: "2026-01-01T00:00:00.000Z",
   };
-  const annotationLink = "[Bigger](t3-context://v1/preview-annotation/preview-annotation_ann-1)";
+  const annotationLink =
+    "[Bigger](kurambit-context://v1/preview-annotation/preview-annotation_ann-1)";
 
   beforeEach(() => {
     resetComposerDraftStore();
@@ -3165,7 +3166,7 @@ describe("composerDraftStore inline context references", () => {
     store.setContextInsertionHandler(threadRef, null);
     store.addReviewComment(threadRef, { ...reviewComment, id: "rc-2" });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(
-      "look [b.ts L4](t3-context://v1/review-comment/review-comment_rc-2) ",
+      "look [b.ts L4](kurambit-context://v1/review-comment/review-comment_rc-2) ",
     );
   });
 
@@ -3179,7 +3180,7 @@ describe("composerDraftStore inline context references", () => {
         .getState()
         .setPrompt(
           threadRef,
-          `before [${reference.label}](t3-context://v1/${reference.kind}/${reference.contextId}) after`,
+          `before [${reference.label}](kurambit-context://v1/${reference.kind}/${reference.contextId}) after`,
         );
       return true;
     });
@@ -3290,8 +3291,8 @@ describe("composerDraftStore inline context references", () => {
 describe("composerDraftStore attachment references", () => {
   const threadId = ThreadId.make("thread-attachment-refs");
   const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
-  const fileLink = "[notes.txt](t3-context://v1/file/file_file-1)";
-  const imageLink = "[shot.png](t3-context://v1/image/image_img-1)";
+  const fileLink = "[notes.txt](kurambit-context://v1/file/file_file-1)";
+  const imageLink = "[shot.png](kurambit-context://v1/image/image_img-1)";
 
   beforeEach(() => {
     resetComposerDraftStore();
@@ -3346,7 +3347,7 @@ describe("composerDraftStore attachment references", () => {
 
   it("moves a needs-reattach marker's chip to the re-picked file", () => {
     const store = useComposerDraftStore.getState();
-    store.setPrompt(threadRef, "see [notes.txt](t3-context://v1/file/file_marker-1) ok");
+    store.setPrompt(threadRef, "see [notes.txt](kurambit-context://v1/file/file_marker-1) ok");
     store.addFiles(threadRef, [
       {
         type: "file",
@@ -3370,7 +3371,7 @@ describe("composerDraftStore attachment references", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(acceptedIds).toEqual([]);
     expect(draft?.files.map((file) => file.id)).toEqual(["fresh-1"]);
-    expect(draft?.prompt).toBe("see [notes.txt](t3-context://v1/file/file_fresh-1) ok");
+    expect(draft?.prompt).toBe("see [notes.txt](kurambit-context://v1/file/file_fresh-1) ok");
   });
 
   it("restores a file-only draft with a reference and preserves it through prompt edits", () => {
@@ -3392,11 +3393,11 @@ describe("composerDraftStore attachment references", () => {
       { appendReference: true },
     );
     const restored = draftFor(threadId, TEST_ENVIRONMENT_ID)!;
-    expect(restored.prompt).toBe("[notes.txt](t3-context://v1/file/file_restored) ");
+    expect(restored.prompt).toBe("[notes.txt](kurambit-context://v1/file/file_restored) ");
     store.setPrompt(threadRef, `${restored.prompt}explain this`);
     const edited = draftFor(threadId, TEST_ENVIRONMENT_ID)!;
     expect(edited.files.map((file) => file.id)).toEqual(["restored"]);
-    expect(edited.prompt).toContain("t3-context://v1/file/file_restored");
+    expect(edited.prompt).toContain("kurambit-context://v1/file/file_restored");
   });
 
   it.each(["old.file:1", "file-1"])(
@@ -3406,7 +3407,7 @@ describe("composerDraftStore attachment references", () => {
         {
           draftsByThreadKey: {
             [threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]: {
-              prompt: `before [notes.txt](t3-context://v1/file/${id}) after`,
+              prompt: `before [notes.txt](kurambit-context://v1/file/${id}) after`,
               attachments: [],
               files: [{ id, name: "notes.txt", mimeType: "text/plain", sizeBytes: 3 }],
             },
@@ -3416,7 +3417,7 @@ describe("composerDraftStore attachment references", () => {
       );
       useComposerDraftStore.setState(merged);
       const draft = draftFor(threadId, TEST_ENVIRONMENT_ID)!;
-      expect(draft.prompt.match(/t3-context:/g)).toHaveLength(1);
+      expect(draft.prompt.match(/kurambit-context:/g)).toHaveLength(1);
       expect(draft.prompt).not.toContain(`/file/${id})`);
       useComposerDraftStore.getState().removeFile(threadRef, id);
       expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("before after");
@@ -3455,7 +3456,7 @@ describe("composerDraftStore attachment references", () => {
       styles: element.styles,
       selector: element.selector,
     });
-    expect(draft.prompt).toContain("t3-context://v1/preview-annotation/");
+    expect(draft.prompt).toContain("kurambit-context://v1/preview-annotation/");
     expect(draft.prompt).toContain(prompt);
   });
 
@@ -3490,7 +3491,7 @@ describe("composerDraftStore attachment references", () => {
       {
         draftsByThreadKey: {
           [threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]: {
-            prompt: "see ![shot.png](t3-context://v1/image/img-1) after",
+            prompt: "see ![shot.png](kurambit-context://v1/image/img-1) after",
             attachments: [
               {
                 id: "img-1",
@@ -3506,13 +3507,13 @@ describe("composerDraftStore attachment references", () => {
       useComposerDraftStore.getInitialState(),
     );
     expect(merged.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.prompt).toBe(
-      "see ![shot.png](t3-context://v1/image/image_img-1) after",
+      "see ![shot.png](kurambit-context://v1/image/image_img-1) after",
     );
   });
 
   it("preserves canonical references when another producer ID matches their namespace", () => {
     const prompt =
-      "![x.png](t3-context://v1/image/image_x) ![image_x.png](t3-context://v1/image/image_image_x)";
+      "![x.png](kurambit-context://v1/image/image_x) ![image_x.png](kurambit-context://v1/image/image_image_x)";
     const merged = useComposerDraftStore.persist.getOptions().merge!(
       {
         draftsByThreadKey: {

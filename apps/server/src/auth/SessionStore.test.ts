@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { AuthStandardClientScopes, EnvironmentId } from "@t3tools/contracts";
+import { AuthStandardClientScopes, EnvironmentId } from "@kurambit/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -34,7 +34,9 @@ const layerServerConfig = (overrides?: Partial<ServerConfig.ServerConfig["Servic
         ...overrides,
       } satisfies ServerConfig.ServerConfig["Service"];
     }),
-  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-session-test-" })));
+  ).pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-auth-session-test-" })),
+  );
 
 const layerServerEnvironment = (environmentId: EnvironmentId) =>
   Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
@@ -177,9 +179,12 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
           ),
         );
 
-      const original = yield* cookieName("/srv/t3-one", EnvironmentId.make("environment-one"));
-      const moved = yield* cookieName("/srv/t3-moved", EnvironmentId.make("environment-one"));
-      const other = yield* cookieName("/srv/t3-one", EnvironmentId.make("environment-two"));
+      const original = yield* cookieName(
+        "/srv/kurambit-one",
+        EnvironmentId.make("environment-one"),
+      );
+      const moved = yield* cookieName("/srv/kurambit-moved", EnvironmentId.make("environment-one"));
+      const other = yield* cookieName("/srv/kurambit-one", EnvironmentId.make("environment-two"));
 
       expect(moved).toBe(original);
       expect(other).not.toBe(original);
@@ -190,8 +195,8 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const token = "reusable-dev-auth-token-that-is-long-enough";
-      const baseA = yield* fs.makeTempDirectoryScoped({ prefix: "t3-dev-auth-a-" });
-      const baseB = yield* fs.makeTempDirectoryScoped({ prefix: "t3-dev-auth-b-" });
+      const baseA = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-dev-auth-a-" });
+      const baseB = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-dev-auth-b-" });
       const layerA = yield* makeDiskSessionStoreLayer(baseA, token);
       const fromA = yield* Effect.gen(function* () {
         const sessions = yield* SessionStore.SessionStore;
@@ -235,7 +240,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
   it.effect("invalidates old dev credentials and tickets after rotation or removal", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-dev-auth-rotation-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-dev-auth-rotation-" });
       const oldToken = "old-reusable-dev-auth-token-that-is-long-enough";
       const newToken = "new-reusable-dev-auth-token-that-is-long-enough";
       const layerInitial = yield* makeDiskSessionStoreLayer(baseDir, oldToken);

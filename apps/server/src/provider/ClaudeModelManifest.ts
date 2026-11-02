@@ -1,5 +1,5 @@
-import { TrimmedNonEmptyString } from "@t3tools/contracts";
-import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
+import { TrimmedNonEmptyString } from "@kurambit/contracts";
+import { compareSemverVersions, parseSemver } from "@kurambit/shared/semver";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

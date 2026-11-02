@@ -11,16 +11,15 @@
       "entry": [
         // CodeRabbit loads its configuration by filename.
         ".coderabbit.config.ts",
-        ".github/scripts/thread-transfer-report.cjs",
       ],
       "vite": { "entry": [".github/**/*.test.cjs"] },
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option; native verification and
-      // worktree setup (from t3.json) run directly.
+      // worktree setup (from kurambit.json) run directly.
       "entry": ["knip-schemas.ts", "setup-worktree.ts"],
-      // The `t3` npm package's files: copied into the package, never imported.
+      // The `kurambit` npm package's files: copied into the package, never imported.
       "ignore": ["npm-launcher/**"],
     },
     "apps/server": {
@@ -39,7 +38,7 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "@napi-rs/keyring"],
+      "ignoreDependencies": ["@effect/platform-node-shared", "@kurambit/web", "@napi-rs/keyring"],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.

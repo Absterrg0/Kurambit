@@ -1,4 +1,4 @@
-import { AuthPreviewOperateScope } from "@t3tools/contracts";
+import { AuthPreviewOperateScope } from "@kurambit/contracts";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
@@ -146,7 +146,7 @@ function ChatRouteGlobalShortcuts() {
             stackedThreadToast({
               type: "info",
               title: "Preview is desktop-only",
-              description: "Open Game Studio in the desktop app to use the in-app preview.",
+              description: "Open Kurambit in the desktop app to use the in-app preview.",
             }),
           );
           return;

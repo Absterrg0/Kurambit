@@ -103,7 +103,7 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
     pullRequest: {
       number: 42,
       title: "Improve context chips",
-      url: "https://github.com/pingdotgg/t3code/pull/42",
+      url: "https://github.com/Absterrg0/Kurambit/pull/42",
       headBranch: "feat/context-chips",
       baseBranch: "main",
       state: "open",

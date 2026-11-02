@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   workflow: null as unknown,
 }));
 
-vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
+vi.mock(import("@kurambit/client-runtime/state/thread-workflows"), async (importOriginal) => ({
   ...(await importOriginal()),
   deriveThreadQueueWorkflowState: (() => state.workflow) as never,
 }));

@@ -13,7 +13,7 @@ import {
   encodeHtmlRenderOutline,
   HTML_RENDER_COLUMN_WIDTH,
   HTML_RENDER_OUTLINE_MAX_BOXES,
-} from "@t3tools/shared/htmlRender";
+} from "@kurambit/shared/htmlRender";
 
 import { publicProxy } from "./publicProxy.ts";
 
@@ -50,7 +50,7 @@ const CAPTURE_TIMEOUT = "20 seconds";
 // public addresses, so a page cannot reach this machine's local network. The
 // main frame also stays on the page and the browser opens no popups, so a
 // capture always shows the page itself.
-const PAGE_ORIGIN = "http://t3-page.localhost";
+const PAGE_ORIGIN = "http://kurambit-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 const PAGE_NAME = "page.html";
 const MEASURE_CONCURRENCY = 3;
@@ -374,7 +374,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
         return fulfillPage(sessionId, paused.requestId, body);
       }
       // A frame inside the page may show another site; Local Network Access
-      // still covers it. The main frame and T3's own origin serve nothing else.
+      // still covers it. The main frame and Kurambit's own origin serve nothing else.
       const otherSiteFrame =
         paused.resourceType === "Document" &&
         paused.frameId !== page.mainFrameId &&
@@ -502,7 +502,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       Ignored,
       sessionId,
     );
-    // Pauses T3's own origin, to serve the page, and every document, to keep
+    // Pauses Kurambit's own origin, to serve the page, and every document, to keep
     // the main frame on it.
     yield* send(
       "Fetch.enable",
@@ -608,7 +608,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
 const scratchDirectory = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   return yield* Effect.acquireRelease(
-    fileSystem.makeTempDirectory({ prefix: "t3-html-preview-" }),
+    fileSystem.makeTempDirectory({ prefix: "kurambit-html-preview-" }),
     (directory) => fileSystem.remove(directory, { recursive: true }).pipe(Effect.ignore),
   ).pipe(
     Effect.mapError(

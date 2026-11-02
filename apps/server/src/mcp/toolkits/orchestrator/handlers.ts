@@ -1,4 +1,4 @@
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { OrchestratorMcpFailure } from "@kurambit/contracts";
 import { OrchestratorToolkit } from "./tools.ts";
 import * as Effect from "effect/Effect";
 
@@ -37,7 +37,7 @@ const handlers = {
       return yield* service.cancelTask(scope, input);
     }),
   ),
-  t3_workflow_stop: McpToolAccess.writesThreads(
+  kurambit_workflow_stop: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -101,21 +101,21 @@ const handlers = {
       return yield* service.createThreads(scope, input);
     }),
   ),
-  t3_thread_list: McpToolAccess.reads((input) =>
+  kurambit_thread_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.listThreads(scope, input);
     }),
   ),
-  t3_thread_read: McpToolAccess.reads((input) =>
+  kurambit_thread_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.readThread(scope, input);
     }),
   ),
-  t3_thread_update: McpToolAccess.writesThreads(
+  kurambit_thread_update: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -124,7 +124,7 @@ const handlers = {
         return yield* service.update(scope, input);
       }),
   ),
-  t3_thread_send: McpToolAccess.writesThreads(
+  kurambit_thread_send: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -133,14 +133,14 @@ const handlers = {
         return yield* service.sendToThread(scope, input);
       }),
   ),
-  t3_thread_wait: McpToolAccess.reads((input) =>
+  kurambit_thread_wait: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.waitForThread(scope, input);
     }),
   ),
-  t3_thread_interrupt: McpToolAccess.writesThreads(
+  kurambit_thread_interrupt: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {

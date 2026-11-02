@@ -1,4 +1,4 @@
-import type { DesktopCliCommandState } from "@t3tools/contracts";
+import type { DesktopCliCommandState } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,7 +16,7 @@ export class DesktopCliCommand extends Context.Service<
     readonly install: Effect.Effect<DesktopCliCommandState, DesktopCliCommandError>;
     readonly uninstall: Effect.Effect<DesktopCliCommandState, DesktopCliCommandError>;
   }
->()("@t3tools/desktop/app/DesktopCliCommand") {}
+>()("@kurambit/desktop/app/DesktopCliCommand") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.succeed(
@@ -24,7 +24,7 @@ export const make = Effect.succeed(
     state: Effect.succeed({ supported: false, installedPath: null, onPath: false }),
     install: Effect.fail(
       new DesktopCliCommandError({
-        message: "Global CLI installation is unavailable in Game Studio.",
+        message: "Global CLI installation is unavailable in Kurambit.",
       }),
     ),
     uninstall: Effect.succeed({ supported: false, installedPath: null, onPath: false }),

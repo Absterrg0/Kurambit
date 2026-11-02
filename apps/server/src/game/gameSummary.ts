@@ -1,4 +1,4 @@
-import type { GameSummary } from "@t3tools/contracts";
+import type { GameSummary } from "@kurambit/contracts";
 
 /** Newest activity first, then name, so equal timestamps stay deterministic. */
 export const sortGameSummaries = (games: readonly GameSummary[]): GameSummary[] =>

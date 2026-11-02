@@ -12,7 +12,7 @@ describe("deriveAuthClientMetadata", () => {
       request: {
         headers: {
           "user-agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) t3code/0.0.15 Chrome/136.0.7103.93 Electron/36.3.2 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) kurambit/0.0.15 Chrome/136.0.7103.93 Electron/36.3.2 Safari/537.36",
         },
         source: {
           remoteAddress: "::ffff:127.0.0.1",
@@ -40,14 +40,14 @@ describe("deriveAuthClientMetadata", () => {
         },
       } as never,
       presented: {
-        label: "T3 Code Mobile",
+        label: "Kurambit Mobile",
         deviceType: "mobile",
         os: "iOS",
       },
     });
 
     expect(metadata).toMatchObject({
-      label: "T3 Code Mobile",
+      label: "Kurambit Mobile",
       browser: "Electron",
       deviceType: "mobile",
       ipAddress: "192.168.213.72",
@@ -63,7 +63,7 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 5775,
       host: "127.0.0.1",
-      instanceKey: "/tmp/t3-agent-one",
+      instanceKey: "/tmp/kurambit-agent-one",
       environmentId: "environment-one",
       development: true,
     });
@@ -71,13 +71,13 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 5775,
       host: "127.0.0.1",
-      instanceKey: "/tmp/t3-agent-two",
+      instanceKey: "/tmp/kurambit-agent-two",
       environmentId: "environment-two",
       development: true,
     });
 
-    expect(first).toMatch(/^t3_session_5775_[a-f0-9]{12}$/);
-    expect(second).toMatch(/^t3_session_5775_[a-f0-9]{12}$/);
+    expect(first).toMatch(/^kurambit_session_5775_[a-f0-9]{12}$/);
+    expect(second).toMatch(/^kurambit_session_5775_[a-f0-9]{12}$/);
     expect(first).not.toBe(second);
   });
 
@@ -86,7 +86,7 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 3773,
       host: "192.168.1.50",
-      instanceKey: "/srv/t3-one",
+      instanceKey: "/srv/kurambit-one",
       environmentId: "environment-one",
       development: false,
     });
@@ -94,13 +94,13 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 5775,
       host: "192.168.1.50",
-      instanceKey: "/srv/t3-two",
+      instanceKey: "/srv/kurambit-two",
       environmentId: "environment-two",
       development: false,
     });
 
-    expect(first).toMatch(/^t3_session_[a-f0-9]{12}$/);
-    expect(second).toMatch(/^t3_session_[a-f0-9]{12}$/);
+    expect(first).toMatch(/^kurambit_session_[a-f0-9]{12}$/);
+    expect(second).toMatch(/^kurambit_session_[a-f0-9]{12}$/);
     expect(first).not.toBe(second);
   });
 
@@ -109,7 +109,7 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 8080,
       host: "0.0.0.0",
-      instanceKey: "/srv/t3",
+      instanceKey: "/srv/kurambit",
       environmentId: "environment-one",
       development: false,
     });
@@ -117,7 +117,7 @@ describe("session cookie isolation", () => {
       mode: "web",
       port: 9090,
       host: "app.example.com",
-      instanceKey: "/srv/t3",
+      instanceKey: "/srv/kurambit",
       environmentId: "environment-one",
       development: false,
     });
@@ -135,7 +135,7 @@ describe("session cookie isolation", () => {
         environmentId: "environment-one",
         development: true,
       }),
-    ).toBe("t3_session_3773");
+    ).toBe("kurambit_session_3773");
   });
 
   it("isolates development servers even when they bind a wildcard host", () => {
@@ -144,11 +144,11 @@ describe("session cookie isolation", () => {
         mode: "web",
         port: 5775,
         host: "0.0.0.0",
-        instanceKey: "/tmp/t3-wildcard-dev",
+        instanceKey: "/tmp/kurambit-wildcard-dev",
         environmentId: "environment-one",
         development: true,
       }),
-    ).toMatch(/^t3_session_5775_[a-f0-9]{12}$/);
+    ).toMatch(/^kurambit_session_5775_[a-f0-9]{12}$/);
   });
 
   it("classifies loopback aliases separately from remotely reachable hosts", () => {

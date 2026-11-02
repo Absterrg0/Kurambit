@@ -1,9 +1,9 @@
 import { SettingsGroup } from "./SettingsGroup";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@kurambit/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, Undo2Icon } from "lucide-react";
-import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@kurambit/contracts";
 import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -387,8 +387,8 @@ export function SettingsRow({
     ? { state: "mixed", summary: "Mixed across selected environments" }
     : source === "project"
       ? { state: "overridden", summary: "Overridden for this project" }
-      : source === "t3.json"
-        ? { state: "inherited", summary: "Inherited from the repository's t3.json" }
+      : source === "kurambit.json"
+        ? { state: "inherited", summary: "Inherited from the repository's kurambit.json" }
         : source === "environment" && scopedKeys.length > 0
           ? { state: "inherited", summary: `Inherited from ${inheritedFrom}` }
           : customized

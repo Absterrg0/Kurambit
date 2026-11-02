@@ -5,7 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as SqlClient from "effect/sql/SqlClient";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@kurambit/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
@@ -101,9 +101,11 @@ describe("ReviewService", () => {
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-outside-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const error = yield* Effect.gen(function* () {
@@ -124,9 +126,11 @@ describe("ReviewService", () => {
   it.effect("attributes file-content workspace violations to the file-content operation", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-outside-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const error = yield* Effect.gen(function* () {
@@ -157,10 +161,14 @@ describe("ReviewService", () => {
   it.effect("allows previous custom worktree locations but never a filesystem root", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-      const previous = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-old-worktrees-" });
-      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
+      const previous = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-old-worktrees-",
+      });
+      const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-outside-" });
 
       const result = yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
@@ -192,9 +200,11 @@ describe("ReviewService", () => {
   it.effect("allows registered project roots outside the server cwd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
+      const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-project-" });
       const projectChild = `${projectRoot}/packages/app`;
       yield* fs.makeDirectory(projectChild, { recursive: true });
       const sibling = `${projectRoot}-sibling`;
@@ -227,15 +237,17 @@ describe("ReviewService", () => {
   it.effect("allows the worktree a thread is bound to, and nothing else outside the project", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-      const project = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
+      const project = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-project-" });
       // Checkouts outside every managed folder, as `git worktree add ../feature` makes.
-      const bound = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-bound-" });
-      const deleted = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-deleted-" });
-      const unbound = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-unbound-" });
+      const bound = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-bound-" });
+      const deleted = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-deleted-" });
+      const unbound = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-unbound-" });
       // A client can set a thread's path to any folder; git doesn't list this one.
-      const claimed = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-claimed-" });
+      const claimed = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-claimed-" });
       yield* fs.makeDirectory(`${bound}/sub`);
 
       const review = (cwd: string) =>
@@ -254,7 +266,7 @@ describe("ReviewService", () => {
                 { worktreePath: claimed },
                 { worktreePath: deleted, deleted: true },
                 // A relative path would resolve against the server's own cwd.
-                { worktreePath: "t3-review-relative" },
+                { worktreePath: "kurambit-review-relative" },
                 // A filesystem root would make every folder look bound.
                 { worktreePath: "/" },
               ],
@@ -265,7 +277,7 @@ describe("ReviewService", () => {
       for (const cwd of [bound, `${bound}/sub`]) {
         assert.strictEqual((yield* review(cwd)).cwd, cwd);
       }
-      for (const cwd of [deleted, unbound, claimed, `${process.cwd()}/t3-review-relative`]) {
+      for (const cwd of [deleted, unbound, claimed, `${process.cwd()}/kurambit-review-relative`]) {
         const error = yield* review(cwd).pipe(Effect.flip);
         assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
       }
@@ -275,12 +287,14 @@ describe("ReviewService", () => {
   it.effect("allows a thread's worktree linked from a managed folder to a checkout elsewhere", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
       const managed = yield* fs.realPath(
-        yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-worktrees-" }),
+        yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-worktrees-" }),
       );
-      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-checkout-" });
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-checkout-" });
       yield* fs.symlink(checkout, `${managed}/feature`);
 
       const result = yield* Effect.gen(function* () {
@@ -303,8 +317,10 @@ describe("ReviewService", () => {
   it.effect("allows diff preview cwd inside the configured workspace root", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
 
       const result = yield* Effect.gen(function* () {
@@ -321,8 +337,10 @@ describe("ReviewService", () => {
   it.effect("preserves unexpected path-resolution failures", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-review-workspace-",
+      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-review-base-" });
       const invalidCwd = `${workspaceRoot}\0invalid`;
       const detectCalls: Array<{ readonly cwd: string }> = [];
 

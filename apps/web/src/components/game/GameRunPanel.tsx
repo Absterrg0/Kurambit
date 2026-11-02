@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { PlayIcon, RefreshCwIcon, SquareIcon } from "lucide-react";
-import type { GameRunStatusResult, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { GameRunStatusResult, ScopedThreadRef, ThreadId } from "@kurambit/contracts";
 
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";

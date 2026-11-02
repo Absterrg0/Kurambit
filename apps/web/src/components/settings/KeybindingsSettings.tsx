@@ -27,12 +27,12 @@ import {
   type KeybindingWhenNode,
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
-} from "@t3tools/contracts";
-import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
+} from "@kurambit/contracts";
+import { mergeWithDefaultKeybindings } from "@kurambit/shared/keybindings";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 
 import { isElectron } from "../../env";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
@@ -252,7 +252,7 @@ function UnknownWhenVariableWarning({
 
   return (
     <WarningTooltipIcon label={label} focusable={focusable} className="size-4.5">
-      Game Studio does not recognize this condition yet. It can still be saved, but it may not match
+      Kurambit does not recognize this condition yet. It can still be saved, but it may not match
       unless the runtime provides it.
     </WarningTooltipIcon>
   );

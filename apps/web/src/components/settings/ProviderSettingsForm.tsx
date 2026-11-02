@@ -9,7 +9,7 @@ import {
   type ProviderSettingsFormControl,
   type ProviderSettingsFormOption,
   type ProviderSettingsFormSchemaAnnotation,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { PlusIcon, XIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
@@ -20,7 +20,7 @@ import { SecretInput } from "./SecretInput";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
+import type { ProviderClientDefinition } from "@kurambit/provider-core/client";
 
 export type SettingsFormDefinition = Pick<ProviderClientDefinition, "settingsSchema"> & {
   readonly driverKind?: ProviderClientDefinition["driverKind"];

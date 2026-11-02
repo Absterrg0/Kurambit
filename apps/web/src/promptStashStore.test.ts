@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ThreadId } from "@kurambit/contracts";
 import {
   collectAssistantCitations,
   serializeAssistantCitation,
-} from "@t3tools/shared/assistantCitations";
+} from "@kurambit/shared/assistantCitations";
 
 import { removeLocalStorageItem } from "./hooks/useLocalStorage";
 
@@ -307,7 +307,7 @@ describe("prompt stash context records", () => {
     store.stashEntry({
       id: "entry-records",
       createdAt: "2026-01-01T00:00:00.000Z",
-      prompt: "see [Terminal 1 line 4](t3-context://v1/terminal/ctx-1)",
+      prompt: "see [Terminal 1 line 4](kurambit-context://v1/terminal/ctx-1)",
       attachments: [],
       droppedImageNames: [],
       records,

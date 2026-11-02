@@ -1,10 +1,10 @@
 # Welcome wizard
 
-Game Studio shows setup when you open a new installation. Existing workspaces skip it.
+Kurambit shows setup when you open a new installation. Existing workspaces skip it.
 
 ## Connect
 
-Game Studio runs your agents, Blender, and Godot on this computer. Continue once the local connection is ready.
+Kurambit runs your agents, Blender, and Godot on this computer. Continue once the local connection is ready.
 
 If setup cannot confirm the workspace during startup, select **Reload** to try again. If it cannot read your saved settings, select **Retry** after storage becomes available.
 

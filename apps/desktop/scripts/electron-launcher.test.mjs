@@ -19,9 +19,9 @@ describe("electron development launcher", () => {
   it("uses captured values only as fallbacks for a live runner environment", () => {
     const environmentScript = makeDevelopmentEnvironmentScript({
       VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
-      T3CODE_PORT: "16566",
-      GAME_STUDIO_HOME: "/tmp/t3",
-      T3CODE_OTLP_PROTOCOL: "http/protobuf",
+      KURAMBIT_PORT: "16566",
+      KURAMBIT_HOME: "/tmp/kurambit",
+      KURAMBIT_OTLP_PROTOCOL: "http/protobuf",
     });
 
     assert.include(
@@ -30,7 +30,7 @@ describe("electron development launcher", () => {
     );
     assert.include(
       environmentScript,
-      "if [ -z \"${T3CODE_OTLP_PROTOCOL:-}\" ]; then export T3CODE_OTLP_PROTOCOL='http/protobuf'; fi",
+      "if [ -z \"${KURAMBIT_OTLP_PROTOCOL:-}\" ]; then export KURAMBIT_OTLP_PROTOCOL='http/protobuf'; fi",
     );
     assert.notInclude(environmentScript, "\nexport VITE_DEV_SERVER_URL=");
   });
@@ -50,7 +50,7 @@ describe("electron development launcher", () => {
     assert.notInclude(script, "VITE_DEV_SERVER_URL");
     assert.include(
       script,
-      "exec '/repo/node_modules/electron/Electron' --game-studio-dev-root='/repo/apps/desktop' '/repo/apps/desktop/dist-electron/main.cjs' \"$@\"",
+      "exec '/repo/node_modules/electron/Electron' --kurambit-dev-root='/repo/apps/desktop' '/repo/apps/desktop/dist-electron/main.cjs' \"$@\"",
     );
   });
 
@@ -76,18 +76,18 @@ describe("electron development launcher", () => {
 
   it("keeps the native Electron executable name inside the branded macOS bundle", () => {
     const paths = resolveMacLauncherPaths(
-      "/repo/apps/desktop/.electron-runtime/Game Studio (Dev).app",
-      "Game Studio (Dev)",
+      "/repo/apps/desktop/.electron-runtime/Kurambit (Dev).app",
+      "Kurambit (Dev)",
     );
 
-    assert.equal(paths.launcherExecutableName, "Game Studio (Dev) Launcher");
+    assert.equal(paths.launcherExecutableName, "Kurambit (Dev) Launcher");
     assert.equal(
       paths.launcherBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/Game Studio (Dev).app/Contents/MacOS/Game Studio (Dev) Launcher",
+      "/repo/apps/desktop/.electron-runtime/Kurambit (Dev).app/Contents/MacOS/Kurambit (Dev) Launcher",
     );
     assert.equal(
       paths.runtimeElectronBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/Game Studio (Dev).app/Contents/MacOS/Electron",
+      "/repo/apps/desktop/.electron-runtime/Kurambit (Dev).app/Contents/MacOS/Electron",
     );
 
     const script = makeDevelopmentLauncherScript({
@@ -98,37 +98,37 @@ describe("electron development launcher", () => {
     });
     assert.include(
       script,
-      "exec '/repo/apps/desktop/.electron-runtime/Game Studio (Dev).app/Contents/MacOS/Electron'",
+      "exec '/repo/apps/desktop/.electron-runtime/Kurambit (Dev).app/Contents/MacOS/Electron'",
     );
     assert.notInclude(script, "node_modules/electron");
   });
 
   it("declares why the macOS app needs protected access", () => {
-    const values = resolveMacBundleInfoPlistStrings("Game Studio (Dev) Launcher");
+    const values = resolveMacBundleInfoPlistStrings("Kurambit (Dev) Launcher");
 
     assert.equal(
       values.NSScreenCaptureUsageDescription,
-      "Game Studio captures the active window when you use the snapshot shortcut.",
+      "Kurambit captures the active window when you use the snapshot shortcut.",
     );
     assert.equal(
       values.NSDocumentsFolderUsageDescription,
-      "Game Studio reads project files you open in the desktop app.",
+      "Kurambit reads project files you open in the desktop app.",
     );
   });
 
   it("ad-hoc signs the complete development app bundle", () => {
-    assert.deepEqual(resolveMacCodeSignArguments("/runtime/Game Studio (Dev).app"), [
+    assert.deepEqual(resolveMacCodeSignArguments("/runtime/Kurambit (Dev).app"), [
       "--force",
       "--deep",
       "--sign",
       "-",
       "--timestamp=none",
-      "/runtime/Game Studio (Dev).app",
+      "/runtime/Kurambit (Dev).app",
     ]);
   });
 
   it("restores execute permissions on an unchanged launcher", () => {
-    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-launcher-"));
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-launcher-"));
     const launcherPath = NodePath.join(directory, "launcher");
     try {
       writeDevelopmentLauncherScript(launcherPath, "/runtime/Electron");
@@ -145,9 +145,9 @@ describe("electron development launcher", () => {
     const development = resolveMacLauncherIconPaths("/runtime", true);
     const production = resolveMacLauncherIconPaths("/runtime", false);
 
-    assert.match(development.sourceIconPath, /assets[\\/]dev[\\/]blueprint-macos-1024\.png$/);
+    assert.match(development.sourceIconPath, /assets[\\/]dev[\\/]kurambit-dev-macos-1024\.png$/);
     assert.equal(development.generatedIconPath, "/runtime/icon-dev.icns");
-    assert.match(production.sourceIconPath, /assets[\\/]prod[\\/]black-macos-1024\.png$/);
+    assert.match(production.sourceIconPath, /assets[\\/]prod[\\/]kurambit-macos-1024\.png$/);
     assert.equal(production.generatedIconPath, "/runtime/icon-prod.icns");
   });
 });

@@ -9,7 +9,7 @@ import {
   ThreadId,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -83,7 +83,8 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
       // Snapshots read password fields from their own isolated world in each frame.
       if (method === "Page.createIsolatedWorld") {
         return {
-          executionContextId: (input as { worldName?: string }).worldName === "t3-preview" ? 1 : 7,
+          executionContextId:
+            (input as { worldName?: string }).worldName === "kurambit-preview" ? 1 : 7,
         };
       }
       if (method === "Runtime.evaluate" && (input as { contextId?: number }).contextId === 1) {
@@ -260,7 +261,7 @@ const dependencies = Layer.mergeAll(
     pointer: () => Effect.void,
   }),
 ).pipe(
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-server-browser-" })),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-server-browser-" })),
   Layer.provideMerge(NodeServices.layer),
 );
 const layer = ServerBrowser.layer.pipe(Layer.provideMerge(dependencies));

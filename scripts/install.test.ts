@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Drives the real shell installer through a PTY and a gated HTTP fixture.
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -14,17 +14,23 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
   it.each([false, true])(
     "preserves download and install behavior (HTTP failure: %s)",
     async (fail) => {
-      const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-progress-"));
+      const root = await NodeFSP.mkdtemp(
+        NodePath.join(NodeOS.tmpdir(), "kurambit-install-progress-"),
+      );
       const version = "1.2.3";
-      const stem = `t3-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+      const stem = `kurambit-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
       const archiveName = `${stem}.tar.gz`;
       let resumeDownload: (() => void) | undefined;
       let sawPartialProgress = false;
       let output = "";
       await NodeFSP.mkdir(NodePath.join(root, stem));
-      await NodeFSP.writeFile(NodePath.join(root, stem, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
-        mode: 0o755,
-      });
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, "kurambit"),
+        "#!/bin/sh\necho 'kurambit v1.2.3'\n",
+        {
+          mode: 0o755,
+        },
+      );
       await NodeFSP.writeFile(
         NodePath.join(root, stem, "payload"),
         NodeCrypto.randomBytes(64 * 1024),
@@ -68,10 +74,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
             ...process.env,
             TERM: "xterm",
             NO_COLOR: "1",
-            T3CODE_VERSION: version,
-            GAME_STUDIO_HOME: NodePath.join(root, "home"),
-            T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-            T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+            KURAMBIT_VERSION: version,
+            KURAMBIT_HOME: NodePath.join(root, "home"),
+            KURAMBIT_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+            KURAMBIT_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -95,7 +101,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(code).not.toBe(0);
           expect(output).toContain("500");
           expect(output).not.toContain("100%");
-          expect(output).not.toContain("Installed Game Studio");
+          expect(output).not.toContain("Installed Kurambit");
           expect(await NodeFSP.readdir(versions)).toEqual([]);
         } else {
           expect(code).toBe(0);
@@ -104,15 +110,15 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
             expect(output).toContain("100%");
             expect(output).toContain("0.1 / 0.1 MB");
           }
-          expect(output).toContain("Installed Game Studio 1.2.3");
+          expect(output).toContain("Installed Kurambit 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
           ).toBe("1.2.3\n");
           expect(
-            NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+            NodeChildProcess.execFileSync(NodePath.join(root, "bin/kurambit"), ["--version"], {
               encoding: "utf8",
             }).trim(),
-          ).toBe("t3 v1.2.3");
+          ).toBe("kurambit v1.2.3");
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
         }
       } finally {
@@ -133,12 +139,12 @@ it("requires an explicit fork release source before downloading or installing", 
       encoding: "utf8",
       env: {
         ...process.env,
-        T3CODE_RELEASE_BASE_URL: "",
-        T3CODE_INSTALL_BIN_DIR: "",
-        T3CODE_VERSION: "",
+        KURAMBIT_RELEASE_BASE_URL: "",
+        KURAMBIT_INSTALL_BIN_DIR: "",
+        KURAMBIT_VERSION: "",
       },
     },
   );
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain("Set T3CODE_RELEASE_BASE_URL");
+  expect(result.stderr).toContain("Set KURAMBIT_RELEASE_BASE_URL");
 });

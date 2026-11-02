@@ -1,5 +1,5 @@
-import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { parseScopedThreadKey, scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { type ScopedThreadRef } from "@kurambit/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -43,7 +43,7 @@ export type RightPanelSurface =
       folderTrail?: string;
     };
 
-const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
+const RIGHT_PANEL_STORAGE_KEY = "kurambit:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 const isPullRequestsPanelKey = (threadKey: string) => threadKey.endsWith(":pull-requests-panel");

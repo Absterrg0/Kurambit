@@ -1,4 +1,4 @@
-import { EnvironmentId, type ServerConfig } from "@t3tools/contracts";
+import { EnvironmentId, type ServerConfig } from "@kurambit/contracts";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -1290,7 +1290,7 @@ describe("EnvironmentSupervisor", () => {
 });
 
 describe("EnvironmentSupervisor routes", () => {
-  it.effect("skips a silent LAN route and connects over T3 Connect", () =>
+  it.effect("skips a silent LAN route and connects over the relay", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
@@ -1374,14 +1374,14 @@ describe("EnvironmentSupervisor routes", () => {
       }).pipe(Effect.provide(TestClock.layer())),
   );
 
-  it.effect("still tries a silent LAN route after the T3 Connect route fails", () =>
+  it.effect("still tries a silent LAN route after the relay route fails", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
           Effect.succeed(route.target._tag === "BearerConnectionTarget" ? "silent" : "unchecked"),
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to T3 Connect."))
+            ? Effect.fail(blocked("Sign in to the relay."))
             : Effect.succeed(preparedFor(target)),
       });
       const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_RELAY_ENTRY, {
@@ -1401,7 +1401,7 @@ describe("EnvironmentSupervisor routes", () => {
         checkRoute: () => Effect.succeed("answered"),
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to T3 Connect."))
+            ? Effect.fail(blocked("Sign in to the relay."))
             : Effect.fail(transient("LAN socket refused.")),
       });
       const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_RELAY_ENTRY, {
@@ -1589,7 +1589,7 @@ describe("EnvironmentSupervisor routes", () => {
     }),
   );
 
-  it.effect("learns the LAN address over T3 Connect and moves to it", () =>
+  it.effect("learns the LAN address over the relay and moves to it", () =>
     Effect.gen(function* () {
       const relayEntry: ConnectionCatalogEntry = {
         target: RELAY_TARGET,

@@ -19,7 +19,7 @@ import {
   type ProviderReplayTranscript,
   type ProviderUserInputAnswers,
   type RuntimeMode,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 
@@ -27,7 +27,7 @@ import type {
   OrchestratorV2ScenarioResult,
   OrchestratorV2ScenarioStep,
 } from "../OrchestratorScenario.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import type { RuntimePolicyV2Override } from "../../RuntimePolicy.ts";
 
 export const SIMPLE_PROMPT = "Respond with the following text: fixture simple ok";
@@ -1370,7 +1370,7 @@ export function assertNoAcpClientFileOrTerminalRequests(transcript: ProviderRepl
   assert.deepInclude(
     frames.find((frame) => frame.method === "initialize")?.params?.clientCapabilities ?? {},
     { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    "T3 must not advertise client fs or terminals",
+    "Kurambit must not advertise client fs or terminals",
   );
   assert.deepEqual(
     frames.flatMap((frame) =>
@@ -1379,7 +1379,7 @@ export function assertNoAcpClientFileOrTerminalRequests(transcript: ProviderRepl
         : [],
     ),
     [],
-    "the agent must not route file or terminal work through T3",
+    "the agent must not route file or terminal work through Kurambit",
   );
 }
 

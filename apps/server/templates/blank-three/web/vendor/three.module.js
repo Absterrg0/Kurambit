@@ -4785,7 +4785,7 @@ function setValueT1(gl, v, textures) {
   textures.setTexture2D(v || emptyTexture2D, unit);
 }
 
-function setValueT3D1(gl, v, textures) {
+function setValueKurambitD1(gl, v, textures) {
   const cache = this.cache;
   const unit = textures.allocateTextureUnit();
 
@@ -4873,7 +4873,7 @@ function getSingularSetter(type) {
     case 0x8b5f: // SAMPLER_3D
     case 0x8dcb: // INT_SAMPLER_3D
     case 0x8dd3: // UNSIGNED_INT_SAMPLER_3D
-      return setValueT3D1;
+      return setValueKurambitD1;
 
     case 0x8b60: // SAMPLER_CUBE
     case 0x8dcc: // INT_SAMPLER_CUBE
@@ -4995,7 +4995,7 @@ function setValueT1Array(gl, v, textures) {
   }
 }
 
-function setValueT3DArray(gl, v, textures) {
+function setValueKurambitDArray(gl, v, textures) {
   const cache = this.cache;
 
   const n = v.length;
@@ -5101,7 +5101,7 @@ function getPureArraySetter(type) {
     case 0x8b5f: // SAMPLER_3D
     case 0x8dcb: // INT_SAMPLER_3D
     case 0x8dd3: // UNSIGNED_INT_SAMPLER_3D
-      return setValueT3DArray;
+      return setValueKurambitDArray;
 
     case 0x8b60: // SAMPLER_CUBE
     case 0x8dcc: // INT_SAMPLER_CUBE

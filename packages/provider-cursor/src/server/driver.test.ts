@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProviderInstanceId, ProviderSessionId, ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ProviderSessionId, ThreadId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -10,15 +10,15 @@ import { vi } from "vite-plus/test";
 import * as HttpClient from "effect/http/HttpClient";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
+import * as TestProviderHost from "@kurambit/provider-testing/TestProviderHost";
 import { CursorDriver } from "./driver.ts";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 import * as CursorSdk from "./CursorSdk.ts";
 import * as CursorKeychain from "./CursorKeychain.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import { Cursor } from "./sdk.ts";
 
 const layerTest = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
@@ -68,7 +68,7 @@ it.layer(layerTest)("CursorDriver", (it) => {
           return { apiKey: "instance-browser-key", apiKeyExpiresAtMs: 4_000_000_000_000 };
         });
         const me = vi.spyOn(Cursor, "me").mockResolvedValue({
-          apiKeyName: "T3 Code",
+          apiKeyName: "Kurambit",
           createdAt: "2026-01-01T00:00:00.000Z",
           userEmail: "cursor@example.com",
         });

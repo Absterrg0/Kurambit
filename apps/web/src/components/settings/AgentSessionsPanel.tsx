@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@kurambit/contracts";
 
 import { Button } from "../ui/button";
 import { usePrimaryEnvironmentId } from "../../state/environments";

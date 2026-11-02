@@ -13,7 +13,7 @@ it.effect.each(["linux", "darwin", "win32"] as const)(
           isDevelopment: true,
           platform,
         }),
-        "/profiles/game-studio-dev",
+        "/profiles/kurambit-dev",
       );
       assert.equal(
         yield* resolveUserDataPath({
@@ -21,7 +21,7 @@ it.effect.each(["linux", "darwin", "win32"] as const)(
           isDevelopment: false,
           platform,
         }),
-        "/profiles/game-studio",
+        "/profiles/kurambit",
       );
     }).pipe(Effect.provide(NodePath.layerPosix)),
 );

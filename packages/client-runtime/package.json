@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/client-runtime",
+  "name": "@kurambit/client-runtime",
   "private": true,
   "type": "module",
   "exports": {
@@ -111,9 +111,9 @@
       "types": "./src/voice-input/index.ts",
       "default": "./src/voice-input/index.ts"
     },
-    "./t3ToolSummary": {
-      "types": "./src/t3ToolSummary.ts",
-      "default": "./src/t3ToolSummary.ts"
+    "./kurambitToolSummary": {
+      "types": "./src/kurambitToolSummary.ts",
+      "default": "./src/kurambitToolSummary.ts"
     },
     "./state/auth": {
       "types": "./src/state/auth.ts",
@@ -349,9 +349,9 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@kurambit/contracts": "workspace:*",
+    "@kurambit/shared": "workspace:*",
     "@pierre/diffs": "catalog:",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

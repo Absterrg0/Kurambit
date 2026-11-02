@@ -4,8 +4,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstallState,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -15,7 +15,7 @@ import * as Stream from "effect/Stream";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CodexInstallation from "./CodexInstallation.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
-import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import type { ProviderInstance } from "@kurambit/provider-core/server/driver";
 import { makeProviderInstallation } from "./providerInstallation.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
@@ -216,7 +216,9 @@ describe("provider installation routing", () => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const platform = yield* HostProcess.Platform;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-install-route-" });
+      const directory = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-provider-install-route-",
+      });
       const binary = platform === "win32" ? "agy-test.exe" : "agy-test";
       const executable = path.join(directory, binary);
       yield* fs.writeFileString(executable, "test");
@@ -243,7 +245,9 @@ describe("provider installation routing", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-install-route-" });
+      const directory = yield* fs.makeTempDirectoryScoped({
+        prefix: "kurambit-provider-install-route-",
+      });
       const binaryPath = path.join(directory, "missing");
       const harness = yield* makeHarness({
         settings: {

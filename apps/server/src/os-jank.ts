@@ -1,4 +1,4 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   listLoginShellCandidates,
   mergePathEntries,
@@ -6,7 +6,7 @@ import {
   readPathFromLaunchctl,
   resolveWindowsEnvironment,
   setWindowsPath,
-} from "@t3tools/shared/shell";
+} from "@kurambit/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -119,7 +119,7 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(yield* HostProcess.HomeDirectory, ".game-studio");
+    return join(yield* HostProcess.HomeDirectory, ".kurambit");
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });

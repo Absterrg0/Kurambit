@@ -3,15 +3,15 @@ import {
   AuthSettingsWriteScope,
   type EnvironmentId,
   type ProjectScript,
-  type T3ProjectFileScript,
-} from "@t3tools/contracts";
+  type KurambitProjectFileScript,
+} from "@kurambit/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { projectScriptMenuLabel } from "@t3tools/shared/projectScripts";
+} from "@kurambit/client-runtime/state/runtime";
+import { projectScriptMenuLabel } from "@kurambit/shared/projectScripts";
 import { ChevronDownIcon, DownloadIcon, PlusIcon, SettingsIcon, WrenchIcon } from "lucide-react";
 import React, { useState } from "react";
 
@@ -56,7 +56,7 @@ import {
 
 export type { NewProjectScriptInput, ProjectScriptActionResult };
 
-const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
+const NO_FILE_SCRIPTS: ReadonlyArray<KurambitProjectFileScript> = [];
 
 interface ProjectScriptsControlProps {
   displayMode?: "toolbar" | "panel";
@@ -64,7 +64,7 @@ interface ProjectScriptsControlProps {
   onRequestMenuClose?: () => void;
   environmentId: EnvironmentId;
   scripts: ReadonlyArray<ProjectScript>;
-  fileScripts?: ReadonlyArray<T3ProjectFileScript>;
+  fileScripts?: ReadonlyArray<KurambitProjectFileScript>;
   preferredScriptId?: string | null;
   onRunScript?: ((script: ProjectScript) => void) | undefined;
   onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -129,7 +129,7 @@ export default function ProjectScriptsControl({
   const submitScript = (scriptId: string | null, input: NewProjectScriptInput) =>
     scriptId === null ? onAddScript(input) : onUpdateScript(scriptId, input);
 
-  const importFileScript = async (fileScript: T3ProjectFileScript) => {
+  const importFileScript = async (fileScript: KurambitProjectFileScript) => {
     const payload: NewProjectScriptInput = {
       name: fileScript.name,
       command: fileScript.command,
@@ -156,7 +156,7 @@ export default function ProjectScriptsControl({
     <>
       {scripts.length > 0 && <MenuSeparator />}
       <MenuGroup>
-        <MenuGroupLabel>From t3.json</MenuGroupLabel>
+        <MenuGroupLabel>From kurambit.json</MenuGroupLabel>
         {importableScripts.map((fileScript) => (
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}

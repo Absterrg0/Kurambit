@@ -1,8 +1,8 @@
-import { ProviderSetupError, type CodexAuthCallbackInput } from "@t3tools/contracts";
-import { receiveCodexAuthCallback } from "@t3tools/shared/codexAuthCallback";
-import { codexAuthorizationRequest } from "@t3tools/shared/codexAuthHandoff";
-import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import { ProviderSetupError, type CodexAuthCallbackInput } from "@kurambit/contracts";
+import { receiveCodexAuthCallback } from "@kurambit/shared/codexAuthCallback";
+import { codexAuthorizationRequest } from "@kurambit/shared/codexAuthHandoff";
+import { providerAuthReturnUrl } from "@kurambit/shared/providerAuthReturnUrl";
+import { isLoopbackHost } from "@kurambit/shared/preview";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -23,7 +23,7 @@ export function subscribeCodexAuthCallback(input: CodexAuthCallbackInput) {
           codexAuthorizationRequest(input.authorizationUrl);
           const destination = providerAuthReturnUrl(input.returnUrl);
           if (!destination || !isLoopbackHost(new URL(destination).hostname))
-            throw new Error("The local sign-in receiver needs a local T3 Code return address.");
+            throw new Error("The local sign-in receiver needs a local Kurambit return address.");
           return destination;
         },
         catch: failure,

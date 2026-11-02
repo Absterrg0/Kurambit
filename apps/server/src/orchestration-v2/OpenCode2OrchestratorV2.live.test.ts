@@ -13,7 +13,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -34,12 +34,12 @@ import * as CodexInstallation from "../provider/CodexInstallation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderInstanceRegistryHydration from "../provider/ProviderInstanceRegistryHydration.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import * as OpenCode2Client from "@t3tools/provider-opencode/server/v2/OpenCode2Client";
-import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
-import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
+import * as ProviderLatestVersions from "@kurambit/provider-core/server/ProviderLatestVersions";
+import * as McpProviderSessions from "@kurambit/provider-core/server/McpProviderSessions";
+import * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
+import * as OpenCode2Client from "@kurambit/provider-opencode/server/v2/OpenCode2Client";
+import * as OpenCodeRuntime from "@kurambit/provider-opencode/server/OpenCodeRuntime";
+import * as OpenCodeServerLedger from "@kurambit/provider-opencode/server/OpenCodeServerLedger";
 import * as ServerSettings from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -48,8 +48,8 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderTurnStartServiceTestkit from "./ProviderTurnStartService.testkit.ts";
 import * as RuntimeLayer from "./runtimeLayer.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@kurambit/provider-core/server/ProviderContinuationRequests";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
@@ -100,7 +100,9 @@ const layerMcpRegistry = Layer.succeed(
 );
 
 const layerPlatformTest = Layer.merge(NodeServices.layer, Layer.empty);
-const layerServerConfig = ServerConfig.layerTest(`${ROOT}/work`, { prefix: "t3-opencode2-live-" });
+const layerServerConfig = ServerConfig.layerTest(`${ROOT}/work`, {
+  prefix: "kurambit-opencode2-live-",
+});
 const layerVcsDriverRegistry = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
   Layer.provide(layerServerConfig),
@@ -300,7 +302,10 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        yield* fs.writeFileString(path.join(ROOT, "work", "hello.txt"), "hello from t3 live\n");
+        yield* fs.writeFileString(
+          path.join(ROOT, "work", "hello.txt"),
+          "hello from kurambit live\n",
+        );
         yield* EffectWorker.runDaemonWithOptions({ concurrency: 2 }).pipe(Effect.forkScoped);
 
         // A status check starts a fresh server, which lists no models for its
@@ -685,9 +690,9 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
         yield* git("init", "-q");
         yield* git(
           "-c",
-          "user.name=t3",
+          "user.name=kurambit",
           "-c",
-          "user.email=t3@example.com",
+          "user.email=kurambit@example.com",
           "commit",
           "-q",
           "--allow-empty",
@@ -967,7 +972,7 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
   );
 
   it.live(
-    "generates a title, calls T3's MCP server, and reconciles a turn cut off by a killed server",
+    "generates a title, calls Kurambit's MCP server, and reconciles a turn cut off by a killed server",
     () =>
       Effect.gen(function* () {
         const work = `${ROOT}/work`;
@@ -1007,7 +1012,7 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
           yield* send(
             threadId,
             "restart-mcp",
-            "Call the echo_marker tool from the T3 Code MCP server with word 'kiwi', then reply with its exact output and nothing else.",
+            "Call the echo_marker tool from the Kurambit MCP server with word 'kiwi', then reply with its exact output and nothing else.",
           );
           const called = yield* waitFor(threadId, runs(1));
           assert.equal(called.runs[0]?.status, "completed");
@@ -1102,7 +1107,7 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
         assert.deepEqual(
           servers.data.map((server) => server.name),
           [],
-          "an external server gets no T3 MCP server, as with 1.x",
+          "an external server gets no Kurambit MCP server, as with 1.x",
         );
       }).pipe(Effect.provide(Layer.merge(layerLive, NodeServices.layer)), Effect.scoped),
     360_000,

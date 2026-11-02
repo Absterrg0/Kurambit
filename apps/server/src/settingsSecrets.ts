@@ -5,13 +5,13 @@ import {
   type ServerSettings,
   UsageLimitSourceConfig,
   secretSettingsFields,
-} from "@t3tools/contracts";
-import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
-import { cursorClient } from "@t3tools/provider-cursor/client";
-import { grokClient } from "@t3tools/provider-grok/client";
-import { museClient } from "@t3tools/provider-muse/client";
-import { openCodeClient } from "@t3tools/provider-opencode/client";
-import { piClient } from "@t3tools/provider-pi/client";
+} from "@kurambit/contracts";
+import { acpRegistryClient } from "@kurambit/provider-acp-registry/client";
+import { cursorClient } from "@kurambit/provider-cursor/client";
+import { grokClient } from "@kurambit/provider-grok/client";
+import { museClient } from "@kurambit/provider-muse/client";
+import { openCodeClient } from "@kurambit/provider-opencode/client";
+import { piClient } from "@kurambit/provider-pi/client";
 import {
   readSecretFieldValues,
   SOURCE_CONTROL_HOST_SECRET_FIELDS,

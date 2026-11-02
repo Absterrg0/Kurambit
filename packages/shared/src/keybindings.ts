@@ -8,7 +8,7 @@ import {
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 export interface ShortcutEventLike {
   getModifierState?: (key: "AltGraph") => boolean;

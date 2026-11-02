@@ -11,7 +11,7 @@ import {
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
-import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { assistantCitationsToPlainText } from "@kurambit/shared/assistantCitations";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import {
   isPaintOnlyThreadTimeline,
@@ -31,13 +31,13 @@ import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { useThreadTerminalActions } from "./terminal/useThreadTerminalActions";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@kurambit/client-runtime/state/projects";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
-import { isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
+} from "@kurambit/shared/orchestrationV2ThreadError";
+import type { UsageLimitSourceSnapshots } from "@kurambit/contracts";
+import { isUsageLimitsCommand } from "@kurambit/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
 import { useWorktreeSetup } from "./chat/useWorktreeSetup";
@@ -49,7 +49,7 @@ import {
   TYPE_TO_FOCUS_EDITABLE_SELECTOR,
   TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR,
 } from "./chat/composerFocusRedirect";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@kurambit/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import {
   AuthOrchestrationOperateScope,
@@ -78,16 +78,16 @@ import {
   ProviderDriverKind,
   resolveProjectProviderInstanceEnabled,
   RuntimeMode,
-} from "@t3tools/contracts";
-import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+} from "@kurambit/contracts";
+import { type EnvironmentConnectionPresentation } from "@kurambit/client-runtime/connection";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
-} from "@t3tools/client-runtime/errors";
+} from "@kurambit/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
-import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { childThreadInputsTitle } from "@t3tools/client-runtime/state/threads";
+import { isPasteAsTextShortcut } from "@kurambit/client-runtime/text-paste";
+import { effectiveSnoozed, threadWokeAt } from "@kurambit/client-runtime/state/thread-settled";
+import { childThreadInputsTitle } from "@kurambit/client-runtime/state/threads";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import {
   deriveProviderSubagentStatus,
@@ -99,13 +99,13 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
-} from "@t3tools/client-runtime/state/thread-execution";
+} from "@kurambit/client-runtime/state/thread-execution";
 import {
   resolveWorkflowOpening,
   workflowOpeningParentThreadId,
-} from "@t3tools/client-runtime/state/subagentRuntime";
-import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
-import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
+} from "@kurambit/client-runtime/state/subagentRuntime";
+import { threadSupportsProviderHandoff } from "@kurambit/client-runtime/state/thread-workflows";
+import { resolvePendingHandoff } from "@kurambit/client-runtime/handoff";
 import { HandoffRow } from "./chat/V2LifecycleRow";
 import {
   codexFeedbackMessage,
@@ -113,32 +113,32 @@ import {
   shouldShowLoadEarlierControl,
   submitCodexFeedback,
   type CodexFeedbackSubmission,
-} from "@t3tools/client-runtime/state/threads";
+} from "@kurambit/client-runtime/state/threads";
 import { resolveThreadLastVisitedAt } from "./Sidebar.logic";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@kurambit/client-runtime/environment";
 import {
   applyClaudePromptEffortPrefix,
   createModelSelection,
   formatModelSlugName,
   resolvePromptInjectedEffort,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
-import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
-import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
-import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+} from "@kurambit/shared/model";
+import { projectScriptCwd, resolveProjectScripts } from "@kurambit/shared/projectScripts";
+import { CHAT_LIST_ANCHOR_OFFSET } from "@kurambit/shared/chatList";
+import { derivePendingBackgroundWork } from "@kurambit/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { truncate } from "@t3tools/shared/String";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
-import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
+} from "@kurambit/shared/orchestrationV2ThreadError";
+import { resolveProjectSettings } from "@kurambit/shared/projectSettings";
+import { truncate } from "@kurambit/shared/String";
+import { resolveThreadReferenceCopyTarget } from "@kurambit/shared/threadReference";
+import { resolveTerminalSessionLabel } from "@kurambit/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
@@ -163,7 +163,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@kurambit/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -254,7 +254,7 @@ import { RightPanelTabs } from "./RightPanelTabs";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import { shortcutLabelForCommand } from "../keybindings";
 import { PersistentThreadTerminalDrawer } from "./PersistentThreadTerminals";
 import {
@@ -334,7 +334,7 @@ import {
   removeInlineContextReference,
   stripInlineContextReferences,
 } from "../lib/composerContextReferences";
-import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
+import { serializeLegacyContextMessage } from "@kurambit/shared/composerContextLegacySend";
 import {
   buildMessageContext,
   previewAnnotationContextLabel,
@@ -360,11 +360,11 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { threadEnvironment } from "../state/threads";
-import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import { resolveProviderSkillsForCwd } from "@kurambit/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
-import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
+import { projectCloneDisplayName, projectCloneProgressSummary } from "@kurambit/contracts";
 import {
   type EnvironmentPresentation,
   useEnvironmentProviders,
@@ -465,7 +465,7 @@ import {
   MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME,
   runMobileComposerTransition,
 } from "./chat/draftHeroTransition";
-import type { ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
+import type { ComposerDispatchMode } from "@kurambit/client-runtime/state/composer-dispatch";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   branchMismatchKey,
@@ -518,7 +518,7 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
-import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
+import { clampFileAttachmentUploadBytes } from "@kurambit/client-runtime/state/attachments";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFiles";
 import { assetEnvironment } from "../state/assets";
@@ -545,14 +545,14 @@ import {
   supportsDesktopAppUpdate,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
+import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@kurambit/shared/composerContextReferences";
 import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@kurambit/shared/codexArtifactTemplates";
 
 const TIMELINE_SCROLL_CANCEL_SENTINEL = Object.freeze({});
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
@@ -1578,7 +1578,7 @@ export default function ChatView(props: ChatViewProps) {
   const browserAvailable = isPreviewSupportedInRuntime() || activeEnvironmentServerBrowser;
   const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
     container: workspaceLayoutElement,
-    widthStorageKey: `t3code:preview-panel-width:${activeThreadKey}`,
+    widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
   });
   const activeThreadShell = useQuietThreadShell(isServerThread ? activeThreadRef : null);
   const timelineThreadError =
@@ -2856,7 +2856,7 @@ export default function ChatView(props: ChatViewProps) {
   });
   const [resumeCompactionPermanentlyDismissed, setResumeCompactionPermanentlyDismissed] =
     useLocalStorage(
-      `t3code:resume-compaction-dismissed:${environmentId}:${activeProviderInstanceId ?? "claudeAgent"}`,
+      `kurambit:resume-compaction-dismissed:${environmentId}:${activeProviderInstanceId ?? "claudeAgent"}`,
       false,
       Schema.Boolean,
     );

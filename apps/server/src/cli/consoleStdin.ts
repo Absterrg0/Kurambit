@@ -2,15 +2,15 @@
 import * as NodeFS from "node:fs";
 import * as NodeTty from "node:tty";
 
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 /**
- * Whether this process is the desktop app's `t3.cmd` running the CLI in a
+ * Whether this process is the desktop app's `kurambit.cmd` running the CLI in a
  * terminal with no stdin. The launcher runs the app's executable with
  * `ELECTRON_RUN_AS_NODE`, and Electron's Windows executable is a GUI program:
  * on start it points stdout and stderr at the parent's console but leaves
  * stdin unset, so prompts see no terminal and children such as the agent
- * `t3 triage` starts inherit nothing to read from. Input the user piped or
+ * `kurambit triage` starts inherit nothing to read from. Input the user piped or
  * redirected is a valid descriptor and is left alone, as is any run whose
  * output is not a console (the desktop backend, scripts).
  */
@@ -23,7 +23,7 @@ export function needsConsoleStdin(input: {
   return (
     input.platform === "win32" &&
     // Set only by the launcher (DesktopCliShim), never for the desktop backend.
-    input.env.T3CODE_DESKTOP_CLI_LAUNCHER === "1" &&
+    input.env.KURAMBIT_DESKTOP_CLI_LAUNCHER === "1" &&
     !input.stdinOpen &&
     input.stdoutIsConsole
   );
@@ -52,8 +52,8 @@ export function attachConsoleStdin(): number | undefined {
     stdoutIsConsole: NodeTty.isatty(1),
   });
   // The marker describes this process's own start; a server started here
-  // must not pass it on to the shells and `t3` runs it spawns.
-  delete process.env.T3CODE_DESKTOP_CLI_LAUNCHER;
+  // must not pass it on to the shells and `kurambit` runs it spawns.
+  delete process.env.KURAMBIT_DESKTOP_CLI_LAUNCHER;
   if (!needed) return undefined;
   let fd: number;
   try {

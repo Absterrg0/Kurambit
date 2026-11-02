@@ -1,11 +1,11 @@
-import { fileBasename, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { fileBasename, workspaceRelativeFilePath } from "@kurambit/shared/path";
 import {
   inlineCodeFilePathCandidate,
   isRelativeFilePath,
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkTarget,
-} from "@t3tools/shared/markdownLinks";
-import { parseFileUrlHref, splitFilePathPosition } from "@t3tools/shared/fileLinks";
+} from "@kurambit/shared/markdownLinks";
+import { parseFileUrlHref, splitFilePathPosition } from "@kurambit/shared/fileLinks";
 
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 import { isTerminalLinkActivation } from "./terminal-links";

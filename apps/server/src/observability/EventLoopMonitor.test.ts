@@ -81,7 +81,7 @@ describe("EventLoopMonitor", () => {
   it.effect("keeps each stall as one line in a capped stall log", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-event-loop-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-event-loop-" });
       const filePath = `${directory}/event-loop-stalls.ndjson`;
       yield* monitor([stalled, stalled, stalled, { ...stalled, delayMaxNs: ms(7_000) }], {
         filePath,
@@ -118,7 +118,7 @@ describe("EventLoopMonitor", () => {
     });
     return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const filePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-event-loop-" });
+      const filePath = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-event-loop-" });
       yield* monitor([stalled, stalled], { filePath, maxBytes: 1024 * 1024 });
       yield* TestClock.adjust("60 seconds");
       assert.deepStrictEqual(warnings, [

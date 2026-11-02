@@ -3,8 +3,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NetService from "@t3tools/shared/Net";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NetService from "@kurambit/shared/Net";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
@@ -57,7 +57,7 @@ function mockProcess(exit: number | PlatformError.PlatformError) {
 
 const devServerInput = {
   mode: "dev:server",
-  t3Home: "/tmp/t3code-dev-runner",
+  kurambitHome: "/tmp/kurambit-dev-runner",
   browser: undefined,
   autoBootstrapProjectFromCwd: undefined,
   logWebSocketEvents: undefined,
@@ -88,8 +88,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.sync(() => {
         assert.deepStrictEqual(getDevRunnerModeArgs("dev:desktop"), [
           "run",
-          "--filter=@t3tools/desktop",
-          "--filter=@t3tools/web",
+          "--filter=@kurambit/desktop",
+          "--filter=@kurambit/web",
           "dev",
         ]);
       }),
@@ -99,9 +99,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.sync(() => {
         assert.deepStrictEqual(getDevRunnerModeArgs("dev"), [
           "run",
-          "--filter=@t3tools/contracts",
-          "--filter=@t3tools/web",
-          "--filter=t3",
+          "--filter=@kurambit/contracts",
+          "--filter=@kurambit/web",
+          "--filter=kurambit",
           "--parallel",
           "dev",
         ]);
@@ -110,12 +110,12 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("resolveOffset", () => {
-    it.effect("uses explicit T3CODE_PORT_OFFSET when provided", () =>
+    it.effect("uses explicit KURAMBIT_PORT_OFFSET when provided", () =>
       Effect.gen(function* () {
         const result = yield* resolveOffset({ portOffset: 12, devInstance: undefined });
         assert.deepStrictEqual(result, {
           offset: 12,
-          source: "T3CODE_PORT_OFFSET=12",
+          source: "KURAMBIT_PORT_OFFSET=12",
         });
       }),
     );
@@ -138,7 +138,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         );
 
         assert.equal(error._tag, "DevRunnerInvalidPortOffsetError");
-        assert.equal(error.configKey, "T3CODE_PORT_OFFSET");
+        assert.equal(error.configKey, "KURAMBIT_PORT_OFFSET");
         assert.equal(error.portOffset, -1);
         assert.equal(error.minimum, 0);
         assert.ok(!("cause" in error));
@@ -150,10 +150,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
     it.effect("forwards the reusable auth token to web dev and removes it for desktop", () =>
       Effect.gen(function* () {
         const input = {
-          baseEnv: { T3CODE_DEV_AUTH_TOKEN: "reusable-dev-auth-token-that-is-long-enough" },
+          baseEnv: { KURAMBIT_DEV_AUTH_TOKEN: "reusable-dev-auth-token-that-is-long-enough" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -164,8 +164,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const web = yield* createDevRunnerEnv({ ...input, mode: "dev" });
         const desktop = yield* createDevRunnerEnv({ ...input, mode: "dev:desktop" });
 
-        assert.equal(web.T3CODE_DEV_AUTH_TOKEN, input.baseEnv.T3CODE_DEV_AUTH_TOKEN);
-        assert.equal(desktop.T3CODE_DEV_AUTH_TOKEN, undefined);
+        assert.equal(web.KURAMBIT_DEV_AUTH_TOKEN, input.baseEnv.KURAMBIT_DEV_AUTH_TOKEN);
+        assert.equal(desktop.KURAMBIT_DEV_AUTH_TOKEN, undefined);
       }),
     );
     it.effect("leaves the shared home implicit and disables browser auto-open", () =>
@@ -175,7 +175,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -184,8 +184,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.GAME_STUDIO_HOME, undefined);
-        assert.equal(env.T3CODE_NO_BROWSER, "1");
+        assert.equal(env.KURAMBIT_HOME, undefined);
+        assert.equal(env.KURAMBIT_NO_BROWSER, "1");
       }),
     );
 
@@ -196,7 +196,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: true,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -205,7 +205,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_NO_BROWSER, "0");
+        assert.equal(env.KURAMBIT_NO_BROWSER, "0");
       }),
     );
 
@@ -213,10 +213,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
-          baseEnv: { T3CODE_NO_BROWSER: "0" },
+          baseEnv: { KURAMBIT_NO_BROWSER: "0" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: false,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -225,7 +225,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_NO_BROWSER, "1");
+        assert.equal(env.KURAMBIT_NO_BROWSER, "1");
       }),
     );
 
@@ -237,7 +237,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: "/tmp/custom-t3",
+          kurambitHome: "/tmp/custom-kurambit",
           browser: false,
           autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: true,
@@ -246,14 +246,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: new URL("http://localhost:7331"),
         });
 
-        assert.equal(env.GAME_STUDIO_HOME, path.resolve("/tmp/custom-t3"));
-        assert.equal(env.T3CODE_PORT, "4222");
+        assert.equal(env.KURAMBIT_HOME, path.resolve("/tmp/custom-kurambit"));
+        assert.equal(env.KURAMBIT_PORT, "4222");
         assert.equal(env.VITE_HTTP_URL, "http://localhost:4222");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
-        assert.equal(env.T3CODE_NO_BROWSER, "1");
-        assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
-        assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
-        assert.equal(env.T3CODE_HOST, "0.0.0.0");
+        assert.equal(env.KURAMBIT_NO_BROWSER, "1");
+        assert.equal(env.KURAMBIT_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
+        assert.equal(env.KURAMBIT_LOG_WS_EVENTS, "1");
+        assert.equal(env.KURAMBIT_HOST, "0.0.0.0");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
     );
@@ -263,12 +263,12 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {
-            T3_SERVICE_LAUNCHER_CONTEXT: '{"childVersion":"9.9.9"}',
-            T3_BOOT_SERVICE_UNIT: "t3code.service",
+            KURAMBIT_SERVICE_LAUNCHER_CONTEXT: '{"childVersion":"9.9.9"}',
+            KURAMBIT_BOOT_SERVICE_UNIT: "kurambit.service",
           },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -277,8 +277,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3_SERVICE_LAUNCHER_CONTEXT, undefined);
-        assert.equal(env.T3_BOOT_SERVICE_UNIT, undefined);
+        assert.equal(env.KURAMBIT_SERVICE_LAUNCHER_CONTEXT, undefined);
+        assert.equal(env.KURAMBIT_BOOT_SERVICE_UNIT, undefined);
       }),
     );
 
@@ -287,11 +287,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {
-            T3CODE_LOG_WS_EVENTS: "keep-me-out",
+            KURAMBIT_LOG_WS_EVENTS: "keep-me-out",
           },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -300,8 +300,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_MODE, "web");
-        assert.equal(env.T3CODE_LOG_WS_EVENTS, undefined);
+        assert.equal(env.KURAMBIT_MODE, "web");
+        assert.equal(env.KURAMBIT_LOG_WS_EVENTS, undefined);
       }),
     );
 
@@ -310,11 +310,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {
-            T3CODE_LOG_WS_EVENTS: "1",
+            KURAMBIT_LOG_WS_EVENTS: "1",
           },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
@@ -323,11 +323,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_LOG_WS_EVENTS, "0");
+        assert.equal(env.KURAMBIT_LOG_WS_EVENTS, "0");
       }),
     );
 
-    it.effect("uses custom t3Home when provided", () =>
+    it.effect("uses custom kurambitHome when provided", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
@@ -335,7 +335,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: "/tmp/my-t3",
+          kurambitHome: "/tmp/my-kurambit",
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -344,7 +344,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.GAME_STUDIO_HOME, path.resolve("/tmp/my-t3"));
+        assert.equal(env.KURAMBIT_HOME, path.resolve("/tmp/my-kurambit"));
       }),
     );
 
@@ -354,16 +354,16 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         const env = yield* createDevRunnerEnv({
           mode: "dev:desktop",
           baseEnv: {
-            T3CODE_PORT: "13773",
-            T3CODE_MODE: "web",
-            T3CODE_NO_BROWSER: "0",
-            T3CODE_HOST: "0.0.0.0",
+            KURAMBIT_PORT: "13773",
+            KURAMBIT_MODE: "web",
+            KURAMBIT_NO_BROWSER: "0",
+            KURAMBIT_HOST: "0.0.0.0",
             VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
             VITE_WS_URL: "ws://localhost:13773",
           },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: "/tmp/my-t3",
+          kurambitHome: "/tmp/my-kurambit",
           browser: true,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -372,15 +372,15 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.GAME_STUDIO_HOME, path.resolve("/tmp/my-t3"));
+        assert.equal(env.KURAMBIT_HOME, path.resolve("/tmp/my-kurambit"));
         assert.equal(env.PORT, "5733");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://127.0.0.1:5733");
         assert.equal(env.HOST, "127.0.0.1");
-        assert.equal(env.T3CODE_PORT, "4222");
+        assert.equal(env.KURAMBIT_PORT, "4222");
         assert.equal(env.VITE_HTTP_URL, "http://127.0.0.1:4222");
-        assert.equal(env.T3CODE_MODE, undefined);
-        assert.equal(env.T3CODE_NO_BROWSER, undefined);
-        assert.equal(env.T3CODE_HOST, undefined);
+        assert.equal(env.KURAMBIT_MODE, undefined);
+        assert.equal(env.KURAMBIT_NO_BROWSER, undefined);
+        assert.equal(env.KURAMBIT_HOST, undefined);
         assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:4222");
       }),
     );
@@ -392,7 +392,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -401,7 +401,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_PORT, "13773");
+        assert.equal(env.KURAMBIT_PORT, "13773");
         assert.equal(env.PORT, "5733");
       }),
     );
@@ -418,7 +418,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             },
             serverOffset: 0,
             webOffset: 0,
-            t3Home: undefined,
+            kurambitHome: undefined,
             browser: undefined,
             autoBootstrapProjectFromCwd: undefined,
             logWebSocketEvents: undefined,
@@ -429,11 +429,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
           assert.equal(env.VITE_HTTP_URL, undefined);
           assert.equal(env.VITE_WS_URL, undefined);
-          assert.equal(env.T3CODE_PORT, "13773");
+          assert.equal(env.KURAMBIT_PORT, "13773");
           // Deleting the keys is not sufficient — vite.config.ts merges
           // `.env`/`.env.local` underneath this env and would revive them, so
           // the intent has to be stated positively.
-          assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, "1");
+          assert.equal(env.KURAMBIT_SINGLE_ORIGIN_DEV, "1");
         }),
     );
 
@@ -441,10 +441,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev:desktop",
-          baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1" },
+          baseEnv: { KURAMBIT_SINGLE_ORIGIN_DEV: "1" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -453,7 +453,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, undefined);
+        assert.equal(env.KURAMBIT_SINGLE_ORIGIN_DEV, undefined);
         assert.equal(env.VITE_HTTP_URL, "http://127.0.0.1:13773");
       }),
     );
@@ -462,10 +462,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev:server",
-          baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1" },
+          baseEnv: { KURAMBIT_SINGLE_ORIGIN_DEV: "1" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -474,7 +474,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, undefined);
+        assert.equal(env.KURAMBIT_SINGLE_ORIGIN_DEV, undefined);
         assert.equal(env.VITE_HTTP_URL, "http://localhost:13773");
       }),
     );
@@ -486,7 +486,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: { HOST: "0.0.0.0" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -506,7 +506,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: { HOST: "0.0.0.0" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -516,7 +516,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.equal(env.HOST, undefined);
-        assert.equal(env.T3CODE_HOST, "0.0.0.0");
+        assert.equal(env.KURAMBIT_HOST, "0.0.0.0");
       }),
     );
 
@@ -527,7 +527,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: { HOST: "0.0.0.0" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -547,7 +547,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -835,7 +835,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Layer.merge(
               netServiceLayer,
               ConfigProvider.layer(
-                ConfigProvider.fromEnv({ env: { T3CODE_PORT_OFFSET: "not-an-integer" } }),
+                ConfigProvider.fromEnv({ env: { KURAMBIT_PORT_OFFSET: "not-an-integer" } }),
               ),
             ),
           ),
@@ -845,7 +845,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         if (error._tag !== "DevRunnerConfigurationError") {
           assert.fail(`Unexpected error: ${error._tag}`);
         }
-        assert.deepStrictEqual(error.configKeys, ["T3CODE_PORT_OFFSET", "T3CODE_DEV_INSTANCE"]);
+        assert.deepStrictEqual(error.configKeys, ["KURAMBIT_PORT_OFFSET", "KURAMBIT_DEV_INSTANCE"]);
         assert.ok(error.cause !== undefined);
         assert.ok(!error.message.includes(String((error.cause as Error).message)));
       }),
@@ -887,14 +887,14 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     // `tailscale serve` config outlives the process, so a dry run that shared
     // would replace and then tear down whatever mapping the port already had.
-    it.effect("ignores an ambient GAME_STUDIO_HOME when no home is resolved", () =>
+    it.effect("ignores an ambient KURAMBIT_HOME when no home is resolved", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
-          baseEnv: { GAME_STUDIO_HOME: "/home/user/.t3" },
+          baseEnv: { KURAMBIT_HOME: "/home/user/.kurambit" },
           serverOffset: 0,
           webOffset: 0,
-          t3Home: undefined,
+          kurambitHome: undefined,
           browser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
@@ -903,7 +903,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.GAME_STUDIO_HOME, undefined);
+        assert.equal(env.KURAMBIT_HOME, undefined);
       }),
     );
 
@@ -1016,10 +1016,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       });
     });
 
-    describe("t3 home precedence", () => {
+    describe("kurambit home precedence", () => {
       const makeWorktree = Effect.acquireRelease(
         Effect.sync(() => {
-          const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-devrunner-"));
+          const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-devrunner-"));
           NodeFS.writeFileSync(
             NodePath.join(root, ".git"),
             "gitdir: /elsewhere/.git/worktrees/x\n",
@@ -1030,10 +1030,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       );
 
       const spawnedHome = (input: {
-        readonly t3Home: string | undefined;
+        readonly kurambitHome: string | undefined;
         readonly cwd: string;
         readonly ambientHome: string | undefined;
-        readonly upstreamHome?: string;
       }) =>
         Effect.gen(function* () {
           let captured: Record<string, string | undefined> | undefined;
@@ -1049,17 +1048,19 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             }),
           );
 
-          yield* runDevRunnerWithInput({ ...devServerInput, t3Home: input.t3Home }).pipe(
+          yield* runDevRunnerWithInput({
+            ...devServerInput,
+            kurambitHome: input.kurambitHome,
+          }).pipe(
             Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
             Effect.provideService(HostProcess.Platform, "linux"),
             Effect.provideService(HostProcess.WorkingDirectory, input.cwd),
             Effect.provideService(HostProcess.Environment, {
-              GAME_STUDIO_HOME: input.ambientHome,
-              T3CODE_HOME: input.upstreamHome,
+              KURAMBIT_HOME: input.ambientHome,
             }),
           );
 
-          return captured?.GAME_STUDIO_HOME;
+          return captured?.KURAMBIT_HOME;
         });
 
       it.effect("prefers an explicit --home-dir over the worktree default", () =>
@@ -1067,9 +1068,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           const path = yield* Path.Path;
           const root = yield* makeWorktree;
           const home = yield* spawnedHome({
-            t3Home: "/tmp/explicit-home",
+            kurambitHome: "/tmp/explicit-home",
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.kurambit",
           });
           assert.equal(home, path.resolve("/tmp/explicit-home"));
         }).pipe(Effect.scoped),
@@ -1080,55 +1081,43 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           const path = yield* Path.Path;
           const root = yield* makeWorktree;
           const home = yield* spawnedHome({
-            t3Home: "   ",
+            kurambitHome: "   ",
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.kurambit",
           });
-          assert.equal(home, path.join(path.resolve(root), ".t3"));
+          assert.equal(home, path.join(path.resolve(root), ".kurambit"));
         }).pipe(Effect.scoped),
       );
 
-      it.effect("prefers the worktree .t3 over an ambient GAME_STUDIO_HOME", () =>
+      it.effect("prefers the worktree .kurambit over an ambient KURAMBIT_HOME", () =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const root = yield* makeWorktree;
           const home = yield* spawnedHome({
-            t3Home: undefined,
+            kurambitHome: undefined,
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.kurambit",
           });
-          assert.equal(home, path.join(path.resolve(root), ".t3"));
+          assert.equal(home, path.join(path.resolve(root), ".kurambit"));
         }).pipe(Effect.scoped),
       );
 
-      it.effect("uses GAME_STUDIO_HOME outside a worktree", () =>
+      it.effect("uses KURAMBIT_HOME outside a worktree", () =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const home = yield* spawnedHome({
-            t3Home: undefined,
+            kurambitHome: undefined,
             cwd: "/",
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.kurambit",
           });
-          assert.equal(home, path.resolve("/home/user/.t3"));
-        }),
-      );
-
-      it.effect("ignores the upstream home outside a worktree", () =>
-        Effect.gen(function* () {
-          const home = yield* spawnedHome({
-            t3Home: undefined,
-            cwd: "/",
-            ambientHome: undefined,
-            upstreamHome: "/live-t3",
-          });
-          assert.equal(home, undefined);
+          assert.equal(home, path.resolve("/home/user/.kurambit"));
         }),
       );
 
       it.effect("leaves the home implicit with no worktree and no ambient value", () =>
         Effect.gen(function* () {
           const home = yield* spawnedHome({
-            t3Home: undefined,
+            kurambitHome: undefined,
             cwd: "/",
             ambientHome: undefined,
           });

@@ -4,15 +4,15 @@ import type {
   VcsRef,
   ProjectId,
   WorktreeSubmodules,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
-import { sanitizeNewRefName } from "@t3tools/shared/git";
+import { sanitizeNewRefName } from "@kurambit/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   sanitizeNewRefName,
-} from "@t3tools/shared/git";
+} from "@kurambit/shared/git";
 
 export interface EnvironmentOption {
   environmentId: EnvironmentId;

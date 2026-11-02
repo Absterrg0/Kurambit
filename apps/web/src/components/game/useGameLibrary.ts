@@ -1,4 +1,4 @@
-import type { EnvironmentId, GameSummary } from "@t3tools/contracts";
+import type { EnvironmentId, GameSummary } from "@kurambit/contracts";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";

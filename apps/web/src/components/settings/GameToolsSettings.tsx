@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import type { EnvironmentId, GameToolchainStatus } from "@t3tools/contracts";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import type { EnvironmentId, GameToolchainStatus } from "@kurambit/contracts";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { gameEnvironment } from "../../state/game";
 import { serverEnvironment } from "../../state/server";

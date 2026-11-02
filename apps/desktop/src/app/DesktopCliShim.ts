@@ -10,7 +10,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // AppImage itself instead of pointing into it.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by Game Studio: runs the desktop app's bundled t3 CLI.";
+export const MARKER = "Written by Kurambit: runs the desktop app's bundled kurambit CLI.";
 
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
 
@@ -19,7 +19,7 @@ const shellWord = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const cmdText = (value: string) => value.replaceAll("%", "%%");
 const cmdWord = (value: string) => `"${cmdText(value)}"`;
 
-const MOVED = "Game Studio has moved or been removed. Open the app once to update this command.";
+const MOVED = "Kurambit has moved or been removed. Open the app once to update this command.";
 
 export type CliShimTarget =
   | { readonly kind: "appimage"; readonly appImage: string; readonly executableName: string }
@@ -29,20 +29,20 @@ export type CliShimTarget =
 /**
  * Electron runs the server as plain Node with `ELECTRON_RUN_AS_NODE`, which
  * reads the entry from inside the asar archive. The launcher's own path and the
- * app's T3 home are written in, so the command the server shows is absolute and
+ * app's Kurambit home are written in, so the command the server shows is absolute and
  * `sudo`, which clears the environment, still runs against this install's home.
  */
 export const renderCliShim = (input: {
   readonly target: CliShimTarget;
   readonly shimPath: string;
-  readonly t3Home: string;
+  readonly kurambitHome: string;
 }) => {
   const { target } = input;
   if (target.kind === "windows") {
-    const utf8 = [target.executable, target.entry, input.shimPath, input.t3Home].some((value) =>
-      [...value].some((character) => character.codePointAt(0)! > 0x7f),
+    const utf8 = [target.executable, target.entry, input.shimPath, input.kurambitHome].some(
+      (value) => [...value].some((character) => character.codePointAt(0)! > 0x7f),
     );
-    const restore = utf8 ? ["chcp %t3_codepage% >nul"] : [];
+    const restore = utf8 ? ["chcp %kurambitpage% >nul"] : [];
     return [
       "@echo off",
       `rem ${MARKER}`,
@@ -53,15 +53,15 @@ export const renderCliShim = (input: {
       // for the common all-ASCII install.
       ...(utf8
         ? [
-            `for /f "tokens=2 delims=:." %%c in ('chcp') do set "t3_codepage=%%c"`,
+            `for /f "tokens=2 delims=:." %%c in ('chcp') do set "kurambitpage=%%c"`,
             "chcp 65001 >nul",
           ]
         : []),
-      `set "T3CODE_CLI_PATH=${cmdText(input.shimPath)}"`,
-      `if not defined GAME_STUDIO_HOME set "GAME_STUDIO_HOME=${cmdText(input.t3Home)}"`,
+      `set "KURAMBIT_CLI_PATH=${cmdText(input.shimPath)}"`,
+      `if not defined KURAMBIT_HOME set "KURAMBIT_HOME=${cmdText(input.kurambitHome)}"`,
       'set "ELECTRON_RUN_AS_NODE=1"',
       // Electron's Windows executable starts without stdin; this tells the CLI to reopen the console.
-      'set "T3CODE_DESKTOP_CLI_LAUNCHER=1"',
+      'set "KURAMBIT_DESKTOP_CLI_LAUNCHER=1"',
       // A goto, not a parenthesized block: "Program Files (x86)" would close the block early.
       `if exist ${cmdWord(target.executable)} goto run`,
       ...restore,
@@ -69,18 +69,18 @@ export const renderCliShim = (input: {
       "exit /b 127",
       ":run",
       `${cmdWord(target.executable)} ${cmdWord(target.entry)} %*`,
-      'set "t3_exit=%ERRORLEVEL%"',
+      'set "kurambit_exit=%ERRORLEVEL%"',
       ...restore,
-      "exit /b %t3_exit%",
+      "exit /b %kurambit_exit%",
       "",
     ].join("\r\n");
   }
   const header = [
     "#!/bin/sh",
     `# ${MARKER}`,
-    `export T3CODE_CLI_PATH=${shellWord(input.shimPath)}`,
-    `home=${shellWord(input.t3Home)}`,
-    'export GAME_STUDIO_HOME="${GAME_STUDIO_HOME:-$home}"',
+    `export KURAMBIT_CLI_PATH=${shellWord(input.shimPath)}`,
+    `home=${shellWord(input.kurambitHome)}`,
+    'export KURAMBIT_HOME="${KURAMBIT_HOME:-$home}"',
     "export ELECTRON_RUN_AS_NODE=1",
     `app=${shellWord(target.kind === "appimage" ? target.appImage : target.executable)}`,
     'if [ ! -x "$app" ]; then',
@@ -125,7 +125,7 @@ export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment[
   environment.path.join(
     environment.baseDir,
     "bin",
-    environment.platform === "win32" ? "t3.cmd" : "t3",
+    environment.platform === "win32" ? "kurambit.cmd" : "kurambit",
   );
 
 export const install = Effect.gen(function* () {
@@ -146,12 +146,12 @@ export const install = Effect.gen(function* () {
         }),
         onNone: () => ({ kind: "direct" as const, executable: process.execPath, entry }),
       });
-  const content = renderCliShim({ target, shimPath, t3Home: environment.baseDir });
+  const content = renderCliShim({ target, shimPath, kurambitHome: environment.baseDir });
 
   return yield* Effect.gen(function* () {
     const existing = yield* fs.readFileString(shimPath).pipe(Effect.option);
     if (Option.isSome(existing) && !existing.value.includes(MARKER)) {
-      yield* logWarning("leaving a t3 launcher the app did not write", { shimPath });
+      yield* logWarning("leaving a kurambit launcher the app did not write", { shimPath });
       return Option.none<string>();
     }
     if (Option.getOrUndefined(existing) !== content) {
@@ -159,14 +159,15 @@ export const install = Effect.gen(function* () {
       const staging = `${shimPath}.${process.pid}.tmp`;
       yield* fs.writeFileString(staging, content, { mode: 0o755 });
       yield* fs.rename(staging, shimPath);
-      yield* logInfo("installed t3 launcher", { shimPath });
+      yield* logInfo("installed kurambit launcher", { shimPath });
     }
     return Option.some(shimPath);
   }).pipe(
     Effect.catchCause((cause) =>
-      logWarning("could not install t3 launcher", { shimPath, cause: Cause.pretty(cause) }).pipe(
-        Effect.as(Option.none<string>()),
-      ),
+      logWarning("could not install kurambit launcher", {
+        shimPath,
+        cause: Cause.pretty(cause),
+      }).pipe(Effect.as(Option.none<string>())),
     ),
     Effect.withSpan("desktop.cliShim.install"),
   );

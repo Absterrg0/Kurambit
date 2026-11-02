@@ -6,7 +6,7 @@ import {
   type GameCreateInput,
   type GameEngineId,
   type GameManifest,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 /** The first message of a game's thread. The brief lives in BRIEF.md. */
 export function initialGamePrompt(input: GameCreateInput): string {
@@ -56,13 +56,13 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const engine = createEngine(input);
   const projectLine =
     engine === "three"
-      ? `# Game Studio project
+      ? `# Kurambit project
 
 Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `
-      : `# Game Studio project
+      : `# Kurambit project
 
 Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the project.
 

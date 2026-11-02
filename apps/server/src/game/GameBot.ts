@@ -24,7 +24,7 @@ import {
   type GameBotRunResult,
   type GameBotViewInput,
   type GameBotViewResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { prepareNativeUserIsolation, type NativeUserIsolation } from "./gameNativeUserDir.ts";
@@ -249,7 +249,7 @@ export class GameBot extends Context.Service<
     /** Stop one game's live bot session by root; game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
->()("t3/game/GameBot") {}
+>()("kurambit/game/GameBot") {}
 
 interface Session {
   readonly root: string;
@@ -2499,7 +2499,7 @@ const make = Effect.gen(function* () {
       const godot = isWeb ? null : yield* tools.executable("godot");
       const chrome = isWeb ? yield* requireChromium("Bot run", root) : null;
       const ffmpeg = yield* Effect.promise(() =>
-        findExecutable("ffmpeg", { pathEnv, override: process.env.GAME_STUDIO_FFMPEG }),
+        findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
       if (ffmpeg === null)
         return yield* opError(
@@ -2511,7 +2511,7 @@ const make = Effect.gen(function* () {
       const xvfb = isWeb
         ? null
         : yield* Effect.promise(() =>
-            findExecutable("Xvfb", { pathEnv, override: process.env.GAME_STUDIO_XVFB }),
+            findExecutable("Xvfb", { pathEnv, override: process.env.KURAMBIT_XVFB }),
           );
       if (xvfb === null && !isWeb)
         return yield* opError(

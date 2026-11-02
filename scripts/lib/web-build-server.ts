@@ -51,7 +51,7 @@ export const serveWebBuild = async (
 /** The pinned headless browser the studio installs under its checkout. */
 export const defaultHeadlessBrowser = async (): Promise<string> => {
   const checkout = NodePath.resolve(NodeURL.fileURLToPath(new URL("../..", import.meta.url)));
-  const root = NodePath.join(checkout, ".t3/tools/chrome-headless-shell");
+  const root = NodePath.join(checkout, ".kurambit/tools/chrome-headless-shell");
   const platforms = await NodeFSP.readdir(root).catch(() => []);
   for (const platform of platforms) {
     const versions = await NodeFSP.readdir(NodePath.join(root, platform)).catch(() => []);

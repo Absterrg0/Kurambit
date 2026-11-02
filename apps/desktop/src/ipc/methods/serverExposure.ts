@@ -1,4 +1,4 @@
-import { AdvertisedEndpoint, DesktopServerExposureStateSchema } from "@t3tools/contracts";
+import { AdvertisedEndpoint, DesktopServerExposureStateSchema } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 

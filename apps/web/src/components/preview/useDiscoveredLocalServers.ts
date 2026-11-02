@@ -1,7 +1,7 @@
-import type { DiscoveredLocalServer } from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import type { DiscoveredLocalServer } from "@kurambit/contracts";
+import { isLoopbackHost } from "@kurambit/shared/preview";
 
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@kurambit/contracts";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { useDiscoveredPortsState } from "~/portDiscoveryState";
 

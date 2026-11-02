@@ -127,8 +127,8 @@ impl LoadedScript {
         connection
             .call_method(
                 Some(destination.as_str()),
-                "/com/t3tools/KdeCapture",
-                Some("com.t3tools.KdeCapture"),
+                "/com/kurambit/KdeCapture",
+                Some("dev.kurambit.KdeCapture"),
                 "Reply",
                 &(value,),
             )
@@ -149,7 +149,7 @@ impl Fixture {
     pub(super) fn new() -> Self {
         // mktemp provides a private directory; no predictable paths or desktop bus env changes.
         let output = Command::new("mktemp")
-            .args(["-d", "/tmp/t3-kde-bus-XXXXXX"])
+            .args(["-d", "/tmp/kurambit-kde-bus-XXXXXX"])
             .output()
             .unwrap();
         assert!(output.status.success());

@@ -10,9 +10,9 @@ import {
   type ScopedThreadRef,
   type ThreadContextRecord,
   type ThreadId,
-} from "@t3tools/contracts";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
+} from "@kurambit/contracts";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@kurambit/shared/composerContextReferences";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useAssetUrls } from "../../assets/assetUrls";
 import {

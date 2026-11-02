@@ -5,8 +5,8 @@ import {
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { getProviderOptionDescriptors } from "@t3tools/shared/model";
+} from "@kurambit/contracts";
+import { getProviderOptionDescriptors } from "@kurambit/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 import {
   getComposerPromptInjectionState,

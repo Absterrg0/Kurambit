@@ -1,4 +1,4 @@
-import { AuthFilesystemWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { AuthFilesystemWriteScope, type EnvironmentId } from "@kurambit/contracts";
 import { createRef, useEffect, useState } from "react";
 
 import { projectEnvironment } from "~/state/projects";

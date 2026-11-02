@@ -5,11 +5,11 @@ import {
   ProjectId,
   ProviderInstanceId,
   type ServerSettings,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+import { applyServerSettingsPatch } from "@kurambit/shared/serverSettings";
 import * as Cause from "effect/Cause";
-import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
+import { resolveWorktreeCleanup } from "@kurambit/shared/projectSettings";
 
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import {
@@ -255,7 +255,7 @@ describe("scoped settings writes", () => {
     const unsupported = [
       {
         label: server.label,
-        message: "This environment does not support this setting. Update Game Studio on it.",
+        message: "This environment does not support this setting. Update Kurambit on it.",
       },
     ];
 
@@ -578,7 +578,7 @@ describe("project overrides at environment scope", () => {
   const laptop = EnvironmentId.make("laptop");
   const desk = EnvironmentId.make("desk");
   const fleet = ProjectId.make("fleet");
-  const t3 = ProjectId.make("t3");
+  const kurambit = ProjectId.make("kurambit");
   const environment = (
     environmentId: EnvironmentId,
     overrides: ServerSettings["projectSettingsOverrides"],
@@ -597,7 +597,7 @@ describe("project overrides at environment scope", () => {
       [
         environment(laptop, {
           [fleet]: { defaultAutoPull: true, defaultThreadEnvMode: "local" },
-          [t3]: { defaultThreadEnvMode: "local" },
+          [kurambit]: { defaultThreadEnvMode: "local" },
         }),
         environment(desk, { [fleet]: { defaultAutoPull: false } }),
       ],
@@ -614,12 +614,12 @@ describe("project overrides at environment scope", () => {
       [
         environment(laptop, {
           [fleet]: { defaultAutoPull: true, defaultThreadEnvMode: "local" },
-          [t3]: { defaultAutoPull: true },
+          [kurambit]: { defaultAutoPull: true },
         }),
       ],
       [
         { environmentId: laptop, projectId: fleet },
-        { environmentId: laptop, projectId: t3 },
+        { environmentId: laptop, projectId: kurambit },
       ],
       ["defaultAutoPull"],
     );
@@ -629,7 +629,10 @@ describe("project overrides at environment scope", () => {
         label: laptop,
         previous: expect.anything(),
         patch: {
-          projectSettingsOverrides: { [fleet]: { defaultThreadEnvMode: "local" }, [t3]: null },
+          projectSettingsOverrides: {
+            [fleet]: { defaultThreadEnvMode: "local" },
+            [kurambit]: null,
+          },
         },
       },
     ]);

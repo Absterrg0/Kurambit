@@ -1,11 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { HostPowerSnapshot } from "@t3tools/contracts";
+import type { HostPowerSnapshot } from "@kurambit/contracts";
 import {
   RESOURCE_MONITOR_PROTOCOL_VERSION,
   ResourceMonitorCommand,
   type ResourceMonitorHelloEvent,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -123,7 +123,7 @@ describe("NativeTelemetryClient", () => {
       const client = yield* NativeTelemetryClient.make().pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(ResourceMonitorBinary.ResourceMonitorBinary, {
-          resolve: Effect.succeed("/test/t3-resource-monitor"),
+          resolve: Effect.succeed("/test/kurambit-resource-monitor"),
         }),
       );
 
@@ -149,7 +149,7 @@ describe("NativeTelemetryClient", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          ServerConfig.layerTest(process.cwd(), { prefix: "t3-native-telemetry-test-" }),
+          ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-native-telemetry-test-" }),
           NodeCrypto.layer,
         ).pipe(Layer.provideMerge(NodeServices.layer)),
       ),

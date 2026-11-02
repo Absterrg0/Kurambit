@@ -13,7 +13,7 @@ import pkg from "./package.json" with { type: "json" };
 import {
   DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
   DEV_PROXIED_PATH_PREFIXES,
-} from "@t3tools/shared/devProxy";
+} from "@kurambit/shared/devProxy";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
@@ -26,7 +26,7 @@ Object.assign(process.env, repoEnv);
 // the absence of VITE_HTTP_URL/VITE_WS_URL: the runner deletes those keys but
 // `loadRepoEnv` merges `.env`/`.env.local` *underneath* the process env, so a
 // developer with either URL in their `.env` gets it back here.
-const isSingleOriginDev = process.env.T3CODE_SINGLE_ORIGIN_DEV === "1";
+const isSingleOriginDev = process.env.KURAMBIT_SINGLE_ORIGIN_DEV === "1";
 
 const port = Number(process.env.PORT ?? 5733);
 const explicitHost = process.env.HOST?.trim();
@@ -35,9 +35,9 @@ const configuredWsUrl = isSingleOriginDev ? undefined : process.env.VITE_WS_URL?
 const configuredHttpUrl = isSingleOriginDev ? undefined : process.env.VITE_HTTP_URL?.trim();
 const configuredAppVersion = process.env.APP_VERSION?.trim() || pkg.version;
 
-const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const sourcemapEnv = process.env.KURAMBIT_WEB_SOURCEMAP?.trim().toLowerCase();
 
-const bundledDevEnv = process.env.T3CODE_BUNDLED_DEV?.trim().toLowerCase();
+const bundledDevEnv = process.env.KURAMBIT_BUNDLED_DEV?.trim().toLowerCase();
 const bundledDev = bundledDevEnv === "1" || bundledDevEnv === "true";
 
 const buildSourcemap: boolean | "hidden" =
@@ -118,13 +118,13 @@ function resolveDevProxyTarget(
   }
 }
 
-const devProxyTarget = resolveDevProxyTarget(process.env.T3CODE_PORT, configuredWsUrl);
+const devProxyTarget = resolveDevProxyTarget(process.env.KURAMBIT_PORT, configuredWsUrl);
 
 // Brotli quality 5 keeps encode time in the hundreds of ms; the default
 // (quality 11) would trade the transfer stall for an equally long encode stall.
 function devCompressionPlugin(): Plugin {
   return {
-    name: "t3code:dev-compression",
+    name: "kurambit:dev-compression",
     apply: "serve",
     configureServer(server) {
       server.middlewares.use(
@@ -139,7 +139,7 @@ function devCompressionPlugin(): Plugin {
 // Vite rejects requests whose Host header isn't localhost, which blocks sharing
 // a dev server over Tailscale/LAN. Tailnet names are safe to allow wholesale:
 // the DNS is controlled by tailscale, so they can't be rebound by an attacker.
-const configuredAllowedHosts = (process.env.T3CODE_DEV_ALLOWED_HOSTS ?? "")
+const configuredAllowedHosts = (process.env.KURAMBIT_DEV_ALLOWED_HOSTS ?? "")
   .split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);

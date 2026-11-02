@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2DomainEvent,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -208,7 +208,9 @@ it.effect("searches on the reader worker while the writer is busy", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-thread-search-" });
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "kurambit-thread-search-",
+    });
     const layerFile = Layer.mergeAll(
       ThreadSearch.layer,
       ProjectionStore.layer,

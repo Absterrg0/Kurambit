@@ -1,5 +1,5 @@
-import type { ThreadId } from "@t3tools/contracts";
-import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
+import type { ThreadId } from "@kurambit/contracts";
+import { boundedSnapshotProjection } from "@kurambit/shared/orchestrationV2BoundedSnapshot";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

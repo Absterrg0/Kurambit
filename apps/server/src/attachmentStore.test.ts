@@ -119,7 +119,7 @@ describe("attachmentStore", () => {
 
   it("resolves attachment path by id using the extension that exists on disk", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-attachment-store-"),
     );
     try {
       const attachmentId = "thread-1-attachment";
@@ -138,7 +138,7 @@ describe("attachmentStore", () => {
 
   it("returns null when no attachment file exists for the id", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-attachment-store-"),
     );
     try {
       const resolved = resolveAttachmentPathById({
@@ -153,7 +153,7 @@ describe("attachmentStore", () => {
 
   it("resolves generic attachments without scanning the attachment directory", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-file-attachment-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-file-attachment-"),
     );
     try {
       const attachmentId = "thread-1-00000000-0000-4000-8000-000000000001-zip";
@@ -168,7 +168,7 @@ describe("attachmentStore", () => {
 
   it("plans pending attachment claims with direct filename lookups", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-claim-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-attachment-claim-"),
     );
     try {
       const uuid = "00000000-0000-4000-8000-000000000001";
@@ -197,7 +197,7 @@ describe("attachmentStore", () => {
 
   it("rejects thread-owned attachments even when thread segments collide", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-ownership-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-attachment-ownership-"),
     );
     try {
       const attachmentId = "a-b-00000000-0000-4000-8000-000000000003";
@@ -214,7 +214,7 @@ describe("attachmentStore", () => {
 
   it("removes expired pending and partial files without touching thread attachments", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-sweep-"),
+      NodePath.join(NodeOS.tmpdir(), "kurambit-attachment-sweep-"),
     );
     try {
       const now = 1_800_000_000_000;
@@ -245,7 +245,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
     const own = createAttachmentId("thread-a", "html")!;
     const other = createAttachmentId("thread-b", "html")!;
     const render = (attachmentId: string, extra = {}) => ({
-      toolName: "mcp__t3-code__html_render",
+      toolName: "mcp__kurambit__html_render",
       output: [
         {
           type: "text",
@@ -258,7 +258,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
         render(own),
         render(other),
         render(createAttachmentId("thread-a", "html")!, { isError: true }),
-        { toolName: "mcp__t3-code__html_preview", output: render(own).output },
+        { toolName: "mcp__kurambit__html_preview", output: render(own).output },
       ]),
     ).toEqual([own]);
   });
@@ -270,7 +270,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
         {
           toolName: "weather.get_weather",
           output: {
-            t3McpApp: {
+            kurambitMcpApp: {
               attachmentId: app,
               server: "weather",
               tool: "get_weather",

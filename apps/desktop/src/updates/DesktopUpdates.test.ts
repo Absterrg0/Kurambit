@@ -40,8 +40,8 @@ it.effect(
               Layer.mergeAll(
                 NodeServices.layer,
                 DesktopConfig.layerTest({
-                  T3CODE_MOCK_UPDATES: "true",
-                  T3CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
+                  KURAMBIT_MOCK_UPDATES: "true",
+                  KURAMBIT_DESKTOP_UPDATE_REPOSITORY: "Absterrg0/Kurambit",
                 }),
               ),
             ),

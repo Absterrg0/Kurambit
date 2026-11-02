@@ -1,4 +1,4 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 // @effect-diagnostics globalFetch:off -- Stream large checked artifacts directly to disk with an AbortSignal.
 // @effect-diagnostics nodeBuiltinImport:off -- This service owns the native filesystem, process, or loopback HTTP boundary.
 import * as NodeFSP from "node:fs/promises";
@@ -12,7 +12,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { GameOperationError, type GameToolchainStatus } from "@t3tools/contracts";
+import { GameOperationError, type GameToolchainStatus } from "@kurambit/contracts";
 import * as ServerSettings from "../serverSettings.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
@@ -25,7 +25,7 @@ export const UV_VERSION = "0.9.8";
 export const toolsDirectory = () =>
   NodePath.join(
     process.env.XDG_DATA_HOME || NodePath.join(NodeOS.homedir(), ".local/share"),
-    "game-studio/tools",
+    "kurambit/tools",
   );
 export const validToolVersion = (tool: "blender" | "godot" | "uv", version: string) => {
   const match = version.match(/(?:Blender\s+)?(\d+)\.(\d+)(?:\.(\d+))?/);
@@ -78,7 +78,7 @@ export class GameToolchain extends Context.Service<
     readonly verify: Effect.Effect<GameToolchainStatus, GameOperationError>;
     readonly install: Effect.Effect<GameToolchainStatus, GameOperationError>;
   }
->()("t3/game/GameToolchain") {}
+>()("kurambit/game/GameToolchain") {}
 const pythonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const isGameOperationError = Schema.is(GameOperationError);
 const make = Effect.gen(function* () {
@@ -102,10 +102,10 @@ const make = Effect.gen(function* () {
         tool === "blender" ? config.gameBlenderPath : tool === "godot" ? config.gameGodotPath : "",
         process.env[
           tool === "blender"
-            ? "GAME_STUDIO_BLENDER"
+            ? "KURAMBIT_BLENDER"
             : tool === "godot"
-              ? "GAME_STUDIO_GODOT"
-              : "GAME_STUDIO_UV"
+              ? "KURAMBIT_GODOT"
+              : "KURAMBIT_UV"
         ],
         directory,
         process.env.PATH ?? "",

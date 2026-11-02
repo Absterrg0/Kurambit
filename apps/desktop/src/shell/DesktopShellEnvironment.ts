@@ -1,4 +1,4 @@
-import { listLoginShellCandidates, setWindowsPath } from "@t3tools/shared/shell";
+import { listLoginShellCandidates, setWindowsPath } from "@kurambit/shared/shell";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -67,7 +67,7 @@ export class DesktopShellEnvironment extends Context.Service<
     // Reuses the installation result; false leaves server hydration enabled.
     readonly installIntoProcess: Effect.Effect<boolean>;
   }
->()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
+>()("@kurambit/desktop/shell/DesktopShellEnvironment") {}
 
 const LOGIN_SHELL_ENV_NAMES = [
   "PATH",
@@ -90,7 +90,7 @@ const LOGIN_SHELL_ENV_NAMES = [
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
-  "T3CODE_TELEMETRY_ENABLED",
+  "KURAMBIT_TELEMETRY_ENABLED",
   "__MISE_DIFF",
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
@@ -184,8 +184,8 @@ const knownWindowsCliDirs = (env: NodeJS.ProcessEnv): ReadonlyArray<string> => [
   ),
 ];
 
-const startMarker = (name: string) => `__T3CODE_ENV_${name}_START__`;
-const endMarker = (name: string) => `__T3CODE_ENV_${name}_END__`;
+const startMarker = (name: string) => `__KURAMBIT_ENV_${name}_START__`;
+const endMarker = (name: string) => `__KURAMBIT_ENV_${name}_END__`;
 
 const executableName = (command: string): string => command.split(/[\\/]/u).at(-1) ?? command;
 
@@ -465,7 +465,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "SSL_CERT_FILE",
       "SSL_CERT_DIR",
       "NODE_EXTRA_CA_CERTS",
-      "T3CODE_TELEMETRY_ENABLED",
+      "KURAMBIT_TELEMETRY_ENABLED",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];

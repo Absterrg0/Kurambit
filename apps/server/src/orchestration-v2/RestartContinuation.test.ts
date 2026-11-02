@@ -14,7 +14,7 @@ import {
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,7 +24,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as EventSink from "./EventSink.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 
@@ -1054,13 +1054,13 @@ it.effect("tells a turn cut mid-way about the background work it lost", () =>
   }),
 );
 
-it.effect("shows a continuation as a T3 Code notice whose detail is the prompt", () =>
+it.effect("shows a continuation as a Kurambit notice whose detail is the prompt", () =>
   Effect.gen(function* () {
     const [resumed] = yield* continuationDispatches(cutMidTurn());
     assert.deepEqual(resumed?.notification, {
       source: { kind: "system" },
       outcome: "updated",
-      summary: "T3 Code restarted and resumed this turn",
+      summary: "Kurambit restarted and resumed this turn",
       detail: "Continue where you left off.",
     });
   }),

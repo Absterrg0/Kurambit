@@ -3,9 +3,9 @@ import type {
   OrchestrationV2ThreadShell,
   OrchestrationProjectShell,
   ServerProvider,
-} from "@t3tools/contracts";
-import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
-import { fileBasename } from "@t3tools/shared/path";
+} from "@kurambit/contracts";
+import { formatModelSlugName, resolveSelectableModel } from "@kurambit/shared/model";
+import { fileBasename } from "@kurambit/shared/path";
 import { isTerminalSubagentStatus } from "./subagentRuntime.ts";
 
 export function subagentGroupSummary(

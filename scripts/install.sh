@@ -1,21 +1,21 @@
 #!/bin/sh
-# Installs an explicitly selected Game Studio CLI archive.
-# Set T3CODE_RELEASE_BASE_URL, T3CODE_VERSION, and T3CODE_INSTALL_BIN_DIR.
-# GAME_STUDIO_HOME defaults to ~/.game-studio. The internal executable is t3.
+# Installs an explicitly selected Kurambit CLI archive.
+# Set KURAMBIT_RELEASE_BASE_URL, KURAMBIT_VERSION, and KURAMBIT_INSTALL_BIN_DIR.
+# KURAMBIT_HOME defaults to ~/.kurambit. The internal executable is kurambit.
 set -eu
 
-base_url="${T3CODE_RELEASE_BASE_URL:-}"
-t3_home="${GAME_STUDIO_HOME:-$HOME/.game-studio}"
-bin_dir="${T3CODE_INSTALL_BIN_DIR:-}"
+base_url="${KURAMBIT_RELEASE_BASE_URL:-}"
+kurambit_home="${KURAMBIT_HOME:-$HOME/.kurambit}"
+bin_dir="${KURAMBIT_INSTALL_BIN_DIR:-}"
 
 fail() {
   printf '\nt3 install: %s\n' "$1" >&2
   exit 1
 }
 
-[ -n "$base_url" ] || fail "Set T3CODE_RELEASE_BASE_URL to a Game Studio release source."
-[ -n "$bin_dir" ] || fail "Set T3CODE_INSTALL_BIN_DIR to a dedicated Game Studio bin directory."
-[ -n "${T3CODE_VERSION:-}" ] || fail "Set T3CODE_VERSION to the exact Game Studio release."
+[ -n "$base_url" ] || fail "Set KURAMBIT_RELEASE_BASE_URL to a Kurambit release source."
+[ -n "$bin_dir" ] || fail "Set KURAMBIT_INSTALL_BIN_DIR to a dedicated Kurambit bin directory."
+[ -n "${KURAMBIT_VERSION:-}" ] || fail "Set KURAMBIT_VERSION to the exact Kurambit release."
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -32,7 +32,7 @@ step() {
 if "$interactive"; then
   printf '\n%s' "$bold" >&2
   printf '  %s\n' '██████████ ████████ ' >&2
-  printf '  %s\n' '    ███       ▄██▀       Game Studio' >&2
+  printf '  %s\n' '    ███       ▄██▀       Kurambit' >&2
   printf '  %s%s     %sCLI installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$reset$bold" >&2
   printf '  %s\n' '    ███    ▄     ███' >&2
   printf '  %s\n' '    ███    ███████▀ ' >&2
@@ -132,24 +132,24 @@ else
   fail "sha256sum or shasum is required"
 fi
 
-channel="${T3CODE_CHANNEL:-stable}"
-version="${T3CODE_VERSION:-}"
+channel="${KURAMBIT_CHANNEL:-stable}"
+version="${KURAMBIT_VERSION:-}"
 case "$version" in
   *-preview.*)
     printf '%s\n' \
-      "t3 ${version} is a preview build." \
+      "kurambit ${version} is a preview build." \
       "  Preview builds are cut by maintainers from unreleased branches to exercise the release" \
       "  pipeline. They can be broken, receive no fixes, and are never offered as updates." \
-      "  Set T3CODE_CHANNEL=stable (the default) for a supported build." >&2
-    if [ "$channel" != "preview" ] && [ -z "${T3CODE_VERSION:-}" ]; then
+      "  Set KURAMBIT_CHANNEL=stable (the default) for a supported build." >&2
+    if [ "$channel" != "preview" ] && [ -z "${KURAMBIT_VERSION:-}" ]; then
       fail "refusing a preview build that was not explicitly requested"
     fi
     ;;
 esac
 
-stem="t3-${version}-${platform}-${arch}"
+stem="kurambit-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
-versions_dir="${t3_home}/runtime/versions"
+versions_dir="${kurambit_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 
 if [ -f "${target_dir}/.install-complete" ] && [ "$(cat "${target_dir}/.install-complete")" = "$version" ]; then
@@ -163,12 +163,12 @@ else
   trap 'printf "\n" >&2; exit 143' TERM
 
   if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalling%s Game Studio %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
+  printf '  %sInstalling%s Kurambit %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
   step "Downloading..."
   fetch_status=0
   fetch "${base_url}/v${version}/SHA256SUMS" "${staging}/SHA256SUMS" || fetch_status=$?
   if [ "$fetch_status" -eq 44 ]; then
-    fail "t3 ${version} has no release archive for ${platform}-${arch}; releases before the self-contained CLI can only be installed with \`npm install -g t3@${version}\`"
+    fail "kurambit ${version} has no release archive for ${platform}-${arch}; releases before the self-contained CLI can only be installed with \`npm install -g kurambit@${version}\`"
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
@@ -180,10 +180,10 @@ else
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
-  step "Extracting Game Studio..."
+  step "Extracting Kurambit..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
-  "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
+  "${staging}/kurambit" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
 
   rm -rf "$target_dir"
@@ -191,11 +191,11 @@ else
   trap - EXIT
 fi
 
-step "Setting up the t3 command..."
+step "Setting up the kurambit command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
+ln -sfn "${target_dir}/kurambit" "${bin_dir}/kurambit"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
-printf '  %sInstalled Game Studio %s%s\n\n' "$green" "$version" "$reset" >&2
+printf '  %sInstalled Kurambit %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
   *":${bin_dir}:"*) printf '  Run %st3%s to get started.\n\n' "$bold" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset" ;;

@@ -64,7 +64,7 @@ import {
   type GameSetSecretInput,
   type GameSetSecretResult,
   type GameSecretsStatusResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameExploreNative from "./gameExploreNative.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameBlender from "./GameBlender.ts";
@@ -307,7 +307,7 @@ export class GameService extends Context.Service<
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
   }
->()("t3/game/GameService") {}
+>()("kurambit/game/GameService") {}
 const isGameOperationError = Schema.is(GameOperationError);
 
 /** The build Play serves, written at each Web export. */

@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { OrchestrationV2TurnItem, ProviderReplayTranscript } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem, ProviderReplayTranscript } from "@kurambit/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import {
@@ -76,7 +76,7 @@ export function assertToolCallReadOnlyOnRequestGrokOutput(
     };
     return frame.method === "session/request_permission" ? [frame.params?.toolCall?.kind] : [];
   });
-  assert.deepEqual(permissionKinds, ["edit"], "Grok must ask T3 before its own write");
+  assert.deepEqual(permissionKinds, ["edit"], "Grok must ask Kurambit before its own write");
 
   const approval = projectionFor(result, transcript.scenario).turnItems.find(
     (item) => item.type === "approval_request",

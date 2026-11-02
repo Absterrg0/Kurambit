@@ -15,8 +15,8 @@ import {
   type OrchestrationV2ThreadShell,
   type ServerSettings as ContractServerSettings,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+} from "@kurambit/contracts";
+import { applyServerSettingsPatch } from "@kurambit/shared/serverSettings";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

@@ -4,14 +4,14 @@ import type {
   ProviderInstanceId,
   ServerConfig,
   ServerProvider,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+} from "@kurambit/contracts";
+import { scopeThreadRef } from "@kurambit/client-runtime/environment";
 import {
   AuthTerminalOperateScope,
   defaultInstanceIdForDriver,
   ProviderDriverKind,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import { ArrowRightIcon, CheckIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -151,9 +151,9 @@ export function WelcomeWizard({
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
         <WizardHeader
-          title="Set up Game Studio"
+          title="Set up Kurambit"
           identity={
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="Game Studio">
+            <div className="flex items-baseline gap-1.5" role="img" aria-label="Kurambit">
               <span className="text-2xl font-medium tracking-tight">Game</span>
               <span className="text-2xl font-medium tracking-tight text-muted-foreground">
                 Studio
@@ -223,7 +223,7 @@ function ConnectionStep({
   return (
     <StepShell
       title="Create games on this computer"
-      description="Game Studio runs your agents and game tools locally."
+      description="Kurambit runs your agents and game tools locally."
     >
       <Button disabled={!primary || primary.connection.phase !== "connected"} onClick={onContinue}>
         Continue

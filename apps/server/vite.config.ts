@@ -23,7 +23,7 @@ const cliBuildChannel = /^[^-+]+-(?:nightly|preview)\./.test(packageJson.version
 // step refuses multi-chunk output and counts the sourcemap as a chunk, and the
 // executable needs a host Node that supports `--build-sea` (25.7+), so this is
 // a separate mode rather than a second entry in the default build.
-const packExecutable = process.env.T3CODE_PACK_EXE === "1";
+const packExecutable = process.env.KURAMBIT_PACK_EXE === "1";
 const SEA_NODE_VERSION = "26.8.2";
 const SEA_TARGETS = {
   "darwin-arm64": { platform: "darwin", arch: "arm64" },
@@ -33,10 +33,10 @@ const SEA_TARGETS = {
   "win-arm64": { platform: "win", arch: "arm64" },
   "win-x64": { platform: "win", arch: "x64" },
 } as const;
-const packExecutableTarget = process.env.T3CODE_PACK_EXE_TARGET?.trim();
+const packExecutableTarget = process.env.KURAMBIT_PACK_EXE_TARGET?.trim();
 if (packExecutableTarget && !Object.hasOwn(SEA_TARGETS, packExecutableTarget)) {
   throw new Error(
-    `T3CODE_PACK_EXE_TARGET must be one of ${Object.keys(SEA_TARGETS).join(", ")}, got "${packExecutableTarget}".`,
+    `KURAMBIT_PACK_EXE_TARGET must be one of ${Object.keys(SEA_TARGETS).join(", ")}, got "${packExecutableTarget}".`,
   );
 }
 const packExecutableTargets = packExecutableTarget
@@ -55,7 +55,7 @@ export default mergeConfig(
       tasks: {
         build: {
           command: "node scripts/cli.ts build",
-          dependsOn: ["@t3tools/web#build"],
+          dependsOn: ["@kurambit/web#build"],
           cache: false,
         },
       },
@@ -70,7 +70,7 @@ export default mergeConfig(
       ...(packExecutable
         ? {
             exe: {
-              fileName: "t3",
+              fileName: "kurambit",
               outDir: "dist-exe",
               ...(packExecutableTargets ? { targets: packExecutableTargets } : {}),
               // Node's SEA docs: `import()` does not work when useCodeCache is
@@ -92,7 +92,7 @@ export default mergeConfig(
         js: "#!/usr/bin/env node\n",
       },
       define: {
-        __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
+        __KURAMBIT_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
       },
     },
     test: {

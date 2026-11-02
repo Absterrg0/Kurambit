@@ -17,8 +17,8 @@ import {
   VcsProcessSpawnError,
   VcsProcessStdinWriteError,
   VcsProcessTimeoutError,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 import * as ProcessRunner from "../processRunner.ts";
 
@@ -53,7 +53,7 @@ export class VcsProcess extends Context.Service<
   {
     readonly run: (input: VcsProcessInput) => Effect.Effect<VcsProcessOutput, VcsError>;
   }
->()("t3/vcs/VcsProcess") {}
+>()("kurambit/vcs/VcsProcess") {}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -105,7 +105,7 @@ export const gitConfigEnv = (
  * Git otherwise opens any folder holding `HEAD`, `objects/` and `refs/` as a
  * bare repository and applies its `config`, including commands such as
  * `core.fsmonitor`. Files saved in a project or checked out from a clone can
- * form one, so git started by T3 (or by gh and friends) only opens a bare
+ * form one, so git started by Kurambit (or by gh and friends) only opens a bare
  * repository named with `--git-dir` or `GIT_DIR`. Git before 2.38 ignores it.
  */
 export const explicitBareRepositoryEnv = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) =>

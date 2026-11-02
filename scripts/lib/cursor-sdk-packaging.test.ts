@@ -63,7 +63,7 @@ async function stagePackage(name: string, from: string, destination: string): Pr
 }
 
 it("loads packaged Cursor catalog chunks without credentials or checkout dependencies", async () => {
-  const scratch = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-cursor-package-"));
+  const scratch = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kurambit-cursor-package-"));
   try {
     for (let parent = NodePath.dirname(scratch); ; parent = NodePath.dirname(parent)) {
       assert.isFalse(NodeFS.existsSync(NodePath.join(parent, "node_modules")));

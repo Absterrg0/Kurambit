@@ -1,5 +1,5 @@
-import { HTML_RENDER_DEFAULT_FONTS, type HtmlRenderTheme } from "@t3tools/shared/htmlRender";
-import { BUILT_IN_THEME_IDS } from "@t3tools/shared/themePalettes";
+import { HTML_RENDER_DEFAULT_FONTS, type HtmlRenderTheme } from "@kurambit/shared/htmlRender";
+import { BUILT_IN_THEME_IDS } from "@kurambit/shared/themePalettes";
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";

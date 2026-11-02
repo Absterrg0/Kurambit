@@ -1,11 +1,11 @@
-import { ProjectId, type ProjectScript } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ProjectId, type ProjectScript } from "@kurambit/contracts";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
   settleProjectScript,
   setupProjectScript,
-} from "@t3tools/shared/projectScripts";
+} from "@kurambit/shared/projectScripts";
 
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -111,14 +111,14 @@ export class ProjectSetupScriptRunner extends Context.Service<
       input: ProjectSetupScriptRunnerInput,
     ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
   }
->()("t3/project/ProjectSetupScriptRunner") {}
+>()("kurambit/project/ProjectSetupScriptRunner") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 /**
  * Each run gets its own random token so script output cannot spoof completion, and the sentinel
  * pattern is built per run from it.
  */
-const COMPLETION_SENTINEL_PREFIX = "__T3_SETUP_DONE__";
+const COMPLETION_SENTINEL_PREFIX = "__KURAMBIT_SETUP_DONE__";
 const OUTPUT_LINE_MAX_LENGTH = 400;
 const PARTIAL_LINE_MAX_LENGTH = 4_096;
 
@@ -171,7 +171,7 @@ function wrapCommandForCompletion(
   const body = command.replace(/\r?\n/g, "\r");
   switch (shell) {
     case "powershell":
-      return `$global:LASTEXITCODE = $null; & {\r${body}\r}; if ($null -ne $LASTEXITCODE) { $__t3c = $LASTEXITCODE } elseif ($?) { $__t3c = 0 } else { $__t3c = 1 }; Write-Host "${sentinel}$__t3c"`;
+      return `$global:LASTEXITCODE = $null; & {\r${body}\r}; if ($null -ne $LASTEXITCODE) { $__kbc = $LASTEXITCODE } elseif ($?) { $__kbc = 0 } else { $__kbc = 1 }; Write-Host "${sentinel}$__kbc"`;
     case "fish":
       return `begin\r${body}\rend; printf '\\n${sentinel}%s\\n' $status`;
     case "posix":

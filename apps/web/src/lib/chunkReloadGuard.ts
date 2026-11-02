@@ -1,7 +1,7 @@
 // Split chunks are fetched lazily, so a deploy (or desktop server swap) between
 // page load and a later fetch can 404 the old hashed assets. One reload picks
 // up the fresh index.html.
-const CHUNK_RELOAD_GUARD_KEY = "t3code:chunk-load-reloaded";
+const CHUNK_RELOAD_GUARD_KEY = "kurambit:chunk-load-reloaded";
 
 export function reloadOnceForChunkLoadError(
   getStorage: () => Storage = () => window.sessionStorage,

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode, RuntimeMode } from "@kurambit/contracts";
 import { BotIcon, PencilRulerIcon } from "lucide-react";
 import { runtimeModeConfig } from "./runtimeModeConfig";
 import {

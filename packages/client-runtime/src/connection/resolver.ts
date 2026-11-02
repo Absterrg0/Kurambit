@@ -1,7 +1,7 @@
 import type {
   AuthClientPresentationMetadata,
   ExecutionEnvironmentDescriptor,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -44,7 +44,7 @@ export class ConnectionResolver extends Context.Service<
       ConnectionAttemptError
     >;
   }
->()("@t3tools/client-runtime/connection/resolver/ConnectionResolver") {}
+>()("@kurambit/client-runtime/connection/resolver/ConnectionResolver") {}
 
 function primarySocketUrl(
   target: PrimaryConnectionTarget,
@@ -113,7 +113,7 @@ export const make = Effect.gen(function* () {
           return Effect.fail(
             new ConnectionBlockedError({
               reason: "configuration",
-              detail: "Game Studio connects only to its local server.",
+              detail: "Kurambit connects only to its local server.",
             }),
           );
       }

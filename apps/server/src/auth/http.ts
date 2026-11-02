@@ -17,10 +17,10 @@ import {
   EnvironmentScopeRequiredError,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
-} from "@t3tools/contracts";
-import type { AuthEnvironmentScope, DpopFailureReason } from "@t3tools/contracts";
-import { parseOAuthScope } from "@t3tools/shared/oauthScope";
-import { causeErrorTag } from "@t3tools/shared/observability";
+} from "@kurambit/contracts";
+import type { AuthEnvironmentScope, DpopFailureReason } from "@kurambit/contracts";
+import { parseOAuthScope } from "@kurambit/shared/oauthScope";
+import { causeErrorTag } from "@kurambit/shared/observability";
 
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

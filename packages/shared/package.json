@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/shared",
+  "name": "@kurambit/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -151,9 +151,9 @@
       "types": "./src/projectSettings.ts",
       "import": "./src/projectSettings.ts"
     },
-    "./t3ProjectFile": {
-      "types": "./src/t3ProjectFile.ts",
-      "import": "./src/t3ProjectFile.ts"
+    "./kurambitProjectFile": {
+      "types": "./src/kurambitProjectFile.ts",
+      "import": "./src/kurambitProjectFile.ts"
     },
     "./orchestrationTiming": {
       "types": "./src/orchestrationTiming.ts",
@@ -359,9 +359,9 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
-    "./t3McpToolPresentation": {
-      "types": "./src/t3McpToolPresentation.ts",
-      "import": "./src/t3McpToolPresentation.ts"
+    "./kurambitMcpToolPresentation": {
+      "types": "./src/kurambitMcpToolPresentation.ts",
+      "import": "./src/kurambitMcpToolPresentation.ts"
     },
     "./Array": {
       "types": "./src/Array.ts",
@@ -469,9 +469,9 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
+    "@kurambit/contracts": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "mdast-util-directive": "catalog:",

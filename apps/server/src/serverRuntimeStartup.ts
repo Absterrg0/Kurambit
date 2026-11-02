@@ -8,8 +8,8 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+} from "@kurambit/contracts";
+import { resolveProjectSettings } from "@kurambit/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
@@ -75,7 +75,7 @@ export class ServerRuntimeStartup extends Context.Service<
       effect: Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
   }
->()("t3/serverRuntimeStartup") {}
+>()("kurambit/serverRuntimeStartup") {}
 
 interface QueuedCommand {
   readonly run: Effect.Effect<void, never>;
@@ -324,12 +324,12 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
 });
 
 /**
- * Prints the startup pairing URL to stdout, where `t3` users and the dev runner
+ * Prints the startup pairing URL to stdout, where `kurambit` users and the dev runner
  * read it. The URL carries a one-time admin token, so it skips the logger: log
  * records also land in the trace file and any configured OTLP collector.
  */
 export const announceStartupPairingUrl = (pairingUrl: string) =>
-  Effect.logInfo("Authentication required. Open T3 Code using the pairing URL.").pipe(
+  Effect.logInfo("Authentication required. Open Kurambit using the pairing URL.").pipe(
     // Indented to match the annotation line the pretty logger printed before.
     Effect.andThen(Console.log(`  pairingUrl: ${pairingUrl}`)),
   );

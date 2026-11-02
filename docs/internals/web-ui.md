@@ -62,7 +62,7 @@ makes it skip the whole function without a build error. Lint reports each skip a
 `react(...)` warning with the note "React Compiler skipped optimizing this component or hook".
 
 Every file under `apps/web/src` must compile. Lint makes those rules errors there, and
-`t3code/no-manual-memo` rejects `useMemo` and `useCallback`, which the compiler makes redundant;
+`kurambit/no-manual-memo` rejects `useMemo` and `useCallback`, which the compiler makes redundant;
 no upstream rule bans them outright. It also rejects `"use memo"`. The compiler withholds a cache
 scope when a value reaches plain function calls on both sides of a hook call. A `"use memo"`
 helper forces one, but hides the ordering problem. Fix the order instead: plain uses of a value go

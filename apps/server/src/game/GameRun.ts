@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the production loop's native boundary: wall-clock blocks, pids, git, and the run/rounds JSONL in the game folder, like the bot and Blender services.
-// GameRun: one game's production loop as a T3 service; state is `.studio/run.json` + `.studio/rounds.jsonl` + git.
+// GameRun: one game's production loop as a Kurambit service; state is `.studio/run.json` + `.studio/rounds.jsonl` + git.
 // Scope: quality of what exists; code never parses prose apart from STATUS/SHIP/COMPARE lines.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -28,7 +28,7 @@ import {
   type RunId,
   type RuntimeMode,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import * as Templates from "./templates.ts";
@@ -37,7 +37,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
-} from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@kurambit/shared/orchestrationV2ThreadError";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -373,7 +373,7 @@ export class GameRun extends Context.Service<
     /** MCP catalog role: "run" for threads this service launched, else null. */
     readonly toolRole: (caller: { readonly threadId: ThreadId }) => Effect.Effect<"run" | null>;
   }
->()("t3/game/GameRun") {}
+>()("kurambit/game/GameRun") {}
 
 export const layer = (options: { readonly stateDir: string }) => {
   const callerFile = (threadId: string): string =>

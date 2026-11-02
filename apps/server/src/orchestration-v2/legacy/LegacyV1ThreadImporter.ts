@@ -1,7 +1,7 @@
 import {
   threadPullRequestKeysEqual,
   threadPullRequestsOf,
-} from "@t3tools/shared/threadPullRequests";
+} from "@kurambit/shared/threadPullRequests";
 import {
   ChatAttachment,
   OrchestrationMessageContext,
@@ -20,8 +20,8 @@ import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
   TurnItemId,
-} from "@t3tools/contracts";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
+} from "@kurambit/contracts";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -31,7 +31,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EventSink from "../EventSink.ts";
-import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
+import { randomUuidV4 } from "@kurambit/provider-core/server/randomUuid";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
 const TRANSCRIPT_EVENT_BATCH_SIZE = 100;
@@ -117,7 +117,7 @@ export interface LegacyV1ThreadImporterShape {
 export class LegacyV1ThreadImporter extends Context.Service<
   LegacyV1ThreadImporter,
   LegacyV1ThreadImporterShape
->()("t3/orchestration-v2/legacy/LegacyV1ThreadImporter") {}
+>()("kurambit/orchestration-v2/legacy/LegacyV1ThreadImporter") {}
 
 const decodeModelSelection = Schema.decodeUnknownOption(ModelSelection);
 const decodeAttachments = Schema.decodeUnknownOption(Schema.Array(ChatAttachment));

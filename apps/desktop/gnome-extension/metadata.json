@@ -1,7 +1,7 @@
 {
-  "uuid": "snap-shot@game-studio.local",
-  "name": "Game Studio SnapShots",
-  "description": "Allows Game Studio to capture the focused window, identify it for optional accessibility text, and animate it into Game Studio. Disable this extension to revoke access.",
+  "uuid": "snap-shot@kurambit.local",
+  "name": "Kurambit SnapShots",
+  "description": "Allows Kurambit to capture the focused window, identify it for optional accessibility text, and animate it into Kurambit. Disable this extension to revoke access.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "version": 2
 }

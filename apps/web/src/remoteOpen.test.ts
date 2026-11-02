@@ -1,4 +1,4 @@
-import { buildRemoteOpenUrl } from "@t3tools/contracts";
+import { buildRemoteOpenUrl } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 describe("buildRemoteOpenUrl", () => {

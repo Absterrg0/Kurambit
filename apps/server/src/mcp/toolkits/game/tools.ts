@@ -35,7 +35,7 @@ import {
   GameWebPackage,
   GameWindowsPackage,
   OrchestratorMcpFailure,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -65,7 +65,7 @@ const visibleToRunThreads = () => true;
 const hiddenFromRunThreads = () => !isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Game Studio project: brief path, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+    "Inspect this thread's Kurambit project: brief path, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
   parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
@@ -240,7 +240,7 @@ const PreviewTool = Tool.make("game_preview", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const StopTool = Tool.make("game_stop", {
   description:
-    "Stop only this game's processes spawned by Game Studio, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
+    "Stop only this game's processes spawned by Kurambit, including running Blender/Godot operations and native play, and close its Web preview server. Returns after managed processes exit. Does not kill external editors or other games.",
   success: GameActionResult,
   failure,
   failureMode: "return",

@@ -3,7 +3,7 @@ import * as NodeNet from "node:net";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import { GAME_EXPLORE_BOUNDS, type GameExploreStep } from "@t3tools/contracts";
+import { GAME_EXPLORE_BOUNDS, type GameExploreStep } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
 import { engineChildEnv, DISPLAY_VARIABLES } from "./GameProcesses.ts";
 import { GODOT_EXPLORE_SCRIPT } from "./godotExploreScript.ts";
@@ -275,7 +275,7 @@ export const findXvfb = async (): Promise<string | null> => {
     // system xvfb-run still fall back to it.
     const system = await findExecutable("xvfb-run", {
       pathEnv,
-      override: process.env.GAME_STUDIO_XVFB_RUN,
+      override: process.env.KURAMBIT_XVFB_RUN,
     });
     if (system !== null) return system;
     return await findExecutable("xvfb-run", { pathEnv: fallback });

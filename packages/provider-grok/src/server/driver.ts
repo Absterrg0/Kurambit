@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@kurambit/contracts";
 import { GrokSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -8,12 +8,12 @@ import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderLatestVersions from "@kurambit/provider-core/server/ProviderLatestVersions";
+import * as ProviderHost from "@kurambit/provider-core/server/ProviderHost";
+import * as ProviderEventLoggers from "@kurambit/provider-core/server/ProviderEventLoggers";
 import { makeGrokTextGeneration } from "./textGeneration.ts";
 import { GrokAdapterV2Driver, type GrokAdapterV2DriverEnv } from "./adapter.ts";
-import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
+import { ProviderDriverError } from "@kurambit/provider-core/server/errors";
 import {
   buildInitialGrokProviderSnapshot,
   checkGrokProviderStatus,
@@ -21,14 +21,14 @@ import {
 } from "./status.ts";
 import { grokUsageReader } from "./usage.ts";
 import { readGrokAccount } from "./usageLimits.ts";
-import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
+import { makeManagedServerProvider } from "@kurambit/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "@t3tools/provider-core/server/driver";
-import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+} from "@kurambit/provider-core/server/driver";
+import { withInstanceIdentity } from "@kurambit/provider-core/server/instanceIdentity";
+import { mergeProviderInstanceEnvironment } from "@kurambit/provider-core/server/instanceEnvironment";
 import { discoverGrokSkills } from "./skills.ts";
 import {
   makeCachedProviderMaintenanceResolution,
@@ -36,12 +36,12 @@ import {
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "@t3tools/provider-core/server/maintenanceResolver";
+} from "@kurambit/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "@t3tools/provider-core/server/snapshotSettings";
+} from "@kurambit/provider-core/server/snapshotSettings";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("grok");

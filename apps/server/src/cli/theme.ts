@@ -7,9 +7,9 @@ import {
   EnvironmentThemeFile,
   EnvironmentThemeId,
   environmentThemeFileHasColors,
-} from "@t3tools/contracts";
-import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
-import { BUILT_IN_THEME_IDS, UNPUBLISHABLE_THEME_IDS } from "@t3tools/shared/themePalettes";
+} from "@kurambit/contracts";
+import { fromJsonStringPretty, fromLenientJson } from "@kurambit/shared/schemaJson";
+import { BUILT_IN_THEME_IDS, UNPUBLISHABLE_THEME_IDS } from "@kurambit/shared/themePalettes";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
@@ -20,7 +20,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/cli";
 
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as ServerConfig from "../config.ts";
 import {
   MAX_THEME_FILE_BYTES,
@@ -88,7 +88,7 @@ export class ThemeFileInvalidError extends Schema.TaggedError<ThemeFileInvalidEr
   { filePath: Schema.String, cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return `${this.filePath} is not a valid theme file. Use a theme exported from T3 Code, or a seeded file with name, appearance, canvas, and accent.`;
+    return `${this.filePath} is not a valid theme file. Use a theme exported from Kurambit, or a seeded file with name, appearance, canvas, and accent.`;
   }
 }
 
@@ -154,14 +154,14 @@ export class ThemeTargetMissingError extends Schema.TaggedError<ThemeTargetMissi
   {},
 ) {
   override get message(): string {
-    return "Provide a theme id or file, or run `t3 theme clear` to remove the theme.";
+    return "Provide a theme id or file, or run `kurambit theme clear` to remove the theme.";
   }
 }
 
-const envT3Home = Config.String("GAME_STUDIO_HOME").pipe(Config.option);
+const envKurambitHome = Config.String("KURAMBIT_HOME").pipe(Config.option);
 
 const resolveThemePaths = Effect.fn(function* (explicitBaseDir: Option.Option<string>) {
-  const envHome = Option.filter(yield* envT3Home, (value) => value.trim().length > 0);
+  const envHome = Option.filter(yield* envKurambitHome, (value) => value.trim().length > 0);
   const configuredBaseDir = Option.orElse(explicitBaseDir, () => envHome);
   const baseDir = yield* resolveBaseDir(Option.getOrUndefined(configuredBaseDir));
   const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined, {
@@ -423,7 +423,7 @@ const themeSetCommand = Command.make("set", {
       const paths = yield* resolveThemePaths(flags.baseDir);
 
       // Path-shaped first, existence second. Deciding on existence alone would
-      // make `t3 theme set ocean` publish ./ocean whenever the cwd happens to
+      // make `kurambit theme set ocean` publish ./ocean whenever the cwd happens to
       // hold a file by that name, instead of selecting the built-in.
       const looksLikePath =
         target.endsWith(".json") ||

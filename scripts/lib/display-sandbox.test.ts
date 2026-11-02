@@ -19,10 +19,10 @@ describe("sandboxDisplayEnvironment", () => {
         XAUTHORITY: "/run/user/1000/xauth",
         XDG_RUNTIME_DIR: "/run/user/1000",
       },
-      "/run/game-studio/display-sandbox",
+      "/run/kurambit/display-sandbox",
     );
     for (const name of DISPLAY_VARIABLES) assert.equal(sandboxed[name], undefined);
-    assert.equal(sandboxed.XDG_RUNTIME_DIR, "/run/game-studio/display-sandbox");
+    assert.equal(sandboxed.XDG_RUNTIME_DIR, "/run/kurambit/display-sandbox");
     // The rest of the environment is what makes headless tools work at all.
     assert.equal(sandboxed.PATH, "/usr/bin");
   });

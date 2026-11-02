@@ -1,16 +1,16 @@
-import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@kurambit/contracts";
 import {
   makeLocalFileTracer,
   makeTraceSink,
   type SignalExport,
-} from "@t3tools/shared/observability";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as SharedObservability from "@t3tools/shared/observability";
-import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
+} from "@kurambit/shared/observability";
+import * as HostProcess from "@kurambit/shared/HostProcess";
+import * as SharedObservability from "@kurambit/shared/observability";
+import * as OtelEnvironment from "@kurambit/shared/otelEnvironment";
 import {
   parsePersistedServerObservabilitySettings,
   type PersistedServerObservabilitySettings,
-} from "@t3tools/shared/serverSettings";
+} from "@kurambit/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -59,7 +59,7 @@ export class DesktopBackendOutputLogFactory extends Context.Service<
   {
     readonly forInstance: (id: string) => Effect.Effect<DesktopBackendOutputLogShape>;
   }
->()("@t3tools/desktop/app/DesktopObservability/DesktopBackendOutputLogFactory") {}
+>()("@kurambit/desktop/app/DesktopObservability/DesktopBackendOutputLogFactory") {}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -596,10 +596,10 @@ const layerTelemetry = Layer.unwrap(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const endpoints = yield* resolveOtlpEndpoints;
     const resource = {
-      serviceName: "game-studio-desktop",
+      serviceName: "kurambit-desktop",
       serviceVersion: environment.appVersion,
       attributes: {
-        "service.namespace": "game-studio",
+        "service.namespace": "kurambit",
         "service.runtime": "desktop",
         "service.mode": environment.isDevelopment ? "development" : "packaged",
         "host.name": endpoints.resourceAttributes["host.name"] || (yield* HostProcess.Hostname),

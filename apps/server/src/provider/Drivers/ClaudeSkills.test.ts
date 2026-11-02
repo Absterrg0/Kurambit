@@ -24,7 +24,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -71,7 +71,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -93,7 +93,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -131,7 +131,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -158,7 +158,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       for (const [description, comment] of [
@@ -200,7 +200,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const skillsDir = path.join(configDir, "skills");
 
@@ -236,7 +236,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const environmentConfigDir = path.join(tempDir, "env-config");
 
       yield* writeSkill(
@@ -274,7 +274,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const workspace = path.join(tempDir, "workspace");
       yield* fs.makeDirectory(workspace, { recursive: true });
 
@@ -302,7 +302,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -344,7 +344,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const workspace = path.join(tempDir, "workspace");
 
@@ -384,7 +384,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       yield* writeSkill(
@@ -407,7 +407,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       yield* writeSkill(
@@ -433,7 +433,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       for (const name of ["unknown-mode", "boolean-false", "sibling-off"]) {
@@ -467,7 +467,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const repo = path.join(tempDir, "repo");
       const workspace = path.join(repo, "packages", "app");
@@ -514,7 +514,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const parent = path.join(tempDir, "not-a-repo");
       const workspace = path.join(parent, "workspace");
@@ -602,7 +602,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       yield* writeSkill(
@@ -624,7 +624,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       yield* writeSkill(
@@ -650,7 +650,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
 
       yield* writeSkill(
@@ -676,7 +676,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
       const configDir = path.join(tempDir, "claude-home");
       const skillsDir = path.join(configDir, "skills");
 
@@ -717,7 +717,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-claude-skills-" });
 
       const skills = yield* discoverClaudeSkills(
         { homePath: path.join(tempDir, "missing-home") },

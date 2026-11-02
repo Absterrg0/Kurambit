@@ -1,4 +1,4 @@
-import { ThreadId, TurnItemId } from "@t3tools/contracts";
+import { ThreadId, TurnItemId } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,7 +17,7 @@ const screenshot = {
   ordinal: 1,
   status: "completed" as const,
   title: null,
-  toolName: "mcp__t3-code__device_screenshot",
+  toolName: "mcp__kurambit__device_screenshot",
   input: { deviceId: "phone" },
   output: {
     content: [

@@ -5,7 +5,7 @@
  * a composer menu.
  */
 
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import type { ServerProviderSkill } from "@kurambit/contracts";
 import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -13,7 +13,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { parse as parseYamlDocument } from "yaml";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const SKILL_MENTION_PATTERN =
@@ -271,7 +271,7 @@ export const probeCursorSkills = Effect.fn("probeCursorSkills")(function* (
   return inspection.skills;
 });
 
-/** Cursor invokes Agent Skills with `/name`; T3 composers insert `$name`. */
+/** Cursor invokes Agent Skills with `/name`; Kurambit composers insert `$name`. */
 export function hasCursorSkillMention(prompt: string): boolean {
   return HAS_SKILL_MENTION_PATTERN.test(prompt);
 }

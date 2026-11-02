@@ -29,7 +29,7 @@ const environmentInput = {
 
 const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
-  name: Effect.succeed("T3 Code"),
+  name: Effect.succeed("Kurambit"),
   systemLocale: Effect.succeed("en-US"),
   whenReady: Effect.void,
   requestSingleInstanceLock: Effect.succeed(true),
@@ -143,21 +143,21 @@ describe("DesktopApplicationMenu", () => {
       const template = yield* Deferred.await(applicationMenuTemplate);
       const applicationMenu = template[0];
       assert.isDefined(applicationMenu);
-      assert.equal(applicationMenu.label, "Game Studio");
+      assert.equal(applicationMenu.label, "Kurambit");
       if (!Array.isArray(applicationMenu.submenu)) {
         throw new Error("Expected application menu submenu to be an array.");
       }
       assert.equal(
         applicationMenu.submenu.find((item) => item.role === "about")?.label,
-        "About Game Studio",
+        "About Kurambit",
       );
       assert.equal(
         applicationMenu.submenu.find((item) => item.role === "hide")?.label,
-        "Hide Game Studio",
+        "Hide Kurambit",
       );
       assert.equal(
         applicationMenu.submenu.find((item) => item.role === "quit")?.label,
-        "Quit Game Studio",
+        "Quit Kurambit",
       );
     }),
   );

@@ -7,8 +7,8 @@ import {
   type ChatGptReconnectProfile,
   type ChatGptTransferredProfile,
   type ProviderInstanceId,
-} from "@t3tools/contracts";
-import { codexCallbackUrl } from "@t3tools/shared/codexAuthHandoff";
+} from "@kurambit/contracts";
+import { codexCallbackUrl } from "@kurambit/shared/codexAuthHandoff";
 import * as Clock from "effect/Clock";
 import * as Cause from "effect/Cause";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
@@ -19,8 +19,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import * as ProviderAuthFlow from "@t3tools/provider-core/server/providerAuthFlow";
-import type { ProviderAuthFlowContext } from "@t3tools/provider-core/server/providerAuthFlow";
+import * as ProviderAuthFlow from "@kurambit/provider-core/server/providerAuthFlow";
+import type { ProviderAuthFlowContext } from "@kurambit/provider-core/server/providerAuthFlow";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as ProviderCredentialStore from "./ProviderCredentialStore.ts";
 import { withChatGptSessionLock } from "./CodexChatGptSessionLock.ts";
@@ -515,7 +515,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
               ? { prompt: "consent" }
               : {}),
           }
-        : { agent_name_hint: "T3 Code" }),
+        : { agent_name_hint: "Kurambit" }),
       ext_agent_host_id: hostId,
       response_type: "code",
       redirect_uri: redirectUri,

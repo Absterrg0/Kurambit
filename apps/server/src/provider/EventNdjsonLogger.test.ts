@@ -3,10 +3,10 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@kurambit/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { RotatingFileSinkError } from "@t3tools/shared/logging";
+import { RotatingFileSinkError } from "@kurambit/shared/logging";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -66,7 +66,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
     const secret = "secret-circular-event-value";
 
     return Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "provider-native.ndjson");
       const circular: Record<string, unknown> = { secret };
       circular.self = circular;
@@ -92,7 +92,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("writes effect-style lines to thread-scoped files", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "provider-native.ndjson");
 
       try {
@@ -140,7 +140,9 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
     "falls back to a global segment when orchestration thread id is missing or invalid",
     () =>
       Effect.gen(function* () {
-        const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+        const tempDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"),
+        );
         const basePath = NodePath.join(tempDir, "provider-canonical.ndjson");
 
         try {
@@ -175,7 +177,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("shares one thread writer across native and canonical streams", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
 
       try {
@@ -211,7 +213,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("keeps shared store views non-owning when one adapter closes", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
 
       try {
@@ -248,7 +250,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("flushes an active batch without a permanent polling loop", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const threadPath = ownedLogPath(basePath, "thread-batched");
 
@@ -270,7 +272,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("does not strand a later batch after an interrupted write", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const threadPath = ownedLogPath(basePath, "thread-interrupted");
 
@@ -297,7 +299,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("drops transient provider events before serialization", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
 
       try {
@@ -437,7 +439,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("summarizes large histories without reading their items", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const turns = Array.from({ length: 10_000 });
       Object.defineProperty(turns, 0, {
@@ -475,7 +477,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("bounds oversized records while retaining failure details", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
 
       try {
@@ -519,7 +521,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("bounds canonical diff snapshots before serializing their duplicate payloads", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const threadId = ThreadId.make("large-diff");
       const diff = "diff-payload".repeat(128 * 1_024);
@@ -550,7 +552,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("keeps OpenCode tool input, final output, and errors in native logs", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const threadId = ThreadId.make("thread-tool-lifecycle");
 
@@ -595,7 +597,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("contains hostile event accessors inside guarded serialization", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
 
       try {
@@ -628,7 +630,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("serializes concurrent first writes for the same segment", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "provider-canonical.ndjson");
 
       try {
@@ -670,7 +672,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("rotates per-thread files when max size is exceeded", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "provider-native.ndjson");
 
       try {
@@ -721,7 +723,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("enforces aggregate age and byte retention on startup", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const expiredPath = ownedLogPath(basePath, "expired");
       const oldPath = ownedLogPath(basePath, "old");
@@ -765,7 +767,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("does not prune an active thread sink during an unrelated flush", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
       const activePath = ownedLogPath(basePath, "active");
 
@@ -839,7 +841,9 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
     "keeps unrelated work responsive and drains before close while a disk write is held",
     () =>
       Effect.gen(function* () {
-        const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+        const tempDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"),
+        );
         const basePath = NodePath.join(tempDir, "events.log");
         const fs = yield* FileSystem.FileSystem;
         const started = yield* Deferred.make<void>();
@@ -888,7 +892,7 @@ it.layer(NodeServices.layer)("EventNdjsonLogger", (it) => {
 
   it.effect("reports logical provider log writes to resource attribution", () =>
     Effect.gen(function* () {
-      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-provider-log-"));
       const basePath = NodePath.join(tempDir, "provider-native.ndjson");
 
       try {

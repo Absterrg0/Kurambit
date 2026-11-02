@@ -8,7 +8,7 @@ import {
   GameOperationError,
   type GameActionResult,
   type GameProcessResult,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 import * as GameProcesses from "./GameProcesses.ts";
 import type * as GameToolchain from "./GameToolchain.ts";
 import { insideGame } from "./GameProjectService.ts";

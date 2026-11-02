@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -177,13 +177,13 @@ describe("OpenCode2Server passwords", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it("hands the spawned server only the T3 password", () => {
-    const password = Redacted.make("t3-generated");
+  it("hands the spawned server only the Kurambit password", () => {
+    const password = Redacted.make("kurambit-generated");
     const environment = OpenCode2Server.serverEnvironment(
       { PATH: "/bin", OPENCODE_SERVER_PASSWORD: "ambient", OPENCODE_PASSWORD: "ambient" },
       password,
     );
-    assert.deepStrictEqual(environment, { PATH: "/bin", OPENCODE_PASSWORD: "t3-generated" });
+    assert.deepStrictEqual(environment, { PATH: "/bin", OPENCODE_PASSWORD: "kurambit-generated" });
   });
 });
 
@@ -200,7 +200,7 @@ const server = createServer((request, response) => {
 });
 server.listen(0, "127.0.0.1", () => {
   process.stdout.write("server listening on http://127.0.0.1:" + server.address().port + "\\n");
-  process.stdout.write("server password not-the-t3-password\\n");
+  process.stdout.write("server password not-the-kurambit-password\\n");
 });
 `;
 
@@ -212,7 +212,7 @@ describe("OpenCode2Server spawned server", () => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const platform = yield* HostProcess.Platform;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-opencode2-fake-" });
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "kurambit-opencode2-fake-" });
         const isWindows = platform === "win32";
         const binaryPath = path.join(directory, isWindows ? "opencode.cmd" : "opencode");
         const scriptPath = path.join(directory, "opencode.mjs");

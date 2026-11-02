@@ -4,9 +4,9 @@ import * as NodeURL from "node:url";
 
 const RESTRICTED_IMPORT_PATHS = [
   {
-    name: "@t3tools/client-runtime",
+    name: "@kurambit/client-runtime",
     message:
-      "Import from an explicit @t3tools/client-runtime/* subpath. The package has no root export.",
+      "Import from an explicit @kurambit/client-runtime/* subpath. The package has no root export.",
   },
   {
     name: "@pierre/diffs/react",
@@ -34,7 +34,7 @@ export default defineConfig({
     environment: "node",
     exclude: [
       "**/.repos/**",
-      "**/.t3/**",
+      "**/.kurambit/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",
@@ -90,7 +90,7 @@ export default defineConfig({
       "**/*.graphql.ts",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
-    jsPlugins: ["./oxlint-plugin-t3code/index.ts", "@shadcn/lint"],
+    jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],
     settings: {
       shadcn: { ui: "~/components/ui" },
     },
@@ -126,24 +126,24 @@ export default defineConfig({
       "typescript/restrict-template-expressions": "off",
       "typescript/unbound-method": "off",
       "eslint/no-restricted-imports": ["error", { paths: RESTRICTED_IMPORT_PATHS }],
-      "t3code/no-global-process-runtime": "error",
-      "t3code/no-inline-schema-compile": "warn",
-      "t3code/no-low-value-comments": "error",
-      "t3code/no-manual-effect-runtime-in-tests": "error",
-      "t3code/no-native-title-tooltip": "error",
-      "t3code/no-raw-mcp-registration": "error",
-      "t3code/no-test-in-loop": "error",
-      "t3code/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }],
-      "t3code/no-unscoped-has": "error",
-      "t3code/namespace-node-imports": "error",
-      "t3code/prefer-catch-tags": "error",
-      "t3code/require-centered-scroll-gutter": "error",
-      "t3code/require-suppression-reason": "error",
+      "kurambit/no-global-process-runtime": "error",
+      "kurambit/no-inline-schema-compile": "warn",
+      "kurambit/no-low-value-comments": "error",
+      "kurambit/no-manual-effect-runtime-in-tests": "error",
+      "kurambit/no-native-title-tooltip": "error",
+      "kurambit/no-raw-mcp-registration": "error",
+      "kurambit/no-test-in-loop": "error",
+      "kurambit/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }],
+      "kurambit/no-unscoped-has": "error",
+      "kurambit/namespace-node-imports": "error",
+      "kurambit/prefer-catch-tags": "error",
+      "kurambit/require-centered-scroll-gutter": "error",
+      "kurambit/require-suppression-reason": "error",
     },
     overrides: [
       {
         files: ["packages/client-runtime/src/state/**", "apps/{web,desktop}/src/**"],
-        rules: { "t3code/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },
+        rules: { "kurambit/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },
       },
       {
         files: [
@@ -151,7 +151,7 @@ export default defineConfig({
           "packages/client-runtime/src/state/vcsAction.ts",
         ],
         rules: {
-          "t3code/no-rpc-permission-bypass": [
+          "kurambit/no-rpc-permission-bypass": [
             "error",
             { allowGuardInstallation: true, allowRawClientAccess: false },
           ],
@@ -159,34 +159,34 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/components/settings/ConnectionsSettings.tsx"],
-        rules: { "t3code/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }] },
+        rules: { "kurambit/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }] },
       },
       {
         files: ["packages/client-runtime/src/connection/outdatedHostUpdate.ts"],
-        rules: { "t3code/no-rpc-permission-bypass": "off" },
+        rules: { "kurambit/no-rpc-permission-bypass": "off" },
       },
       {
         files: [
           "packages/client-runtime/src/rpc/**",
           "**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
         ],
-        rules: { "t3code/no-rpc-permission-bypass": "off" },
+        rules: { "kurambit/no-rpc-permission-bypass": "off" },
       },
       {
         files: ["packages/shared/src/HostProcess.ts"],
-        rules: { "t3code/no-global-process-runtime": "off" },
+        rules: { "kurambit/no-global-process-runtime": "off" },
       },
       {
-        // The `t3` npm launcher is published as plain, dependency-free Node.
+        // The `kurambit` npm launcher is published as plain, dependency-free Node.
         files: ["scripts/npm-launcher/**"],
         rules: {
-          "t3code/no-global-process-runtime": "off",
-          "t3code/namespace-node-imports": "off",
+          "kurambit/no-global-process-runtime": "off",
+          "kurambit/namespace-node-imports": "off",
         },
       },
       {
         files: ["apps/server/src/mcp/McpHttpServer.ts"],
-        rules: { "t3code/no-raw-mcp-registration": "off" },
+        rules: { "kurambit/no-raw-mcp-registration": "off" },
       },
       {
         files: ["apps/web/src/**"],
@@ -213,7 +213,7 @@ export default defineConfig({
           "apps/web/src/lib/observeResize.ts",
           "**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
         ],
-        rules: { "t3code/no-raw-resize-observer": "error" },
+        rules: { "kurambit/no-raw-resize-observer": "error" },
       },
       {
         files: ["apps/web/src/**"],
@@ -221,7 +221,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/**"],
-        rules: { "t3code/no-outset-state-indicators": "error" },
+        rules: { "kurambit/no-outset-state-indicators": "error" },
       },
       {
         files: ["apps/web/src/**"],
@@ -281,7 +281,7 @@ export default defineConfig({
       {
         // Every web file must compile under the React Compiler. Its bailout rules are errors here,
         // and manual memoization is redundant. No upstream rule bans useMemo/useCallback, hence
-        // t3code/no-manual-memo.
+        // kurambit/no-manual-memo.
         files: ["apps/web/src/**/*.{ts,tsx}"],
         rules: {
           "react/exhaustive-effect-dependencies": "error",
@@ -298,11 +298,11 @@ export default defineConfig({
           "react/set-state-in-render": "error",
           "react/static-components": "error",
           "react/unsupported-syntax": "error",
-          "t3code/no-manual-memo": "error",
+          "kurambit/no-manual-memo": "error",
         },
       },
       {
-        // The sign-in masthead is T3 brand artwork: fixed gradients, not theme surfaces.
+        // The sign-in masthead is Kurambit brand artwork: fixed gradients, not theme surfaces.
         files: ["apps/web/src/components/auth/AuthSurfaceShell.tsx"],
         rules: { "shadcn/no-arbitrary-values": "off" },
       },

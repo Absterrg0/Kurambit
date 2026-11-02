@@ -1,8 +1,8 @@
 import {
   createFilesystemEnvironmentAtoms,
   resolveFilesystemReadAccess,
-} from "@t3tools/client-runtime/state/filesystem";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@kurambit/client-runtime/state/filesystem";
+import type { EnvironmentId } from "@kurambit/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentPresentation } from "./presentation";

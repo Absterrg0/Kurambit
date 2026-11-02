@@ -4,7 +4,7 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthAccessTokenType,
   EnvironmentHttpApi,
-} from "@t3tools/contracts";
+} from "@kurambit/contracts";
 
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -42,7 +42,9 @@ const layerConfig = Layer.effect(
       devAuthToken: Redacted.make(DEV_TOKEN),
     } satisfies ServerConfig.ServerConfig["Service"];
   }),
-).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-http-test-" })));
+).pipe(
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-auth-http-test-" })),
+);
 
 const layerEnvironmentAuth = EnvironmentAuth.layer.pipe(
   Layer.provide(SqlitePersistence.layerMemory),
@@ -117,11 +119,11 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           expect(await retiredScopeResponse.json()).toMatchObject({ reason: "invalid_scope" });
 
           const devCookies = devResponse.headers.getSetCookie();
-          const devCookie = devCookies.find((cookie) => cookie.startsWith("t3_dev_session_"));
+          const devCookie = devCookies.find((cookie) => cookie.startsWith("kurambit_dev_session_"));
           expect(devCookie).toContain("HttpOnly");
           expect(devCookie).toContain(`=${DEV_TOKEN};`);
           expect(devCookies).toContainEqual(
-            expect.stringMatching(/^t3_session_[^=]*=;.*Max-Age=0/),
+            expect.stringMatching(/^kurambit_session_[^=]*=;.*Max-Age=0/),
           );
           const devCookieHeader = devCookie?.split(";", 1)[0] ?? "";
           const environmentBSession = await environmentB.handler(
@@ -150,8 +152,8 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           expect(restrictedResponse.status).toBe(200);
           const restrictedCookies = restrictedResponse.headers.getSetCookie();
           expect(restrictedCookies).toHaveLength(1);
-          expect(restrictedCookies[0]).toMatch(/^t3_session_/);
-          expect(restrictedCookies[0]).not.toContain("t3_dev_session_");
+          expect(restrictedCookies[0]).toMatch(/^kurambit_session_/);
+          expect(restrictedCookies[0]).not.toContain("kurambit_dev_session_");
         }),
       ([environmentA, environmentB]) =>
         Effect.promise(() => Promise.all([environmentA.dispose(), environmentB.dispose()])),

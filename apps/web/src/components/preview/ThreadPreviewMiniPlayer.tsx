@@ -1,6 +1,6 @@
 "use client";
 
-import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
+import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@kurambit/contracts";
 import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -41,7 +41,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
-import type { PreviewStreamViewport } from "@t3tools/client-runtime/preview/server-browser-stream";
+import type { PreviewStreamViewport } from "@kurambit/client-runtime/preview/server-browser-stream";
 import { previewBridge } from "./previewBridge";
 import { showPreviewPopup } from "./showPreviewPopup";
 import {
