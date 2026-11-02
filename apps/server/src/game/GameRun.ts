@@ -194,7 +194,7 @@ const readJsonFile = async <T>(path: string, fallback: T): Promise<T> => {
 // missing file as empty, and rename is atomic on one filesystem. Concurrent
 // writers each own their temp path, so nobody truncates or renames another
 // writer's inode; a crash orphan keeps a tmp.* name no reader ever opens.
-const writeJsonAtomic = async (file: string, text: string): Promise<void> => {
+export const writeJsonAtomic = async (file: string, text: string): Promise<void> => {
   await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
   const tmp = `${file}.tmp.${process.pid}.${NodeCrypto.randomUUID()}`;
   try {
@@ -212,7 +212,7 @@ const lastMatch = (text: string, re: RegExp): string | null => {
   return (matches[matches.length - 1]?.[1] ?? "").toUpperCase();
 };
 
-const isUsageLimit = (text: string): boolean =>
+export const isUsageLimit = (text: string): boolean =>
   /usage limit|rate limit|quota exceeded|exceeded.*quota|\b429\b|capacity exceeded|overloaded/i.test(
     text,
   );
@@ -234,23 +234,100 @@ const withVariantOption = (options: unknown, variant: string | null | undefined)
 };
 
 // Declared lines only. Code never interprets any other prose.
-const parseStatus = (text: string): string | null => {
+export const parseStatus = (text: string): string | null => {
   const m = lastMatch(text, /^STATUS:\s*(continue|ready)\s*$/gim);
   return m === null ? null : m.toLowerCase();
 };
-const parseShip = (text: string): string | null => {
+export const parseShip = (text: string): string | null => {
   const m = lastMatch(text, /^SHIP:\s*(YES|NO)\s*$/gim);
   return m === null ? null : m.toUpperCase();
 };
-const parseCompare = (text: string): string | null => {
+export const parseCompare = (text: string): string | null => {
   const m = lastMatch(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
   return m === null ? null : m.toUpperCase();
 };
 // Continuation selection after a tied compare: which prototype to extend.
 // A selection, never a quality verdict; parsed strictly like COMPARE.
-const parseSelect = (text: string): string | null => {
+export const parseSelect = (text: string): string | null => {
   const m = lastMatch(text, /^SELECT:\s*(A|B)\s*$/gim);
   return m === null ? null : m.toUpperCase();
+};
+
+// Pure round-decision helpers shared by the loop and controlled checks.
+// Production calls these; checks import them from this module (no copies).
+
+export type ComparePairKind = "best-wins" | "candidate-wins" | "inconclusive" | "unjudged";
+
+/** Keep/revert decision from the two ordered blind verdicts. Priority matches the loop: best-wins, then unjudged, then inconclusive, else candidate-wins. */
+export const classifyComparePair = (order1: string, order2: string): ComparePairKind => {
+  const bestWinsBoth = order1 === "B" && order2 === "A";
+  const noVerdicts = order1 === "NONE" || order2 === "NONE";
+  const candidateWinsBoth = order1 === "A" && order2 === "B";
+  if (bestWinsBoth) return "best-wins";
+  if (noVerdicts) return "unjudged";
+  if (!candidateWinsBoth) return "inconclusive";
+  return "candidate-wins";
+};
+
+/** Pending-line step after one inconclusive round. Three consecutive inconclusives drop the line and count one stall. */
+export const advancePendingAfterInconclusive = (
+  current: StoredRun["pending"],
+  branch: string,
+  round: number,
+  verdicts: VerdictRef[],
+): { pending: StoredRun["pending"]; dropStall: boolean } => {
+  const streak = (current?.streak ?? 0) + 1;
+  if (streak >= 3) return { pending: null, dropStall: true };
+  return { pending: { branch, round, verdicts, streak }, dropStall: false };
+};
+
+/** Builder no-op streak step. Real source change resets; two quiet turns in a row ends the block. */
+export const advanceQuietStreak = (
+  prev: string,
+  next: string,
+  streak: number,
+): { streak: number; versions: string; ended: boolean } => {
+  const updated = next !== prev ? 0 : streak + 1;
+  return { streak: updated, versions: next, ended: updated >= 2 };
+};
+
+/** Journal lines with torn lines skipped, as the fresh-run path already does. */
+export const parseJournalLines = (text: string): RoundRecord[] => {
+  const records: RoundRecord[] = [];
+  for (const line of text.split("\n").filter(Boolean)) {
+    try {
+      records.push(JSON.parse(line) as RoundRecord);
+    } catch {
+      // Skip torn lines.
+    }
+  }
+  return records;
+};
+
+/** Journal authority for round metadata: longer journal wins, else the snapshot stands. */
+export const reconcileRoundArrays = (
+  snapshot: RoundRecord[],
+  journalText: string,
+): RoundRecord[] => {
+  const journal = parseJournalLines(journalText);
+  return journal.length > snapshot.length ? journal : snapshot;
+};
+
+/** Blind evidence gate: both builds need recorded hands-on input within the equal budget. Returns a NONE reason or null when evidence is usable. */
+export const validatePlayEvidence = (
+  aEvidence: { executedInputSteps: number; nominalMs: number } | null,
+  bEvidence: { executedInputSteps: number; nominalMs: number } | null,
+): string | null => {
+  if (
+    aEvidence === null ||
+    bEvidence === null ||
+    aEvidence.executedInputSteps === 0 ||
+    bEvidence.executedInputSteps === 0
+  )
+    return "Both builds did not receive recorded hands-on input.";
+  if (aEvidence.nominalMs > 120_000 || bEvidence.nominalMs > 120_000)
+    return "A play sample exceeded the equal 120-second input budget.";
+  return null;
 };
 
 export class GameRun extends Context.Service<
@@ -415,15 +492,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     const reconcileJournal = (root: string, resumed: StoredRun): Effect.Effect<void> =>
       Effect.promise(async () => {
         const text = await NodeFSP.readFile(runPaths(root).rounds, "utf8").catch(() => "");
-        const records: RoundRecord[] = [];
-        for (const line of text.split("\n").filter(Boolean)) {
-          try {
-            records.push(JSON.parse(line) as RoundRecord);
-          } catch {
-            // Skip torn lines, as the fresh-run path does.
-          }
-        }
-        if (records.length > resumed.rounds.length) resumed.rounds = records;
+        resumed.rounds = reconcileRoundArrays(resumed.rounds, text);
       });
 
     const markRoleThread = (threadId: ThreadId): Effect.Effect<void> =>
@@ -1586,10 +1655,10 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
         failState.consec = 0;
         const after = yield* gameSourceVersion(root, lane.dir);
-        const changed = after !== versions;
-        quietTurns = changed ? 0 : quietTurns + 1;
-        versions = after;
-        if (quietTurns >= 2) {
+        const stepped = advanceQuietStreak(versions, after, quietTurns);
+        quietTurns = stepped.streak;
+        versions = stepped.versions;
+        if (stepped.ended) {
           yield* logLine(
             root,
             `builder ${tag}: finished after two turns without a game-file change (${turns} turns)`,
@@ -2035,25 +2104,23 @@ export const layer = (options: { readonly stateDir: string }) => {
             JSON.stringify(evidence, null, 2) + "\n",
           );
         });
-        if (
-          a === null ||
-          b === null ||
-          aEvidence === null ||
-          bEvidence === null ||
-          aEvidence.executedInputSteps === 0 ||
-          bEvidence.executedInputSteps === 0
-        )
+        if (a === null || b === null) {
+          const gate = validatePlayEvidence(aEvidence, bEvidence);
           return {
             verdict: "NONE",
-            reason: "Both builds did not receive recorded hands-on input.",
+            reason: gate ?? "Both builds did not receive recorded hands-on input.",
             end: null as string | null,
           };
-        if (aEvidence.nominalMs > 120_000 || bEvidence.nominalMs > 120_000)
-          return {
-            verdict: "NONE",
-            reason: "A play sample exceeded the equal 120-second input budget.",
-            end: null as string | null,
-          };
+        }
+        {
+          const gate = validatePlayEvidence(aEvidence, bEvidence);
+          if (gate !== null)
+            return {
+              verdict: "NONE",
+              reason: gate,
+              end: null as string | null,
+            };
+        }
         const reports = {
           A: `Build A. Recorded play: ${JSON.stringify(aEvidence)}\n${a.notes}`,
           B: `Build B. Recorded play: ${JSON.stringify(bEvidence)}\n${b.notes}`,
@@ -2663,11 +2730,9 @@ export const layer = (options: { readonly stateDir: string }) => {
           verdict: order2.verdict,
           reason: order2.reason,
         });
-        const bestWinsBoth = order1.verdict === "B" && order2.verdict === "A";
-        const noVerdicts = order1.verdict === "NONE" || order2.verdict === "NONE";
-        const candidateWinsBoth = order1.verdict === "A" && order2.verdict === "B";
+        const pairKind = classifyComparePair(order1.verdict, order2.verdict);
         let reviewedBuild = "the current best on main";
-        if (bestWinsBoth) {
+        if (pairKind === "best-wins") {
           if (yield* checkoutRef(root, "main", `round ${round} reject`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
           }
@@ -2677,7 +2742,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           stallStreak += 1;
           stored.pending = null;
           reviewedBuild = "the current best on main (last candidate rejected; best won both)";
-        } else if (noVerdicts) {
+        } else if (pairKind === "unjudged") {
           if (yield* checkoutRef(root, "main", `round ${round} unjudged`)) {
             if (best.length > 0) yield* resetMainTo(root, best);
           }
@@ -2696,7 +2761,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               300,
             );
           stallStreak += 1;
-        } else if (!candidateWinsBoth) {
+        } else if (pairKind === "inconclusive") {
           // Inconclusive (tie or split): a tie is an honest non-finding, never
           // a keep. The judged best stands, the candidate stays on its branch
           // for the record, and the loop continues with the same weakness. No
@@ -2714,15 +2779,18 @@ export const layer = (options: { readonly stateDir: string }) => {
           // Open pending line: later rounds refine this candidate against the
           // same judged base instead of rebuilding from main. Three consecutive
           // inconclusives drop the line and count one stall: not converging.
-          const streak = (stored.pending !== null ? stored.pending.streak : 0) + 1;
-          if (streak >= 3) {
-            stored.pending = null;
+          const advanced = advancePendingAfterInconclusive(
+            stored.pending,
+            key,
+            round,
+            record.verdicts,
+          );
+          stored.pending = advanced.pending;
+          if (advanced.dropStall) {
             stallStreak += 1;
             record.note =
               `${record.note ?? ""} inconclusive (${split}); pending dropped after 3 inconclusive rounds`.trim();
             yield* logLine(root, `round ${round}: pending dropped after 3 inconclusive rounds`);
-          } else {
-            stored.pending = { branch: key, round, verdicts: record.verdicts, streak };
           }
           reviewedBuild = `the current best on main (last round inconclusive ${split}; its candidate stays on branch ${key} unmerged; the top flaw below is still open)`;
           yield* logLine(
@@ -2748,7 +2816,9 @@ export const layer = (options: { readonly stateDir: string }) => {
             record.note = `${record.note ?? ""} merge failed; kept on branch`.trim();
             stallStreak += 1;
             stored.pending = null;
-            reviewedBuild = `the unmerged candidate on branch ${key} (merge failed; best on main is unchanged)`;
+            // The tree is on main here (checkout succeeded, merge failed), so
+            // the reviewer plays best, not the candidate.
+            reviewedBuild = `the current best on main (merge failed; candidate stays on branch ${key} unmerged)`;
           } else {
             best = candidate;
             record.kept = true;
