@@ -1,5 +1,4 @@
 import * as GameService from "./game/GameService.ts";
-import * as GameEngine from "./game/GameEngine.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
@@ -509,7 +508,6 @@ const layerGameServices = Layer.mergeAll(GameService.layer).pipe(
     ),
   ),
   Layer.provideMerge(GameProjectService.layer),
-  Layer.provideMerge(GameEngine.layer),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
   Layer.provideMerge(GamePreview.layer),
