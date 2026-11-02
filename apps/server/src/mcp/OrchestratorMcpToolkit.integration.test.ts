@@ -42,6 +42,7 @@ import {
 } from "@t3tools/provider-testing/replayTranscript";
 import * as ProviderRegistryMock from "../provider/testUtils/providerRegistryMock.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
@@ -160,7 +161,21 @@ const layerMemorySecretStore = Layer.sync(ServerSecretStore.ServerSecretStore, (
   });
 });
 
-const layerUnusedScheduledTaskStub = Layer.empty;
+const layerUnusedScheduledTaskStub = Layer.succeed(
+  ScheduledTaskService.ScheduledTaskService,
+  ScheduledTaskService.ScheduledTaskService.of({
+    list: () => Effect.succeed({ tasks: [] }),
+    subscribeList: () => Stream.succeed({ tasks: [] }),
+    upsert: () => Effect.die("ScheduledTaskService.upsert is unused in this test"),
+    setEnabled: () => Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
+    delete: () => Effect.die("ScheduledTaskService.delete is unused in this test"),
+    runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
+    rotateWebhookToken: () => Effect.die("unused in this test"),
+    listWebhookDeliveries: () => Effect.die("unused in this test"),
+    getWebhookDelivery: () => Effect.die("unused in this test"),
+    triggerWebhook: () => Effect.die("unused in this test"),
+  }),
+);
 
 describe("orchestrator MCP toolkit", () => {
   it.live("reports running and queued child follow-ups from a Codex replay transcript", () =>

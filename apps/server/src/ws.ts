@@ -1,4 +1,7 @@
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
+import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameRun from "./game/GameRun.ts";
 import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
@@ -1178,6 +1181,9 @@ const layerWsRpc = (
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const secretRequests = yield* SecretRequests.SecretRequests;
+      const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
+      const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
 
       const crypto = yield* Crypto.Crypto;
 
@@ -2064,6 +2070,21 @@ const layerWsRpc = (
               Effect.as(commandOutputHub.subscribe(input)),
             ),
           ),
+        [WS_METHODS.scheduledTasksList]: () => scheduledTasks.list(),
+        [WS_METHODS.scheduledTasksSubscribe]: () => scheduledTasks.subscribeList(),
+        [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),
+        [WS_METHODS.scheduledTasksSetEnabled]: (input) =>
+          Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
+            Effect.andThen(scheduledTasks.setEnabled(input)),
+          ),
+        [WS_METHODS.scheduledTasksDelete]: (input) =>
+          Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
+            Effect.andThen(scheduledTasks.delete(input)),
+          ),
+        [WS_METHODS.scheduledTasksRunNow]: (input) =>
+          Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
+            Effect.andThen(scheduledTasks.runNow(input)),
+          ),
         [WS_METHODS.secretsAnswerRequest]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(secretRequests.answer(input)),
@@ -2530,6 +2551,9 @@ const layerWsRpc = (
           ),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),
+        [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,
+        [WS_METHODS.agentSessionsImport]: (input) =>
+          agentSessionImporter.importRecentAgentThreads(input),
         [WS_METHODS.assetsCreateUrl]: (input) =>
           Effect.gen(function* () {
             const path = yield* Path.Path;
@@ -2977,6 +3001,7 @@ export const layer = Layer.unwrap(
               // their defects, not the rest of the server's.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+              Layer.provide(AgentSessionScanner.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(OtlpEndpointCheck.layer),
             ),

@@ -57,6 +57,36 @@ const handlers = {
         );
       }),
   ),
+  schedule_task: McpToolAccess.startsThreads(
+    () => ({}),
+    (input) =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.McpInvocationContext;
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        return yield* service.scheduleTask(scope, input);
+      }),
+  ),
+  list_scheduled_tasks: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.listScheduledTasks(scope, input);
+    }),
+  ),
+  update_scheduled_task: McpToolAccess.writes((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.updateScheduledTask(scope, input);
+    }),
+  ),
+  delete_scheduled_task: McpToolAccess.writes((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.deleteScheduledTask(scope, input);
+    }),
+  ),
   request_secret: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

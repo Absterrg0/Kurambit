@@ -5,11 +5,18 @@ import {
   OrchestratorMcpCreateThreadsResult,
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
+  OrchestratorMcpDeleteScheduledTaskInput,
+  OrchestratorMcpDeleteScheduledTaskResult,
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpRequestSecretResult,
   OrchestratorMcpFailure,
+  OrchestratorMcpListScheduledTasksInput,
+  OrchestratorMcpListScheduledTasksResult,
+  OrchestratorMcpScheduleTaskInput,
+  OrchestratorMcpScheduleTaskResult,
   OrchestratorMcpTaskCancelInput,
   OrchestratorMcpTaskCancelResult,
+  OrchestratorMcpUpdateScheduledTaskInput,
   OrchestratorMcpTaskStatusInput,
   OrchestratorMcpThreadInterruptInput,
   OrchestratorMcpThreadInterruptResult,
@@ -107,9 +114,60 @@ const WorkflowStopTool = Tool.make("t3_workflow_stop", {
   .annotate(Tool.Title, "Stop a workflow")
   .annotate(Tool.Destructive, true);
 
+export const ScheduleTaskTool = Tool.make("schedule_task", {
+  description:
+    "Create persistent work in the app scheduler that runs even when no turn is active. Pass schedule as a STRUCTURED OBJECT, never JSON text. Timers: {type:'interval', everyMs:3600000} is hourly; {type:'fixed_time', timeOfDay:'09:00', weekdays:[1,2,3,4,5]} is weekday mornings; report the returned nextRunAt. This local environment has no public webhook URL, so prefer interval or fixed_time schedules here. Omit projectId for this thread's project. In this thread's project, runs post into THIS thread by default (bindToCurrentThread=true), which suits an orchestrator that sees every trigger, delegates work, and can dedupe against what is in flight; use false only when the user wants a fresh top-level thread per run. Elsewhere each run launches a fresh thread. Provider, model, and runtime settings inherit from this thread, or from the project default when there is no calling thread.",
+  parameters: OrchestratorMcpScheduleTaskInput,
+  success: OrchestratorMcpScheduleTaskResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Schedule a recurring task")
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.OpenWorld, true);
+
+const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
+  parameters: OrchestratorMcpListScheduledTasksInput,
+  description:
+    "List recurring scheduled tasks in a project (omit projectId for the calling thread's project, or every project when there is no calling thread), including their id, schedule, prompt, enabled state, bound thread, next run time, and last run status. Use the returned scheduledTaskId with update_scheduled_task or delete_scheduled_task.",
+  success: OrchestratorMcpListScheduledTasksResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "List scheduled tasks")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
+
+const UpdateScheduledTaskTool = Tool.make("update_scheduled_task", {
+  description:
+    "Update an existing scheduled task by scheduledTaskId (from list_scheduled_tasks). Only the provided fields change; omit a field to leave it as-is. Use enabled=false to pause a task without deleting it. Set bindToCurrentThread to move the task between posting into this thread and launching a fresh thread per run.",
+  parameters: OrchestratorMcpUpdateScheduledTaskInput,
+  success: OrchestratorMcpScheduleTaskResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Update a scheduled task")
+  .annotate(Tool.Destructive, true);
+
+const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
+  description:
+    "Permanently delete a scheduled task by scheduledTaskId (from list_scheduled_tasks). The task stops running immediately. To keep it but stop runs, use update_scheduled_task with enabled=false instead.",
+  parameters: OrchestratorMcpDeleteScheduledTaskInput,
+  success: OrchestratorMcpDeleteScheduledTaskResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Delete a scheduled task")
+  .annotate(Tool.Destructive, true);
+
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    "Ask the user for a secret (a token, API key, signing secret, password) through a private card in this thread, and wait for them to answer. The value is kept by the app and NEVER returned to you or shown in the transcript. When saved, the result carries a secretRef: pass it to a tool that accepts one. It works once. Never ask for secrets in chat, and never invent one.",
+    "Ask the user for a secret (a token, API key, signing secret, password) through a private card in this thread, and wait for them to answer. The value is kept by the app and NEVER returned to you or shown in the transcript. When saved, the result carries a secretRef: pass it to a tool that accepts one (e.g. schedule_task's signature.secretRef). It works once. Never ask for secrets in chat, and never invent one.",
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -219,6 +277,10 @@ export const OrchestratorToolkit = Toolkit.make(
   TaskStatusTool,
   TaskCancelTool,
   WorkflowStopTool,
+  ScheduleTaskTool,
+  ListScheduledTasksTool,
+  UpdateScheduledTaskTool,
+  DeleteScheduledTaskTool,
   RequestSecretTool,
   CreateThreadsTool,
   ThreadListTool,

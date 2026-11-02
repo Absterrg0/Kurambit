@@ -45,6 +45,7 @@ import {
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { AgentSessionsPanel } from "./AgentSessionsPanel";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
@@ -570,6 +571,13 @@ function ProjectDetail({
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
+        <SettingsSection id="project-agent-sessions" title="Agent sessions">
+          <AgentSessionsPanel
+            environmentId={representative.environmentId}
+            projectId={representative.id}
+            canOperate={canEditGroup}
+          />
+        </SettingsSection>
         <SettingsSection title="Danger">
           <SettingsRow
             title={
