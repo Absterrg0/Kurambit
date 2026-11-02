@@ -7,6 +7,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -165,6 +166,19 @@ const strippedEnv = (): NodeJS.ProcessEnv => {
   env.TMPDIR = NodePath.join(NodeOS.homedir(), ".gs-tmp");
   env.NODE_OPTIONS = "--max-old-space-size=1536";
   return env;
+};
+
+// Bounded one-line summary of a failure cause for logs: curated error messages
+// pass through, defects contribute only their message text, never values.
+const causeMessage = (cause: Cause.Cause<unknown>): string => {
+  const squashed: unknown = Cause.squash(cause);
+  const text =
+    typeof squashed === "string"
+      ? squashed
+      : squashed instanceof Error
+        ? squashed.message
+        : "unrecognized failure";
+  return text.length > 0 ? text : "unrecognized failure";
 };
 
 const readJsonFile = async <T>(path: string, fallback: T): Promise<T> => {
@@ -3020,10 +3034,13 @@ export const layer = (options: { readonly stateDir: string }) => {
             ),
             Effect.tap(() => finishExports(root, input.threadId).pipe(Effect.ignore)),
             // A failed loop must never end silently (observed: a failed boot check
-            // left ending null with no log and no next role). Record cause plus
-            // lastFailure through existing bookkeeping, then let the failure stand.
-            Effect.tapErrorCause((cause) =>
-              logLine(root, `run loop failed: ${String(cause).slice(0, 500)}`).pipe(
+            // left ending null with no log and no next role). tapCause observes
+            // typed failures and defects (verified on the installed runtime);
+            // creator-stop interruption bypasses observation taps by construction,
+            // so a user stop is never mislabeled as a provider failure. Record
+            // plus lastFailure through existing bookkeeping, then let it stand.
+            Effect.tapCause((cause) =>
+              logLine(root, `run loop failed: ${causeMessage(cause).slice(0, 500)}`).pipe(
                 Effect.andThen(() => noteRouteFailure(root, "run loop failed; see run.log")),
                 Effect.ignore,
               ),
