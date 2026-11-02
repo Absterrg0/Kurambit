@@ -5,7 +5,8 @@ import { ThreadId } from "./baseSchemas.ts";
 
 export const GameRunStartInput = Schema.Struct({
   threadId: ThreadId,
-  brief: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8000)),
+  /** Required for a new run; empty resumes a stopped run with its own brief. */
+  brief: Schema.String.check(Schema.isMaxLength(8000)),
   artDirection: Schema.optionalKey(Schema.String),
   /** Creator's choice. Omitted means no time limit. */
   budgetMinutes: Schema.optionalKey(Schema.Number),

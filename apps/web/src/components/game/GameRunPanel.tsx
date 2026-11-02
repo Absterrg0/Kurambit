@@ -5,14 +5,25 @@ import { PlayIcon, RefreshCwIcon, SendIcon, SquareIcon } from "lucide-react";
 import {
   gameRunRoleLabel,
   type GameRunStatusResult,
+  type ModelSelection,
   type ScopedThreadRef,
   type ThreadId,
 } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "../../providerInstances";
+import { useThreadShell } from "../../state/entities";
+import { useEnvironmentProviders } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -36,6 +47,16 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const [brief, setBrief] = useState("");
   const [budgetMinutes, setBudgetMinutes] = useState("");
   const [busy, setBusy] = useState(false);
+  // The run's agent: the game chat's own model unless the creator picks
+  // another one here, so a run can use a different provider than the chat.
+  const shell = useThreadShell(threadRef);
+  const settings = useEnvironmentSettings(threadRef.environmentId);
+  const providers = useEnvironmentProviders().get(threadRef.environmentId) ?? [];
+  const entries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
+  );
+  const [picked, setPicked] = useState<ModelSelection | null>(null);
+  const runModel = picked ?? shell?.modelSelection ?? null;
   const [error, setError] = useState<string | null>(null);
   const status: GameRunStatusResult | null = statusQuery.data ?? null;
   const active = status?.active ?? false;
@@ -48,8 +69,10 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     return () => window.clearInterval(interval);
   }, [active, refreshStatus]);
 
+  // A run record that is not live can be resumed without a new brief.
+  const resumable = status !== null && status.runId !== null && status.ending !== "ready";
   const start = async () => {
-    if (busy || brief.trim().length === 0) return;
+    if (busy || (brief.trim().length === 0 && !resumable)) return;
     setBusy(true);
     setError(null);
     const budget = budgetMinutes.trim() === "" ? undefined : Number(budgetMinutes);
@@ -58,6 +81,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: {
         threadId: threadRef.threadId,
         brief: brief.trim(),
+        ...(picked === null ? {} : { provider: picked.instanceId, model: picked.model }),
         ...(budget === undefined || !Number.isFinite(budget) || budget <= 0
           ? {}
           : { budgetMinutes: budget }),
@@ -146,7 +170,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
               rows={3}
-              placeholder="One-line brief: what the player does and what winning looks like."
+              placeholder={
+                resumable
+                  ? "Optional: a new brief. Leave empty to resume with the run's own brief."
+                  : "One-line brief: what the player does and what winning looks like."
+              }
               disabled={busy || !canRun}
               aria-label="Run brief"
             />
@@ -163,13 +191,30 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
                   aria-label="Budget in minutes"
                 />
               </label>
+              {runModel !== null ? (
+                <ProviderModelPicker
+                  environmentId={threadRef.environmentId}
+                  activeInstanceId={runModel.instanceId}
+                  model={runModel.model}
+                  lockedProvider={null}
+                  instanceEntries={entries}
+                  modelOptionsByInstance={getCustomModelOptionsByInstance(
+                    settings,
+                    providers,
+                    runModel.instanceId,
+                    runModel.model,
+                  )}
+                  disabled={busy || !canRun}
+                  onInstanceModelChange={(instanceId, model) => setPicked({ instanceId, model })}
+                />
+              ) : null}
               <Button
                 size="sm"
-                disabled={busy || !canRun || brief.trim().length === 0}
+                disabled={busy || !canRun || (brief.trim().length === 0 && !resumable)}
                 onClick={() => void start()}
               >
                 <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
-                {busy ? "Starting…" : "Start run"}
+                {busy ? "Starting…" : resumable ? "Resume run" : "Start run"}
               </Button>
             </div>
           </div>

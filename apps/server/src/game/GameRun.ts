@@ -191,11 +191,16 @@ const selectionFor = (current: ModelSelection, state: State.RunState): ModelSele
   }
   if ((variant === null || variant.length === 0) && state.model === null && state.provider === null)
     return current;
+  // Options belong to a provider: another provider's (Codex effort on an
+  // OpenCode model) would make every turn fail, so they carry over only when
+  // the provider stays.
+  const base =
+    state.provider === null || state.provider === current.instanceId ? current.options : [];
   const options =
     variant === null || variant.length === 0
-      ? current.options
+      ? base
       : [
-          ...(current.options ?? []).filter((entry) => entry.id !== "variant"),
+          ...(base ?? []).filter((entry) => entry.id !== "variant"),
           { id: "variant", value: variant },
         ];
   return {
@@ -576,7 +581,13 @@ export const layer = (options: { readonly stateDir: string }) => {
               ),
             ),
         ),
-        Effect.onInterrupt(() => save({ ...state, ending: "stopped" })),
+        // Only the creator's stop (which leaves the stop file) ends the run; a
+        // server shutdown interrupts it too, and that run must resume at startup.
+        Effect.onInterrupt(() =>
+          Effect.flatMap(stopRequested(root), (stopped) =>
+            stopped ? save({ ...state, ending: "stopped" }) : Effect.void,
+          ),
+        ),
       );
       if (state.ending !== "stopped" && state.ending !== "failed")
         yield* finishExports(root, d.creator, d.deps.game, log).pipe(Effect.ignore);
@@ -609,6 +620,14 @@ export const layer = (options: { readonly stateDir: string }) => {
           ...prior,
           brief: input.brief.length > 0 ? input.brief : prior.brief,
           budgetMinutes: input.budgetMinutes ?? prior.budgetMinutes,
+          // A model chosen at resume replaces the run's; its variant goes with it.
+          ...(input.provider === undefined && input.model === undefined
+            ? {}
+            : {
+                provider: input.provider ?? prior.provider,
+                model: input.model ?? prior.model,
+                variant: input.variant ?? null,
+              }),
           ending: null,
           creator: input.threadId,
           ...(loaded.kind === "legacy" ? { next } : {}),
@@ -619,6 +638,13 @@ export const layer = (options: { readonly stateDir: string }) => {
             `resuming a run from the previous loop at stage ${prior.stage}; recovering trunk first`,
           );
       } else {
+        if (input.brief.trim().length === 0)
+          return yield* new GameRunError({
+            operation: "run-start",
+            path: root,
+            reason: "brief-required",
+            detail: "A new run needs a brief.",
+          });
         const rounds =
           prior?.rounds ??
           State.parseJournal((yield* Effect.promise(() => readText(paths(root).rounds))) ?? "");
