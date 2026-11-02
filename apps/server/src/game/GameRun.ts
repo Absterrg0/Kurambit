@@ -6,7 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NodeUrl from "node:url";
+import * as NodeURL from "node:url";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -616,7 +616,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     const ensureGameScaffold = (root: string): Effect.Effect<void> =>
       Effect.promise(async () => {
         const [bundled, monorepo] = Templates.templateDirectoryCandidates(
-          NodePath.dirname(NodeUrl.fileURLToPath(import.meta.url)),
+          NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
           NodePath.join,
         );
         let templatesDir: string | null = null;
@@ -786,6 +786,34 @@ export const layer = (options: { readonly stateDir: string }) => {
       "cancelled",
       "rolled_back",
     ]);
+    const stopTurn = Effect.fn("GameRun.stopTurn")(function* (
+      projectId: ProjectId,
+      threadId: ThreadId,
+      runId: RunId | undefined,
+      reason: string,
+    ) {
+      const threads = yield* needThreads("stop-turn", String(threadId));
+      yield* threads
+        .interruptThread({
+          projectId,
+          commandId: CommandId.make(NodeCrypto.randomUUID()),
+          threadId,
+          ...(runId === undefined ? {} : { runId }),
+          reason,
+        })
+        .pipe(Effect.mapError(() => fail("stop-turn", String(threadId), "interrupt-failed")));
+      const stopped = yield* threads
+        .waitForThread({
+          projectId,
+          threadId,
+          ...(runId === undefined ? {} : { runId }),
+          timeoutMs: 60_000,
+        })
+        .pipe(Effect.mapError(() => fail("stop-turn", String(threadId), "wait-failed")));
+      // An interrupt request only commits a command; the provider stops later.
+      if (stopped.timedOut || (stopped.run !== null && !TERMINAL_RUN.has(stopped.run.status)))
+        return yield* Effect.fail(fail("stop-turn", String(threadId), "stop-unconfirmed"));
+    });
     const liveRoleThread = (
       stored: StoredRun,
       role: string,
@@ -803,8 +831,14 @@ export const layer = (options: { readonly stateDir: string }) => {
         if (projection === null) return null;
         const latest = projection.runs[projection.runs.length - 1];
         if (latest === undefined || TERMINAL_RUN.has(latest.status)) return null;
+        yield* stopTurn(
+          projection.thread.projectId,
+          peer.threadId as ThreadId,
+          latest.id,
+          "Resuming the role after a server restart.",
+        );
         return { threadId: peer.threadId as ThreadId, projectId: projection.thread.projectId };
-      }).pipe(Effect.orElseSucceed(() => null));
+      });
     const launchRole = Effect.fn("GameRun.launchRole")(function* (
       root: string,
       stored: StoredRun,
@@ -896,50 +930,64 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.orElseSucceed(() => -1),
       )) as unknown as number;
       let lastSequence = baseline;
-      for (;;) {
-        const left = deadline - Date.now();
-        if (left <= 0) return { replaced: false as const, restarts };
-        const slice = Math.min(60_000, left);
-        const waited = (yield* threads
-          .waitForThread({
-            projectId,
-            threadId,
-            ...(currentRunId === undefined ? {} : { runId: currentRunId }),
-            timeoutMs: slice,
-          })
-          .pipe(
+      return yield* Effect.gen(function* () {
+        for (;;) {
+          const left = deadline - Date.now();
+          if (left <= 0) {
+            yield* stopTurn(projectId, threadId, currentRunId, "Role play/work cap reached.");
+            return { replaced: false as const, restarts, capped: true };
+          }
+          const slice = Math.min(60_000, left);
+          const waited = (yield* threads
+            .waitForThread({
+              projectId,
+              threadId,
+              ...(currentRunId === undefined ? {} : { runId: currentRunId }),
+              timeoutMs: slice,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                fail("wait-thread", String(threadId), "thread-wait", String(cause)),
+              ),
+            )) as unknown as { run: { id: RunId; status: string } | null; timedOut: boolean };
+          if (waited.run !== null && waited.run.id !== undefined) currentRunId = waited.run.id;
+          if (!waited.timedOut) return { replaced: false as const, restarts, capped: false };
+          const sequence = (yield* threads.getThreadEventSequence(threadId).pipe(
             Effect.mapError((cause) =>
-              fail("wait-thread", String(threadId), "thread-wait", String(cause)),
+              fail("watch-thread", String(threadId), "thread-read", String(cause)),
             ),
-          )) as unknown as { run: { id: RunId; status: string } | null; timedOut: boolean };
-        if (waited.run !== null && waited.run.id !== undefined) currentRunId = waited.run.id;
-        if (!waited.timedOut) return { replaced: false as const, restarts };
-        const sequence = (yield* threads.getThreadEventSequence(threadId).pipe(
-          Effect.mapError((cause) =>
-            fail("watch-thread", String(threadId), "thread-read", String(cause)),
-          ),
-          Effect.orElseSucceed(() => lastSequence),
-        )) as unknown as number;
-        if (sequence !== lastSequence) {
-          lastSequence = sequence;
+            Effect.orElseSucceed(() => lastSequence),
+          )) as unknown as number;
+          if (sequence !== lastSequence) {
+            lastSequence = sequence;
+            lastGrowth = Date.now();
+            continue;
+          }
+          if (Date.now() - lastGrowth < STALL_MS) continue;
+          if (restarts >= MAX_RESTARTS) {
+            yield* stopTurn(
+              projectId,
+              threadId,
+              currentRunId,
+              "Role watchdog replacing stalled thread.",
+            );
+            return { replaced: true as const, restarts, capped: false };
+          }
+          restarts += 1;
           lastGrowth = Date.now();
-          continue;
-        }
-        if (Date.now() - lastGrowth < STALL_MS) continue;
-        if (restarts >= MAX_RESTARTS) return { replaced: true as const, restarts };
-        restarts += 1;
-        lastGrowth = Date.now();
-        yield* threads
-          .interruptThread({
+          yield* stopTurn(
             projectId,
-            commandId: CommandId.make(NodeCrypto.randomUUID()),
             threadId,
-            ...(currentRunId === undefined ? {} : { runId: currentRunId }),
-            reason: "No thread activity for 4 minutes; continuing.",
-          })
-          .pipe(Effect.ignore);
-        currentRunId = yield* sendTurn(projectId, threadId, continueText);
-      }
+            currentRunId,
+            "No thread activity for 4 minutes; continuing.",
+          );
+          currentRunId = yield* sendTurn(projectId, threadId, continueText);
+        }
+      }).pipe(
+        Effect.onInterrupt(() =>
+          stopTurn(projectId, threadId, currentRunId, "Game run stopped.").pipe(Effect.orDie),
+        ),
+      );
     });
 
     const assistantText = Effect.fn("GameRun.assistantText")(function* (
@@ -961,22 +1009,12 @@ export const layer = (options: { readonly stateDir: string }) => {
       return texts.join("\n");
     });
 
-    // A usage limit pauses and retries: the run waits in 30-minute slices
-    // up to 6 hours, then resumes from the folder. Never switches models.
     const pauseOnUsageLimit = Effect.fn("GameRun.pauseOnUsageLimit")(function* (
-      root: string,
       threadId: ThreadId,
       runId: RunId | undefined,
     ) {
       const text = yield* assistantText(threadId, runId);
-      if (!isUsageLimit(text)) return "ok" as const;
-      for (let i = 0; i < 12; i += 1) {
-        if (yield* stopRequested(root)) return "stopped" as const;
-        yield* Effect.sleep("30 minutes");
-        const retry = yield* assistantText(threadId, undefined);
-        if (!isUsageLimit(retry)) return "ok" as const;
-      }
-      return "usage-limit" as const;
+      return isUsageLimit(text) ? ("usage-limit" as const) : ("ok" as const);
     });
 
     const logLine = (root: string, line: string): Effect.Effect<void> =>
@@ -1078,7 +1116,8 @@ export const layer = (options: { readonly stateDir: string }) => {
       never
     > {
       const waited = yield* waitWithWatchdog(projectId, threadId, runId, capMs, continueText);
-      const limit = yield* pauseOnUsageLimit(root, threadId, undefined);
+      if (waited.capped) yield* logLine(root, `role cap: ${threadId}; run terminal before handoff`);
+      const limit = yield* pauseOnUsageLimit(threadId, undefined);
       if (limit !== "ok")
         return { replaced: waited.replaced, restarts: waited.restarts, end: limit };
       const outcome = yield* latestOutcome(threadId);
@@ -1234,7 +1273,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       const continued = "Continue where you left off. Reply briefly, then keep working.";
       const end = Date.now() + blockMs;
       const first =
-        `${BUILD_RULE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
+        `${BUILD_RULE}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
         `Note learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
       const launched = yield* launchRole(
         root,
@@ -1310,6 +1349,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           `${mins} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nDo not redo what works. No subagents. No commits.`,
         );
       }
+      yield* stopTurn(projectId, threadId, runId, "Builder block complete.");
       return { threadId, turns, end: null as string | null };
     });
 
@@ -1776,7 +1816,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         const planEnd = yield* singleStage(
           "plan",
           "plan",
-          `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (target native). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Do not list extra levels or content to add. Do not write game code. Do not use subagents. Do not commit.`,
+          `${TOOL_RULE}${SKILL_LINE}Play the base build first with game_explore_start (target native). Then write PLAN.md: the game's structure, with rules and state separate from presentation so later passes can change it safely; the asset list; what makes the core experience good (how it should play, feel and look); and what done means for the scope the brief asks for. Concrete and short. Plan the depth the core needs; avoid filler and length targets. More content is the creator's choice. Do not write game code. Do not use subagents. Do not commit.`,
           5 * 60_000,
         );
         if (planEnd !== null) return planEnd;
@@ -1847,14 +1887,13 @@ export const layer = (options: { readonly stateDir: string }) => {
         const roundStart = Date.now();
         const nextMd = yield* readNextMd(root);
         const pickNotes = nextMd.length > 0 ? "" : yield* readPick(root);
-        const concreteAsk =
-          "Deliver something a player would notice in the first minute: a control that feels different, a visible change on screen, a new or fixed sound, a readable HUD element, or one fixed rough edge from the tester notes. Work in game files under godot/ only; notes, bots and skill files do not count.";
+        const concreteAsk = `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under godot/; notes, bots and skill files do not count.`;
         const direction =
           nextMd.length > 0
             ? nextMd
             : pickNotes.length > 0
-              ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks (better, never bigger: no new levels, systems or length):\n${pickNotes}\n${concreteAsk}`
-              : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. Do not add new levels, systems or length; make what's there really good. ${concreteAsk}`;
+              ? `No review yet. The blind pick of the prototypes reported real play issues; fix the most important one in how the game plays, feels or looks:\n${pickNotes}\n${concreteAsk}`
+              : `Read PLAN.md and improve the biggest quality gap in what exists: how it plays, feels and looks, working systems, no bugs. Play weakness first. ${concreteAsk}`;
         const move = direction.slice(0, 300);
         const record: RoundRecord = {
           round,
@@ -1915,7 +1954,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               creatorThreadId,
               projectId,
               `${round}b`,
-              `The last block changed no game files under godot/ and will be discarded. Make a real change now: ${direction} Deliver something a player would notice in the first minute (a control that feels different, a visible change on screen, a sound, a fixed rough edge). Verify with game_check. Do not end your turn without changing a game file under godot/. No subagents. No commits.`,
+              `The last block changed no game files under godot/. Address the named top flaw now: ${direction} ${concreteAsk} Verify with game_check. No subagents. No commits.`,
               retryMs,
             );
             if (retry.end !== null) return retry.end;
@@ -2239,7 +2278,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           projectId,
           `reviewer-${round}`,
           `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): it is the kept build. Read PLAN.md and .studio/tester-${round}.md. Code facts: ${facts}.${playerFacts} After every couple of plays, append what you did and felt to .studio/reviewer-${round}.md. You may only write that notes file. Do not change game files. Do not use subagents.`,
-          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the one big quality move for the next block (better, never bigger: no new levels, systems or length); a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
+          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
           REVIEWER_CAP_MS,
           `.studio/reviewer-${round}.md`,
         );
@@ -2617,8 +2656,9 @@ export const layer = (options: { readonly stateDir: string }) => {
 // model anything. Shell Godot/Blender do not exist for these threads.
 const TOOL_RULE =
   "You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_status). ";
-const BUILD_RULE = `${TOOL_RULE}Write the game; the harness plays and judges it after you finish. Check new work only briefly with game_check, never playtest through the slot. Spend the block changing the game, not planning or judging: the harness plays and judges your build after you finish, so run the game only for brief checks of new work. Keep it bootable and changes small, so an early stop loses nothing. End the block with a change a player would notice in the first minute (a control that feels different, something new or fixed on screen, a sound, a readable HUD): a block that changes no game file under godot/ is discarded, and changing only notes, bots or skill files does not count.`;
+const BUILD_RULE = `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under godot/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;
 const BUILD_RULE_SHORT = BUILD_RULE;
+
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use long holds for movement; quick taps are unreliable. `;
 const FIRST_DIRECTION =

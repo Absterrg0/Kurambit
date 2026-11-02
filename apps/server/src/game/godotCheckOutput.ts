@@ -52,6 +52,8 @@ export const parseGodotIssues = (output: string): GameCheckIssue[] => {
     if (message === "") continue;
     // Godot's own cleanup chatter is not the game's failure.
     if (/ObjectDB instances? leaked/.test(message)) continue;
+    if (/^\d+ resources? still in use at exit \(run with --verbose for details\)\.$/.test(message))
+      continue;
     const quoted = SCRIPT_LOAD_FAILURE.exec(message);
     const location = locationAfter(lines, index);
     const file = location?.file ?? (quoted?.[1] ? quoted[1] : "");

@@ -1,69 +1,41 @@
-# {{GAME_NAME}} — Blank starter template
+# {{GAME_NAME}} blank starter
 
-This game started from the **Blank** template: one Godot 4.7 project under `godot/` with
-no gameplay yet. Everything below is the starting point to extend, not a fixed structure.
+An editable Godot project lives under `godot/`. The starter has no gameplay.
+Extend its structure to suit the game.
 
-## What the template ships
+## Project structure
 
-- `godot/project.godot` — project settings: window 960×540, the Compatibility
-  (`gl_compatibility`) renderer, `res://scenes/main.tscn` as the main scene, and two
-  autoloads:
-  - `GameState` (`godot/scripts/game_state.gd`) — the game's single source of truth. It
-    starts with no values; add the public primitive variables the game needs.
-  - `StudioProbe` (`godot/scripts/studio_probe.gd`) — in games it reports the
-    read-only probe snapshot `game_explore_*` and `game_check` read. Keep it and its
-    autoload line.
-- `godot/scenes/main.tscn` — a `Node3D` named `Main` with a camera and a directional
-  light. This is the one scene the game boots into; replace or extend it as the game
-  needs.
-- `godot/export_presets.cfg` — the **Web** preset (single-threaded, Compatibility
-  renderer, output `../builds/web/index.html`) and the **Linux** preset. `game_export`
-  uses these presets.
-- `godot/tests/smoke_test.gd` — the headless smoke entry point, with its checks in
-  `godot/tests/smoke_harness.gd`. It proves the project boots, the main scene enters the
-  tree, and the probe reads GameState. It proves engine readiness only: there is no
-  gameplay, no player and no run value to test yet.
-- `godot/assets/models/`, `godot/scripts/`, `godot/tests/` — where imported GLB models,
-  GDScript, and headless tests live.
+- `project.godot` uses the Compatibility renderer and boots `scenes/main.tscn`.
+  Keep that scene as the entry point; compose other scenes from it as needed.
+- Put scenes under `scenes/` and scripts under `scripts/`. Give distinct rules,
+  state, player behavior and presentation clear owners as the game grows.
+- Put runtime assets under `assets/`, including imported GLB files under
+  `assets/models/`. Keep editable `.blend` sources outside `godot/`.
+- `export_presets.cfg` provides Web and Linux exports through `game_export`.
+  Keep Web single-threaded so it works without special response headers.
 
-## Where to add content
+Read BRIEF.md and the relevant files in `studio-skills/`. When PLAN.md exists,
+use it to guide the core loop and organization. More content is the creator's
+choice; depth should serve the game's decisions and feel.
 
-- Build gameplay inside `godot/scenes/main.tscn` instead of creating a second root
-  scene, so the main scene stays the entry point.
-- Split anything bigger than a script per concept into its own scene under
-  `godot/scenes/` (`Player.tscn`, `HUD.tscn`, …) with a `class_name` script under
-  `godot/scripts/` and instantiate it from `Main`.
-- Put imported models under `godot/assets/models/` only (Godot imports that folder;
-  `.blend` sources never go inside `godot/`).
-- Keep the Web export single-threaded, so preview and playtest need no COOP/COEP
-  headers.
+## Studio integration
 
-Before building, write the 3–5 step build plan in DESIGN.md's Milestones: core playable
-first with a first playable checkpoint early, then content, then presentation. Each step
-names the acceptance ids it proves and the proof you will run.
+Keep the `GameState` and `StudioProbe` autoloads. Expose useful public primitive
+run values in GameState and add the player node to the `player` group so
+exploration can report state and position. Keep those facts legible in the game.
+For a game without a player node, expose a primitive `GameState.state` that
+distinguishes the menu from play.
 
-## Conventions
+Keep the probe's visibility handling. It pauses and mutes the game when its
+stage tab is hidden, then restores the prior state when shown.
 
-- GDScript only, typed where practical, one script per scene or system.
-- The game must be playable from `res://scenes/main.tscn` on a fresh checkout.
-- Add run values to `GameState` as public variables. `StudioProbe` reports up to 40
-  primitive values and the position of the first node in the `player` group, so keep the
-  values that matter on screen too.
-- A game with no player node marks play with a typed `GameState.state` (0/false before
-  play, another value once play starts), so scenarios and playtests can find the gameplay
-  baseline.
-- The probe also answers the stage's `studio-visibility` messages: while the stage tab
-  is hidden it pauses the scene tree and mutes the master audio bus, then restores what
-  it found. Keep that half of the bridge as well.
+## Check and play
 
-## Playtest
+Use `game_check` for import, load and boot problems. A clean check says the
+project boots; it cannot establish that the game is good to play. Godot's
+shutdown-only resource-use chatter is noise, not a gameplay defect.
 
-Play first with the `game_explore_*` tools (target native) and study every frame.
-
-## Tests
-
-`game_check` runs the headless checks plus `tests/smoke_test.gd`. Keep its engine-readiness checks as you add
-gameplay and run values. Extend them with the game's actual behaviour as you build it: boot
-`res://scenes/main.tscn`, drive the real loop with input or physics, assert observable
-outcomes, and quit with a nonzero exit code on failure. A green smoke test on an empty
-project means the engine and the bridge work, not that a game exists.
+Use `game_explore_start`, `game_explore_act` and `game_explore_close` to play.
+Inspect the frames, try real inputs, and report what you reached and what
+remains unverified. Fix the cause of the biggest play flaw. Games are verified
+by playing, without game test suites, acceptance IDs or scripted routes.
