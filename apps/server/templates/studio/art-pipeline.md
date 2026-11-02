@@ -20,3 +20,10 @@ must go.
 5. Lay the set out on one contact-sheet image, look at it, and redo the
    weak ones until the set hangs together.
 6. Dynamic text stays code; its skin (panels, buttons, fonts) is images.
+7. No-key shelf before paid generators: Poly Haven textures/models (public API,
+   no key, CC0; send app-identifying User-Agent/Referer and credit Poly Haven
+   visibly where surfaced), Quaternius CC0 characters (itch.io, verify the
+   download route before depending on it), sfxr/ZzFX-style synthesized effects
+   and code-rendered music loops for audio. Record every file's source and
+   licence in ASSETS.md next to its use; unlicensed or unknown-source files
+   do not ship.

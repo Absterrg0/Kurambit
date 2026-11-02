@@ -232,6 +232,12 @@ const parseCompare = (text: string): string | null => {
   const m = lastMatch(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
   return m === null ? null : m.toUpperCase();
 };
+// Continuation selection after a tied compare: which prototype to extend.
+// A selection, never a quality verdict; parsed strictly like COMPARE.
+const parseSelect = (text: string): string | null => {
+  const m = lastMatch(text, /^SELECT:\s*(A|B)\s*$/gim);
+  return m === null ? null : m.toUpperCase();
+};
 
 export class GameRun extends Context.Service<
   GameRun,
@@ -1610,7 +1616,19 @@ export const layer = (options: { readonly stateDir: string }) => {
         } catch {
           // No bot results yet; leave the default.
         }
-        return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} res:// references. Bots: ${botLine}.`;
+        // File-to-use map: art must record which file serves which use plus its
+        // source. Code counts entries only; the reviewer judges whether the game
+        // actually loads them.
+        let artMap = "ASSETS.md missing";
+        try {
+          const lines = (await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8"))
+            .split("\n")
+            .filter((line) => line.trim().length > 0).length;
+          artMap = `ASSETS.md with ${lines} entries (unverified)`;
+        } catch {
+          // No map yet; leave the default.
+        }
+        return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. Code has ${refs} res:// references. Bots: ${botLine}. Art map: ${artMap}.`;
       });
 
     // The tester explores with Jev only when the key is actually there.
@@ -2127,11 +2145,71 @@ export const layer = (options: { readonly stateDir: string }) => {
                 );
               best = yield* gitOut(root, ["rev-parse", "HEAD"]);
             }
-          } else if (pickResult.verdict === "TIE")
-            yield* logLine(
-              root,
-              "pick inconclusive (TIE): no prototype merged without demonstrated preference",
-            );
+          } else if (pickResult.verdict === "TIE") {
+            // TIE compares honestly but creation needs a base: ask the synthesis
+            // thread which prototype to continue. A selection, not a win; the tie
+            // stays on record and the base merges as unjudged starting material
+            // (same semantics as the single-prototype path). An unparsable answer
+            // builds from merge-base with the tie recorded instead of looping.
+            const compareEntry = [...stored.threads]
+              .reverse()
+              .find((entry) => entry.role.startsWith("compare-"));
+            let selected: string | null = null;
+            let selectReasons = "";
+            if (compareEntry !== undefined) {
+              const selectRunId = yield* sendTurn(
+                projectId,
+                compareEntry.threadId as ThreadId,
+                "The comparison is a tie with no demonstrated preference either way. For continuation only, not a quality verdict: which prototype should the first build extend, A or B, and in what direction? Put exactly one line SELECT: A or SELECT: B alone on its own line, then reasons in a separate paragraph below it. Do not replay or collect new evidence.",
+              );
+              const selectWaited = yield* waitRole(
+                root,
+                projectId,
+                compareEntry.threadId as ThreadId,
+                selectRunId,
+                WRITE_CAP_MS,
+                "Finish the selection: one SELECT line plus reasons.",
+              );
+              if (selectWaited.end !== null) return selectWaited.end;
+              const selectText = yield* assistantText(compareEntry.threadId as ThreadId, selectRunId);
+              selected = parseSelect(selectText);
+              selectReasons = selectText
+                .split("\n")
+                .filter((line) => !/^SELECT:\s*(A|B)\s*$/i.test(line))
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 500);
+            }
+            const tieNotes = "notes" in pickResult ? (pickResult.notes ?? "") : "";
+            if (selected === "A" || selected === "B") {
+              const base = selected === "B" ? bSha : aSha;
+              if (yield* checkoutRef(root, "main", "pick base merge")) {
+                const merged = yield* gitExec(root, ["merge", "--ff-only", "-q", base], 60_000);
+                if (merged.exitCode !== 0)
+                  yield* logLine(
+                    root,
+                    `pick base merge failed (${merged.stdout.slice(0, 200)}); staying on merge-base`,
+                  );
+                best = yield* gitOut(root, ["rev-parse", "HEAD"]);
+              }
+              yield* Effect.promise(() =>
+                NodeFSP.writeFile(
+                  NodePath.join(root, ".studio", "pick.txt"),
+                  `${tieNotes}\nSELECT: ${selected} (continuation choice on tied comparison; no demonstrated preference)\n${selectReasons}\n`,
+                ),
+              );
+              yield* logLine(
+                root,
+                `pick tie: continuing with ${selected} as unjudged base (no demonstrated preference)`,
+              );
+            } else {
+              yield* Effect.promise(() =>
+                NodeFSP.writeFile(NodePath.join(root, ".studio", "pick.txt"), tieNotes),
+              );
+              yield* logLine(root, "pick tie unresolved: building from merge-base with tie recorded");
+            }
+          }
           else
             yield* logLine(root, "pick incomplete: no prototype selected without play evidence");
         } else if (usable.length === 1) {
@@ -2174,7 +2252,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         const artEnd = yield* singleStage(
           "art",
           "art",
-          `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Render the game's asset set as files in godot/assets (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. A 3D game needs real 3D models made with the game_blender_* tools and exported as GLB (rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. Record sources in ASSETS.md. Do not write game code yet. Do not use subagents. Do not commit.`,
+          `${TOOL_RULE}${SKILL_LINE}Read VISION.md and look at the key art named there. Render the game's asset set as files in godot/assets (every character, object, tile, background, UI piece and effect the plan needs, with animation frames where things move), plus sound effects and a music loop as audio files, all held to the look of the key art. A 3D game needs real 3D models made with the game_blender_* tools and exported as GLB (rigged characters where they move), then imported and checked in the engine; code-built primitives are placeholders, same as 2D. Record each file's intended use and source in ASSETS.md as a file-to-use map (one line per file: path, what it depicts, where the game loads it, source and licence). Do not write game code yet. Do not use subagents. Do not commit.`,
           8 * 60_000,
         );
         if (artEnd !== null) return artEnd;
@@ -2602,7 +2680,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           projectId,
           `reviewer-${round}`,
           `${PLAYBOOK}${SKILL_LINE}Play the game in this folder briefly (a few minutes at most): ${reviewedBuild}. Read PLAN.md and .studio/tester-${round}.md. Code facts: ${facts}.${playerFacts} After every couple of plays, append what you did and felt to .studio/reviewer-${round}.md. You may only write that notes file. Do not change game files. Do not use subagents.`,
-          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Prior round worked from: ${move} Verdicts ${order1.verdict}/${order2.verdict} (${record.kept ? "kept" : record.inconclusive === true ? "inconclusive, flaw still open" : "rejected/unjudged"}). State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
+          `Read .studio/reviewer-${round}.md. Rewrite the notes file with what you did and felt, then write .studio/next.md with: the biggest weakness in how the game plays, feels or looks; the most important bug or rough edge; how to raise the feel and look; the smallest change that fixes the top flaw, including a deeper rule or system change if needed, without filler or length targets; a DO NOT REGRESS list; the furthest state you reached and what blocked further progress; and as the very last line STATUS: continue or STATUS: ready (ready only if a stranger could pay for this demo today). Prior round worked from: ${move} Verdicts ${order1.verdict}/${order2.verdict} (${record.kept ? "kept" : record.inconclusive === true ? "inconclusive, flaw still open" : "rejected/unjudged"}). State whether that prior flaw is fixed, partly fixed, or unchanged, with what action reached which state. Code facts: ${facts}.${playerFacts} Play weakness first. You may only write .studio/reviewer-${round}.md and .studio/next.md.`,
           REVIEWER_CAP_MS,
           `.studio/reviewer-${round}.md`,
         );
@@ -3053,4 +3131,4 @@ const BUILD_RULE_SHORT = BUILD_RULE;
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (target native) and study every frame. The code says what should happen, playing shows what does, and playing wins. Use held-key steps for reliable input, choosing their duration from the observed control response. Observe between adjustments. `;
 const FIRST_DIRECTION =
-  "Read VISION.md and PLAN.md first. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in godot/assets for every visual and sound. End with something a player notices in the first minute; game files under godot/ only.";
+  "Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in godot/assets for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. End with something a player notices in the first minute; game files under godot/ only.";
