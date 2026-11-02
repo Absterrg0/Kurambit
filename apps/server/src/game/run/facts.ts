@@ -2,7 +2,7 @@
 // Plain facts for reviewers and testers. States numbers, never interprets them.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { assetUseSummary, readAssetUse } from "./assetUse.ts";
+import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
@@ -62,6 +62,10 @@ const botLine = async (root: string): Promise<string> => {
 /** Which asset files the code loads and how much it draws itself, bounded for a prompt. */
 export const assetFacts = async (root: string, lane: string): Promise<string> =>
   assetUseSummary(await readAssetUse(root, lane), lane);
+
+/** The art stage's facts: ASSETS.md against the disk, and missing files. */
+export const artAssetFacts = async (root: string, lane: string): Promise<string> =>
+  assetListSummary(await readAssetUse(root, lane), lane);
 
 /** Code facts plus the player report, as one sentence block for the reviewer. */
 export const reviewerFacts = async (root: string, lane: string): Promise<string> => {

@@ -36,7 +36,7 @@ import * as GameService from "./GameService.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
 import * as Templates from "./templates.ts";
 import { runBotFact } from "./run/botFacts.ts";
-import { assetFacts, reviewerFacts } from "./run/facts.ts";
+import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
 import { makeGit } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
@@ -474,7 +474,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               // The art director judges files, so it also gets the static asset-use facts.
               const prompt =
                 step.role === "art-director"
-                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => assetFacts(root, state.lane)))}`
+                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)))}`
                   : step.prompt;
               return yield* runRole(
                 d.deps,

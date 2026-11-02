@@ -84,4 +84,104 @@ describe("readAssetUse", () => {
       ["primitive geometries", 1],
     ]);
   });
+
+  it("counts library files as existing but never as game code, and resolves import maps", async () => {
+    const root = await fixture({
+      "web/index.html":
+        '<script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}</script>\n<script type="module" src="./main.js"></script>',
+      "web/main.js":
+        'import * as THREE from "./vendor/three.module.js";\nimport { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";\nimport { Noise } from "./lib/noise.min.js";\nnew THREE.MeshStandardMaterial(opts);\nnew THREE.BoxGeometry(1, 1, 1);\n',
+      "web/vendor/three.module.js":
+        'import "./three.core.js";\nload("animations/animation.js");\nnew BoxGeometry(1, 1, 1);',
+      "web/vendor/three.core.js": 'fetch("fish.gltf"); new MeshBasicMaterial({});',
+      "web/vendor/addons/loaders/GLTFLoader.js": 'load("draco/decoder.js");',
+      "web/vendor/addons/textures/noise.png": "",
+      "web/lib/noise.min.js": 'load("audio/ocean.ogg");',
+    });
+    const use = await readAssetUse(root, "web");
+    expect(use.assets).toBe(0);
+    expect(use.missing).toEqual([]);
+    expect(use.unloaded).toEqual([]);
+    expect(use.drawn).toEqual([["primitive geometries", 1]]);
+  });
+
+  it("treats paths built at runtime as families, never as missing files", async () => {
+    const web = await fixture({
+      "web/index.html": '<script type="module" src="src/main.js"></script>',
+      "web/src/main.js":
+        "const ASSET_ROOT = \"assets/models\";\nloader.load(ASSET_ROOT + \"/enemy.glb\");\nloader.load(`${ASSET_ROOT}/hero.glb`);\nnew Audio('assets/audio/' + name + '.wav');\n",
+      "web/assets/models/enemy.glb": "",
+      "web/assets/models/hero.glb": "",
+      "web/assets/audio/jump.wav": "",
+    });
+    const webUse = await readAssetUse(web, "web");
+    expect(webUse.missing).toEqual([]);
+    expect(webUse.unused).toEqual([]);
+
+    const godot = await fixture({
+      "godot/project.godot": '[application]\nrun/main_scene="res://main.tscn"\n',
+      "godot/main.tscn":
+        '[gd_scene format=3]\n[ext_resource type="Script" path="res://main.gd" id="1"]\n',
+      "godot/main.gd":
+        'const TILE_DIR := "res://assets/tiles"\nconst LEVELS := "res://data/levels.json"\nfunc _ready():\n\tfor n in ["grass", "rock"]: load(TILE_DIR + "/" + n + ".png")\n\tload("res://assets/sfx/" + "hit.ogg")\n',
+      "godot/data/levels.json": '{"boss": "res://assets/boss.png"}',
+      "godot/assets/tiles/grass.png": "",
+      "godot/assets/tiles/rock.png": "",
+      "godot/assets/boss.png": "",
+      "godot/assets/spare.png": "",
+    });
+    const godotUse = await readAssetUse(godot, "godot");
+    expect(godotUse.missing).toEqual([]);
+    expect(godotUse.unused).toEqual(["assets/spare.png"]);
+  });
+
+  it("reads ASSETS.md frame families as the files they name", async () => {
+    const root = await fixture({
+      "ASSETS.md": [
+        "| godot/assets/sprites/hero_walk_*.png | hero walk |",
+        "| godot/assets/sprites/slime_0.png … slime_5.png | slime |",
+        "| `godot/assets/sprites/bat_0.png..bat_2.png` | bat |",
+        "| godot/assets/sprites/run_[0-1].png | run |",
+        "| godot/assets/sprites/gone_*.png | lost |",
+        "Exported as .png, frames named _0.png upward.",
+      ].join("\n"),
+      "godot/project.godot": "[application]\n",
+      ...Object.fromEntries(
+        [
+          ...[0, 1, 2].map((i) => `hero_walk_${i}`),
+          ...[0, 1, 2, 3, 4, 5].map((i) => `slime_${i}`),
+          ...[0, 1, 2].map((i) => `bat_${i}`),
+          "run_0",
+          "run_1",
+          "stray",
+        ].map((name) => [`godot/assets/sprites/${name}.png`, ""]),
+      ),
+    });
+    const use = await readAssetUse(root, "godot");
+    expect(use.listedMissing).toEqual(["assets/sprites/gone_*.png"]);
+    expect(use.unlisted).toEqual(["assets/sprites/stray.png"]);
+    expect(use.listed).toBe(15);
+  });
+
+  it("counts linked files, skips linked folders, and trusts a live uid over a stale path", async () => {
+    const root = await fixture({
+      "art/linked.png": "",
+      "art/folder/inside.png": "",
+      "godot/project.godot": '[application]\nrun/main_scene="res://main.tscn"\n',
+      "godot/main.tscn":
+        '[gd_scene format=3]\n[ext_resource type="Texture2D" uid="uid://tex1" path="res://assets/old/hero.png" id="1"]\n[ext_resource type="Script" path="res://main.gd" id="2"]\n',
+      "godot/main.gd": 'func _ready():\n\tload("res://assets/linked.png")\n',
+      "godot/assets/hero.png": "",
+      "godot/assets/hero.png.import": '[remap]\nuid="uid://tex1"\n',
+    });
+    await NodeFSP.symlink(
+      NodePath.join(root, "art/linked.png"),
+      NodePath.join(root, "godot/assets/linked.png"),
+    );
+    await NodeFSP.symlink(NodePath.join(root, "art/folder"), NodePath.join(root, "godot/linked"));
+    const use = await readAssetUse(root, "godot");
+    expect(use.assets).toBe(2);
+    expect(use.missing).toEqual([]);
+    expect(use.unused).toEqual([]);
+  });
 });
