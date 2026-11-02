@@ -25,7 +25,7 @@ import {
   type ModelSelection,
   type ProjectId,
   type RunId,
-  type ThreadId,
+  ThreadId,
 } from "@kurambit/contracts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -246,6 +246,8 @@ export class GameRun extends Context.Service<
       threadId: ThreadId,
       text: string,
     ) => Effect.Effect<GameRunSteerResult, GameRunError>;
+    /** At server start: resume every run a restart cut off (no ending, no stop request). */
+    readonly resumeInterrupted: () => Effect.Effect<void>;
     /** MCP catalog role: "run" for threads this service launched, else null. */
     readonly toolRole: (caller: { readonly threadId: ThreadId }) => Effect.Effect<"run" | null>;
   }
@@ -608,6 +610,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           brief: input.brief.length > 0 ? input.brief : prior.brief,
           budgetMinutes: input.budgetMinutes ?? prior.budgetMinutes,
           ending: null,
+          creator: input.threadId,
           ...(loaded.kind === "legacy" ? { next } : {}),
         };
         if (loaded.kind === "legacy")
@@ -638,6 +641,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           pickNotes: prior?.pickNotes ?? "",
           lastDirection: prior?.lastDirection ?? "",
           steer: prior?.steer ?? [],
+          creator: input.threadId,
           next,
         };
         if (prior !== null)
@@ -864,7 +868,36 @@ export const layer = (options: { readonly stateDir: string }) => {
       return created;
     });
 
-    return GameRun.of({ runStart, createGame, runStatus, runStop, runSteer, toolRole });
+    // A live run's state has no ending; a creator's stop leaves the stop file,
+    // so neither a stopped nor a finished run comes back on its own.
+    const resumeInterrupted = Effect.fn("GameRun.resumeInterrupted")(function* () {
+      const projects = yield* Effect.serviceOption(GameProjectService.GameProjectService);
+      if (Option.isNone(projects)) return;
+      const games = yield* projects.value.list().pipe(Effect.orElseSucceed(() => []));
+      for (const game of games) {
+        if (active.has(game.root) || (yield* stopRequested(game.root))) continue;
+        const loaded = yield* load(game.root);
+        if (loaded.kind !== "v3") continue;
+        const { ending, creator } = loaded.state;
+        if (ending !== null || creator.length === 0) continue;
+        yield* logLine(game.root, "server restarted: resuming the live run");
+        yield* runStart({ threadId: ThreadId.make(creator), brief: "" }).pipe(
+          Effect.catch((cause) =>
+            logLine(game.root, `resume after restart failed: ${cause.message}`.slice(0, 300)),
+          ),
+        );
+      }
+    });
+
+    return GameRun.of({
+      runStart,
+      createGame,
+      runStatus,
+      runStop,
+      runSteer,
+      resumeInterrupted,
+      toolRole,
+    });
   });
   return Layer.effect(GameRun, make);
 };

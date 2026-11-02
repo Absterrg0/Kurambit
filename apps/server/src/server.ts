@@ -3,6 +3,7 @@ import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameRun from "./game/GameRun.ts";
+import { forkParked } from "./serverActivation.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GameProcesses from "./game/GameProcesses.ts";
 import * as GamePreview from "./game/GamePreview.ts";
@@ -523,6 +524,14 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameTurnCancellationReactor.layer)),
+  // A production run is a long-lived job: a restart (an update, a crash, a
+  // dev reload) resumes it instead of leaving it silently dead mid-round.
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const gameRun = yield* GameRun.GameRun;
+      yield* forkParked(gameRun.resumeInterrupted());
+    }),
+  ),
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),

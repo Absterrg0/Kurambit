@@ -273,6 +273,9 @@ const RunState = Schema.Struct({
   // The creator's notes for the next round, folded in from .studio/steer.jsonl
   // by the driver. Older run.json files have none.
   steer: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  // The creator thread that started the run, so a server restart can resume
+  // it with the same model and runtime mode. Older run.json files have none.
+  creator: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   task: Task,
   inFlight: Schema.NullOr(Step),
 });
@@ -347,6 +350,7 @@ export const freshState = (
   next: "",
   lastDirection: "",
   steer: [],
+  creator: "",
   task: { _tag: "init" },
   inFlight: null,
 });
