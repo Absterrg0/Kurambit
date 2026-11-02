@@ -31,6 +31,7 @@ import {
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import * as Templates from "./templates.ts";
+import { snapshotBuildSource } from "./sourceSnapshot.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
   latestExecutedRun,
@@ -470,12 +471,20 @@ export const layer = (options: { readonly stateDir: string }) => {
     // The game's own source and assets live under godot/. Bots, notes and
     // skill-pack files never count as game change: a round with no change
     // here is no real change (T25 merged a .studio-only round as unjudged).
+    // Generated Godot sidecars never count either: import/uid writes and the
+    // .godot cache are not builder progress.
+    const gamePaths = [
+      "godot",
+      ":(exclude)godot/**/*.import",
+      ":(exclude)godot/**/*.uid",
+      ":(exclude)godot/.godot",
+    ];
     const gameLinesSince = (root: string, sha: string): Effect.Effect<number> =>
       Effect.sync(() => {
         try {
           const stat = NodeChildProcess.execFileSync(
             "git",
-            ["diff", "--numstat", `${sha}..HEAD`, "--", "godot"],
+            ["diff", "--numstat", `${sha}..HEAD`, "--", ...gamePaths],
             { cwd: root, env: strippedEnv() },
           ).toString();
           let total = 0;
@@ -492,8 +501,21 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
       });
 
-    const gameChangedSince = (root: string, sha: string): Effect.Effect<boolean> =>
-      gameLinesSince(root, sha).pipe(Effect.map((lines) => lines > 0));
+    // Binary diffs report no text lines, so line counts cannot decide change:
+    // use the diff exit status and fail loudly on diff errors (unknown, not unchanged).
+    const gameChangedSince = (
+      root: string,
+      sha: string,
+    ): Effect.Effect<boolean, GameRunError> =>
+      gitExec(root, ["diff", "--quiet", `${sha}..HEAD`, "--", ...gamePaths], 60_000).pipe(
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.succeed(false)
+            : result.exitCode === 1
+              ? Effect.succeed(true)
+              : Effect.fail(fail("read-progress", root, "game-diff-failed")),
+        ),
+      );
 
     const checkoutOk = (root: string, ref: string): Effect.Effect<boolean> =>
       gitExec(root, ["checkout", "-q", ref], 60_000).pipe(Effect.map((r) => r.exitCode === 0));
@@ -1282,8 +1304,22 @@ export const layer = (options: { readonly stateDir: string }) => {
       };
     });
 
-    // One continuing builder thread per block. When a turn ends and block
-    // time remains, the harness sends minutes used plus what's still undone.
+    // Game-file source identity for progress checks: the exact engine input bytes
+    // (generated sidecars excluded). Unknown snapshots fail explicitly.
+    const gameSourceVersion = (root: string) =>
+      Effect.tryPromise({
+        try: (signal) => snapshotBuildSource(root, "godot", { signal }),
+        catch: () => fail("read-progress", root, "game-files-unreadable"),
+      }).pipe(
+        Effect.flatMap((snapshot) =>
+          snapshot.kind === "known"
+            ? Effect.succeed(snapshot.sourceId)
+            : Effect.fail(fail("read-progress", root, snapshot.reason)),
+        ),
+      );
+
+    // A finished turn may need follow-up, but two turns without a game-file
+    // change end the block instead of replaying a completed task until its cap.
     const builderBlock = Effect.fn("GameRun.builderBlock")(function* (
       root: string,
       stored: StoredRun,
@@ -1295,6 +1331,8 @@ export const layer = (options: { readonly stateDir: string }) => {
     ) {
       const continued = "Continue where you left off. Reply briefly, then keep working.";
       const end = Date.now() + blockMs;
+      let versions = yield* gameSourceVersion(root);
+      let quietTurns = 0;
       const first =
         `${BUILD_RULE}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\n` +
         `Note learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
@@ -1363,6 +1401,17 @@ export const layer = (options: { readonly stateDir: string }) => {
           continue;
         }
         failState.consec = 0;
+        const after = yield* gameSourceVersion(root);
+        const changed = after !== versions;
+        quietTurns = changed ? 0 : quietTurns + 1;
+        versions = after;
+        if (quietTurns >= 2) {
+          yield* logLine(
+            root,
+            `builder ${tag}: finished after two turns without a game-file change (${turns} turns)`,
+          );
+          break;
+        }
         const leftAfter = end - Date.now();
         if (leftAfter < 120_000) break;
         const mins = Math.max(1, Math.round(leftAfter / 60_000));
