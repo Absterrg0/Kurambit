@@ -1,5 +1,5 @@
 .picker {
-  width: min(1200px, calc(100% - 48px));
+  width: min(1240px, calc(100% - 48px));
   margin: 0 auto;
   padding: 72px 0 96px;
 }
@@ -14,9 +14,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 28px;
-  margin: 48px 0 0;
-  padding: 0;
-  list-style: none;
+  margin-top: 48px;
 }
 
 .picker a {
@@ -31,7 +29,7 @@
   object-position: top;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  transition: transform 200ms ease;
+  transition: transform 200ms var(--ease);
 }
 
 .picker a:hover img {

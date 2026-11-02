@@ -1,0 +1,389 @@
+/* Poster. One vertical axis. Everything is centered and stacked: the headline, then the fox
+   as a full-width stage, then the loop laid out left to right like a timeline. */
+
+.bar {
+  border-bottom: 1px solid var(--line);
+}
+
+main {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+}
+
+/* Hero */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding: clamp(64px, 9vw, 120px) var(--pad) 56px;
+  text-align: center;
+}
+
+.hero > * {
+  animation: rise 700ms var(--ease) both;
+}
+
+.hero > :nth-child(2) {
+  animation-delay: 80ms;
+}
+
+.hero > :nth-child(3) {
+  animation-delay: 160ms;
+}
+
+.hero > :nth-child(4) {
+  animation-delay: 240ms;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+.hero h1 {
+  max-width: 15ch;
+  font-size: clamp(48px, 7.4vw, 104px);
+}
+
+.lede {
+  max-width: 36rem;
+  font-size: clamp(16px, 1.4vw, 19px);
+  color: var(--muted);
+}
+
+.hero .waitlist {
+  width: min(100%, 34rem);
+}
+
+/* Stage: a wide band with the fox in the middle and the HUD at the corners. */
+
+.stage {
+  position: relative;
+  height: clamp(420px, 56vw, 640px);
+  margin: 0 var(--pad);
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background:
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 50% 0 / 25% 100% repeat-x,
+    repeating-linear-gradient(0deg, rgb(22 21 19 / 3%) 0 1px, transparent 1px 4px);
+}
+
+.stage canvas {
+  width: 100%;
+  height: 100%;
+  padding: 40px 0;
+}
+
+.stage-cap {
+  position: absolute;
+  bottom: -32px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+/* Agents: one centered line. */
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 72px var(--pad) 0;
+}
+
+.agents ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 32px;
+  font-family: var(--serif);
+  font-size: 26px;
+  color: var(--ink-2);
+}
+
+.agents li {
+  transition: color 160ms;
+}
+
+.agents li:hover {
+  color: var(--vermilion);
+}
+
+/* Sections */
+
+.section {
+  padding: clamp(80px, 10vw, 140px) var(--pad) 0;
+}
+
+.section-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto 48px;
+  max-width: 720px;
+  text-align: center;
+}
+
+.section-head .index {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--vermilion);
+}
+
+.section-head h2 {
+  font-size: clamp(38px, 5vw, 64px);
+}
+
+.section-head p {
+  max-width: 36rem;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+/* The loop as a horizontal rail: five numbered stations on one line. */
+
+.rail {
+  position: relative;
+  padding-top: 20px;
+}
+
+.rail::before {
+  content: "";
+  position: absolute;
+  top: 44px;
+  left: 10%;
+  right: 10%;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.steps-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.steps-row li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.steps-row .step-n {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--card);
+  font-family: var(--serif);
+  font-size: 22px;
+  color: var(--vermilion);
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms,
+    background 220ms,
+    color 220ms;
+}
+
+.steps-row li:hover .step-n {
+  transform: translateY(-3px);
+  border-color: var(--vermilion);
+  background: var(--vermilion);
+  color: #fff;
+}
+
+.steps-row h3 {
+  margin-bottom: 6px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.steps-row p {
+  max-width: 22ch;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.receipt-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  margin-top: 72px;
+}
+
+.receipt {
+  transform: rotate(-1.4deg);
+  transition: transform 300ms var(--ease);
+}
+
+.receipt:hover {
+  transform: rotate(0deg) translateY(-4px);
+}
+
+.receipt-wrap figcaption {
+  max-width: 24rem;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Studio: one big window, the second tucked at its corner. */
+
+.shots {
+  position: relative;
+  display: grid;
+  padding-bottom: 8%;
+}
+
+.window-main {
+  grid-area: 1 / 1;
+  width: 86%;
+  justify-self: center;
+}
+
+.window-side {
+  grid-area: 1 / 1;
+  align-self: end;
+  justify-self: end;
+  width: 38%;
+  transform: translateY(22%);
+  transition: transform 400ms var(--ease);
+}
+
+.shots:hover .window-side {
+  transform: translateY(18%) translateX(-2%);
+}
+
+/* Tools */
+
+.carts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  perspective: 1400px;
+}
+
+.cart {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+
+/* FAQ */
+
+.faq {
+  max-width: 760px;
+  margin: 0 auto;
+  border-top: 1px solid var(--line);
+}
+
+/* CTA */
+
+.cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  margin: clamp(80px, 10vw, 140px) var(--pad) 0;
+  padding: clamp(56px, 8vw, 96px) var(--pad);
+  border-top: 1px solid var(--line-strong);
+  text-align: center;
+}
+
+.cta h2 {
+  font-size: clamp(44px, 6vw, 80px);
+}
+
+.cta > p {
+  max-width: 30rem;
+  color: var(--muted);
+}
+
+.waitlist-full {
+  width: min(100%, 40rem);
+  gap: 16px;
+  margin-top: 10px;
+  text-align: left;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 12px;
+}
+
+.cta-submit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 18px;
+  margin-top: 4px;
+}
+
+@media (max-width: 980px) {
+  .steps-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 32px 24px;
+  }
+
+  .rail::before {
+    display: none;
+  }
+
+  .steps-row li {
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .steps-row p {
+    max-width: none;
+  }
+
+  .carts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .window-main {
+    width: 100%;
+  }
+
+  .window-side {
+    display: none;
+  }
+
+  .shots {
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .stage {
+    height: 380px;
+  }
+
+  .steps-row,
+  .carts,
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .agents ul {
+    font-size: 20px;
+    gap: 6px 18px;
+  }
+}

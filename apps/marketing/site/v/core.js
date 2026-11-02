@@ -151,7 +151,7 @@ function dither(canvas) {
 
 for (const canvas of document.querySelectorAll("canvas[data-dither]")) dither(canvas);
 
-/* ---------- Reveals: sections ease in once, from a visible resting state ---------- */
+/* ---------- Reveals ---------- */
 
 const reveals = document.querySelectorAll("[data-reveal]");
 if (!reduceMotion && "IntersectionObserver" in window) {
