@@ -2,6 +2,7 @@ import { useGameDialogStore } from "./game/gameDialogStore";
 import { gameProgress, type GameProgressKind } from "./game/gameProgress";
 import {
   gameInitial,
+  gamePigment,
   gameTemplateAppearance,
   newestThreadByProject,
   sortGameThreadsByActivity,
@@ -2092,6 +2093,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const gameSummary = game;
     const appearance = gameTemplateAppearance(gameSummary.template);
     const initial = gameInitial(gameSummary.name);
+    const [pigment, pigmentInk] = gamePigment(gameSummary.name);
     const olderSessions = gameSessions.filter((session) => session.id !== thread.id);
     const working =
       status === "working" || status === "waiting" || status === "approval" || status === "input";
@@ -2138,13 +2140,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <span className="sr-only">{gameSummary.name}</span>
           <div className="flex items-center gap-2.5 px-2.5 py-2">
             <span
-              className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 text-xs font-semibold tabular-nums",
-                appearance.initialClassName,
-              )}
+              className="relative flex size-9 shrink-0 items-end justify-end overflow-hidden rounded-lg"
+              style={{
+                background: `radial-gradient(120% 95% at 20% 10%, ${pigment}, ${pigmentInk})`,
+              }}
               aria-hidden
             >
-              {initial}
+              <span className="-mb-1 me-0.5 font-display text-2xl leading-none text-washi/90">
+                {initial.charAt(0)}
+              </span>
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="flex min-w-0 items-center gap-1.5">

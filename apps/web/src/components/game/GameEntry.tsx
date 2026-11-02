@@ -103,11 +103,12 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const navigate = useNavigate();
   const dialog = useGameDialogStore((state) => state.dialog);
   const setDialog = useGameDialogStore((state) => state.show);
+  const draft = useGameDialogStore((state) => state.draft);
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
-  const [brief, setBrief] = useState("");
+  const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
-  const [engine, setEngine] = useState<"godot" | "three">("godot");
+  const [engine, setEngine] = useState<"godot" | "three">(draft?.engine ?? "godot");
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);

@@ -7688,7 +7688,7 @@ export default function ChatView(props: ChatViewProps) {
           rightPanelMaximized || gameChatHidden
             ? "invisible w-0 flex-none"
             : gameChatDocked
-              ? "shrink-0"
+              ? "shrink-0 border-l border-border"
               : "flex-1",
         )}
         style={gameChatDocked ? { width: gameChatWidth } : undefined}

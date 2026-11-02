@@ -5,7 +5,6 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import {
   ChevronDownIcon,
   DownloadIcon,
-  Gamepad2Icon,
   MaximizeIcon,
   MessageSquareIcon,
   MinimizeIcon,
@@ -42,6 +41,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildsPanel } from "./GameBuildsPanel";
 import { GameElapsed } from "./GameElapsed";
+import { gamePigment } from "./gameLibrary.logic";
 import { GamePlaySurface } from "./GamePlaySurface";
 import { GameRunPanel } from "./GameRunPanel";
 import {
@@ -333,6 +333,7 @@ export function GameStage({
         </Button>
       </div>
     ) : null;
+  const [pigment, pigmentInk] = gamePigment(data.manifest.name);
   return (
     <section
       ref={stageRef}
@@ -347,14 +348,21 @@ export function GameStage({
       )}
     >
       <header className="@container/stage-header flex shrink-0 flex-col border-b border-border bg-background">
-        <div className="flex min-h-12 items-center gap-2 px-2 py-1.5 pl-3">
-          <Gamepad2Icon
-            className="hidden size-4 shrink-0 text-muted-foreground @[28rem]/stage-header:block"
+        <div className="flex min-h-[var(--workspace-topbar-height)] items-center gap-2.5 px-2 py-1.5 pl-3">
+          <span
             aria-hidden="true"
-          />
+            className="hidden size-8 shrink-0 items-end justify-end overflow-hidden rounded-lg @[28rem]/stage-header:flex"
+            style={{
+              background: `radial-gradient(120% 95% at 20% 10%, ${pigment}, ${pigmentInk})`,
+            }}
+          >
+            <span className="-mb-1 me-0.5 font-display text-2xl leading-none text-washi/90">
+              {data.manifest.name.trim().charAt(0).toUpperCase()}
+            </span>
+          </span>
           <div className="flex min-w-0 flex-1 flex-col justify-center">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="min-w-0 truncate text-sm font-semibold leading-5 tracking-tight">
+              <h2 className="min-w-0 truncate text-base font-semibold leading-5 tracking-tight">
                 <TruncatedText text={data.manifest.name} />
               </h2>
             </div>

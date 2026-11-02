@@ -1,12 +1,8 @@
 import { scopeProjectRef } from "@kurambit/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  ArrowUpRightIcon,
-  FolderOpenIcon,
-  Gamepad2Icon,
-  PlusIcon,
-  SparklesIcon,
-} from "lucide-react";
+import { useState } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
+import { ArrowRightIcon, ArrowUpRightIcon, FolderOpenIcon } from "lucide-react";
 
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -14,12 +10,12 @@ import { useThreadShells } from "../../state/entities";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
 import type { EnvironmentId, GameSummary } from "@kurambit/contracts";
 import { KurambitMark } from "../brand/KurambitBrand";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { useGameDialogStore } from "./gameDialogStore";
+import { useGameDialogStore, type GameDraft } from "./gameDialogStore";
 import {
   formatGameEditedAt,
   gameInitial,
@@ -30,8 +26,15 @@ import {
 import { gameProgress } from "./gameProgress";
 import { useGameLibrary } from "./useGameLibrary";
 
+const BRIEF_IDEAS = [
+  "A cozy fishing game on a floating island at dusk",
+  "A top-down roguelike in a flooded cathedral",
+  "A racing game with paper boats down a rainy street",
+  "A puzzle platformer where shadows are solid",
+] as const;
+
 export function GamesHome() {
-  const { games, environmentId, isLoading, error } = useGameLibrary();
+  const { games, isLoading, error } = useGameLibrary();
   const threads = useThreadShells();
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
@@ -48,7 +51,7 @@ export function GamesHome() {
         gameActivityMs(right) - gameActivityMs(left) ||
         left.game.name.localeCompare(right.game.name),
     );
-  const openGame = (card: (typeof cards)[number]) => {
+  const openGame = (card: GameCard) => {
     if (card.latestThread !== null) {
       void navigate({
         to: "/$environmentId/$threadId",
@@ -61,8 +64,8 @@ export function GamesHome() {
     }
     void handleNewThread(scopeProjectRef(card.game.environmentId, card.game.projectId));
   };
-  const newGame = () => useGameDialogStore.getState().show("create");
   const openGameFolder = () => useGameDialogStore.getState().show("open");
+  const startGame = (draft: GameDraft) => useGameDialogStore.getState().startCreate(draft);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -70,68 +73,130 @@ export function GamesHome() {
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-          <div className="mx-auto flex w-full max-w-[86rem] flex-col gap-8 px-10 pt-10 pb-12">
-            <header className="flex flex-wrap items-end justify-between gap-6 border-b border-border pb-8">
-              <div className="flex min-w-0 flex-col gap-3">
-                <span className="flex items-center gap-2 text-2xs font-semibold tracking-eyebrow text-muted-foreground uppercase">
-                  <span aria-hidden className="size-2.5 rounded-xs bg-primary" />
-                  Studio
-                </span>
-                <h1 className="font-display text-5xl leading-none tracking-tight">Your games</h1>
-                <p className="max-w-xl text-sm text-muted-foreground">
-                  {games.length === 0
-                    ? "Describe a game and your agent designs and builds it with Blender and Godot."
-                    : `${games.length} ${games.length === 1 ? "game" : "games"} on this machine. Open one to keep making it, or start something new.`}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button variant="outline" onClick={openGameFolder}>
-                  <FolderOpenIcon aria-hidden />
-                  Open game
-                </Button>
-                <Button onClick={() => newGame()}>
-                  <PlusIcon aria-hidden />
-                  New game
-                </Button>
-              </div>
-            </header>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-8 pt-24 pb-16 lg:pt-32">
+            <BriefComposer onStart={startGame} onOpenFolder={openGameFolder} />
 
             {error ? (
-              <div className="flex flex-col items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+              <div className="mx-auto flex w-full max-w-2xl flex-col items-start gap-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
                 <p className="text-sm text-destructive-foreground">Could not load your games.</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
               </div>
             ) : null}
 
             {isLoading ? (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-                {[0, 1, 2].map((index) => (
-                  <div
-                    key={index}
-                    className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card"
-                  >
-                    <div className="aspect-[16/10] bg-muted/60" />
-                    <div className="flex flex-col gap-2 p-4">
-                      <div className="h-4 w-2/3 rounded bg-muted" />
-                      <div className="h-3 w-1/2 rounded bg-muted/70" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : cards.length === 0 ? (
-              <GamesEmptyState onNewGame={newGame} onOpenGame={openGameFolder} />
-            ) : environmentId === null ? null : (
-              <GameGrid
-                environmentId={environmentId}
-                cards={cards}
-                onOpen={openGame}
-                onNewGame={newGame}
-              />
+              <GameGridSkeleton />
+            ) : cards.length === 0 ? null : (
+              <section aria-labelledby="your-games" className="flex flex-col gap-5">
+                <div className="flex items-baseline justify-between gap-4">
+                  <h2 id="your-games" className="font-display text-3xl">
+                    Your games
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {cards.length} {cards.length === 1 ? "game" : "games"} on this machine
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                  {cards.map((card) => (
+                    <GameCard key={card.game.projectId} card={card} onOpen={() => openGame(card)} />
+                  ))}
+                </div>
+              </section>
             )}
           </div>
         </div>
       </div>
     </SidebarInset>
+  );
+}
+
+function BriefComposer({
+  onStart,
+  onOpenFolder,
+}: {
+  onStart: (draft: GameDraft) => void;
+  onOpenFolder: () => void;
+}) {
+  const [brief, setBrief] = useState("");
+  const [engine, setEngine] = useState<GameDraft["engine"]>("godot");
+  const ready = brief.trim().length > 0;
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    if (ready) onStart({ brief: brief.trim(), engine });
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  };
+
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col items-center gap-8 text-center">
+      <div className="flex flex-col items-center gap-4">
+        <KurambitMark className="size-14" />
+        <h1 className="font-display text-6xl leading-none tracking-tight text-balance">
+          What are we making today?
+        </h1>
+        <p className="max-w-md text-sm leading-relaxed text-muted-foreground text-balance">
+          Describe a game in a sentence or two. Your agent builds it, plays every build, and keeps
+          only the changes that make it better.
+        </p>
+      </div>
+
+      <form
+        onSubmit={submit}
+        className="group flex w-full flex-col gap-3 rounded-2xl border border-border bg-card p-3 text-left shadow-lg/5 transition-colors focus-within:border-primary/50"
+      >
+        <label htmlFor="game-brief" className="sr-only">
+          Game brief
+        </label>
+        <textarea
+          id="game-brief"
+          value={brief}
+          onChange={(event) => setBrief(event.target.value)}
+          onKeyDown={onKeyDown}
+          rows={3}
+          placeholder="A cozy fishing game on a floating island at dusk, with a day-night cycle and a rival fisher…"
+          className="w-full resize-none bg-transparent px-2 pt-1.5 text-base leading-relaxed outline-none placeholder:text-placeholder"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <ToggleGroup
+            aria-label="Engine"
+            variant="segmented"
+            value={[engine]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "godot" || next === "three") setEngine(next);
+            }}
+          >
+            <Toggle value="godot">Godot · native</Toggle>
+            <Toggle value="three">three.js · browser</Toggle>
+          </ToggleGroup>
+          <Button type="button" variant="ghost" size="sm" onClick={onOpenFolder}>
+            <FolderOpenIcon aria-hidden />
+            Open a game
+          </Button>
+          <Button type="submit" className="ms-auto" disabled={!ready}>
+            Start building
+            <ArrowRightIcon aria-hidden />
+          </Button>
+        </div>
+      </form>
+
+      <div className="flex flex-wrap justify-center gap-2">
+        {BRIEF_IDEAS.map((idea) => (
+          <Button
+            key={idea}
+            type="button"
+            variant="outline"
+            size="compact"
+            onClick={() => setBrief(idea)}
+          >
+            {idea}
+          </Button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -154,33 +219,18 @@ const gameActivityMs = (card: GameCard): number => {
   return Number.isNaN(time) ? 0 : time;
 };
 
-function GameGrid({
-  environmentId,
-  cards,
-  onOpen,
-  onNewGame,
-}: {
-  environmentId: EnvironmentId;
-  cards: readonly GameCard[];
-  onOpen: (card: GameCard) => void;
-  onNewGame: () => void;
-}) {
+function GameGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map((card) => (
-        <GameCard key={card.game.projectId} card={card} onOpen={() => onOpen(card)} />
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      {[0, 1, 2].map((index) => (
+        <div key={index} className="flex flex-col overflow-hidden rounded-2xl border border-border">
+          <div className="aspect-[16/9] bg-muted/60" />
+          <div className="flex flex-col gap-2 p-4">
+            <div className="h-4 w-2/3 rounded bg-muted" />
+            <div className="h-3 w-1/2 rounded bg-muted/70" />
+          </div>
+        </div>
       ))}
-      <button
-        type="button"
-        onClick={() => onNewGame()}
-        className="group flex min-h-48 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border p-6 text-center transition-colors hover:border-primary/50 hover:bg-primary/[0.04]"
-      >
-        <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
-          <PlusIcon className="size-5" aria-hidden />
-        </span>
-        <span className="font-display text-2xl leading-none">New game</span>
-        <span className="text-xs text-muted-foreground">Start from a real, playable template</span>
-      </button>
     </div>
   );
 }
@@ -194,16 +244,16 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left transition-[border-color,box-shadow,translate] hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg"
+      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card text-left transition-[border-color,box-shadow,translate] hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-xl/10"
     >
       <span
-        className="relative block aspect-[16/10] overflow-hidden"
+        className="relative block aspect-[16/9] overflow-hidden"
         style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
       >
         <span aria-hidden className="surface-grain absolute inset-0 mix-blend-overlay" />
         <span
           aria-hidden
-          className="absolute -right-2 -bottom-6 font-display text-9xl leading-none text-washi/85 transition-transform duration-300 group-hover:-translate-y-1"
+          className="absolute -right-2 -bottom-7 font-display text-9xl leading-none text-washi/85 transition-transform duration-300 group-hover:-translate-y-1"
         >
           {initial}
         </span>
@@ -219,76 +269,21 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
             <TooltipPopup>{progress.detail}</TooltipPopup>
           </Tooltip>
         ) : null}
-        <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-sumi/45 px-2 py-0.5 text-2xs font-medium text-washi/90 backdrop-blur-sm">
-          <Gamepad2Icon className="size-3" aria-hidden />
+        <span className="absolute bottom-3 left-3 rounded-full bg-sumi/50 px-2 py-0.5 text-2xs font-medium text-washi/90 backdrop-blur-sm">
           {appearance.label}
         </span>
       </span>
-      <span className="flex flex-col gap-1 px-4 pt-3.5 pb-4">
-        <span className="flex min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate font-medium text-sm">{card.game.name}</span>
-          <ArrowUpRightIcon
-            className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-            aria-hidden
-          />
+      <span className="flex items-center justify-between gap-3 px-4 py-3.5">
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate font-medium text-sm">{card.game.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {formatGameEditedAt(gameActivityTimestamp(card))}
+          </span>
         </span>
-        <span className="text-xs text-muted-foreground">
-          {formatGameEditedAt(gameActivityTimestamp(card))}
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors group-hover:border-primary group-hover:bg-primary group-hover:text-primary-foreground">
+          <ArrowUpRightIcon className="size-4" aria-hidden />
         </span>
       </span>
     </button>
-  );
-}
-
-function GamesEmptyState({
-  onNewGame,
-  onOpenGame,
-}: {
-  onNewGame: () => void;
-  onOpenGame: () => void;
-}) {
-  return (
-    <div className="grid items-center gap-10 py-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:py-10">
-      <div className="flex min-w-0 flex-col items-start gap-5">
-        <Badge variant="outline">
-          <SparklesIcon className="size-3" aria-hidden />
-          Your first game is one sentence away
-        </Badge>
-        <h2 className="max-w-lg font-display text-5xl leading-none text-balance">
-          Describe it. Your agent builds it. <em className="text-primary">Then you play it.</em>
-        </h2>
-        <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-          Kurambit turns a brief into a real game: a native Godot project with Blender-made art, or
-          a quick three.js browser game. Every build is played and judged before it lands.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="lg" onClick={() => onNewGame()}>
-            <PlusIcon aria-hidden />
-            New game
-          </Button>
-          <Button size="lg" variant="ghost" onClick={onOpenGame}>
-            <FolderOpenIcon aria-hidden />
-            Open a game folder
-          </Button>
-        </div>
-        <ol className="mt-3 grid w-full max-w-lg gap-0 border-t border-border text-sm text-muted-foreground">
-          {[
-            "Describe your game in a few sentences.",
-            "Start a production run and watch the agent build.",
-            "Play, ask for changes, and export when it feels right.",
-          ].map((item, index) => (
-            <li key={item} className="flex items-baseline gap-4 border-b border-border py-3">
-              <span className="font-display text-xl leading-none text-primary">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div className="hidden items-center justify-center lg:flex">
-        <KurambitMark variant="full" className="h-[26rem] w-auto opacity-90" />
-      </div>
-    </div>
   );
 }
