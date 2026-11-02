@@ -485,17 +485,39 @@ export const layer = (options: { readonly stateDir: string }) => {
               Effect.map((outcome) => ({ kind: "git", git: outcome }) as const),
               Effect.uninterruptible,
             );
-          case "boot":
-            return d.deps.game.check(d.creator).pipe(
-              Effect.map(
-                (r) =>
-                  ({
+          case "boot": {
+            // A check that could not run is not a verdict on the build: a busy
+            // game or a cancelled check is retried; a missing tool ends the
+            // run (resumable) rather than rejecting good work. Anything else
+            // the check reports is the build failing to boot.
+            const check = (attempt: number): Effect.Effect<Policy.StepResult, GameOperationError> =>
+              d.deps.game.check(d.creator).pipe(
+                Effect.map(
+                  (r) =>
+                    ({
+                      kind: "boot",
+                      ok: r.ok,
+                      detail: r.ok ? "boot clean" : "check failed",
+                    }) as const,
+                ),
+                Effect.catchTag("GameOperationError", (error) => {
+                  const transient =
+                    error.reason === "busy" || error.detail === "Operation cancelled.";
+                  if (transient && attempt < 3)
+                    return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
+                      Effect.andThen(Effect.sleep("5 seconds")),
+                      Effect.andThen(check(attempt + 1)),
+                    );
+                  if (error.reason === "tool-missing") return Effect.fail(error);
+                  return Effect.succeed({
                     kind: "boot",
-                    ok: r.ok,
-                    detail: r.ok ? "boot clean" : "check failed",
-                  }) as const,
-              ),
-            );
+                    ok: false,
+                    detail: (error.detail ?? error.reason).slice(0, 300),
+                  } as const);
+                }),
+              );
+            return check(1);
+          }
           case "facts":
             return Effect.gen(function* () {
               const jev =

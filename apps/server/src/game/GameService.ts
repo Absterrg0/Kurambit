@@ -326,13 +326,18 @@ const make = Effect.gen(function* () {
   const gameBot = yield* GameBot.GameBot;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const operations = yield* GameOperations.GameOperations;
+  // `owner` is the thread whose call started the operation. A turn that ends
+  // cancels only its own work: the production loop runs boot checks on the
+  // same game while role turns are being interrupted at their caps.
   const active = new Map<
     string,
-    { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
+    { cancelled: Deferred.Deferred<void>; done: Deferred.Deferred<void>; owner: string }
   >();
-  const cancel = Effect.fnUntraced(function* (root: string) {
+  /** Cancels the game's running operation; with `owner`, only that thread's. */
+  const cancel = Effect.fnUntraced(function* (root: string, owner?: string) {
     const operation = active.get(root);
     if (operation === undefined) return;
+    if (owner !== undefined && operation.owner !== owner) return;
     yield* Deferred.succeed(operation.cancelled, undefined);
     // The race interrupts work and awaits its finalizers, including native child exit.
     yield* Deferred.await(operation.done);
@@ -353,14 +358,19 @@ const make = Effect.gen(function* () {
     if (typeof result !== "object" || result === null) return `${name} completed.`;
     return "message" in result ? String(result.message) : `${name} completed.`;
   };
-  const exclusive = <A>(root: string, name: string, work: Effect.Effect<A, GameOperationError>) =>
+  const exclusive = <A>(
+    root: string,
+    name: string,
+    work: Effect.Effect<A, GameOperationError>,
+    owner: string,
+  ) =>
     Effect.gen(function* () {
       if (active.has(root))
         return yield* new GameOperationError({ operation: name, path: root, reason: "busy" });
       const cancelled = yield* Deferred.make<void>();
       const done = yield* Deferred.make<void>();
       const at = DateTime.formatIso(yield* DateTime.now);
-      active.set(root, { cancelled, done });
+      active.set(root, { cancelled, done, owner });
       yield* operations.record(
         root,
         { name, state: "running", message: `${name} is running.`, at },
@@ -2153,7 +2163,7 @@ const make = Effect.gen(function* () {
     work: (root: string) => Effect.Effect<A, GameOperationError>,
   ) {
     const root = yield* projects.resolve(threadId);
-    return yield* exclusive(root, name, work(root));
+    return yield* exclusive(root, name, work(root), String(threadId));
   });
   // Idle and wall-clock expiry without a caller: one scoped fiber sweeps the
   // live sessions. Production timers own it; every act/close also
@@ -2252,7 +2262,7 @@ const make = Effect.gen(function* () {
         }),
       );
       if (root !== null) {
-        yield* cancel(root);
+        yield* cancel(root, String(threadId));
         // A cancelled turn also releases the game's exploration session: the
         // browser belongs to the user, not to a turn that is going away.
         const live = exploreLive.get(root);
@@ -2656,6 +2666,7 @@ const make = Effect.gen(function* () {
             };
           return yield* publishWeb(root);
         }),
+        String(threadId),
       );
     }),
   });
