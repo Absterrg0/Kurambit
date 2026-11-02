@@ -15,7 +15,9 @@ templates match; Blender 4.2 or newer works.
 
 The live Blender view additionally needs `uvx` (or `uv`) on PATH: it runs the pinned 3D-server
 package behind the `game_blender_*` tools. Install uv from https://docs.astral.sh/uv/ if those
-tools report it missing.
+tools report it missing. Playing native games and the live Blender view also need the system
+Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything runs on a
+private virtual display, so nothing opens on your desktop.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
@@ -24,8 +26,9 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 Choose **New game** on the home screen or in the sidebar. Name the game, write a brief and optional
 art direction, and choose where to save it (`~/Games/<slug>` by default). Pick the agent and model,
-then choose **Create game**. Kurambit creates the project folder, starts a session with your
-brief, and opens the game workspace.
+then choose **Create game**. Kurambit creates the project folder, starts a production run on your
+brief (see below), and opens the game on its **Run** tab. The game's session stays yours: talk to
+your agent there about the game at any time.
 
 Engine: Godot native (default) or three.js browser. Godot is the full lane: a real Godot 4.7 project
 with Blender-made art, native play, and Web, Windows and Linux exports. three.js is the quick
@@ -41,7 +44,8 @@ empty one.
 
 The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
 then round after round of building, playtesting and judging until a ship review passes, the
-run stalls, or you stop it. Give it a one-line brief and an optional budget in minutes, then **Start run**. The status
+run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
+opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
 line says where the run is; the rounds list shows each round's move, whether it was kept, the
 judges' verdicts and the tester's note; role threads link to the sessions that did the work.
 **Stop run** ends it; rejected work stays on its branch.

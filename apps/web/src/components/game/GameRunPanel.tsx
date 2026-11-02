@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { PlayIcon, RefreshCwIcon, SquareIcon } from "lucide-react";
@@ -30,6 +30,14 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const [error, setError] = useState<string | null>(null);
   const status: GameRunStatusResult | null = statusQuery.data ?? null;
   const active = status?.active ?? false;
+  // Run progress has no push event; a slow read keeps the stage, rounds and
+  // verdicts current while a run is live, and stops when it ends.
+  const refreshStatus = statusQuery.refresh;
+  useEffect(() => {
+    if (!active) return;
+    const interval = window.setInterval(refreshStatus, 15_000);
+    return () => window.clearInterval(interval);
+  }, [active, refreshStatus]);
 
   const start = async () => {
     if (busy || brief.trim().length === 0) return;

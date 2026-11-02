@@ -23,6 +23,7 @@ import { GAME_TEMPLATES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 
 import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { clampGameChatWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -102,6 +103,14 @@ export function GameStage({
   const setChatWidth = useGameWorkspaceStore((state) => state.setChatWidth);
   const setChatCollapsed = useGameWorkspaceStore((state) => state.setChatCollapsed);
   const [tab, setTab] = useState<GameStageTab | null>(null);
+  // A game being made by its production run opens on the run, not on an
+  // empty stage; the creator's own choice of tab always wins.
+  const runStatus = useEnvironmentQuery(
+    gameEnvironment.runStatus({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
   // The server keeps the last operation per game for the whole session, so the
   // stage treats an operation as news only when it happened after this stage
   // mounted. Older ones would greet the user with a build they already know about.
@@ -153,7 +162,7 @@ export function GameStage({
   }, []);
   if (!data) return null;
   const tabs = PLAY_TABS;
-  const activeTab = tab ?? "play";
+  const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
     toolchainReady: data.toolchain.tools.every((tool) => tool.ready),

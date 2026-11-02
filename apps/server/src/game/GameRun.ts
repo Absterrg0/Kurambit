@@ -13,7 +13,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
+  GameOperationError,
   ProviderInstanceId,
+  type GameCreateInput,
+  type GameProjectResult,
   type GameRunStartInput,
   type GameRunStatusResult,
   type ModelSelection,
@@ -170,6 +173,10 @@ export class GameRun extends Context.Service<
       { runId: string; root: string; stage: string; resumed: boolean },
       GameRunError
     >;
+    /** A new game is a production run: create the project, then run the brief. */
+    readonly createGame: (
+      input: GameCreateInput,
+    ) => Effect.Effect<typeof GameProjectResult.Type, GameOperationError>;
     readonly runStatus: (threadId: ThreadId) => Effect.Effect<GameRunStatusResult, GameRunError>;
     readonly runStop: (
       threadId: ThreadId,
@@ -706,7 +713,31 @@ export const layer = (options: { readonly stateDir: string }) => {
           : null,
       );
 
-    return GameRun.of({ runStart, runStatus, runStop, toolRole });
+    const createGame = Effect.fn("GameRun.createGame")(function* (input: GameCreateInput) {
+      const projects = yield* Effect.serviceOption(GameProjectService.GameProjectService);
+      if (Option.isNone(projects))
+        return yield* new GameOperationError({
+          operation: "create-game",
+          path: input.name,
+          reason: "io",
+          detail: "Game projects are not in scope for this call.",
+        });
+      const created = yield* projects.value.create(input);
+      // The game exists either way; a run that cannot start shows as not
+      // started in the Run tab, where the creator can start it again.
+      yield* runStart({
+        threadId: created.threadId,
+        brief: input.brief,
+        ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("game run did not start after create", { reason: cause.message }),
+        ),
+      );
+      return created;
+    });
+
+    return GameRun.of({ runStart, createGame, runStatus, runStop, toolRole });
   });
   return Layer.effect(GameRun, make);
 };

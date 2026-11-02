@@ -28,8 +28,8 @@ session, compares builds blind so a worse one never lands, and keeps working unt
 ## What it does
 
 - **New game from a brief.** Name, folder, brief, optional art direction, and the agent and model
-  to use. Kurambit scaffolds a portable project, starts a thread, and the agent builds the game.
-- **A production loop that plays its own builds.** Start a run from the Stage: the harness builds,
+  to use. Kurambit scaffolds a portable project and starts its production run on the brief.
+- **A production loop that plays its own builds.** Every new game is made by a run: the harness builds,
   plays every build with a separate tester session, compares builds blind so a worse one never
   lands, and keeps working until the budget ends.
 - **Real tools, one execution system.** Agents reach Blender and Godot through Kurambit's own

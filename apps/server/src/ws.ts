@@ -1775,7 +1775,7 @@ const layerWsRpc = (
             ),
           ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
-        [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
+        [WS_METHODS.gameCreate]: (input) => gameRun.createGame(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
         [WS_METHODS.gameAction]: ({ threadId, action }) => game.action(threadId, action),
         [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>

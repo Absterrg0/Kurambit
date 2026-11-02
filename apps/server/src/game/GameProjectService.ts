@@ -35,7 +35,7 @@ import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { createEngine, initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
+import { createEngine, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -322,7 +322,10 @@ const make = Effect.gen(function* () {
               detail: commandDetail(result),
             });
         }
-        return yield* register(root, input, initialGamePrompt(input));
+        // The creator thread starts empty: GameRun.createGame starts the
+        // production run with this brief, and the thread stays the creator's
+        // own conversation with the game.
+        return yield* register(root, input);
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder behind.
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),

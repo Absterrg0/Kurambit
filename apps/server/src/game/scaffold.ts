@@ -8,17 +8,6 @@ import {
   type GameManifest,
 } from "@kurambit/contracts";
 
-/** The first message of a game's thread. The brief lives in BRIEF.md. */
-export function initialGamePrompt(input: GameCreateInput): string {
-  const engine: GameEngineId = input.engine ?? "godot";
-  const projectLine =
-    engine === "three"
-      ? "web/ the three.js static project (open web/index.html over HTTP to play it)"
-      : "godot/ the Godot 4.7 project";
-  const brief = `${input.brief}${input.artDirection ? `\n\nArt direction:\n${input.artDirection}` : ""}`;
-  return `${brief}\n\nThe game is scaffolded in this folder: BRIEF.md holds the brief, ${projectLine}. Build it with the game_* tools (game_check to check, game_export to export). The creator starts a production run from the Stage when ready.`;
-}
-
 /** The engine a create request builds for. Omitted means the Godot native lane. */
 export const createEngine = (input: GameCreateInput): GameEngineId => input.engine ?? "godot";
 
