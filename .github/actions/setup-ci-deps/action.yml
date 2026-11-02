@@ -18,10 +18,8 @@ runs:
         path: ~/.vite-plus
         key: vite-plus-home-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.vp.outputs.version }}
 
-    # The pnpm store stays a cache tarball on the runner's own disk. A store on a
-    # Blacksmith sticky disk mounts in under a second, but pnpm then copies every
-    # package across filesystems instead of hard-linking it: install took 28-49s
-    # against 9s plus an 11s restore.
+    # The pnpm store stays a cache tarball on the runner's own disk, so pnpm can
+    # hard-link packages instead of copying them across filesystems.
     - name: Setup Vite+
       uses: voidzero-dev/setup-vp@v1
       with:
