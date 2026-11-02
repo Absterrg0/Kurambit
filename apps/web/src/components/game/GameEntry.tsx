@@ -107,6 +107,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState("");
   const [artDirection, setArtDirection] = useState("");
+  const [engine, setEngine] = useState<"godot" | "three">("godot");
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -157,6 +158,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
             parentDirectory: directory,
             brief,
             artDirection,
+            engine,
             modelSelection: model,
           },
         })
@@ -194,13 +196,13 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
           <DialogHeader>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {isCreate
-                ? "Describe the game; your agent builds it in Godot."
+                ? "Describe the game; your agent builds it as a native Godot game or a quick three.js browser game."
                 : "Continue a game that already lives on this machine."}
             </div>
             <DialogTitle>{isCreate ? "Name your game" : "Open game"}</DialogTitle>
             <DialogDescription>
               {isCreate
-                ? "Every game starts from the same blank Godot project with a live state probe and export presets."
+                ? "Every Godot game starts from the same blank native project; every browser game from the same blank three.js project."
                 : "Open a game folder containing game.json."}
             </DialogDescription>
           </DialogHeader>
@@ -230,6 +232,44 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                     disabled={busy}
                   />
                 </label>
+                <fieldset className="flex flex-col gap-2 text-sm">
+                  <legend className="font-medium">Engine</legend>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
+                    <input
+                      type="radio"
+                      name="game-engine"
+                      value="godot"
+                      checked={engine === "godot"}
+                      onChange={() => setEngine("godot")}
+                      disabled={busy}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="font-medium">Godot native</span>
+                      <span className="block text-xs text-muted-foreground">
+                        A real Godot 4.7 project with Blender-made art. The full lane: native play,
+                        Windows and Linux exports.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
+                    <input
+                      type="radio"
+                      name="game-engine"
+                      value="three"
+                      checked={engine === "three"}
+                      onChange={() => setEngine("three")}
+                      disabled={busy}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="font-medium">three.js browser</span>
+                      <span className="block text-xs text-muted-foreground">
+                        A quick static browser game, no install step. Web export only.
+                      </span>
+                    </span>
+                  </label>
+                </fieldset>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="flex items-baseline gap-1.5">
                     Art direction

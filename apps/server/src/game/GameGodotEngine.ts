@@ -57,6 +57,8 @@ export const makeGodotBackend = (
         args: ["--headless", "--path", ctx.projectDir, "--editor", "--import"],
         operation: "godot-import",
         timeoutMs: 180_000,
+        env: GameProcesses.engineChildEnv(),
+        envMode: "replace",
       });
       return {
         result: response(run),
@@ -65,6 +67,8 @@ export const makeGodotBackend = (
     });
   return {
     id: "godot",
+    displayName: "Godot",
+    exportTargets: ["Web", "Linux", "Windows"],
     resolveProject: (root, manifest) =>
       Effect.gen(function* () {
         const binary = yield* tools.executable("godot");
@@ -119,6 +123,8 @@ export const makeGodotBackend = (
             ],
             operation: "godot-check",
             timeoutMs: 120_000,
+            env: GameProcesses.engineChildEnv(),
+            envMode: "replace",
           });
           // Read before the scratch directory is removed below.
           const resultText = yield* Effect.promise(() =>
@@ -158,6 +164,8 @@ export const makeGodotBackend = (
           ],
           operation: input.operation,
           timeoutMs: 300_000,
+          env: GameProcesses.engineChildEnv(),
+          envMode: "replace",
         });
         return response(run, input.outputPath);
       }),

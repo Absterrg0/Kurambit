@@ -256,8 +256,9 @@ function GamesEmptyState({
           Describe it. Your agent builds it. Then you play it.
         </h2>
         <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-          Game Studio turns a brief into a real Godot project with Blender-made art. Watch the agent
-          work, and play every revision right here.
+          Game Studio turns a brief into a real game — a Godot native project with Blender-made art,
+          or a quick three.js browser game. Watch the agent work, and play every revision right
+          here.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="lg" onClick={() => onNewGame()}>

@@ -19,7 +19,26 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameToolchain` manages Blender/Godot installs; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
-- `GameEngine`/`GameGodotEngine` is the engine adapter seam: import, check, export release.
+- `GameEngine`/`GameGodotEngine`/`GameThreeEngine` is the engine adapter seam: import, check,
+  export release. Godot owns the native process boundary (headless editor import, check script,
+  export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
+  instead: the static folder is the game, so import is a no-op success, check loads the page
+  and reports console/page errors, export copies the folder. Windows and Linux exports are
+  refused plainly for three.js (`backend.exportTargets`); the interface carries `displayName`
+  so core messages name the engine without naming it in core code.
+- Web play shares the services: `gameExploreWeb` opens real-time headless-Chromium sessions on
+  the served static folder (real keyboard/mouse, one screenshot per act, console errors, the
+  read-only `window.__studio` probe; no pause between acts). `gameChromium` resolves the
+  executable (`GAME_STUDIO_CHROME` override, then host lookup) and holds the `__studio`
+  snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
+  without touching Preview state. `GameBot` plays three.js games in the same Chromium lane:
+  identical bot-child protocol and trace shape, stills stitched to video with ffmpeg, the
+  overlap/long-fall detectors not applicable, id-clicks counted and skipped (no control tree),
+  explicit state writes through the game's own `setState`.
+- `GameService` routes by manifest engine with an explicit target override: `game_explore_start`
+  defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
+  content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
+  the expected-files check is engine-aware.
 
 ## Tools
 
@@ -40,8 +59,15 @@ checks are boots, exports and keep-or-revert verdicts.
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
 harness makes these true regardless of what the model says: a separate tester plays every build,
 fresh sessions review it, blind compare reverts the loser, and the clock enforces bold moves in
-every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` and the bot
-kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product.
+every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
+for the browser lane) and the bot
+kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product. `GameCreateInput.engine`
+(`godot` default, `three` for the browser lane) picks the starter template (`blank` / `blank-three`)
+and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js project with vendored three.js
+r0.180.0, MIT); `copyTemplateIntoGame` copies whichever engine tree the template ships. The manifest's
+`godotProject` names the engine project directory for either lane (`web` for three.js), so snapshots,
+exports and the loop resolve it unchanged. `GameRun` reads the manifest once per loop (`laneOf`) for
+the engine directory and prompt paths; everything else in the loop is engine-neutral.
 
 Two constraints hold everywhere:
 

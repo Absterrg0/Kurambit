@@ -28,6 +28,7 @@ import {
   type ThreadId,
   GAME_EXPLORE_BOUNDS,
   EXPLORE_CAPTURE_BOUNDS,
+  THREE_VIEWPORT,
   exploreCaptureIssues,
   exploreStepIssues,
   GameExploreStartInput,
@@ -88,6 +89,9 @@ import * as GameOperations from "./GameOperations.ts";
 import { userDirConfigIssues } from "./gameNativeUserDir.ts";
 import { mergeCheckIssues, limitIssues } from "./godotCheckOutput.ts";
 import { parseGodotViewport } from "./godotViewport.ts";
+import { openExploreWeb, webStepIssues, type ExploreWebHandle } from "./gameExploreWeb.ts";
+import { requireChromium } from "./gameChromium.ts";
+import { serveGameDirectory } from "./gameWebServer.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
 import { inspectWindowsBuild, type WindowsBuildInspection } from "./windowsExport.ts";
 import { publishWindowsBuild } from "./windowsPublication.ts";
@@ -542,11 +546,21 @@ const make = Effect.gen(function* () {
     target: "Web" | "Linux" | "Windows",
   ) {
     const { backend, godot, cwd, godotProject } = yield* engine(root);
+    if (!backend.exportTargets.includes(target))
+      return yield* new GameOperationError({
+        operation: `${backend.displayName} export`,
+        path: root,
+        reason: "invalid-input",
+        detail: `${backend.displayName} games export ${backend.exportTargets.join(", ")} only; ${target} is refused for this engine.`,
+      });
     const toolStatus = yield* tools.status;
-    const engineStatus = toolStatus.tools.find((tool) => tool.tool === "godot");
+    const engineStatus =
+      backend.id === "godot"
+        ? toolStatus.tools.find((tool) => tool.tool === "godot")
+        : { ready: true };
     if (!engineStatus?.ready)
       return yield* new GameOperationError({
-        operation: "Godot export",
+        operation: `${backend.displayName} export`,
         path: godot.templates ?? godot.path,
         reason: "templates-missing",
         detail: `Godot executable: ${godot.path} (${godot.version}).`,
@@ -558,7 +572,7 @@ const make = Effect.gen(function* () {
         !(yield* Effect.promise(() => GameToolchain.hasWindowsExportTemplates(windowsTemplates))))
     )
       return yield* new GameOperationError({
-        operation: "Godot Windows export",
+        operation: `${backend.displayName} Windows export`,
         path: godot.templates ?? godot.path,
         reason: "templates-missing",
         detail: `Windows x86_64 export templates for Godot ${godot.version} are missing from ${godot.templates ?? "the template directory"}. Ask the user to run Install tools in Settings > General > Game tools to add them; the Godot binary and the Web/Linux templates are reused as they are. Godot executable: ${godot.path}.`,
@@ -631,16 +645,22 @@ const make = Effect.gen(function* () {
       const result =
         windowsOutput !== null ? { ...exportResult, path: windowsOutput } : exportResult;
       if (!result.success) return result;
-      yield* Effect.tryPromise({
-        try: async () => {
-          for (const file of target === "Web"
-            ? [
+      // A Godot web release is its entry plus the engine files beside it; a
+      // three.js release is the static copy, whose entry proves the staging.
+      const expectedFiles =
+        target === "Web"
+          ? backend.id === "three"
+            ? [output]
+            : [
                 output,
                 output.replace(/\.html$/, ".wasm"),
                 output.replace(/\.html$/, ".js"),
                 output.replace(/\.html$/, ".pck"),
               ]
-            : [exportOutput]) {
+          : [exportOutput];
+      yield* Effect.tryPromise({
+        try: async () => {
+          for (const file of expectedFiles) {
             const stat = await NodeFSP.stat(file);
             if (!stat.isFile() || stat.size === 0) throw new Error(`Empty export: ${file}`);
           }
@@ -868,6 +888,10 @@ const make = Effect.gen(function* () {
     server: NodeNet.Server;
     nextId: number;
   }
+  interface ExploreWebConn {
+    handle: ExploreWebHandle;
+    server: { url: string; close: () => Promise<void> };
+  }
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
@@ -880,6 +904,7 @@ const make = Effect.gen(function* () {
     readonly profileDir: string;
     readonly traceDir: string;
     readonly native: ExploreNativeConn | null;
+    readonly web: ExploreWebConn | null;
     readonly lock: Semaphore.Semaphore;
     lastActiveMs: number;
     readonly wallDeadlineMs: number;
@@ -1022,6 +1047,23 @@ const make = Effect.gen(function* () {
           yield* closeNativeConn(session).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Closing a native exploration session failed.", {
+                sessionId: session.id,
+                cause,
+              }),
+            ),
+          );
+        if (session.web !== null)
+          yield* Effect.promise(() =>
+            (async () => {
+              try {
+                await session.web!.handle.close();
+              } finally {
+                await session.web!.server.close();
+              }
+            })(),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Closing a web exploration session failed.", {
                 sessionId: session.id,
                 cause,
               }),
@@ -1244,6 +1286,7 @@ const make = Effect.gen(function* () {
               operation: "explore-native",
               timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
               env: GameExploreNative.nativeChildEnv(staged.isolation),
+              envMode: "replace",
               ownedProcessGroup: true,
             })
           : processes.start({
@@ -1253,6 +1296,7 @@ const make = Effect.gen(function* () {
               operation: "explore-native",
               timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
               env: GameExploreNative.nativeChildEnv(staged.isolation),
+              envMode: "replace",
               ownedProcessGroup: true,
             })
       ).pipe(
@@ -1369,6 +1413,7 @@ const make = Effect.gen(function* () {
           server,
           nextId: 1,
         },
+        web: null,
         lock: Semaphore.makeUnsafe(1),
         lastActiveMs: now,
         wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
@@ -1423,6 +1468,139 @@ const make = Effect.gen(function* () {
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
       } satisfies typeof GameExploreStartResult.Type;
     });
+  /**
+   * Opens a web exploration session on the current game sources. The static
+   * folder is served over loopback and headless Chromium plays it in real
+   * time: real keyboard and mouse input, screenshots, console errors and the
+   * game's read-only `window.__studio` probe. There is no pause between
+   * calls; waits and holds advance game time as they run.
+   */
+  const exploreStartWeb = (
+    threadId: ThreadId,
+    root: string,
+    input: typeof GameExploreStartInput.Type,
+  ) =>
+    Effect.gen(function* () {
+      yield* projects.read(root);
+      const resolved = yield* engine(root);
+      if (resolved.backend.id !== "three")
+        return yield* exploreInvalid(
+          root,
+          "Web exploration plays three.js browser games; this game runs on another engine.",
+        );
+      const before = yield* snapshot(root, resolved.godotProject);
+      if (before.kind !== "known")
+        return yield* exploreInvalid(
+          root,
+          "The game sources could not be identified before the web session ran; the result would not be current.",
+        );
+      const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
+      if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
+      const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
+      const executable = yield* requireChromium("Explore session", root);
+      const id = NodeCrypto.randomUUID();
+      const traceDir = NodePath.join(exploreScratchBase(), id);
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(traceDir, { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
+      });
+      const profileDir = NodePath.join(traceDir, "chrome-profile");
+      const server = yield* Effect.tryPromise({
+        try: () => serveGameDirectory(root, resolved.godotProject),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore session",
+            path: root,
+            reason: "io",
+            detail: "The static project could not be served.",
+            cause,
+          }),
+      });
+      const now = yield* Clock.currentTimeMillis;
+      const dropServer = Effect.promise(() => server.close()).pipe(Effect.ignore);
+      const handle = yield* Effect.tryPromise({
+        try: (signal) =>
+          openExploreWeb({
+            executable,
+            url: server.url,
+            profileDirectory: profileDir,
+            width: THREE_VIEWPORT.width,
+            height: THREE_VIEWPORT.height,
+            bootTimeoutMs,
+            signal,
+          }),
+        catch: (cause) =>
+          isGameOperationError(cause)
+            ? cause
+            : new GameOperationError({
+                operation: "Explore session",
+                path: root,
+                reason: "command-failed",
+                detail: cause instanceof Error ? cause.message : String(cause),
+                cause,
+              }),
+      }).pipe(
+        Effect.tapError(() => dropServer),
+        Effect.onInterrupt(() => dropServer),
+      );
+      const live: ExploreSession = {
+        id,
+        root,
+        threadId,
+        buildId: before.sourceId,
+        sourceId: before.sourceId,
+        viewport: { ...handle.viewport },
+        bootMs: handle.bootMs,
+        profileDir,
+        traceDir,
+        native: null,
+        web: { handle, server },
+        lock: Semaphore.makeUnsafe(1),
+        lastActiveMs: now,
+        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
+        calls: 0,
+        totalSteps: 0,
+        totalNominalMs: 0,
+        images: 0,
+        actions: [],
+        closed: false,
+        closeReason: null,
+        closedAt: null,
+      };
+      if (handle.bootProbe !== null) {
+        live.actions.push({
+          index: 0,
+          steps: [],
+          executedInputSteps: 0,
+          nominalMs: 0,
+          probe: {
+            gameState: { ...handle.bootProbe.gameState },
+            player: handle.bootProbe.player === null ? null : { ...handle.bootProbe.player },
+          },
+          screenshot: "",
+          consoleMessages: [...handle.bootConsole],
+          consoleTruncated: 0,
+        });
+      }
+      exploreLive.set(root, live);
+      return {
+        sessionId: id,
+        buildId: before.sourceId,
+        sourceId: before.sourceId,
+        viewport: { ...handle.viewport },
+        booted: true,
+        bootMs: handle.bootMs,
+        message:
+          `Web exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
+          `at ${handle.viewport.width}x${handle.viewport.height} (real time: the game keeps running between calls). ` +
+          `Act with short input steps, then game_explore_close. ` +
+          `This session never qualifies the build.`,
+        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
+        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
+        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
+      } satisfies typeof GameExploreStartResult.Type;
+    });
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     exploreStartLock.withPermits(1)(
       Effect.gen(function* () {
@@ -1431,7 +1609,22 @@ const make = Effect.gen(function* () {
         if (existing !== undefined)
           return yield* exploreInvalid(
             existing.id,
-            "Another exploration session is open for this game; its owning thread must close it before this game starts another.",
+            "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
+          );
+        const manifest = yield* projects.read(root);
+        const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
+        if (target === "web") {
+          if (manifest.engine.name !== "three")
+            return yield* exploreInvalid(
+              root,
+              "Godot web play is not in this build; start the session without a target (or with target native).",
+            );
+          return yield* exploreStartWeb(threadId, root, input);
+        }
+        if (manifest.engine.name === "three")
+          return yield* exploreInvalid(
+            root,
+            "This is a three.js browser game; start the session with target web.",
           );
         return yield* exploreStartNative(threadId, root, input);
       }),
@@ -1620,6 +1813,136 @@ const make = Effect.gen(function* () {
           : Effect.void,
       ),
     );
+  /**
+   * Runs one web act through headless Chromium and persists the returned
+   * picture. The game runs in real time, so waits and holds in the steps
+   * already advanced it; captures cost nothing extra.
+   */
+  const exploreActWeb = (
+    session: ExploreSession,
+    input: typeof GameExploreActInput.Type,
+    callIndex: number,
+    nominalMs: number,
+  ) =>
+    Effect.gen(function* () {
+      const conn = session.web!;
+      const file = `act-${String(callIndex).padStart(2, "0")}-observe.png`;
+      const screenshotPath = NodePath.join(session.traceDir, file);
+      const failAct = Effect.gen(function* () {
+        session.actions.push({
+          index: callIndex,
+          steps: [...input.steps],
+          executedInputSteps: 0,
+          nominalMs: 0,
+          probe: null,
+          screenshot: "",
+          consoleMessages: [],
+          consoleTruncated: 0,
+          execution: "unknown",
+          failure:
+            "Act failed or was interrupted after possible partial execution. Exact input progress is unknown.",
+        });
+        yield* exploreFinalize(session, "act-failed");
+      });
+      const observed = yield* Effect.tryPromise({
+        try: (signal) => conn.handle.act([...input.steps], callIndex, signal),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore session",
+            path: session.id,
+            reason: "command-failed",
+            detail:
+              cause instanceof Error && cause.message !== "aborted"
+                ? cause.message.slice(0, 500)
+                : "The web act failed.",
+            cause,
+          }),
+      }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? failAct : Effect.void)));
+      let keptScreenshot = "";
+      let screenshotReason: string | undefined = undefined;
+      if (observed.screenshotData !== "") {
+        const written = yield* Effect.promise(() =>
+          NodeFSP.writeFile(screenshotPath, Buffer.from(observed.screenshotData, "base64"))
+            .then(() =>
+              NodeFSP.stat(screenshotPath).then(
+                (stat) => stat.isFile() && stat.size > 0,
+                () => false,
+              ),
+            )
+            .catch(() => false),
+        );
+        if (written) keptScreenshot = file;
+        else
+          screenshotReason =
+            "The browser picture could not be saved; state and console messages stay available.";
+      } else {
+        screenshotReason =
+          "The browser returned no picture for this act; state and console messages stay available.";
+      }
+      const probe =
+        observed.probe === null
+          ? null
+          : {
+              gameState: { ...observed.probe.gameState },
+              player: observed.probe.player === null ? null : { ...observed.probe.player },
+            };
+      session.actions.push({
+        index: callIndex,
+        steps: [...input.steps],
+        executedInputSteps: observed.executedInputSteps,
+        nominalMs,
+        probe,
+        screenshot: keptScreenshot,
+        consoleMessages: [...observed.consoleMessages],
+        consoleTruncated: observed.consoleTruncated,
+        ...(screenshotReason === undefined ? {} : { screenshotReason }),
+      });
+      session.totalNominalMs += nominalMs;
+      if (keptScreenshot !== "") session.images += 1;
+      session.lastActiveMs = yield* Clock.currentTimeMillis;
+      return {
+        sessionId: session.id,
+        callIndex,
+        executedInputSteps: observed.executedInputSteps,
+        nominalMs,
+        probe,
+        screenshotPath: keptScreenshot === "" ? null : screenshotPath,
+        ...(screenshotReason === undefined ? {} : { screenshotReason }),
+        consoleMessages: [...observed.consoleMessages],
+        consoleTruncated: observed.consoleTruncated,
+        message:
+          `Act ${callIndex} ran ${input.steps.length} step(s) ` +
+          `(${observed.executedInputSteps} input, +${nominalMs}ms nominal); ` +
+          `${GAME_EXPLORE_BOUNDS.maxCalls - callIndex} act(s) left. ` +
+          `This observation is descriptive only, never a verdict.`,
+        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
+        totalNominalMs: session.totalNominalMs,
+      } satisfies typeof GameExploreActResult.Type;
+    }).pipe(
+      Effect.onExit((exit) =>
+        exit._tag === "Failure" && !session.closed
+          ? Effect.gen(function* () {
+              if (!session.actions.some((action) => action.index === callIndex))
+                yield* Effect.gen(function* () {
+                  session.actions.push({
+                    index: callIndex,
+                    steps: [...input.steps],
+                    executedInputSteps: 0,
+                    nominalMs: 0,
+                    probe: null,
+                    screenshot: "",
+                    consoleMessages: [],
+                    consoleTruncated: 0,
+                    execution: "unknown",
+                    failure:
+                      "Observation failed after possible partial execution. Exact input progress is unknown.",
+                  });
+                  yield* exploreFinalize(session, "act-failed");
+                });
+            })
+          : Effect.void,
+      ),
+    );
   const exploreAct = (threadId: ThreadId, input: typeof GameExploreActInput.Type) =>
     Effect.gen(function* () {
       const session = [...exploreLive.values()].find((live) => live.id === input.sessionId);
@@ -1643,7 +1966,10 @@ const make = Effect.gen(function* () {
           session.id,
           `This session used its ${GAME_EXPLORE_BOUNDS.maxCalls} act calls; close it and start a new exploration.`,
         );
-      const nominalMs = GameExploreNative.exploreStepsNominalMs(input.steps);
+      const nominalMs = GameExploreNative.exploreStepsNominalMs(
+        input.steps,
+        session.web === null ? "native" : "web",
+      );
       if (!Number.isFinite(nominalMs) || nominalMs < 0)
         return yield* exploreInvalid(session.id, "The act has an invalid duration.");
       if (nominalMs > GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall)
@@ -1653,9 +1979,14 @@ const make = Effect.gen(function* () {
         );
       const stepIssues = exploreStepIssues(input.steps);
       if (stepIssues.length > 0) return yield* exploreInvalid(session.id, stepIssues.join("\n"));
-      const nativeIssues = exploreNativeStepIssues(input.steps);
-      if (nativeIssues.length > 0)
-        return yield* exploreInvalid(session.id, nativeIssues.join("\n"));
+      if (session.web !== null) {
+        const webIssues = webStepIssues(input.steps);
+        if (webIssues.length > 0) return yield* exploreInvalid(session.id, webIssues.join("\n"));
+      } else {
+        const nativeIssues = exploreNativeStepIssues(input.steps);
+        if (nativeIssues.length > 0)
+          return yield* exploreInvalid(session.id, nativeIssues.join("\n"));
+      }
       return yield* session.lock.withPermits(1)(
         Effect.gen(function* () {
           if (session.closed || exploreLive.get(session.root) !== session)
@@ -1693,8 +2024,9 @@ const make = Effect.gen(function* () {
               `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs}ms total nominal time; close it and start a new exploration.`,
             );
           // Headless native acts persist no picture, so the image bound only
-          // covers acts that actually keep one.
-          const keepsImage = session.native !== null && session.native.hasDisplay;
+          // covers acts that actually keep one. Web acts always keep one.
+          const keepsImage =
+            session.web !== null || (session.native !== null && session.native.hasDisplay);
           if (keepsImage && session.images + 1 > GAME_EXPLORE_BOUNDS.maxImages)
             return yield* exploreInvalid(
               session.id,
@@ -1703,6 +2035,8 @@ const make = Effect.gen(function* () {
           const callIndex = session.calls + 1;
           session.calls = callIndex;
           session.totalSteps += input.steps.length;
+          if (session.web !== null)
+            return yield* exploreActWeb(session, input, callIndex, nominalMs);
           return yield* exploreActNative(session, input, callIndex, nominalMs);
         }),
       );
@@ -1768,32 +2102,34 @@ const make = Effect.gen(function* () {
           const importedIssues = backend.parseDiagnostics(importedOutput);
           const parsed = [...importedIssues, ...executed.issues];
           const errors = mergeCheckIssues(reported?.errors ?? [], parsed);
+          // File labels name the engine project, whichever engine it is.
+          const projectFile = `${godotProject}/${backend.projectSettingsFile}`;
           if (!imported.success && importedIssues.length === 0)
             errors.unshift({
-              file: "godot/project.godot",
+              file: projectFile,
               message: `Import failed with exit code ${imported.process?.exitCode ?? -1}. ${imported.message}`,
             });
           if (reported === null)
             errors.unshift({
-              file: "godot/project.godot",
-              message:
-                "The Godot check script did not report a result. The project may have crashed during startup.",
+              file: projectFile,
+              message: `The ${backend.displayName} check script did not report a result. The project may have crashed during startup.`,
             });
           if (run.timedOut)
             errors.unshift({
-              file: "godot/project.godot",
-              message: "The Godot check timed out before finishing its physics frames.",
+              file: projectFile,
+              message: `The ${backend.displayName} check timed out before finishing its physics frames.`,
             });
           if (run.exitCode !== 0 && errors.length === 0)
             errors.unshift({
-              file: "godot/project.godot",
-              message: `Godot exited with code ${run.exitCode}. ${commandDetail(run)}`,
+              file: projectFile,
+              message: `${backend.displayName} exited with code ${run.exitCode}. ${commandDetail(run)}`,
             });
           // A game created before gameplay entries is checked as it always was, but
           // the warning says what the check did not cover rather than implying it did.
+          // three.js games have no gameplay scene concept; the check loads the page.
           const warnings = [
             ...(reported?.warnings ?? []),
-            ...(manifest.gameplayScene == null
+            ...(manifest.gameplayScene == null && backend.id === "godot"
               ? [
                   {
                     file: "game.json",
@@ -1806,7 +2142,7 @@ const make = Effect.gen(function* () {
           const after = yield* snapshot(root, godotProject);
           const comparison = comparedSource(before, after, "check");
           if (comparison.kind !== "current")
-            warnings.unshift({ file: "godot/", message: comparison.detail });
+            warnings.unshift({ file: `${godotProject}/`, message: comparison.detail });
           const result = {
             ok: errors.length === 0 && reported !== null && !run.timedOut,
             errors: limitIssues(errors),
@@ -1942,8 +2278,14 @@ const make = Effect.gen(function* () {
           : yield* Effect.promise(async () => {
               // Cheap structural check for status polling: a missing or empty
               // artifact file must read as stale. Byte identity is checked when
-              // Play actually opens the build, not on every poll.
-              for (const name of ["index.html", "index.js", "index.wasm", "index.pck"]) {
+              // Play actually opens the build, not on every poll. three.js
+              // builds are static copies (no wasm/pck), so only their entry
+              // and script must be present.
+              const names =
+                manifest.engine.name === "three"
+                  ? ["index.html", "main.js"]
+                  : ["index.html", "index.js", "index.wasm", "index.pck"];
+              for (const name of names) {
                 const stat = await NodeFSP.stat(
                   NodePath.join(root, selected.directory, name),
                 ).catch(() => null);
@@ -2009,12 +2351,10 @@ const make = Effect.gen(function* () {
     export: (threadId, target) =>
       withRoot(threadId, `Export ${target}`, (root) => runExport(root, target)),
     exportTargets: (threadId) =>
-      withRoot(threadId, "Export targets", (_root) =>
+      withRoot(threadId, "Export targets", (root) =>
         Effect.gen(function* () {
-          // Native single-engine tree: Godot releases Web, Linux and Windows
-          // (product tool descriptions). T30's backend exportTargets and
-          // displayName fields supersede this at integration.
-          return { targets: ["Web", "Linux", "Windows"] as const, displayName: "Godot" };
+          const { backend } = yield* engine(root);
+          return { targets: backend.exportTargets, displayName: backend.displayName };
         }),
       ),
     packageWindows: (threadId) =>
@@ -2188,17 +2528,21 @@ const make = Effect.gen(function* () {
         // hold the game's operation lock. The bot service refuses a second
         // concurrent run per game as busy.
         const root = yield* projects.resolve(threadId);
-        const imported = yield* importGame(root);
-        if (!imported.success)
-          return yield* new GameOperationError({
-            operation: "Bot run",
-            path: imported.path ?? root,
-            reason: "command-failed",
-            detail:
-              `The Godot import failed before the bot run started.\n${imported.message}`.slice(
-                -2000,
-              ),
-          });
+        const manifest = yield* projects.read(root);
+        // Static sources need no editor import; the bot plays the folder.
+        if (manifest.engine.name !== "three") {
+          const imported = yield* importGame(root);
+          if (!imported.success)
+            return yield* new GameOperationError({
+              operation: "Bot run",
+              path: imported.path ?? root,
+              reason: "command-failed",
+              detail:
+                `The Godot import failed before the bot run started.\n${imported.message}`.slice(
+                  -2000,
+                ),
+            });
+        }
         return yield* gameBot.run(root, input);
       }),
     botView: (threadId, input) =>
@@ -2255,7 +2599,13 @@ const make = Effect.gen(function* () {
         );
         return { name: input.name, set: true } satisfies GameSetSecretResult;
       }),
-    check: (threadId) => withRoot(threadId, "Godot check", checkGame),
+    check: (threadId) =>
+      Effect.gen(function* () {
+        const root = yield* projects.resolve(threadId);
+        const manifest = yield* projects.read(root);
+        const label = manifest.engine.name === "three" ? "three.js check" : "Godot check";
+        return yield* withRoot(threadId, label, checkGame);
+      }),
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>

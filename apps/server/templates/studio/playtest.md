@@ -9,9 +9,9 @@ play rules (Apache-2.0, ramenvr/autopilot).
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
    triggers), regression (the DO NOT REGRESS list still holds), visual
    (frames against the key art).
-3. The game waits paused between acts. Use held-key steps with durations
-   chosen from observed control response. Observe between adjustments so a
-   missed input or overshoot is visible.
+3. Native games pause between acts; browser games run in real time. Use
+   held-key steps with durations chosen from observed control response.
+   Observe between adjustments so a missed input or overshoot is visible.
 4. Report separately what was verified and what was not. Name the steps
    you ran, what you saw, and what you never reached. Never claim a pass
    on a screen you did not see.

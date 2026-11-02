@@ -5,22 +5,25 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { GAME_EXPLORE_BOUNDS, type GameExploreStep } from "@t3tools/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import { headlessEnvironment, DISPLAY_VARIABLES } from "./GameProcesses.ts";
+import { engineChildEnv, DISPLAY_VARIABLES } from "./GameProcesses.ts";
 import { GODOT_EXPLORE_SCRIPT } from "./godotExploreScript.ts";
 import { prepareNativeUserIsolation, type NativeUserIsolation } from "./gameNativeUserDir.ts";
 
-/** Nominal game time for new step kinds. Web kinds keep their existing accounting. */
-export const exploreStepNominalMs = (step: GameExploreStep): number => {
-  if ("press" in step) return 50;
+/** Nominal commanded game time; native taps span the runner's physics-frame hold. */
+export const exploreStepNominalMs = (step: GameExploreStep, target: "native" | "web"): number => {
+  if ("press" in step) return target === "native" ? 170 : 50;
   if ("waitMs" in step) return step.waitMs;
   if ("holdMs" in step) return step.holdMs;
   if ("ui" in step) return 100;
   return 0;
 };
 
-export const exploreStepsNominalMs = (steps: readonly GameExploreStep[]): number => {
+export const exploreStepsNominalMs = (
+  steps: readonly GameExploreStep[],
+  target: "native" | "web",
+): number => {
   let total = 0;
-  for (const step of steps) total += exploreStepNominalMs(step);
+  for (const step of steps) total += exploreStepNominalMs(step, target);
   return total;
 };
 
@@ -282,15 +285,19 @@ export const findXvfb = async (): Promise<string | null> => {
 };
 
 /**
- * The environment exactly one native explore child sees. Display routes are
- * stripped explicitly here — not only by the process service default — so a
+ * The environment exactly one native explore child sees: the allowlisted
+ * engine base plus GL software rendering and the per-run XDG trio, so the
+ * executed project scripts cannot read server secrets. Display routes are
+ * stripped explicitly here too — not only by the helper default — so a
  * shell with DISPLAY/WAYLAND_DISPLAY set can never leak the real desktop
  * into the child. Under Xvfb only xvfb-run's private DISPLAY reaches Godot
- * (plus --display-driver x11 in the args), and headless runs keep none.
+ * (plus --display-driver x11 in the args), and headless runs keep none. HOME
+ * stays the real one (Godot resolves editor config under it); user:// stays
+ * inside the isolated XDG trio the runner's containment check enforces.
  */
 export const nativeChildEnv = (isolation: NativeUserIsolation): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
-    ...headlessEnvironment(process.env),
+    ...engineChildEnv(),
     LIBGL_ALWAYS_SOFTWARE: "1",
     LP_NUM_THREADS: "2",
     ...isolation.env,

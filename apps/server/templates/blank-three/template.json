@@ -1,0 +1,7 @@
+{
+  "id": "blank-three",
+  "name": "Blank (browser)",
+  "description": "An empty three.js static project: a lit 3D scene, a read-only studio probe and a single static web export.",
+  "dimension": "3d",
+  "probe": true
+}

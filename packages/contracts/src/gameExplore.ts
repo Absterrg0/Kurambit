@@ -45,13 +45,17 @@ export const GAME_EXPLORE_BOUNDS = {
 const sessionId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 
 /**
- * Exploration plays the current game sources natively with the game paused
- * between acts. There is no web backend: the game under test is the live
- * folder, never an export.
+ * Exploration plays the current game sources with the game paused between
+ * acts. Native games run Godot; three.js games load the static folder in
+ * headless Chromium (real keyboard/mouse, screenshots, console errors, a
+ * read-only `window.__studio` probe). The target defaults to the game's
+ * engine when omitted.
  */
 export const GameExploreStartInput = Schema.Struct({
   /** How long to wait for Godot to boot. */
   bootTimeoutMs: Schema.optionalKey(Schema.Finite),
+  /** Which runner to open. Omitted means the game's own engine. */
+  target: Schema.optionalKey(Schema.Literals(["native", "web"])),
 });
 export type GameExploreStartInput = typeof GameExploreStartInput.Type;
 

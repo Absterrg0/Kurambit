@@ -18,6 +18,8 @@ import {
   ThreadId,
   GameManifest,
   GameOperationError,
+  THREE_VIEWPORT,
+  gameTemplateForEngine,
   type GameCreateInput,
   type GameListResult,
   type GameOpenInput,
@@ -33,7 +35,7 @@ import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
+import { createEngine, initialGamePrompt, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame, resolveTemplatesDirectory } from "./templates.ts";
 
 export const insideGame = (root: string, relative: string) => {
@@ -256,13 +258,15 @@ const make = Effect.gen(function* () {
             await NodeFSP.mkdir(NodePath.dirname(root), { recursive: true });
             await NodeFSP.mkdir(root); // Never adopt or overwrite an existing directory during creation.
             created = true;
+            const engineDirs =
+              createEngine(input) === "three"
+                ? ["web/assets"]
+                : ["godot/assets/models", "godot/scripts", "godot/tests"];
             for (const relative of [
               "art/blender",
               "art/scripts",
               "art/previews",
-              "godot/assets/models",
-              "godot/scripts",
-              "godot/tests",
+              ...engineDirs,
               "builds/web",
               "builds/linux",
             ])
@@ -282,7 +286,7 @@ const make = Effect.gen(function* () {
         );
         yield* copyTemplateIntoGame({
           templatesDirectory,
-          templateId: "blank",
+          templateId: gameTemplateForEngine(createEngine(input)),
           gameRoot: root,
           gameName: name,
         }).pipe(
@@ -470,8 +474,10 @@ const make = Effect.gen(function* () {
       const manifest = yield* read(root);
       // The walk stays bounded to the engine tree; every source is read once
       // to attribute asset usage, and a changed tree is never served stale.
+      // three.js games have no project.godot: they play at the lane's fixed viewport.
       const expensive = yield* Effect.tryPromise({
         try: async () => {
+          if (manifest.engine.name === "three") return { viewport: { ...THREE_VIEWPORT } };
           const engineRoot = insideGame(root, manifest.godotProject);
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),

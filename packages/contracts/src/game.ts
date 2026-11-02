@@ -59,15 +59,24 @@ export const GameAsset = Schema.Struct({
   inputs: Schema.optionalKey(Schema.Array(GameBlenderInputSource)),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals(["blank"]);
+export const GameTemplateId = Schema.Literals(["blank", "blank-three"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
+/** The engine every game build runs on. Godot is the native lane; three.js is the quick browser lane. */
+export const GameEngineId = Schema.Literals(["godot", "three"]);
+export type GameEngineId = typeof GameEngineId.Type;
+/** Game-relative directory holding a three.js game's static sources. */
+export const THREE_PROJECT_DIRECTORY = "web";
+/** Pinned three.js the browser lane vendors, so no install step is needed. */
+export const THREE_PINNED_VERSION = "0.180.0";
+/** Design resolution three.js games boot, explore and bot-play at. */
+export const THREE_VIEWPORT = { width: 1280, height: 720 } as const;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
   name: Schema.String,
   description: Schema.String,
   dimension: Schema.Literals(["2d", "3d"]),
-  /** The game-relative suite whose pass is the game's qualification test. */
-  testSuite: Schema.String,
+  /** The game-relative suite whose pass is the game's qualification test. Absent on lanes with no scripted suite. */
+  testSuite: Schema.optionalKey(Schema.String),
   /**
    * The scene play starts in, which the check runs after the main scene so a
    * failure in gameplay initialization cannot hide behind the menu.
@@ -99,8 +108,19 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     gameplayScene: "res://scenes/main.tscn",
     probe: true,
   },
+  {
+    id: "blank-three",
+    name: "Blank (browser)",
+    description:
+      "An empty three.js static project: a lit 3D scene, a read-only studio probe and a single static web export. No install step; three.js is vendored.",
+    dimension: "3d",
+    probe: true,
+  },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
+/** The starter template a create request's engine maps to. */
+export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
+  engine === "three" ? "blank-three" : "blank";
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -112,7 +132,7 @@ export const GameManifest = Schema.Struct({
   testSuite: Schema.optionalKey(Schema.String),
   gameplayScene: Schema.optionalKey(Schema.String),
   probe: Schema.optionalKey(Schema.Boolean),
-  engine: Schema.Struct({ name: Schema.Literal("godot"), version: Schema.String }),
+  engine: Schema.Struct({ name: GameEngineId, version: Schema.String }),
   godotProject: Schema.String,
   assets: Schema.Array(GameAsset),
   /**
@@ -385,6 +405,8 @@ export const GameCreateInput = Schema.Struct({
   parentDirectory: Schema.String,
   brief: Schema.String.check(Schema.isMinLength(1)),
   artDirection: Schema.optionalKey(Schema.String),
+  /** Which lane to build in. Omitted means the Godot native lane. */
+  engine: Schema.optionalKey(GameEngineId),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });

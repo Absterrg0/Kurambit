@@ -7,9 +7,9 @@ export interface GameTemplateAppearance {
 }
 
 export const gameTemplateAppearance = (
-  _template: GameSummary["template"],
+  template: GameSummary["template"],
 ): GameTemplateAppearance => ({
-  label: "Blank",
+  label: template === "blank-three" ? "Blank (browser)" : "Blank",
   initialClassName: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-300",
   coverClassName: "from-zinc-500/20 via-zinc-400/10 to-transparent",
 });

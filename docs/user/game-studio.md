@@ -1,7 +1,7 @@
 # Making games
 
-Game Studio turns a written brief into a playable Godot game. Your coding agent does the work with
-Blender and Godot; you direct it, play the result, and ask for changes.
+Game Studio turns a written brief into a playable game. Your coding agent does the work with
+Blender and Godot for native games, or three.js for browser games; you direct it, play the result, and ask for changes.
 
 ## Set up the tools once
 
@@ -26,6 +26,12 @@ Choose **New game** on the home screen or in the sidebar. Name the game, write a
 art direction, and choose where to save it (`~/Games/<slug>` by default). Pick the agent and model,
 then choose **Create game**. Game Studio creates the project folder, starts a session with your
 brief, and opens the game workspace.
+
+Engine: Godot native (default) or three.js browser. Godot is the full lane: a real Godot 4.7 project
+with Blender-made art, native play, and Web, Windows and Linux exports. three.js is the quick
+browser lane: a static browser game with three.js vendored (no install step), played in real time
+through the same tools, with a Web export only. The run loop, Play, preview and web packaging work
+the same on both.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
@@ -55,7 +61,8 @@ its right.
   the stage says so and offers to rebuild.
 - **Stop** ends only the processes Game Studio
   started for this game, and closes its preview server.
-- **Export Windows** writes a 64-bit build to `builds/windows/game.exe`. The standard preset embeds
+- **Export Windows** writes a 64-bit build to `builds/windows/game.exe` (Godot games only;
+  three.js games export Web only and Windows and Linux are refused with the reason). The standard preset embeds
   the game data, so you can copy that one file to a Windows PC. A game whose Windows preset does not
   embed it also gets `builds/windows/game.pck`, and both files must be copied together; the export
   result says which files to share. **Download package** on the same card zips the checked release
@@ -73,6 +80,9 @@ its right.
   export.
 - The chat column is resizable; drag its edge, or hide it with the panel control in the stage header
   to give the game the whole window.
+- **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
+  reports console and page errors instead of script errors; `game_explore_*` play it in real time
+  with real keys and clicks (see the `three` studio skill for the bridge contract).
 
 To change the game, write a follow-up in the session, for example "make the rocks taller and spread
 the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
@@ -86,7 +96,9 @@ keeps running; use **Stop** in the stage to close it.
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
-- `godot/` is a normal Godot 4.7 project you can open in the Godot editor.
+- `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
+  `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
+  and vendored `vendor/three.*.js`).
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the production run's rounds, notes, bots and videos.
