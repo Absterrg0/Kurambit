@@ -1624,7 +1624,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           const lines = (await NodeFSP.readFile(NodePath.join(root, "ASSETS.md"), "utf8"))
             .split("\n")
             .filter((line) => line.trim().length > 0).length;
-          artMap = `ASSETS.md with ${lines} entries (unverified)`;
+          artMap = `ASSETS.md with ${lines} non-empty lines (unverified)`;
         } catch {
           // No map yet; leave the default.
         }
@@ -2471,7 +2471,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           projectId,
           `tester-${round}`,
           `${PLAYBOOK}Play the game in this folder freely: start it with game_explore_start (target native), get past the menu, push as far as you can, try to win and to lose. ${winBotAsk} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${round}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`,
-          `Read .studio/tester-${round}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. You may only write that notes file.`,
+          `Read .studio/tester-${round}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. Prior flaw for this round: ${move} State whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached. You may only write that notes file.`,
           TESTER_CAP_MS,
           `.studio/tester-${round}.md`,
         );
@@ -2706,7 +2706,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             projectId,
             `ship-${round}`,
             `${PLAYBOOK}Play the game in this folder to the end if you can. After every couple of plays, append what you did and felt to .studio/ship.md. Do not change files. Do not use subagents.`,
-            "Read .studio/ship.md. Rewrite the notes file with what you did and felt, then end with exactly one line SHIP: YES or SHIP: NO and the reasons. You may only write .studio/ship.md.",
+            "Read .studio/ship.md. Rewrite the notes file with what you did and felt, then name the furthest late state actually reached (ending? win or loss? which levels or systems?) and what remains unverified, then end with exactly one line SHIP: YES or SHIP: NO and the reasons. You may only write .studio/ship.md.",
             SHIP_CAP_MS,
             ".studio/ship.md",
           );
