@@ -512,6 +512,24 @@ h3 {
   outline: none;
 }
 
+/* Browsers tint autofilled fields blue; delaying that tint indefinitely
+   keeps the field's own paper. */
+.field input:-webkit-autofill,
+.invite-field input:-webkit-autofill,
+.field input:-webkit-autofill:focus,
+.invite-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  transition:
+    background-color 100000s 0s,
+    color 100000s 0s;
+}
+
+.field input:autofill,
+.invite-field input:autofill {
+  -webkit-text-fill-color: var(--ink);
+}
+
 .field input::placeholder,
 .invite-field input::placeholder {
   color: var(--faint);
@@ -1235,13 +1253,30 @@ h3 {
   background: var(--sheet);
   cursor: ew-resize;
   touch-action: pan-y;
+  container-type: inline-size;
 }
 
-.compare-view canvas {
+.compare-view canvas,
+.compare-overlay,
+.compare-overlay svg,
+.compare-overlay div {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+/* Each side's playtest and pen marks show only on its own side of the split. */
+.compare-overlay {
+  pointer-events: none;
+}
+
+.compare-overlay.is-before {
+  clip-path: inset(0 calc(100% - var(--split, 0.5) * 100%) 0 0);
+}
+
+.compare-overlay.is-after {
+  clip-path: inset(0 0 0 calc(var(--split, 0.5) * 100%));
 }
 
 .compare-tag {
@@ -1519,10 +1554,24 @@ h3 {
   transform: rotate(135deg);
 }
 
+.faq-a {
+  margin: -6px 0 0;
+  padding: 0 0 26px 22px;
+}
+
 .faq-a p {
-  max-width: 40rem;
-  padding: 0 0 24px;
+  max-width: 34em;
+  padding-left: 18px;
+  border-left: 1.5px solid rgb(20 20 18 / 14%);
   color: var(--ink-2);
+  font-family: var(--display);
+  font-size: clamp(17.5px, 1.45vw, 19.5px);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.faq-a p + p {
+  margin-top: 10px;
 }
 
 @supports (interpolate-size: allow-keywords) {
@@ -1573,11 +1622,6 @@ h3 {
   gap: 12px;
   max-width: 640px;
   margin-top: 40px;
-}
-
-.invite-label {
-  font-size: 14.5px;
-  font-weight: 600;
 }
 
 .invite-field {
@@ -1903,6 +1947,14 @@ h3 {
     padding: 6px 8px;
     font-size: 12.5px;
   }
+
+  .faq-a {
+    padding-left: 2px;
+  }
+
+  .faq-a p {
+    padding-left: 14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1974,4 +2026,636 @@ h3 {
   .zone-judge {
     padding-top: 14px;
   }
+}
+
+/* Ink and washi. The rules above set the layout; these give it the brush:
+   washi paper, swash buttons and nav, painted strokes and section seals.
+   They come last so they win over the plainer rules above. */
+
+/* Only the five seal characters, so the file stays tiny. */
+@font-face {
+  font-family: "Yuji Syuku";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/yuji-syuku-seals.woff2") format("woff2");
+  unicode-range: U+5165, U+554F, U+591C, U+6307, U+8A66;
+}
+
+:root {
+  --paper: #ede6d7;
+  --desk: #ddd3bf;
+  /* Pictures are printed on a brighter stock than the page, so they read as
+     sheets laid on it rather than marks on the same paper. */
+  --print: #fffdf8;
+  --sheet: #f9f5ec;
+  --ink: #171511;
+  --ink-2: #36322b;
+  --pencil: #6c665b;
+  --faint: #a59e90;
+  --rule: rgb(23 21 17 / 12%);
+  --rule-strong: rgb(23 21 17 / 24%);
+}
+
+/* The page is one sheet of handmade washi lying on a darker surface. */
+body {
+  background:
+    url("washi.svg") 0 0 / 420px 420px,
+    var(--desk);
+}
+
+.page {
+  border-inline-color: transparent;
+  background:
+    url("washi.svg") 0 0 / 420px 420px,
+    var(--paper);
+}
+
+/* Its long edges are deckled, as they come off the mould, with a little
+   shadow where the sheet lifts from the surface. */
+.page::before,
+.page::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -20px;
+  width: 20px;
+  background: url("deckle.svg") 0 0 / 20px 800px repeat-y;
+  pointer-events: none;
+}
+
+.page::after {
+  left: auto;
+  right: -20px;
+  transform: scaleX(-1);
+}
+
+/* Below 1312px the sheet has a 16px margin; the edge keeps inside it. */
+@media (max-width: 1312px) {
+  .page::before,
+  .page::after {
+    left: -14px;
+    width: 14px;
+    background-size: 14px 800px;
+  }
+
+  .page::after {
+    left: auto;
+    right: -14px;
+  }
+}
+
+/* On a phone the sheet fills the screen, so it has no edge to show. */
+@media (max-width: 640px) {
+  .page::before,
+  .page::after {
+    display: none;
+  }
+}
+
+/* Scroll progress: vermilion soaking down along each edge of the sheet,
+   feathered into the fibres and fading where it is still spreading. */
+.edge-progress i {
+  width: 12px;
+  background: var(--shu);
+  -webkit-mask:
+    url("bleed.svg") 0 0 / 12px 400px repeat-y,
+    linear-gradient(#000 calc(100% - 70px), transparent);
+  mask:
+    url("bleed.svg") 0 0 / 12px 400px repeat-y,
+    linear-gradient(#000 calc(100% - 70px), transparent);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.edge-progress i:first-child {
+  left: calc(50% - var(--page) / 2 + 2px);
+}
+
+.edge-progress i:last-child {
+  right: calc(50% - var(--page) / 2 + 2px);
+}
+
+/* Brush marks, drawn by masking a block of colour with a stroke. */
+.brush-rule,
+.agents::before,
+.agents::after,
+.faq details::before,
+.faq details:last-child::after,
+.foot::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: var(--ink);
+  -webkit-mask: url("brush-rule.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-rule.svg") 0 0 / 100% 100% no-repeat;
+  pointer-events: none;
+}
+
+/* The nav: a strip of paper mounted like a print, with a faint outer edge
+   and a keyline just inside it. */
+.bar,
+.bar[data-scrolled] {
+  border: 0;
+  border-radius: 8px;
+  background:
+    url("washi.svg") 0 0 / 420px 420px,
+    rgb(249 245 236 / 96%);
+  box-shadow:
+    0 0 0 1px rgb(23 21 17 / 10%),
+    0 1px 0 rgb(23 21 17 / 6%),
+    0 16px 30px -24px rgb(23 21 17 / 55%);
+  backdrop-filter: none;
+}
+
+.bar::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 1px solid rgb(23 21 17 / 8%);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.bar-nav {
+  margin: 0 auto;
+}
+
+.bar-nav a {
+  position: relative;
+}
+
+/* A link you point at gets a faint wash of the swash it will receive. */
+.bar-nav a::before {
+  content: "";
+  position: absolute;
+  inset: 3px -2px;
+  z-index: -1;
+  background: var(--ink);
+  opacity: 0;
+  -webkit-mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  transition: opacity 220ms ease;
+}
+
+.bar-nav a:hover::before {
+  opacity: 0.08;
+}
+
+.bar-nav a[aria-current]::before {
+  opacity: 0;
+}
+
+.bar-icon {
+  color: var(--ink-2);
+  transition: color 160ms ease;
+}
+
+.bar-icon:hover {
+  color: var(--shu-deep);
+}
+
+.bar-nav {
+  background: none;
+  box-shadow: none;
+}
+
+.nav-mark {
+  top: 3px;
+  height: 40px;
+  border-radius: 0;
+  background: var(--ink);
+  box-shadow: none;
+  -webkit-mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.bar-nav a[aria-current] {
+  color: var(--sheet);
+}
+
+/* Buttons are a single swash of the brush. */
+.btn {
+  border: 0;
+  border-radius: 0;
+  padding-inline: 28px;
+  background: var(--ink);
+  box-shadow: none;
+  -webkit-mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-swash.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.btn:hover {
+  background: #2c2923;
+}
+
+.btn-primary,
+.btn-primary:hover {
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: var(--shu);
+}
+
+.btn-primary:hover {
+  background: #d1491b;
+}
+
+.btn:active {
+  transform: translateY(1px) rotate(-0.4deg);
+  box-shadow: none;
+}
+
+/* Fields have no box: you write on a single stroke of the brush, which
+   darkens as you type. */
+.field,
+.invite-field,
+.field:focus-within,
+.invite-field:focus-within {
+  position: relative;
+  gap: 10px;
+  padding: 0 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  transform: none;
+}
+
+.field::after,
+.invite-field::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 7px;
+  background: var(--ink);
+  opacity: 0.72;
+  -webkit-mask: url("brush-rule.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-rule.svg") 0 0 / 100% 100% no-repeat;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.field:focus-within::after,
+.invite-field:focus-within::after {
+  opacity: 1;
+}
+
+.field input,
+.invite-field input {
+  padding-left: 2px;
+  color: var(--ink);
+}
+
+/* Stacked on a phone, the stroke runs under the input, above the button. */
+@media (max-width: 700px) {
+  .field::after,
+  .invite-field::after {
+    display: none;
+  }
+
+  .field input,
+  .invite-field input {
+    background: url("underline.svg") 0 100% / 100% 7px no-repeat;
+  }
+
+  .field input:focus,
+  .invite-field input:focus {
+    background-image: url("underline-focus.svg");
+  }
+}
+
+/* Headings end in a stroke of vermilion. */
+.hero h1::after,
+.section-head h2::after,
+.faq-section h2::after,
+.join h2::after {
+  content: "";
+  display: block;
+  width: min(4.4em, 72%);
+  height: 0.26em;
+  margin-top: 0.2em;
+  background: var(--shu);
+  -webkit-mask: url("brush-line.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("brush-line.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.hero h1::after {
+  width: min(3.2em, 60%);
+  background: var(--ink);
+}
+
+/* An enso behind the fox, in a wash of ink. */
+.hero-stage::before {
+  content: "";
+  position: absolute;
+  inset: 2% -2% 8%;
+  background: var(--ink);
+  opacity: 0.16;
+  -webkit-mask: url("enso.svg") center / contain no-repeat;
+  mask: url("enso.svg") center / contain no-repeat;
+}
+
+.agents {
+  position: relative;
+  border-block: 0;
+}
+
+.agents::before {
+  top: -4px;
+  opacity: 0.6;
+}
+
+.agents::after {
+  bottom: -4px;
+  opacity: 0.35;
+  transform: scaleX(-1);
+}
+
+.faq details {
+  position: relative;
+  border-top: 0;
+}
+
+.faq details:last-child {
+  border-bottom: 0;
+}
+
+.faq details::before {
+  top: -3px;
+  height: 5px;
+  opacity: 0.55;
+}
+
+.faq details:nth-child(even)::before {
+  transform: scaleX(-1);
+}
+
+.faq details:last-child::after {
+  bottom: -3px;
+  height: 5px;
+  opacity: 0.55;
+}
+
+.foot {
+  position: relative;
+  border-top: 0;
+}
+
+.foot::before {
+  top: -4px;
+  opacity: 0.5;
+}
+
+/* The desk is a board laid on the sheet: a fine edge and a soft shadow. */
+.mat {
+  border-radius: 6px;
+  background:
+    linear-gradient(rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
+    url("washi.svg") 0 0 / 420px 420px,
+    #e1d8c5;
+  box-shadow:
+    0 0 0 1px rgb(23 21 17 / 12%),
+    0 30px 50px -38px rgb(23 21 17 / 55%);
+}
+
+/* Pictures are mounted like prints: a fine keyline at the image, a margin of
+   lighter paper, the mount's own edge, and a soft shadow. */
+.compare-view,
+.night-sky {
+  position: relative;
+  border: 0;
+  border-radius: 1px;
+  background: var(--print);
+  box-shadow:
+    0 0 0 1px rgb(23 21 17 / 30%),
+    0 0 0 10px #faf6ee,
+    0 0 0 11px rgb(23 21 17 / 10%),
+    0 28px 44px -24px rgb(23 21 17 / 50%);
+}
+
+.compare {
+  gap: 28px;
+}
+
+.night-strip {
+  margin-top: 26px;
+}
+
+.asks button[aria-selected="true"] {
+  background: rgb(249 245 236 / 80%);
+  box-shadow: none;
+}
+
+/* Each section is stamped with a seal: one character for what it is about. */
+.section,
+.join {
+  position: relative;
+}
+
+.kanji-seal {
+  position: absolute;
+  top: clamp(92px, 9.6vw, 138px);
+  right: var(--pad);
+  display: grid;
+  place-items: center;
+  width: clamp(52px, 5vw, 68px);
+  aspect-ratio: 1;
+  background: var(--shu);
+  color: var(--sheet);
+  font-family: "Yuji Syuku", serif;
+  font-size: clamp(30px, 3vw, 42px);
+  line-height: 1;
+  transform: rotate(4deg);
+  -webkit-mask: url("seal-mask.svg") 0 0 / 100% 100% no-repeat;
+  mask: url("seal-mask.svg") 0 0 / 100% 100% no-repeat;
+}
+
+.faq-section .kanji-seal {
+  right: 0;
+}
+
+.kanji-seal.is-inline {
+  position: relative;
+  top: auto;
+  right: auto;
+  display: inline-grid;
+  margin-left: 0.3em;
+  vertical-align: 0.12em;
+}
+
+@media (max-width: 640px) {
+  /* No room beside the heading: the seal stamps the space above it. */
+  .kanji-seal {
+    position: static;
+    width: 44px;
+    margin-bottom: 16px;
+    font-size: 26px;
+  }
+
+  .kanji-seal.is-inline {
+    top: auto;
+  }
+}
+
+.proof,
+.pile i,
+.blind canvas {
+  background-color: var(--print);
+}
+
+/* Motion. A few movements, each one a thing a brush or a seal would do.
+   They play once; the base stylesheet turns all of them off for people who
+   ask for less motion, and nothing waits hidden for them. */
+
+@property --stroke {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 360deg;
+}
+
+@keyframes ink-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(3px);
+  }
+}
+
+@keyframes paint {
+  from {
+    clip-path: inset(-20% 100% -20% 0);
+  }
+
+  to {
+    clip-path: inset(-20% 0 -20% 0);
+  }
+}
+
+@keyframes enso {
+  from {
+    --stroke: 0deg;
+  }
+}
+
+@keyframes stamp {
+  0% {
+    opacity: 0;
+    transform: rotate(-3deg) scale(1.45);
+  }
+
+  55% {
+    opacity: 1;
+    transform: rotate(5deg) scale(0.93);
+  }
+
+  100% {
+    opacity: 1;
+    transform: rotate(4deg) scale(1);
+  }
+}
+
+/* The hero inks in on arrival: the headline, then what it means, then the
+   form, while its stroke is painted and the enso drawn in one breath. */
+.hero-copy > * {
+  animation: ink-in 900ms var(--ease) both;
+}
+
+.hero-copy > :nth-child(2) {
+  animation-delay: 130ms;
+}
+
+.hero-copy > :nth-child(3) {
+  animation-delay: 260ms;
+}
+
+.hero h1::after {
+  animation: paint 780ms cubic-bezier(0.55, 0.05, 0.2, 1) 520ms both;
+}
+
+.hero-stage::before {
+  -webkit-mask:
+    url("enso.svg") center / contain no-repeat,
+    conic-gradient(from 338deg, #000 var(--stroke), transparent 0);
+  mask:
+    url("enso.svg") center / contain no-repeat,
+    conic-gradient(from 338deg, #000 var(--stroke), transparent 0);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  animation: enso 1700ms cubic-bezier(0.45, 0, 0.25, 1) 300ms both;
+}
+
+/* Further down, a heading's stroke is painted as it comes into view, and its
+   seal is pressed a moment after. */
+[data-ink="wait"]::after {
+  clip-path: inset(-20% 100% -20% 0);
+}
+
+[data-ink="in"]::after {
+  animation: paint 760ms cubic-bezier(0.55, 0.05, 0.2, 1) both;
+}
+
+.kanji-seal[data-stamp="wait"] {
+  opacity: 0;
+}
+
+.kanji-seal[data-stamp="in"] {
+  animation: stamp 440ms cubic-bezier(0.3, 0.7, 0.4, 1) 380ms both;
+}
+
+/* You direct: one sheet of paper glides to the request you pick. */
+.asks {
+  position: relative;
+}
+
+.ask-sheet {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: 6px;
+  background: rgb(250 247 240 / 92%);
+  box-shadow: 0 16px 30px -24px rgb(23 21 17 / 45%);
+  pointer-events: none;
+  transition:
+    transform 520ms var(--ease),
+    width 520ms var(--ease),
+    height 520ms var(--ease);
+}
+
+.ask-sheet::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--shu);
+}
+
+.asks button {
+  z-index: 1;
+}
+
+.asks.has-sheet button[aria-selected="true"] {
+  border-color: transparent;
+  background: none;
+  box-shadow: none;
+}
+
+.asks.has-sheet button::before {
+  display: none;
+}
+
+/* An opened answer settles in as the FAQ row grows to hold it. */
+.faq details[open] .faq-a p {
+  animation: settle 480ms var(--ease) 60ms both;
 }

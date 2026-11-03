@@ -111,7 +111,6 @@
         <section class="agents" aria-labelledby="agents-title">
           <div class="agents-copy">
             <h2 id="agents-title">Runs on the agent you already pay for.</h2>
-            <p>40+ agents, through the Agent Client Protocol.</p>
           </div>
           <div class="marquee" data-marquee>
             <div class="marquee-track">
@@ -627,6 +626,14 @@
                   role="img"
                   aria-label="The build before and after the change"
                 ></canvas>
+                <div class="compare-overlay is-before" data-overlay="before" aria-hidden="true">
+                  <svg></svg>
+                  <div></div>
+                </div>
+                <div class="compare-overlay is-after" data-overlay="after" aria-hidden="true">
+                  <svg></svg>
+                  <div></div>
+                </div>
                 <span class="compare-tag is-before" data-before>Before</span>
                 <span class="compare-tag is-after" data-after>After</span>
                 <div
@@ -739,7 +746,7 @@
               We let people in a few at a time, so every new studio gets a good first game.
             </p>
             <form class="invite" data-waitlist data-source="footer" novalidate>
-              <label class="invite-label" for="email-join">Your email</label>
+              <label class="sr-only" for="email-join">Your email</label>
               <div class="invite-field">
                 <input
                   id="email-join"

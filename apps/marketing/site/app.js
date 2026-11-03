@@ -553,10 +553,25 @@ function paintValley(context, W, H, scene) {
     }
   }
 
+  // Snow falls as small ink crosses in the sky; the ridge gets its caps below.
+  if (scene.snow) {
+    context.fillStyle = "#000";
+    const unit = Math.max(1, Math.round(H / 110));
+    for (let i = 0; i < 12; i += 1) {
+      const x = Math.round(hash2(i, 23) * W);
+      const y = Math.round(hash2(i, 29) * H * 0.36);
+      context.fillRect(x - unit, y, unit * 3, unit);
+      context.fillRect(x, y - unit, unit, unit * 3);
+    }
+  }
+
   const moonX = W * 0.62;
+  const moonless = scene.moon === "none";
   const moonY = H * 0.27;
   const moonR = Math.max(2, H * 0.11);
-  if (scene.moon === "red") {
+  if (moonless) {
+    // A crop that would only catch the moon's edge leaves it out.
+  } else if (scene.moon === "red") {
     const glow = context.createRadialGradient(moonX, moonY, moonR, moonX, moonY, moonR * 1.7);
     glow.addColorStop(0, "rgba(255, 0, 0, 0.45)");
     glow.addColorStop(1, "rgba(255, 0, 0, 0)");
@@ -566,9 +581,11 @@ function paintValley(context, W, H, scene) {
   } else {
     context.fillStyle = "rgb(175, 175, 175)";
   }
-  context.beginPath();
-  context.arc(moonX, moonY, moonR, 0, Math.PI * 2);
-  context.fill();
+  if (!moonless) {
+    context.beginPath();
+    context.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+    context.fill();
+  }
 
   context.beginPath();
   context.moveTo(0, H);
@@ -577,15 +594,25 @@ function paintValley(context, W, H, scene) {
   context.closePath();
   if (!scene.flat) {
     // Colder rounds darken the ridge so its snowcaps read as paper.
-    context.fillStyle = scene.snow ? "rgb(170, 170, 170)" : "rgb(228, 228, 228)";
+    context.fillStyle = scene.snow ? "rgb(120, 120, 120)" : "rgb(228, 228, 228)";
     context.fill();
   }
   if (scene.snow) {
     context.save();
     context.clip();
     context.fillStyle = "#fff";
-    context.fillRect(0, 0, W, H * 0.445);
+    context.fillRect(0, 0, W, H * 0.47);
     context.restore();
+    // The caps are paper against a paper sky; an inked outline shows them.
+    context.beginPath();
+    for (let x = 0; x <= W; x += 1) {
+      const y = ridgeAt(x / W) * H;
+      if (x) context.lineTo(x, y);
+      else context.moveTo(x, y);
+    }
+    context.strokeStyle = "#000";
+    context.lineWidth = Math.max(1, H * 0.009);
+    context.stroke();
   }
 
   context.beginPath();
@@ -1476,27 +1503,70 @@ const nightRoot = document.querySelector("[data-night]");
 const night = nightRoot ? startNight(nightRoot) : null;
 
 // You direct: what was asked for, and the build before and after it, split by
-// a handle you can drag.
+// a handle you can drag. Each side carries its own playtest and the red pen's
+// marks, and the handle comes to rest where the change shows best.
 const ASKS = [
   {
-    before: SCENES.first,
-    after: { ...SCENES.first, snow: true },
-    labels: ["Round 2", "Round 4"],
+    before: { scene: SCENES.first, round: "Round 2" },
+    after: { scene: SCENES.snow, round: "Round 4" },
+    rest: 0.36,
+    marks: {
+      before: [{ note: ["blends into the hills", 0.04, 0.24] }],
+      after: [{ ring: [0.47, 0.445, 0.07, 0.045], note: ["reads now", 0.38, 0.3] }],
+    },
     note: "Round 3 tried something else and lost the blind compare, so it was thrown away. Round 4 kept the snow. The tester: “The ridge reads clearly now.”",
   },
   {
-    before: { ...SCENES.first, snow: true },
-    after: { ...SCENES.first, snow: true, lantern: true },
-    labels: ["Round 4", "Round 5"],
+    before: { scene: { ...SCENES.snow, lantern: false }, round: "Round 4", walk: "lantern" },
+    after: { scene: SCENES.snow, round: "Round 5", walk: "lantern" },
+    rest: 0.86,
+    marks: {
+      before: [{ note: ["nothing happens", 0.22, 0.24] }],
+      after: [{ tick: [0.95, 0.4], note: ["lit", 0.9, 0.24] }],
+    },
     note: "Kept on the first try, 14 minutes later. The tester: “Lighting it feels like an ending.”",
   },
   {
-    before: { ...SCENES.first, snow: true, lantern: true, fox: [0.38, 0.97] },
-    after: { ...SCENES.forest, fox: [0.8, 0.66] },
-    labels: ["Round 5", "Round 7"],
-    note: "Round 6 made the ledges hard to see and was thrown away. Round 7 added the double jump. The tester: “The long gap finally feels fair.”",
+    before: { scene: SCENES.snow, round: "Round 5", walk: "fall" },
+    after: { scene: SCENES.stars, round: "Round 7", walk: "across" },
+    rest: 0.45,
+    marks: {
+      before: [{ cross: [0.39, 0.95], note: ["falls in, ×3", 0.05, 0.4] }],
+      after: [
+        { tick: [0.5, 0.68], note: ["clears it", 0.53, 0.63] },
+        { tick: [0.92, 0.39], note: ["to the lantern", 0.97, 0.22, "end"] },
+      ],
+    },
+    note: "Round 6 made the ledges hard to see and was thrown away. Round 7 added the double jump, and the tester crossed the whole level for the first time: “The long gap finally feels fair.”",
   },
 ];
+
+// Where the tester is at u in [0, 1], in scene fractions, for each kind of run.
+const WALKS = {
+  lantern: (u) => {
+    if (u < 0.85) return Object.values(testerAt(0.74 + (u / 0.85) * 0.26));
+    return [0.79 + ((u - 0.85) / 0.15) * 0.035, PLATFORMS[2][2]];
+  },
+  fall: (u) => {
+    if (u < 0.4) return [0.08 + (0.21 * u) / 0.4, PLATFORMS[0][2]];
+    const s = (u - 0.4) / 0.6;
+    return [0.29 + 0.1 * s, 0.8 - 0.5 * s + 0.72 * s * s];
+  },
+  // The double jump over the long gap, then the rest of the level.
+  across: (u) => {
+    if (u < 0.12) return [0.08 + (0.21 * u) / 0.12, PLATFORMS[0][2]];
+    if (u < 0.22) {
+      const s = (u - 0.12) / 0.1;
+      return [0.29 + 0.06 * s, 0.8 - 0.44 * s + 0.3 * s * s];
+    }
+    if (u < 0.34) {
+      const s = (u - 0.22) / 0.12;
+      return [0.35 + 0.12 * s, 0.66 - 0.26 * s + 0.33 * s * s];
+    }
+    if (u < 0.88) return Object.values(testerAt(0.57 + ((u - 0.34) / 0.54) * 0.43));
+    return [0.79 + ((u - 0.88) / 0.12) * 0.035, PLATFORMS[2][2]];
+  },
+};
 
 function startDirect(root) {
   const tabs = [...root.querySelectorAll("[data-ask]")];
@@ -1507,6 +1577,13 @@ function startDirect(root) {
   const before = root.querySelector("[data-before]");
   const after = root.querySelector("[data-after]");
   const note = root.querySelector("[data-compare-note]");
+  const layers = Object.fromEntries(
+    ["before", "after"].map((side) => {
+      const layer = root.querySelector(`[data-overlay="${side}"]`);
+      return [side, { svg: layer.querySelector("svg"), scrawls: layer.querySelector("div") }];
+    }),
+  );
+  const timeline = createTimeline();
   const cache = new Map();
   let width = 0;
   let height = 0;
@@ -1514,6 +1591,7 @@ function startDirect(root) {
   let current = 0;
   let split = 0.5;
   let sweep = 0;
+  let frame = 0;
   let dragging = false;
 
   function fieldFor(scene) {
@@ -1533,6 +1611,9 @@ function startDirect(root) {
     width = size.width;
     height = size.height;
     cell = Math.max(3, Math.round(Math.min(width, height * 1.33) / 150));
+    for (const layer of Object.values(layers)) {
+      layer.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    }
     cache.clear();
   }
 
@@ -1541,8 +1622,8 @@ function startDirect(root) {
     const ask = ASKS[current];
     const x = Math.round((split * width) / cell) * cell;
     context.clearRect(0, 0, width, height);
-    drawField(context, fieldFor(ask.before), cell, { x1: x });
-    drawField(context, fieldFor(ask.after), cell, { x0: x });
+    drawField(context, fieldFor(ask.before.scene), cell, { x1: x });
+    drawField(context, fieldFor(ask.after.scene), cell, { x0: x });
     view.style.setProperty("--split", String(x / width));
     handle.setAttribute("aria-valuenow", String(Math.round(split * 100)));
   }
@@ -1552,6 +1633,128 @@ function startDirect(root) {
     draw();
   }
 
+  // Plans each side's playtest and marks on the timeline.
+  function plan(ask) {
+    timeline.clear();
+    const at = ([x, y]) => [x * width, y * height];
+    for (const side of ["before", "after"]) {
+      const { svg, scrawls } = layers[side];
+      svg.replaceChildren();
+      scrawls.replaceChildren();
+      const run = ask[side];
+      let clock = side === "after" ? 250 : 0;
+      if (run.walk) {
+        const walk = WALKS[run.walk];
+        const trail = svgNode(svg, "g", { class: "trail" });
+        const dots = [];
+        let previous = null;
+        for (let i = 0; i <= 240; i += 1) {
+          const u = i / 240;
+          const [px, py] = at(walk(u));
+          const column = Math.round(px / cell);
+          if (column === previous || column % 2 || py > height) continue;
+          previous = column;
+          dots.push({
+            u,
+            dot: svgNode(trail, "rect", {
+              x: column * cell,
+              y: (Math.round(py / cell) - 2) * cell,
+              width: cell * 0.8,
+              height: cell * 0.8,
+            }),
+          });
+        }
+        const fox = svgNode(svg, "g", { class: "fox" });
+        svgNode(fox, "rect", {
+          class: "fox-back",
+          x: -cell,
+          y: -cell,
+          width: 12 * cell,
+          height: 7 * cell,
+        });
+        drawSprite(
+          (x, y) =>
+            svgNode(fox, "rect", {
+              x: x * cell,
+              y: y * cell,
+              width: cell * 0.85,
+              height: cell * 0.85,
+            }),
+          5,
+          6,
+        );
+        const runFor = run.walk === "across" ? 2200 : 1300;
+        timeline.add(clock, runFor, (t) => {
+          const u = run.walk === "fall" ? t : easeInOut(t);
+          for (const { dot, u: when } of dots) dot.setAttribute("opacity", when <= u ? "1" : "0");
+          const [px, py] = at(walk(u));
+          fox.setAttribute("opacity", py > height + cell * 2 ? "0" : "1");
+          fox.setAttribute(
+            "transform",
+            `translate(${(Math.round(px / cell) - 5) * cell} ${(Math.round(py / cell) - 6) * cell})`,
+          );
+        });
+        clock += runFor;
+      }
+      clock += 150;
+      for (const mark of ask.marks[side]) {
+        let d = "";
+        if (mark.ring) {
+          const [cx, cy, rx, ry] = mark.ring;
+          const [px, py] = at([cx, cy]);
+          d = roughRing(px, py, rx * width, ry * height, current * 3 + side.length);
+        } else if (mark.tick) {
+          const [px, py] = at(mark.tick);
+          d = `M${px - 9} ${py - 1}L${px - 2} ${py + 7}L${px + 13} ${py - 11}`;
+        } else if (mark.cross) {
+          const [px, py] = at(mark.cross);
+          d = `M${px - 10} ${py - 10}L${px + 10} ${py + 10}M${px + 10} ${py - 11}L${px - 10} ${py + 9}`;
+        }
+        if (d) {
+          const path = svgNode(svg, "path", { class: "mark", d });
+          const length = path.getTotalLength();
+          path.style.strokeDasharray = String(length);
+          timeline.add(clock, 440, (t) => {
+            path.style.strokeDashoffset = String(length * (1 - t));
+          });
+          clock += 360;
+        }
+        if (mark.note) {
+          // A note anchored at its end reads leftward from the picture's edge.
+          const [text, nx, ny, anchor] = mark.note;
+          const scrawl = scrawls.appendChild(document.createElement("span"));
+          scrawl.className = "scrawl";
+          scrawl.textContent = text;
+          if (anchor === "end") scrawl.style.right = `${(1 - nx) * 100}%`;
+          else scrawl.style.left = `${nx * 100}%`;
+          scrawl.style.top = `${ny * 100}%`;
+          const writeFor = 120 + text.length * 22;
+          timeline.add(clock, writeFor, (t) => {
+            scrawl.style.clipPath =
+              t < 1 ? `inset(-30% ${((1 - t) * 100).toFixed(1)}% -30% 0)` : "";
+          });
+          clock += writeFor;
+        }
+      }
+    }
+  }
+
+  function play(instant) {
+    cancelAnimationFrame(frame);
+    if (instant) {
+      timeline.seek(timeline.end);
+      return;
+    }
+    const begin = performance.now();
+    const end = timeline.end;
+    const tick = (now) => {
+      const time = now - begin;
+      timeline.seek(Math.min(time, end));
+      if (time < end) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+  }
+
   function select(index, animate) {
     current = index;
     tabs.forEach((tab, i) => {
@@ -1559,22 +1762,27 @@ function startDirect(root) {
       tab.tabIndex = i === index ? 0 : -1;
     });
     const ask = ASKS[index];
-    before.textContent = `Before, ${ask.labels[0].toLowerCase()}`;
-    after.textContent = `After, ${ask.labels[1].toLowerCase()}`;
+    before.textContent = `Before, ${ask.before.round.toLowerCase()}`;
+    after.textContent = `After, ${ask.after.round.toLowerCase()}`;
     note.textContent = ask.note;
     note.removeAttribute("data-swap");
     void note.offsetWidth;
     note.setAttribute("data-swap", "");
     cancelAnimationFrame(sweep);
-    if (!animate || reduceMotion || !width) {
-      setSplit(0.5);
+    if (!width) return;
+    plan(ask);
+    if (!animate || reduceMotion) {
+      setSplit(ask.rest);
+      play(true);
       return;
     }
-    // Wipe the new build in from the right, then rest in the middle.
+    play(false);
+    // Wipe the new build in from the right, then rest where the change shows.
     const start = performance.now();
+    const from = 0.98;
     const step = (now) => {
-      const t = clamp((now - start) / 700);
-      setSplit(0.98 - 0.48 * easeOut(t));
+      const t = clamp((now - start) / 800);
+      setSplit(from + (ask.rest - from) * easeOut(t));
       if (t < 1) sweep = requestAnimationFrame(step);
     };
     sweep = requestAnimationFrame(step);
@@ -1607,8 +1815,22 @@ function startDirect(root) {
     setSplit(Math.abs(step) === 1 ? (step < 0 ? 0 : 1) : split + step);
   });
 
+  // On a narrow screen the picture sits above the requests; bring it back
+  // into view when a request is picked below it.
+  const reveal = () => {
+    const box = view.getBoundingClientRect();
+    if (box.top >= 70 && box.bottom <= window.innerHeight) return;
+    window.scrollTo({
+      top: window.scrollY + box.top - 90,
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
+  };
+
   tabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => select(index, true));
+    tab.addEventListener("click", () => {
+      select(index, true);
+      if (window.matchMedia("(max-width: 900px)").matches) reveal();
+    });
     tab.addEventListener("keydown", (event) => {
       const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
       if (!step) return;
@@ -1624,14 +1846,24 @@ function startDirect(root) {
     root,
     () => {
       layout();
-      draw();
+      select(current, false);
     },
     "200px 0px",
   );
+  // The first pair plays once most of the picture is on screen.
+  new IntersectionObserver(
+    (entries, observer) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      if (!width) layout();
+      select(current, true);
+    },
+    { threshold: 0.5 },
+  ).observe(view);
   resizers.push(() => {
     if (!width) return;
     layout();
-    draw();
+    select(current, false);
   });
 }
 
@@ -1779,3 +2011,78 @@ for (const form of document.querySelectorAll("[data-waitlist]")) {
     label.textContent = idleLabel;
   });
 }
+
+// Ink: seal stamps on the sections, strokes painted as headings arrive, and
+// the sheet that glides between requests.
+(() => {
+  const SEALS = { run: "試", studio: "指", overnight: "夜", faq: "問", join: "入" };
+  for (const [id, glyph] of Object.entries(SEALS)) {
+    const section = document.getElementById(id);
+    if (!section) continue;
+    const seal = document.createElement("span");
+    seal.className = "kanji-seal";
+    seal.setAttribute("aria-hidden", "true");
+    seal.textContent = glyph;
+    // The waitlist's heading shares its row with the fox, so its seal sits
+    // at the end of the heading instead of the section's corner.
+    if (id === "join") {
+      seal.classList.add("is-inline");
+      section.querySelector("h2").append(seal);
+    } else section.prepend(seal);
+  }
+
+  // Motion: strokes painted and seals pressed as their heading comes into
+  // view, and one sheet that glides between the requests. Nothing here runs for people who ask for less motion.
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (still) return;
+
+  const below = (node) => node.getBoundingClientRect().top > window.innerHeight * 0.92;
+  const reveal = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        reveal.unobserve(entry.target);
+        const heading = entry.target;
+        heading.dataset.ink = "in";
+        const seal = heading.closest("section")?.querySelector(".kanji-seal");
+        if (seal?.dataset.stamp === "wait") seal.dataset.stamp = "in";
+      }
+    },
+    { rootMargin: "0px 0px -18% 0px" },
+  );
+  for (const heading of document.querySelectorAll(".section-head h2, .faq-section h2, .join h2")) {
+    if (!below(heading)) continue;
+    heading.dataset.ink = "wait";
+    const seal = heading.closest("section")?.querySelector(".kanji-seal");
+    if (seal) seal.dataset.stamp = "wait";
+    reveal.observe(heading);
+  }
+
+  const asks = document.querySelector(".asks");
+  if (asks) {
+    const sheet = document.createElement("span");
+    sheet.className = "ask-sheet";
+    sheet.setAttribute("aria-hidden", "true");
+    asks.prepend(sheet);
+    asks.classList.add("has-sheet");
+    const place = (animate) => {
+      const chosen = asks.querySelector('[aria-selected="true"]');
+      if (!chosen) return;
+      if (!animate) sheet.style.transition = "none";
+      sheet.style.transform = `translate(${chosen.offsetLeft}px, ${chosen.offsetTop}px)`;
+      sheet.style.width = `${chosen.offsetWidth}px`;
+      sheet.style.height = `${chosen.offsetHeight}px`;
+      if (!animate) {
+        void sheet.offsetWidth;
+        sheet.style.transition = "";
+      }
+    };
+    place(false);
+    new MutationObserver(() => place(true)).observe(asks, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-selected"],
+    });
+    new ResizeObserver(() => place(false)).observe(asks);
+  }
+})();
