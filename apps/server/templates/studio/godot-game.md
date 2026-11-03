@@ -63,6 +63,17 @@ Never hand-write clip switching or camera follow; the shell kits do it.
 - Juice.shake works on top of both; never set a camera's `offset`,
   `h_offset` or `v_offset` yourself.
 
+## Levels
+
+Write every level as a text map with `LevelMap` (shell/level_map.gd), never
+nodes placed by coordinates: `#` walls, `.` floor, a letter per spawn.
+`LevelMap.build_2d(self, rows, legend, {"sheet": ..., "tile_size": 16})` takes
+tiles from a library sheet, `LevelMap.build_3d(self, rows, legend, {"floor": ...})`
+library model pieces; walls collide for `move_and_slide`. Make more than one
+room, joined by corridors, when the brief allows. Put the player, enemies and
+pickups at `level.spawns["P"][0]`, `level.spawns["E"]`, never at hard-coded
+positions, and give FollowCamera2D `bounds = level.bounds`.
+
 ## Godot 4 patterns (each verified on 4.7)
 
 Godot 3 code fails the check. Use the Godot 4 form:
