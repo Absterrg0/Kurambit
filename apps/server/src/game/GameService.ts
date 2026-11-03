@@ -2634,8 +2634,16 @@ ${built.result.message}`.slice(-3000),
         }),
       );
     });
-  /** Imports first: a fresh game has no .godot cache, so .tres files and class_names can resolve. */
+  /**
+   * Imports first: a fresh game has no .godot cache, so .tres files and
+   * class_names can resolve. A Unity import and check share one hold, as
+   * export does: another game cannot take the editor between them.
+   */
   const checkGame = (root: string) =>
+    Effect.flatMap(engine(root), ({ backend }) =>
+      backend.id === "unity" ? liveUnity.hold(root)(checkSources(root)) : checkSources(root),
+    );
+  const checkSources = (root: string) =>
     Effect.gen(function* () {
       {
         const startedAt = yield* Clock.currentTimeMillis;
