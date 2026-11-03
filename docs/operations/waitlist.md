@@ -82,7 +82,9 @@ The AI Bots ruleset is left off on purpose: the site wants answer engines to rea
 
 ## Search engines
 
-Bing, Yandex, Seznam and Naver are also told about changed pages through IndexNow: the key is the
+kurambit.com is a Domain property in Google Search Console, verified by the
+`google-site-verification` TXT record on the apex in Cloudflare (keep it), and is in Bing Webmaster
+Tools; both have the sitemap. Bing, Yandex, Seznam and Naver are also told about changed pages through IndexNow: the key is the
 `<key>.txt` file in `site/`, and after a deploy that changes pages,
 
 ```sh
