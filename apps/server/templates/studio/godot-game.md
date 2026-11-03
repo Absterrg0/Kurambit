@@ -28,6 +28,9 @@ Spawn bullets and effects under your game scene (or `Juice.stage`), never
 `reload_current_scene`: the shell owns restarts. Retry resets every value in
 game_state.gd; list the ones that must survive (best score, unlocks) in
 `const KEEP_ACROSS_RUNS := [...]`.
+The title shows `assets/ui/title_bg.png` behind the menu once that file
+exists: put the game's key art there (16:9), and the title stops looking like
+a template.
 
 ## Godot 4 patterns (each verified on 4.7)
 
