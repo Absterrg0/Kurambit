@@ -29,6 +29,14 @@ GB of memory, so Kurambit keeps at most one open at a time and closes it after t
 while one Unity game is checking, playing or exporting, another Unity game's request reports the
 editor busy instead of closing it.
 
+Kurambit refuses to open a live editor when the machine is short of memory: about 4 GB free for
+Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view. An editor started
+with less tends to be killed by the system mid-build, or to make the whole machine hang on swap.
+The refusal says how much is needed and how much is free; close other apps or wait a few minutes,
+then ask again. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it
+and reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB` and
+`KURAMBIT_BLENDER_MEMORY_MB` change the requirement, and 0 turns the check off.
+
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
 

@@ -22,10 +22,12 @@ import {
   alive,
   displayInRange,
   findXvfb,
+  memoryShortfall,
   pickDisplay,
   processTreeOf,
   readRecord,
   reapVerified,
+  underIdleMemoryFloor,
   type RecordedPid,
 } from "./liveProcess.ts";
 import {
@@ -36,6 +38,13 @@ import {
 } from "./unityToolchain.ts";
 
 const IDLE_MS = 10 * 60_000;
+/**
+ * Free memory a live Unity editor needs to open, in MB: the editor plus its
+ * import worker, compilers and player build tools peaked about 4 GB on a
+ * Linux player build here, and editors opened with less were OOM-killed
+ * mid-build once other processes grew.
+ */
+const NEEDED_MB = 4096;
 const SESSION_FILE = "session.json";
 /** Unity's private displays; Blender and the bot pick from other ranges. */
 const DISPLAYS = { first: 251, last: 399 } as const;
@@ -689,6 +698,11 @@ const make = Effect.gen(function* () {
             "tool-missing",
             "Xvfb is needed for the live Unity editor's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
           );
+        // After the drops above, so an editor this server just closed counts as free.
+        const short = yield* Effect.promise(() =>
+          memoryShortfall("live Unity editor", NEEDED_MB, "KURAMBIT_UNITY_MEMORY_MB"),
+        );
+        if (short !== null) return yield* opError("unity-live", root, "low-memory", short);
         const homeDir = homeDirOf(root);
         yield* Effect.tryPromise({
           try: async () => {
@@ -980,20 +994,33 @@ const make = Effect.gen(function* () {
     );
 
   // Idle sessions die on a sweep so one forgotten game cannot hold a 2-3 GB
-  // editor and its display forever; a held editor is never idle.
+  // editor and its display forever, and close early when the machine runs
+  // short of memory; a held editor is never idle.
   yield* Effect.forkScoped(
     Effect.forever(
       Effect.gen(function* () {
-        yield* Effect.sleep("60 seconds");
+        yield* Effect.sleep("15 seconds");
         const now = yield* Clock.currentTimeMillis;
-        for (const [root, session] of Array.from(sessions))
-          if (session.inFlight === 0 && now - session.lastActive > IDLE_MS)
-            yield* openLock.withPermits(1)(
-              // Re-read under the lock: a call may have taken it meanwhile.
-              Effect.suspend(() =>
-                session.inFlight === 0 && sessions.get(root) === session ? drop(root) : Effect.void,
-              ),
-            );
+        const idle = Array.from(sessions).filter(([, session]) => session.inFlight === 0);
+        const shortMb = idle.length === 0 ? null : yield* Effect.promise(underIdleMemoryFloor);
+        for (const [root, session] of idle) {
+          const expired = now - session.lastActive > IDLE_MS;
+          if (!expired && shortMb === null) continue;
+          yield* openLock.withPermits(1)(
+            // Re-read under the lock: a call may have taken it meanwhile.
+            Effect.suspend(() =>
+              session.inFlight === 0 && sessions.get(root) === session
+                ? (expired
+                    ? Effect.void
+                    : Effect.logWarning("closing the idle live Unity editor: memory is short", {
+                        root,
+                        availableMb: shortMb,
+                      })
+                  ).pipe(Effect.andThen(drop(root)))
+                : Effect.void,
+            ),
+          );
+        }
       }),
     ),
   );

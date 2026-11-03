@@ -522,9 +522,10 @@ export const layer = (options: { readonly stateDir: string }) => {
             );
           case "boot": {
             // A check that could not run is not a verdict on the build: a busy
-            // game or a cancelled check is retried; a missing tool ends the
-            // run (resumable) rather than rejecting good work. Anything else
-            // the check reports is the build failing to boot.
+            // game or a cancelled check is retried; a missing tool, or memory
+            // still short after a few minutes, ends the run (resumable) rather
+            // than rejecting good work. Anything else the check reports is the
+            // build failing to boot.
             const check = (attempt: number): Effect.Effect<Policy.StepResult, GameOperationError> =>
               d.deps.game.check(d.creator).pipe(
                 Effect.map(
@@ -544,7 +545,13 @@ export const layer = (options: { readonly stateDir: string }) => {
                         Effect.andThen(Effect.sleep("5 seconds")),
                         Effect.andThen(check(attempt + 1)),
                       );
-                    if (error.reason === "tool-missing") return Effect.fail(error);
+                    if (error.reason === "low-memory" && attempt < 3)
+                      return log("boot check refused: memory is short; waiting 2 minutes").pipe(
+                        Effect.andThen(Effect.sleep("2 minutes")),
+                        Effect.andThen(check(attempt + 1)),
+                      );
+                    if (error.reason === "tool-missing" || error.reason === "low-memory")
+                      return Effect.fail(error);
                     return Effect.succeed({
                       kind: "boot",
                       ok: false,
