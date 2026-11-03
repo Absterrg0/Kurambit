@@ -816,6 +816,18 @@ it.effect("waits for a fresh OpenCode 2 server to list its models", () =>
   }).pipe(Effect.provide(TestClock.layer())),
 );
 
+it.effect("waits longer for the first OpenCode 2 model list than for later ones", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    const load = yield* makeOpenCode2ModelLoader(
+      Effect.sync(() => (++reads > 40 ? [bigPickle] : [])),
+    );
+    const fiber = yield* load.pipe(Effect.forkChild);
+    yield* TestClock.adjust("12 seconds");
+    NodeAssert.deepEqual(yield* Fiber.join(fiber), [bigPickle]);
+  }).pipe(Effect.provide(TestClock.layer())),
+);
+
 it.effect("keeps the last OpenCode 2 model list while a fresh server's stays empty", () =>
   Effect.gen(function* () {
     let listed: ReadonlyArray<OpenCode2Model> = [bigPickle];
