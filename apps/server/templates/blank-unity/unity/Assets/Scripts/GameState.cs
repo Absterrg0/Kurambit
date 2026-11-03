@@ -1,25 +1,23 @@
-using UnityEngine;
-
 /// <summary>
-/// The game's run state: one object every scene and the StudioProbe read
-/// instead of walking the scene graph. It installs itself before the first
+/// The game's run values: one object every script and the StudioProbe read
+/// instead of walking the scene. GameState.Instance exists before the first
 /// scene loads and survives scene changes.
 ///
-/// The Blank starter ships no gameplay, so it starts with no values. Add the
-/// public primitive fields (int, float, bool, string, enum) the game needs;
-/// the StudioProbe reports them. A leading underscore keeps a helper out of
-/// that snapshot.
+/// The shell half (Assets/Kurambit/Shell/GameState.Shell.cs) holds `state`
+/// ("title", "playing", "paused", "ended"), `result` and the calls that end a
+/// run: GameState.Win(text, stats...) and GameState.Lose(text, stats...).
+///
+/// Add the public fields the game needs here (int, float, bool, string, enum
+/// are what the probe reports; a leading underscore hides a helper). Each Play
+/// and Retry puts every field back to the value written here, except the names
+/// in KeepAcrossRuns, which persist between launches (a best score, an unlock).
+///
+///   public int score;
+///   public float health = 3f;
+///   public int best;
+///   public static readonly string[] KeepAcrossRuns = { "best" };
 /// </summary>
-public sealed class GameState : MonoBehaviour
+public sealed partial class GameState
 {
-    public static GameState Instance { get; private set; }
-
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-    private static void Install()
-    {
-        if (Instance != null) return;
-        var host = new GameObject("GameState");
-        DontDestroyOnLoad(host);
-        Instance = host.AddComponent<GameState>();
-    }
+    public static readonly string[] KeepAcrossRuns = { };
 }

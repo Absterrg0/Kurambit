@@ -170,7 +170,7 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `game.json` and `BRIEF.md` describe the game.
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
   `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
-  and vendored `vendor/three.*.js`). A new Godot or three.js game starts inside a demo shell: a
+  and vendored `vendor/three.*.js`). A new game, on any engine, starts inside a demo shell: a
   title screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where
   players rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best
   scores and unlocks are saved between launches, and Settings can reset them. The game's icon
@@ -178,8 +178,9 @@ Each game is a self-contained git repository you can move, back up, or open on a
   Windows `.exe`. The gameplay lives in `godot/scenes/game.tscn` (`web/main.js` for
   three.js), and the credits screen shows `godot/credits.txt` (`web/credits.txt`).
 - Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
-  Unity 6000.6.7f1. Its `Library/`, `Temp/` and `Logs/` folders are Unity's caches and are not
-  committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just
+  Unity 6000.6.7f1. The gameplay lives in `unity/Assets/Scenes/Game.unity`, the icon is
+  `unity/Assets/UI/icon.png` and the credits are `unity/Assets/credits.txt`. Its `Library/`,
+  `Temp/` and `Logs/` folders are Unity's caches and are not committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just
   the executable.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
