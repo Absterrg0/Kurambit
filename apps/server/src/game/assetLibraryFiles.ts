@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- Streams pinned archives to disk with an AbortSignal like the toolchain downloader, unpacks them, and reads glTF JSON headers of any shape.
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off preferSchemaOverJson:off -- Streams pinned archives to disk with an AbortSignal and a stall timer like the toolchain downloader, unpacks them, and reads glTF JSON headers of any shape.
 // The pinned CC0 library's file boundary: pins, safe unpacking and cheap facts about the files.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -44,12 +44,19 @@ export interface LibraryFile {
   readonly clipCount?: number;
   /** Pack-relative files a model loads from beside itself (glTF images and buffers, OBJ materials). */
   readonly deps?: ReadonlyArray<string>;
-  /** The pack's own preview image of this model. */
+  /** True when the glTF JSON header is too large to read, so clips and deps are unknown. */
+  readonly clipsUnread?: boolean;
+  /** The pack's own picture of this model. */
   readonly preview?: string;
+  /** Set on an image that is a picture of this model (stem), not art made for a game. */
+  readonly previewOf?: string;
 }
 
+/** Bump when indexPack learns a new fact, so saved indexes are rebuilt from the cached archive. */
+export const INDEX_VERSION = 2;
+
 export interface LibraryIndex {
-  readonly version: 1;
+  readonly version: typeof INDEX_VERSION;
   readonly pack: string;
   readonly sha256: string;
   readonly files: ReadonlyArray<LibraryFile>;
@@ -142,35 +149,49 @@ export const pinProblem = (
 /**
  * Streams one pinned archive to `destination`. Never keeps more bytes than the pin
  * names, so a changed source cannot fill the disk; the caller checks the hash.
+ * Gives up when no bytes arrive for `stallMs`, so a hung source frees its pack's lock.
  * Module-level so Effect's fetch diagnostic never sees it; reached only through Effect.tryPromise.
  */
 export async function downloadPinned(
   pack: Pick<LibraryPack, "download" | "bytes">,
   destination: string,
   signal: AbortSignal,
+  stallMs = 60_000,
 ) {
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(20 * 60_000)]);
-  const response = await fetch(pack.download, {
-    signal: requestSignal,
-    redirect: "follow",
-    headers: { "user-agent": "Kurambit asset library" },
-  });
-  if (!response.ok || !response.body) throw new Error(`Download request: ${response.status}`);
-  if (!response.url.startsWith("https://")) throw new Error("Download left HTTPS.");
-  let received = 0;
-  const cap = new NodeStream.Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      received += chunk.byteLength;
-      if (received > pack.bytes) callback(new Error("Download is larger than its pin."));
-      else callback(null, chunk);
-    },
-  });
-  await NodeStreamPromises.pipeline(
-    NodeStream.Readable.fromWeb(response.body),
-    cap,
-    NodeFS.createWriteStream(destination, { flags: "wx" }),
-    { signal: requestSignal },
-  );
+  const stall = new AbortController();
+  const stalled = () =>
+    stall.abort(new Error(`The download stalled: no bytes arrived for ${stallMs / 1000} s.`));
+  let timer = setTimeout(stalled, stallMs);
+  const requestSignal = AbortSignal.any([signal, stall.signal, AbortSignal.timeout(20 * 60_000)]);
+  try {
+    const response = await fetch(pack.download, {
+      signal: requestSignal,
+      redirect: "follow",
+      headers: { "user-agent": "Kurambit asset library" },
+    });
+    if (!response.ok || !response.body) throw new Error(`Download request: ${response.status}`);
+    if (!response.url.startsWith("https://")) throw new Error("Download left HTTPS.");
+    let received = 0;
+    const cap = new NodeStream.Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        clearTimeout(timer);
+        timer = setTimeout(stalled, stallMs);
+        received += chunk.byteLength;
+        if (received > pack.bytes) callback(new Error("Download is larger than its pin."));
+        else callback(null, chunk);
+      },
+    });
+    await NodeStreamPromises.pipeline(
+      NodeStream.Readable.fromWeb(response.body),
+      cap,
+      NodeFS.createWriteStream(destination, { flags: "wx" }),
+      { signal: requestSignal },
+    );
+  } catch (error) {
+    throw stall.signal.aborted ? stall.signal.reason : error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface UnpackLimits {
@@ -238,6 +259,7 @@ export const unpackArchive = (archivePath: string, target: string, limits: Unpac
           `The archive has ${archive.entryCount} entries; the limit is ${limits.entries}.`,
         );
       let total = 0;
+      const seen = new Set<string>();
       for (;;) {
         const entry = yield* archive.next;
         if (entry === null) break;
@@ -247,6 +269,11 @@ export const unpackArchive = (archivePath: string, target: string, limits: Unpac
         const destination = NodePath.join(target, entry.fileName);
         if (!isPathInside(destination, target) || destination === NodePath.resolve(target))
           return yield* unsafe(`Member ${shown} resolves outside the pack.`);
+        if (!entry.fileName.endsWith("/")) {
+          if (seen.has(entry.fileName))
+            return yield* unsafe(`Member ${shown} is a duplicate entry.`);
+          seen.add(entry.fileName);
+        }
         if (entry.fileName.endsWith("/")) {
           yield* Effect.tryPromise({
             try: () => NodeFSP.mkdir(destination, { recursive: true }),
@@ -342,6 +369,9 @@ const oggSeconds = (head: Buffer, tail: Buffer) => {
   return granule > 0 ? (granule - skip) / rate : undefined;
 };
 
+const GLB_HEADER_BYTES = 4 * 1024 * 1024;
+const GLTF_FILE_BYTES = 64 * 1024 * 1024;
+
 /** glTF JSON from a .glb header or a .gltf file, if it parses. */
 const gltfJson = (buffer: Buffer, binary: boolean): unknown => {
   try {
@@ -394,6 +424,48 @@ const stem = (path: string) => {
   return (dot <= 0 ? name : name.slice(0, dot)).toLowerCase();
 };
 
+const TEXTURE_DIR = /(?:^|\/)textures?\//i;
+
+/**
+ * Which images are pictures of a model, and each model's best one. Kenney kits name renders
+ * after the model: Previews/tree.png, Side/tree.png or Isometric/tree_NE.png. An image a model
+ * loads, or one under Textures/, is never a picture. Pure.
+ */
+export const modelPictures = (
+  files: ReadonlyArray<Pick<LibraryFile, "path" | "media" | "deps">>,
+) => {
+  const models = new Set(
+    files.filter((file) => file.media === "model").map((file) => stem(file.path)),
+  );
+  const loaded = new Set(files.flatMap((file) => file.deps ?? []));
+  const ofImage = new Map<string, string>();
+  const byModel = new Map<string, string>();
+  const rank = (path: string, model: string) =>
+    PREVIEW_DIR.test(path) ? 0 : stem(path) === model ? 1 : 2;
+  for (const file of files) {
+    if (file.media !== "image" || loaded.has(file.path) || TEXTURE_DIR.test(file.path)) continue;
+    const name = stem(file.path);
+    // The longest model name the image is named after, so tree_oak_NE goes to tree_oak, not tree.
+    let model = models.has(name) ? name : undefined;
+    for (
+      let cut = name.lastIndexOf("_");
+      model === undefined && cut > 0;
+      cut = name.lastIndexOf("_", cut - 1)
+    )
+      if (models.has(name.slice(0, cut))) model = name.slice(0, cut);
+    if (model === undefined) continue;
+    ofImage.set(file.path, model);
+    const prior = byModel.get(model);
+    if (
+      prior === undefined ||
+      rank(file.path, model) < rank(prior, model) ||
+      (rank(file.path, model) === rank(prior, model) && file.path < prior)
+    )
+      byModel.set(model, file.path);
+  }
+  return { ofImage, byModel };
+};
+
 const walk = async (directory: string, prefix = ""): Promise<string[]> => {
   const entries = await NodeFSP.readdir(NodePath.join(directory, prefix), { withFileTypes: true });
   const files: string[] = [];
@@ -412,8 +484,6 @@ export const indexPack = async (
 ): Promise<LibraryIndex> => {
   const paths = await walk(directory);
   const present = new Set(paths);
-  const previewImages = paths.filter((path) => mediaOf(path) === "image" && PREVIEW_DIR.test(path));
-  const previewByStem = new Map(previewImages.map((path) => [stem(path), path]));
   const files: LibraryFile[] = [];
   for (const path of paths) {
     const media = mediaOf(path);
@@ -434,11 +504,21 @@ export const indexPack = async (
       );
       if (seconds !== undefined) file = { ...file, seconds: Math.round(seconds * 100) / 100 };
     }
-    if ((format === "glb" || format === "gltf") && size <= 64 * 1024 * 1024) {
+    const glbHead = format === "glb" ? await readHead(absolute, 20) : undefined;
+    const jsonBytes =
+      glbHead === undefined
+        ? size
+        : glbHead.length === 20 && glbHead.toString("latin1", 0, 4) === "glTF"
+          ? 20 + glbHead.readUInt32LE(12)
+          : 0;
+    if (
+      (format === "glb" && jsonBytes > GLB_HEADER_BYTES) ||
+      (format === "gltf" && size > GLTF_FILE_BYTES)
+    )
+      file = { ...file, clipsUnread: true };
+    else if (format === "glb" || format === "gltf") {
       const head =
-        format === "glb"
-          ? await readHead(absolute, Math.min(size, 4 * 1024 * 1024))
-          : await NodeFSP.readFile(absolute);
+        format === "glb" ? await readHead(absolute, jsonBytes) : await NodeFSP.readFile(absolute);
       const facts = gltfFacts(gltfJson(head, format === "glb"));
       const deps = facts.uris.flatMap((uri) => {
         const dep = besides(path, uri);
@@ -476,12 +556,18 @@ export const indexPack = async (
       );
       if (textures.length > 0) file = { ...file, deps: textures };
     }
-    if (media === "model") {
-      const preview = previewByStem.get(stem(path));
-      if (preview !== undefined) file = { ...file, preview };
-    }
     files.push(file);
   }
+  const pictures = modelPictures(files);
+  const withPictures = files.map((file) => {
+    const preview = file.media === "model" ? pictures.byModel.get(stem(file.path)) : undefined;
+    const previewOf = pictures.ofImage.get(file.path);
+    return {
+      ...file,
+      ...(preview === undefined ? {} : { preview }),
+      ...(previewOf === undefined ? {} : { previewOf }),
+    };
+  });
   const previews = paths
     .filter(
       (path) => mediaOf(path) === "image" && OVERVIEW.test(path.slice(path.lastIndexOf("/") + 1)),
@@ -489,7 +575,13 @@ export const indexPack = async (
     .filter((path) => !PREVIEW_DIR.test(path))
     .toSorted((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
     .slice(0, 4);
-  return { version: 1, pack: pack.id, sha256: pack.sha256, files, previews };
+  return {
+    version: INDEX_VERSION,
+    pack: pack.id,
+    sha256: pack.sha256,
+    files: withPictures,
+    previews,
+  };
 };
 
 /** One game-safe path segment: ASSETS.md and engines read paths without spaces or brackets. */

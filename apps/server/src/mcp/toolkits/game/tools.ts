@@ -159,7 +159,7 @@ const BlenderExportTool = Tool.make("game_blender_export", {
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
 export const GameAssetsSearchTool = Tool.make("game_assets_search", {
   description:
-    "Search Kurambit's pinned CC0 asset library: 2D sprites, tilesets, UI kits, icons, fonts, sound effects, music, animated 3D characters, 3D kits and PBR textures from Kenney, Quaternius, ambientCG and others. Public domain, no key, no attribution needed. Without pack it lists matching packs with their style; pass pack to look inside one: the pack is downloaded once (checked against its pinned SHA-256) and matching files come with a numbered contact sheet image, or the pack's own preview pictures when you pass no query and no kind. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one pack style per game. Add files with game_assets_add.",
+    "Search Kurambit's pinned CC0 asset library: 2D sprites, tilesets, UI kits, icons, fonts, sound effects, music, animated 3D characters, 3D kits and PBR textures from Kenney, Quaternius, ambientCG and others. Public domain, no key, no attribution needed. Without pack it lists matching packs with their style, or every pack on one line each when you pass no query and no kind; pass pack to look inside one: the pack is downloaded once (checked against its pinned SHA-256) and matching files come with a contact sheet image numbered like the list (models are shown by their pictures), or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one pack style per game. Add files with game_assets_add by the exact paths listed.",
   parameters: GameAssetsSearchInput,
   success: GameAssetsSearchResult,
   failure,
@@ -171,7 +171,7 @@ export const GameAssetsSearchTool = Tool.make("game_assets_search", {
 export const GameAssetsSearchToolkit = Toolkit.make(GameAssetsSearchTool);
 const AssetsAddTool = Tool.make("game_assets_add", {
   description:
-    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game: godot/assets/library/<pack>/, web/assets/library/<pack>/ or unity/Assets/Library/<pack>/, with names made path-safe. Models bring the textures they load. Never overwrites a file that differs; files already there are left alone. Appends each file's pack, source page and CC0 licence to ASSETS.md. Run game_import after.",
+    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game: godot/assets/library/<pack>/, web/assets/library/<pack>/ or unity/Assets/Library/<pack>/, with names made path-safe. Models bring the textures they load; a folder add keeps one format per model, the one search shows. Never overwrites a file that differs; files already there are left alone. Appends each file's pack, source page and CC0 licence to ASSETS.md. Run game_import after.",
   parameters: GameAssetsAddInput,
   success: GameAssetsAddResult,
   failure,

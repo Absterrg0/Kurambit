@@ -6,7 +6,15 @@ import * as NodePath from "node:path";
 import * as NodeZlib from "node:zlib";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import { entryProblem, pinProblem, unpackArchive, type UnpackLimits } from "./assetLibraryFiles.ts";
+import {
+  downloadPinned,
+  entryProblem,
+  indexPack,
+  modelPictures,
+  pinProblem,
+  unpackArchive,
+  type UnpackLimits,
+} from "./assetLibraryFiles.ts";
 
 interface Member {
   readonly name: string;
@@ -150,6 +158,74 @@ it.effect("refuses archives past the entry and size limits", () =>
     expect(reasonOf(bomb.exit)).toBe("unsafe-archive");
   }),
 );
+
+it.effect("names a duplicate member as a duplicate entry", () =>
+  Effect.gen(function* () {
+    const { exit } = yield* unpack([
+      { name: "a.png", data: Buffer.from("one") },
+      { name: "a.png", data: Buffer.from("two") },
+    ]);
+    expect(reasonOf(exit)).toBe("unsafe-archive");
+    expect(String(Exit.isFailure(exit) ? exit.cause : "")).toMatch(/duplicate entry/);
+  }),
+);
+
+it("names model renders as pictures of the model, never textures", () => {
+  const { byModel, ofImage } = modelPictures([
+    { path: "Models/GLTF format/tree.glb", media: "model" },
+    { path: "Models/GLTF format/tree_oak.glb", media: "model" },
+    { path: "Models/FBX format/crate.fbx", media: "model", deps: ["Models/FBX format/crate.png"] },
+    { path: "Models/FBX format/crate.png", media: "image" },
+    { path: "Isometric/tree_oak_NE.png", media: "image" },
+    { path: "Isometric/tree_oak_NW.png", media: "image" },
+    { path: "Isometric/tree_NE.png", media: "image" },
+    { path: "Side/tree.png", media: "image" },
+    { path: "Textures/tree.png", media: "image" },
+    { path: "Tiles/grass.png", media: "image" },
+  ]);
+  expect(byModel.get("tree")).toBe("Side/tree.png");
+  expect(byModel.get("tree_oak")).toBe("Isometric/tree_oak_NE.png");
+  expect(byModel.has("crate")).toBe(false);
+  expect(ofImage.get("Isometric/tree_NE.png")).toBe("tree");
+  expect(ofImage.has("Textures/tree.png")).toBe(false);
+  expect(ofImage.has("Tiles/grass.png")).toBe(false);
+});
+
+it("says a glTF clip list was not read when the header is past the read limit", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "assetlib-"));
+  roots.push(root);
+  const header = Buffer.alloc(20);
+  header.write("glTF", 0, "latin1");
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(5 * 1024 * 1024, 12);
+  header.write("JSON", 16, "latin1");
+  await NodeFSP.writeFile(NodePath.join(root, "big.glb"), header);
+  const index = await indexPack({ id: "test", sha256: "a".repeat(64) }, root);
+  expect(index.files[0]?.clipsUnread).toBe(true);
+});
+
+it("gives up on a download when no bytes arrive", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "assetlib-"));
+  roots.push(root);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    const response = new Response(new ReadableStream({ start: () => undefined }));
+    Object.defineProperty(response, "url", { value: "https://example.test/pack.zip" });
+    return response;
+  }) as typeof fetch;
+  try {
+    await expect(
+      downloadPinned(
+        { download: "https://example.test/pack.zip", bytes: 10 },
+        NodePath.join(root, "pack.part"),
+        new AbortController().signal,
+        50,
+      ),
+    ).rejects.toThrow(/stalled/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
 
 it("names what is unsafe about a member", () => {
   const plain = {

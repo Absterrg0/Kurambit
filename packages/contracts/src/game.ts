@@ -185,6 +185,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "license-missing",
       "source-changed",
       "unsafe-archive",
+      "symlink",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -194,6 +195,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
     const fixes = {
       "invalid-project": "Open a folder containing a valid game.json, or create a new game.",
       "invalid-path": "Use a relative path inside the game project.",
+      symlink:
+        "A symbolic link is on the way to this path. Game tools write only real files and folders inside the game and never follow a link; replace the link with a real folder or file and retry.",
       "tool-missing":
         "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or KURAMBIT_BLENDER / KURAMBIT_GODOT. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
       "wrong-version":

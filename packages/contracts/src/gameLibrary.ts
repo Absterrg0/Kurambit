@@ -29,6 +29,10 @@ export const GameAssetsSearchInput = Schema.Struct({
   limit: Schema.optionalKey(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(24)),
   ),
+  /** Inside a pack: skip this many matching files, to page through a long list. */
+  offset: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(100_000)),
+  ),
 });
 export type GameAssetsSearchInput = typeof GameAssetsSearchInput.Type;
 

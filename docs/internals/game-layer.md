@@ -37,7 +37,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   refused, never re-pinned at runtime: a source can change contents or licence silently, and a
   refusal is the only honest answer. A pin changes only in a reviewed commit that rechecks the
   licence. Kenney packs come from Kenney's own OpenGameArt uploads, because kenney.nl hands out
-  short-lived signed links behind a session cookie, which cannot be pinned.
+  short-lived signed links behind a session cookie, which cannot be pinned. Every server on the
+  machine (the installed app and any dev server) shares that cache, so fetches lock per pack only
+  within one process, scratch names carry the fetching server's pid (a start-up sweep spares live
+  ones), and placing a pack accepts a complete copy another server placed first.
 - `GameEngine`/`GameGodotEngine`/`GameThreeEngine` is the engine adapter seam: import, check,
   export release. Godot owns the native process boundary (headless editor import, check script,
   export presets; Web, Linux and Windows releases). three.js owns a headless-Chromium boundary
