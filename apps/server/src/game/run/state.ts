@@ -72,6 +72,8 @@ const RoleStep = Schema.Struct({
   source: Schema.Boolean,
   bots: Schema.Boolean,
   release: Schema.Boolean,
+  // Where the runner draws this thread's explore frames as one sheet, game-relative; "" draws none.
+  sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   // Written by the driver once the turn exists, so a resume waits on it.
   attached: Schema.NullOr(Schema.Struct({ threadId: ThreadId, runId: RunId })),
 });
@@ -145,6 +147,8 @@ const Sample = Schema.Struct({
   phase: Schema.Literals(["play", "more", "write", "done"]),
   notes: Schema.String,
   evidence: Schema.NullOr(Evidence),
+  // The sheet of this player's own frames, game-relative; "" when it has none.
+  sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
 });
 export type Sample = typeof Sample.Type;
 
