@@ -74,6 +74,8 @@ const RoleStep = Schema.Struct({
   release: Schema.Boolean,
   // Where the runner draws this thread's explore frames as one sheet, game-relative; "" draws none.
   sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // Total explore input this thread may use across its sessions; 0 sets none.
+  inputCapMs: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
   // Written by the driver once the turn exists, so a resume waits on it.
   attached: Schema.NullOr(Schema.Struct({ threadId: ThreadId, runId: RunId })),
 });
