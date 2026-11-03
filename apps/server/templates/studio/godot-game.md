@@ -27,7 +27,8 @@ Spawn bullets and effects under your game scene (or `Juice.stage`), never
 `get_tree().current_scene`, and never call `change_scene_to_file` or
 `reload_current_scene`: the shell owns restarts. Retry resets every value in
 game_state.gd; list the ones that must survive (best score, unlocks) in
-`const KEEP_ACROSS_RUNS := [...]`.
+`const KEEP_ACROSS_RUNS := [...]`; the shell saves those to user:// between
+launches and Settings can reset them.
 The title shows `assets/ui/title_bg.png` behind the menu once that file
 exists: put the game's key art there (16:9), and the title stops looking like
 a template.

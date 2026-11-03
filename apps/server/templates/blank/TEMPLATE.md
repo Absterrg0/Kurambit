@@ -19,7 +19,8 @@ but it ships the shell a demo needs, so build the game, not the menus.
   out in slow motion for a moment, then the end screen shows the message and
   the stats in the order given.
 - Each Play and Retry resets every value declared in `scripts/game_state.gd`;
-  name the ones that must outlive a run in its `KEEP_ACROSS_RUNS`.
+  name the ones that must outlive a run in its `KEEP_ACROSS_RUNS`; they persist
+  in `user://progress.cfg` between launches and Settings shows "Reset progress".
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.
