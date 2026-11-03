@@ -183,6 +183,16 @@ const EXPLORE_WEB_ROOM: MemoryRoom = {
   env: "KURAMBIT_EXPLORE_WEB_MEMORY_MB",
 };
 /**
+ * A Unity Linux player under software GL and its xvfb-run display: a small
+ * 3D game's player held 290 MB PSS; headroom covers bigger games. Its build,
+ * when the session needs one, is the live editor's own memory guard.
+ */
+const EXPLORE_UNITY_ROOM: MemoryRoom = {
+  what: "Unity exploration session",
+  neededMb: 1024,
+  env: "KURAMBIT_EXPLORE_UNITY_MEMORY_MB",
+};
+/**
  * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
  * ffmpeg recording, Xvfb, bot child); a Chromium bot at 630 MB. Its
  * Chromium launches after the memory gate, so two bots admitted together
@@ -270,6 +280,12 @@ export class GameService extends Context.Service<
       },
       GameOperationError
     >;
+    /**
+     * Opens a Unity game's editor once and closes it, so its first full
+     * import is paid outside any role's clock. A no-op when the project
+     * already has an import cache.
+     */
+    readonly unityWarmEditor: (root: string) => Effect.Effect<boolean, GameOperationError>;
     /** Live Blender scene: run bpy code, auto-saving the .blend source. */
     readonly blenderCode: (
       threadId: ThreadId,
@@ -2071,7 +2087,7 @@ const make = Effect.gen(function* () {
                 path: root,
                 reason: "command-failed",
                 detail: `The Unity import failed, so no session was opened.
-${imported.message}`.slice(-3000),
+${imported.message}`.slice(0, 3000),
               });
             const sourceId = yield* known(
               "The game sources could not be identified after the Unity import; the result would not be current.",
@@ -2105,7 +2121,7 @@ ${imported.message}`.slice(-3000),
                 path: root,
                 reason: "command-failed",
                 detail: `The Unity play build failed, so no session was opened.
-${built.result.message}`.slice(-3000),
+${built.result.message}`.slice(0, 3000),
               });
             if (built.sourceId === null)
               return yield* exploreInvalid(
@@ -2529,15 +2545,34 @@ ${built.result.message}`.slice(-3000),
           ? EXPLORE_WEB_ROOM
           : target === "native" && engineName === "godot"
             ? EXPLORE_NATIVE_ROOM
-            : null;
+            : unity
+              ? EXPLORE_UNITY_ROOM
+              : null;
       if (unity) {
         const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
         if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
       }
       // The player build takes minutes and is the game's own exclusive
       // operation; the start lock is held only to launch and register.
+      // The editor that builds it refuses at once when memory is short; that
+      // refusal counts like a gated start's, so a run replays a sample turn
+      // that never played instead of voiding it.
       const unityPlayer =
-        unity && !exploreLive.has(root) ? yield* unityPlayerFor(String(threadId), root) : null;
+        unity && !exploreLive.has(root)
+          ? yield* unityPlayerFor(String(threadId), root).pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  if (error.reason !== "low-memory") return;
+                  const prior = exploreMemory.get(String(threadId));
+                  exploreMemory.set(String(threadId), {
+                    waitedMs: prior?.waitedMs ?? 0,
+                    refusals: (prior?.refusals ?? 0) + 1,
+                    refused: true,
+                  });
+                }),
+              ),
+            )
+          : null;
       const locked = exploreStartLock.withPermits(1)(
         Effect.gen(function* () {
           const existing = exploreLive.get(root);
@@ -3844,7 +3879,7 @@ ${built.result.message}`.slice(-3000),
         return yield* exploreInvalid(root, "Only a Unity game plays a prepared player.");
       const prepared = yield* unityPrepareLock.withPermits(1)(
         Effect.gen(function* () {
-          const ready = yield* unityPlayerFor("game run sample preparation", root);
+          const ready = yield* unityPlayerFor("game run player preparation", root);
           // The sample plays only its player; an idle editor beside it would
           // take the memory the player runs in.
           if (ready.origin === "built") yield* liveUnity.stop(root);
@@ -3852,6 +3887,25 @@ ${built.result.message}`.slice(-3000),
         }),
       );
       return { origin: prepared.origin, ms: prepared.ms, sourceId: prepared.sourceId };
+    }),
+    unityWarmEditor: Effect.fn("GameService.unityWarmEditor")(function* (root) {
+      if ((yield* projects.read(root)).engine.name !== "unity") return false;
+      const { cwd } = yield* engine(root);
+      const cached = yield* Effect.promise(() =>
+        NodeFSP.stat(NodePath.join(cwd, "Library")).then(
+          (stat) => stat.isDirectory(),
+          () => false,
+        ),
+      );
+      if (cached) return false;
+      yield* exclusive(
+        root,
+        "Unity warm-up",
+        liveUnity.hold(root)(Effect.void),
+        "game run warm-up",
+      );
+      yield* liveUnity.stop(root);
+      return true;
     }),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);

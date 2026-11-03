@@ -44,6 +44,18 @@ const asResult = (
   process: run,
 });
 
+/** A build report's errors as `file: message` lines, the compiler's own words. */
+const buildErrors = (errors: unknown): string =>
+  Array.isArray(errors) && errors.length > 0
+    ? errors
+        .map((entry) => {
+          const e = (entry ?? {}) as Record<string, unknown>;
+          const file = typeof e["file"] === "string" && e["file"] !== "" ? `${e["file"]}: ` : "";
+          return `${file}${String(e["message"] ?? JSON.stringify(entry))}`;
+        })
+        .join("\n")
+    : "no errors reported";
+
 /**
  * The Unity backend. Every editor operation goes through the game's one live
  * editor (GameUnity), because Unity refuses a second editor on an open
@@ -324,7 +336,7 @@ export const makeUnityBackend = (
             ? `Unity ${input.preset} player built.`
             : !ours(report)
               ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
-              : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${JSON.stringify(report["errors"] ?? []).slice(0, 1500)}`,
+              : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
           input.outputPath,
         );
       }).pipe(

@@ -150,6 +150,15 @@ checks are boots, exports and keep-or-revert verdicts. A fresh art director judg
 renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
 committed; a missing verdict keeps the art.
 
+The Unity lane needs three things the loop does nowhere else. A live editor holds the open scene in
+memory and saves it after every edit without reading the disk first, so every run git step that can
+move the root's checkout closes the root's live editors before it runs; otherwise the next
+prototype's first edit writes the previous branch's scene over its own (seen live). Its boot is the
+editor check plus a Linux player build, because testers and samples play only the player and a
+build can pass the editor (an editor-only API in a runtime script) and still fail as a player.
+And the project's first editor open, a full import of minutes, runs before the first root role's
+clock, so the first prototype is not capped on it while the second opens warm.
+
 ## Why this shape
 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
