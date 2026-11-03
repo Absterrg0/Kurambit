@@ -76,6 +76,8 @@ const END_GUARD_S = 0.4;
 const byId = (id) => document.getElementById(id);
 const canvas = byId("game");
 const hud = byId("hud");
+// ctx.ui's own layer: a game writing raw text into ctx.hud cannot wipe it.
+const hudKit = byId("hud-kit");
 const ui = byId("ui");
 const backdrop = byId("backdrop");
 const screens = {
@@ -128,7 +130,7 @@ function newContext() {
     player: null,
     input: input.api,
     /** HUD widgets by name (shell/hud.js); call them every frame from update(). */
-    ui: createHud(hud, input.api),
+    ui: createHud(hudKit, input.api),
     keys: {
       down: (code) => down.has(code),
       pressed: (code) => pressed.has(code),
@@ -207,6 +209,7 @@ function clearRun() {
   }
   Juice.stage = null;
   hud.replaceChildren();
+  hudKit.replaceChildren();
 }
 
 function startRun() {

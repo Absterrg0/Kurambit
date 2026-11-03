@@ -50,7 +50,8 @@ body {
 
 /* The game's own overlay (ctx.hud). The probe reports its text, so keep the
    values that matter on screen. */
-#hud {
+#hud,
+#hud-kit {
   position: absolute;
   inset: 0;
   padding: 14px 16px;

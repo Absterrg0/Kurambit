@@ -33,6 +33,10 @@ var _shown_hints := {}
 ## Toast text that ended a moment ago, with the seconds until it may show again.
 var _recent := {}
 const TOAST_AGAIN_S := 4.0
+const MAX_TOASTS := 3
+## A value that changes every frame (a ticking score) pops at most this often.
+const POP_GAP_S := 0.3
+var _now := 0.0
 
 
 class Hearts extends Control:
@@ -41,7 +45,7 @@ class Hearts extends Control:
 	var max_value := 3
 
 	func _draw() -> void:
-		var r := size.y * 0.27
+		var r := _height() * 0.27
 		for i in max_value:
 			var x := i * (r * 4.6)
 			var colour := HEART if i < value else Color(1, 1, 1, 0.28)
@@ -50,7 +54,11 @@ class Hearts extends Control:
 			draw_colored_polygon(PackedVector2Array([Vector2(x + r * 0.08, r * 1.45), Vector2(x + r * 3.92, r * 1.45), Vector2(x + r * 2, r * 3.6)]), colour)
 
 	func _get_minimum_size() -> Vector2:
-		return Vector2(max_value * size.y * 0.27 * 4.6, 26)
+		return Vector2(max_value * _height() * 0.27 * 4.6, _height())
+
+	# Before layout size is zero; the minimum height stands in.
+	func _height() -> float:
+		return maxf(size.y, custom_minimum_size.y)
 
 
 func _ready() -> void:
@@ -95,7 +103,7 @@ func counter(name: String, value: Variant, max_value: Variant = null, icon: Text
 	var entry := _widget(name, "counter", icon)
 	var text := "%s %s" % [name, value] if max_value == null else "%s %s / %s" % [name, value, max_value]
 	if entry.has("value") and entry["value"] != value:
-		Juice.pop(entry["node"], 0.18, 0.18)
+		_pop(entry, 0.18)
 	entry["value"] = value
 	_write(entry["label"], text)
 
@@ -117,7 +125,7 @@ func bar(name: String, value: float, max_value: float) -> void:
 		track.max_value = max_value
 		track.value = clamped
 	if entry.has("value") and clamped < float(entry["value"]):
-		Juice.pop(entry["node"], 0.15, 0.15)
+		_pop(entry, 0.15)
 	entry["value"] = clamped
 
 
@@ -134,20 +142,27 @@ func objective(text: String) -> void:
 
 func toast(text: String, seconds := TOAST_S) -> void:
 	# Called from a condition every frame, the same text would show forever:
-	# it waits while it shows or queues and for a few seconds after.
-	if (_toast_on and _toast.text == text) or _recent.has(text) or _toasts.any(func(t): return t["text"] == text):
+	# it waits while it shows or queues, and a call within a few seconds of it
+	# ending restarts that wait, so it shows again only after a real gap.
+	if _recent.has(text):
+		_recent[text] = TOAST_AGAIN_S
 		return
+	if (_toast_on and _toast.text == text) or _toasts.any(func(t): return t["text"] == text):
+		return
+	# Text that changes every frame would queue without end: keep the newest few.
+	if _toasts.size() >= MAX_TOASTS:
+		_toasts.pop_front()
 	_toasts.append({"text": text, "seconds": seconds})
 
 
 func hint(text: String, until := Callable(), seconds := 6.0) -> void:
-	if _shown_hints.has(text):
+	if _shown_hints.has(text) or _hints.any(func(h): return h["text"] == text) or _hint_now.get("text", "") == text:
 		return
-	_shown_hints[text] = true
 	_hints.append({"text": text, "until": until, "seconds": seconds})
 
 
 func _process(delta: float) -> void:
+	_now += delta
 	for text in _recent.keys():
 		_recent[text] -= delta
 		if _recent[text] <= 0.0:
@@ -169,6 +184,8 @@ func _process(delta: float) -> void:
 			_recent[_toast.text] = TOAST_AGAIN_S
 	if _hint_now.is_empty() and not _hints.is_empty():
 		_hint_now = _hints.pop_front()
+		# Shown counts from here: a hint queued when the run ended comes back next run.
+		_shown_hints[_hint_now["text"]] = true
 		_write(_hint.get_child(0) as Label, _labelled(_hint_now["text"]))
 		_hint.modulate.a = 1.0
 		_hint.visible = true
@@ -194,6 +211,7 @@ func _widget(name: String, kind: String, icon: Texture2D) -> Dictionary:
 	var entry := {"kind": kind, "node": row}
 	if icon != null:
 		var picture := TextureRect.new()
+		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		picture.texture = icon
 		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -206,11 +224,13 @@ func _widget(name: String, kind: String, icon: Texture2D) -> Dictionary:
 		var pips := Hearts.new()
 		pips.custom_minimum_size = Vector2(0, 26)
 		pips.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(pips)
 		entry["pips"] = pips
 	elif kind == "bar":
 		var track := ProgressBar.new()
 		track.show_percentage = false
+		track.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		track.custom_minimum_size = Vector2(150, 8)
 		track.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		var fill := StyleBoxFlat.new()
@@ -274,3 +294,10 @@ func _labelled(text: String) -> String:
 func _write(label: Label, text: String) -> void:
 	if label.text != text:
 		label.text = text
+
+
+func _pop(entry: Dictionary, amount: float) -> void:
+	if _now - float(entry.get("popped_at", -INF)) < POP_GAP_S:
+		return
+	entry["popped_at"] = _now
+	Juice.pop(entry["node"], amount, amount)

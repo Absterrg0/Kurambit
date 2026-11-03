@@ -20,6 +20,9 @@ import { Juice } from "./juice.js";
 const TOAST_S = 1.8;
 const FADE_S = 0.25;
 const TOAST_AGAIN_S = 4;
+const MAX_TOASTS = 3;
+// A value that changes every frame (a ticking score) pops at most this often.
+const POP_GAP_S = 0.3;
 
 export function createHud(layer, input) {
   const area = (name) => {
@@ -39,6 +42,13 @@ export function createHud(layer, input) {
   const hints = [];
   let toast = null;
   let hint = null;
+  // Game time, for the pop throttle.
+  let now = 0;
+  const pop = (entry, amount) => {
+    if (now - (entry.poppedAt ?? -Infinity) < POP_GAP_S) return;
+    entry.poppedAt = now;
+    Juice.pop(entry.element, amount, amount);
+  };
 
   const write = (element, text) => {
     if (element.textContent !== text) element.textContent = text;
@@ -79,7 +89,7 @@ export function createHud(layer, input) {
         return { text };
       });
       const shown = max === undefined ? `${name} ${value}` : `${name} ${value} / ${max}`;
-      if (entry.value !== undefined && entry.value !== value) Juice.pop(entry.element, 0.18, 0.18);
+      if (entry.value !== undefined && entry.value !== value) pop(entry, 0.18);
       entry.value = value;
       write(entry.text, shown);
     },
@@ -111,7 +121,7 @@ export function createHud(layer, input) {
         const width = `${(clamped / max) * 100}%`;
         if (entry.fill.style.width !== width) entry.fill.style.width = width;
       }
-      if (entry.value !== undefined && clamped < entry.value) Juice.pop(entry.element, 0.15, 0.15);
+      if (entry.value !== undefined && clamped < entry.value) pop(entry, 0.15);
       entry.value = clamped;
     },
     timer(name, seconds) {
@@ -126,22 +136,25 @@ export function createHud(layer, input) {
     },
     toast(text, seconds = TOAST_S) {
       // Called from a condition every frame, the same text would show forever:
-      // it waits while it shows or queues and for a few seconds after.
-      if (
-        (toast !== null && centre?.textContent === text) ||
-        recent.has(text) ||
-        toasts.some((t) => t.text === text)
-      )
+      // it waits while it shows or queues, and a call within a few seconds of
+      // it ending restarts that wait, so it shows again only after a real gap.
+      if (recent.has(text)) {
+        recent.set(text, TOAST_AGAIN_S);
         return;
+      }
+      if ((toast !== null && centre?.textContent === text) || toasts.some((t) => t.text === text))
+        return;
+      // Text that changes every frame would queue without end: keep the newest few.
+      if (toasts.length >= MAX_TOASTS) toasts.shift();
       toasts.push({ text, seconds });
     },
     hint(text, { until = null, seconds = 6 } = {}) {
       if (shownHints.has(text) || hints.some((h) => h.key === text) || hint?.key === text) return;
-      shownHints.add(text);
-      hints.push({ key: text, until, seconds });
+      hints.push({ key: text, until: typeof until === "function" ? until : null, seconds });
     },
     /** The shell's tick, on game time after update(). */
     update(dt) {
+      now += dt;
       for (const [text, left] of recent)
         if (left - dt <= 0) recent.delete(text);
         else recent.set(text, left - dt);
@@ -163,6 +176,8 @@ export function createHud(layer, input) {
       }
       if (hint === null && hints.length > 0) {
         const next = hints.shift();
+        // Shown counts from here: a hint queued when the run ended comes back next run.
+        shownHints.add(next.key);
         bottom ??= area("hint");
         write(bottom, labelled(next.key));
         bottom.hidden = false;
