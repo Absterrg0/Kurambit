@@ -44,8 +44,9 @@ import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
-import { artFacts, spriteBlock } from "./run/roles.ts";
+import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
+import { modelFacts } from "./run/modelFacts.ts";
 import * as State from "./run/state.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
@@ -504,15 +505,18 @@ export const layer = (options: { readonly stateDir: string }) => {
               // the redo that answers it sees the same measurements.
               const task = state.task;
               const redo = step.role === "art" && task._tag === "stage" && task.phase === "redo";
-              const sprites =
-                step.role === "art-director" || redo
-                  ? (yield* Effect.promise(() => spriteFacts(root, state.lane))).full
-                  : "";
+              const judged = step.role === "art-director" || redo;
+              const sprites = judged
+                ? (yield* Effect.promise(() => spriteFacts(root, state.lane))).full
+                : "";
+              const models = judged
+                ? (yield* Effect.promise(() => modelFacts(root, state.lane))).full
+                : "";
               const prompt =
                 step.role === "art-director"
-                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)), sprites)}`
+                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)), sprites)}${modelBlock(models)}`
                   : redo
-                    ? `${step.prompt}${spriteBlock(sprites, true)}`
+                    ? `${step.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`
                     : step.prompt;
               return yield* runRole(
                 d.deps,
