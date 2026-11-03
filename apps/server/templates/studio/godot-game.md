@@ -31,6 +31,9 @@ Spawn bullets and effects under your game scene (or `Juice.stage`), never
 game_state.gd; list the ones that must survive (best score, unlocks) in
 `const KEEP_ACROSS_RUNS := [...]`; the shell saves those to user:// between
 launches and Settings can reset them.
+Show the score, health, timer, objective, event toasts and control hints
+through the `Hud` autoload (TEMPLATE.md), never your own labels, and teach
+each control with `Hud.hint` the first time it matters.
 The title shows `assets/ui/title_bg.png` behind the menu once that file
 exists: put the game's key art there (16:9), and the title stops looking like
 a template. `assets/ui/icon.png` is the window, web tab and Windows .exe icon:

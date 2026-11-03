@@ -89,9 +89,14 @@ demo needs, so build the game, not the menus.
   lists only controls that work. Reading an undeclared action throws.
 - Settings > Controls lists every action with its keys and gamepad inputs,
   rebinds keys (saved with the other settings; Reset to defaults) and is the
-  place players and testers read the controls. Name keys in a HUD hint with
-  `input.label("dash")`, as the starter does, so the hint stays true after
-  a rebind.
+  place players and testers read the controls. Name keys in a HUD hint as
+  `{dash}`, as the starter does, so the hint stays true after a rebind.
+- Put every HUD line through `ctx.ui` (`web/shell/hud.js`), called each frame
+  from `update`: `counter("Gems", n, 5)`, `bar("Health", hp, 3)` (hearts up to
+  10), `timer("Time", seconds)`, `objective(text)`; `toast("Gate opened!")` on
+  the event; `hint("{jump} to jump", { until: () => jumped })` teaches a
+  control once. They stay out of the play area's centre, clear on Retry and
+  freeze on pause. Do not write raw text into `ctx.hud` beside them.
 
 ## Game feel
 

@@ -225,6 +225,7 @@ func _on_ended(won: bool, text: String, stats: Dictionary) -> void:
 
 func _clear_game() -> void:
 	_end_serial += 1
+	Hud.clear()
 	if is_instance_valid(_game):
 		_holder.remove_child(_game)
 		_game.queue_free()
