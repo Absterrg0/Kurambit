@@ -46,24 +46,35 @@ const MB = 1024 * 1024;
 const gb = (bytes: number) => (bytes / 1024 / MB).toFixed(1);
 
 /**
- * Null when there is room to open `editor`, else the detail of a
- * `low-memory` refusal. An editor started short of memory gets OOM-killed
- * mid-build once other processes grow, or the machine hangs on full swap;
- * a refusal up front is the honest answer. `env` (whole MB, 0 turns the
- * check off) overrides `neededMb` for machines that know better.
+ * The pure half of {@link memoryShortfall}: null when `available` bytes
+ * cover the need (or are unknown), else the refusal detail. `override` is
+ * the env value; whole MB replace `neededMb`, and 0 turns the check off.
  */
-export const memoryShortfall = async (
-  editor: string,
+export const shortfallDetail = (
+  what: string,
   neededMb: number,
-  env: string,
-): Promise<string | null> => {
-  const override = process.env[env];
+  override: string | undefined,
+  available: number | null,
+): string | null => {
   const needed =
     (override !== undefined && /^\d+$/.test(override) ? Number(override) : neededMb) * MB;
-  const available = await memAvailable();
   if (available === null || available >= needed) return null;
-  return `The ${editor} needs about ${gb(needed)} GB of free memory to open safely and this machine has ${gb(available)} GB available. Opening it now risks the system killing it mid-work, or the whole machine hanging on swap.`;
+  return `The ${what} needs about ${gb(needed)} GB of free memory to open safely and this machine has ${gb(available)} GB available. Opening it now risks the system killing it mid-work, or the whole machine hanging on swap.`;
 };
+
+/**
+ * Null when there is room to open `what`, else the detail of a `low-memory`
+ * refusal. Work started short of memory gets OOM-killed mid-way once other
+ * processes grow, or the machine hangs on full swap; a refusal up front is
+ * the honest answer. `env` (whole MB, 0 turns the check off) overrides
+ * `neededMb` for machines that know better.
+ */
+export const memoryShortfall = async (
+  what: string,
+  neededMb: number,
+  env: string,
+): Promise<string | null> =>
+  shortfallDetail(what, neededMb, process.env[env], await memAvailable());
 
 /**
  * Below this much available memory an idle live editor is closed. The kernel

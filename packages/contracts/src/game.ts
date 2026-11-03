@@ -213,7 +213,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The command failed. Read builds/logs for stdout and stderr, fix the reported error, and retry.",
       busy: "Another operation is running for this game. Wait for it or press Stop.",
       "low-memory":
-        "This machine has too little free memory to open the editor without risking it being killed mid-work. Close other apps, or wait a few minutes for other work to finish, then retry once. Retrying sooner gets the same answer.",
+        "This machine has too little free memory to start this without risking it being killed mid-work. Close other apps, or wait a few minutes for other work to finish, then retry once. Retrying sooner gets the same answer.",
       checksum: "The downloaded artifact failed its published checksum. Retry the install.",
       download: "The tool download failed. Check network access and retry the install.",
       io: "Check that the path exists and is writable. Read the server log for the underlying error.",
