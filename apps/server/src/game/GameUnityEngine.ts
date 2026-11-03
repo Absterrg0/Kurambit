@@ -240,8 +240,10 @@ export const makeUnityBackend = (
     }).pipe(live.hold(ctx.root));
 
   /**
-   * The live editor builds the player (`build run` queues it and returns);
-   * `build status` is read until the build completes.
+   * The live editor builds the player (`build run` queues it and returns a
+   * build id); `build status` is read until that build leaves the Pipeline's
+   * `queued` and `building` states (it reports idle | queued | building |
+   * completed, retained until the next build).
    */
   const runExportRelease: GameEngineBackend["runExportRelease"] = (ctx, input) =>
     Effect.gen(function* () {
@@ -261,53 +263,68 @@ export const makeUnityBackend = (
         input.operation,
       );
       const queuedResult = resultOf(queued);
-      if (!queued.ok || queuedResult?.["status"] === "error")
+      if (!queued.ok || queuedResult?.["status"] !== "queued")
         return asResult(
           queued.process,
           false,
-          `The Unity ${input.preset} build did not start: ${String(queuedResult?.["message"] ?? queued.errorMessage ?? "no answer")}.`,
+          `The Unity ${input.preset} build did not start: ${String(queuedResult?.["message"] ?? queued.errorMessage ?? queuedResult?.["status"] ?? "no answer")}.`,
           input.outputPath,
         );
+      const buildId = queuedResult["buildId"];
+      // A report is this build's only by its id (or, without one, its output
+      // path); a status left by an earlier build never ends this wait as done.
+      const ours = (report: Record<string, unknown>) =>
+        typeof buildId === "string"
+          ? report["buildId"] === buildId
+          : typeof report["outputPath"] === "string" &&
+            NodePath.resolve(report["outputPath"]) === NodePath.resolve(input.outputPath);
       let last = queued;
-      // `idle` right after queueing means the editor has not picked the
-      // build up yet; it ends the wait only once this build was seen.
-      let seen = false;
       let finished = false;
-      for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
-        yield* Effect.sleep("15 seconds");
-        last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
-        const status = resultOf(last)?.["status"];
-        if (status === "completed") finished = true;
-        else if (status === "idle") finished = seen;
-        else if (status !== undefined) seen = true;
-      }
-      if (!finished) {
-        // Unity has no build cancel here; the editor would keep writing into
-        // a staging folder the caller is about to delete, so it is closed.
-        yield* live.stop(ctx.root);
+      return yield* Effect.gen(function* () {
+        for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
+          yield* Effect.sleep("15 seconds");
+          last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
+          const status = resultOf(last)?.["status"];
+          // An unanswered poll says nothing; every state but these two is final.
+          if (typeof status === "string") finished = status !== "queued" && status !== "building";
+        }
+        if (!finished) {
+          // Unity has no build cancel here; the editor would keep writing into
+          // a staging folder the caller is about to delete, so it is closed.
+          yield* live.stop(ctx.root);
+          return asResult(
+            last.process,
+            false,
+            `The Unity ${input.preset} build did not finish within ${BUILD_TIMEOUT_MS / 60_000} minutes (last status: ${String(resultOf(last)?.["status"] ?? "none")}); the live editor was closed to stop it, and the next Unity call reopens it.`,
+            input.outputPath,
+          );
+        }
+        const report = resultOf(last) ?? {};
+        const present = yield* Effect.promise(() =>
+          NodeFSP.stat(input.outputPath).then(
+            (stat) => stat.isFile() && stat.size > 0,
+            () => false,
+          ),
+        );
+        const succeeded =
+          report["status"] === "completed" &&
+          ours(report) &&
+          report["result"] === "Succeeded" &&
+          present;
         return asResult(
           last.process,
-          false,
-          `The Unity ${input.preset} build did not finish within ${BUILD_TIMEOUT_MS / 60_000} minutes (last status: ${String(resultOf(last)?.["status"] ?? "none")}); the live editor was closed to stop it, and the next Unity call reopens it.`,
+          succeeded,
+          succeeded
+            ? `Unity ${input.preset} player built.`
+            : !ours(report)
+              ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
+              : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${JSON.stringify(report["errors"] ?? []).slice(0, 1500)}`,
           input.outputPath,
         );
-      }
-      const report = resultOf(last) ?? {};
-      const present = yield* Effect.promise(() =>
-        NodeFSP.stat(input.outputPath).then(
-          (stat) => stat.isFile() && stat.size > 0,
-          () => false,
-        ),
-      );
-      const succeeded =
-        report["status"] === "completed" && report["result"] === "Succeeded" && present;
-      return asResult(
-        last.process,
-        succeeded,
-        succeeded
-          ? `Unity ${input.preset} player built.`
-          : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${JSON.stringify(report["errors"] ?? []).slice(0, 1500)}`,
-        input.outputPath,
+      }).pipe(
+        // A cancelled caller deletes the staging folder and releases the
+        // editor; a build still writing into it is stopped with the editor.
+        Effect.onInterrupt(() => live.stop(ctx.root)),
       );
     }).pipe(live.hold(ctx.root));
 
