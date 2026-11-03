@@ -54,6 +54,10 @@ export const parseGodotIssues = (output: string): GameCheckIssue[] => {
     if (/ObjectDB instances? leaked/.test(message)) continue;
     if (/^\d+ resources? still in use at exit \(run with --verbose for details\)\.$/.test(message))
       continue;
+    // The server-side twin of a leaked node (a physics body never freed): exit
+    // chatter like the ObjectDB line beside it, not a failure to boot or run.
+    if (/^\d+ RID allocations? of type '[^']+' (?:was|were) leaked at exit\.?$/.test(message))
+      continue;
     const quoted = SCRIPT_LOAD_FAILURE.exec(message);
     const location = locationAfter(lines, index);
     const file = location?.file ?? (quoted?.[1] ? quoted[1] : "");
