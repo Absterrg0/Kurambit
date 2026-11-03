@@ -1,7 +1,7 @@
 // Keep-or-revert, stalls, the pending line, budget and resume decide what happens to a
 // creator's game history; these are pure decisions, so they are checked here.
 import { describe, expect, it } from "@effect/vitest";
-import { ThreadId } from "@kurambit/contracts";
+import { RunId, ThreadId } from "@kurambit/contracts";
 import * as Policy from "./policy.ts";
 import * as State from "./state.ts";
 
@@ -66,7 +66,37 @@ const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
   },
 });
 
-type Responder = (step: State.Step, state: State.RunState) => Policy.StepResult;
+type Single = Exclude<State.Step, State.PairStep>;
+type Responder = (step: Single, state: State.RunState) => Policy.StepResult;
+
+const stepName = (s: Single) =>
+  s.kind === "role" ? s.role.replace(/-[0-9a-z]+$/, "") : s.kind === "git" ? s.op._tag : s.kind;
+
+// A pair's halves answer in the order given (x then y, unless reversed), as a
+// driver would record them when each finishes; then the pair applies.
+const answerPair = (
+  pair: State.PairStep,
+  state: State.RunState,
+  respond: Responder,
+  reverse = false,
+): State.PairStep => ({
+  ...pair,
+  results: (reverse ? pair.halves.toReversed() : pair.halves).map((half) => ({
+    id: half.id,
+    result: respond(half, state) as State.HalfResult,
+  })),
+});
+
+// Applies a planned step, a pair through its halves.
+const applyStep = (
+  state: State.RunState,
+  step: State.Step,
+  respond: Responder,
+  input: Policy.Inputs,
+): Policy.Applied =>
+  step.kind === "pair"
+    ? Policy.applyPair(state, answerPair(step, state, respond), input)
+    : Policy.applyResult(state, step, respond(step, state), input);
 
 // Plans and applies until `until` holds or the run ends; returns the steps taken.
 const drive = (
@@ -80,27 +110,37 @@ const drive = (
   const logs: string[] = [];
   const released: string[] = [];
   const written: Record<string, string> = {};
+  const pairs: string[][] = [];
   for (let guard = 0; guard < 200 && !until(state) && state.ending === null; guard += 1) {
     const planned = Policy.plan(state, { now, coin: 0.3, id: `id${guard}` });
     if (planned.kind === "end")
-      return { state: { ...state, ending: planned.reason }, steps, logs, released, written };
+      return {
+        state: { ...state, ending: planned.reason },
+        steps,
+        logs,
+        released,
+        written,
+        pairs,
+      };
     logs.push(...(planned.logs ?? []));
     state = planned.state;
     const s = planned.step;
-    steps.push(
-      s.kind === "role" ? s.role.replace(/-[0-9a-z]+$/, "") : s.kind === "git" ? s.op._tag : s.kind,
-    );
-    const applied = Policy.applyResult(state, s, respond(s, state), {
-      now,
-      coin: 0.3,
-      id: `a${guard}`,
-    });
+    const applyInput = { now, coin: 0.3, id: `a${guard}` };
+    let applied: Policy.Applied;
+    if (s.kind === "pair") {
+      steps.push(...s.halves.map(stepName));
+      pairs.push(s.halves.map(stepName));
+      applied = Policy.applyPair(state, answerPair(s, state, respond), applyInput);
+    } else {
+      steps.push(stepName(s));
+      applied = Policy.applyResult(state, s, respond(s, state), applyInput);
+    }
     logs.push(...applied.logs);
     released.push(...applied.release);
     for (const file of applied.files) written[file.path] = file.text;
     state = applied.state;
   }
-  return { state, steps, logs, released, written };
+  return { state, steps, logs, released, written, pairs };
 };
 
 // A responder for a whole round. v1 answers order 1 (A=candidate), v2 order 2 (A=best).
@@ -344,6 +384,226 @@ describe("rounds", () => {
   });
 });
 
+describe("parallel samples", () => {
+  const atCompare = (patch: Partial<State.RunState> = {}) =>
+    drive(
+      atRound(patch),
+      roundResponder("A", "B"),
+      (s) => s.task._tag === "round" && s.task.phase === "compare",
+    ).state;
+  const planPair = (state: State.RunState) => {
+    const planned = Policy.plan(state, { now: T0, coin: 0.3, id: "lbl" });
+    if (planned.kind !== "step" || planned.step.kind !== "pair") throw new Error("expected a pair");
+    return { state: planned.state, pair: planned.step };
+  };
+  const roles = (pair: State.PairStep) =>
+    pair.halves.map((h) => {
+      if (h.kind !== "role") throw new Error("expected role halves");
+      return h;
+    });
+  const cmpOf = (state: State.RunState) => {
+    if (state.task._tag !== "round" || state.task.cmp === null) throw new Error("no comparison");
+    return state.task.cmp;
+  };
+
+  it("plans both builds' plays as one pair with identical prompts, caps and budgets", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x, y] = roles(pair);
+    expect([x!.at, y!.at]).toEqual(["cand", "best"]);
+    const cmp = cmpOf(state);
+    const [lx, ly] = [x!, y!].map((h) => h.role.replace("sample-", ""));
+    expect(lx).not.toBe(ly);
+    expect(x!.prompt.replace(lx!, "L")).toBe(y!.prompt.replace(ly!, "L"));
+    expect([x!.capMs, x!.inputCapMs]).toEqual([y!.capMs, y!.inputCapMs]);
+    // Ids follow the coin's play order, so the lower id is not always x.
+    const first = cmp.xFirst ? x! : y!;
+    expect(first.id).toBe(Math.min(x!.id, y!.id));
+    expect(pair.id).toBe(Math.max(x!.id, y!.id));
+    expect(state.seq).toBe(pair.id);
+    const { pairs } = drive(atRound(), roundResponder("A", "B"), (s) => s.rounds.length === 1);
+    expect(pairs).toEqual([
+      ["sample", "sample"],
+      ["sample", "sample"],
+    ]);
+  });
+
+  it("lets one build take its extra play turn alone while the other is done", () => {
+    const shortOnCand: Responder = (step, state) =>
+      step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
+        ? done(step, {
+            evidence: {
+              ...goodEvidence,
+              nominalMs:
+                step.at === "cand" && !step.prompt.includes("You used about") ? 12_000 : 80_000,
+            },
+          })
+        : roundResponder("A", "B")(step, state);
+    const { state, steps, pairs } = drive(atRound(), shortOnCand, (s) => s.rounds.length === 1);
+    expect(steps.filter((s) => s === "sample")).toHaveLength(5);
+    // Plays together; then the candidate's extra turn beside the best's write-up; then its write-up alone.
+    expect(pairs).toEqual([
+      ["sample", "sample"],
+      ["sample", "sample"],
+    ]);
+    expect(state.rounds[0]?.kept).toBe(true);
+  });
+
+  it("gives a build played well short of the other one catch-up turn, once", () => {
+    const uneven =
+      (cand: number, best: number): Responder =>
+      (step, state) =>
+        step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
+          ? done(step, {
+              evidence: {
+                ...goodEvidence,
+                nominalMs: step.prompt.includes("You used about")
+                  ? 100_000
+                  : step.at === "cand"
+                    ? cand
+                    : best,
+              },
+            })
+          : roundResponder("A", "B")(step, state);
+    const short = drive(atRound(), uneven(70_000, 110_000), (s) => s.rounds.length === 1);
+    // Both plays, the candidate's catch-up turn, both write-ups.
+    expect(short.steps.filter((s) => s === "sample")).toHaveLength(5);
+    expect(short.logs.some((l) => /plays on: 70 s against 110 s/.test(l))).toBe(true);
+    const close = drive(atRound(), uneven(95_000, 110_000), (s) => s.rounds.length === 1);
+    expect(close.steps.filter((s) => s === "sample")).toHaveLength(4);
+    // A floor turn already spent is the one extra turn: no second catch-up.
+    const floored = drive(atRound(), uneven(10_000, 118_000), (s) => s.rounds.length === 1);
+    expect(floored.steps.filter((s) => s === "sample")).toHaveLength(5);
+  });
+
+  it("replays an unusable sample on its own build only", () => {
+    const ats: Array<string | null> = [];
+    let candPlays = 0;
+    const noInputOnce: Responder = (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("sample")) {
+        ats.push(step.at);
+        // The candidate's first player (its play and write-up turns) records no input.
+        if (step.at === "cand" && candPlays++ < 2)
+          return done(step, { evidence: { ...goodEvidence, executedInputSteps: 0 } });
+      }
+      return roundResponder("A", "B")(step, state);
+    };
+    const { state, steps, pairs, logs } = drive(
+      atRound(),
+      noInputOnce,
+      (s) => s.rounds.length === 1,
+    );
+    expect(steps.filter((s) => s === "sample")).toHaveLength(6);
+    expect(pairs).toHaveLength(2);
+    expect(ats.slice(4)).toEqual(["cand", "cand"]);
+    expect(logs.some((l) => l.includes("lacked usable hands-on evidence"))).toBe(true);
+    expect(state.rounds[0]?.kept).toBe(true);
+  });
+
+  it("resumes a half-finished pair from run.json and runs only the unfinished half", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x, y] = roles(pair);
+    // The driver attached both halves, then x finished and was saved; then the server stopped.
+    const attachedY = {
+      ...y!,
+      attached: { threadId: ThreadId.make("ty"), runId: RunId.make("run-y") },
+    };
+    const saved: State.RunState = {
+      ...state,
+      inFlight: {
+        ...pair,
+        halves: [x!, attachedY],
+        results: [{ id: x!.id, result: done(x!) as State.HalfResult }],
+      },
+    };
+    const loaded = State.loadState(JSON.stringify(State.encodeRunState(saved)), "");
+    if (loaded.kind !== "v3") throw new Error("expected v3");
+    const again = Policy.plan(loaded.state, { now: T0 + MIN, coin: 0.9, id: "other" });
+    if (again.kind !== "step" || again.step.kind !== "pair") throw new Error("expected the pair");
+    const resumed = again.step;
+    expect(resumed).toEqual(saved.inFlight);
+    expect(resumed.halves.filter((h) => !resumed.results.some((r) => r.id === h.id))).toEqual([
+      attachedY,
+    ]);
+    const applied = Policy.applyPair(
+      again.state,
+      {
+        ...resumed,
+        results: [...resumed.results, { id: y!.id, result: done(attachedY) as State.HalfResult }],
+      },
+      { now: T0, coin: 0, id: "a" },
+    );
+    const samples = cmpOf(applied.state).samples;
+    expect(samples.map((s) => [s.side, s.phase])).toEqual(
+      expect.arrayContaining([
+        ["x", "write"],
+        ["y", "write"],
+      ]),
+    );
+    expect(samples.find((s) => s.side === "x")?.thread).toBe(`t-${x!.id}`);
+    expect(applied.state.inFlight).toBeNull();
+  });
+
+  it("keeps a usage-limited pair in flight with its finished half's result", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x] = roles(pair);
+    const withX = { ...pair, results: [{ id: x!.id, result: done(x!) as State.HalfResult }] };
+    const applied = Policy.applyResult(
+      state,
+      withX,
+      { kind: "ended", ending: "usage-limit", reason: "usage limit" },
+      { now: T0, coin: 0, id: "y" },
+    );
+    expect(applied.state.ending).toBe("usage-limit");
+    expect(applied.state.inFlight).toEqual(withX);
+  });
+
+  it("drops the other half at a budget end and gives its worktree back", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x, y] = roles(pair);
+    const applied = Policy.applyPair(
+      state,
+      {
+        ...pair,
+        results: [
+          { id: x!.id, result: done(x!, { timedOut: true, budgetCut: true }) as State.HalfResult },
+          { id: y!.id, result: done(y!) as State.HalfResult },
+        ],
+      },
+      { now: T0, coin: 0, id: "a" },
+    );
+    expect(applied.state.task._tag).toBe("leave");
+    expect(applied.state.inFlight).toBeNull();
+    expect(applied.release).toEqual([`t-${y!.id}`]);
+  });
+
+  it("gives the first half's worktree back when the second half ends the round", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x, y] = roles(pair);
+    const applied = Policy.applyPair(
+      state,
+      {
+        ...pair,
+        results: [
+          { id: x!.id, result: done(x!) as State.HalfResult },
+          { id: y!.id, result: done(y!, { timedOut: true, budgetCut: true }) as State.HalfResult },
+        ],
+      },
+      { now: T0, coin: 0, id: "a" },
+    );
+    expect(applied.state.task._tag).toBe("leave");
+    expect(applied.release).toEqual([`t-${x!.id}`]);
+  });
+
+  it("keeps Unity samples one at a time", () => {
+    const { pairs } = drive(
+      atRound({ lane: "unity" }),
+      roundResponder("A", "B"),
+      (s) => s.rounds.length === 1,
+    );
+    expect(pairs).toEqual([]);
+  });
+});
+
 describe("bot facts", () => {
   // The tester's turns report the bot they ran; each build's bot outcome is keyed by sha.
   const withBot =
@@ -376,7 +636,7 @@ describe("bot facts", () => {
   };
 
   it("runs the tester's bot on both builds after the plays and gives each report its facts", () => {
-    const { steps, prompts, state } = comparePrompts(
+    const { steps, prompts, state, pairs } = comparePrompts(
       withBot({ cand: fact("won", { jars: 5 }), best: fact("timed out", { jars: 2 }) }),
     );
     expect(steps.slice(steps.indexOf("restore-commit"), steps.indexOf("compare"))).toEqual([
@@ -388,6 +648,7 @@ describe("bot facts", () => {
       "bot",
       "bot",
     ]);
+    expect(pairs).toContainEqual(["bot", "bot"]);
     expect(prompts).toHaveLength(2);
     for (const prompt of prompts) {
       expect(prompt).toContain("not how play feels");
@@ -414,14 +675,17 @@ describe("bot facts", () => {
   });
 
   it("withholds bot facts from both reports when the bot errors on one build", () => {
-    const { steps, prompts, state, logs } = comparePrompts(
+    const { steps, prompts, state, logs, pairs, written } = comparePrompts(
       withBot({
         cand: fact("error", {}, "bot file does not load: no node named Jar"),
         best: fact("lost", { level: 3 }),
       }),
     );
-    // The candidate's run errors first, so the best's run is skipped.
-    expect(steps.filter((s) => s === "bot")).toHaveLength(1);
+    // Both runs play at once; the candidate's error still withholds both.
+    expect(pairs).toContainEqual(["bot", "bot"]);
+    expect(steps.filter((s) => s === "bot")).toHaveLength(2);
+    const record = Object.entries(written).find(([path]) => path.endsWith(".json"))?.[1] ?? "";
+    expect(JSON.parse(record).botWithheld).toContain("the bot could not run on cand");
     expect(steps.filter((s) => s === "compare")).toHaveLength(2);
     for (const prompt of prompts) {
       expect(prompt).not.toContain("Bot facts");
@@ -478,15 +742,13 @@ describe("bot facts", () => {
       const planned = Policy.plan(state, { now: clock, coin: 0.3, id: `b${guard}` });
       if (planned.kind === "end") break;
       logs.push(...(planned.logs ?? []));
-      steps.push(
-        planned.step.kind === "role" ? planned.step.role.split("-")[0]! : planned.step.kind,
-      );
-      const applied = Policy.applyResult(
-        planned.state,
-        planned.step,
-        late(planned.step, planned.state),
-        { now: clock, coin: 0.3, id: `c${guard}` },
-      );
+      const halves = planned.step.kind === "pair" ? planned.step.halves : [planned.step];
+      steps.push(...halves.map((h) => (h.kind === "role" ? h.role.split("-")[0]! : h.kind)));
+      const applied = applyStep(planned.state, planned.step, late, {
+        now: clock,
+        coin: 0.3,
+        id: `c${guard}`,
+      });
       logs.push(...applied.logs);
       state = applied.state;
     }
@@ -511,7 +773,7 @@ describe("blind comparators", () => {
     const seeing: Responder = (step, state) => {
       if (step.kind === "role" && step.role.startsWith("compare")) compares.push(step);
       if (step.kind === "role" && step.sheet !== "" && step.at !== null) {
-        expect(step.sheet).toMatch(/^\.studio\/comparisons\/frames-id\d+\.jpg$/);
+        expect(step.sheet).toMatch(/^\.studio\/comparisons\/frames-id\d+b?\.jpg$/);
         if (drawn.includes(step.at)) sheets[step.at] = step.sheet;
         return done(step, {
           sheet: drawn.includes(step.at) ? step.sheet : "",
@@ -823,18 +1085,17 @@ describe("resume", () => {
       const again = Policy.plan(loaded.state, { now: T0 + MIN, coin: 0.1, id: "other" });
       expect(again.kind === "step" && again.step).toEqual(planned.step);
       seen.add(planned.step.kind === "git" ? `git:${planned.step.op._tag}` : planned.step.kind);
-      state = Policy.applyResult(
-        planned.state,
-        planned.step,
-        respond(planned.step, planned.state),
-        { now: T0, coin: 0.7, id: `q${guard}` },
-      ).state;
+      state = applyStep(planned.state, planned.step, respond, {
+        now: T0,
+        coin: 0.7,
+        id: `q${guard}`,
+      }).state;
     }
     for (const kind of [
       "role",
       "boot",
       "facts",
-      "bot",
+      "pair",
       "git:start-round",
       "git:commit",
       "git:restore-commit",

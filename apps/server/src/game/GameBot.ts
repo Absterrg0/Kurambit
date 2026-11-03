@@ -89,7 +89,12 @@ const alive = (pid: number | undefined): boolean => {
   }
 };
 
-/** A free private X display, preferring above the live-Blender range. */
+// Displays this process picked and has not let go: two runs at once (a blind
+// comparison's bot on both builds) both see a number free before either's Xvfb
+// writes its lock, and the second would then play on the first one's display.
+const claimed = new Set<number>();
+
+/** A free private X display, preferring above the live-Blender range; the caller releases it. */
 const pickDisplay = async (): Promise<number | null> => {
   const taken = async (n: number): Promise<boolean> => {
     try {
@@ -114,7 +119,9 @@ const pickDisplay = async (): Promise<number | null> => {
   for (let n = 251; n < 350; n++) ranges.push(n);
   for (let n = 119; n < 251; n++) ranges.push(n);
   for (const n of ranges) {
-    if (!(await taken(n))) return n;
+    if (claimed.has(n) || (await taken(n)) || claimed.has(n)) continue;
+    claimed.add(n);
+    return n;
   }
   return null;
 };
@@ -937,10 +944,12 @@ const make = Effect.gen(function* () {
         }
       }
     };
+    let picked: number | null = null;
     try {
       if (stopped()) throw new Error("Bot run stopped.");
       const display = await pickDisplay();
       if (display === null) throw new Error("No free private X display.");
+      picked = display;
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
         server.listen(0, "127.0.0.1", () => {
@@ -1663,6 +1672,7 @@ const make = Effect.gen(function* () {
           resolve();
         }
       });
+      if (picked !== null) claimed.delete(picked);
     }
   };
 

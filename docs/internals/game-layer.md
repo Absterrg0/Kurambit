@@ -126,7 +126,9 @@ comparators run, the tester's last play bot plays both builds in fresh worktrees
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and run.log and the comparison record say why. A failing bot never drops the round. Comparators
+and run.log and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
+and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
+because explore sessions, bot runs and game operations are keyed by checkout root, not by game. Comparators
 never work in the game folder, where run.json and run.log map every sample to its sha: each gets a
 worktree of its own at one parentless empty-tree commit, holding only its two frame sheets under
 neutral names, and writes `.compare/verdict.md`; the root keeps the write-ups once all verdicts are

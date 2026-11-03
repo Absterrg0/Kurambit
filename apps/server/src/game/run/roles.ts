@@ -32,6 +32,12 @@ export const laneLibrary = (lane: string): string =>
 /** Bot runs play Godot and three.js games; Unity games are played through explore only. */
 export const laneBots = (lane: string): boolean => lane !== "unity";
 
+/**
+ * A comparison's two builds play at once in their own worktrees. Not Unity:
+ * one editor per server builds every sample's player, so a second waits on it.
+ */
+export const laneParallel = (lane: string): boolean => lane !== "unity";
+
 export const CONTINUE = "Continue where you left off. Reply briefly, then keep working.";
 
 const buildRule = (lane: string) =>

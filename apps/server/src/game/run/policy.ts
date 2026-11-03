@@ -9,7 +9,9 @@ import type {
   Compare,
   Evidence,
   GitOp,
+  Half,
   Judge,
+  PairStep,
   Pending,
   RoleStep,
   Round,
@@ -197,7 +199,7 @@ export const expectedBranch = (state: RunState): string | null => {
 // ── Step builders. ────────────────────────────────────────────────────────
 type RoleSpec = Partial<Omit<RoleStep, "kind" | "id" | "role" | "prompt" | "capMs">> &
   Pick<RoleStep, "role" | "prompt" | "capMs">;
-const role = (id: number, spec: RoleSpec): Step => ({
+const role = (id: number, spec: RoleSpec): RoleStep => ({
   kind: "role",
   id,
   title: `studio ${spec.role}`,
@@ -298,32 +300,37 @@ const sheetFile = (s: Pick<Sample, "label">) => `.studio/comparisons/frames-${s.
 const VERDICT = ".compare/verdict.md";
 const SHEET = { a: ".compare/sheet-a.jpg", b: ".compare/sheet-b.jpg" } as const;
 
+type SampleMove = { readonly side: Side; readonly current: Sample | null };
 type CompareMove =
-  | { readonly kind: "sample"; readonly side: Side; readonly current: Sample | null }
-  | { readonly kind: "bot"; readonly side: Side }
+  | { readonly kind: "samples"; readonly moves: ReadonlyArray<SampleMove> }
+  | { readonly kind: "bots"; readonly sides: ReadonlyArray<Side> }
   | { readonly kind: "judge"; readonly aIs: Side; readonly current: Judge | null }
   | { readonly kind: "done"; readonly gate: string | null };
 
-// Each build is played once, in random order with equal caps; a sample without
-// usable evidence is replayed once. The round's bot then plays each build, and
-// each order gets a fresh comparator, a missing verdict one fresh retry on the
-// same reports.
+// Each build is played once with equal caps; a sample without usable evidence
+// is replayed once. The round's bot then plays each build, and each order gets
+// a fresh comparator, a missing verdict one fresh retry on the same reports.
+// The two builds' plays (and bot runs) are independent, so each side's next
+// one is returned, in the comparison's random play order.
 const compareMove = (c: Compare): CompareMove => {
-  for (const side of c.xFirst ? (["x", "y"] as const) : (["y", "x"] as const)) {
-    const entries = c.samples.filter((s) => s.side === side);
-    const last = entries.at(-1) ?? null;
-    if (last === null) return { kind: "sample", side, current: null };
-    if (last.phase !== "done") return { kind: "sample", side, current: last };
-    if (!usable(last) && entries.length === 1) return { kind: "sample", side, current: null };
-  }
+  const moves = (c.xFirst ? (["x", "y"] as const) : (["y", "x"] as const)).flatMap(
+    (side): SampleMove[] => {
+      const entries = c.samples.filter((s) => s.side === side);
+      const last = entries.at(-1) ?? null;
+      if (last === null) return [{ side, current: null }];
+      if (last.phase !== "done") return [{ side, current: last }];
+      if (!usable(last) && entries.length === 1) return [{ side, current: null }];
+      return [];
+    },
+  );
+  if (moves.length > 0) return { kind: "samples", moves };
   const gate = validatePlayEvidence(
     lastSample(c, "x")?.evidence ?? null,
     lastSample(c, "y")?.evidence ?? null,
   );
   if (gate !== null) return { kind: "done", gate };
-  if (c.bot.length > 0 && c.botWithheld === "")
-    for (const side of ["x", "y"] as const)
-      if (!c.bots.some((b) => b.side === side)) return { kind: "bot", side };
+  const sides = (["x", "y"] as const).filter((side) => !c.bots.some((b) => b.side === side));
+  if (c.bot.length > 0 && c.botWithheld === "" && sides.length > 0) return { kind: "bots", sides };
   for (const aIs of c.orders) {
     const entries = c.judges.filter((j) => j.aIs === aIs);
     const last = entries.at(-1) ?? null;
@@ -366,6 +373,110 @@ const nodeCounts = (f: BotFact): string =>
     ? ""
     : ` Scene nodes: ${f.perf.nodesStart} at boot, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (out of the tree, not freed) at the end. A build that reached more of the game is expected to have more nodes; many orphans, or nodes far above what the visible play needs, suggest something spawned and was not freed.`;
 
+// Judges discount a verdict when one build was played much longer than the
+// other. A sample about to write up that played well short of the other
+// side's finished play takes its one extra turn now (the same neutral prompt
+// as the floor's), unless it already had one.
+const CATCH_UP_MS = 20_000;
+const catchUp = (samples: ReadonlyArray<Sample>, logs: string[]): ReadonlyArray<Sample> => {
+  let out = samples;
+  for (const side of ["x", "y"] as const) {
+    const mi = out.findLastIndex((s) => s.side === side);
+    const oi = out.findLastIndex((s) => s.side !== side);
+    if (mi < 0 || oi < 0) continue;
+    const mine = out[mi]!;
+    const other = out[oi]!;
+    if (mine.phase !== "write" || mine.extra) continue;
+    if (other.phase !== "write" && other.phase !== "done") continue;
+    const played = mine.evidence?.nominalMs ?? 0;
+    const theirs = other.evidence?.nominalMs ?? 0;
+    if (
+      theirs - played > Math.max(CATCH_UP_MS, theirs * 0.25) &&
+      played < Roles.SAMPLE_INPUT_MS - CATCH_UP_MS
+    ) {
+      logs.push(
+        `sample ${mine.label} plays on: ${Math.round(played / 1000)} s against ${Math.round(theirs / 1000)} s`,
+      );
+      out = out.with(mi, { ...mine, phase: "more", extra: true });
+    }
+  }
+  return out;
+};
+
+// One play turn of one side's sample: its first play, the floor's one extra
+// turn, or the write-up. Both sides get the same prompt, caps and input budget.
+const sampleStep = (
+  id: number,
+  c: Compare,
+  move: SampleMove,
+  label: string,
+): { sample: Sample | null; step: RoleStep } => {
+  const at = move.side === "x" ? c.x : c.y;
+  if (move.current === null) {
+    const s: Sample = {
+      side: move.side,
+      label,
+      thread: null,
+      phase: "play",
+      notes: "",
+      evidence: null,
+      sheet: "",
+      extra: false,
+    };
+    const step = role(id, {
+      role: `sample-${s.label}`,
+      title: "studio sample",
+      at,
+      prompt: Roles.samplePlay(c.question, sampleFile(s)),
+      capMs: CAP.judge,
+      inputCapMs: Roles.SAMPLE_INPUT_MS,
+    });
+    return { sample: s, step };
+  }
+  const s = move.current;
+  if (s.phase === "more")
+    return {
+      sample: null,
+      step: role(id, {
+        role: `sample-${s.label}`,
+        title: "studio sample",
+        thread: s.thread,
+        at,
+        prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
+        capMs: CAP.judge,
+        inputCapMs: Roles.SAMPLE_INPUT_MS,
+      }),
+    };
+  const step = role(id, {
+    role: `sample-${s.label}`,
+    title: "studio sample",
+    thread: s.thread,
+    at,
+    prompt: Roles.sampleWrite(sampleFile(s)),
+    capMs: CAP.write,
+    // After a restart only this turn re-registers the thread's cap, and a
+    // model that plays on here would void the sample.
+    inputCapMs: Roles.SAMPLE_INPUT_MS,
+    read: [sampleFile(s)],
+    release: true,
+    sheet: sheetFile(s),
+  });
+  return { sample: null, step };
+};
+
+const sideOf = (c: Compare, half: Half): Side | null => {
+  if (half.kind === "bot")
+    return (["x", "y"] as const).find((side) => (side === "x" ? c.x : c.y) === half.sha) ?? null;
+  return c.samples.find((s) => half.role === `sample-${s.label}`)?.side ?? null;
+};
+
+// Two halves become one pair step in x-then-y order; a lone half is itself.
+const pairOf = (c: Compare, id: number, halves: ReadonlyArray<Half>): Step => {
+  const [a, b] = halves;
+  if (b === undefined) return a!;
+  return { kind: "pair", id, halves: sideOf(c, a!) === "y" ? [b, a!] : [a!, b], results: [] };
+};
+
 const compareStep = (
   id: number,
   c: Compare,
@@ -373,10 +484,12 @@ const compareStep = (
   state: RunState,
 ): { cmp: Compare; step: Step; logs: string[] } => {
   const move = compareMove(c);
-  if (move.kind === "bot") {
+  const parallel = Roles.laneParallel(state.lane);
+  if (move.kind === "bots") {
     // Decided here, after the plays and their replays: the runs still owed
     // must fit and leave both verdicts their time.
-    const owed = (2 - c.bots.length) * BOT_RUN_MS;
+    const sides = parallel ? move.sides : move.sides.slice(0, 1);
+    const owed = (parallel ? 1 : move.sides.length) * BOT_RUN_MS;
     if (fit(state, input.now, owed, 2 * CAP.write) < owed) {
       const why = "the budget leaves no time for the bot runs";
       const next = compareStep(id, { ...c, botWithheld: why }, input, state);
@@ -385,71 +498,35 @@ const compareStep = (
         logs: [`bot facts withheld: ${why}; judging on play reports`, ...next.logs],
       };
     }
+    const halves = sides.map((side, i): Half => ({
+      kind: "bot",
+      id: id + i,
+      sha: side === "x" ? c.x : c.y,
+      file: c.bot,
+      decider: c.botDecider,
+      seconds: BOT_SECONDS,
+    }));
+    return { cmp: c, step: pairOf(c, id + halves.length - 1, halves), logs: [] };
+  }
+  if (move.kind === "samples") {
+    // Ids and labels follow the play order, which is a coin, never x and y.
+    let fresh = 0;
+    const made = (parallel ? move.moves : move.moves.slice(0, 1)).map((m, i) =>
+      sampleStep(id + i, c, m, m.current === null && fresh++ > 0 ? `${input.id}b` : input.id),
+    );
+    const cmp = {
+      ...c,
+      samples: [...c.samples, ...made.flatMap((m) => (m.sample === null ? [] : [m.sample]))],
+    };
     return {
-      cmp: c,
-      step: {
-        kind: "bot",
-        id,
-        sha: move.side === "x" ? c.x : c.y,
-        file: c.bot,
-        decider: c.botDecider,
-        seconds: BOT_SECONDS,
-      },
+      cmp,
+      step: pairOf(
+        cmp,
+        id + made.length - 1,
+        made.map((m) => m.step),
+      ),
       logs: [],
     };
-  }
-  if (move.kind === "sample") {
-    const at = move.side === "x" ? c.x : c.y;
-    if (move.current === null) {
-      const s: Sample = {
-        side: move.side,
-        label: input.id,
-        thread: null,
-        phase: "play",
-        notes: "",
-        evidence: null,
-        sheet: "",
-      };
-      const step = role(id, {
-        role: `sample-${s.label}`,
-        title: "studio sample",
-        at,
-        prompt: Roles.samplePlay(c.question, sampleFile(s)),
-        capMs: CAP.judge,
-        inputCapMs: Roles.SAMPLE_INPUT_MS,
-      });
-      return { cmp: { ...c, samples: [...c.samples, s] }, step, logs: [] };
-    }
-    const s = move.current;
-    if (s.phase === "more")
-      return {
-        cmp: c,
-        step: role(id, {
-          role: `sample-${s.label}`,
-          title: "studio sample",
-          thread: s.thread,
-          at,
-          prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
-          capMs: CAP.judge,
-          inputCapMs: Roles.SAMPLE_INPUT_MS,
-        }),
-        logs: [],
-      };
-    const step = role(id, {
-      role: `sample-${s.label}`,
-      title: "studio sample",
-      thread: s.thread,
-      at,
-      prompt: Roles.sampleWrite(sampleFile(s)),
-      capMs: CAP.write,
-      // After a restart only this turn re-registers the thread's cap, and a
-      // model that plays on here would void the sample.
-      inputCapMs: Roles.SAMPLE_INPUT_MS,
-      read: [sampleFile(s)],
-      release: true,
-      sheet: sheetFile(s),
-    });
-    return { cmp: c, step, logs: [] };
   }
   if (move.kind === "judge") {
     if (move.current === null) {
@@ -511,21 +588,30 @@ const compareStep = (
 
 const applyCompare = (
   c: Compare,
+  done: Step,
   res: StepResult,
   logs: string[],
   release: ThreadId[],
 ): Compare => {
   if (res.kind === "bot") {
-    const move = compareMove(c);
-    if (move.kind !== "bot") return c;
-    const bots = [...c.bots, { side: move.side, ...res.fact }];
-    if (res.fact.ending !== "error") return { ...c, bots };
-    // Either build failing withholds both reports' facts, so the other run is skipped.
-    const botWithheld = `the bot could not run on ${(move.side === "x" ? c.x : c.y).slice(0, 12)}: ${res.fact.note || "no detail"}`;
+    // The step names its build; both builds may be one sha, then either side is it.
+    const side = (["x", "y"] as const).find(
+      (each) =>
+        !c.bots.some((b) => b.side === each) &&
+        (done.kind !== "bot" || (each === "x" ? c.x : c.y) === done.sha),
+    );
+    if (side === undefined) return c;
+    const bots = [...c.bots, { side, ...res.fact }];
+    if (res.fact.ending !== "error" || c.botWithheld !== "") return { ...c, bots };
+    // Either build failing withholds both reports' facts; a serial run skips the other.
+    const botWithheld = `the bot could not run on ${(side === "x" ? c.x : c.y).slice(0, 12)}: ${res.fact.note || "no detail"}`;
     logs.push(`bot facts withheld from both reports: ${botWithheld}`);
     return { ...c, bots, botWithheld };
   }
-  const si = c.samples.findIndex((s) => s.phase !== "done");
+  // Two samples may be in flight at once; the step's role names its own.
+  const si = c.samples.findIndex(
+    (s) => s.phase !== "done" && (done.kind !== "role" || done.role === `sample-${s.label}`),
+  );
   if (si >= 0) {
     const s = c.samples[si]!;
     const next: Sample =
@@ -536,8 +622,9 @@ const applyCompare = (
               ...s,
               thread: res.threadId,
               // Evidence is cumulative per thread, so the second turn adds to it.
-              phase:
-                res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS ? "more" : "write",
+              ...(res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS
+                ? { phase: "more" as const, extra: true }
+                : { phase: "write" as const }),
               evidence: res.evidence,
             }
           : s.phase === "more"
@@ -552,7 +639,7 @@ const applyCompare = (
     if (res.kind === "failed") logs.push(`sample ${s.label} could not finish: ${res.reason}`);
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);
-    return { ...c, samples: c.samples.with(si, next) };
+    return { ...c, samples: catchUp(c.samples.with(si, next), logs) };
   }
   const ji = c.judges.findIndex((j) => j.phase !== "done");
   if (ji < 0) return c;
@@ -941,6 +1028,68 @@ const leaveRound = (state: RunState, r: Round): RunState => ({
   },
 });
 
+const inComparison = (s: RunState): boolean =>
+  s.ending === null &&
+  (s.task._tag === "pick" || s.task._tag === "round") &&
+  s.task.phase === "compare";
+
+/**
+ * A pair lands once both halves have results: each goes through applyResult,
+ * x then y, so every per-side rule (the play floor's extra turn, a replay, bot
+ * withholding) is the serial one. A half that ends the comparison (a budget
+ * end) drops the other; one that stays in flight keeps the other with it.
+ */
+export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Applied => {
+  const logs: string[] = [];
+  const files: Array<{ path: string; text: string }> = [];
+  const release: ThreadId[] = [];
+  const out = (next: RunState): Applied => ({ state: next, logs, files, release });
+  const resultOf = (half: Half) => pair.results.find((r) => r.id === half.id)?.result;
+  // What stays in flight: these halves, each with its result unless it re-runs.
+  const keep = (rest: ReadonlyArray<Half>, rerun: number | null): Step =>
+    rest.length === 1
+      ? rest[0]!
+      : {
+          ...pair,
+          halves: rest,
+          results: pair.results.filter((r) => r.id !== rerun && rest.some((h) => h.id === r.id)),
+        };
+  // Leaving the comparison (a budget end on either half) drops every sample
+  // in it, so each finished worktree play gives its checkout back, including
+  // one applied earlier in this pair that was kept for a follow-up turn.
+  // Releasing an already released checkout is a no-op.
+  const leave = (next: RunState): Applied => {
+    for (const each of pair.halves) {
+      const r = resultOf(each);
+      // A budget-cut half already gave its own checkout back in the role runner.
+      if (
+        each.kind === "role" &&
+        each.at !== null &&
+        r?.kind === "done" &&
+        !(r.timedOut && r.budgetCut) &&
+        !release.includes(r.threadId)
+      )
+        release.push(r.threadId);
+    }
+    return out(next);
+  };
+  let s: RunState = { ...state, inFlight: null };
+  for (const [i, half] of pair.halves.entries()) {
+    const rest = pair.halves.slice(i);
+    if (!inComparison(s)) return leave(s);
+    const res = resultOf(half);
+    if (res === undefined) return out({ ...s, inFlight: keep(rest, null) });
+    const applied = applyResult(s, half, res, input);
+    logs.push(...applied.logs);
+    files.push(...applied.files);
+    release.push(...applied.release);
+    s = applied.state;
+    // Kept in flight (a budget end outside a round): it re-runs on resume, as a serial step would.
+    if (s.inFlight !== null) return out({ ...s, inFlight: keep(rest, half.id) });
+  }
+  return inComparison(s) ? out(s) : leave(s);
+};
+
 export const applyResult = (
   state: RunState,
   done: Step,
@@ -1079,7 +1228,7 @@ export const applyResult = (
           task: { ...t, phase: "adopt", chosen: chosen === "A" ? t.cmp.x : t.cmp.y },
         });
       }
-      const cmp = applyCompare(t.cmp, res, logs, release);
+      const cmp = applyCompare(t.cmp, done, res, logs, release);
       const move = compareMove(cmp);
       if (move.kind !== "done") return out({ ...s, task: { ...t, cmp } });
       files.push(...comparisonFiles("pick", input.id, cmp, move.gate, { x: "A", y: "B" }));
@@ -1119,13 +1268,14 @@ export const applyResult = (
       if (t.phase === "restore") return out({ ...s, task: { ...t, phase: "trunk" } });
       return out({ ...s, ending: "budget", task: newRound(s, now) });
     case "round":
-      return out(applyRound(s, t, res, input, logs, files, release));
+      return out(applyRound(s, t, done, res, input, logs, files, release));
   }
 };
 
 const applyRound = (
   s: RunState,
   r: Round,
+  done: Step,
   res: StepResult,
   input: Inputs,
   logs: string[],
@@ -1300,7 +1450,7 @@ const applyRound = (
       return at({ phase: "compare", cmp });
     }
     case "compare": {
-      const cmp = applyCompare(r.cmp!, res, logs, release);
+      const cmp = applyCompare(r.cmp!, done, res, logs, release);
       const move = compareMove(cmp);
       if (move.kind !== "done") return at({ cmp });
       files.push(
