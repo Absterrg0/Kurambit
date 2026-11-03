@@ -54,8 +54,9 @@ what happened in a round. Role threads link to the sessions that did the work. *
 it; rejected work stays on its branch.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
-round**. The game's sources return to that build as a new commit, so later commits stay in git
-history, and restoring a later kept round goes forward again. A resumed run judges its next
+round**. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as
+a new commit, so later commits stay in git history, and restoring a later kept round goes forward
+again. Notes, `PLAN.md`, `VISION.md`, `BRIEF.md`, bots and the run's records stay as they are. A resumed run judges its next
 round against the restored build. Restore refuses while a run is live, while a stopped run is in
 the middle of a round, and while the game has uncommitted changes; it never discards work.
 

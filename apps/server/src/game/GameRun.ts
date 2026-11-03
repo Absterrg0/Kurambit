@@ -40,7 +40,7 @@ import * as Templates from "./templates.ts";
 import { runBotFact } from "./run/botFacts.ts";
 import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
-import { makeGit } from "./run/git.ts";
+import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
@@ -987,8 +987,8 @@ export const layer = (options: { readonly stateDir: string }) => {
       threadId: ThreadId,
       round: number,
     ) {
-      const found = yield* findRound("run-restore", threadId, round);
-      const { root, state, record, trunk } = found;
+      const target = yield* resolveGame(threadId);
+      const root = target.root;
       const no = (reason: string, detail: string) => refuse("run-restore", root, reason, detail);
       // Checked and claimed with no yield between, like runStart's slot.
       if (active.has(root) || restoring.has(root))
@@ -996,15 +996,24 @@ export const layer = (options: { readonly stateDir: string }) => {
           "run-live",
           "A production run is live for this game. Stop it before restoring a round.",
         );
-      if (!record.kept)
-        return yield* no(
-          "not-kept",
-          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
-        );
       restoring.add(root);
       return yield* Effect.gen(function* () {
+        // Read only after the claim: no run can change run.json from here on.
+        const found = yield* findRound("run-restore", threadId, round);
+        const { state, record, trunk, lane } = found;
+        if (!record.kept)
+          return yield* no(
+            "not-kept",
+            `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
+          );
+        // A crash-saved step replays on resume from the run's old position.
+        if (state.inFlight !== null && CONTINUABLE.has(state.ending))
+          return yield* no(
+            "mid-step",
+            `The stopped run saved an unfinished ${state.inFlight.kind} step and would replay it on resume. Resume the run and let it finish, or start a new run, before restoring.`,
+          );
         const log = (line: string) => logLine(root, line);
-        const git = makeGit(root, found.lane, log);
+        const git = makeGit(root, lane, log);
         const on = yield* git.current;
         if (on !== trunk)
           return yield* no(
@@ -1031,10 +1040,11 @@ export const layer = (options: { readonly stateDir: string }) => {
             "commit-missing",
             `Round ${round}'s commit (branch ${record.branch}) is no longer on ${trunk}.`,
           );
+        const what = restoredPaths(lane).join(", ");
         if (yield* git.sameBuild(sha))
           return {
             sha,
-            message: `Round ${round}'s build is already the game's current build.`,
+            message: `Round ${round}'s build (${what}) is already the game's current build.`,
           } satisfies GameRunRestoreResult;
         const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
         if (!(yield* git.sameBuild(sha)))
@@ -1052,17 +1062,25 @@ export const layer = (options: { readonly stateDir: string }) => {
             ),
           );
         yield* log(
-          `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}`,
+          `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}: ${what}`,
         );
         return {
           sha: restored,
-          message: `Round ${round}'s build is now the game's sources (commit ${restored.slice(0, 8)} on ${trunk}). Later commits stay in git history, and restoring a later kept round goes forward again.`,
+          message: `Round ${round}'s ${what} are back as commit ${restored.slice(0, 8)} on ${trunk}; notes, PLAN.md, VISION.md, bots and run records were left as they are. Later commits stay in git history, and restoring a later kept round goes forward again.`,
         } satisfies GameRunRestoreResult;
       }).pipe(
         Effect.catchTags({
           RunGitError: (cause) =>
             Effect.fail(
-              no("git-failed", `${cause.message} See .studio/run.log and the game's git status.`),
+              cause.op === "restore-apply"
+                ? no(
+                    "local-changes",
+                    `Nothing was restored: changes made meanwhile touch files the restore would change (${cause.reason}). Commit or discard those changes, then restore again.`,
+                  )
+                : no(
+                    "git-failed",
+                    `${cause.message} See .studio/run.log and the game's git status.`,
+                  ),
             ),
         }),
         Effect.ensuring(Effect.sync(() => restoring.delete(root))),
