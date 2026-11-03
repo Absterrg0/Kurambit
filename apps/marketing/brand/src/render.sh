@@ -74,7 +74,25 @@ wall "t=paper&rows=9" 2560 1440 youtube/banner.png
 shot "og.html?w=1200&h=630" 1200,630 web/og.png
 shot "og.html?w=1280&h=640" 1280,640 github/social-preview.png
 
-find "$kit" -path "$kit/src" -prune -o -path "$kit/logo" -prune -o -name "*.png" -print0 |
+# The site's icons: tabs, Google's results, phones and installed web apps.
+shot "icon.html?r=18&w=512&h=512" 512,512 icon/icon-round.png
+shot "icon.html?r=0&w=512&h=512" 512,512 icon/icon-square.png
+python3 - "$kit/icon" "$kit/../site" <<'PY'
+import sys
+from PIL import Image
+icons, site = sys.argv[1:3]
+round_ = Image.open(f"{icons}/icon-round.png").convert("RGBA")
+square = Image.open(f"{icons}/icon-square.png").convert("RGB")
+size = lambda image, n: image.resize((n, n), Image.LANCZOS)
+round_.save(f"{site}/favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
+for n in (32, 48):
+    size(round_, n).save(f"{site}/favicon-{n}x{n}.png", optimize=True)
+for n in (192, 512):
+    size(round_, n).save(f"{site}/icon-{n}.png", optimize=True)
+size(square, 180).save(f"{site}/apple-touch-icon.png", optimize=True)
+PY
+
+find "$kit" -path "$kit/src" -prune -o -path "$kit/logo" -prune -o -path "$kit/icon" -prune -o -name "*.png" -print0 |
   xargs -0 python3 -c '
 import os, sys
 from PIL import Image

@@ -70,9 +70,24 @@ repository; `vercel firewall overview` from a directory linked to the `kurambit`
   page.
 - **Waitlist API rate limit:** at most 10 requests a minute per IP to `/api`, ahead of the
   endpoint's own hourly limit.
-- **Link previews:** Slack, Discord, Telegram and WhatsApp preview bots cannot be verified, so a
-  bypass lets their GET requests through to pages and images, never to `/api`.
+- **Link previews and crawl files:** Slack, Discord, Telegram and WhatsApp preview bots cannot be
+  verified, so a bypass lets their GET requests through to pages and images, never to `/api`. The
+  same rule lets any GET of `robots.txt`, `sitemap.xml`, `llms.txt` and the IndexNow key file
+  through, for crawlers Vercel does not verify. Hobby allows three custom rules, which is why the
+  two share one.
 - **Waitlist export:** requests to `/api/waitlist-export` that carry an `Authorization` header skip
   Bot Protection so the `curl` above keeps working; the endpoint checks the token itself.
 
 The AI Bots ruleset is left off on purpose: the site wants answer engines to read and cite it.
+
+## Search engines
+
+Bing, Yandex, Seznam and Naver are also told about changed pages through IndexNow: the key is the
+`<key>.txt` file in `site/`, and after a deploy that changes pages,
+
+```sh
+curl -s -H "Content-Type: application/json" https://api.indexnow.org/indexnow -d \
+  '{"host":"kurambit.com","key":"<key>","urlList":["https://kurambit.com/"]}'
+```
+
+with the key from that file. Bump the sitemap's `lastmod` when a page changes.
