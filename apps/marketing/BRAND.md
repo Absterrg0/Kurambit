@@ -57,7 +57,8 @@ Reuse the lines the site already carries before writing new ones:
 | Geist Mono       | Small facts: URLs, build ids, times             | 400, never as a caps eyebrow        |
 
 Headlines take a short brush stroke under them (ink on the hero, vermilion on section heads). The
-font files and their OFL licences are in [site/fonts](site/fonts).
+font files and their OFL licences are in [site/fonts](site/fonts). They are subset to Latin and
+common punctuation, and browsers cache them for 30 days, so a changed font needs a new file name.
 
 ## Colour
 

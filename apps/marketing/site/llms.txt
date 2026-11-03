@@ -1,0 +1,27 @@
+# Kurambit
+
+> Kurambit is an open-source desktop app for making games with the coding agent you already use. You describe a game; your agent builds it, a separate tester session plays every build, a judge compares each new build blind against the one before it, and only builds that come out better are kept. A run keeps going until its budget ends, so a game can keep improving overnight.
+
+Kurambit is open source under the MIT license and is currently invite-only: people join a waitlist on kurambit.com and are let in in small batches.
+
+## What it works with
+
+- Coding agents: Codex, Claude Code, Cursor, Grok Build, OpenCode and Antigravity, plus any agent that speaks the Agent Client Protocol (ACP). One signed-in agent is enough for the whole loop.
+- Engines and tools: games are built in Godot, with art made in Blender. Kurambit installs both.
+- Platform: Linux on x86_64 today.
+
+## What you get
+
+- Any genre. One brief aims for a game shaped like a Steam demo: something you can play, judge and keep improving.
+- Every game is its own git repository on your machine, with a normal Godot project and the Blender files that made its art. It opens without Kurambit.
+- You can direct it in plain words at any time; the next round takes the request on, and nothing reaches you until it beats the build before it.
+
+## Cost
+
+Kurambit is free and open source. It runs on the agent subscription you already pay for.
+
+## Links
+
+- [Kurambit website](https://kurambit.com/): what it does, answers to common questions and the waitlist
+- [Source code on GitHub](https://github.com/Absterrg0/Kurambit): the full app, MIT licensed
+- [Privacy note](https://kurambit.com/privacy): how waitlist emails are handled

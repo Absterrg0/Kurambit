@@ -162,6 +162,8 @@ h3 {
 .page {
   position: relative;
   z-index: 1;
+  /* A short page still runs the sheet to the bottom of the window. */
+  min-height: 100vh;
   width: var(--page);
   margin: 0 auto;
   border-inline: 1px solid var(--rule);
@@ -1456,7 +1458,7 @@ h3 {
   left: 8px;
   padding: 3px 7px;
   border-radius: 6px;
-  background: var(--shu);
+  background: var(--shu-deep);
   color: #fff;
   font-family: var(--mono);
   font-size: 12px;
@@ -2270,12 +2272,14 @@ body {
   box-shadow: none;
 }
 
+/* Filled vermilion carries text, so it takes the deeper shade: white on
+   --shu is 3.6:1, under the 4.5:1 that small text needs. */
 .btn-primary {
-  background: var(--shu);
+  background: var(--shu-deep);
 }
 
 .btn-primary:hover {
-  background: #d1491b;
+  background: #b53e17;
 }
 
 .btn:active {
@@ -2534,11 +2538,13 @@ body {
   initial-value: 360deg;
 }
 
+/* It starts faint rather than invisible: browsers do not count a fully
+   transparent headline as painted, so the page's largest paint would wait.
+   No blur: re-blurring the headline every frame kept phones busy. */
 @keyframes ink-in {
   from {
-    opacity: 0;
+    opacity: 0.1;
     transform: translateY(10px);
-    filter: blur(3px);
   }
 }
 

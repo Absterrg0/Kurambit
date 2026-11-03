@@ -56,3 +56,23 @@ closed and sends nothing.
 - Formula injection in the CSV export: cells that start with `=`, `+`, `-` or `@` are escaped.
 
 Schema changes are plain SQL against the database; the tables are `waitlist` and `waitlist_rate`.
+
+## Firewall
+
+The project is on Vercel's Hobby plan, which pauses the whole team when it runs over its monthly
+allowance, so the Vercel Firewall stops abusive traffic before it is counted. Traffic the firewall
+challenges, denies or rate limits does not count toward usage. Its rules live in Vercel, not in this
+repository; `vercel firewall overview` from a directory linked to the `kurambit` project shows them.
+
+- **Bot Protection** is on in challenge mode. Verified bots pass: search engines, the X, Facebook
+  and LinkedIn preview bots, AI crawlers and assistants, and PageSpeed Insights. Anything else that
+  does not look like a browser gets a JavaScript challenge, so `curl` against the site sees a 429
+  page.
+- **Waitlist API rate limit:** at most 10 requests a minute per IP to `/api`, ahead of the
+  endpoint's own hourly limit.
+- **Link previews:** Slack, Discord, Telegram and WhatsApp preview bots cannot be verified, so a
+  bypass lets their GET requests through to pages and images, never to `/api`.
+- **Waitlist export:** requests to `/api/waitlist-export` that carry an `Authorization` header skip
+  Bot Protection so the `curl` above keeps working; the endpoint checks the token itself.
+
+The AI Bots ruleset is left off on purpose: the site wants answer engines to read and cite it.

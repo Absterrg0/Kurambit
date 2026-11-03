@@ -4,21 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#efeee9" />
-    <title>Kurambit: your coding agent, now a game studio</title>
+    <meta name="theme-color" content="#ede6d7" />
+    <title>Kurambit: make games with your coding agent</title>
     <meta
       name="description"
-      content="Describe a game. Kurambit has the coding agent you already use build it in Godot and Blender, plays every build, and keeps only the changes that make it better. Join the waitlist."
+      content="Describe a game and Kurambit has your coding agent build it, plays every build, and keeps only what gets better. Open source; works with Claude Code, Codex and more."
     />
+    <link rel="canonical" href="https://kurambit.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Kurambit" />
-    <meta property="og:title" content="Kurambit: your coding agent, now a game studio" />
+    <meta property="og:title" content="Kurambit: make games with your coding agent" />
     <meta
       property="og:description"
-      content="The game harness for coding agents. Your agent builds the game in Godot and Blender; Kurambit plays every build, judges it blind, and keeps only what's better."
+      content="Describe a game. Your coding agent builds it, Kurambit plays every build, and only what gets better is kept. Open source."
     />
     <!-- Bump ?v= with every new card: link previews cache by URL. -->
-    <meta property="og:image" content="https://kurambit.com/og.png?v=2" />
+    <meta property="og:image" content="https://kurambit.com/og.png?v=3" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
@@ -31,6 +32,101 @@
       name="twitter:image:alt"
       content="Your coding agent, now a game studio. Kurambit's fox drawn in ink pixels on washi paper."
     />
+    <!-- For search engines and answer engines; the FAQ entries must match the page's own FAQ. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://kurambit.com/#org",
+            "name": "Kurambit",
+            "url": "https://kurambit.com/",
+            "logo": "https://kurambit.com/apple-touch-icon.png",
+            "sameAs": ["https://github.com/Absterrg0/Kurambit"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://kurambit.com/#site",
+            "name": "Kurambit",
+            "url": "https://kurambit.com/",
+            "publisher": {
+              "@id": "https://kurambit.com/#org"
+            }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://kurambit.com/#app",
+            "name": "Kurambit",
+            "url": "https://kurambit.com/",
+            "description": "An open-source desktop app for making games with the coding agent you already use. Your agent builds the game in Godot and Blender, a separate tester plays every build, each build is judged blind against the last, and only better builds are kept.",
+            "applicationCategory": "DeveloperApplication",
+            "applicationSubCategory": "Game development",
+            "operatingSystem": "Linux",
+            "license": "https://opensource.org/licenses/MIT",
+            "isAccessibleForFree": true,
+            "image": "https://kurambit.com/og.png?v=3",
+            "publisher": {
+              "@id": "https://kurambit.com/#org"
+            }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://kurambit.com/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "When can I use Kurambit?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "We are letting people in small batches so every new studio gets a good first game. Join the waitlist and we will email you when your invite is ready."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What do I need?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "A Linux x86_64 machine today and one signed-in coding agent: Codex, Claude Code, Cursor, Grok Build, OpenCode or Antigravity. Kurambit installs Godot and Blender for you."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What does it cost?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Kurambit is open source under the MIT license. It runs on the agent subscription you already have; one model is enough for the whole loop."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can it make any kind of game?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Any genre. One brief aims for a game shaped like a Steam demo: something you can play, judge and keep improving with the studio."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is my game mine?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Each game is its own git repository on your machine, with a normal Godot project and the Blender files that made its art. Open it without Kurambit any time."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What happens to my email?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "It is stored privately and used only to contact you about Kurambit. It is never sold or shared, and you can ask to be removed at any time. Read the privacy note."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" href="favicon-32x32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
@@ -592,7 +688,7 @@
                   </g>
                 </svg>
               </div>
-              <ol class="proof-index" data-proof-index aria-hidden="true"></ol>
+              <ol class="proof-index" data-proof-index aria-label="Builds"></ol>
               <ol class="sr-only">
                 <li>
                   Build 2 lights the lantern. The tester plays it and both jumps land. Compared

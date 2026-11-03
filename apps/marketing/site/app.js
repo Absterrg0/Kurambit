@@ -140,6 +140,9 @@ function createInkArt(canvas, options) {
   let height = 0;
   let reveal = reduceMotion ? 1 : 0;
   let revealStart = 0;
+  // How far the reveal the canvas holds has got, or null when the canvas
+  // holds cells bent by the cursor and has to be redrawn whole.
+  let drawnTo = null;
   let frame = 0;
   let ready = false;
 
@@ -157,8 +160,13 @@ function createInkArt(canvas, options) {
         : Math.round((height - shape.rows * cell) / 2);
     field = sampleField(shape.cols, shape.rows, paint, inkWeight);
     if (curve) clean(field, curve);
+    // Sizing the canvas cleared it.
+    drawnTo = -1;
     return true;
   }
+
+  const revealOrder = (x, y, cols, rows) =>
+    revealFrom === "left" ? x / cols : revealFrom === "bottom" ? 1 - y / rows : y / rows;
 
   // Push soft brush tones toward ink or paper, then drop pixels that would
   // stand alone: the dither keeps the stroke and loses the noise.
@@ -227,10 +235,8 @@ function createInkArt(canvas, options) {
         if (value < 0.02) continue;
         const threshold = bayer(x, y);
         if (value <= threshold) continue;
-        if (reveal < 1) {
-          const order =
-            revealFrom === "left" ? x / cols : revealFrom === "bottom" ? 1 - y / rows : y / rows;
-          if (reveal * 1.5 - order - threshold * 0.5 < 0) continue;
+        if (reveal < 1 && reveal * 1.5 - revealOrder(x, y, cols, rows) - threshold * 0.5 < 0) {
+          continue;
         }
         let px = offsetX + x * cell;
         let py = offsetY + y * cell;
@@ -254,6 +260,33 @@ function createInkArt(canvas, options) {
     context.fill(ink);
     context.fillStyle = VERMILION;
     context.fill(hot);
+    drawnTo = strength > 0.002 || ground ? null : reveal;
+  }
+
+  // A reveal frame paints only the cells that arrive in it, on top of the
+  // ones already there. Repainting every cell each frame kept a phone's main
+  // thread busy for the whole reveal.
+  function drawArrivals() {
+    const { cols, rows, density, accent } = field;
+    const size = cell - 1;
+    const ink = new Path2D();
+    const hot = new Path2D();
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        const index = y * cols + x;
+        const value = density[index];
+        const threshold = bayer(x, y);
+        if (value < 0.02 || value <= threshold) continue;
+        const arrives = (revealOrder(x, y, cols, rows) + threshold * 0.5) / 1.5;
+        if (arrives <= drawnTo || arrives > reveal) continue;
+        (accent[index] ? hot : ink).rect(offsetX + x * cell, offsetY + y * cell, size, size);
+      }
+    }
+    context.fillStyle = INK;
+    context.fill(ink);
+    context.fillStyle = VERMILION;
+    context.fill(hot);
+    drawnTo = reveal;
   }
 
   function tick(now) {
@@ -272,7 +305,8 @@ function createInkArt(canvas, options) {
       Math.abs(pointer.ty - pointer.y) < 0.5;
     if (settled) pointer.s = pointer.ts;
     else busy = true;
-    draw();
+    if (drawnTo !== null && pointer.s <= 0.002 && !ground) drawArrivals();
+    else draw();
     if (busy) frame = requestAnimationFrame(tick);
   }
 
@@ -338,7 +372,6 @@ const foxCanvas = document.getElementById("fox");
 if (foxCanvas) {
   const image = new Image();
   image.decoding = "async";
-  image.src = "fox-ink.webp";
   const fox = createInkArt(foxCanvas, {
     inkWeight: 0.55,
     curve: [0.18, 0.72],
@@ -358,9 +391,16 @@ if (foxCanvas) {
       context.drawImage(image, 0, 0, cols, rows);
     },
   });
-  image.decode().then(
-    () => fox.start(),
-    () => {},
+  // The headline paints first: the 120 KB picture the fox is sampled from
+  // would otherwise compete with the fonts on a slow connection.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      image.src = "fox-ink.webp";
+      image.decode().then(
+        () => fox.start(),
+        () => {},
+      );
+    }),
   );
   resizers.push(() => fox.resize());
 }

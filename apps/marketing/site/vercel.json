@@ -32,7 +32,16 @@
       ]
     },
     {
-      "source": "/(.*)\\.(webp|png|ico|woff2)",
+      "source": "/fonts/(.*)\\.woff2",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=2592000"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(webp|png|ico)",
       "headers": [
         {
           "key": "Cache-Control",
