@@ -39,7 +39,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { laneAssets } from "./run/roles.ts";
+import { laneLibrary } from "./run/roles.ts";
 import { templateDirectoryCandidates } from "./templates.ts";
 
 /** Beside the pinned tools, shared by every game on this machine. */
@@ -126,8 +126,7 @@ const engineOf = (name: string): LibraryEngine =>
   name === "three" ? "three" : name === "unity" ? "unity" : "godot";
 
 /** Game-relative directory a pack's files land in, under the lane's own asset dir. */
-const libraryDirFor = (lane: string, pack: string) =>
-  `${laneAssets(lane)}/${lane === "unity" ? "Library" : "library"}/${pack}`;
+const libraryDirFor = (lane: string, pack: string) => `${laneLibrary(lane)}/${pack}`;
 
 /** Scratch names carry the pid of the server that made them, so a sweep spares a live server's fetch. */
 const SCRATCH_NAME =

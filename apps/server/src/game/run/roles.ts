@@ -25,6 +25,10 @@ const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default 
 export const laneAssets = (lane: string): string =>
   lane === "unity" ? "unity/Assets" : `${lane}/assets`;
 
+/** Where library packs land under the lane's asset dir. */
+export const laneLibrary = (lane: string): string =>
+  `${laneAssets(lane)}/${lane === "unity" ? "Library" : "library"}`;
+
 /** Bot runs play Godot and three.js games; Unity games are played through explore only. */
 export const laneBots = (lane: string): boolean => lane !== "unity";
 
@@ -59,8 +63,14 @@ export const artReview = (lane: string): string =>
 // GameRun appends this at launch: the facts come from disk and the policy stays pure.
 // Only ASSETS.md against the disk: the code is not wired to the new art yet, so which files
 // it references says nothing about the art.
-export const artFacts = (facts: string): string =>
-  `\n\nFile facts on the asset set (static scan of ASSETS.md against the files on disk): ${facts}`;
+export const artFacts = (facts: string, sprites: string): string =>
+  `\n\nFile facts on the asset set (static scan of ASSETS.md against the files on disk): ${facts}${spriteBlock(sprites)}`;
+
+/** Measured pixel facts, given to the art director and to the redo that answers it. */
+export const spriteBlock = (sprites: string): string =>
+  sprites.length === 0
+    ? ""
+    : `\n\nMeasured image facts (pixels decoded from the files; numbers, not verdicts; look at the files yourself):\n${sprites}`;
 
 // Works as a follow-up on the art thread and as a fresh art role alike.
 export const artRedo = (defects: string, lane: string): string =>
