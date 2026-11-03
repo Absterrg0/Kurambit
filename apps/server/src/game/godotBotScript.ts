@@ -174,6 +174,17 @@ func _boot_observation() -> Dictionary:
 		"probe": _read_probe(),
 		"body": _read_body(),
 		"errors": _drain_errors(),
+		"perf": _read_perf(),
+	}
+
+# Counts, not timings: frame and script times under the private software
+# display measure this machine's load, while node counts are the game's own.
+# Orphans (nodes out of the tree, never freed) are tracked in the debug build
+# the bot runs.
+func _read_perf() -> Dictionary:
+	return {
+		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"orphans": int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)),
 	}
 
 func _tick_observation() -> Dictionary:
@@ -194,6 +205,7 @@ func _tick_observation() -> Dictionary:
 		"room": _read_room(),
 		"errors": _drain_errors(),
 		"sweep": sweep,
+		"perf": null if sweep == null else _read_perf(),
 	}
 
 # --- commands (never block; the game keeps running) ---

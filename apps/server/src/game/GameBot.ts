@@ -19,6 +19,7 @@ import {
   GameOperationError,
   type GameBotFinding,
   type GameBotMode,
+  type GameBotPerf,
   type GameBotReportResult,
   type GameBotRunInput,
   type GameBotRunResult,
@@ -216,6 +217,24 @@ const ENDINGS: Readonly<Record<string, string>> = {
 };
 export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
 
+/**
+ * Folds one observation's node counts into the run's: the first reading is
+ * the start, the latest the end, the largest the peak. A reading without
+ * counts (the web runner, a non-sweep tick) keeps what was there.
+ */
+const perfFrom = (raw: unknown, prev: GameBotPerf | null): GameBotPerf | null => {
+  if (raw === null || typeof raw !== "object") return prev;
+  const nodes = asNumber((raw as Record<string, unknown>)["nodes"]);
+  const orphans = asNumber((raw as Record<string, unknown>)["orphans"]);
+  if (nodes === null || orphans === null) return prev;
+  return {
+    nodesStart: prev?.nodesStart ?? nodes,
+    nodesPeak: Math.max(prev?.nodesPeak ?? nodes, nodes),
+    nodesEnd: nodes,
+    orphansEnd: orphans,
+  };
+};
+
 // Numbers first, then flags: progress, scores and counts read as how far a run got.
 const finalRank = (value: number | boolean | string | null): number =>
   typeof value === "number" ? 0 : typeof value === "boolean" ? 1 : 2;
@@ -333,6 +352,7 @@ interface RunTrace {
   samples: Array<{ t: number; pos: [number, number, number] | null; state: unknown }>;
   finalPos: [number, number, number] | null;
   finalState?: Record<string, number | boolean | string | null>;
+  perf?: GameBotPerf;
   videoPath?: string;
 }
 
@@ -1094,6 +1114,7 @@ const make = Effect.gen(function* () {
       let lastT = 0;
       let lastPos: [number, number, number] | null = null;
       let lastGameState: Record<string, number | boolean | string | null> = {};
+      let perf = perfFrom(hello["perf"], null);
       let fallStart: number | null = null;
       let overlapStreak = 0;
       let moveWindow: Array<{ wall: number; pos: [number, number, number] }> = [];
@@ -1210,6 +1231,7 @@ const make = Effect.gen(function* () {
           (msg["probe"] as Record<string, unknown> | undefined)?.["gameState"],
         );
         if (Object.keys(gameState).length > 0) lastGameState = gameState;
+        perf = perfFrom(msg["perf"], perf);
         // Detectors, adapted from the Aura in-game checks (Apache-2.0) plus
         // the sweep's movement/hitch probes; the code here is our own.
         if (gap > 1500 && ticks > 2)
@@ -1572,6 +1594,7 @@ const make = Effect.gen(function* () {
         samples,
         finalPos: lastPos,
         finalState: lastGameState,
+        ...(perf === null ? {} : { perf }),
       };
       await NodeFSP.writeFile(args.tracePath, JSON.stringify(trace, null, 2));
       await NodeFSP.writeFile(
@@ -1593,6 +1616,9 @@ const make = Effect.gen(function* () {
         jevLine +
         (trace.policyNote !== null ? `. ${trace.policyNote}` : "") +
         `. ${allFindings.length} finding(s). ` +
+        (perf === null
+          ? ""
+          : `Scene nodes ${perf.nodesStart} start, ${perf.nodesPeak} peak, ${perf.nodesEnd} end; ${perf.orphansEnd} orphans. `) +
         (usedSetState ? "Used explicit set-state writes (not pure play)." : "Pure input play.") +
         ` Video: ${args.videoPath}`;
       return {
@@ -1609,6 +1635,7 @@ const make = Effect.gen(function* () {
         usedSetState,
         findings: allFindings,
         finalState: lastGameState,
+        ...(perf === null ? {} : { perf }),
         finalPos: lastPos,
         mode: args.mode,
         runIds: [args.runId],

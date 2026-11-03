@@ -84,6 +84,19 @@ export const GameBotJevUsage = Schema.Struct({
 });
 export type GameBotJevUsage = typeof GameBotJevUsage.Type;
 
+/**
+ * Scene node counts over a Godot play run: start, peak and end, plus orphan
+ * nodes (out of the tree, never freed) at the end. Counts, not timings, so
+ * they do not depend on the machine's load.
+ */
+export const GameBotPerf = Schema.Struct({
+  nodesStart: Schema.Int,
+  nodesPeak: Schema.Int,
+  nodesEnd: Schema.Int,
+  orphansEnd: Schema.Int,
+});
+export type GameBotPerf = typeof GameBotPerf.Type;
+
 export const GameBotRunResult = Schema.Struct({
   runId: Schema.String,
   goal: Schema.String,
@@ -107,6 +120,8 @@ export const GameBotRunResult = Schema.Struct({
     Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
   ),
   finalPos: Schema.NullOr(Schema.Tuple([Schema.Number, Schema.Number, Schema.Number])),
+  /** Absent when the runner reports no counts (the web runner). */
+  perf: Schema.optionalKey(GameBotPerf),
   /** What this call was for: finishing (`play`) or wandering (`explore`). */
   mode: GameBotMode,
   /** Every run id this call made, in order (one entry for a single run). */

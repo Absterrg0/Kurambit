@@ -97,6 +97,7 @@ export const runBotFact = (
             ending: botEnding(result.status.state),
             seconds: result.gameSeconds,
             final: botFinalState(result.finalState),
+            ...(result.perf === undefined ? {} : { perf: result.perf }),
             note: plain(`${fallback}${result.status.note}`, ctx.root),
           },
         } satisfies StepResult;

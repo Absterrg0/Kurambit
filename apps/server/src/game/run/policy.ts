@@ -333,8 +333,14 @@ const botsShown = (c: Compare): boolean =>
 const botReport = (c: Compare, side: Side): string => {
   const f = c.bots.find((b) => b.side === side);
   if (!botsShown(c) || f === undefined) return "";
-  return `\nBot facts: the scripted bot played this build for up to ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.`;
+  return `\nBot facts: the scripted bot played this build for up to ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.${c.bots.every((b) => b.perf !== undefined) ? nodeCounts(f) : ""}`;
 };
+
+// Shown only when both builds have counts, so a missing line never names a build.
+const nodeCounts = (f: BotFact): string =>
+  f.perf === undefined
+    ? ""
+    : ` Scene nodes: ${f.perf.nodesStart} at start, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (removed from the tree but never freed) at the end. Nodes that keep climbing or any orphans usually mean something spawns without being freed, which slows a longer session.`;
 
 const compareStep = (
   id: number,

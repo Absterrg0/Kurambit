@@ -1,7 +1,7 @@
 // The run's persisted record: `.studio/run.json` holds one RunState, decoded on every load.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { GameBotDecider, RunId, ThreadId } from "@kurambit/contracts";
+import { GameBotDecider, GameBotPerf, RunId, ThreadId } from "@kurambit/contracts";
 
 const Verdict = Schema.Struct({
   order: Schema.String,
@@ -162,7 +162,8 @@ const Judge = Schema.Struct({
 export type Judge = typeof Judge.Type;
 
 // How the same bot ended on one build: an ending word ("error" when it could
-// not run) and the game's last primitive probe values.
+// not run), the game's last primitive probe values and, from the Godot runner,
+// its scene node counts.
 const BotFact = Schema.Struct({
   side: Side,
   ending: Schema.String,
@@ -171,6 +172,7 @@ const BotFact = Schema.Struct({
     Schema.String,
     Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
   ),
+  perf: Schema.optionalKey(GameBotPerf),
   note: Schema.String,
 });
 export type BotFact = typeof BotFact.Type;
