@@ -101,6 +101,14 @@ worker and `-job-worker-count 2` (the worker count is a per-user setting in
 three import workers cost about 0.7 GB each. Packaging, preview, stop and the
 run's own status, round and steer tools stay outside their catalog.
 
+`game_blender_render_sprites` exists because weak models cannot write sprite framing: their
+renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
+orthographic camera per view to the subject's evaluated geometry across every frame, renders in a
+throwaway scene that links the live objects (the live scene and its .blend never change), and
+batches renders because the pinned server gives each Blender command 180 s. The pixel-art pass
+(downscale, hard alpha, one palette for the whole strip, outline) runs in the server in
+`spriteRender.ts`, so the same renders always give the same bytes.
+
 The creator's session and a live run share the game folder, and the run's git resets would undo the
 session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with
 `game_run_steer` while one is live; the composer is never rerouted. Notes land in

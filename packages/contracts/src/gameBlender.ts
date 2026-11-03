@@ -97,3 +97,89 @@ export const GameBlenderExportResult = Schema.Struct({
   export: Schema.String,
 });
 export type GameBlenderExportResult = typeof GameBlenderExportResult.Type;
+
+/** Named views; the four sides take `elevation`, top looks straight down, isometric is 45° round and 30° down. */
+export const GameBlenderSpriteViewName = Schema.Literals([
+  "front",
+  "back",
+  "left",
+  "right",
+  "top",
+  "isometric",
+]);
+export const GameBlenderSpriteView = Schema.Union([
+  GameBlenderSpriteViewName,
+  Schema.Struct({
+    name: Schema.String.check(Schema.isPattern(/^[a-z0-9]{1,16}$/)),
+    /** Degrees round the subject: 0 sees its front (-Y), 90 shows it facing screen right. */
+    azimuth: Schema.Number.check(Schema.isBetween({ minimum: -360, maximum: 360 })),
+    /** Degrees the camera looks down: 0 level, 90 straight down. */
+    elevation: Schema.Number.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+  }),
+]);
+export type GameBlenderSpriteView = typeof GameBlenderSpriteView.Type;
+
+const SpriteSize = Schema.Int.check(Schema.isBetween({ minimum: 8, maximum: 512 }));
+
+export const GameBlenderRenderSpritesInput = Schema.Struct({
+  /** Game-relative path prefix under the engine directory; frames are `<output>_0.png`, `<output>_1.png`, ... */
+  output: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+  /** Object or collection names; children come along. Omitted works only when the scene has one top-level object with geometry. */
+  objects: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(64))),
+  /** Output pixels per Blender unit. Omitted fits this clip; pass the value a first strip reports to every other strip of the same character. */
+  pixelsPerUnit: Schema.optionalKey(
+    Schema.Number.check(Schema.isBetween({ minimum: 0.001, maximum: 100000 })),
+  ),
+  views: Schema.optionalKey(
+    Schema.Array(GameBlenderSpriteView).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  ),
+  /** Degrees the front/back/left/right/isometric cameras look down; 30-45 for a top-down 3/4 look. */
+  elevation: Schema.optionalKey(
+    Schema.Number.check(Schema.isBetween({ minimum: -89, maximum: 89 })),
+  ),
+  action: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+  frames: Schema.optionalKey(
+    Schema.Array(Schema.Number).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  ),
+  frameStart: Schema.optionalKey(Schema.Number),
+  frameEnd: Schema.optionalKey(Schema.Number),
+  frameCount: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
+  /** A looping cycle leaves out the end frame, which repeats the start. Default true. */
+  loop: Schema.optionalKey(Schema.Boolean),
+  /** Canvas width in pixels, and height unless `height` is given. Default 64. */
+  size: Schema.optionalKey(SpriteSize),
+  height: Schema.optionalKey(SpriteSize),
+  /** feet: the lowest point across all frames sits on the bottom margin; center: the subject is centred. */
+  anchor: Schema.optionalKey(Schema.Literals(["feet", "center"])),
+  /** Clear pixels kept on every side of the subject. */
+  margin: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 64 }))),
+  lighting: Schema.optionalKey(Schema.Literals(["studio", "scene"])),
+  pixelArt: Schema.optionalKey(
+    Schema.Struct({
+      /** A game-relative PNG or folder of PNGs, or a library pack id added to this game. */
+      palette: Schema.optionalKey(
+        Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+      ),
+      colors: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 64 }))),
+      downscale: Schema.optionalKey(Schema.Literals(["area", "nearest"])),
+      /** true for the palette's darkest colour, or a #rrggbb colour. */
+      outline: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.String])),
+      supersample: Schema.optionalKey(
+        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
+      ),
+    }),
+  ),
+  /** Also write `<output>_sheet.png`: frames in a row, one row per view. */
+  sheet: Schema.optionalKey(Schema.Boolean),
+});
+export type GameBlenderRenderSpritesInput = typeof GameBlenderRenderSpritesInput.Type;
+export const GameBlenderRenderSpritesResult = Schema.Struct({
+  text: Schema.String,
+  /** Game-relative PNGs written, in view then frame order. */
+  files: Schema.Array(Schema.String),
+  sheet: Schema.optionalKey(Schema.String),
+  /** Game-relative contact sheet of every frame, enlarged; attached as the image. */
+  contactSheet: Schema.String,
+  screenshot: Schema.optionalKey(GameBlenderLookScreenshot),
+});
+export type GameBlenderRenderSpritesResult = typeof GameBlenderRenderSpritesResult.Type;
