@@ -1,7 +1,7 @@
 # Making games
 
 Kurambit turns a written brief into a playable game. Your coding agent does the work with
-Blender and Godot for native games, or three.js for browser games; you direct it, play the result, and ask for changes.
+Blender and Godot or Unity for native games, or three.js for browser games; you direct it, play the result, and ask for changes.
 
 ## Set up the tools once
 
@@ -19,6 +19,14 @@ tools report it missing. Playing native games and the live Blender view also nee
 Xvfb package (`xorg-x11-server-Xvfb` on Fedora, `xvfb` on Debian and Ubuntu): everything runs on a
 private virtual display, so nothing opens on your desktop.
 
+Unity games need Unity installed separately: choose **Install Unity** in **Game tools**. Kurambit
+downloads Unity's official CLI (checked against its published hash) and uses it to install Unity
+6000.6.7f1 with Windows build support into the same tools folder, about 4.5 GB. Unity also needs a
+licence on this machine: open Unity Hub, sign in, and add a free Unity Personal licence under
+**Preferences → Licenses**. Kurambit reads that the licence is active and tells you when it is
+missing or needs a refresh; it never asks for or stores your Unity account. A Unity editor uses 2-3
+GB of memory, so Kurambit keeps at most one open at a time and closes it after ten idle minutes.
+
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
 
@@ -34,7 +42,10 @@ Engine: Godot native (default) or three.js browser. Godot is the full lane: a re
 with Blender-made art, native play, and Web, Windows and Linux exports. three.js is the quick
 browser lane: a static browser game with three.js vendored (no install step), played in real time
 through the same tools, with a Web export only. The run loop, Play, preview and web packaging work
-the same on both.
+the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
+editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
+Unity games have no Web export, so Play and web packaging are not available for them, and bot runs
+do not play them yet.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
@@ -109,6 +120,10 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
   `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
   and vendored `vendor/three.*.js`).
+- Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
+  Unity 6000.6.7f1. Its `Library/`, `Temp/` and `Logs/` folders are Unity's caches and are not
+  committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just
+  the executable.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the production run's rounds, notes, bots and videos.

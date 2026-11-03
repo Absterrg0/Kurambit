@@ -17,7 +17,10 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   the folder. Code never interprets model prose apart from declared STATUS/SHIP/COMPARE/ART lines.
 - `GameBot` plays a model-written bot file in real time on a private display and records video plus
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
-  private display. `GameToolchain` manages Blender/Godot installs; `GamePreview` serves builds;
+  private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
+  (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
+  `unity mcp` server, with the same session.json pid records, reaping and idle shutdown.
+  `GameToolchain` manages Blender/Godot/Unity installs; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
 - `GameEngine`/`GameGodotEngine`/`GameThreeEngine` is the engine adapter seam: import, check,
   export release. Godot owns the native process boundary (headless editor import, check script,
@@ -25,7 +28,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   instead: the static folder is the game, so import is a no-op success, check loads the page
   and reports console/page errors, export copies the folder. Windows and Linux exports are
   refused plainly for three.js (`backend.exportTargets`); the interface carries `displayName`
-  so core messages name the engine without naming it in core code.
+  so core messages name the engine without naming it in core code. Unity refuses a second editor
+  on an open project, so every Unity operation goes through the game's live editor in
+  `GameUnity`: import refreshes and recompiles there, check recompiles and then plays the main
+  scene for 120 frames and reads the console, export builds a player folder that replaces
+  `builds/linux` or `builds/windows` only after its files and the source identity check out.
+  Unity editors run with the real HOME so they reach the user's Licensing Client; Kurambit only
+  reads the entitlement file to say whether a licence is active and never stores credentials.
 - Web play shares the services: `gameExploreWeb` opens real-time headless-Chromium sessions on
   the served static folder (real keyboard/mouse, one screenshot per act, console errors, the
   read-only `window.__studio` probe; no pause between acts). `gameChromium` resolves the
@@ -35,6 +44,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   identical bot-child protocol and trace shape, stills stitched to video with ffmpeg, the
   overlap/long-fall detectors not applicable, id-clicks counted and skipped (no control tree),
   explicit state writes through the game's own `setState`.
+- Unity play is a real Linux player of the current sources, built once per source identity
+  under `builds/logs/unity-play-*`, run under xvfb-run. The template's `StudioProbe.cs` speaks
+  the Godot native runner's TCP protocol, so acts, pictures, probe reads and close share that
+  path; input is queued on virtual Input System devices, which is why the lane asks games to read
+  input through the Input System.
 - `GameService` routes by manifest engine with an explicit target override: `game_explore_start`
   defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
   content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
@@ -71,12 +85,12 @@ A model left alone grades its own work, stops when it feels done, and says it te
 harness makes these true regardless of what the model says: a separate tester plays every build,
 fresh sessions review it, blind compare reverts the loser, and the clock enforces bold moves in
 every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
-for the browser lane) and the bot
+for the browser lane, `unity.md` for Unity) and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product. `GameCreateInput.engine`
-(`godot` default, `three` for the browser lane) picks the starter template (`blank` / `blank-three`)
-and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js project with vendored three.js
-r0.180.0, MIT); `copyTemplateIntoGame` copies whichever engine tree the template ships. The manifest's
-`godotProject` names the engine project directory for either lane (`web` for three.js), so snapshots,
+(`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
+`blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
+project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships. The manifest's
+`godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
 exports and the loop resolve it unchanged. `GameRun` reads the manifest once per loop (`laneOf`) for
 the engine directory and prompt paths; everything else in the loop is engine-neutral.
 
