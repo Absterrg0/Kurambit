@@ -27,7 +27,8 @@ exported with the same `game_*` tools as a Godot game.
    up across retries. Retry resets every plain-data GameState value (numbers,
    strings, arrays, plain objects) to a copy of its starting value; list the
    ones that must survive (best score, unlocks) in
-   `export const KEEP_ACROSS_RUNS = [...]`.
+   `export const KEEP_ACROSS_RUNS = [...]`; the shell saves those between
+   visits (numbers, strings, arrays, plain objects) and Settings can reset them.
    Answer every player action through `Juice` (`web/shell/juice.js`):
    `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
    `sfx`.

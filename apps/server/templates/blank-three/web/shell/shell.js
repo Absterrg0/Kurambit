@@ -29,7 +29,14 @@
 // Restyle the screens in index.html and style.css.
 import * as THREE from "../vendor/three.module.js";
 import { installStudio } from "./studio.js";
-import { GameState, newRun, onRunEnded } from "./run-state.js";
+import {
+  GameState,
+  hasProgress,
+  loadProgress,
+  newRun,
+  onRunEnded,
+  resetProgress,
+} from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
 import {
   VOLUME_NAMES,
@@ -48,6 +55,7 @@ const BOOT_INTO_PLAY = false;
 const CLICK_SOUND = "";
 const CREDITS_FILE = "./credits.txt";
 const SETTINGS_KEY = `settings:${location.pathname}`;
+const KEEP = Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : [];
 /** Real seconds and time scale of the slow-motion beat before the end screen. */
 const END_BEAT_S = 0.6;
 const END_BEAT_SCALE = 0.3;
@@ -186,7 +194,7 @@ function startRun() {
   // A throw here is reported like one in update(), so the loop still starts,
   // the menus keep working and the check sees the error itself.
   try {
-    newRun(Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : []);
+    newRun(KEEP);
     game.start?.(run.ctx);
   } catch (error) {
     reportError(error);
@@ -352,6 +360,10 @@ function toggleFullscreen() {
 function openSettings() {
   settingsFrom = openScreen;
   syncFullscreen();
+  const reset = byId("reset-progress");
+  reset.hidden = !hasProgress();
+  reset.disabled = false;
+  reset.textContent = "Reset progress";
   show(screens.settings);
 }
 
@@ -384,7 +396,20 @@ const actions = {
   credits: openCredits,
   back: () => back(false),
   fullscreen: toggleFullscreen,
+  "reset-progress": confirmResetProgress,
 };
+
+// Two presses, so a stray click cannot wipe a best score.
+function confirmResetProgress() {
+  const reset = byId("reset-progress");
+  if (reset.textContent !== "Press again to reset") {
+    reset.textContent = "Press again to reset";
+    return;
+  }
+  resetProgress();
+  reset.textContent = "Progress reset";
+  reset.disabled = true;
+}
 
 ui.addEventListener("click", (event) => {
   const control = event.target.closest("[data-action]");
@@ -601,6 +626,7 @@ const studio = installStudio({
 });
 
 loadSettings();
+loadProgress(KEEP);
 if (BOOT_INTO_PLAY || new URLSearchParams(location.search).has("play")) startRun();
 else showTitle();
 

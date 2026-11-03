@@ -77,10 +77,12 @@ func _ready() -> void:
 	for slider_name in VOLUME_BUSES:
 		_slider(slider_name).value_changed.connect(_set_volume.bind(VOLUME_BUSES[slider_name]))
 	_fullscreen_toggle().toggled.connect(_set_fullscreen)
+	_reset_button().pressed.connect(_reset_progress)
 	# Deferred: a game ends a run from physics callbacks, where pausing the
 	# tree mid-flush is unsafe; the state already reads "ended" meanwhile.
 	GameState.ended.connect(_on_ended, CONNECT_DEFERRED)
 	_load_settings()
+	GameState.load_progress()
 	if BOOT_INTO_PLAY:
 		start_run()
 	else:
@@ -238,7 +240,26 @@ func _focus_first(screen: CanvasLayer) -> void:
 		return
 
 
+func _reset_button() -> Button:
+	return _settings.get_node("Center/Card/Box/ResetProgress") as Button
+
+
+## Two presses, so a stray click cannot wipe a best score.
+func _reset_progress() -> void:
+	var button := _reset_button()
+	if button.text != "Press again to reset":
+		button.text = "Press again to reset"
+		return
+	GameState.reset_progress()
+	button.text = "Progress reset"
+	button.disabled = true
+
+
 func _open_settings(from: CanvasLayer) -> void:
+	var reset := _reset_button()
+	reset.visible = GameState.has_progress()
+	reset.disabled = false
+	reset.text = "Reset progress"
 	# The browser or window manager can leave fullscreen without us.
 	_fullscreen_toggle().set_pressed_no_signal(DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN)
 	_settings_from = from

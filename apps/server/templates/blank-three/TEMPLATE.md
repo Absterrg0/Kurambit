@@ -48,7 +48,8 @@ demo needs, so build the game, not the menus.
   plain objects, `Map`, `Set`) back to a copy of that starting value; a
   function, class instance or three.js object is left as it is, with a
   console warning, so build those in `start`. Name the values that must
-  outlive a run in `export const KEEP_ACROSS_RUNS = ["best"]`.
+  outlive a run in `export const KEEP_ACROSS_RUNS = ["best"]`; they persist
+  in localStorage between visits and Settings shows "Reset progress".
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.

@@ -22,6 +22,10 @@ export const SHELL_KEYS = ["state", "result", "result_text"];
 
 let onEnded = null;
 let defaults = null;
+// Kept values as main.js declared them, before the saved ones loaded: what a
+// reset returns to. Empty until loadProgress ran, and nothing saves until then.
+const keptStart = new Map();
+const PROGRESS_KEY = `progress:${location.pathname}`;
 
 const method = (name, fn) =>
   Object.defineProperty(GameState, name, { value: fn, enumerable: false });
@@ -36,6 +40,9 @@ function end(won, text, stats) {
   GameState.result_text = String(text);
   GameState.state = "ended";
   onEnded?.(won, GameState.result_text, stats ?? {});
+  // After the current frame's code: a game usually updates its best score
+  // right after calling win().
+  queueMicrotask(saveProgress);
 }
 
 /** The shell's hook for win() and lose(). */
@@ -90,6 +97,7 @@ function copy(key, value) {
  * score, health or timers.
  */
 export function newRun(keep = []) {
+  saveProgress();
   if (defaults === null) {
     // Built aside and set once complete: a half-filled table would delete
     // every later value on each Retry.
@@ -111,4 +119,69 @@ export function newRun(keep = []) {
       GameState[key] = copy(key, defaults[key]);
   GameState.result = "";
   GameState.result_text = "";
+}
+
+/**
+ * The shell calls this once at launch, before the title, so a title screen can
+ * already show the best score from the last visit. Only plain data saves.
+ */
+export function loadProgress(keep = []) {
+  for (const key of keep) {
+    const start = GameState[key];
+    if (jsonSafe(start)) keptStart.set(key, structuredClone(start));
+    else
+      console.warn(
+        `GameState.${key} is not numbers, strings, booleans, arrays or plain objects, so it is not saved between visits.`,
+      );
+  }
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null", (_, value) =>
+      typeof value?.$number === "string" ? Number(value.$number) : value,
+    );
+  } catch {
+    saved = null;
+  }
+  if (saved !== null && typeof saved === "object")
+    for (const key of keptStart.keys()) if (key in saved) GameState[key] = saved[key];
+  addEventListener("pagehide", saveProgress);
+}
+
+// What JSON gives back as it was: a Map, Set or Date would load as a plain
+// object and break the game code that reads it.
+function jsonSafe(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return true;
+  if (Array.isArray(value)) return value.every(jsonSafe);
+  if (typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return (proto === Object.prototype || proto === null) && Object.values(value).every(jsonSafe);
+}
+
+/** Whether the game keeps anything across runs (the Settings reset shows only then). */
+export const hasProgress = () => keptStart.size > 0;
+
+/** Puts every kept value back to its starting value and forgets the saved copy. */
+export function resetProgress() {
+  for (const [key, start] of keptStart) GameState[key] = structuredClone(start);
+  try {
+    localStorage.removeItem(PROGRESS_KEY);
+  } catch {
+    // Storage blocked: nothing was saved either.
+  }
+}
+
+function saveProgress() {
+  if (keptStart.size === 0) return;
+  const values = {};
+  for (const key of keptStart.keys()) if (jsonSafe(GameState[key])) values[key] = GameState[key];
+  try {
+    // JSON writes Infinity as null; a best time often starts at Infinity.
+    const text = JSON.stringify(values, (_, value) =>
+      typeof value === "number" && !Number.isFinite(value) ? { $number: String(value) } : value,
+    );
+    localStorage.setItem(PROGRESS_KEY, text);
+  } catch {
+    // Storage can be blocked (private mode, sandboxed frames); progress then lasts this visit.
+  }
 }

@@ -271,6 +271,10 @@ value = 1.0
 layout_mode = 2
 text = "Fullscreen"
 
+[node name="ResetProgress" type="Button" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+text = "Reset progress"
+
 [node name="Back" type="Button" parent="Settings/Center/Card/Box"]
 layout_mode = 2
 text = "Back"
