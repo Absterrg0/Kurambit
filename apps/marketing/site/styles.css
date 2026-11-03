@@ -2060,14 +2060,14 @@ h3 {
 /* The page is one sheet of handmade washi lying on a darker surface. */
 body {
   background:
-    url("washi.svg") 0 0 / 420px 420px,
+    url("washi.svg?v=warm") 0 0 / 420px 420px,
     var(--desk);
 }
 
 .page {
   border-inline-color: transparent;
   background:
-    url("washi.svg") 0 0 / 420px 420px,
+    url("washi.svg?v=warm") 0 0 / 420px 420px,
     var(--paper);
 }
 
@@ -2088,7 +2088,7 @@ body {
   width: var(--edge);
   /* The tile is offset so the paper runs on from the page without a seam. */
   background:
-    url("washi.svg") var(--edge) 0 / 420px 420px,
+    url("washi.svg?v=warm") var(--edge) 0 / 420px 420px,
     var(--paper);
   -webkit-mask: url("deckle-left.svg") 0 0 / var(--edge) 800px repeat-y;
   mask: url("deckle-left.svg") 0 0 / var(--edge) 800px repeat-y;
@@ -2175,7 +2175,7 @@ body {
   border: 0;
   border-radius: 8px;
   background:
-    url("washi.svg") 0 0 / 420px 420px,
+    url("washi.svg?v=warm") 0 0 / 420px 420px,
     rgb(249 245 236 / 96%);
   box-shadow:
     0 0 0 1px rgb(23 21 17 / 10%),
@@ -2335,12 +2335,12 @@ body {
 
   .field input,
   .invite-field input {
-    background: url("underline.svg") 0 100% / 100% 7px no-repeat;
+    background: url("underline.svg?v=warm") 0 100% / 100% 7px no-repeat;
   }
 
   .field input:focus,
   .invite-field input:focus {
-    background-image: url("underline-focus.svg");
+    background-image: url("underline-focus.svg?v=warm");
   }
 }
 
@@ -2432,7 +2432,7 @@ body {
   background:
     linear-gradient(rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
     linear-gradient(90deg, rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
-    url("washi.svg") 0 0 / 420px 420px,
+    url("washi.svg?v=warm") 0 0 / 420px 420px,
     #e1d8c5;
   box-shadow:
     0 0 0 1px rgb(23 21 17 / 12%),
