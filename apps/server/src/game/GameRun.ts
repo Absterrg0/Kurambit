@@ -324,7 +324,10 @@ export const layer = (options: { readonly stateDir: string }) => {
           ),
     );
 
-  const make = Effect.sync(() => {
+  // Game operations are this server's own in-memory record and push, with no
+  // dependencies of their own, so the layer takes them at build time: the run
+  // records its live step there for the library.
+  const build = (operations: GameOperations.GameOperations["Service"]) => {
     // One slot per game root, claimed before runStart's first yield so two
     // starts can never both fork a loop.
     const active = new Map<string, RunSlot>();
@@ -464,7 +467,6 @@ export const layer = (options: { readonly stateDir: string }) => {
       readonly creator: ThreadId;
       readonly deps: RoleDeps;
       readonly secrets: ServerSecretStore.ServerSecretStore["Service"] | null;
-      readonly ops: GameOperations.GameOperations["Service"] | null;
       readonly selection: ModelSelection;
       readonly runtimeMode: Parameters<RoleDeps["launches"]["launch"]>[0]["runtimeMode"];
     };
@@ -479,9 +481,9 @@ export const layer = (options: { readonly stateDir: string }) => {
         state = next;
         return persist(root, next, written).pipe(
           Effect.andThen(
-            d.ops === null || next.ending !== null
+            next.ending !== null
               ? Effect.void
-              : d.ops.recordRun(root, { step: currentStep(next), startedAt: next.startedAt }),
+              : operations.recordRun(root, { step: currentStep(next), startedAt: next.startedAt }),
           ),
         );
       };
@@ -834,14 +836,12 @@ export const layer = (options: { readonly stateDir: string }) => {
       const secrets = Option.getOrNull(
         yield* Effect.serviceOption(ServerSecretStore.ServerSecretStore),
       );
-      const ops = Option.getOrNull(yield* Effect.serviceOption(GameOperations.GameOperations));
       const drives: Drive = {
         root,
         projectId,
         creator: input.threadId,
         deps,
         secrets,
-        ops,
         selection: selectionFor(current, state),
         runtimeMode: projection.thread.runtimeMode,
       };
@@ -854,7 +854,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             Effect.catchCause((cause) => logLine(root, `run loop failed: ${causeText(cause)}`)),
             Effect.ensuring(
               Effect.sync(() => active.get(root) === slot && active.delete(root)).pipe(
-                Effect.andThen(ops === null ? Effect.void : ops.recordRun(root, null)),
+                Effect.andThen(operations.recordRun(root, null)),
               ),
             ),
           ),
@@ -1248,6 +1248,11 @@ export const layer = (options: { readonly stateDir: string }) => {
       resumeInterrupted,
       toolRole,
     });
-  });
-  return Layer.effect(GameRun, make);
+  };
+  return Layer.effect(
+    GameRun,
+    Effect.gen(function* () {
+      return build(yield* GameOperations.GameOperations);
+    }),
+  );
 };
