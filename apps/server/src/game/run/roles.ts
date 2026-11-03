@@ -70,7 +70,9 @@ export const artRedo = (defects: string, lane: string): string =>
 const shellLine = (lane: string): string =>
   lane === "godot"
     ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus of your own. "
-    : "";
+    : lane === "web"
+      ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in web/main.js (start, update, stop on the ctx the shell passes), a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus or render loop of your own. "
+      : "";
 
 export const proto = (lane: string): string =>
   `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${shellLine(lane)}Keep the boot clean. Do not use subagents. Do not commit.`;

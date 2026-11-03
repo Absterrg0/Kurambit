@@ -51,7 +51,7 @@ const response = (
  * and reports console and page errors; export copies the static folder.
  */
 export const makeThreeBackend = (): GameEngineBackend => {
-  const runCheck: GameEngineBackend["runCheck"] = (ctx, _input) =>
+  const runCheck: GameEngineBackend["runCheck"] = (ctx, input) =>
     Effect.gen(function* () {
       const temporary = NodePath.join(
         ctx.root,
@@ -68,6 +68,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
       let browser: { close: () => Promise<void> } | null = null;
       let booted = false;
       let timedOut = false;
+      const reached: string[] = [];
       try {
         yield* Effect.promise(() => NodeFSP.mkdir(temporary, { recursive: true }));
         server = yield* Effect.promise(() => serveGameDirectory(ctx.root, ctx.projectName)).pipe(
@@ -106,71 +107,88 @@ export const makeThreeBackend = (): GameEngineBackend => {
           ),
         );
         browser = launched;
-        const page = yield* Effect.promise(() =>
-          launched.newPage({ viewport: { ...THREE_VIEWPORT } }),
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new GameOperationError({
-                operation: "three-check",
-                path: ctx.projectDir,
-                reason: "command-failed",
-                detail: "Headless Chromium would not open a page.",
-                cause,
-              }),
-          ),
-        );
-        page.on("console", (message) => {
-          const type = message.type();
-          if (type !== "error" && type !== "warning") return;
-          const text = message.text().slice(0, 500);
-          // The browser's own chrome, not the game: a missing favicon is not
-          // a game failure (the starter links a data-URI icon so it never fires).
-          if (/favicon\.ico/i.test(text)) return;
-          log(`console ${type}: ${text}`);
-          if (type === "error")
-            issues.push({
-              file: stackToGameFile(message.location()?.url, origin),
-              message: `Console error: ${text}`,
-            });
-        });
-        page.on("pageerror", (error) => {
-          const text = (error instanceof Error ? error.message : String(error)).slice(0, 500);
-          const stack = error instanceof Error ? error.stack : undefined;
-          log(`pageerror: ${text}`);
-          issues.push({
-            file: stackToGameFile(stack, origin),
-            message: `Page error: ${text}`,
+        // The page as the player opens it, then the gameplay entry the template
+        // names (the starter's shell boots straight into play with "?play"), so a
+        // failure in gameplay start cannot hide behind the title screen.
+        const entries: Array<readonly [string, string]> = [["boot", served.url]];
+        if (input.gameplayScene !== "")
+          entries.push(["gameplay", new URL(input.gameplayScene, served.url).href]);
+        for (const [entry, entryUrl] of entries) {
+          let entryBooted = false;
+          const page = yield* Effect.promise(() =>
+            launched.newPage({ viewport: { ...THREE_VIEWPORT } }),
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "three-check",
+                  path: ctx.projectDir,
+                  reason: "command-failed",
+                  detail: "Headless Chromium would not open a page.",
+                  cause,
+                }),
+            ),
+          );
+          page.on("console", (message) => {
+            const type = message.type();
+            if (type !== "error" && type !== "warning") return;
+            const text = message.text().slice(0, 500);
+            // The browser's own chrome, not the game: a missing favicon is not
+            // a game failure (the starter links a data-URI icon so it never fires).
+            if (/favicon\.ico/i.test(text)) return;
+            log(`console ${type}: ${text}`);
+            if (type === "error")
+              issues.push({
+                file: stackToGameFile(message.location()?.url, origin),
+                message: `Console error: ${text}`,
+              });
           });
-        });
-        const bootTimeoutMs = 60_000;
-        const started = Date.now();
-        yield* Effect.promise(() =>
-          page
-            .goto(served.url, { timeout: bootTimeoutMs, waitUntil: "load" })
-            .catch((cause: unknown) => {
-              log(`navigation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
-            }),
-        );
-        for (;;) {
-          if (Date.now() - started > bootTimeoutMs) {
-            timedOut = true;
-            break;
-          }
-          try {
-            const ready = yield* Effect.promise(() => page.evaluate(READ_STUDIO_READY));
-            if (ready === true) {
-              booted = true;
+          page.on("pageerror", (error) => {
+            const text = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+            const stack = error instanceof Error ? error.stack : undefined;
+            log(`pageerror: ${text}`);
+            issues.push({
+              file: stackToGameFile(stack, origin),
+              message: `Page error: ${text}`,
+            });
+          });
+          const bootTimeoutMs = 60_000;
+          const started = Date.now();
+          yield* Effect.promise(() =>
+            page
+              .goto(entryUrl, { timeout: bootTimeoutMs, waitUntil: "load" })
+              .catch((cause: unknown) => {
+                log(`navigation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+              }),
+          );
+          for (;;) {
+            if (Date.now() - started > bootTimeoutMs) {
+              timedOut = true;
               break;
             }
-          } catch {
-            // Evaluations race the page navigation; keep polling until the deadline.
+            try {
+              const ready = yield* Effect.promise(() => page.evaluate(READ_STUDIO_READY));
+              if (ready === true) {
+                entryBooted = true;
+                if (entry === "boot") booted = true;
+                break;
+              }
+            } catch {
+              // Evaluations race the page navigation; keep polling until the deadline.
+            }
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 500)));
           }
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 500)));
+          // One extra beat so late module errors still land in the listeners above.
+          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 2000)));
+          yield* Effect.promise(() => page.close().catch(() => undefined));
+          if (entryBooted) reached.push(entry);
+          else if (entry !== "boot")
+            issues.push({
+              file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
+              message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
+            });
+          if (timedOut) break;
         }
-        // One extra beat so late module errors still land in the listeners above.
-        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 2000)));
-        yield* Effect.promise(() => page.close().catch(() => undefined));
       } finally {
         if (browser !== null) yield* Effect.promise(() => browser!.close().catch(() => undefined));
         if (server !== null) yield* Effect.promise(() => server!.close().catch(() => undefined));
@@ -202,7 +220,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
       };
       return {
         reported: {
-          entries: booted ? ["boot"] : [],
+          entries: reached,
           errors: issues,
           warnings: [],
         },

@@ -1,18 +1,67 @@
 # {{GAME_NAME}} — Blank (browser) starter template
 
 This game started from the **Blank (browser)** template: one static three.js
-project under `web/` with no gameplay yet. Everything below is the starting
-point to extend, not a fixed structure.
+project under `web/`. It has no real gameplay yet, but it ships the shell a
+demo needs, so build the game, not the menus.
 
-## What the template ships
+## Demo shell
 
-- `web/index.html` — the only page. Served over HTTP by preview, playtest and
-  the export; `file://` is not a supported way to play it.
-- `web/main.js` — the game: a lit 3D scene (ground, key light, beacon, rover),
-  WASD/arrows movement, and the `GameState` object. Keep `GameState` as the
-  single source of truth with public primitives only.
-- `web/style.css` — fullscreen canvas plus the `#hud` overlay. The probe
-  reports the overlay text, so keep the values that matter on screen too.
+- `web/index.html` loads `web/shell/shell.js`, which owns the page: a title
+  screen (the game's name, Play, Settings, Credits), pause on Esc, P or
+  gamepad Start (Resume, Settings, Main menu), settings (master, music and
+  sound-effect volume, plus fullscreen; volumes are saved in the browser), an
+  end screen (the result message, the game's stats, Retry, Main menu) and
+  credits. Menus work with the mouse, the keys (arrows, Enter, Esc) and a
+  gamepad.
+- Gameplay plugs in at `web/main.js`, which exports `start(ctx)`,
+  `update(dt, ctx)` and optionally `stop(ctx)`. The shell calls `start` on
+  Play and on Retry with a fresh `ctx` (a new `ctx.scene` and `ctx.camera`),
+  calls `update` every frame of play, and stops calling it while paused or
+  ended. Build the run inside `start`, never at the module's top level; split
+  it into more modules under `web/` as it grows.
+- `ctx` also carries `renderer`, `canvas`, `hud` (the game's DOM overlay,
+  emptied each run), `player` (set it to the player object so the probe
+  reports its position), `keys.down("KeyW")` / `keys.pressed("Space")` (held
+  and just-pressed keys, by `KeyboardEvent.code` or the key itself),
+  `listen(target, type, fn)` and `after(seconds, fn)`. Listeners and timers
+  made through `ctx` fire only during play and end with the run; a raw
+  `addEventListener`, `setTimeout` or `requestAnimationFrame` keeps running
+  through pause and stacks up across retries.
+- End a run with `GameState.win("You escaped!", {Time: "1:42"})` or
+  `GameState.lose("Out of fuel", {Distance: "340 m"})` (import `GameState`
+  from `./shell/run-state.js`). The last hit plays out in slow motion for a
+  moment, then the end screen shows the message and the stats in the order
+  given.
+- Put the game's run values on `GameState` at the top of `main.js`. Each Play
+  and Retry puts every one back to that starting value (a copy, never the
+  same array or object); name the ones that must outlive a run in
+  `export const KEEP_ACROSS_RUNS = ["best"]`.
+- `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
+  (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
+  the game reads it.
+- To boot straight into play while building, set `BOOT_INTO_PLAY = true` in
+  `web/shell/shell.js` (or open `index.html?play`). Ship with it `false`.
+- `web/credits.txt` is what the credits screen shows. ASSETS.md stays the
+  full record of every file's source and licence; every asset whose licence
+  asks for attribution also gets a line in `credits.txt`.
+- The look lives in `web/style.css` (theme tokens at the top, then one rule
+  set per screen) and the screen markup in `web/index.html`. The art pass
+  restyles both to the game's key art; keep the element ids and
+  `data-action` attributes. `CLICK_SOUND` in `shell.js` names a file to
+  replace the synthesized menu tick.
+- Play music with `playMusic(url)` and effects with `Juice.sfx(url)` (or
+  `playSfx`) from `./shell/audio.js`, so the volume sliders reach them.
+
+## Game feel
+
+`Juice` (`web/shell/juice.js`) answers player actions in one call each:
+`Juice.shake(0.4)`, `Juice.hitPause()`, `Juice.pop(mesh)`,
+`Juice.squash(mesh)`, `Juice.flash(mesh)`, `Juice.flashScreen(color)`,
+`Juice.burst(position, color)` and `Juice.sfx("./assets/sfx/hit.wav")`.
+The comment block at the top of the file shows each call.
+
+## What else the template ships
+
 - `web/vendor/three.module.js` + `web/vendor/three.core.js` — three.js
   r0.180.0, pinned and vendored (MIT, see `web/vendor/LICENSE`), imported
   with a relative path. The module entry re-exports the core file, so both
@@ -23,41 +72,29 @@ point to extend, not a fixed structure.
 
 ## The studio bridge (keep it)
 
-`window.__studio` is how the harness plays this game: `ready` after the first
-frame, `getState()` returning `{gameState, player, hudText}`, `errors[]`
-carrying page errors, and `setState(target, values)` reaching named late
-content when the game implements a target (the starter refuses). Keep the
-shape; extend `GameState`, not the bridge. The bridge also answers the
-stage's `studio-visibility` messages: while the stage tab is hidden the loop
-pauses (and a game with sound mutes), then restores what it found.
-
-## Where to add content
-
-- Build gameplay inside `web/main.js` (split per system into modules under
-  `web/` when it grows past a screenful), so the page stays the entry point.
-- A game with no player marks play with a typed `GameState.state` (0/false
-  before play, another value once play starts), so exploration and bot runs
-  can find the gameplay baseline.
-- Prefer code-built meshes and a few local assets over heavy downloads; the
-  export is a static copy of `web/`, so everything the game needs must be a
-  file in it.
+`window.__studio` (`web/shell/studio.js`) is how the harness plays this game:
+`ready` after the first frame, `getState()` returning `{gameState, player,
+hudText}` (the shell's `state` and `result` first, then the game's values;
+`hudText` is the text on screen, menus included), `errors[]` carrying page
+errors, and `setState(target, values)` reaching named late content when
+`main.js` exports its own `setState` (the starter refuses). Keep the shape;
+extend `GameState`, not the bridge. While the stage tab is hidden the bridge
+holds play and suspends sound, then restores what it found.
 
 ## Conventions
 
 - ES modules only, no build step: the file the browser loads is the file you
-  edit. Keep the import of `./vendor/three.module.js` relative.
-- Keyboard: read physical keys on `window` (`KeyW`/`ArrowLeft`/…). The harness
-  sends real keys, not Godot action names.
-- The game must be playable from `web/index.html` on a fresh checkout.
-- Never open anything outside `web/` at runtime, never phone home.
+  edit. Keep imports relative.
+- The game must be playable from `web/index.html` over HTTP on a fresh
+  checkout (`file://` is not supported). Never open anything outside `web/`
+  at runtime, never phone home.
 
-## Playtest
+## Check and play
 
-Play first with the `game_explore_*` tools (target web) and study every frame.
+`game_check` loads the page and then `index.html?play` headless and reports
+console and page errors with file and line, so a failure in `start` cannot
+hide behind the title. Keep both clean. A clean check says the page boots; it
+cannot establish that the game is good to play.
 
-## Checks
-
-`game_check` loads the page headless and reports console and page errors with
-file and line. Keep the boot clean: no script errors while the game runs.
-Engine shutdown noise after quit is not failure; anything while the game runs
-is.
+Play with the `game_explore_*` tools (target web) and study every frame. The
+game opens on the title: press `Enter` (Play is selected) or click Play.
