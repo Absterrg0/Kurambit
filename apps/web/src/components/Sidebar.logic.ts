@@ -9,7 +9,7 @@ import {
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
 import {
-  isNestedThread,
+  isNestedUnderLiveParent,
   type ContextMenuItem,
   type EnvironmentId,
   type ThreadId,
@@ -520,14 +520,16 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
+    id: string;
     environmentId: string;
     projectId: string;
   },
 >(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
+  const listed = new Set<string>(threads.map((thread) => thread.id));
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      !isNestedThread(thread) &&
+      !isNestedUnderLiveParent(thread, listed) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );

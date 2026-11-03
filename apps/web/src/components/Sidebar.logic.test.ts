@@ -452,6 +452,12 @@ describe("sidebar thread lineage helpers", () => {
         new Set([`${environmentId}:${projectId}`]),
       ).map((thread) => thread.id),
     ).toEqual([parentId, fork.id]);
+    // With its parent chat gone, a role thread is listed again so its evidence stays reachable.
+    expect(
+      filterSidebarV2VisibleThreads([gameRunRole], new Set([`${environmentId}:${projectId}`])).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual([gameRunRole.id]);
   });
 
   it("resolves the parent thread for fork sidebar affordances", () => {

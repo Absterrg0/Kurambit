@@ -430,6 +430,25 @@ export function isNestedThread(thread: Pick<OrchestrationV2AppThread, "lineage">
 }
 
 /**
+ * Nested and its parent is still listed. A role thread whose parent chat was
+ * deleted shows as a session again, so its evidence stays reachable.
+ */
+export function isNestedUnderLiveParent(
+  thread: Pick<OrchestrationV2AppThread, "lineage">,
+  liveThreadIds: ReadonlySet<string>,
+): boolean {
+  const parent = thread.lineage.parentThreadId;
+  return isNestedThread(thread) && parent !== null && liveThreadIds.has(parent);
+}
+
+/** Children whose approvals and questions surface on their parent's row. */
+export function bubblesRequestsToParent(
+  thread: Pick<OrchestrationV2AppThread, "lineage">,
+): boolean {
+  return isNestedThread(thread);
+}
+
+/**
  * The provider owns its conversation, so it cannot take messages; Kurambit delegate_task children
  * (`creationSource: "mcp"`) can.
  */

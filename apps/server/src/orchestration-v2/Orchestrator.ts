@@ -2180,7 +2180,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const parentThreadId = command.parentThreadId;
-    const roleParent =
+    const parent =
       parentThreadId === undefined
         ? null
         : yield* projectionStore.getThread(parentThreadId).pipe(
@@ -2189,12 +2189,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (cause) => new OrchestratorProjectionError({ threadId: parentThreadId, cause }),
             ),
           );
-    if (
-      parentThreadId !== undefined &&
-      (roleParent === null ||
-        roleParent.deletedAt !== null ||
-        roleParent.projectId !== command.projectId)
-    ) {
+    // A role parent only groups the thread. A missing or deleted parent loses
+    // the grouping instead of rejecting: a rejected receipt under a stable
+    // command id would block that launch on every retry.
+    const roleParent = parent !== null && parent.deletedAt === null ? parent : null;
+    if (roleParent !== null && roleParent.projectId !== command.projectId) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
