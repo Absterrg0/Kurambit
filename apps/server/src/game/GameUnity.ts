@@ -243,6 +243,21 @@ const descendantsOf = async (pid: number): Promise<number[]> => {
   return out;
 };
 
+/**
+ * A killed editor leaves its Unity.DataStore shared memory in /dev/shm, and
+ * the next editor on the project hangs before its first refresh trying to
+ * reuse it. The segment names carry the namespace this editor logged, so
+ * only this project's segments are removed, after its processes are gone.
+ */
+const dropDataStoreMemory = async (homeDir: string): Promise<void> => {
+  const log = await NodeFSP.readFile(NodePath.join(homeDir, "editor.log"), "utf8").catch(() => "");
+  const namespace = /Resource namespace: ([0-9a-f]{16,64})/.exec(log)?.[1];
+  if (namespace === undefined) return;
+  for (const name of await NodeFSP.readdir("/dev/shm").catch(() => [] as string[]))
+    if (name.startsWith(`udsMem${namespace}`) || name.startsWith(`sem.udsMem${namespace}`))
+      await NodeFSP.rm(NodePath.join("/dev/shm", name), { force: true });
+};
+
 /** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
 const reapRecorded = async (homeDir: string): Promise<void> => {
   const file = NodePath.join(homeDir, SESSION_FILE);
@@ -274,6 +289,7 @@ const reapRecorded = async (homeDir: string): Promise<void> => {
   }
   for (const entry of live) signalOwned(entry.pid, entry.group, "SIGKILL");
   for (const pid of editorTree) if (alive(pid)) signalOwned(pid, false, "SIGKILL");
+  await dropDataStoreMemory(homeDir);
   await NodeFSP.rm(file, { force: true });
 };
 
@@ -541,6 +557,8 @@ const make = Effect.gen(function* () {
           try: async () => {
             await NodeFSP.mkdir(homeDir, { recursive: true });
             await capImportWorkers(projectDir);
+            // Every earlier editor for this game was reaped above.
+            await dropDataStoreMemory(homeDir);
           },
           catch: (cause) => opError("unity-live", homeDir, "io", undefined, cause),
         });
