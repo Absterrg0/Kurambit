@@ -5,14 +5,23 @@
 //   export function start(ctx) {}   // build the run into ctx.scene; set ctx.camera, ctx.player
 //   export function update(dt, ctx) {} // every frame while playing (and the slow end beat)
 //   export function stop(ctx) {}     // optional: undo anything start() did outside ctx
+//   export function resize(ctx) {}   // optional: every window resize, paused or not
+//   export function setState(target, values, ctx) {} // optional studio reach; ctx is null
+//                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
 // camera, player, keys.down(code) / keys.pressed(code) (KeyboardEvent.code
 // such as "KeyW", "ArrowLeft", "Space", or the key itself such as "w"),
-// listen(target, type, fn) and after(seconds, fn). Listeners and timers made
-// through ctx fire only while playing and go away with the run; the scene and
-// the hud are emptied before the next one.
+// mouse (x, y in canvas pixels, ndc.x / ndc.y from -1 to 1 for a Raycaster,
+// movement.x / movement.y this frame, also under pointer lock, and
+// down(button) / pressed(button), 0 the left button), listen(target, type,
+// fn) and after(seconds, fn). Keys and mouse see only gameplay input: a click
+// on a menu never reaches them, and pause releases them. Listeners and timers
+// made through ctx fire only while playing (timers also through the slow end
+// beat) and go away with the run; the scene and the hud are emptied before
+// the next one. The shell refits ctx.camera, perspective or orthographic, on
+// resize.
 //
 // A run ends with GameState.win(text, stats) or GameState.lose(text, stats).
 // The shell owns the loop: gameplay stops while paused or ended, the menus keep
@@ -22,7 +31,15 @@ import * as THREE from "../vendor/three.module.js";
 import { installStudio } from "./studio.js";
 import { GameState, newRun, onRunEnded } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
-import { VOLUME_NAMES, getVolume, holdAudio, playSfx, playTick, setVolume } from "./audio.js";
+import {
+  VOLUME_NAMES,
+  getVolume,
+  holdAudio,
+  playSfx,
+  playTick,
+  setVolume,
+  unlockAudio,
+} from "./audio.js";
 import * as game from "../main.js";
 
 /** true boots straight into play, skipping the title (handy while building). `?play` in the URL does the same. */
@@ -63,12 +80,16 @@ let endSerial = 0;
 let held = false;
 let redraw = true;
 let hadPointerLock = false;
+// Where the pointer last was on the canvas; a new run starts aiming there.
+const pointer = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
 
 function newContext() {
   const down = new Set();
   const pressed = new Set();
   const listeners = [];
   const timers = [];
+  const buttons = new Set();
+  const clicked = new Set();
   const ctx = {
     renderer,
     canvas,
@@ -81,6 +102,14 @@ function newContext() {
       down: (code) => down.has(code),
       pressed: (code) => pressed.has(code),
     },
+    mouse: {
+      x: pointer.x,
+      y: pointer.y,
+      ndc: { x: pointer.ndcX, y: pointer.ndcY },
+      movement: { x: 0, y: 0 },
+      down: (button = 0) => buttons.has(button),
+      pressed: (button = 0) => clicked.has(button),
+    },
     listen(target, type, fn, options) {
       const wrapped = (event) => {
         if (GameState.state === "playing") fn(event);
@@ -92,7 +121,7 @@ function newContext() {
       timers.push({ left: seconds, fn });
     },
   };
-  return { ctx, down, pressed, listeners, timers, reported: false };
+  return { ctx, down, pressed, buttons, clicked, listeners, timers, reported: false };
 }
 
 const keyNames = (event) => [
@@ -103,6 +132,16 @@ const keyNames = (event) => [
 function releaseKeys() {
   run?.down.clear();
   run?.pressed.clear();
+  run?.buttons.clear();
+  run?.clicked.clear();
+}
+
+function clearFrameInput() {
+  if (run === null) return;
+  run.pressed.clear();
+  run.clicked.clear();
+  run.ctx.mouse.movement.x = 0;
+  run.ctx.mouse.movement.y = 0;
 }
 
 function dispose(scene) {
@@ -139,13 +178,20 @@ function clearRun() {
 
 function startRun() {
   clearRun();
-  newRun(Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : []);
   GameState.state = "playing";
   show(null);
   run = newContext();
   Juice.stage = run.ctx.scene;
   redraw = true;
-  game.start?.(run.ctx);
+  // A throw here is reported like one in update(), so the loop still starts,
+  // the menus keep working and the check sees the error itself.
+  try {
+    newRun(Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : []);
+    game.start?.(run.ctx);
+  } catch (error) {
+    reportError(error);
+    run.reported = true;
+  }
 }
 
 function pause() {
@@ -216,7 +262,10 @@ function show(screen) {
   backdrop.hidden = !(GameState.state === "title" && screen !== null);
   document.body.dataset.screen = screen?.id ?? "play";
   if (screen === null) document.activeElement?.blur?.();
-  else focusFirst(screen);
+  else {
+    if (document.pointerLockElement != null) document.exitPointerLock?.();
+    focusFirst(screen);
+  }
 }
 
 function focusables(screen) {
@@ -406,6 +455,46 @@ window.addEventListener("keyup", (event) => {
 });
 window.addEventListener("blur", releaseKeys);
 
+// Gameplay mouse input: only presses on the canvas (or anywhere under pointer
+// lock) during play, so the click that closes a menu never fires a shot.
+const gameplayPointer = (event) =>
+  run !== null &&
+  GameState.state === "playing" &&
+  openScreen === null &&
+  !held &&
+  (event.target === canvas || document.pointerLockElement != null);
+
+window.addEventListener("pointermove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = event.clientX - rect.left;
+  pointer.y = event.clientY - rect.top;
+  pointer.ndcX = rect.width > 0 ? (pointer.x / rect.width) * 2 - 1 : 0;
+  pointer.ndcY = rect.height > 0 ? 1 - (pointer.y / rect.height) * 2 : 0;
+  if (run === null) return;
+  const mouse = run.ctx.mouse;
+  if (document.pointerLockElement == null) {
+    mouse.x = pointer.x;
+    mouse.y = pointer.y;
+    mouse.ndc.x = pointer.ndcX;
+    mouse.ndc.y = pointer.ndcY;
+  }
+  if (gameplayPointer(event)) {
+    mouse.movement.x += event.movementX;
+    mouse.movement.y += event.movementY;
+  }
+});
+window.addEventListener("pointerdown", (event) => {
+  if (!gameplayPointer(event)) return;
+  run.buttons.add(event.button);
+  run.clicked.add(event.button);
+});
+window.addEventListener("pointerup", (event) => run?.buttons.delete(event.button));
+// Exported web builds pause when their tab is hidden. The studio stage hides
+// with CSS, which leaves the page visible, so its own hold is unaffected.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") pause();
+});
+
 document.addEventListener("fullscreenchange", syncFullscreen);
 document.addEventListener("pointerlockchange", () => {
   // Esc releases a pointer lock before the page sees the key, so losing the
@@ -426,6 +515,7 @@ function pollGamepad(now) {
   if (pad === undefined) return;
   const isDown = (i) => pad.buttons[i]?.pressed === true;
   const pressedNow = (i) => isDown(i) && padWas[i] !== true;
+  if (pad.buttons.some((_, i) => pressedNow(i))) unlockAudio();
   if (pressedNow(9)) back(true);
   else if (openScreen !== null) {
     if (pressedNow(1)) back(false);
@@ -456,7 +546,7 @@ function step(dt) {
     run.reported = true;
   }
   juiceShell.update(dt);
-  run?.pressed.clear();
+  clearFrameInput();
 }
 
 function draw() {
@@ -470,20 +560,35 @@ function draw() {
   juiceShell.afterRender(camera);
 }
 
+// Every resize, whatever the state: fullscreen is toggled from the pause menu.
 window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
+  const aspect = window.innerWidth / window.innerHeight;
   const camera = run?.ctx.camera;
   if (camera?.isPerspectiveCamera) {
-    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    camera.updateProjectionMatrix();
+  } else if (camera?.isOrthographicCamera) {
+    // Keeps the vertical extent and the centre; the width follows the window.
+    const centre = (camera.left + camera.right) / 2;
+    const half = ((camera.top - camera.bottom) / 2) * aspect;
+    camera.left = centre - half;
+    camera.right = centre + half;
     camera.updateProjectionMatrix();
   }
+  if (run !== null)
+    try {
+      game.resize?.(run.ctx);
+    } catch (error) {
+      reportError(error);
+    }
   redraw = true;
 });
 
 const studio = installStudio({
   ui,
   player: () => run?.ctx.player ?? null,
-  setState: (target, values) => game.setState?.(target, values),
+  setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),
   hold(on) {
     held = on;
     releaseKeys();

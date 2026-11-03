@@ -20,10 +20,12 @@ exported with the same `game_*` tools as a Godot game.
    each run in `start(ctx)` and move it in `update(dt, ctx)` in `web/main.js`,
    end it with `GameState.win(text, stats)` or `GameState.lose(text, stats)`,
    and restyle the shell instead of replacing it. Use `ctx.keys`,
-   `ctx.listen` and `ctx.after`, never raw listeners, `setTimeout` or
-   `requestAnimationFrame`: those run through pause and pile up across
-   retries. Retry resets every GameState value; list the ones that must
-   survive (best score, unlocks) in `export const KEEP_ACROSS_RUNS = [...]`.
+   `ctx.mouse`, `ctx.listen` and `ctx.after`, never raw listeners,
+   `setTimeout` or `requestAnimationFrame`: those run through pause and pile
+   up across retries. Retry resets every plain-data GameState value (numbers,
+   strings, arrays, plain objects) to a copy of its starting value; list the
+   ones that must survive (best score, unlocks) in
+   `export const KEEP_ACROSS_RUNS = [...]`.
    Answer every player action through `Juice` (`web/shell/juice.js`):
    `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
    `sfx`.
@@ -31,7 +33,9 @@ exported with the same `game_*` tools as a Godot game.
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).
    Extend `GameState`, not the bridge.
-6. Keep `GameState` the single source of truth with public primitives only.
+6. Keep `GameState` the single source of truth with public primitives only
+   (the probe reports those; Retry resets them too). Build meshes, class
+   instances and functions in `start(ctx)`, never on `GameState`.
    Keep the values that matter on screen too (the probe reports the overlay).
    Set `ctx.player` so the probe reports the player's position.
 7. Playtest with `game_explore_*` (target web): real keys

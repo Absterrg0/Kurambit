@@ -43,34 +43,67 @@ export function onRunEnded(listener) {
   onEnded = listener;
 }
 
-// A copy, never a shared reference: a retry must not inherit the last run's
-// arrays, objects or vectors.
-function copy(value) {
-  if (value === null || typeof value !== "object") return value;
-  if (typeof value.clone === "function") return value.clone();
-  return structuredClone(value);
+// Retry resets only plain data: numbers, strings, booleans, arrays, plain
+// objects, Map and Set, copied so a retry never shares the last run's arrays
+// or objects. A function, a class instance or a three.js object would come back
+// broken or detached from the scene, so it is left as it is.
+function isPlainData(value, seen = new Set()) {
+  if (typeof value === "function" || typeof value === "symbol") return false;
+  if (value === null || typeof value !== "object") return true;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (Array.isArray(value)) return value.every((each) => isPlainData(each, seen));
+  if (value instanceof Map)
+    return [...value].every(([k, v]) => isPlainData(k, seen) && isPlainData(v, seen));
+  if (value instanceof Set) return [...value].every((each) => isPlainData(each, seen));
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(value).every((each) => isPlainData(each, seen));
+}
+
+const NOT_RESET = Symbol("not reset");
+const warned = new Set();
+
+function copy(key, value) {
+  if (isPlainData(value))
+    try {
+      return typeof value === "object" && value !== null ? structuredClone(value) : value;
+    } catch {
+      // Falls through to the warning below.
+    }
+  if (!warned.has(key)) {
+    warned.add(key);
+    console.warn(
+      `GameState.${key} is not plain data, so Retry does not reset it; build it in start().`,
+    );
+  }
+  return NOT_RESET;
 }
 
 /**
  * The shell calls this before every Play and Retry, before the game's
- * start(). Every value the game put on GameState returns to what it was when
- * the first run began, except the names in `keep`; a value first added during
- * a run is removed. So a retry never inherits the last run's score, health or
- * timers.
+ * start(). Every plain-data value the game put on GameState returns to what it
+ * was when the first run began, except the names in `keep`; a value first
+ * added during a run is removed. So a retry never inherits the last run's
+ * score, health or timers.
  */
 export function newRun(keep = []) {
   if (defaults === null) {
     defaults = {};
     for (const [key, value] of Object.entries(GameState))
-      if (!SHELL_KEYS.includes(key)) defaults[key] = copy(value);
+      if (SHELL_KEYS.includes(key)) continue;
+      // A kept value never resets, so it needs no copy and no warning.
+      else if (keep.includes(key) && !isPlainData(value)) defaults[key] = NOT_RESET;
+      else defaults[key] = copy(key, value);
   }
   for (const key of Object.keys(GameState)) {
     if (SHELL_KEYS.includes(key) || keep.includes(key)) continue;
-    if (key in defaults) GameState[key] = copy(defaults[key]);
-    else delete GameState[key];
+    if (!(key in defaults)) delete GameState[key];
+    else if (defaults[key] !== NOT_RESET) GameState[key] = copy(key, defaults[key]);
   }
   for (const key of Object.keys(defaults))
-    if (!(key in GameState)) GameState[key] = copy(defaults[key]);
+    if (!(key in GameState) && defaults[key] !== NOT_RESET)
+      GameState[key] = copy(key, defaults[key]);
   GameState.result = "";
   GameState.result_text = "";
 }

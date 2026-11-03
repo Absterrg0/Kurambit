@@ -6,8 +6,8 @@
 //   playSfx("./assets/sfx/hit.wav", { volume: 0.8, pitch: 0.08 }); // or Juice.sfx(...)
 //
 // Browsers start audio only after a click or key press, so the context is made
-// on the first one; sounds asked for before that are skipped, and music asked
-// for before that starts then.
+// on the first one (the shell also tries on a gamepad button); sounds asked for
+// before that are skipped, and music asked for before that starts then.
 
 export const VOLUME_NAMES = ["master", "music", "sfx"];
 const MAX_VOICES = 12;
@@ -23,7 +23,8 @@ let musicUrl = null;
 let musicSource = null;
 let musicToken = 0;
 
-function unlock() {
+/** Makes or resumes the audio context; the shell calls it on gamepad presses. */
+export function unlockAudio() {
   if (context !== null) {
     if (context.state === "suspended" && !held) context.resume().catch(() => undefined);
     return;
@@ -42,8 +43,8 @@ function unlock() {
   if (held) context.suspend().catch(() => undefined);
   if (musicUrl !== null) playMusic(musicUrl);
 }
-window.addEventListener("pointerdown", unlock, { capture: true });
-window.addEventListener("keydown", unlock, { capture: true });
+window.addEventListener("pointerdown", unlockAudio, { capture: true });
+window.addEventListener("keydown", unlockAudio, { capture: true });
 
 export function setVolume(name, value) {
   volumes[name] = Math.min(1, Math.max(0, Number(value) || 0));
@@ -120,7 +121,20 @@ export function stopMusic() {
 
 /** A short synthesized tick for menu presses, so the shell sounds before any file exists. */
 export function playTick() {
-  if (context === null || context.state !== "running") return;
+  if (context === null || held) return;
+  // A context left suspended (made from a gamepad press, or after a hold)
+  // resumes on this press, so the first menu tick still sounds.
+  if (context.state !== "running") {
+    context.resume().then(
+      () => context.state === "running" && tick(),
+      () => undefined,
+    );
+    return;
+  }
+  tick();
+}
+
+function tick() {
   const tone = context.createOscillator();
   const level = context.createGain();
   tone.frequency.value = 880;

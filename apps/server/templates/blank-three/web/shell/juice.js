@@ -1,6 +1,7 @@
 // Game feel, one call each. Every player action wants an answer the player can
 // see and hear; overlapping calls combine instead of fighting, everything runs
-// on game time (it freezes on pause), and nothing here can leave the game stuck.
+// on game time (it freezes on pause) except pop on a DOM element and
+// flashScreen, which run on real time, and nothing here can leave the game stuck.
 //
 //   import { Juice } from "./shell/juice.js";
 //   Juice.shake(0.4);                         // camera shake: trauma 0..1 adds up, decays

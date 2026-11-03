@@ -7,35 +7,48 @@ demo needs, so build the game, not the menus.
 ## Demo shell
 
 - `web/index.html` loads `web/shell/shell.js`, which owns the page: a title
-  screen (the game's name, Play, Settings, Credits), pause on Esc, P or
-  gamepad Start (Resume, Settings, Main menu), settings (master, music and
-  sound-effect volume, plus fullscreen; volumes are saved in the browser), an
+  screen (the game's name, Play, Settings, Credits), pause on Esc, P,
+  gamepad Start or a hidden tab (Resume, Settings, Main menu), settings
+  (master, music and sound-effect volume, plus fullscreen; an exported build
+  keeps the volumes in the browser, while each Game panel rebuild is a new
+  origin and starts at full volume), an
   end screen (the result message, the game's stats, Retry, Main menu) and
   credits. Menus work with the mouse, the keys (arrows, Enter, Esc) and a
   gamepad.
 - Gameplay plugs in at `web/main.js`, which exports `start(ctx)`,
   `update(dt, ctx)` and optionally `stop(ctx)`. The shell calls `start` on
   Play and on Retry with a fresh `ctx` (a new `ctx.scene` and `ctx.camera`),
-  calls `update` every frame of play, and stops calling it while paused or
-  ended. Build the run inside `start`, never at the module's top level; split
-  it into more modules under `web/` as it grows.
+  calls `update` every frame of play and through the short slow-motion beat
+  after a win or loss, and stops calling it while paused and once the end
+  screen opens. Build the run inside `start`, never at the module's top
+  level; split it into more modules under `web/` as it grows. An optional
+  `resize(ctx)` runs on every window resize, paused or not; the shell
+  already refits a perspective or orthographic `ctx.camera`.
 - `ctx` also carries `renderer`, `canvas`, `hud` (the game's DOM overlay,
   emptied each run), `player` (set it to the player object so the probe
   reports its position), `keys.down("KeyW")` / `keys.pressed("Space")` (held
   and just-pressed keys, by `KeyboardEvent.code` or the key itself),
-  `listen(target, type, fn)` and `after(seconds, fn)`. Listeners and timers
-  made through `ctx` fire only during play and end with the run; a raw
-  `addEventListener`, `setTimeout` or `requestAnimationFrame` keeps running
-  through pause and stacks up across retries.
+  `mouse` (`x`, `y` in canvas pixels, `ndc.x` / `ndc.y` for a `Raycaster`,
+  `movement.x` / `movement.y` this frame, also under pointer lock, and
+  `down(0)` / `pressed(0)` for the left button), `listen(target, type, fn)`
+  and `after(seconds, fn)`. Keys and mouse carry gameplay input only: a click
+  on a menu never reaches them. Listeners and timers made through `ctx` fire
+  only during play (timers also through the slow-motion end beat) and end
+  with the run; a raw `addEventListener`, `setTimeout` or
+  `requestAnimationFrame` keeps running through pause and stacks up across
+  retries. The starter uses `ctx.mouse` for its dash and `ctx.after` for its
+  clock.
 - End a run with `GameState.win("You escaped!", {Time: "1:42"})` or
   `GameState.lose("Out of fuel", {Distance: "340 m"})` (import `GameState`
   from `./shell/run-state.js`). The last hit plays out in slow motion for a
   moment, then the end screen shows the message and the stats in the order
   given.
 - Put the game's run values on `GameState` at the top of `main.js`. Each Play
-  and Retry puts every one back to that starting value (a copy, never the
-  same array or object); name the ones that must outlive a run in
-  `export const KEEP_ACROSS_RUNS = ["best"]`.
+  and Retry puts every plain-data value (numbers, strings, booleans, arrays,
+  plain objects, `Map`, `Set`) back to a copy of that starting value; a
+  function, class instance or three.js object is left as it is, with a
+  console warning, so build those in `start`. Name the values that must
+  outlive a run in `export const KEEP_ACROSS_RUNS = ["best"]`.
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.
@@ -77,8 +90,9 @@ The comment block at the top of the file shows each call.
 hudText}` (the shell's `state` and `result` first, then the game's values;
 `hudText` is the text on screen, menus included), `errors[]` carrying page
 errors, and `setState(target, values)` reaching named late content when
-`main.js` exports its own `setState` (the starter refuses). Keep the shape;
-extend `GameState`, not the bridge. While the stage tab is hidden the bridge
+`main.js` exports its own `setState(target, values, ctx)` (the starter
+refuses; `ctx` is `null` when no run is going, so return `false` then).
+Keep the shape; extend `GameState`, not the bridge. While the stage tab is hidden the bridge
 holds play and suspends sound, then restores what it found.
 
 ## Conventions

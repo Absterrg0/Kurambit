@@ -4,7 +4,8 @@
 // GameState.win(text, stats) or GameState.lose(text, stats). Retry calls
 // start() again on a fresh ctx, so build everything here, not at the top level.
 //
-// The starter: roam with WASD or the arrow keys and touch the beacon five times.
+// The starter: roam with WASD or the arrow keys, dash with a click or Space,
+// and touch the beacon five times before the clock runs out.
 import * as THREE from "./vendor/three.module.js";
 import { GameState } from "./shell/run-state.js";
 import { Juice } from "./shell/juice.js";
@@ -14,14 +15,23 @@ import { Juice } from "./shell/juice.js";
 // back to these, except the names in KEEP_ACROSS_RUNS.
 GameState.score = 0;
 GameState.moves = 0;
+GameState.time_left = 0;
+GameState.beacon_x = 0;
+GameState.beacon_z = 0;
 GameState.best_time = 0;
 export const KEEP_ACROSS_RUNS = ["best_time"];
 
 const GOAL = 5;
 const SPEED = 5;
+const DASH_SPEED = 14;
+const DASH_S = 0.2;
+const TIME_LIMIT_S = 40;
 let rover = null;
 let beacon = null;
 let elapsed = 0;
+let dashLeft = 0;
+let wasMoving = false;
+const heading = new THREE.Vector3(0, 0, -1);
 
 export function start(ctx) {
   const { scene, camera } = ctx;
@@ -50,7 +60,7 @@ export function start(ctx) {
       roughness: 0.35,
     }),
   );
-  beacon.position.set(6, 1.2, -4);
+  placeBeacon(6, -4);
   rover = new THREE.Mesh(
     new THREE.SphereGeometry(0.45, 24, 18),
     new THREE.MeshStandardMaterial({ color: 0x7fd4ff, roughness: 0.4, metalness: 0.1 }),
@@ -60,30 +70,51 @@ export function start(ctx) {
   ctx.player = rover;
   camera.position.set(0, 7, 12);
   elapsed = 0;
+  dashLeft = 0;
+  wasMoving = false;
+  heading.set(0, 0, -1);
+  // ctx.after runs on game time and goes with the run, so pause holds the
+  // clock and Retry never inherits the last run's timer.
+  ctx.after(TIME_LIMIT_S, () =>
+    GameState.lose("Out of time", { Beacons: `${GameState.score} / ${GOAL}` }),
+  );
+}
+
+function placeBeacon(x, z) {
+  beacon.position.set(x, 1.2, z);
+  GameState.beacon_x = x;
+  GameState.beacon_z = z;
 }
 
 export function update(dt, ctx) {
-  const { keys, camera, hud } = ctx;
+  const { keys, mouse, camera, hud } = ctx;
   elapsed += dt;
+  GameState.time_left = Math.max(0, Math.ceil(TIME_LIMIT_S - elapsed));
   let dx = 0;
   let dz = 0;
   if (keys.down("KeyA") || keys.down("ArrowLeft")) dx -= 1;
   if (keys.down("KeyD") || keys.down("ArrowRight")) dx += 1;
   if (keys.down("KeyW") || keys.down("ArrowUp")) dz -= 1;
   if (keys.down("KeyS") || keys.down("ArrowDown")) dz += 1;
-  if (dx !== 0 || dz !== 0) {
-    const len = Math.hypot(dx, dz);
-    rover.position.x = THREE.MathUtils.clamp(rover.position.x + (dx / len) * SPEED * dt, -28, 28);
-    rover.position.z = THREE.MathUtils.clamp(rover.position.z + (dz / len) * SPEED * dt, -28, 28);
-    GameState.moves += 1;
+  const moving = dx !== 0 || dz !== 0;
+  if (moving) heading.set(dx, 0, dz).normalize();
+  if (moving && !wasMoving) GameState.moves += 1;
+  wasMoving = moving;
+  if ((mouse.pressed() || keys.pressed("Space")) && dashLeft <= 0) {
+    dashLeft = DASH_S;
+    Juice.squash(rover);
   }
+  dashLeft -= dt;
+  const speed = dashLeft > 0 ? DASH_SPEED : moving ? SPEED : 0;
+  rover.position.x = THREE.MathUtils.clamp(rover.position.x + heading.x * speed * dt, -28, 28);
+  rover.position.z = THREE.MathUtils.clamp(rover.position.z + heading.z * speed * dt, -28, 28);
   beacon.rotation.y += dt * 0.8;
   if (GameState.isPlaying() && rover.position.distanceTo(beacon.position) < 1.2) {
     GameState.score += 1;
     Juice.burst(beacon.position, 0xffc94d, 24);
     Juice.shake(0.25);
     Juice.pop(rover);
-    beacon.position.set(THREE.MathUtils.randFloat(-10, 10), 1.2, THREE.MathUtils.randFloat(-12, 4));
+    placeBeacon(THREE.MathUtils.randFloat(-10, 10), THREE.MathUtils.randFloat(-12, 4));
     if (GameState.score >= GOAL) {
       const time = Math.round(elapsed);
       GameState.best_time = GameState.best_time === 0 ? time : Math.min(GameState.best_time, time);
@@ -97,6 +128,8 @@ export function update(dt, ctx) {
   camera.position.set(rover.position.x, 7, rover.position.z + 9);
   camera.lookAt(rover.position.x, 0.5, rover.position.z);
   // Write the overlay only when it changes: a DOM write every frame costs layout.
-  const text = `beacons ${GameState.score} / ${GOAL}\nWASD or arrows to roam, touch the beacon`;
+  const text =
+    `beacons ${GameState.score} / ${GOAL}   time ${GameState.time_left}\n` +
+    "WASD or arrows to roam, click or Space to dash";
   if (hud.textContent !== text) hud.textContent = text;
 }
