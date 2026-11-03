@@ -1,10 +1,318 @@
 [gd_scene format=3]
 
-[node name="Main" type="Node3D"]
+[ext_resource type="Script" path="res://shell/shell.gd" id="1_shell"]
 
-[node name="Camera3D" type="Camera3D" parent="."]
-position = Vector3(0, 2, 5)
-current = true
+[sub_resource type="Gradient" id="Gradient_title"]
+offsets = PackedFloat32Array(0, 0.55, 1)
+colors = PackedColorArray(0.19, 0.17, 0.25, 1, 0.09, 0.09, 0.14, 1, 0.035, 0.04, 0.06, 1)
 
-[node name="Light" type="DirectionalLight3D" parent="."]
-rotation_degrees = Vector3(-45, -30, 0)
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_title"]
+gradient = SubResource("Gradient_title")
+width = 256
+height = 256
+fill = 1
+fill_from = Vector2(0.5, 0.3)
+fill_to = Vector2(1.15, 1.2)
+
+[node name="Main" type="Node"]
+process_mode = 3
+script = ExtResource("1_shell")
+
+[node name="Game" type="Node" parent="."]
+process_mode = 1
+
+[node name="Title" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="Background" type="TextureRect" parent="Title"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = SubResource("GradientTexture2D_title")
+expand_mode = 1
+
+[node name="Center" type="VBoxContainer" parent="Title"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+theme_override_constants/separation = 44
+
+[node name="Name" type="Label" parent="Title/Center"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Game"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Buttons" type="VBoxContainer" parent="Title/Center"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+size_flags_horizontal = 4
+
+[node name="Play" type="Button" parent="Title/Center/Buttons"]
+layout_mode = 2
+text = "Play"
+
+[node name="Settings" type="Button" parent="Title/Center/Buttons"]
+layout_mode = 2
+text = "Settings"
+
+[node name="Credits" type="Button" parent="Title/Center/Buttons"]
+layout_mode = 2
+text = "Credits"
+
+[node name="Quit" type="Button" parent="Title/Center/Buttons"]
+layout_mode = 2
+text = "Quit"
+
+[node name="Hint" type="Label" parent="Title"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -48.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_type_variation = &"HintLabel"
+text = "Enter or click to choose  ·  Esc pauses"
+horizontal_alignment = 1
+
+[node name="Pause" type="CanvasLayer" parent="."]
+layer = 21
+visible = false
+
+[node name="Dim" type="ColorRect" parent="Pause"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.04, 0.62)
+
+[node name="Center" type="CenterContainer" parent="Pause"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Pause/Center"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="Pause/Center/Card"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Pause/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HeadingLabel"
+text = "Paused"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Resume" type="Button" parent="Pause/Center/Card/Box"]
+layout_mode = 2
+text = "Resume"
+
+[node name="Settings" type="Button" parent="Pause/Center/Card/Box"]
+layout_mode = 2
+text = "Settings"
+
+[node name="MainMenu" type="Button" parent="Pause/Center/Card/Box"]
+layout_mode = 2
+text = "Main menu"
+
+[node name="End" type="CanvasLayer" parent="."]
+layer = 21
+visible = false
+
+[node name="Dim" type="ColorRect" parent="End"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.04, 0.62)
+
+[node name="Center" type="CenterContainer" parent="End"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="End/Center"]
+custom_minimum_size = Vector2(540, 0)
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="End/Center/Card"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="End/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HeadingLabel"
+text = "Game over"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Stats" type="GridContainer" parent="End/Center/Card/Box"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/h_separation = 40
+theme_override_constants/v_separation = 6
+columns = 2
+
+[node name="Buttons" type="HBoxContainer" parent="End/Center/Card/Box"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="Retry" type="Button" parent="End/Center/Card/Box/Buttons"]
+layout_mode = 2
+text = "Retry"
+
+[node name="MainMenu" type="Button" parent="End/Center/Card/Box/Buttons"]
+layout_mode = 2
+text = "Main menu"
+
+[node name="Settings" type="CanvasLayer" parent="."]
+layer = 22
+visible = false
+
+[node name="Dim" type="ColorRect" parent="Settings"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.04, 0.75)
+
+[node name="Center" type="CenterContainer" parent="Settings"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Settings/Center"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="Settings/Center/Card"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HeadingLabel"
+text = "Settings"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Grid" type="GridContainer" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+theme_override_constants/h_separation = 24
+theme_override_constants/v_separation = 16
+columns = 2
+
+[node name="MasterLabel" type="Label" parent="Settings/Center/Card/Box/Grid"]
+layout_mode = 2
+text = "Master volume"
+
+[node name="Master" type="HSlider" parent="Settings/Center/Card/Box/Grid"]
+custom_minimum_size = Vector2(240, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="MusicLabel" type="Label" parent="Settings/Center/Card/Box/Grid"]
+layout_mode = 2
+text = "Music"
+
+[node name="Music" type="HSlider" parent="Settings/Center/Card/Box/Grid"]
+custom_minimum_size = Vector2(240, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="SfxLabel" type="Label" parent="Settings/Center/Card/Box/Grid"]
+layout_mode = 2
+text = "Sound effects"
+
+[node name="Sfx" type="HSlider" parent="Settings/Center/Card/Box/Grid"]
+custom_minimum_size = Vector2(240, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="Fullscreen" type="CheckButton" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+text = "Fullscreen"
+
+[node name="Back" type="Button" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+text = "Back"
+
+[node name="Credits" type="CanvasLayer" parent="."]
+layer = 22
+visible = false
+
+[node name="Dim" type="ColorRect" parent="Credits"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.04, 0.75)
+
+[node name="Center" type="CenterContainer" parent="Credits"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Credits/Center"]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="Credits/Center/Card"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Credits/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HeadingLabel"
+text = "Credits"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="Credits/Center/Card/Box"]
+custom_minimum_size = Vector2(460, 200)
+layout_mode = 2
+focus_mode = 0
+horizontal_scroll_mode = 0
+
+[node name="Text" type="Label" parent="Credits/Center/Card/Box/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Made with the Godot Engine"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Back" type="Button" parent="Credits/Center/Card/Box"]
+layout_mode = 2
+text = "Back"

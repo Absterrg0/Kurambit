@@ -1,8 +1,8 @@
 {
   "id": "blank",
   "name": "Blank",
-  "description": "An empty Godot project: a camera, a light, a live state probe and Web, Windows and Linux export presets.",
+  "description": "An empty Godot game inside a demo shell (title, pause, settings, end and credits screens), a game feel kit, a live state probe and Web, Windows and Linux export presets.",
   "dimension": "3d",
-  "gameplayScene": "res://scenes/main.tscn",
+  "gameplayScene": "res://scenes/game.tscn",
   "probe": true
 }

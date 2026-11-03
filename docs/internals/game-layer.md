@@ -114,7 +114,12 @@ for the browser lane, `unity.md` for Unity) and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product. `GameCreateInput.engine`
 (`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
-project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships. The manifest's
+project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
+The Godot starter's main scene is a genre-free demo shell (title, pause, settings, end, credits)
+and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
+them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
+instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
+native explore runner resumes the game's own pause after each act instead of forcing it off. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
 exports and the loop resolve it unchanged. `GameRun` reads the manifest once per loop (`laneOf`) for
 the engine directory and prompt paths; everything else in the loop is engine-neutral.
