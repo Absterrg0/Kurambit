@@ -224,6 +224,9 @@ namespace Kurambit
             var port = config != null && config.TryGetValue("port", out var p) ? Convert.ToInt32(p, CultureInfo.InvariantCulture) : 0;
             token = config != null && config.TryGetValue("token", out var t) ? t as string ?? "" : "";
             if (port <= 0 || token == "") yield break;
+            // A player on a private display never holds window focus, and by
+            // default the Input System disables devices while unfocused.
+            InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
             keyboard = InputSystem.AddDevice<Keyboard>("KurambitKeyboard");
             mouse = InputSystem.AddDevice<Mouse>("KurambitMouse");
             keyboard.MakeCurrent();
