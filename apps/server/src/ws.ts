@@ -1805,15 +1805,33 @@ const layerWsRpc = (
             // Read scope is enough to mint it because the client never names
             // the path: roundDetail builds it from the run id and resolves it
             // inside the game's builds/logs.
-            Effect.flatMap(({ detail, videoFile }) => {
-              const video = detail.video;
-              if (videoFile === null || video === null) return Effect.succeed(detail);
-              return issueAssetUrl({
-                resource: { _tag: "media-file", threadId, path: videoFile },
-              }).pipe(
-                Effect.map((asset) => ({ ...detail, video: { ...video, url: asset.relativeUrl } })),
-                Effect.orElseSucceed(() => detail),
-              );
+            Effect.flatMap(({ detail, videoFile, sheetFiles }) => {
+              const sign = (path: string) =>
+                issueAssetUrl({ resource: { _tag: "media-file", threadId, path } }).pipe(
+                  Effect.map((asset): string | null => asset.relativeUrl),
+                  Effect.orElseSucceed(() => null),
+                );
+              return Effect.gen(function* () {
+                const video = detail.video;
+                const videoUrl =
+                  videoFile === null || video === null ? null : yield* sign(videoFile);
+                const comparison = detail.comparison;
+                // The frame sheets the blind comparators judged from, signed the same way.
+                const sheets =
+                  comparison === null
+                    ? []
+                    : yield* Effect.forEach(comparison.sheets, (sheet) => {
+                        const file = sheetFiles.find((each) => each.build === sheet.build);
+                        return file === undefined
+                          ? Effect.succeed(sheet)
+                          : sign(file.path).pipe(Effect.map((url) => ({ ...sheet, url })));
+                      });
+                return {
+                  ...detail,
+                  video: video === null || videoUrl === null ? video : { ...video, url: videoUrl },
+                  comparison: comparison === null ? null : { ...comparison, sheets },
+                };
+              });
             }),
           ),
         [WS_METHODS.gameRunRestore]: ({ threadId, round }) =>

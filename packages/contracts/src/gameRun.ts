@@ -129,6 +129,16 @@ export const GameRunRoundDetail = Schema.Struct({
           note: Schema.String,
         }),
       ),
+      /** Each blind player's frame sheet, by build; `url` is a short-lived signed path. */
+      sheets: Schema.Array(
+        Schema.Struct({
+          build: Schema.String,
+          file: Schema.String,
+          url: Schema.NullOr(Schema.String),
+        }),
+      ),
+      /** Whether the comparators were shown the sheets (only when both players had one). */
+      sheetsShown: Schema.Boolean,
     }),
   ),
   testerNote: Schema.NullOr(Schema.String),
