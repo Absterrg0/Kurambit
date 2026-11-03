@@ -8,3 +8,4 @@
 /[Bb]uilds/
 *.csproj
 *.sln
+/mono_crash.*
