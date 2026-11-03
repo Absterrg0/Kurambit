@@ -356,6 +356,3 @@ export const makeUnityBackend = (
     runExportRelease,
   };
 };
-
-export const unityPlayerDirectory = (root: string, sourceId: string) =>
-  NodePath.join(root, "builds/logs", `unity-play-${sourceId.slice(0, 16)}`);

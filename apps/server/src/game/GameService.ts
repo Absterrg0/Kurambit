@@ -88,7 +88,12 @@ import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameUnity from "./GameUnity.ts";
-import { unityPlayerDirectory } from "./GameUnityEngine.ts";
+import {
+  checkoutOf,
+  completePlayer,
+  reuseMainPlayer,
+  unityPlayerDirectory,
+} from "./unityPlayerCache.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -136,6 +141,8 @@ import {
 
 /** Short confirmation the creator reads after an export lands. */
 const WEB_READY_MESSAGE = "Web game is ready to play. Open it with Play.";
+/** Unity play players a game keeps under builds/logs, about 100 MB each. */
+const UNITY_PLAYERS_KEPT = 3;
 
 /**
  * Hashes an already opened, identity-checked archive. A download names the
@@ -1884,17 +1891,43 @@ const make = Effect.gen(function* () {
         );
       const playerOf = (sourceId: string) =>
         NodePath.join(unityPlayerDirectory(root, sourceId), "game.x86_64");
-      const cached = (sourceId: string) =>
-        Effect.promise(() =>
-          NodeFSP.stat(playerOf(sourceId)).then(
-            (stat) => stat.isFile(),
-            () => false,
-          ),
-        );
+      const startedMs = yield* Clock.currentTimeMillis;
+      const prepared = (sourceId: string, origin: "cached" | "reused" | "built") =>
+        Effect.map(Clock.currentTimeMillis, (now) => ({
+          player: playerOf(sourceId),
+          sourceId,
+          origin,
+          ms: now - startedMs,
+        }));
+      const checkout = yield* Effect.promise(() => checkoutOf(root));
+      // Only an exact content match is reused: the same sources build the same player.
+      const ready = (sourceId: string) =>
+        Effect.gen(function* () {
+          if (yield* Effect.promise(() => completePlayer(unityPlayerDirectory(root, sourceId))))
+            return yield* prepared(sourceId, "cached");
+          if (checkout.kind !== "linked") return null;
+          const notReused = yield* Effect.promise(() =>
+            reuseMainPlayer(checkout.main, root, sourceId),
+          );
+          if (notReused === null) {
+            yield* Effect.logInfo("Unity worktree reuses its main checkout's player", {
+              root,
+              sourceId,
+            });
+            return yield* prepared(sourceId, "reused");
+          }
+          yield* Effect.logInfo("Unity worktree builds its own player", {
+            root,
+            sourceId,
+            reason: notReused,
+          });
+          return null;
+        });
       const before = yield* known(
         "The game sources could not be identified before the Unity session ran; the result would not be current.",
       );
-      if (yield* cached(before)) return { player: playerOf(before), sourceId: before };
+      const early = yield* ready(before);
+      if (early !== null) return early;
       return yield* exclusive(
         root,
         "Unity play build",
@@ -1914,13 +1947,22 @@ ${imported.message}`.slice(-3000),
             const sourceId = yield* known(
               "The game sources could not be identified after the Unity import; the result would not be current.",
             );
-            if (yield* cached(sourceId)) return { player: playerOf(sourceId), sourceId };
-            // One play build is kept: older ones are the previous sources' players.
+            const afterImport = yield* ready(sourceId);
+            if (afterImport !== null) return afterImport;
+            // The newest few players are kept: a comparison's worktrees reuse
+            // the main checkout's players of both the candidate and the best.
             yield* Effect.promise(async () => {
               const logs = NodePath.join(root, "builds/logs");
+              const players: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
               for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
-                if (name.startsWith("unity-play-"))
-                  await NodeFSP.rm(NodePath.join(logs, name), { recursive: true, force: true });
+                if (name.startsWith("unity-play-")) {
+                  const path = NodePath.join(logs, name);
+                  const stat = await NodeFSP.stat(path).catch(() => null);
+                  if (stat !== null) players.push({ path, mtimeMs: stat.mtimeMs });
+                }
+              players.sort((a, b) => b.mtimeMs - a.mtimeMs);
+              for (const { path } of players.slice(UNITY_PLAYERS_KEPT - 1))
+                await NodeFSP.rm(path, { recursive: true, force: true });
             });
             const built = yield* buildUnityPlayer(
               root,
@@ -1960,7 +2002,7 @@ ${built.result.message}`.slice(-3000),
                   }),
               });
             }
-            return { player: playerOf(built.sourceId), sourceId: built.sourceId };
+            return yield* prepared(built.sourceId, "built");
           }),
         ),
         String(threadId),
@@ -1970,10 +2012,22 @@ ${built.result.message}`.slice(-3000),
     threadId: ThreadId,
     root: string,
     input: typeof GameExploreStartInput.Type,
-    prepared: { readonly player: string; readonly sourceId: string },
+    prepared: {
+      readonly player: string;
+      readonly sourceId: string;
+      readonly origin: "cached" | "reused" | "built";
+      readonly ms: number;
+    },
   ) =>
     Effect.gen(function* () {
       const { player, sourceId } = prepared;
+      const seconds = `${Math.max(1, Math.round(prepared.ms / 1000))} s`;
+      const playerOrigin =
+        prepared.origin === "built"
+          ? `The player was built for this session in ${seconds}.`
+          : prepared.origin === "reused"
+            ? `The player was copied from an earlier build of these exact sources in ${seconds}; no editor opened.`
+            : "The player of these exact sources was already built; no editor opened.";
       const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -2178,7 +2232,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
           `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System. ` +
-          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
+          `${playerOrigin} ${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,

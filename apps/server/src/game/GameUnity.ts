@@ -36,6 +36,7 @@ import {
   unityCliEnv,
   unityEditorEnv,
 } from "./unityToolchain.ts";
+import { checkoutOf } from "./unityPlayerCache.ts";
 
 const IDLE_MS = 10 * 60_000;
 /**
@@ -363,40 +364,6 @@ export const parseCliEnvelope = (
 };
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
-
-type Checkout =
-  | { readonly kind: "own" }
-  | { readonly kind: "linked"; readonly main: string }
-  | { readonly kind: "other"; readonly detail: string };
-
-/**
- * Whose checkout a game folder is, read from git itself. A linked worktree
- * (the production run plays blind samples in these) names its main checkout,
- * the folder above the common git dir. Any other folder whose .git is a file
- * (a submodule, a separate git dir) has no game folder to share an import with.
- */
-const checkoutOf = async (root: string): Promise<Checkout> => {
-  const dotGit = await NodeFSP.stat(NodePath.join(root, ".git")).catch(() => null);
-  if (dotGit === null || !dotGit.isFile()) return { kind: "own" };
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-  );
-  const listed = await execFile(
-    "git",
-    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
-    { cwd: root, env, timeout: 15_000 },
-  ).catch((cause: unknown) => cause);
-  const [common, gitDir] =
-    typeof listed === "object" && listed !== null && "stdout" in listed
-      ? String(listed.stdout).trim().split("\n")
-      : [];
-  if (common === undefined || gitDir === undefined)
-    return { kind: "other", detail: "git could not read its .git file" };
-  return NodePath.basename(common) === ".git" &&
-    NodePath.dirname(gitDir) === NodePath.join(common, "worktrees")
-    ? { kind: "linked", main: NodePath.dirname(common) }
-    : { kind: "other", detail: `its git dir is ${gitDir}` };
-};
 
 /**
  * Left out of the copy: files that name the editor that wrote them, and the

@@ -79,7 +79,11 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   overlap/long-fall detectors not applicable, id-clicks counted and skipped (no control tree),
   explicit state writes through the game's own `setState`.
 - Unity play is a real Linux player of the current sources, built once per source identity
-  under `builds/logs/unity-play-*`, run under xvfb-run. The template's `StudioProbe.cs` speaks
+  under `builds/logs/unity-play-*`, run under xvfb-run. A blind sample's worktree first takes a
+  copy-on-write copy of its main checkout's player of the same source identity (the content hash,
+  never a commit: samples check out a neutral commit), so it plays in seconds instead of building
+  inside its play time; the main checkout keeps its newest three players for that, and its folder
+  is only read. The template's `StudioProbe.cs` speaks
   the Godot native runner's TCP protocol, so acts, pictures, probe reads and close share that
   path; input is queued on virtual Input System devices, which is why the lane asks games to read
   input through the Input System.
