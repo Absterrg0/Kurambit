@@ -27,7 +27,7 @@ import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
 import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
-import { MEMORY_PAUSE, MEMORY_WAITS } from "./lowMemory.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
 import { CONTINUE, MEMORY_RETRY } from "./roles.ts";
 import { BLANK, type RoleStep } from "./state.ts";
 
@@ -301,7 +301,10 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   // explore start spent waiting for memory is given back for the same reason.
   const started = Date.now();
   let capEnd = started + step.capMs;
-  let credited = (yield* deps.game.exploreMemoryWait(live)).waitedMs;
+  // Unreadable marks credit nothing and never replay a turn.
+  const memoryMark = deps.game.exploreMemoryWait(live).pipe(Effect.orElseSucceed(() => null));
+  let turnStart = yield* memoryMark;
+  let credited = turnStart?.waitedMs ?? 0;
   const budgetBound = () => ctx.budgetEndsAt !== null && ctx.budgetEndsAt < capEnd;
   const deadline = () => (budgetBound() ? ctx.budgetEndsAt! : capEnd);
   // The sample budget is enforced where input happens: an act past it is
@@ -315,13 +318,14 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     let retries = 0;
     let memoryWaits = 0;
     let continued = false;
-    // A sample whose explore start was refused for memory has not played: it
-    // waits like the boot check, then plays again on a fresh clock. Memory
-    // that never frees ends the run resumably instead of voiding the sample.
-    // Only play turns: the write-up (the turn that releases) does not play.
+    // A sample turn that did not play because its explore start was refused
+    // for memory waits like the boot check, then plays again on a fresh clock.
+    // Memory that never frees ends the run resumably instead of voiding the
+    // sample. Only play turns: the write-up (the turn that releases) does not play.
     const plays = step.inputCapMs > 0 && !step.release;
     const memoryRefused = Effect.gen(function* () {
-      if (!plays || !(yield* deps.game.exploreMemoryWait(live)).refused) return null;
+      const mark = plays && turnStart !== null ? yield* memoryMark : null;
+      if (turnStart === null || mark === null || !replayRefusedTurn(turnStart, mark)) return null;
       if (memoryWaits >= MEMORY_WAITS)
         return {
           kind: "ended",
@@ -334,7 +338,8 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
       );
       yield* Effect.sleep(MEMORY_PAUSE);
       capEnd = Date.now() + step.capMs;
-      credited = (yield* deps.game.exploreMemoryWait(live)).waitedMs;
+      turnStart = (yield* memoryMark) ?? mark;
+      credited = turnStart.waitedMs;
       runId = yield* send(live, `${MEMORY_RETRY}\n\n${step.prompt}`);
       return "retry" as const;
     });
@@ -350,7 +355,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         })
         .pipe(Effect.mapError(roleError("wait", live, "thread-wait")));
       if (waited.timedOut) {
-        const { waitedMs } = yield* deps.game.exploreMemoryWait(live);
+        const waitedMs = (yield* memoryMark)?.waitedMs ?? credited;
         capEnd += waitedMs - credited;
         credited = waitedMs;
         if (deadline() > Date.now()) continue;

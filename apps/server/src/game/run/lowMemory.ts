@@ -36,3 +36,20 @@ export const memoryEnded = (error: GameOperationError) =>
     ending: "low-memory",
     reason: `memory short: ${lastLine(error)}`.slice(0, 300),
   }) as const;
+
+export type MemoryMark = {
+  readonly refusals: number;
+  readonly refused: boolean;
+  readonly executedInputSteps: number;
+};
+
+/**
+ * Whether a sample's play turn is played again: only when it executed no
+ * input since `atTurnStart` and its own latest start was refused for memory.
+ * A turn that played keeps its result (a replay would give one side a second
+ * turn), and a turn that never tried to start is not the machine's fault.
+ */
+export const replayRefusedTurn = (atTurnStart: MemoryMark, now: MemoryMark): boolean =>
+  now.refused &&
+  now.refusals > atTurnStart.refusals &&
+  now.executedInputSteps === atTurnStart.executedInputSteps;

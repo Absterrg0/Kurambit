@@ -776,7 +776,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           ),
         ),
       );
-      if (state.ending !== "stopped" && state.ending !== "failed")
+      // Exports need the memory a low-memory ending says is missing.
+      if (state.ending !== "stopped" && state.ending !== "failed" && state.ending !== "low-memory")
         yield* finishExports(root, d.creator, d.deps.game, log).pipe(Effect.ignore);
     });
 
