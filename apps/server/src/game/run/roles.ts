@@ -171,6 +171,10 @@ export const sampleWrite = (notes: string): string =>
 const BOT_FACTS =
   "Each report ends with bot facts: the same scripted bot played each build for the same real time, and its ending and the game's final probe values are recorded. The tester wrote that bot against one of these two builds, so how far it gets is a fact about scripted play on each build, not a verdict on either; it measures what scripted play reaches, not how play feels. Weigh bot facts as facts next to the play report. ";
 
+// Pixels are equal-format evidence where a weak player's words are not.
+const sheets = (s: { readonly a: string; readonly b: string }) =>
+  `Each build also has one frame sheet: frames from that player's own play, evenly sampled across all of it and labelled with session and act. Open both images with your file-reading tool before you judge: Build A's is ${s.a} and Build B's is ${s.b}. Judge looks, juice and readability from the pixels as well as the report, and weigh how much of the game each sheet and report actually covers. `;
+
 export const compare = (
   question: string,
   a: string,
@@ -178,8 +182,9 @@ export const compare = (
   aFirst: boolean,
   file: string,
   bots: boolean,
+  frames: { readonly a: string; readonly b: string } | null = null,
 ) =>
-  `Compare these two independent play reports. Shared question: ${question} Which build better handles that flaw, and is better to play overall? Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. ${bots ? BOT_FACTS : ""}TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports, not the game folder, sources or Git. Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
+  `Compare these two independent play reports. Shared question: ${question} Which build better handles that flaw, and is better to play overall? Consider uncertainty and unequal observed exposure. The players may have made different choices or mistakes; an outcome difference alone does not prove different game behavior. ${bots ? BOT_FACTS : ""}${frames === null ? "" : sheets(frames)}TIE means no demonstrated preference. Reports are anonymous and their presentation order is randomized; do not prefer a label or position. Use only these reports${frames === null ? "" : " and the two frame sheets"}, not the game folder, sources or Git. Write ${file}. Put exactly one declaration, COMPARE: A or COMPARE: B or COMPARE: TIE, alone on its own line without any other text. Put play-based reasons in a separate paragraph after that line. Do not play or use subagents.\n\n${aFirst ? `Build A. ${a}\n\nBuild B. ${b}` : `Build B. ${b}\n\nBuild A. ${a}`}`;
 
 export const correct = (file: string): string =>
   `Correct only the format of ${file}, using the reports already provided. Put your declaration COMPARE: A or COMPARE: B or COMPARE: TIE alone on its own line. Put reasons in a separate paragraph below it. Do not play again or collect new evidence.`;

@@ -80,6 +80,7 @@ import {
 import * as GameExploreNative from "./gameExploreNative.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
+import * as ExploreSheet from "./exploreSheet.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -163,6 +164,15 @@ export class GameService extends Context.Service<
       },
       GameOperationError
     >;
+    /**
+     * Tiles an even selection of the frames this thread's explore sessions kept
+     * into one JPEG at `output` (absolute). Returns how many frames it drew; 0
+     * draws nothing.
+     */
+    readonly exploreSheet: (
+      threadId: ThreadId,
+      output: string,
+    ) => Effect.Effect<number, GameOperationError>;
     readonly status: (
       threadId: ThreadId,
       options?: { readonly checkSources?: boolean | undefined },
@@ -1298,6 +1308,7 @@ const make = Effect.gen(function* () {
     executedInputSteps: 0,
     nominalMs: 0,
     images: 0,
+    frames: [] as ExploreSheet.ExploreFrame[],
   });
   const exploreEvidence = new Map<string, ReturnType<typeof emptyExploreEvidence>>();
   const exploreBudget =
@@ -1380,6 +1391,13 @@ const make = Effect.gen(function* () {
         );
         evidence.nominalMs += session.totalNominalMs;
         evidence.images += session.images;
+        for (const action of session.actions)
+          if (action.screenshot !== "")
+            evidence.frames.push({
+              session: evidence.sessions,
+              step: action.index,
+              path: NodePath.join(session.traceDir, action.screenshot),
+            });
         exploreEvidence.delete(owner);
         exploreEvidence.set(owner, evidence);
         if (exploreEvidence.size > 128) {
@@ -2908,6 +2926,97 @@ ${built.result.message}`.slice(-3000),
         yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
       const evidence = exploreEvidence.get(String(threadId)) ?? emptyExploreEvidence();
       return evidence;
+    }),
+    exploreSheet: Effect.fn("GameService.exploreSheet")(function* (threadId, output) {
+      const root = yield* projects.resolve(threadId);
+      const kept = exploreEvidence.get(String(threadId))?.frames ?? [];
+      // Scratch frames can be gone (a cleaned temp dir); only what is on disk is drawn.
+      const present = yield* Effect.promise(() =>
+        Promise.all(
+          kept.map((frame) =>
+            NodeFSP.stat(frame.path).then(
+              (stat) => stat.isFile() && stat.size > 0,
+              () => false,
+            ),
+          ),
+        ),
+      );
+      const frames = ExploreSheet.pickFrames(kept.filter((_, i) => present[i]));
+      const size =
+        frames.length === 0
+          ? null
+          : yield* Effect.promise(() => ExploreSheet.pngSize(frames[0]!.path));
+      if (size === null || size.w === 0) return 0;
+      const ffmpeg = yield* Effect.promise(() =>
+        GameProcesses.findExecutable("ffmpeg", {
+          pathEnv: process.env.PATH,
+          override: process.env.KURAMBIT_FFMPEG,
+        }),
+      );
+      if (ffmpeg === null)
+        return yield* new GameOperationError({
+          operation: "Explore sheet",
+          path: "ffmpeg",
+          reason: "tool-missing",
+          detail: "ffmpeg draws the frame sheet.",
+        });
+      const fontDirectory = yield* GameAssetLibrary.labelFontDirectory();
+      // ffmpeg writes a fresh name, then the rename replaces whatever sits at
+      // `output` without following a link planted there.
+      const temporary = NodePath.join(
+        NodePath.dirname(output),
+        `.sheet-${NodeCrypto.randomUUID()}.jpg`,
+      );
+      const result = yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore sheet",
+            path: output,
+            reason: "io",
+            detail: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }).pipe(
+        Effect.andThen(
+          processes.run({
+            root,
+            ...(fontDirectory === undefined ? {} : { cwd: fontDirectory }),
+            executable: ffmpeg,
+            args: ExploreSheet.sheetArgs(
+              frames,
+              size.h / size.w,
+              fontDirectory === undefined ? null : GameAssetLibrary.LABEL_FONT,
+              temporary,
+            ),
+            operation: "explore-sheet",
+            timeoutMs: 60_000,
+            envMode: "replace",
+            env: GameProcesses.engineChildEnv(),
+          }),
+        ),
+      );
+      if (result.exitCode !== 0) {
+        yield* Effect.promise(() => NodeFSP.rm(temporary, { force: true }));
+        return yield* new GameOperationError({
+          operation: "Explore sheet",
+          path: output,
+          reason: "command-failed",
+          detail: result.stderr.slice(0, 1000),
+        });
+      }
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.rename(temporary, output),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore sheet",
+            path: output,
+            reason: "command-failed",
+            detail: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      });
+      return frames.length;
     }),
     cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
       const root = yield* projects.resolve(threadId).pipe(

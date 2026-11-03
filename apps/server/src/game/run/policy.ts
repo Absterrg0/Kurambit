@@ -72,6 +72,8 @@ export type RoleDone = {
   readonly botsAfter: number;
   /** The play bot this turn last ran and its decider, null when it ran none. */
   readonly bot: { readonly file: string; readonly decider: GameBotDecider } | null;
+  /** The step's sheet when the runner drew one, else "". */
+  readonly sheet: string;
 };
 /** One shape for every git op; each op fills the fields it knows. */
 export type GitOutcome = {
@@ -203,6 +205,7 @@ const role = (id: number, spec: RoleSpec): Step => ({
   source: false,
   bots: false,
   release: false,
+  sheet: "",
   attached: null,
   ...spec,
 });
@@ -283,6 +286,8 @@ const usable = (s: Sample | null) =>
   s !== null && s.phase === "done" && validatePlayEvidence(s.evidence, s.evidence) === null;
 const sampleFile = (s: Pick<Sample, "label">) => `.studio/play-${s.label}.md`;
 const judgeFile = (j: Pick<Judge, "id">) => `.studio/comparisons/${j.id}.md`;
+// Named by the sample's neutral label, like its report: the name never says which build it shows.
+const sheetFile = (s: Pick<Sample, "label">) => `.studio/comparisons/frames-${s.label}.jpg`;
 
 type CompareMove =
   | { readonly kind: "sample"; readonly side: Side; readonly current: Sample | null }
@@ -341,6 +346,11 @@ const botReport = (c: Compare, side: Side): string => {
   return `\nBot facts: the scripted bot played this build for up to ${BOT_SECONDS} seconds of real time and ended ${f.ending} after ${f.seconds.toFixed(0)} seconds of game time${f.note.length > 0 ? ` (${f.note})` : ""}. Final probe values: ${JSON.stringify(f.final)}.${c.bots.every((b) => b.perf !== undefined) ? nodeCounts(f) : ""}`;
 };
 
+// Like bot facts, frame sheets reach the comparators only when both players have
+// one, so a missing sheet never marks a build.
+const sheetsShown = (c: Compare): boolean =>
+  (["x", "y"] as const).every((side) => (lastSample(c, side)?.sheet ?? "") !== "");
+
 // Shown only when both builds have counts, so a missing line never names a build.
 const nodeCounts = (f: BotFact): string =>
   f.perf === undefined
@@ -389,6 +399,7 @@ const compareStep = (
         phase: "play",
         notes: "",
         evidence: null,
+        sheet: "",
       };
       const step = role(id, {
         role: `sample-${s.label}`,
@@ -422,6 +433,7 @@ const compareStep = (
       capMs: CAP.write,
       read: [sampleFile(s)],
       release: true,
+      sheet: sheetFile(s),
     });
     return { cmp: c, step, logs: [] };
   }
@@ -453,6 +465,9 @@ const compareStep = (
           j.aFirst,
           judgeFile(j),
           botsShown(c),
+          sheetsShown(c)
+            ? { a: lastSample(c, move.aIs)!.sheet, b: lastSample(c, other)!.sheet }
+            : null,
         ),
         capMs: CAP.write,
         read: [judgeFile(j)],
@@ -506,6 +521,7 @@ const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
                 phase: "done",
                 notes: textOf(res, sampleFile(s)),
                 evidence: res.evidence ?? s.evidence,
+                sheet: res.sheet,
               };
     if (res.kind === "failed") logs.push(`sample ${s.label} could not finish: ${res.reason}`);
     if (next.phase === "done" && !usable(next))
@@ -560,6 +576,8 @@ const comparisonFile = (
         evidence: side((s) => s?.evidence ?? null),
         players: side((s) => s?.thread ?? null),
         reports: side((s) => s?.notes ?? ""),
+        sheets: side((s) => (s === null || s.sheet === "" ? null : s.sheet)),
+        sheetsShown: sheetsShown(c),
         bot: c.bot.length === 0 ? null : { file: c.bot, decider: c.botDecider },
         botWithheld: c.botWithheld === "" ? null : c.botWithheld,
         bots: {
