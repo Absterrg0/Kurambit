@@ -104,15 +104,16 @@ const presetText = (index: number, name: string): string =>
     `[preset.${index}.options]`,
     'custom_template/debug=""',
     'custom_template/release=""',
-    // Release exports need no console wrapper. Disabling resource rewriting
-    // keeps the template's PE headers untouched on a Linux host.
+    // Release exports need no console wrapper. Resource rewriting puts the
+    // project icon and name on the .exe (Godot does it natively on Linux; the
+    // pack check still passes); without it every game shows Godot's logo.
     "debug/export_console_wrapper=0",
     "binary_format/embed_pck=true",
     "texture_format/s3tc_bptc=true",
     "texture_format/etc2_astc=false",
     'binary_format/architecture="x86_64"',
     "codesign/enable=false",
-    "application/modify_resources=false",
+    "application/modify_resources=true",
     "ssh_remote_deploy/enabled=false",
   ].join("\n");
 

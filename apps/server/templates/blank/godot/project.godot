@@ -3,6 +3,7 @@ config_version=5
 [application]
 config/name="{{GAME_NAME_ESCAPED}}"
 run/main_scene="res://scenes/main.tscn"
+config/icon="res://assets/ui/icon.png"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [autoload]

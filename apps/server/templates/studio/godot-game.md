@@ -31,7 +31,8 @@ game_state.gd; list the ones that must survive (best score, unlocks) in
 launches and Settings can reset them.
 The title shows `assets/ui/title_bg.png` behind the menu once that file
 exists: put the game's key art there (16:9), and the title stops looking like
-a template.
+a template. `assets/ui/icon.png` is the window, web tab and Windows .exe icon:
+replace the placeholder with a 256x256 cut of the key art's main subject.
 
 ## Godot 4 patterns (each verified on 4.7)
 
