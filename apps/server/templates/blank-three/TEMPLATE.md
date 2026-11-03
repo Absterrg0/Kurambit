@@ -117,6 +117,14 @@ zone, look-ahead, damping and level bounds, and in 3D pull in at walls.
 The shell ticks both after `update` and drops them between runs. The comment
 block at the top of each file shows each call.
 
+## Levels
+
+`buildLevel(ctx, rows, legend, { floor })` (`web/shell/level.js`) builds a
+level from a text map and a legend of ASSETS models, instanced so a large map
+stays cheap, and returns `spawns` by letter, `bounds`, `walls` (camera
+blockers) and `move(position, step, radius)`, which slides a circle along the
+walls. The comment block at the top of the file shows each call.
+
 ## What else the template ships
 
 - `web/vendor/three.module.js` + `web/vendor/three.core.js` — three.js

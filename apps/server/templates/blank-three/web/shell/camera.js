@@ -11,7 +11,8 @@
 //     deadZone: { x: 1.5, y: 1 },       // the target moves this far before the camera does
 //     lookAhead: 2,                     // world units ahead in the moving direction
 //     smooth: 6,                        // higher catches up faster
-//     bounds: { minX: 0, maxX: 80, minY: -2, maxY: 20 }, // level edges (minZ/maxZ for xz); the view stays inside
+//     bounds: { minX: 0, maxX: 80, minY: -2, maxY: 20 }, // level edges (minZ/maxZ for xz), or a Box3
+//                                       // such as buildLevel's level.bounds; the view stays inside
 //   });
 //
 // 3D third person: behind and above the target, lagging, looking a little
@@ -28,13 +29,18 @@ const live = new Set();
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 
 export function followCamera2D(ctx, target, options = {}) {
-  const {
-    plane = "xy",
-    deadZone = { x: 1, y: 1 },
-    lookAhead = 1.5,
-    smooth = 6,
-    bounds = null,
-  } = options;
+  const { plane = "xy", deadZone = { x: 1, y: 1 }, lookAhead = 1.5, smooth = 6 } = options;
+  const box = options.bounds;
+  const bounds = box?.isBox3
+    ? {
+        minX: box.min.x,
+        maxX: box.max.x,
+        minY: box.min.y,
+        maxY: box.max.y,
+        minZ: box.min.z,
+        maxZ: box.max.z,
+      }
+    : (box ?? null);
   const camera = ctx.camera;
   // u/v are the two axes the target moves on; the third keeps its offset.
   const v = plane === "xz" ? "z" : "y";
