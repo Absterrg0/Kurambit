@@ -119,8 +119,10 @@ export const retryDirection = (direction: string, lane: string): string =>
 export const builderFirst = (whole: boolean, lane: string, direction: string): string =>
   `${whole ? wholeBuildRule(lane) : buildRule(lane)}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\nNote learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
 
+// A builder that finished the direction early otherwise spends its follow-ups
+// rewriting NOTES.md until the no-change limit ends the block.
 export const builderMore = (minutes: number, direction: string): string =>
-  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nDo not redo what works. No subagents. No commits.`;
+  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nIf it is all done, play your build for a minute with game_explore_start/act/close and fix the most important problem you see in how it plays, feels or looks; only a change to game files counts as progress. Do not redo what works. No subagents. No commits.`;
 
 // The service records every bot run itself in .studio/bot-results.jsonl, so
 // the tester never appends there. With a Jev key the tester also explores.
