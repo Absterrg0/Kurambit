@@ -321,6 +321,11 @@ const compareMove = (c: Compare): CompareMove => {
   return { kind: "done", gate: null };
 };
 
+// The pick's comparator wrote blind, about "A" and "B"; the builders who read
+// its notes afterwards need to know which of those the game became.
+const pickLegend = (chosen: string) =>
+  `(In these notes, ${chosen} is the prototype the game continued from, now on main; ${chosen === "A" ? "B" : "A"} is the one set aside.)`;
+
 const finalJudge = (c: Compare, aIs: Side): Judge | null => {
   const [first, retry] = c.judges.filter((j) => j.aIs === aIs);
   return retry !== undefined && retry.verdict !== "NONE" ? retry : (first ?? null);
@@ -1005,7 +1010,7 @@ export const applyResult = (
           logs.push("pick tie unresolved: building from trunk with the tie recorded");
           return out(afterStage({ ...s, pickNotes: t.notes }, "pick", now));
         }
-        const notes = `${t.notes}\nSELECT: ${chosen} (continuation choice on tied comparison; no demonstrated preference)\n${reasonsAfter(text, /^SELECT:\s*(A|B)\s*$/i)}`;
+        const notes = `${pickLegend(chosen)}\n${t.notes}\nSELECT: ${chosen} (continuation choice on tied comparison; no demonstrated preference)\n${reasonsAfter(text, /^SELECT:\s*(A|B)\s*$/i)}`;
         return out({
           ...s,
           pickNotes: notes,
@@ -1021,7 +1026,7 @@ export const applyResult = (
       if (verdict === "A" || verdict === "B")
         return out({
           ...s,
-          pickNotes: j!.notes,
+          pickNotes: `${pickLegend(verdict)}\n${j!.notes}`,
           task: { ...t, cmp, phase: "adopt", chosen: verdict === "A" ? cmp.x : cmp.y },
         });
       // TIE compares honestly, but creation needs a base: the comparator picks
