@@ -40,6 +40,12 @@ const CODE_UNITY = /\.(cs|unity|prefab)$/;
 const SOURCE_UNITY = /\.(cs|unity|prefab|asset|mat|controller|anim)$/i;
 const UNITY_VERSION_FILE = "ProjectSettings/ProjectVersion.txt";
 const UNITY_BUILD_SCENES = "ProjectSettings/EditorBuildSettings.asset";
+// The render pipeline assets (and what they name) load from these, not from any scene.
+const UNITY_SETTINGS_ROOTS = [
+  UNITY_BUILD_SCENES,
+  "ProjectSettings/GraphicsSettings.asset",
+  "ProjectSettings/QualitySettings.asset",
+] as const;
 // Generated or installed trees are not walked; a path into one is never reported missing.
 const SKIP_DIRS = new Set([".godot", ".git", "builds", "node_modules"]);
 // Third-party code: its files exist, but it is not the game's code or the game's art.
@@ -344,13 +350,28 @@ const drawnGodot = (path: string, text: string): Array<readonly [string, number]
 
 const UNITY_GUID = /\bguid: ([0-9a-f]{32})\b/g;
 const CS_ASSET_PATH = /"(Assets\/[^"\n]{1,200})"/g;
-const CS_RESOURCES = /\bResources\.Load(?:All|Async)?\s*(?:<[^>]*>)?\s*\(\s*"([^"\n]{1,200})"/g;
+// The literal's `$` marks an interpolated string; a `+` after it a path built at runtime.
+const CS_RESOURCES =
+  /\bResources\.Load(?:All|Async)?\s*(?:<[^>]*>)?\s*\(\s*(\$?)"([^"\n]{1,200})"\s*(\+?)/g;
+// A disabled build scene is listed but never built, so it is no entry point.
+const DISABLED_SCENE = /^( *)- enabled: 0[^\n]*\n(?:\1 {2}[^\n]*(?:\n|$))*/gm;
+
+/**
+ * C# with comments removed and string and character literals emptied, so a
+ * word inside either is never read as a declaration.
+ */
+const csCode = (text: string): string =>
+  text.replace(
+    /\/\/[^\n]*|\/\*[\s\S]*?\*\/|@"(?:[^"]|"")*"|\$?"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g,
+    (m) => (m.startsWith("/") ? " " : '""'),
+  );
 
 const unityRefs = (text: string, path: string, guids: ReadonlyMap<string, string>) => {
   const refs: Reference[] = [];
   if (!path.endsWith(".cs")) {
+    const scanned = path === UNITY_BUILD_SCENES ? text.replace(DISABLED_SCENE, "") : text;
     // GUIDs of packages and built-in resources have no .meta here; they are not the game's files.
-    for (const m of text.matchAll(UNITY_GUID)) {
+    for (const m of scanned.matchAll(UNITY_GUID)) {
       const target = guids.get(m[1] ?? "");
       if (target !== undefined)
         refs.push({ raw: target, refs: [{ kind: "exact", path: target }], reportable: false });
@@ -370,16 +391,23 @@ const unityRefs = (text: string, path: string, guids: ReadonlyMap<string, string
     );
   }
   // Resources.Load names a path under any Resources/ folder, without its extension.
+  // A literal that is only the start of the path (concatenated or interpolated) names
+  // every file below that start.
   for (const m of text.matchAll(CS_RESOURCES)) {
-    const name = m[1] ?? "";
+    const interpolated = m[1] === "$";
+    const literal = m[2] ?? "";
+    const name = interpolated ? literal.split("{")[0]! : literal;
+    const partial = m[3] === "+" || (interpolated && name !== literal);
     refs.push({
-      raw: name,
+      raw: literal,
       refs: [
         {
           kind: "family",
           prefix: "",
           suffix: "",
-          source: `^(?:.*/)?Resources/${escapeRe(name)}(?:\\.[^/]+|/.*)?$`,
+          source: partial
+            ? `^(?:.*/)?Resources/${escapeRe(name)}`
+            : `^(?:.*/)?Resources/${escapeRe(name)}(?:\\.[^/]+|/.*)?$`,
         },
       ],
       reportable: false,
@@ -568,28 +596,28 @@ export const scanAssetUse = (
       );
 
   const classNames = new Map<string, string>();
-  const classDecl =
-    engine === "godot"
-      ? /^class_name\s+(\w+)/m
-      : engine === "unity"
-        ? /\b(?:class|struct)\s+(\w+)/
-        : null;
-  if (classDecl !== null)
-    for (const [path] of refsOf) {
-      if (engine === "unity" && !path.endsWith(".cs")) continue;
-      const name = classDecl.exec(byPath.get(path)?.text ?? "")?.[1];
+  for (const [path] of refsOf) {
+    const text = byPath.get(path)?.text ?? "";
+    // A C# file may declare several types; every one of them names the file.
+    const names =
+      engine === "godot"
+        ? [/^class_name\s+(\w+)/m.exec(text)?.[1]]
+        : engine === "unity" && path.endsWith(".cs")
+          ? [...csCode(text).matchAll(/\b(?:class|struct)\s+(\w+)/g)].map((m) => m[1])
+          : [];
+    for (const name of names)
       if (name !== undefined && !classNames.has(name)) classNames.set(name, path);
-    }
+  }
 
   // Loaded code is what the engine reaches from its entry point: project.godot names the
-  // main scene and autoloads; Unity starts from the build's scene list and from scripts
-  // it runs on load. A global class_name (or C# class) counts once a loaded file names it.
+  // main scene and autoloads; Unity starts from the build's enabled scenes, its graphics
+  // and quality settings (the render pipeline assets) and from scripts it runs on load. A global class_name (or C# class) counts once a loaded file names it.
   const roots =
     engine === "godot"
       ? ["project.godot"]
       : engine === "unity"
         ? [
-            UNITY_BUILD_SCENES,
+            ...UNITY_SETTINGS_ROOTS,
             ...[...refsOf.keys()].filter((p) =>
               /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? ""),
             ),
@@ -676,7 +704,7 @@ const readEngine = async (
   const files: EngineFile[] = [];
   let sourceBytes = 0;
   let tooLarge: string | null = null;
-  // A Unity project is read from Assets/ and its build scene list only:
+  // A Unity project is read from Assets/ and the settings it loads from only:
   // Library/, Temp/, Logs/ and the package cache are generated and huge.
   const unity = await isFile(NodePath.join(dir, UNITY_VERSION_FILE));
   const visit = async (rel: string) => {
@@ -717,10 +745,11 @@ const readEngine = async (
   }
   await visit("Assets");
   files.push({ path: UNITY_VERSION_FILE, text: null });
-  files.push({
-    path: UNITY_BUILD_SCENES,
-    text: await NodeFSP.readFile(NodePath.join(dir, UNITY_BUILD_SCENES), "utf8").catch(() => null),
-  });
+  for (const path of UNITY_SETTINGS_ROOTS)
+    files.push({
+      path,
+      text: await NodeFSP.readFile(NodePath.join(dir, path), "utf8").catch(() => null),
+    });
   return { files, tooLarge };
 };
 
@@ -769,7 +798,7 @@ export const assetUseSummary = (use: AssetUse, lane: string): string => {
     use.engine === "godot"
       ? "project.godot"
       : use.engine === "unity"
-        ? `${UNITY_BUILD_SCENES} scenes`
+        ? `the enabled ${UNITY_BUILD_SCENES} scenes and the graphics and quality settings`
         : "index.html";
   const drawn =
     use.drawn.length === 0 ? "none" : use.drawn.map(([name, n]) => `${name} ${n}`).join(", ");
