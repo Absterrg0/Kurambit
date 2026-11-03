@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This helper reads the game's source tree on the native filesystem.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -26,7 +27,13 @@ const UNITY_OUTPUT_DIRECTORIES = new Set([
 const READ_FLAGS = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW;
 
 export type SourceSnapshot =
-  | { readonly kind: "known"; readonly sourceId: string; readonly entries: number }
+  | {
+      readonly kind: "known";
+      readonly sourceId: string;
+      readonly entries: number;
+      /** Each file's size and content hash, by path relative to the engine directory. */
+      readonly files: ReadonlyMap<string, string>;
+    }
   | {
       readonly kind: "unknown";
       readonly reason: "entry-limit" | "io" | "symlink";
@@ -107,6 +114,7 @@ export const snapshotBuildSource = async (
     () => false,
   );
   const lines: string[] = [];
+  const files = new Map<string, string>();
   let visited = 0;
   try {
     const stack = [engineRoot];
@@ -161,6 +169,7 @@ export const snapshotBuildSource = async (
           throw cause;
         }
         lines.push(`${relative}\0${hashed.size}\0${hashed.sha256}\n`);
+        files.set(relative, `${hashed.size}:${hashed.sha256}`);
       }
     }
   } catch {
@@ -171,7 +180,43 @@ export const snapshotBuildSource = async (
   lines.sort();
   const hash = NodeCrypto.createHash("sha256");
   for (const line of lines) hash.update(line);
-  return { kind: "known", sourceId: hash.digest("hex"), entries: lines.length };
+  return { kind: "known", sourceId: hash.digest("hex"), entries: lines.length, files };
+};
+
+/** Paths (relative to the engine directory) added, removed or changed between two reads. */
+export const changedFiles = (
+  before: Extract<SourceSnapshot, { kind: "known" }>,
+  after: Extract<SourceSnapshot, { kind: "known" }>,
+): string[] => {
+  const changed = new Set<string>();
+  for (const [path, content] of before.files)
+    if (after.files.get(path) !== content) changed.add(path);
+  for (const path of after.files.keys()) if (!before.files.has(path)) changed.add(path);
+  return [...changed].sort();
+};
+
+/**
+ * Whether every one of `paths` (relative to the game root) now holds exactly
+ * its committed content: tracked, unmodified, and neither untracked nor
+ * ignored. A path in neither the commit nor the tree counts as matching. Any
+ * git failure answers false.
+ */
+export const matchesCommit = async (
+  root: string,
+  paths: ReadonlyArray<string>,
+): Promise<boolean> => {
+  if (paths.length === 0) return true;
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  return new Promise((resolve) => {
+    NodeChildProcess.execFile(
+      "git",
+      ["status", "--porcelain", "--ignored", "--untracked-files=all", "--", ...paths],
+      { cwd: root, env, timeout: 30_000, maxBuffer: 1 << 20 },
+      (error, stdout) => resolve(error === null && stdout.trim() === ""),
+    );
+  });
 };
 
 export type SourceComparison =
