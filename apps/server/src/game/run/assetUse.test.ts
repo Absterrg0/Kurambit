@@ -245,4 +245,54 @@ describe("readAssetUse", () => {
       ["CreatePrimitive calls", 1],
     ]);
   });
+
+  it("reaches Unity render pipeline assets, skips disabled scenes, and reads C# declarations as code", async () => {
+    const meta = (guid: string) => `fileFormatVersion: 2\nguid: ${guid}\n`;
+    const g = (c: string) => c.repeat(32);
+    const root = await fixture({
+      "unity/ProjectSettings/ProjectVersion.txt": "m_EditorVersion: 6000.6.7f1\n",
+      "unity/ProjectSettings/EditorBuildSettings.asset": `EditorBuildSettings:\n  m_Scenes:\n  - enabled: 1\n    path: Assets/Scenes/Main.unity\n    guid: ${g("a")}\n  - enabled: 0\n    path: Assets/Scenes/Old.unity\n    guid: ${g("d")}\n  m_configObjects: {}\n`,
+      "unity/ProjectSettings/GraphicsSettings.asset": `  m_RenderPipelineGlobalSettingsMap:\n    UnityEngine.Rendering.Universal.UniversalRenderPipeline: {fileID: 11400000, guid: ${g("e")}, type: 2}\n`,
+      "unity/ProjectSettings/QualitySettings.asset": `  - name: PC\n    customRenderPipeline: {fileID: 11400000, guid: ${g("f")}, type: 2}\n`,
+      "unity/Assets/Scenes/Main.unity": `m_Script: {fileID: 11500000, guid: ${g("b")}, type: 3}\n`,
+      "unity/Assets/Scenes/Main.unity.meta": meta(g("a")),
+      "unity/Assets/Scenes/Old.unity": `m_Texture: {fileID: 2800000, guid: ${g("9")}, type: 3}\n`,
+      "unity/Assets/Scenes/Old.unity.meta": meta(g("d")),
+      "unity/Assets/Settings/Global.asset": "m_Name: Global\n",
+      "unity/Assets/Settings/Global.asset.meta": meta(g("e")),
+      "unity/Assets/Settings/PC_RPAsset.asset": `m_RendererDataList:\n  - {fileID: 11400000, guid: ${g("1")}, type: 2}\n`,
+      "unity/Assets/Settings/PC_RPAsset.asset.meta": meta(g("f")),
+      "unity/Assets/Settings/PC_Renderer.asset": `m_RendererFeatures:\n  - {fileID: 1}\nm_Script: {fileID: 11500000, guid: ${g("2")}, type: 3}\nm_Lut: {fileID: 2800000, guid: ${g("3")}, type: 3}\n`,
+      "unity/Assets/Settings/PC_Renderer.asset.meta": meta(g("1")),
+      "unity/Assets/Rendering/Outline.cs":
+        "public class OutlineFeature : ScriptableRendererFeature {}\n",
+      "unity/Assets/Rendering/Outline.cs.meta": meta(g("2")),
+      "unity/Assets/Art/lut.png": "",
+      "unity/Assets/Art/lut.png.meta": meta(g("3")),
+      "unity/Assets/Art/old.png": "",
+      "unity/Assets/Art/old.png.meta": meta(g("9")),
+      "unity/Assets/Scripts/Player.cs": [
+        "public class Player : MonoBehaviour {",
+        "  void Start() {",
+        '    Resources.Load<AudioClip>("Sfx/" + clip);',
+        '    Resources.Load<Sprite>($"Faces/{mood}");',
+        "    new Ghost(); new Sidekick();",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      "unity/Assets/Scripts/Player.cs.meta": meta(g("b")),
+      // Before the real declaration, a comment or string naming another class must not claim it.
+      "unity/Assets/Scripts/Aaa.cs":
+        '/* class Player */ public class Aaa { string s = "struct Player"; }\n',
+      "unity/Assets/Scripts/Ghost.cs": "// class Helper used to live here\npublic class Ghost {}\n",
+      "unity/Assets/Scripts/Kinds.cs": "public struct Pickup {}\npublic class Sidekick {}\n",
+      "unity/Assets/Resources/Sfx/jump.wav": "",
+      "unity/Assets/Resources/Faces/happy.png": "",
+    });
+    const use = await readAssetUse(root, "unity");
+    expect(use.missing).toEqual([]);
+    expect(use.unused).toEqual(["Assets/Art/old.png"]);
+    expect(use.unloaded).toEqual(["Assets/Scenes/Old.unity", "Assets/Scripts/Aaa.cs"]);
+  });
 });

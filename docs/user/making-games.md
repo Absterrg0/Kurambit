@@ -47,8 +47,9 @@ through the same tools, with a Web export only. The run loop, Play, preview and 
 the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
 editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
 Unity games have no Web export, so Play and web packaging are not available for them, and bot runs
-do not play them yet. A production run's prototype and blind-comparison players work in separate
-checkouts of the game, which cannot open a Unity editor yet, so those steps cannot play a Unity game.
+do not play them yet. In a production run, each blind comparison builds a Unity game in a separate
+checkout of it, which takes over the one Unity editor for that build; the game's own editor reopens
+on its next Unity call.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an

@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -162,7 +163,14 @@ const recordedOwners = (
   record: Partial<SessionRecord>,
   live: LiveExecutables,
 ): ReadonlyArray<RecordedPid> => [
-  { pid: record.mcpPid, owns: (argv) => argv[0] === live.cli && argv.includes("mcp") },
+  {
+    pid: record.mcpPid,
+    owns: (argv) =>
+      argv[0] === live.cli &&
+      argv[1] === "mcp" &&
+      typeof record.projectDir === "string" &&
+      argv[argv.indexOf("--project-path") + 1] === record.projectDir,
+  },
   {
     pid: record.editorPid,
     owns: (argv) =>
@@ -345,6 +353,90 @@ export const parseCliEnvelope = (
   return null;
 };
 
+const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
+
+type Checkout =
+  | { readonly kind: "own" }
+  | { readonly kind: "linked"; readonly main: string }
+  | { readonly kind: "other"; readonly detail: string };
+
+/**
+ * Whose checkout a game folder is, read from git itself. A linked worktree
+ * (the production run plays blind samples in these) names its main checkout,
+ * the folder above the common git dir. Any other folder whose .git is a file
+ * (a submodule, a separate git dir) has no game folder to share an import with.
+ */
+const checkoutOf = async (root: string): Promise<Checkout> => {
+  const dotGit = await NodeFSP.stat(NodePath.join(root, ".git")).catch(() => null);
+  if (dotGit === null || !dotGit.isFile()) return { kind: "own" };
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  const listed = await execFile(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+    { cwd: root, env, timeout: 15_000 },
+  ).catch((cause: unknown) => cause);
+  const [common, gitDir] =
+    typeof listed === "object" && listed !== null && "stdout" in listed
+      ? String(listed.stdout).trim().split("\n")
+      : [];
+  if (common === undefined || gitDir === undefined)
+    return { kind: "other", detail: "git could not read its .git file" };
+  return NodePath.basename(common) === ".git" &&
+    NodePath.dirname(gitDir) === NodePath.join(common, "worktrees")
+    ? { kind: "linked", main: NodePath.dirname(common) }
+    : { kind: "other", detail: `its git dir is ${gitDir}` };
+};
+
+/**
+ * Left out of the copy: files that name the editor that wrote them, and the
+ * compiled-script state keyed by the main checkout's path. The worktree
+ * recompiles its scripts in any case; built from the copied state, its player
+ * lost the scene's MonoBehaviours ("referenced script is missing").
+ */
+const LIBRARY_NOT_COPIED = [
+  "Pipeline/.unity-pipeline-port",
+  "EditorInstance.json",
+  "ilpp.pid",
+  "burst.pid",
+  "Bee",
+  "ScriptAssemblies",
+  "ScriptMapper",
+  "MonoManager.asset",
+  "BuildPlayerData",
+  "PlayerDataCache",
+];
+
+/**
+ * A worktree checkout starts with no Library/, which would cost a full asset
+ * import. It gets a copy-on-write copy of its main checkout's import cache
+ * instead, so Unity reimports only what differs at this commit. The copy is
+ * made while no editor of ours has the main project open, and lands whole or
+ * not at all. Removing the worktree removes the copy with it.
+ */
+const seedLibrary = async (
+  mainProjectDir: string,
+  projectDir: string,
+  scratch: string,
+): Promise<void> => {
+  const target = NodePath.join(projectDir, "Library");
+  if ((await NodeFSP.stat(target).catch(() => null)) !== null) return;
+  const source = NodePath.join(mainProjectDir, "Library");
+  if (!(await NodeFSP.stat(source).catch(() => null))?.isDirectory()) return;
+  const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
+  try {
+    await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
+      timeout: 15 * 60_000,
+    });
+    for (const name of LIBRARY_NOT_COPIED)
+      await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
+    await NodeFSP.rename(staging, target);
+  } finally {
+    await NodeFSP.rm(staging, { recursive: true, force: true });
+  }
+};
+
 export class GameUnity extends Context.Service<
   GameUnity,
   {
@@ -411,24 +503,49 @@ const make = Effect.gen(function* () {
     xvfb: await findXvfb(),
   });
 
-  /** Reaps one record file and removes it; a missing or unreadable record reaps nothing. */
-  const reapFile = async (file: string, homeDir: string, live: LiveExecutables) => {
+  const projectDirOf = (root: string) =>
+    projects
+      .read(root)
+      .pipe(Effect.map((manifest) => GameProjectService.insideGame(root, manifest.godotProject)));
+
+  /**
+   * Reaps one record file and removes it; a missing or unreadable record
+   * reaps nothing. The game-folder copy is writable by the game's agents, so
+   * it is trusted only while it names this game and its own Unity project.
+   */
+  const reapFile = async (
+    file: string,
+    homeDir: string,
+    live: LiveExecutables,
+    expected?: { readonly root: string; readonly projectDir: string | null },
+  ) => {
     const record = await readRecord<SessionRecord>(file);
-    if (record !== null) await reapRecord(record, homeDir, live);
+    if (
+      record !== null &&
+      (expected === undefined ||
+        (record.root === expected.root && record.projectDir === expected.projectDir))
+    )
+      await reapRecord(record, homeDir, live);
     await NodeFSP.rm(file, { force: true });
   };
 
   /** Ends the in-memory session, then reaps whatever its records still name (a previous server's session included). */
   const drop = (root: string): Effect.Effect<void> =>
-    Effect.promise(async () => {
-      const session = sessions.get(root);
-      if (session !== undefined) {
-        sessions.delete(root);
-        void session.client.close().catch(() => undefined);
-      }
-      const live = await liveExecutables();
-      await reapFile(NodePath.join(homeDirOf(root), SESSION_FILE), homeDirOf(root), live);
-      await reapFile(serverRecordOf(root), homeDirOf(root), live);
+    Effect.gen(function* () {
+      const projectDir = yield* projectDirOf(root).pipe(Effect.orElseSucceed(() => null));
+      yield* Effect.promise(async () => {
+        const session = sessions.get(root);
+        if (session !== undefined) {
+          sessions.delete(root);
+          void session.client.close().catch(() => undefined);
+        }
+        const live = await liveExecutables();
+        await reapFile(NodePath.join(homeDirOf(root), SESSION_FILE), homeDirOf(root), live, {
+          root,
+          projectDir: session?.projectDir ?? projectDir,
+        });
+        await reapFile(serverRecordOf(root), homeDirOf(root), live);
+      });
     });
 
   // An editor orphaned by a crashed server is found through the server's own
@@ -444,11 +561,6 @@ const make = Effect.gen(function* () {
       await NodeFSP.rm(file, { force: true });
     }
   });
-
-  const projectDirOf = (root: string) =>
-    projects
-      .read(root)
-      .pipe(Effect.map((manifest) => GameProjectService.insideGame(root, manifest.godotProject)));
 
   const runCli = (
     root: string,
@@ -531,23 +643,14 @@ const make = Effect.gen(function* () {
           take(existing);
           return existing;
         }
-        // The production run plays prototypes and blind samples in git
-        // worktrees at other commits. For Unity each would be a separate
-        // project with an empty Library/: a full import and a second 2-3 GB
-        // editor that evicts the creator's, round after round. Refused until
-        // a checkout can share the creator's import cache.
-        const worktree = yield* Effect.promise(() =>
-          NodeFSP.stat(NodePath.join(root, ".git")).then(
-            (stat) => stat.isFile(),
-            () => false,
-          ),
-        );
-        if (worktree)
+        // The production run plays blind samples in git worktrees of the game.
+        const checkout = yield* Effect.promise(() => checkoutOf(root));
+        if (checkout.kind === "other")
           return yield* opError(
             "unity-live",
             root,
             "invalid-input",
-            "This Unity game folder is a git worktree checkout (the production run plays prototypes and blind samples in those). The live Unity editor runs only in the game's own folder for now: each checkout would need its own editor and a full asset import, and would close the creator's editor. Play and edit the game from its own folder.",
+            `This Unity game folder is a git checkout that is not a worktree of a game folder (${checkout.detail}), such as a submodule. The live Unity editor opens a game's own folder or a git worktree of it; open the game from its own folder.`,
           );
         const unity = yield* tools.unity;
         const projectDir = yield* projectDirOf(root);
@@ -584,6 +687,25 @@ const make = Effect.gen(function* () {
           },
           catch: (cause) => opError("unity-live", homeDir, "io", undefined, cause),
         });
+        // After the drops above: the main checkout's editor is closed, so its
+        // import cache is copied whole.
+        if (checkout.kind === "linked")
+          yield* Effect.tryPromise({
+            try: () =>
+              seedLibrary(
+                NodePath.join(checkout.main, NodePath.relative(root, projectDir)),
+                projectDir,
+                NodePath.dirname(homeDir),
+              ),
+            catch: (cause) =>
+              opError(
+                "unity-live",
+                NodePath.join(projectDir, "Library"),
+                "io",
+                `Could not copy the import cache (Library/) of ${checkout.main} into this worktree. ${cause instanceof Error ? cause.message : ""}`,
+                cause,
+              ),
+          });
         const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
         if (displayNum === null)
           return yield* opError(

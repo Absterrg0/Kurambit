@@ -80,6 +80,8 @@ interface Session {
   readonly mcpPid: number;
   readonly client: Client;
   readonly transport: StdioClientTransport;
+  /** What this session was launched from; its own pids are verified against these. */
+  readonly live: LiveExecutables;
   lastActive: number;
 }
 
@@ -386,7 +388,17 @@ const make = Effect.gen(function* () {
         killPid(session.xvfbPid);
         void session.client.close().catch(() => undefined);
       }
-      const live = yield* liveExecutables;
+      // A live session is checked against what it was launched from, so a
+      // Blender path change never orphans it; only a record without one (a
+      // previous server's) resolves the toolchain.
+      const recorded = yield* Effect.promise(() =>
+        NodeFSP.access(NodePath.join(homeDirOf(root), SESSION_FILE)).then(
+          () => true,
+          () => false,
+        ),
+      );
+      if (!recorded) return;
+      const live = session?.live ?? (yield* liveExecutables);
       yield* Effect.promise(() => reapRecorded(homeDirOf(root), live));
     });
 
@@ -694,6 +706,7 @@ const make = Effect.gen(function* () {
         mcpPid,
         client,
         transport,
+        live: { blender: blender.path, uvx: uv.uvx, xvfb: xvfbPath },
         lastActive: startedAt,
       };
       sessions.set(root, session);

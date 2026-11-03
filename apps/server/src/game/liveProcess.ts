@@ -79,6 +79,19 @@ export interface RecordedPid {
   readonly owns: (argv: ReadonlyArray<string>) => boolean;
 }
 
+/**
+ * A process's start time (clock ticks since boot) and executable, from /proc;
+ * a reused pid never matches both. Null when unreadable or gone.
+ */
+const identityOf = async (pid: number): Promise<string | null> => {
+  const stat = await NodeFSP.readFile(`/proc/${pid}/stat`, "utf8").catch(() => null);
+  const exe = await readExe(pid);
+  if (stat === null || exe === null) return null;
+  // Field 22 (starttime); fields after the parenthesized name start at field 3.
+  const start = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  return start === undefined ? null : `${start} ${exe}`;
+};
+
 const signal = (pid: number, name: NodeJS.Signals): void => {
   try {
     process.kill(pid, name);
@@ -90,7 +103,9 @@ const signal = (pid: number, name: NodeJS.Signals): void => {
 /**
  * SIGTERM the recorded pids that verify as ours plus the extra pids `tree`
  * names (taken once, while the owners still live), wait up to `waitMs`, then
- * SIGKILL stragglers. Without /proc nothing verifies, so nothing is signalled.
+ * SIGKILL stragglers that are still the same process (start time and
+ * executable as signalled). Without /proc nothing verifies, so nothing is
+ * signalled.
  */
 export const reapVerified = async (
   recorded: ReadonlyArray<RecordedPid>,
@@ -111,13 +126,25 @@ export const reapVerified = async (
   };
   let live = await owned();
   const tree = live.length > 0 && options.tree !== undefined ? await options.tree(live) : [];
-  for (const pid of [...live, ...tree]) signal(pid, "SIGTERM");
+  const signalled = new Map<number, string | null>();
+  for (const pid of [...live, ...tree]) {
+    signalled.set(pid, await identityOf(pid));
+    signal(pid, "SIGTERM");
+  }
   for (let waited = 0; live.length > 0 && waited < options.waitMs; waited += options.pollMs) {
     await new Promise((resolve) => setTimeout(resolve, options.pollMs));
     live = await owned();
   }
-  for (const pid of live) signal(pid, "SIGKILL");
-  for (const pid of tree) if (alive(pid)) signal(pid, "SIGKILL");
+  for (const pid of new Set([...live, ...tree])) {
+    const identity = signalled.get(pid);
+    if (
+      identity !== undefined &&
+      identity !== null &&
+      alive(pid) &&
+      (await identityOf(pid)) === identity
+    )
+      signal(pid, "SIGKILL");
+  }
 };
 
 /**

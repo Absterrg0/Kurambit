@@ -99,7 +99,12 @@ import {
   hashWebBuild,
   hashWebBuildDirectory,
 } from "./webBuild.ts";
-import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
+import {
+  changedFiles,
+  comparedSource,
+  matchesCommit,
+  snapshotBuildSource,
+} from "./sourceSnapshot.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { userDirConfigIssues } from "./gameNativeUserDir.ts";
 import { mergeCheckIssues, limitIssues } from "./godotCheckOutput.ts";
@@ -721,7 +726,16 @@ const make = Effect.gen(function* () {
           sourceId: null,
         };
       const after = yield* snapshot(root, godotProject);
-      const comparison = comparedSource(before, after, "export");
+      let comparison = comparedSource(before, after, "export");
+      // A first build after a fresh import has URP re-save its pipeline
+      // assets, putting back the committed bytes the import had rewritten.
+      // A build whose every changed file now holds its committed content
+      // built those sources; any other change mid-build still fails.
+      if (comparison.kind === "changed" && before.kind === "known" && after.kind === "known") {
+        const changed = changedFiles(before, after).map((path) => `${godotProject}/${path}`);
+        if (yield* Effect.promise(() => matchesCommit(root, changed)))
+          comparison = { kind: "current", sourceId: after.sourceId };
+      }
       if (comparison.kind !== "current")
         return {
           result: { ...result, success: false, message: comparison.detail },
@@ -1796,12 +1810,31 @@ ${imported.message}`.slice(-3000),
                 detail: `The Unity play build failed, so no session was opened.
 ${built.result.message}`.slice(-3000),
               });
-            if (built.sourceId !== sourceId)
+            if (built.sourceId === null)
               return yield* exploreInvalid(
                 root,
                 "The game sources changed while the Unity play build ran; start the session again.",
               );
-            return { player: playerOf(sourceId), sourceId };
+            // The build settled files back to their committed content: the
+            // player is cached under the sources as they now stand.
+            if (built.sourceId !== sourceId) {
+              const settled = built.sourceId;
+              yield* Effect.tryPromise({
+                try: () =>
+                  NodeFSP.rename(
+                    unityPlayerDirectory(root, sourceId),
+                    unityPlayerDirectory(root, settled),
+                  ),
+                catch: (cause) =>
+                  new GameOperationError({
+                    operation: "Explore session",
+                    path: unityPlayerDirectory(root, settled),
+                    reason: "io",
+                    cause,
+                  }),
+              });
+            }
+            return { player: playerOf(built.sourceId), sourceId: built.sourceId };
           }),
         ),
         String(threadId),
@@ -2650,8 +2683,16 @@ ${built.result.message}`.slice(-3000),
         }),
       );
     });
-  /** Imports first: a fresh game has no .godot cache, so .tres files and class_names can resolve. */
+  /**
+   * Imports first: a fresh game has no .godot cache, so .tres files and
+   * class_names can resolve. A Unity import and check share one hold, as
+   * export does: another game cannot take the editor between them.
+   */
   const checkGame = (root: string) =>
+    Effect.flatMap(engine(root), ({ backend }) =>
+      backend.id === "unity" ? liveUnity.hold(root)(checkSources(root)) : checkSources(root),
+    );
+  const checkSources = (root: string) =>
     Effect.gen(function* () {
       {
         const startedAt = yield* Clock.currentTimeMillis;

@@ -58,10 +58,16 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   tools directory, because the CLI logs each invocation with its full arguments to
   `~/.config/unityhub/logs/cli-log.json`; it reaches the live editor through the project's
   `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
-  The run's worktree roles (prototypes, blind samples, bot facts) cannot open a Unity editor yet:
-  each checkout is a separate project with an empty `Library/`, so it would cost a full import and
-  close the creator's editor every round. `GameUnity` refuses worktree roots plainly, and the
-  loop drops bot duty and bot facts for the Unity lane.
+  Blind samples play in T3 worktrees at a sha, each a separate Unity project with no `Library/`.
+  Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
+  (`cp -a --reflink=auto`) of its main checkout's `Library/`, found through git's common dir and
+  taken after the main checkout's idle editor closed, so no asset is reimported. The compiled-script
+  state (`Bee/`, `ScriptAssemblies/`, the player data caches) is left out: it is keyed by the main
+  checkout's path, a player built from it lost the scene's MonoBehaviours, and the worktree
+  recompiles its scripts anyway. The editor is
+  needed there only to build the Linux player; the role runner closes it before removing the
+  worktree, which removes the copy too. Other checkouts whose `.git` is a file (submodules) are
+  refused. The loop drops bot duty and bot facts for the Unity lane.
 - Web play shares the services: `gameExploreWeb` opens real-time headless-Chromium sessions on
   the served static folder (real keyboard/mouse, one screenshot per act, console errors, the
   read-only `window.__studio` probe; no pause between acts). `gameChromium` resolves the

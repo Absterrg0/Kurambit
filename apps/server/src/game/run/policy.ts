@@ -1214,7 +1214,7 @@ const applyRound = (
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
       const lanePlaysBots = Roles.laneBots(lane);
       if (!lanePlaysBots)
-        logs.push(`round ${r.n}: bot runs do not play ${lane} games; judging on play reports`);
+        logs.push(`round ${r.n}: bot runs do not play ${lane} games; bot facts are skipped`);
       const cmp = newCompare(
         question,
         r.candidate,

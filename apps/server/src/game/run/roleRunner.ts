@@ -384,6 +384,8 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
 
 // T3 removes a thread's worktree the way the client does after deleting a
 // thread: the checkout goes, then the thread forgets it, then its branch.
+// An editor still open on the checkout (a Unity sample's player build) closes
+// first, so nothing writes into a folder being deleted.
 // Any failure keeps the worktree for the creator to see; nothing is rm'd by hand.
 const releaseWorktree = (deps: RoleDeps, ctx: RoleContext, threadId: ThreadId) =>
   Effect.gen(function* () {
@@ -393,6 +395,7 @@ const releaseWorktree = (deps: RoleDeps, ctx: RoleContext, threadId: ThreadId) =
       return yield* ctx.log(
         `worktree ${shell.worktreePath} kept (${deps.vcs === null ? "no git service" : "role still running"})`,
       );
+    yield* deps.game.closeLiveEditors(shell.worktreePath);
     yield* deps.vcs.removeWorktree({ cwd: ctx.root, path: shell.worktreePath, force: true });
     yield* deps.threads.dispatch({
       type: "thread.metadata.update",
