@@ -48,10 +48,17 @@ const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
 /**
  * Free memory a live Blender needs to open, in MB: Blender, its Xvfb and the
- * MCP child peaked about 1.5 GB on this machine through an asset import and
- * a rendered look.
+ * MCP child peaked about 1.2 GB (PSS) on this machine through code, an asset
+ * import, a GLB export and solid looks; 1.5 GB leaves a little headroom.
  */
 const NEEDED_MB = 1536;
+/**
+ * Further free memory a rendered look needs, in MB: on the same machine a
+ * `shading: "rendered"` look took the session to about 3 GB and MemAvailable
+ * fell 1.55 GB during it. Checked before each rendered look, not at open,
+ * since most sessions never render.
+ */
+const RENDER_NEEDED_MB = 2048;
 const BLEND_REL = "art/blender/live.blend";
 const SESSION_FILE = "session.json";
 
@@ -873,6 +880,22 @@ const make = Effect.gen(function* () {
       holding(
         root,
         Effect.gen(function* () {
+          if (input.shading === "rendered") {
+            const short = yield* Effect.promise(() =>
+              memoryShortfall(
+                "rendered Blender look",
+                RENDER_NEEDED_MB,
+                "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
+              ),
+            );
+            if (short !== null)
+              return yield* opError(
+                "blender-look",
+                root,
+                "low-memory",
+                `${short} A solid look (the default shading) needs far less and works now.`,
+              );
+          }
           const result = yield* call(root, "look", {
             ...(input.mode === undefined ? {} : { mode: input.mode }),
             ...(input.target === undefined ? {} : { target: input.target }),

@@ -30,8 +30,9 @@ while one Unity game is checking, playing or exporting, another Unity game's req
 editor busy instead of closing it.
 
 Kurambit refuses to open a live editor when the machine is short of memory: about 4 GB free for
-Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view. An editor started
-with less tends to be killed by the system mid-build, or to make the whole machine hang on swap.
+Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view, plus about 2 GB
+more for a rendered look. An editor started with less tends to be killed by the system mid-build,
+or to make the whole machine hang on swap; a production run waits for memory rather than failing.
 The refusal says how much is needed and how much is free; close other apps or wait a few minutes,
 then ask again. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it
 and reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB` and

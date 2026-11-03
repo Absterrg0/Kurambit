@@ -196,6 +196,15 @@ export const reapVerified = async (
     )
       signal(pid, "SIGKILL");
   }
+  // A memory check right after a reap must see the memory given back: wait
+  // (briefly) for every signalled process, workers included, to be gone.
+  for (let waited = 0; waited < 3_000; waited += 100) {
+    let left = false;
+    for (const [pid, identity] of signalled)
+      if (alive(pid) && identity !== null && (await identityOf(pid)) === identity) left = true;
+    if (!left) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 };
 
 /**
