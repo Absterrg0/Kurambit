@@ -351,6 +351,22 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     })),
     Effect.orElseSucceed(() => null),
   );
+  // A missing sheet is no verdict: the comparators then see neither build's.
+  const sheet =
+    step.sheet === "" || waited.kind === "failed"
+      ? ""
+      : yield* deps.game.exploreSheet(live, NodePath.join(root, step.sheet)).pipe(
+          Effect.flatMap((drawn) =>
+            drawn > 0
+              ? Effect.succeed(step.sheet)
+              : ctx.log(`${step.role}: no frames to draw a sheet from`).pipe(Effect.as("")),
+          ),
+          Effect.catch((error) =>
+            ctx
+              .log(`${step.role}: frame sheet not drawn: ${error.detail ?? error.reason}`)
+              .pipe(Effect.as("")),
+          ),
+        );
   const dir = step.at === null ? root : yield* worktreeOf(live);
   const files: Record<string, string> = {};
   for (const file of step.read)
@@ -379,6 +395,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     botsBefore,
     botsAfter: step.bots ? yield* Effect.promise(() => botRunCount(root)) : 0,
     bot: step.bots ? yield* Effect.promise(() => lastBotRun(root, botsBefore)) : null,
+    sheet,
   } satisfies StepResult;
 });
 

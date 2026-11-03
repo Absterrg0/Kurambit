@@ -46,8 +46,8 @@ import { templateDirectoryCandidates } from "./templates.ts";
 const libraryDirectory = () => NodePath.join(NodePath.dirname(toolsDirectory()), "asset-library");
 
 /** Vendored beside the starter templates (see its THIRD-PARTY-NOTICES.md), so sheets never wait on a pack. */
-const LABEL_FONT = "label-font.ttf";
-const labelFontDirectory = () => {
+export const LABEL_FONT = "label-font.ttf";
+export const labelFontDirectory = () => {
   const candidates = templateDirectoryCandidates(
     NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
     NodePath.join,

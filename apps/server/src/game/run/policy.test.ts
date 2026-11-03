@@ -49,6 +49,7 @@ const done = (step: State.Step, patch: Partial<Policy.RoleDone> = {}): Policy.Ro
   botsBefore: 0,
   botsAfter: 1,
   bot: null,
+  sheet: "",
   ...patch,
 });
 const gitOk = (patch: Partial<Policy.GitOutcome> = {}): Policy.StepResult => ({
@@ -494,6 +495,55 @@ describe("bot facts", () => {
     expect(drive(atRestore, respond, (s) => s.rounds.length === 1, T0 + 20 * MIN).steps).toContain(
       "bot",
     );
+  });
+});
+
+describe("frame sheets", () => {
+  // Each sample's last turn asks for its sheet; `drawn` says which builds' runners drew one.
+  const run = (drawn: ReadonlyArray<string>) => {
+    const prompts: string[] = [];
+    const sheets: Record<string, string> = {};
+    const respond: Responder = (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("compare")) prompts.push(step.prompt);
+      if (step.kind === "role" && step.sheet !== "" && step.at !== null) {
+        expect(step.sheet).toMatch(/^\.studio\/comparisons\/frames-id\d+\.jpg$/);
+        if (drawn.includes(step.at)) sheets[step.at] = step.sheet;
+        return done(step, {
+          sheet: drawn.includes(step.at) ? step.sheet : "",
+          files: Object.fromEntries(
+            step.read.map((f) => [f, "notes that are long enough to count"]),
+          ),
+        });
+      }
+      return roundResponder("A", "B")(step, state);
+    };
+    drive(atRound(), respond, (s) => s.rounds.length === 1);
+    return { prompts, sheets };
+  };
+
+  it("gives each comparator both sheets labelled as its reports are", () => {
+    const { prompts, sheets } = run(["cand", "best"]);
+    expect(prompts).toHaveLength(2);
+    // Order 1 shows the candidate as A, order 2 shows the best as A.
+    // The sheets follow the reports' presentation order; the mapping is what must hold.
+    expect(prompts[0]).toContain(`Build A's is ${sheets.cand}`);
+    expect(prompts[0]).toContain(`Build B's is ${sheets.best}`);
+    expect(prompts[1]).toContain(`Build A's is ${sheets.best}`);
+    expect(prompts[1]).toContain(`Build B's is ${sheets.cand}`);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("frames from that player's own play, evenly sampled");
+      expect(prompt).toContain("Use only these reports and the two frame sheets,");
+    }
+  });
+
+  it("withholds both sheets when one player has none", () => {
+    const { prompts, sheets } = run(["cand"]);
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt).not.toContain("frame sheet");
+      expect(prompt).not.toContain(sheets.cand!);
+      expect(prompt).toContain("Use only these reports, not the game folder");
+    }
   });
 });
 
