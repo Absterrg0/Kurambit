@@ -268,7 +268,14 @@ export class GameRun extends Context.Service<
     readonly roundDetail: (
       threadId: ThreadId,
       round: number,
-    ) => Effect.Effect<{ detail: GameRunRoundDetail; videoFile: string | null }, GameRunError>;
+    ) => Effect.Effect<
+      {
+        detail: GameRunRoundDetail;
+        videoFile: string | null;
+        sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+      },
+      GameRunError
+    >;
     /**
      * Makes a kept round's build the game's sources again with a new commit on
      * trunk. Refused while a run is live, mid-round, off trunk or with uncommitted work.
@@ -1003,6 +1010,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       return {
         detail: { ...evidence.detail, restorable: sha !== null, current },
         videoFile: evidence.videoFile,
+        sheetFiles: evidence.sheetFiles,
       };
     });
 

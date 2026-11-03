@@ -66,6 +66,8 @@ const ComparisonFile = Schema.Struct({
   ),
   botWithheld: Schema.optionalKey(Schema.NullOr(Schema.String)),
   bots: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(BotFactFile))),
+  sheets: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+  sheetsShown: Schema.optionalKey(Schema.Boolean),
   verdicts: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -92,6 +94,7 @@ const decodeBotRow = Schema.decodeUnknownOption(Schema.fromJsonString(BotRow));
 
 const UUID_JSON = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/;
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,80}\.md$/;
+const SAFE_SHEET = /^frames-[A-Za-z0-9-]{1,80}\.jpg$/;
 const SAFE_RUN_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 // The comparison record is named `${branch}-${uuid}.json`; a branch "round-1"
@@ -111,12 +114,32 @@ const latestComparison = async (root: string, branch: string) => {
   return decoded._tag === "Some" ? { file: decoded.value } : null;
 };
 
+/**
+ * A frame sheet the record names, only as a plain frames-*.jpg in
+ * .studio/comparisons that really resolves inside it; the transport mints its
+ * URL from this resolved path, never from what the record says.
+ */
+const sheetFile = async (root: string, recorded: string | null | undefined) => {
+  const name = recorded === null || recorded === undefined ? "" : NodePath.basename(recorded);
+  if (!SAFE_SHEET.test(name)) return null;
+  const real = await realInside(
+    root,
+    NodePath.join(".studio", "comparisons"),
+    NodePath.join(root, ".studio", "comparisons", name),
+  );
+  const info = real === null ? null : await NodeFSP.stat(real).catch(() => null);
+  return real !== null && info?.isFile() === true && info.size > 0 ? real : null;
+};
+
 const comparisonOf = async (
   root: string,
   branch: string,
-): Promise<GameRunRoundDetail["comparison"]> => {
+): Promise<{
+  readonly comparison: GameRunRoundDetail["comparison"];
+  readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+}> => {
   const found = await latestComparison(root, branch);
-  if (found === null) return null;
+  if (found === null) return { comparison: null, sheetFiles: [] };
   const { file } = found;
   const playOrder = file.playOrder ?? "";
   const builds = playOrder.split(",").filter((name) => name.length > 0);
@@ -135,7 +158,12 @@ const comparisonOf = async (
       reasoning: bounded(text ?? ""),
     });
   }
-  return {
+  const sheetFiles: Array<{ build: string; path: string }> = [];
+  for (const build of order) {
+    const path = await sheetFile(root, file.sheets?.[build]);
+    if (path !== null) sheetFiles.push({ build, path });
+  }
+  const comparison = {
     gate: file.gate ?? null,
     playOrder,
     judges,
@@ -151,7 +179,14 @@ const comparisonOf = async (
         ? []
         : [{ build, ...fact, note: bounded(fact.note, 300) }];
     }),
+    sheets: sheetFiles.map(({ build, path }) => ({
+      build,
+      file: NodePath.relative(root, path).split(NodePath.sep).join("/"),
+      url: null,
+    })),
+    sheetsShown: file.sheetsShown ?? false,
   };
+  return { comparison, sheetFiles };
 };
 
 // Bot runs recorded in the game folder between this round's first builder or
@@ -215,6 +250,8 @@ export type RoundEvidence = {
   readonly detail: Omit<GameRunRoundDetail, "restorable" | "current">;
   /** The canonical video file the transport may mint a URL for. */
   readonly videoFile: string | null;
+  /** The frame sheet files the transport may mint URLs for, by build. */
+  readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
 };
 
 export const readRoundEvidence = async (
@@ -227,6 +264,7 @@ export const readRoundEvidence = async (
   const nextRound = state.rounds.find((r) => r.round === n + 1);
   const latest = state.rounds.at(-1)?.round === n;
   const botRuns = await botRunsOf(root, state, n);
+  const compared = await comparisonOf(root, record.branch);
   let video: GameRunRoundDetail["video"] = null;
   let videoFile: string | null = null;
   for (const run of botRuns.toReversed()) {
@@ -251,7 +289,7 @@ export const readRoundEvidence = async (
       note: record.note ?? null,
       steer: record.steer ?? [],
       verdicts: record.verdicts,
-      comparison: await comparisonOf(root, record.branch),
+      comparison: compared.comparison,
       testerNote: boundedOrNull((await studio(`tester-${n}.md`)) ?? record.testerNote),
       reviewerNotes: boundedOrNull(await studio(`reviewer-${n}.md`)),
       direction: boundedOrNull(nextRound?.move ?? (latest ? state.next : null)),
@@ -259,5 +297,6 @@ export const readRoundEvidence = async (
       video,
     },
     videoFile,
+    sheetFiles: compared.sheetFiles,
   };
 };

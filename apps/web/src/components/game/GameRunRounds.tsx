@@ -194,14 +194,37 @@ function RoundDetail({
             </Field>
           ) : null}
           {comparison.reports.length > 0 ? (
-            <Field title="Blind play reports">
+            <Field
+              title={
+                comparison.sheets.length > 0 && !comparison.sheetsShown
+                  ? "Blind play reports (frame sheets were not shown to the judges)"
+                  : "Blind play reports"
+              }
+            >
               <ul className="space-y-1.5">
-                {comparison.reports.map((report) => (
-                  <li key={report.build} className="space-y-0.5">
-                    <p className="text-2xs font-medium capitalize">{report.build}</p>
-                    <LongText text={report.text} />
-                  </li>
-                ))}
+                {comparison.reports.map((report) => {
+                  const sheet = comparison.sheets.find((each) => each.build === report.build);
+                  const sheetUrl =
+                    sheet?.url != null && connection._tag === "Some"
+                      ? resolveAssetUrl(connection.value.httpBaseUrl, sheet.url)
+                      : null;
+                  return (
+                    <li key={report.build} className="space-y-0.5">
+                      <p className="text-2xs font-medium capitalize">{report.build}</p>
+                      <LongText text={report.text} />
+                      {sheetUrl !== null ? (
+                        <a href={sheetUrl} target="_blank" rel="noreferrer">
+                          <img
+                            src={sheetUrl}
+                            alt={`Frames from the ${report.build} player's own play`}
+                            loading="lazy"
+                            className="w-full rounded-md"
+                          />
+                        </a>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </Field>
           ) : null}
