@@ -1,6 +1,8 @@
 // The art director trusts these numbers, so the measurement is checked on hand-made pixels.
+// @effect-diagnostics nodeBuiltinImport:off -- Builds PNG bytes by hand.
+import * as NodeZlib from "node:zlib";
 import { describe, expect, it } from "@effect/vitest";
-import { cutEdges, frameDifference, measure, type Rgba } from "./spriteFacts.ts";
+import { cutEdges, decodePng, frameDifference, measure, type Rgba } from "./spriteFacts.ts";
 
 // A clear canvas with one opaque rectangle (inclusive bounds) in a single colour.
 const canvas = (
@@ -42,5 +44,40 @@ describe("frameDifference", () => {
     expect(shifted).toBeGreaterThan(0);
     expect(padded).toBeCloseTo(shifted);
     expect(frameDifference(a, canvas(32, 32, { x0: 0, y0: 0, x1: 1, y1: 1 }))).toBeNull();
+  });
+});
+
+const chunk = (name: string, body: Buffer, crc?: number) => {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(body.length, 0);
+  head.write(name, 4, "latin1");
+  const tail = Buffer.alloc(4);
+  tail.writeUInt32BE(crc ?? NodeZlib.crc32(Buffer.concat([head.subarray(4), body])), 0);
+  return Buffer.concat([head, body, tail]);
+};
+const png = (type: number, depth: number, rows: Buffer, extra: Buffer[] = [], idatCrc?: number) => {
+  const ihdr = Buffer.from([0, 0, 0, 2, 0, 0, 0, 1, depth, type, 0, 0, 0]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    ...extra,
+    chunk("IDAT", NodeZlib.deflateSync(rows), idatCrc),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+};
+
+describe("decodePng", () => {
+  // Invented numbers would send the art director after defects that are not there.
+  it("decodes a valid file and rejects invalid ones instead of guessing", async () => {
+    const rgba = Buffer.from([0, 1, 2, 3, 255, 4, 5, 6, 255]);
+    expect(await decodePng(png(6, 8, rgba))).toMatchObject({ width: 2, height: 1 });
+    const unreadable = { skip: "unreadable PNG" };
+    expect(await decodePng(png(6, 8, Buffer.from([5, ...rgba.subarray(1)])))).toEqual(unreadable);
+    expect(await decodePng(png(6, 8, rgba, [], 1))).toEqual(unreadable);
+    expect(await decodePng(png(2, 4, Buffer.from([0, 0x12, 0x34, 0x56])))).toEqual(unreadable);
+    expect(await decodePng(png(3, 8, Buffer.from([0, 0, 0])))).toEqual(unreadable);
+    const plte = chunk("PLTE", Buffer.from([10, 20, 30]));
+    expect(await decodePng(png(3, 8, Buffer.from([0, 0, 0]), [plte]))).toMatchObject({ width: 2 });
+    expect(await decodePng(png(3, 8, Buffer.from([0, 0, 1]), [plte]))).toEqual(unreadable);
   });
 });

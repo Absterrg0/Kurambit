@@ -505,7 +505,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                 step.role === "art-director"
                   ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)), sprites)}`
                   : redo
-                    ? `${step.prompt}${spriteBlock(sprites)}`
+                    ? `${step.prompt}${spriteBlock(sprites, true)}`
                     : step.prompt;
               return yield* runRole(
                 d.deps,

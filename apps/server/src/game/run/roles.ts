@@ -66,11 +66,14 @@ export const artReview = (lane: string): string =>
 export const artFacts = (facts: string, sprites: string): string =>
   `\n\nFile facts on the asset set (static scan of ASSETS.md against the files on disk): ${facts}${spriteBlock(sprites)}`;
 
-/** Measured pixel facts, given to the art director and to the redo that answers it. */
-export const spriteBlock = (sprites: string): string =>
+/** Measured pixel facts, given to the art director and to the redo that answers it. The redo is
+ * told the numbers predate it, so it fixes the director's defects instead of chasing each one. */
+export const spriteBlock = (sprites: string, redo = false): string =>
   sprites.length === 0
     ? ""
-    : `\n\nMeasured image facts (pixels decoded from the files; numbers, not verdicts; look at the files yourself):\n${sprites}`;
+    : redo
+      ? `\n\nMeasured image facts, measured before your redo (pixels decoded from the files; numbers, not verdicts). Fix only the listed defects; a number here is not a defect unless the list names it:\n${sprites}`
+      : `\n\nMeasured image facts (pixels decoded from the files; numbers, not verdicts; look at the files yourself):\n${sprites}`;
 
 // Works as a follow-up on the art thread and as a fresh art role alike.
 export const artRedo = (defects: string, lane: string): string =>
