@@ -8,8 +8,7 @@
       /* A wall of games as crisp pixel art, edge to edge, with one empty slot
          where the fox stands. For headers and banners, where the profile's
          name and bio already sit underneath. copy=1 adds the headline above a
-         single shelf, sub=1 a line under it (the link card). t=shu prints it
-         on vermilion. */
+         single shelf. */
       #wall {
         position: absolute;
         inset: 0;
@@ -34,35 +33,13 @@
         margin-top: 0.22em;
         font-size: var(--size, 64px);
       }
-
-      .copy .brand {
-        margin-bottom: 0.62em;
-        font-size: calc(var(--size, 64px) * 0.36);
-      }
-
-      .copy .sub {
-        margin-top: 0.9em;
-        font-size: calc(var(--size, 64px) * 0.34);
-      }
-
-      [data-t="shu"] {
-        --ground: var(--shu);
-        --text: var(--sheet);
-        --text-2: var(--sheet);
-      }
-
-      [data-t="shu"] body {
-        background-blend-mode: multiply;
-      }
     </style>
   </head>
   <body>
     <canvas id="wall"></canvas>
     <div class="copy" hidden>
-      <div class="brand" hidden><i></i>Kurambit</div>
       <h1>Nobody made the game<br />you want. So make it.</h1>
       <i class="stroke"></i>
-      <p class="sub" hidden>Your coding agent builds it. Kurambit plays every build.</p>
     </div>
     <script src="kit.js"></script>
     <script>
@@ -70,8 +47,6 @@
       const root = document.documentElement;
       root.dataset.t ??= "paper";
       const dark = root.dataset.t === "dark";
-      const shu = root.dataset.t === "shu";
-      const withSub = params.get("sub") === "1";
       const withCopy = params.get("copy") === "1";
 
       // Pixel pictures for the labels, 12 by 9.
@@ -182,7 +157,7 @@
       const cartW = 20;
       const cartH = 26;
       const rowH = cartH + 6;
-      const headroom = withCopy ? (withSub ? 76 : 70) : 8;
+      const headroom = withCopy ? 70 : 8;
       const px = Math.max(2, Math.floor(height / (rowsWanted * rowH + headroom)));
       const cols = Math.ceil(width / px);
       const lines = Math.ceil(height / px);
@@ -193,8 +168,7 @@
 
       const ink = dark ? MOONLIT : INK;
       const paper = dark ? "#161411" : "#fffdf8";
-      // On vermilion the empty slot and the fox are drawn in paper.
-      const slot = shu ? "#f9f5ec" : VERMILION;
+      const slot = VERMILION;
       const quiet = dark ? "#9d9483" : "#6c665b";
       const bodies = dark ? [MOONLIT, "#cfc5b2", "#9d9483"] : [INK, "#36322b", "#6c665b"];
       const dot = (x, y, colour) => {
@@ -267,11 +241,8 @@
       if (withCopy) {
         const copy = document.querySelector(".copy");
         copy.hidden = false;
-        document.querySelector(".copy .sub").hidden = !withSub;
-        document.querySelector(".copy .brand").hidden = !withSub;
-        const size = Number(params.get("size") ?? 0.13);
-        root.style.setProperty("--size", `${Math.round(height * size)}px`);
-        root.style.setProperty("--top", `${Math.round(height * (withSub ? 0.075 : 0.12))}px`);
+        root.style.setProperty("--size", `${Math.round(height * 0.13)}px`);
+        root.style.setProperty("--top", `${Math.round(height * 0.12)}px`);
       }
       whenDrawn(document.fonts.load('400 100px "Redaction"'));
     </script>

@@ -108,7 +108,7 @@ behind it. The ground is washi paper; for dark grounds it is ink (`#161411`) wit
 Everything in [brand](brand) is rendered from the HTML templates in [brand/src](brand/src), which
 share the site's fonts, paper and dither. The card template lays itself out for any size: copy
 beside the picture on landscape cards, the picture over the copy on portrait posts and stories. The
-shelf template draws the headers and banners.
+shelf template draws the headers and banners, and og.html the link card.
 
 | Folder                       | Files                                          | Size                 |
 | ---------------------------- | ---------------------------------------------- | -------------------- |
@@ -121,8 +121,10 @@ shelf template draws the headers and banners.
 | [github](brand/github)       | Repository social preview                      | 1280×640             |
 | [web](brand/web)             | The link card                                  | 1200×630             |
 
-The link card is printed on vermilion: in a feed of white and black it is the one thing that
-stands out, and it matches the seal avatar. Use the paper or dark card where vermilion would clash.
+The link card is the title screen of a game that doesn't exist yet: the headline is its title, and
+a game menu under it offers "So make it." (the fox sprite is the cursor) or "Keep waiting". A link
+card has to read at feed size and make someone curious, so it shows a world worth playing rather
+than describing the product.
 
 Use the **seal** avatar everywhere a picture is cropped round: vermilion is the one colour that
 stands out in a feed. Pair it with the paper X header. The posts run in order: make, tell, played,
