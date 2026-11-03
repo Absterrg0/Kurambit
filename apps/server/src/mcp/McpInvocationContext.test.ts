@@ -6,6 +6,8 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@kurambit/contracts";
+import { McpSchema } from "effect/ai";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -94,5 +96,39 @@ it.effect("refuses thread-owned capabilities to a caller signed in from outside 
     expect(error).toBeInstanceOf(PreviewAutomationUnavailableError);
     expect(error).toMatchObject({ capability: "preview", environmentId: "environment-1" });
     expect(error.threadId).toBeUndefined();
+  });
+});
+
+it.effect("hides tools with no run-thread rule from production-run threads only", () => {
+  const scope = (gameRunRole: "run" | null): McpInvocationContext.McpInvocationScope => ({
+    environmentId: EnvironmentId.make("environment-1"),
+    requestNamespace: "provider-session-1",
+    thread: {
+      threadId: ThreadId.make("thread-1"),
+      providerSessionId: "provider-session-1",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    },
+    client: undefined,
+    gameRunRole,
+    capabilities: new Set(),
+    issuedAt: 1,
+  });
+  const profile = { protocolVersion: "2025-06-18", capabilities: {} };
+  const plain = McpInvocationContext.runThreadDefault(Context.empty());
+  const chosen = McpInvocationContext.runThreadDefault(
+    Context.make(McpSchema.EnabledWhen, () => true),
+  );
+  const visible = (annotations: typeof plain) =>
+    Effect.sync(() => Context.get(annotations, McpSchema.EnabledWhen)(profile));
+  return Effect.gen(function* () {
+    const inRun = (effect: Effect.Effect<boolean>) =>
+      effect.pipe(Effect.provideService(McpInvocationContext.McpInvocationContext, scope("run")));
+    const outside = (effect: Effect.Effect<boolean>) =>
+      effect.pipe(Effect.provideService(McpInvocationContext.McpInvocationContext, scope(null)));
+    expect(yield* inRun(visible(plain))).toBe(false);
+    expect(yield* outside(visible(plain))).toBe(true);
+    expect(yield* visible(plain)).toBe(true);
+    // A tool that chose for itself (the game tools) keeps its own rule.
+    expect(yield* inRun(visible(chosen))).toBe(true);
   });
 });

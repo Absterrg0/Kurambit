@@ -49,6 +49,8 @@ const exec = (
           env: { ...strippedEnv(), ...env },
           timeout: timeoutMs,
         });
+        // No call writes stdin; one that reads it (mktree) sees an empty input, not a hang.
+        child.stdin.end();
         let stdout = "";
         let output = "";
         child.stdout.on("data", (chunk: Buffer) => {
@@ -62,6 +64,25 @@ const exec = (
         child.on("error", () => resolve({ code: null, stdout, output }));
       }),
   );
+
+/**
+ * The commit a comparator's worktree checks out: the empty tree with no parent,
+ * a fixed identity and dates, so it is the same commit every time and says
+ * nothing about the run, its rounds or either build.
+ */
+export const blankCommit = (root: string): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    const tree = yield* exec(root, ["mktree"]);
+    if (tree.code !== 0) return null;
+    const made = yield* exec(
+      root,
+      [...IDENTITY, "commit-tree", tree.stdout.trim(), "-m", "blind comparison"],
+      60_000,
+      { GIT_AUTHOR_DATE: "@0 +0000", GIT_COMMITTER_DATE: "@0 +0000" },
+    );
+    const sha = made.stdout.trim();
+    return made.code === 0 && sha.length > 0 ? sha : null;
+  });
 
 /** The game's own sources: bots, notes and skill files never count as game change. */
 const gamePaths = (lane: string) => [
