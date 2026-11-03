@@ -12,7 +12,7 @@ import {
   type GameEngineId,
   type GameManifest,
 } from "@kurambit/contracts";
-import { laneLibrary } from "./run/roles.ts";
+import { laneAssets, laneLibrary } from "./run/roles.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import {
   colourHex,
@@ -72,6 +72,25 @@ const io = (path: string) => (cause: unknown) =>
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 const cleanRelative = (path: string) =>
   path.split("/").every((s) => SEGMENT.test(s) && s !== "." && s !== "..");
+
+/**
+ * Why `output` (trimmed, no .png) is no place for this lane's sprites, or null.
+ * Unity imports only what sits under Assets/, and on Linux `assets/` is
+ * another folder Unity never reads.
+ */
+export const spriteOutputIssue = (lane: string, output: string): string | null => {
+  const assets = laneAssets(lane);
+  const example = `${assets}/${lane === "unity" ? "Art/Sprites" : "sprites"}/hero_walk`;
+  const under = lane === "unity" ? `${assets}/` : `${lane}/`;
+  if (output.startsWith(under) && cleanRelative(output)) return null;
+  const miscased =
+    lane === "unity" && output.toLowerCase().startsWith(`${assets.toLowerCase()}/`)
+      ? ` Unity imports only ${assets}/ (capital A) and never loads ${output.slice(0, assets.length)}/; use ${assets}/${output.slice(assets.length + 1)}.`
+      : lane === "unity" && output.startsWith("unity/")
+        ? ` Unity imports nothing outside ${assets}/.`
+        : "";
+  return `output must be a game-relative path prefix under ${under} such as ${example} (letters, digits, _ . -).${miscased}`;
+};
 
 /**
  * Makes `relative` under the real game root one real folder at a time and refuses a symbolic
@@ -280,12 +299,8 @@ export const renderSprites = (
     const manifest = yield* deps.manifest(root);
     const lane = manifest.godotProject;
     const output = input.output.trim().replace(/\.png$/i, "");
-    if (!output.startsWith(`${lane}/`) || !cleanRelative(output))
-      return yield* fail(
-        input.output,
-        "invalid-path",
-        `output must be a game-relative path prefix under ${lane}/ such as ${lane}/assets/sprites/hero_walk (letters, digits, _ . -).`,
-      );
+    const issue = spriteOutputIssue(lane, output);
+    if (issue !== null) return yield* fail(input.output, "invalid-path", issue);
     const dirRel = NodePath.posix.dirname(output);
     const base = NodePath.posix.basename(output);
     const views = viewsOf(input);

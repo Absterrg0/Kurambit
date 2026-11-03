@@ -2,8 +2,11 @@
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
 The live Blender behind the `game_blender_*` tools is your modeller and
-renderer; you have no local Blender, Godot or image tools. `<engine>` is
-`godot/` or `web/`.
+renderer; you have no local Blender, Godot or image tools. `<assets>` is
+your lane's asset folder: `godot/assets/`, `web/assets/`, or
+`unity/Assets/` for Unity (capital A: Unity imports nothing else, and
+`unity/assets/` is a different folder it never reads; Unity art goes under
+`unity/Assets/Art/`).
 
 1. Key art first: one image the finished game must live up to.
 2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
@@ -18,7 +21,7 @@ renderer; you have no local Blender, Godot or image tools. `<engine>` is
 5. Library first for characters, tiles, UI, icons and fonts:
    `game_assets_search` finds CC0 packs (no key); pass `pack` to look inside
    one and look at its contact sheet before you pick. `game_assets_add` copies
-   files or whole folders into `<engine>/assets/library/<pack>/` and credits
+   files or whole folders into `<assets>library/<pack>/` (`unity/Assets/Library/<pack>/`) and credits
    them in ASSETS.md. One style per game: take a game's sprites, tiles and UI
    from packs that look alike (same pixel size or same vector look), never a
    mix. Make your own art (below) when nothing fits or the look must be
@@ -36,8 +39,10 @@ the same in every frame and view, the feet stand on the same row in every
 frame, and studio lights keep small sprites readable. It writes
 `<output>_0.png ... <output>_N.png` and `<output>.sprite.json` (frame size,
 fps, anchor per view), records them in ASSETS.md and returns a contact sheet:
-look at it. In Godot, `SpriteStrips.apply` loads strips from the `.sprite.json`;
-elsewhere use the anchor offset it gives.
+look at it. Its `output` is a path prefix under `<assets>`: `godot/assets/sprites/hero_walk`,
+`web/assets/sprites/hero_walk` or `unity/Assets/Art/Sprites/hero_walk`. In Godot,
+`SpriteStrips.apply` loads strips from the `.sprite.json`; elsewhere use the
+anchor offset it gives.
 
 - Pixel-art game: pass the style pack VISION.md names as the palette, and the
   size the sprite has in that pack's own pixels (a 16 px tile pack wants a
@@ -47,7 +52,7 @@ elsewhere use the anchor offset it gives.
 
   ```json
   {
-    "output": "godot/assets/sprites/hero_walk",
+    "output": "<assets>sprites/hero_walk",
     "objects": ["hero"],
     "action": "hero_walk",
     "size": 32,
