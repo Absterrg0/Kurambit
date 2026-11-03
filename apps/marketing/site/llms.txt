@@ -24,4 +24,5 @@ Kurambit is free and open source. It runs on the agent subscription you already 
 
 - [Kurambit website](https://kurambit.com/): what it does, answers to common questions and the waitlist
 - [Source code on GitHub](https://github.com/Absterrg0/Kurambit): the full app, MIT licensed
+- [Kurambit on X](https://x.com/kurambit_gg): news and updates
 - [Privacy note](https://kurambit.com/privacy): how waitlist emails are handled
