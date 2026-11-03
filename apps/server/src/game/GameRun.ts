@@ -389,11 +389,15 @@ export const layer = (options: { readonly stateDir: string }) => {
         ),
       );
 
-    // Skill pack, bot kit and the run-state ignores. New runs and resumes both
-    // refresh it, so the committed tree each worktree role starts from has them.
+    // Skill pack, bot kit and the run-state ignores, so the committed tree each
+    // worktree role starts from has them. Only a new run refreshes the skills
+    // and the kit: a resume after a server update would otherwise change them
+    // mid-run, and the next build's commit would carry harness text as its
+    // own work while earlier builds were made under different guidance.
     const ensureScaffold = (
       root: string,
       untrack: (p: ReadonlyArray<string>) => Effect.Effect<void>,
+      fresh: boolean,
     ) =>
       Effect.promise(async () => {
         const [bundled, monorepo] = Templates.templateDirectoryCandidates(
@@ -407,14 +411,19 @@ export const layer = (options: { readonly stateDir: string }) => {
           ? bundled
           : monorepo;
         await NodeFSP.mkdir(NodePath.join(root, ".studio", "bot"), { recursive: true });
-        await NodeFSP.cp(NodePath.join(templates, "studio"), NodePath.join(root, "studio-skills"), {
-          recursive: true,
-        }).catch(() => undefined);
-        await NodeFSP.cp(
+        const copy = async (from: string, to: string) => {
+          const present = await NodeFSP.access(to).then(
+            () => true,
+            () => false,
+          );
+          if (fresh || !present)
+            await NodeFSP.cp(from, to, { recursive: true }).catch(() => undefined);
+        };
+        await copy(NodePath.join(templates, "studio"), NodePath.join(root, "studio-skills"));
+        await copy(
           NodePath.join(templates, "bot-kit"),
           NodePath.join(root, ".studio", "bot", "kit"),
-          { recursive: true },
-        ).catch(() => undefined);
+        );
         const before = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
         let agents = before.replace(STALE_SKILLS, "");
         if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
@@ -613,7 +622,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       };
 
       const loop = Effect.gen(function* () {
-        yield* ensureScaffold(root, git.untrack);
+        yield* ensureScaffold(root, git.untrack, state.seq === 0);
         // Resume: put the tree where the next step expects it. A git step in
         // flight re-runs instead (every op is safe to repeat).
         const expected = Policy.expectedBranch(state);
