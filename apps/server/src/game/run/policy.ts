@@ -1285,7 +1285,9 @@ const applyRound = (
         r.candidate,
         s.best,
         bit(input.coin, 0),
-        ["x", "y"],
+        // Which comparator sees the candidate as A is a coin too, so no
+        // ordinal (thread order, step id) can tell a judge which build is new.
+        bit(input.coin, 2) ? ["y", "x"] : ["x", "y"],
         lanePlaysBots ? r.bot : "",
         r.botDecider,
       );

@@ -263,12 +263,19 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         ...(creatorLive ? { parentThreadId: ctx.creator } : {}),
       })
       .pipe(Effect.option);
-    if (Option.isNone(launched))
+    // No thread owns a blank checkout until a launch succeeds, so a failed
+    // one removes it here or nothing ever will (the retry gets a new step id).
+    const dropBlank = blank === null ? Effect.void : removeBlank(deps, ctx, blank);
+    if (Option.isNone(launched)) {
+      yield* dropBlank;
       return { kind: "failed", reason: `${step.role}: thread launch failed` } satisfies StepResult;
+    }
     threadId = launched.value.threadId;
     const first = launched.value.projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
-    if (first === undefined)
+    if (first === undefined) {
+      yield* dropBlank;
       return { kind: "failed", reason: `${step.role}: launch made no run` } satisfies StepResult;
+    }
     runId = first.id;
     yield* ctx.attach(threadId, runId);
   }
@@ -456,14 +463,25 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
     );
     if (placed) return { path: dir, branch };
     yield* ctx.log(`${step.role}: could not copy its files into ${dir}`);
-    yield* vcs.removeWorktree({ cwd: ctx.root, path: dir, force: true });
-    yield* vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true });
+    yield* removeBlank(deps, ctx, { path: dir, branch });
     return null;
   }).pipe(
     Effect.catchCause(() =>
       ctx.log(`${step.role}: its worktree could not be made`).pipe(Effect.as(null)),
     ),
   );
+
+const removeBlank = (
+  deps: RoleDeps,
+  ctx: RoleContext,
+  blank: { readonly path: string; readonly branch: string },
+) =>
+  deps.vcs === null
+    ? Effect.void
+    : Effect.gen(function* () {
+        yield* deps.vcs!.removeWorktree({ cwd: ctx.root, path: blank.path, force: true });
+        yield* deps.vcs!.deleteLocalBranch({ cwd: ctx.root, refName: blank.branch, force: true });
+      }).pipe(Effect.ignore);
 
 // T3 removes a thread's worktree the way the client does after deleting a
 // thread: the checkout goes, then the thread forgets it, then its branch.
