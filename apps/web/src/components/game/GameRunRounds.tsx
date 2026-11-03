@@ -218,7 +218,16 @@ function RoundDetail({
                             src={sheetUrl}
                             alt={`Frames from the ${report.build} player's own play`}
                             loading="lazy"
-                            className="w-full rounded-md"
+                            width={1612}
+                            height={758}
+                            className="h-auto w-full rounded-md"
+                            onLoad={() => setVideoRetried(false)}
+                            onError={() => {
+                              // Signed links last an hour, like the video's.
+                              if (videoRetried) return;
+                              setVideoRetried(true);
+                              query.refresh();
+                            }}
                           />
                         </a>
                       ) : null}
