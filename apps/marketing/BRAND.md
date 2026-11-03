@@ -121,9 +121,8 @@ shelf template draws the headers and banners, and og.html the link card.
 | [github](brand/github)       | Repository social preview                      | 1280×640             |
 | [web](brand/web)             | The link card                                  | 1200×630             |
 
-The link card is the fox's face, drawn in brush ink and cropped large, beside the headline, signed
-with a small vermilion seal the way a woodblock print is. `web/og-sun.jpg` sets a vermilion sun
-behind the fox for places that need more colour.
+The link card is the fox's face, drawn in brush ink and cropped large over a vermilion sun, beside
+the headline, signed with a small vermilion seal the way a woodblock print is.
 
 Use the **seal** avatar everywhere a picture is cropped round: vermilion is the one colour that
 stands out in a feed. Pair it with the paper X header. The posts run in order: make, tell, played,

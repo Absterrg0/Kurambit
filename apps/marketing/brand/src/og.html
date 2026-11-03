@@ -5,12 +5,11 @@
     <title>Kurambit link card</title>
     <link rel="stylesheet" href="kit.css" />
     <style>
-      /* The link card: the fox's face, drawn in ink and cropped large, beside
-         the headline, signed with a vermilion seal the way a print is.
-         sun=1 sets a vermilion sun behind the fox. */
+      /* The link card: the fox's face, drawn in ink and cropped large over a
+         vermilion sun, beside the headline, signed with a vermilion seal the
+         way a print is. */
       .sun {
         position: absolute;
-        display: none;
         right: calc(var(--w) * -0.02);
         top: calc(var(--h) * 0.1);
         width: calc(var(--h) * 0.86);
@@ -20,10 +19,6 @@
           url("../../site/washi.svg") 0 0 / 420px 420px,
           var(--shu);
         background-blend-mode: multiply;
-      }
-
-      [data-sun] .sun {
-        display: block;
       }
 
       .face {
