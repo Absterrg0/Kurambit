@@ -5,156 +5,93 @@
     <title>Kurambit link card</title>
     <link rel="stylesheet" href="kit.css" />
     <style>
-      /* The link card: the title screen of a game that doesn't exist yet.
-         The headline is its title, the menu's first line finishes it, and
-         the fox sits on a cliff looking out over the world. */
-      canvas {
+      /* The link card: the fox's face, drawn in ink and cropped large, beside
+         the headline, signed with a vermilion seal the way a print is.
+         sun=1 sets a vermilion sun behind the fox. */
+      .sun {
         position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
+        display: none;
+        right: calc(var(--w) * -0.02);
+        top: calc(var(--h) * 0.1);
+        width: calc(var(--h) * 0.86);
+        height: calc(var(--h) * 0.86);
+        border-radius: 50%;
+        background:
+          url("../../site/washi.svg") 0 0 / 420px 420px,
+          var(--shu);
+        background-blend-mode: multiply;
       }
 
-      #pixels {
-        image-rendering: pixelated;
+      [data-sun] .sun {
+        display: block;
       }
 
-      .copy {
+      .face {
         position: absolute;
-        z-index: 1;
+        right: calc(var(--w) * -0.19);
+        top: calc(var(--h) * -0.14);
+        width: calc(var(--h) * 1.3);
+        height: calc(var(--h) * 1.3);
+        background: var(--ink);
+        -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+        mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+      }
+
+      .name {
+        position: absolute;
+        left: calc(var(--w) * 0.05);
+        top: calc(var(--h) * 0.085);
+        font-family: var(--display);
+        font-size: calc(var(--h) * 0.046);
+        letter-spacing: -0.01em;
       }
 
       h1 {
-        line-height: 0.95;
-      }
-
-      .brand {
         position: absolute;
-        z-index: 1;
-        font-size: calc(var(--h) * 0.04);
+        left: calc(var(--w) * 0.05);
+        bottom: calc(var(--h) * 0.11);
+        font-size: calc(var(--h) * 0.108);
+        line-height: 1.02;
       }
 
-      /* Title screen: the title centred, a game menu under it. */
-      .copy {
-        left: 0;
-        right: 0;
-        top: 14%;
-        text-align: center;
+      h1 em {
+        color: var(--shu-deep);
       }
 
-      h1 {
-        font-size: calc(var(--h) * 0.125);
-      }
-
-      .menu {
+      .seal {
+        position: relative;
         display: inline-block;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        font-family: var(--mono);
-        font-size: calc(var(--h) * 0.044);
-        line-height: 1.75;
+        width: 0.62em;
+        height: 0.62em;
+        margin-left: 0.28em;
+        vertical-align: 0.02em;
+        background: var(--shu);
+        -webkit-mask: url("../../site/seal-mask.svg") center / 100% 100% no-repeat;
+        mask: url("../../site/seal-mask.svg") center / 100% 100% no-repeat;
       }
 
-      .menu {
-        display: inline-block;
-        margin-top: calc(var(--h) * 0.04);
-        text-align: left;
-      }
-
-      .menu li + li {
-        color: var(--quiet);
-      }
-
-      .brand {
-        left: 4.5%;
-        top: 5%;
+      .seal::after {
+        content: "";
+        position: absolute;
+        inset: 14%;
+        background: var(--sheet);
+        -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+        mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
       }
     </style>
   </head>
   <body>
-    <canvas id="scene"></canvas>
-    <div class="copy">
-      <h1></h1>
-      <ul class="menu">
-        <li>So make it.</li>
-        <li>Keep waiting</li>
-      </ul>
-    </div>
-    <div class="brand"><i></i>Kurambit</div>
-    <canvas id="pixels"></canvas>
+    <i class="sun"></i>
+    <i class="face"></i>
+    <p class="name">Kurambit</p>
+    <h1>Nobody made the<br />game you want.<br /><em>So make it.</em><i class="seal"></i></h1>
     <script src="kit.js"></script>
     <script>
-      const { width, height, params } = sizePage(1200, 630);
-      const root = document.documentElement;
-      const h1 = document.querySelector("h1");
-
-      async function titleScreen() {
-        h1.innerHTML = "Nobody made the game<br />you want.";
-        const canvas = document.getElementById("scene");
-        const cell = Math.max(3, Math.round(width / 300));
-        // One painting in greys: depth comes from how densely each layer
-        // dithers, the way the site's art does it. The sky stays bare paper
-        // so the title reads.
-        const world = shape(canvas, cell, (c, w, h) => {
-          c.fillStyle = "#fff";
-          c.fillRect(0, 0, w, h);
-          c.fillStyle = "rgba(255, 0, 0, 0.1)";
-          c.beginPath();
-          c.arc(w * 0.8, h * 0.7, h * 0.23, 0, Math.PI * 2);
-          c.fill();
-          sun(c, w * 0.8, h * 0.7, h * 0.17);
-          const ridge = (base, amp, f1, f2, phase, alpha) => {
-            c.fillStyle = `rgba(0, 0, 0, ${alpha})`;
-            for (let x = 0; x < w; x += 1) {
-              const u = x / w;
-              const top =
-                h *
-                (base + amp * Math.sin(u * f1 + phase) + amp * 0.45 * Math.sin(u * f2 + phase * 2));
-              c.fillRect(x, top, 1, h - top);
-            }
-          };
-          ridge(0.74, 0.04, 9, 23, 0.4, 0.2);
-          // A castle on the middle hills.
-          c.fillStyle = "rgba(0, 0, 0, 0.85)";
-          const cx = w * 0.58;
-          const foot = h * 0.82;
-          c.fillRect(cx, foot - h * 0.08, w * 0.05, h * 0.08);
-          c.fillRect(cx - w * 0.01, foot - h * 0.14, w * 0.015, h * 0.14);
-          c.fillRect(cx + w * 0.045, foot - h * 0.12, w * 0.013, h * 0.12);
-          for (let k = 0; k < 3; k += 1)
-            c.fillRect(cx + w * (0.006 + k * 0.016), foot - h * 0.1, w * 0.008, h * 0.02);
-          ridge(0.83, 0.025, 6, 17, 1.7, 0.4);
-          ridge(0.92, 0.015, 4, 13, 2.6, 0.7);
-          // The cliff the fox sits on, in front of everything.
-          c.beginPath();
-          c.moveTo(0, h * 0.74);
-          c.lineTo(w * 0.2, h * 0.73);
-          c.lineTo(w * 0.26, h * 0.76);
-          c.lineTo(w * 0.29, h * 0.86);
-          c.lineTo(w * 0.31, h);
-          c.lineTo(0, h);
-          c.fill();
-        });
-        const cliffTop = height * 0.735;
-        const sitter = await fox(canvas, cell, { scale: 0.46, at: 0.12 });
-        sitter.oy -= canvas.clientHeight - cliffTop;
-        layers(canvas, [world, sitter]);
-
-        // The menu cursor: the fox sprite, beside the chosen line.
-        const px = Math.max(3, Math.round(height / 120));
-        const pixels = document.getElementById("pixels");
-        pixels.width = Math.ceil(width / px);
-        pixels.height = Math.ceil(height / px);
-        const c = pixels.getContext("2d");
-        const item = document.querySelector(".menu li").getBoundingClientRect();
-        sprite(c, item.left / px - 15, (item.top + item.height * 0.72) / px, 1);
-        c.globalCompositeOperation = "source-in";
-        c.fillStyle = VERMILION;
-        c.fillRect(0, 0, pixels.width, pixels.height);
-      }
-
-      whenDrawn(titleScreen());
+      sizePage(1200, 630);
+      whenDrawn(
+        document.fonts.load('400 100px "Redaction"'),
+        new Promise((done) => setTimeout(done, 300)),
+      );
     </script>
   </body>
 </html>

@@ -121,10 +121,9 @@ shelf template draws the headers and banners, and og.html the link card.
 | [github](brand/github)       | Repository social preview                      | 1280×640             |
 | [web](brand/web)             | The link card                                  | 1200×630             |
 
-The link card is the title screen of a game that doesn't exist yet: the headline is its title, and
-a game menu under it offers "So make it." (the fox sprite is the cursor) or "Keep waiting". A link
-card has to read at feed size and make someone curious, so it shows a world worth playing rather
-than describing the product.
+The link card is the fox's face, drawn in brush ink and cropped large, beside the headline, signed
+with a small vermilion seal the way a woodblock print is. `web/og-sun.jpg` sets a vermilion sun
+behind the fox for places that need more colour.
 
 Use the **seal** avatar everywhere a picture is cropped round: vermilion is the one colour that
 stands out in a feed. Pair it with the paper X header. The posts run in order: make, tell, played,

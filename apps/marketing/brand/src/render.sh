@@ -68,9 +68,11 @@ card "m=join" 1080 1920 instagram/story-join.png
 wall "t=paper" 1584 396 linkedin/banner-profile.png
 wall "t=paper&rows=2" 1128 191 linkedin/banner-company.png
 wall "t=paper&rows=9" 2560 1440 youtube/banner.png
-# The link card: the title screen of the game you want. The site serves it as
+# The link card: the fox's face and the headline. The site serves it as
 # ../site/og.png; GitHub's social preview and the README banner are the same.
+# og-sun.png is the same card with a vermilion sun behind the fox.
 shot "og.html?w=1200&h=630" 1200,630 web/og.png
+shot "og.html?sun=1&w=1200&h=630" 1200,630 web/og-sun.png
 shot "og.html?w=1280&h=640" 1280,640 github/social-preview.png
 
 find "$kit" -path "$kit/src" -prune -o -path "$kit/logo" -prune -o -name "*.png" -print0 |
