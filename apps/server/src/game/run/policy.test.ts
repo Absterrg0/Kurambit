@@ -525,8 +525,11 @@ describe("frame sheets", () => {
     const { prompts, sheets } = run(["cand", "best"]);
     expect(prompts).toHaveLength(2);
     // Order 1 shows the candidate as A, order 2 shows the best as A.
-    expect(prompts[0]).toContain(`Build A's is ${sheets.cand} and Build B's is ${sheets.best}.`);
-    expect(prompts[1]).toContain(`Build A's is ${sheets.best} and Build B's is ${sheets.cand}.`);
+    // The sheets follow the reports' presentation order; the mapping is what must hold.
+    expect(prompts[0]).toContain(`Build A's is ${sheets.cand}`);
+    expect(prompts[0]).toContain(`Build B's is ${sheets.best}`);
+    expect(prompts[1]).toContain(`Build A's is ${sheets.best}`);
+    expect(prompts[1]).toContain(`Build B's is ${sheets.cand}`);
     for (const prompt of prompts) {
       expect(prompt).toContain("frames from that player's own play, evenly sampled");
       expect(prompt).toContain("Use only these reports and the two frame sheets,");

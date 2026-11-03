@@ -2909,15 +2909,11 @@ ${built.result.message}`.slice(-3000),
     exploreSheet: Effect.fn("GameService.exploreSheet")(function* (threadId, output) {
       const root = yield* projects.resolve(threadId);
       const kept = exploreEvidence.get(String(threadId))?.frames ?? [];
-      // Scratch frames can be gone (a cleaned temp dir); only what is on disk is drawn.
+      // Scratch frames can be gone (a cleaned temp dir) or cut off mid-write;
+      // only complete PNGs on disk are drawn.
       const present = yield* Effect.promise(() =>
         Promise.all(
-          kept.map((frame) =>
-            NodeFSP.stat(frame.path).then(
-              (stat) => stat.isFile() && stat.size > 0,
-              () => false,
-            ),
-          ),
+          kept.map((frame) => ExploreSheet.pngSize(frame.path).then((size) => size !== null)),
         ),
       );
       const frames = ExploreSheet.pickFrames(kept.filter((_, i) => present[i]));
@@ -2945,6 +2941,9 @@ ${built.result.message}`.slice(-3000),
       const temporary = NodePath.join(
         NodePath.dirname(output),
         `.sheet-${NodeCrypto.randomUUID()}.jpg`,
+      );
+      const removeTemporary = Effect.promise(() =>
+        NodeFSP.rm(temporary, { force: true }).catch(() => undefined),
       );
       const result = yield* Effect.tryPromise({
         try: () => NodeFSP.mkdir(NodePath.dirname(output), { recursive: true }),
@@ -2976,7 +2975,7 @@ ${built.result.message}`.slice(-3000),
         ),
       );
       if (result.exitCode !== 0) {
-        yield* Effect.promise(() => NodeFSP.rm(temporary, { force: true }));
+        yield* removeTemporary;
         return yield* new GameOperationError({
           operation: "Explore sheet",
           path: output,
@@ -2994,7 +2993,7 @@ ${built.result.message}`.slice(-3000),
             detail: cause instanceof Error ? cause.message : String(cause),
             cause,
           }),
-      });
+      }).pipe(Effect.onError(() => removeTemporary));
       return frames.length;
     }),
     cancelThread: Effect.fn("GameService.cancelThread")(function* (threadId) {
