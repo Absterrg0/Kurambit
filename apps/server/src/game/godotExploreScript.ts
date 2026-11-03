@@ -10,7 +10,8 @@
  * one JSON object per line. The game tree stays paused between acts, so no
  * game time passes while the agent thinks; the runner itself keeps polling
  * TCP while paused (SceneTree signals still fire when paused, verified on
- * Godot 4.7), including for a game that pauses itself.
+ * Godot 4.7). An act resumes the pause the game itself last set, so a game
+ * left on its pause or end screen stays frozen through the next act.
  *
  * Input lands before game nodes read it by frame order: every event is
  * injected synchronously and the next physics frame is awaited before the
@@ -77,6 +78,7 @@ var _errors := ExploreErrorLog.new()
 var _pointer := Vector2.ZERO
 var _pointer_init := false
 var _physics_hz := 60
+var _game_paused := false
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -145,7 +147,7 @@ func _serve() -> void:
 		await process_frame
 	if _peer.get_status() != 2:
 		return
-	paused = true
+	_hold()
 	_send(_boot_observation())
 	while true:
 		var line := await _read_line()
@@ -183,18 +185,18 @@ func _run_act(msg: Dictionary) -> Dictionary:
 	var shot_path: Variant = msg.get("screenshotPath", null)
 	if shot_path != null and not (shot_path is String):
 		shot_path = null
-	paused = false
+	paused = _game_paused
 	var executed := 0
 	var nominal := 0
 	var ui_results: Array = []
 	var inspections: Array = []
 	for step in steps:
 		if typeof(step) != TYPE_DICTIONARY:
-			paused = true
+			_hold()
 			return {"id": id_val, "ok": false, "error": "A step is not an object."}
 		var err := await _run_step(step, ui_results, inspections)
 		if not err.is_empty():
-			paused = true
+			_hold()
 			return {"id": id_val, "ok": false, "error": err}
 		if _is_input_step(step):
 			executed += 1
@@ -218,8 +220,14 @@ func _run_act(msg: Dictionary) -> Dictionary:
 		"screenshotWidth": shot.get("width", 0),
 		"screenshotHeight": shot.get("height", 0),
 	}
-	paused = true
+	_hold()
 	return obs
+
+# Freezes game time between acts, remembering whether the game had paused
+# itself so the next act resumes that state rather than unpausing it.
+func _hold() -> void:
+	_game_paused = paused
+	paused = true
 
 func _is_input_step(step: Dictionary) -> bool:
 	if step.has("waitMs") or step.has("screenshot") or step.has("inspect"):
