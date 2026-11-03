@@ -57,13 +57,14 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    applies on top. Each `ctx.assets.model` call is its own copy, so every
    character or enemy gets its own `animate`; call its `dispose()` when the
    enemy is gone for good.
-6. Write every level as a text map with `buildLevel(ctx, rows, legend, { floor })`
+6. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`
    (`web/shell/level.js`), never pieces placed by coordinates: `#` walls,
    `.` floor, a letter per spawn, the legend naming ASSETS models. Make more
    than one room, joined by corridors, when the brief allows. Put the player,
    enemies and pickups at `level.spawns.P[0]`, `level.spawns.E`, never at
    hard-coded positions; move them with `level.move(position, step, radius)`
-   so they slide along walls; pass `level.walls` to `followCamera3D`'s
+   so they slide along walls (keep the radius under half a cell); a side-view
+   level is built by hand; pass `level.walls` to `followCamera3D`'s
    `blockers` and `level.bounds` to `followCamera2D`.
 7. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,

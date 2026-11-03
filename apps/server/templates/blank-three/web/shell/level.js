@@ -1,6 +1,8 @@
-// Levels as text maps. Write the level as rows of characters and a legend;
+// Top-down levels as text maps (rows run along x/z on the ground; a side-view
+// level is built by hand). Write the level as rows of characters and a legend;
 // buildLevel places the pieces on a grid in ctx.scene and returns the spawns,
 // the bounds and the wall collision, so nothing is placed by coordinates.
+// move() expects a radius under half a cell.
 //
 //   import { buildLevel } from "./shell/level.js";
 //

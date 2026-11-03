@@ -72,7 +72,10 @@ tiles from a library sheet, `LevelMap.build_3d(self, rows, legend, {"floor": ...
 library model pieces; walls collide for `move_and_slide`. Make more than one
 room, joined by corridors, when the brief allows. Put the player, enemies and
 pickups at `level.spawns["P"][0]`, `level.spawns["E"]`, never at hard-coded
-positions, and give FollowCamera2D `bounds = level.bounds`.
+positions, and give FollowCamera2D `bounds = level.bounds`. A space is void:
+nothing there and no collision (open sky in 2D, a pit in 3D), so close every
+walkable edge with a wall. 2D legends are `Vector2i(column, row)` tiles; 3D
+legends are scene paths.
 
 ## Godot 4 patterns (each verified on 4.7)
 

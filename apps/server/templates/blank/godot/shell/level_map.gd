@@ -8,7 +8,7 @@
 ##       "#P......#   #.....E.#",
 ##       "#.......#####...G...#",
 ##       "#.......=...=.......#",   # two rooms joined by a corridor
-##       "#########   #########",
+##       "#####################",   # every walkable edge closed: void is open space
 ##   ]
 ##   var level := LevelMap.build_2d(self, ROOMS, {
 ##       "#": Vector2i(0, 4),                     # a solid tile
@@ -23,11 +23,13 @@
 ##   var level := LevelMap.build_3d(self, ROOMS, {
 ##       "#": "res://assets/library/<pack>/wall.glb",       # a solid piece
 ##       "c": {"scene": "res://assets/library/<pack>/barrel.glb", "rotate": 90},
+##       "=": "floor",
 ##       "P": "spawn", "E": "spawn", "G": "spawn",
 ##   }, {"cell": 1.0, "floor": "res://assets/library/<pack>/floor.glb"})
 ##   $Player.position = level.spawns["P"][0]     # Vector3s on the floor, by letter
 ##
-## " " is void (nothing drawn, no collision: open sky in 2D, a pit in 3D) and
+## " " is void (nothing drawn, no collision: open sky in 2D, a pit in 3D), so
+## close every walkable edge with a solid cell or the player walks out; and
 ## "." is plain floor (the `floor` option's tile or piece; a grey tile in 3D
 ## without one) unless the legend says otherwise; any other character must
 ## be in the legend. A legend entry is "spawn", "floor", a solid piece (a
@@ -54,6 +56,8 @@ var cell := 1.0
 var width := 0
 var height := 0
 var _chars := PackedStringArray()
+## Legend characters already reported, so a bad entry errors once, not once per cell.
+var _reported := {}
 
 
 ## The map character at a position in the parent's space; " " outside the map.
@@ -68,6 +72,11 @@ func at(position: Variant) -> String:
 static func build_2d(parent: Node, rows: Array, legend: Dictionary, options := {}) -> LevelMap:
 	var level := LevelMap.new()
 	var grid := level._parse(rows, legend)
+	# A scene name (the 3D or three.js form) would draw nothing and collide nowhere.
+	for ch in legend:
+		var raw: Variant = legend[ch]
+		if (raw is String and not raw in ["spawn", "floor", "void"]) or (raw is Dictionary and raw.has("scene")):
+			push_error("LevelMap.build_2d: legend \"%s\" names a scene; 2D takes Vector2i(column, row) tiles from the sheet" % ch)
 	var tile: int = options.get("tile_size", 16)
 	var size := Vector2i(tile, tile)
 	level.cell = tile
@@ -184,7 +193,9 @@ static func build_3d(parent: Node, rows: Array, legend: Dictionary, options := {
 				var mid := Vector3((c + run / 2.0) * cell, 0.0, (r + 0.5) * cell)
 				level._box(body, mid + Vector3.DOWN * 0.5, Vector3(run * cell, 1.0, cell))
 				if entry.solid:
-					var tall: float = maxf(heights.get(str(entry.get("scene", "")), cell), 0.1)
+					# As tall as the piece is drawn: its scale and lift count.
+					var piece_scale := float(entry.get("scale", options.get("scale", 1.0)))
+					var tall: float = maxf(heights.get(str(entry.get("scene", "")), cell) * piece_scale, 0.1) + float(entry.get("y", 0.0))
 					level._box(body, mid + Vector3.UP * tall / 2.0, Vector3(run * cell, tall, cell))
 			c += run
 	level.bounds = AABB(Vector3(used.position.x * cell, 0.0, used.position.y * cell), Vector3(used.size.x * cell, top, used.size.y * cell))
@@ -234,7 +245,10 @@ func _entry_at(c: int, r: int, legend: Dictionary) -> Dictionary:
 		var entry: Dictionary = raw.duplicate()
 		entry["solid"] = entry.get("solid", entry.has("scene") or entry.has("tile"))
 		return entry
-	push_error("LevelMap: legend \"%s\" is %s" % [ch, raw])
+	if _reported.has(ch):
+		return {"solid": false}
+	_reported[ch] = true
+	push_error("LevelMap: legend \"%s\" is %s; use \"spawn\", \"floor\", a Vector2i(column, row) tile (2D), a scene path (3D) or a Dictionary" % [ch, raw])
 	return {"solid": false}
 
 
