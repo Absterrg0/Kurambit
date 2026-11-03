@@ -92,6 +92,7 @@ import {
   checkoutOf,
   completePlayer,
   reuseMainPlayer,
+  touchPlayer,
   unityPlayerDirectory,
 } from "./unityPlayerCache.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -204,6 +205,21 @@ export class GameService extends Context.Service<
      * in memory cannot save over files restored on disk; the next call reopens them.
      */
     readonly closeLiveEditors: (root: string) => Effect.Effect<void>;
+    /**
+     * Gives a Unity game folder a complete Linux player of its current
+     * sources: the one it has, a copy of its main checkout's of identical
+     * sources, or a build under the game's lock and the live editor's memory
+     * guard. Idempotent. A blind sample's worktree gets this before its
+     * thread exists, so no sample spends its play time on a build.
+     */
+    readonly unityPreparePlayer: (root: string) => Effect.Effect<
+      {
+        readonly origin: "cached" | "reused" | "built";
+        readonly ms: number;
+        readonly sourceId: string;
+      },
+      GameOperationError
+    >;
     /** Live Blender scene: run bpy code, auto-saving the .blend source. */
     readonly blenderCode: (
       threadId: ThreadId,
@@ -1335,6 +1351,9 @@ const make = Effect.gen(function* () {
   // reloads them, so a sample's earlier play still counts.
   const exploreEvidence = new Map<string, ExploreEvidence.ThreadEvidence>();
   const evidenceLock = Semaphore.makeUnsafe(1);
+  // Both samples of a pair prepare at once and one Unity editor runs at a
+  // time: the second waits for the first's build instead of failing busy.
+  const unityPrepareLock = Semaphore.makeUnsafe(1);
   const rememberEvidence = (record: ExploreEvidence.ThreadEvidence) => {
     exploreEvidence.delete(record.threadId);
     exploreEvidence.set(record.threadId, record);
@@ -1880,7 +1899,7 @@ const make = Effect.gen(function* () {
    * never races game_export or game_check for the editor, and outside the
    * start lock every game's explore shares.
    */
-  const unityPlayerFor = (threadId: ThreadId, root: string) =>
+  const unityPlayerFor = (owner: string, root: string) =>
     Effect.gen(function* () {
       const { godotProject } = yield* engine(root);
       const known = (detail: string) =>
@@ -1903,8 +1922,10 @@ const make = Effect.gen(function* () {
       // Only an exact content match is reused: the same sources build the same player.
       const ready = (sourceId: string) =>
         Effect.gen(function* () {
-          if (yield* Effect.promise(() => completePlayer(unityPlayerDirectory(root, sourceId))))
+          if (yield* Effect.promise(() => completePlayer(unityPlayerDirectory(root, sourceId)))) {
+            yield* Effect.promise(() => touchPlayer(unityPlayerDirectory(root, sourceId)));
             return yield* prepared(sourceId, "cached");
+          }
           if (checkout.kind !== "linked") return null;
           const notReused = yield* Effect.promise(() =>
             reuseMainPlayer(checkout.main, root, sourceId),
@@ -1949,8 +1970,8 @@ ${imported.message}`.slice(-3000),
             );
             const afterImport = yield* ready(sourceId);
             if (afterImport !== null) return afterImport;
-            // The newest few players are kept: a comparison's worktrees reuse
-            // the main checkout's players of both the candidate and the best.
+            // The most recently built or played few players are kept, so the
+            // sources a comparison's worktrees play are usually still here.
             yield* Effect.promise(async () => {
               const logs = NodePath.join(root, "builds/logs");
               const players: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
@@ -2005,7 +2026,7 @@ ${built.result.message}`.slice(-3000),
             return yield* prepared(built.sourceId, "built");
           }),
         ),
-        String(threadId),
+        owner,
       );
     });
   const exploreStartUnity = (
@@ -2021,13 +2042,15 @@ ${built.result.message}`.slice(-3000),
   ) =>
     Effect.gen(function* () {
       const { player, sourceId } = prepared;
-      const seconds = `${Math.max(1, Math.round(prepared.ms / 1000))} s`;
-      const playerOrigin =
-        prepared.origin === "built"
-          ? `The player was built for this session in ${seconds}.`
-          : prepared.origin === "reused"
-            ? `The player was copied from an earlier build of these exact sources in ${seconds}; no editor opened.`
-            : "The player of these exact sources was already built; no editor opened.";
+      // Where the player came from stays in the server log: a blind sample's
+      // notes reach its comparator verbatim, and a sample that waited on a
+      // build must read the same as one that did not.
+      yield* Effect.logInfo("Unity explore session plays its player", {
+        root,
+        sourceId,
+        origin: prepared.origin,
+        ms: prepared.ms,
+      });
       const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -2232,7 +2255,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
           `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System. ` +
-          `${playerOrigin} ${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
+          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
@@ -2395,7 +2418,7 @@ ${built.result.message}`.slice(-3000),
       // The player build takes minutes and is the game's own exclusive
       // operation; the start lock is held only to launch and register.
       const unityPlayer =
-        unity && !exploreLive.has(root) ? yield* unityPlayerFor(threadId, root) : null;
+        unity && !exploreLive.has(root) ? yield* unityPlayerFor(String(threadId), root) : null;
       return yield* exploreStartLock
         .withPermits(1)(
           Effect.gen(function* () {
@@ -3686,6 +3709,20 @@ ${built.result.message}`.slice(-3000),
       withRoot(threadId, "Library add", (root) => library.add(root, input)),
     closeLiveEditors: (root) =>
       Effect.all([liveBlender.stop(root), liveUnity.stop(root)], { discard: true }),
+    unityPreparePlayer: Effect.fn("GameService.unityPreparePlayer")(function* (root) {
+      if ((yield* projects.read(root)).engine.name !== "unity")
+        return yield* exploreInvalid(root, "Only a Unity game plays a prepared player.");
+      const prepared = yield* unityPrepareLock.withPermits(1)(
+        Effect.gen(function* () {
+          const ready = yield* unityPlayerFor("game run sample preparation", root);
+          // The sample plays only its player; an idle editor beside it would
+          // take the memory the player runs in.
+          if (ready.origin === "built") yield* liveUnity.stop(root);
+          return ready;
+        }),
+      );
+      return { origin: prepared.origin, ms: prepared.ms, sourceId: prepared.sourceId };
+    }),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {

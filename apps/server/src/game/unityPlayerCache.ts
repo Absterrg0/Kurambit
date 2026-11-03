@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- This helper reads and copies Unity player folders on the native filesystem.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- This helper reads, copies and touches Unity player folders on the native filesystem.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -61,6 +61,15 @@ export const completePlayer = async (directory: string): Promise<boolean> => {
   return true;
 };
 
+/**
+ * Marks a player as just played: a game keeps its most recent players by the
+ * folder's mtime, so one that samples keep playing outlives newer builds.
+ */
+export const touchPlayer = async (directory: string): Promise<void> => {
+  const now = new Date();
+  await NodeFSP.utimes(directory, now, now).catch(() => undefined);
+};
+
 /** Every entry below `directory` by relative path, with its kind and size. */
 const listing = async (directory: string): Promise<string> => {
   const lines: string[] = [];
@@ -89,7 +98,8 @@ const listing = async (directory: string): Promise<string> => {
  * an editor to build its own inside the sample's play time. A copy rather than
  * running the main's folder in place: the main checkout's own builds may prune
  * that folder while the sample plays, and removing the worktree must remove
- * only its own copy. The main's folder is only read. The copy lands whole or
+ * only its own copy. The main's folder is only read, beyond touching its
+ * time so the main's prune keeps a player samples play. The copy lands whole or
  * not at all, and is kept only if it lists the same files at the same sizes as
  * the main's player still does afterwards, so a prune racing the copy builds
  * as before. Answers null when it copied, or why not.
@@ -120,6 +130,7 @@ export const reuseMainPlayer = async (
       // Another start of this worktree landed the same player first.
       if (!(await completePlayer(target))) throw cause;
     });
+    await touchPlayer(source);
     return null;
   } catch (cause) {
     return `copying the main checkout's player failed (${cause instanceof Error ? cause.message : String(cause)})`;

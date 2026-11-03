@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Proves a worktree's player reuse only reads its main checkout's players.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Proves a worktree's player reuse leaves its main checkout's players whole.
 import { expect, it } from "@effect/vitest";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
@@ -27,7 +27,13 @@ it("copies only a complete player of the exact sources and leaves the main's unt
     expect(await reuseMainPlayer(main, worktree, "b".repeat(64))).toMatch(/no player/);
     expect(await reuseMainPlayer(main, main, SOURCE)).toMatch(/main checkout/);
 
+    // A played player is touched, so the main's prune of its oldest keeps it.
+    const old = new Date(Date.now() - 86_400_000);
+    await NodeFSP.utimes(unityPlayerDirectory(main, SOURCE), old, old);
     expect(await reuseMainPlayer(main, worktree, SOURCE)).toBeNull();
+    expect((await NodeFSP.stat(unityPlayerDirectory(main, SOURCE))).mtimeMs).toBeGreaterThan(
+      old.getTime() + 60_000,
+    );
     const copied = unityPlayerDirectory(worktree, SOURCE);
     expect(
       await NodeFSP.readFile(
