@@ -23,6 +23,11 @@ The starter already has a title, pause, settings, end and credits screens
 `GameState.lose(text, stats)`, and restyle the shell instead of replacing it.
 Answer every player action through `Juice` (shell/juice.gd): `shake`,
 `hit_pause`, `pop`, `squash`, `flash`, `tint`, `burst`, `sfx`.
+Spawn bullets and effects under your game scene (or `Juice.stage`), never
+`get_tree().current_scene`, and never call `change_scene_to_file` or
+`reload_current_scene`: the shell owns restarts. Retry resets every value in
+game_state.gd; list the ones that must survive (best score, unlocks) in
+`const KEEP_ACROSS_RUNS := [...]`.
 
 ## Godot 4 patterns (each verified on 4.7)
 

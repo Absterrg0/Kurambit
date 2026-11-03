@@ -1,6 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://shell/shell.gd" id="1_shell"]
+[ext_resource type="Script" path="res://shell/keys.gd" id="2_keys"]
 
 [sub_resource type="Gradient" id="Gradient_title"]
 offsets = PackedFloat32Array(0, 0.55, 1)
@@ -15,13 +16,17 @@ fill_from = Vector2(0.5, 0.3)
 fill_to = Vector2(1.15, 1.2)
 
 [node name="Main" type="Node"]
-process_mode = 3
 script = ExtResource("1_shell")
 
 [node name="Game" type="Node" parent="."]
 process_mode = 1
 
+[node name="Keys" type="Node" parent="."]
+process_mode = 3
+script = ExtResource("2_keys")
+
 [node name="Title" type="CanvasLayer" parent="."]
+process_mode = 3
 layer = 20
 
 [node name="Background" type="TextureRect" parent="Title"]
@@ -84,6 +89,7 @@ text = "Enter or click to choose  ·  Esc pauses"
 horizontal_alignment = 1
 
 [node name="Pause" type="CanvasLayer" parent="."]
+process_mode = 3
 layer = 21
 visible = false
 
@@ -129,6 +135,7 @@ layout_mode = 2
 text = "Main menu"
 
 [node name="End" type="CanvasLayer" parent="."]
+process_mode = 3
 layer = 21
 visible = false
 
@@ -182,6 +189,7 @@ layout_mode = 2
 text = "Main menu"
 
 [node name="Settings" type="CanvasLayer" parent="."]
+process_mode = 3
 layer = 22
 visible = false
 
@@ -268,6 +276,7 @@ layout_mode = 2
 text = "Back"
 
 [node name="Credits" type="CanvasLayer" parent="."]
+process_mode = 3
 layer = 22
 visible = false
 

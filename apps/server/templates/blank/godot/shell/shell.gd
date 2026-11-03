@@ -28,6 +28,9 @@ const END_GUARD_S := 0.4
 const VOLUME_BUSES := {"Master": "Master", "Music": "Music", "Sfx": "SFX"}
 
 @onready var _holder: Node = $Game
+## Main pauses with the game, so a node a game adds to the current scene
+## freezes too; the screens and this key listener keep running.
+@onready var _keys: Node = $Keys
 @onready var _title: CanvasLayer = $Title
 @onready var _pause: CanvasLayer = $Pause
 @onready var _end: CanvasLayer = $End
@@ -71,7 +74,7 @@ func _ready() -> void:
 		show_title()
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _on_key(event: InputEvent) -> void:
 	if event.is_echo():
 		return
 	var pause_key := event.is_action_pressed("pause")
@@ -97,6 +100,7 @@ func start_run() -> void:
 		return
 	_clear_game()
 	GameState.new_run()
+	Engine.time_scale = 1.0
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_show(null)
@@ -127,6 +131,7 @@ func resume() -> void:
 
 func show_title() -> void:
 	_clear_game()
+	Engine.time_scale = 1.0
 	get_tree().paused = false
 	GameState.result = ""
 	GameState.result_text = ""
@@ -142,7 +147,9 @@ func _on_ended(won: bool, text: String, stats: Dictionary) -> void:
 	var serial := _end_serial
 	var scale_before := Engine.time_scale
 	Engine.time_scale = END_BEAT_SCALE
-	await get_tree().create_timer(END_BEAT_S, true, false, true).timeout
+	# Counts only unpaused time: a hold (explore between acts, a hidden stage
+	# tab) must not let the beat finish and pause underneath it.
+	await get_tree().create_timer(END_BEAT_S, false, false, true).timeout
 	Engine.time_scale = scale_before
 	if serial != _end_serial:
 		return
@@ -184,6 +191,11 @@ func _clear_game() -> void:
 		_holder.remove_child(_game)
 		_game.queue_free()
 	_game = null
+	# Nodes a game added to the current scene (Main) instead of its own.
+	for child in get_children():
+		if child != _holder and child != _keys and not (child is CanvasLayer and _screens.has(child)):
+			remove_child(child)
+			child.queue_free()
 
 
 func _show(screen: CanvasLayer) -> void:
@@ -214,6 +226,8 @@ func _focus_first(screen: CanvasLayer) -> void:
 
 
 func _open_settings(from: CanvasLayer) -> void:
+	# The browser or window manager can leave fullscreen without us.
+	_fullscreen_toggle().set_pressed_no_signal(DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN)
 	_settings_from = from
 	_show(_settings)
 
@@ -250,6 +264,7 @@ func _load_settings() -> void:
 
 func _set_volume(volume: float, bus: String) -> void:
 	_config.set_value("audio", bus, volume)
+	_config.save(SETTINGS_FILE)
 	var index := AudioServer.get_bus_index(bus)
 	if index >= 0:
 		AudioServer.set_bus_volume_db(index, linear_to_db(maxf(volume, 0.0001)))
@@ -257,6 +272,7 @@ func _set_volume(volume: float, bus: String) -> void:
 
 func _set_fullscreen(on: bool) -> void:
 	_config.set_value("video", "fullscreen", on)
+	_config.save(SETTINGS_FILE)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if on else DisplayServer.WINDOW_MODE_WINDOWED)
 
 

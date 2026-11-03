@@ -51,7 +51,9 @@ func new_run() -> void:
 		_defaults = {}
 		for key in _declared_values():
 			_defaults[key] = _copy(get(key))
-	var keep: Array = get_script().get_script_constant_map().get("KEEP_ACROSS_RUNS", [])
+	var keep: Array = get_script().get_script_constant_map().get(
+		"KEEP_ACROSS_RUNS", get("KEEP_ACROSS_RUNS") if "KEEP_ACROSS_RUNS" in self else []
+	)
 	for key in _defaults:
 		if not keep.has(key):
 			set(key, _copy(_defaults[key]))
@@ -74,13 +76,15 @@ func _declared_values() -> Array[String]:
 		if not (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE):
 			continue
 		var key := str(property.name)
-		if key.begins_with("_") or _SHELL_VALUES.has(key):
+		if key.begins_with("_") or _SHELL_VALUES.has(key) or key == "KEEP_ACROSS_RUNS":
 			continue
 		names.append(key)
 	return names
 
 
 static func _copy(value: Variant) -> Variant:
+	if value is Resource:
+		return (value as Resource).duplicate(true)
 	if value is Array or value is Dictionary:
 		return value.duplicate(true)
 	return value

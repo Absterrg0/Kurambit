@@ -106,12 +106,18 @@ func _game_state_values() -> Dictionary:
 	var game_state := get_node_or_null("/root/GameState")
 	if game_state == null:
 		return values
+	# The shell's run state comes last in the property list; read it first
+	# so a game with many values never crowds it out.
+	var keys: Array[String] = []
+	for shell_key in ["state", "result", "result_text"]:
+		if shell_key in game_state:
+			keys.append(shell_key)
 	for property in game_state.get_property_list():
+		if (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) and not keys.has(str(property.name)):
+			keys.append(str(property.name))
+	for key in keys:
 		if values.size() >= MAX_KEYS:
 			break
-		if not (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE):
-			continue
-		var key := str(property.name)
 		if key.begins_with("_"):
 			continue
 		var value: Variant = game_state.get(key)

@@ -69,7 +69,7 @@ export const artRedo = (defects: string, lane: string): string =>
 // Games made from the Godot starter carry a demo shell; older ones do not, so the line defers to TEMPLATE.md.
 const shellLine = (lane: string): string =>
   lane === "godot"
-    ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, and you build no menus of your own. "
+    ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus of your own. "
     : "";
 
 export const proto = (lane: string): string =>

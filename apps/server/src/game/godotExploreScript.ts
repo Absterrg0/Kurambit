@@ -905,6 +905,12 @@ func _read_line() -> String:
 				var line := s.substr(0, idx)
 				_read_buf = s.substr(idx + 1).to_utf8_buffer()
 				return line
+		# Between acts the tree is held; a game that unpauses itself meanwhile
+		# (a countdown timer that runs while paused) gets that state back at the
+		# next act, and game time stays frozen until then.
+		if not paused:
+			_game_paused = false
+			paused = true
 		await process_frame
 	return ""
 `;
