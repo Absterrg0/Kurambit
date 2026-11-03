@@ -1261,10 +1261,22 @@ function startProofs(root) {
     seek(time);
   }
 
+  // Pinned, the desk sits centred under the bar, shrunk if the screen is too
+  // short to hold it whole.
   const centre = () => {
     const bar = parseFloat(getComputedStyle(pin).getPropertyValue("--bar-space")) || 88;
-    const top = Math.max(bar, (window.innerHeight + bar - pin.offsetHeight) / 2);
+    const room = window.innerHeight - bar - 12;
+    const fit = Math.min(1, room / pin.offsetHeight);
+    const top = Math.max(bar, (window.innerHeight + bar - pin.offsetHeight * fit) / 2);
     pin.style.setProperty("--pin-top", `${Math.round(top)}px`);
+    const scale = fit.toFixed(3);
+    if (pin.style.getPropertyValue("--fit") === scale) return;
+    pin.style.setProperty("--fit", scale);
+    // The pen and the stamp were placed against the old size.
+    if (step >= 0) {
+      step = -1;
+      update();
+    }
   };
   centre();
   new ResizeObserver(centre).observe(pin);
@@ -1575,7 +1587,11 @@ function startDirect(root) {
   view.addEventListener("pointerdown", (event) => {
     dragging = true;
     cancelAnimationFrame(sweep);
-    view.setPointerCapture(event.pointerId);
+    try {
+      view.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer can end before capture lands; dragging still works without it.
+    }
     setSplit(fromPointer(event));
   });
   view.addEventListener("pointermove", (event) => {
