@@ -54,6 +54,15 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderAssetsImportInput,
   type GameBlenderAssetsImportResult,
+  type GameUnityConsoleInput,
+  type GameUnityEditInput,
+  type GameUnityEvalInput,
+  type GameUnityPlayInput,
+  type GameUnityRecompileResult,
+  type GameUnityScreenshotInput,
+  type GameUnityScreenshotResult,
+  type GameUnityTextResult,
+  type GameUnityToolsResult,
   type GameBotRunInput,
   type GameBotRunResult,
   type GameBotReportResult,
@@ -310,6 +319,39 @@ export class GameService extends Context.Service<
       input: GameBotViewInput,
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /** Live Unity editor: the editing tools game_unity_edit may call, with input schemas. */
+    readonly unityTools: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
+    /** Live Unity editor: call one editing tool, then save the open scenes. */
+    readonly unityEdit: (
+      threadId: ThreadId,
+      input: GameUnityEditInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: evaluate C# on the editor's main thread. */
+    readonly unityEval: (
+      threadId: ThreadId,
+      input: GameUnityEvalInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: import changed files and compile, with C# errors at file:line. */
+    readonly unityRecompile: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityRecompileResult, GameOperationError>;
+    /** Live Unity editor: enter or leave play mode. */
+    readonly unityPlay: (
+      threadId: ThreadId,
+      input: GameUnityPlayInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: the Game view through the main camera, as one image. */
+    readonly unityScreenshot: (
+      threadId: ThreadId,
+      input: GameUnityScreenshotInput,
+    ) => Effect.Effect<GameUnityScreenshotResult, GameOperationError>;
+    /** Live Unity editor: recent console entries. */
+    readonly unityConsole: (
+      threadId: ThreadId,
+      input: GameUnityConsoleInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
   }
 >()("kurambit/game/GameService") {}
 const isGameOperationError = Schema.is(GameOperationError);
@@ -615,6 +657,13 @@ const make = Effect.gen(function* () {
         { preset: target, outputPath: NodePath.join(staging, executable), operation },
       );
       if (!result.success) return { result, sourceId: null };
+      // Unity names this debug-symbol folder itself: it is never shipped.
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(staging, "game_BackUpThisFolder_ButDontShipItWithYourGame"), {
+          recursive: true,
+          force: true,
+        }),
+      );
       const runtime = target === "Windows" ? "UnityPlayer.dll" : "UnityPlayer.so";
       const missing = yield* Effect.promise(async () => {
         const absent: string[] = [];
@@ -2581,6 +2630,22 @@ const make = Effect.gen(function* () {
         }
       }
     });
+  const unityRoot = (root: string) =>
+    projects.read(root).pipe(
+      Effect.flatMap((manifest) =>
+        manifest.engine.name === "unity"
+          ? Effect.void
+          : Effect.fail(
+              new GameOperationError({
+                operation: "Unity editor",
+                path: root,
+                reason: "invalid-input",
+                detail:
+                  "The game_unity_* tools work on Unity games; this game runs another engine.",
+              }),
+            ),
+      ),
+    );
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
@@ -3026,6 +3091,102 @@ const make = Effect.gen(function* () {
               : "Godot check";
         return yield* withRoot(threadId, label, checkGame);
       }),
+    unityTools: (threadId) =>
+      withRoot(threadId, "Unity tools", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(liveUnity.tools(root)),
+          Effect.map((tools) => ({ tools })),
+        ),
+      ),
+    unityEdit: (threadId, input) =>
+      withRoot(threadId, "Unity edit", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          if (!GameUnity.UNITY_EDIT_TOOL.test(input.tool))
+            return yield* new GameOperationError({
+              operation: "Unity edit",
+              path: input.tool,
+              reason: "invalid-input",
+              detail:
+                "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
+            });
+          const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
+          // Edits live in the open scene until saved; a later close discards them.
+          const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
+            Effect.map(GameUnity.textOf),
+            Effect.orElseSucceed(() => "Saving the scene failed."),
+          );
+          return { text: `${GameUnity.textOf(result).slice(0, 8000)}\n${saved}` };
+        }),
+      ),
+    unityEval: (threadId, input) =>
+      withRoot(threadId, "Unity eval", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(
+            liveUnity.call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
+          ),
+          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 8000) })),
+        ),
+      ),
+    unityRecompile: (threadId) =>
+      withRoot(threadId, "Unity recompile", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          const { backend, godot, cwd, godotProject } = yield* engine(root);
+          const imported = yield* backend.importProject({
+            root,
+            projectDir: cwd,
+            projectName: godotProject,
+            binary: godot,
+          });
+          return {
+            ok: imported.result.success,
+            errors: imported.issues,
+            warnings: [],
+            text: imported.result.success
+              ? imported.result.message
+              : imported.result.message.slice(0, 4000),
+          };
+        }),
+      ),
+    unityPlay: (threadId, input) =>
+      withRoot(threadId, "Unity play", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          // An unfocused editor freezes play mode at frame 1 without auto-tick.
+          if (input.action === "start") yield* liveUnity.call(root, "editor_set_auto_tick", {});
+          const result = yield* liveUnity.call(
+            root,
+            input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
+            {},
+            120_000,
+          );
+          return { text: GameUnity.textOf(result) };
+        }),
+      ),
+    unityScreenshot: (threadId, input) =>
+      withRoot(threadId, "Unity screenshot", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          const result = yield* liveUnity.call(root, "capture_game_view", {
+            source: "camera",
+            max_resolution: input.maxSize ?? 960,
+          });
+          return GameUnity.screenshotOf(result);
+        }),
+      ),
+    unityConsole: (threadId, input) =>
+      withRoot(threadId, "Unity console", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(
+            liveUnity.call(root, "console_get", {
+              level: input.level ?? "log",
+              tail: input.tail ?? 50,
+            }),
+          ),
+          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 12000) })),
+        ),
+      ),
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>

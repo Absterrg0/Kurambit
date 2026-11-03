@@ -23,22 +23,41 @@ const SESSION_FILE = "session.json";
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
 /**
- * The editor tools agents reach through `unity mcp`. Everything else the
- * Pipeline package registers stays hidden: builds, tests, package changes and
- * editor lifecycle belong to Kurambit's own operations.
+ * The editor tools agents reach through `unity mcp` (its `--tools` filter).
+ * Scene, object, component, prefab, material and settings editing plus C#
+ * eval, play mode, capture and console. Builds, tests, packages, jobs and
+ * editor lifecycle stay hidden: they belong to Kurambit's own operations.
  */
 export const UNITY_MCP_TOOLS = [
-  "scene_get_hierarchy",
-  "scene_save",
-  "scene_open",
+  "scene_*",
   "gameobject_*",
   "component_*",
+  "prefab_*",
+  "material_*",
+  "asset_find",
+  "asset_create_folder",
+  "script_attach",
   "script_eval",
+  "settings_tags_layers_*",
+  "settings_physics_*",
+  "settings_time_*",
+  "settings_quality_*",
+  "settings_player_get",
+  "lighting_get_settings",
+  "lighting_set_settings",
+  "editor_save_all",
+  "editor_status",
+  "editor_set_auto_tick",
+  "editor_playmode_start",
+  "editor_playmode_stop",
+  "capture_game_view",
+  "capture_scene_view",
   "console_get",
   "console_clear",
-  "capture_game_view",
-  "editor_playmode_*",
 ] as const;
+/** Of those, what `game_unity_edit` may call: the editing surface, by name prefix. */
+export const UNITY_EDIT_TOOL =
+  /^(scene_|gameobject_|component_|prefab_|material_|asset_find$|asset_create_folder$|script_attach$|settings_|lighting_|editor_save_all$|editor_status$|capture_scene_view$)/;
 
 interface Session {
   readonly root: string;
@@ -64,7 +83,7 @@ interface SessionRecord {
   readonly mcpPid?: number;
 }
 
-type McpContent = {
+export type McpContent = {
   readonly content?: ReadonlyArray<{
     readonly type: string;
     readonly text?: string;
@@ -161,6 +180,69 @@ const signalOwned = (pid: number, group: boolean, signal: NodeJS.Signals): void 
   }
 };
 
+/**
+ * Unity starts three out-of-process asset import workers of about 0.7 GB
+ * each by default. The count is a per-user setting in
+ * UserSettings/EditorUserSettings.asset (gitignored, so a fresh checkout has
+ * none); it is written before every start. A desired count of 0 clamps to
+ * one worker, the lowest the editor allows; no standby workers are kept.
+ */
+export const capImportWorkers = async (projectDir: string): Promise<void> => {
+  const file = NodePath.join(projectDir, "UserSettings/EditorUserSettings.asset");
+  const wanted: Record<string, string> = {
+    m_DesiredImportWorkerCount: "0",
+    m_StandbyImportWorkerCount: "0",
+    m_IdleImportWorkerShutdownDelay: "1000",
+  };
+  const existing = await NodeFSP.readFile(file, "utf8").catch(() => null);
+  if (existing === null) {
+    await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+    await NodeFSP.writeFile(
+      file,
+      `%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!162 &1\nEditorUserSettings:\n  m_ObjectHideFlags: 0\n  serializedVersion: 5\n${Object.entries(
+        wanted,
+      )
+        .map(([key, value]) => `  ${key}: ${value}\n`)
+        .join("")}`,
+    );
+    return;
+  }
+  let text = existing;
+  for (const [key, value] of Object.entries(wanted)) {
+    const line = new RegExp(`^  ${key}: .*$`, "m");
+    text = line.test(text)
+      ? text.replace(line, `  ${key}: ${value}`)
+      : text.replace(/^EditorUserSettings:\n/m, `EditorUserSettings:\n  ${key}: ${value}\n`);
+  }
+  if (text !== existing) await NodeFSP.writeFile(file, text);
+};
+
+/**
+ * Every process below a pid, read from /proc. Unity's import workers start
+ * their own sessions, so a process-group signal does not reach them; walking
+ * the parent links from the editor pid we spawned does, without matching any
+ * name.
+ */
+const descendantsOf = async (pid: number): Promise<number[]> => {
+  const parents = new Map<number, number[]>();
+  for (const entry of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = await NodeFSP.readFile(`/proc/${entry}/stat`, "utf8").catch(() => null);
+    const ppid = stat === null ? NaN : Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+    if (!Number.isFinite(ppid)) continue;
+    parents.set(ppid, [...(parents.get(ppid) ?? []), Number(entry)]);
+  }
+  const out: number[] = [];
+  const queue = [pid];
+  while (queue.length > 0) {
+    for (const child of parents.get(queue.shift()!) ?? []) {
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
+};
+
 /** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
 const reapRecorded = async (homeDir: string): Promise<void> => {
   const file = NodePath.join(homeDir, SESSION_FILE);
@@ -179,12 +261,19 @@ const reapRecorded = async (homeDir: string): Promise<void> => {
     return live;
   };
   let live = await owned();
+  // Taken while the editor still lives: once it exits, its workers reparent.
+  const editorTree =
+    record.editorPid !== undefined && live.some((entry) => entry.pid === record.editorPid)
+      ? await descendantsOf(record.editorPid)
+      : [];
   for (const entry of live) signalOwned(entry.pid, entry.group, "SIGTERM");
+  for (const pid of editorTree) signalOwned(pid, false, "SIGTERM");
   for (let waited = 0; live.length > 0 && waited < 15_000; waited += 200) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     live = await owned();
   }
   for (const entry of live) signalOwned(entry.pid, entry.group, "SIGKILL");
+  for (const pid of editorTree) if (alive(pid)) signalOwned(pid, false, "SIGKILL");
   await NodeFSP.rm(file, { force: true });
 };
 
@@ -212,16 +301,63 @@ const pickDisplay = async (): Promise<number | null> => {
   return null;
 };
 
-const textOf = (result: McpContent): string =>
+export const textOf = (result: McpContent): string =>
   (result.content ?? [])
     .filter((entry) => entry.type === "text")
     .map((entry) => entry.text ?? "")
     .join("\n");
 
+/** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
+const pngSize = (bytes: Buffer): { width: number; height: number } | null =>
+  bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47
+    ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+    : null;
+
+/**
+ * The capture as an image: either MCP image content or a base64 PNG field in
+ * the command's JSON text, whichever the Pipeline version returns.
+ */
+export const screenshotOf = (
+  result: McpContent,
+): {
+  readonly text: string;
+  readonly screenshot?: {
+    readonly mimeType: "image/png";
+    readonly data: string;
+    readonly width: number;
+    readonly height: number;
+  };
+} => {
+  let data = (result.content ?? []).find((entry) => entry.type === "image")?.data;
+  let text = textOf(result);
+  if (data === undefined) {
+    const found = /"(?:image|base64|data|png)"\s*:\s*"([A-Za-z0-9+/=]{200,})"/.exec(text);
+    if (found?.[1] !== undefined) {
+      data = found[1];
+      text = text.replace(found[1], "<image attached>");
+    }
+  }
+  if (data === undefined) return { text: text.slice(0, 4000) || "The editor returned no image." };
+  const size = pngSize(Buffer.from(data, "base64"));
+  if (size === null)
+    return { text: `The editor returned an image that is not a PNG. ${text.slice(0, 2000)}` };
+  return {
+    text: text.slice(0, 4000) || "See the attached Game view.",
+    screenshot: { mimeType: "image/png", data, ...size },
+  };
+};
+
 const stringEnv = (env: NodeJS.ProcessEnv): Record<string, string> => {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) if (value !== undefined) out[key] = value;
   return out;
+};
+
+const withCliFlags = (args: ReadonlyArray<string>, flags: ReadonlyArray<string>): string[] => {
+  const fence = args.indexOf("--");
+  return fence < 0
+    ? [...args, ...flags]
+    : [...args.slice(0, fence), ...flags, ...args.slice(fence)];
 };
 
 /** The CLI prints one JSON envelope; editor log lines may precede it. */
@@ -275,6 +411,17 @@ export class GameUnity extends Context.Service<
       args: Record<string, unknown>,
       timeoutMs?: number,
     ) => Effect.Effect<McpContent, GameOperationError>;
+    /** The editing tools `game_unity_edit` may call, with their input schemas. */
+    readonly tools: (
+      root: string,
+    ) => Effect.Effect<
+      ReadonlyArray<{
+        readonly name: string;
+        readonly description: string;
+        readonly input: unknown;
+      }>,
+      GameOperationError
+    >;
     /** The live editor's log tail, for honest failure detail. */
     readonly logTail: (root: string) => Effect.Effect<string>;
     /** Close this game's live editor (by recorded pid only); game_stop calls this. */
@@ -316,7 +463,9 @@ const make = Effect.gen(function* () {
       .run({
         root,
         executable: cli,
-        args: [...args, "--format", "json"],
+        // CLI flags must precede the `--` fence; after it, every flag is a
+        // Pipeline command parameter.
+        args: withCliFlags(args, ["--format", "json"]),
         operation: options.operation,
         timeoutMs: options.timeoutMs,
         env: unityChildEnv(),
@@ -380,7 +529,10 @@ const make = Effect.gen(function* () {
           );
         const homeDir = homeDirOf(root);
         yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(homeDir, { recursive: true }),
+          try: async () => {
+            await NodeFSP.mkdir(homeDir, { recursive: true });
+            await capImportWorkers(projectDir);
+          },
           catch: (cause) => opError("unity-live", homeDir, "io", undefined, cause),
         });
         const displayNum = yield* Effect.promise(() => pickDisplay());
@@ -436,7 +588,18 @@ const make = Effect.gen(function* () {
           // asset-import workers and shader compilers with it.
           const child = NodeChildProcess.spawn(
             unity.editor,
-            ["-batchmode", "-projectPath", projectDir, "-logFile", logPath, "-force-glcore"],
+            [
+              "-batchmode",
+              "-projectPath",
+              projectDir,
+              "-logFile",
+              logPath,
+              "-force-glcore",
+              // Caps the job system's worker threads (the log confirms
+              // "Creating JobQueue using job-worker-count value 2").
+              "-job-worker-count",
+              "2",
+            ],
             {
               cwd: root,
               env: unityChildEnv({ DISPLAY: display, LIBGL_ALWAYS_SOFTWARE: "1" }),
@@ -527,27 +690,59 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Waits until the editor's Pipeline server answers again. A recompile that
+   * adds or changes scripts reloads the domain, and play mode does too; the
+   * server is gone for a few seconds and calls in that window fail.
+   */
+  const waitReady = (root: string, session: Session) =>
+    Effect.gen(function* () {
+      const unity = yield* tools.unity;
+      return yield* runCli(
+        root,
+        unity.cli,
+        ["status", "--until-ready", "--project-path", session.projectDir, "--timeout", "180"],
+        { operation: "unity-ready", timeoutMs: 200_000 },
+      );
+    });
+  const RELOADING =
+    /socket hang up|No Pipeline instance found|ECONNREFUSED|ECONNRESET|EDITOR_NOT_READY|not ready/i;
+
+  const attempt = (
+    session: Session,
+    name: string,
+    args: Record<string, unknown>,
+    timeoutMs: number,
+  ) =>
+    Effect.tryPromise({
+      try: () =>
+        session.client.callTool({ name, arguments: args }, undefined, {
+          timeout: timeoutMs,
+          resetTimeoutOnProgress: true,
+          onprogress: () => undefined,
+        }) as Promise<McpContent>,
+      catch: (cause) =>
+        opError(
+          "unity-live",
+          name,
+          "command-failed",
+          cause instanceof McpError && cause.code === ErrorCode.RequestTimeout
+            ? `The Unity editor did not answer '${name}' within ${Math.round(timeoutMs / 1000)}s. It may still be working; read the scene before retrying.`
+            : `The Unity editor did not answer '${name}'. ${cause instanceof Error ? cause.message : ""}`,
+          cause,
+        ),
+    });
+
   const call: GameUnity["Service"]["call"] = (root, name, args, timeoutMs = 2 * 60_000) =>
     Effect.gen(function* () {
       const session = yield* ensure(root);
-      const result = (yield* Effect.tryPromise({
-        try: () =>
-          session.client.callTool({ name, arguments: args }, undefined, {
-            timeout: timeoutMs,
-            resetTimeoutOnProgress: true,
-            onprogress: () => undefined,
-          }),
-        catch: (cause) =>
-          opError(
-            "unity-live",
-            name,
-            "command-failed",
-            cause instanceof McpError && cause.code === ErrorCode.RequestTimeout
-              ? `The Unity editor did not answer '${name}' within ${Math.round(timeoutMs / 1000)}s. It may still be working; read the scene before retrying.`
-              : `The Unity editor did not answer '${name}'. ${cause instanceof Error ? cause.message : ""}`,
-            cause,
-          ),
-      })) as McpContent;
+      let result = yield* attempt(session, name, args, timeoutMs);
+      // One retry after the editor is ready again: a domain reload is not
+      // the agent's error, and the call never reached the editor.
+      if (result.isError === true && RELOADING.test(textOf(result))) {
+        yield* waitReady(root, session);
+        result = yield* attempt(session, name, args, timeoutMs);
+      }
       session.lastActive = yield* Clock.currentTimeMillis;
       if (result.isError === true)
         return yield* opError(
@@ -580,16 +775,48 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* ensure(root);
         const unity = yield* tools.unity;
-        const result = yield* runCli(
-          root,
-          unity.cli,
-          [...args, "--project-path", session.projectDir],
-          options,
-        );
+        const run = () =>
+          runCli(
+            root,
+            unity.cli,
+            withCliFlags(args, ["--project-path", session.projectDir]),
+            options,
+          );
+        let result = yield* run();
+        if (
+          !result.ok &&
+          (result.process.exitCode === 12 ||
+            RELOADING.test(`${result.errorCode} ${result.errorMessage}`))
+        ) {
+          yield* waitReady(root, session);
+          result = yield* run();
+        }
         session.lastActive = yield* Clock.currentTimeMillis;
         return result;
       }),
     call,
+    tools: (root) =>
+      Effect.gen(function* () {
+        const session = yield* ensure(root);
+        const listed = yield* Effect.tryPromise({
+          try: () => session.client.listTools(),
+          catch: (cause) =>
+            opError(
+              "unity-live",
+              root,
+              "command-failed",
+              "`unity mcp` did not list its tools.",
+              cause,
+            ),
+        });
+        return listed.tools
+          .filter((tool) => UNITY_EDIT_TOOL.test(tool.name))
+          .map((tool) => ({
+            name: tool.name,
+            description: (tool.description ?? "").slice(0, 600),
+            input: tool.inputSchema,
+          }));
+      }),
     logTail,
     stop: (root) => Effect.promise(() => drop(root)),
   });

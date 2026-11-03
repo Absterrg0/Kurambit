@@ -3,16 +3,6 @@ import { GameCheckIssue } from "./game.ts";
 
 /** The live Unity editor through Unity's official `unity mcp` server, behind GameUnity. */
 
-export const GameUnitySceneInput = Schema.Struct({
-  action: Schema.Literals(["hierarchy", "save", "open"]).annotate({
-    description:
-      "hierarchy lists the open scene's GameObjects; save writes the open scene to disk; open loads the scene at path.",
-  }),
-  /** Project-relative scene path for open, such as Assets/Scenes/Main.unity. */
-  path: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
-});
-export type GameUnitySceneInput = typeof GameUnitySceneInput.Type;
-
 export const GameUnityEditInput = Schema.Struct({
   tool: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)).annotate({
     description:
@@ -49,6 +39,18 @@ export const GameUnityScreenshotInput = Schema.Struct({
   maxSize: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 128, maximum: 1920 }))),
 });
 export type GameUnityScreenshotInput = typeof GameUnityScreenshotInput.Type;
+
+export const GameUnityToolsResult = Schema.Struct({
+  tools: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      description: Schema.String,
+      /** The tool's JSON input schema, as the editor publishes it. */
+      input: Schema.Unknown,
+    }),
+  ),
+});
+export type GameUnityToolsResult = typeof GameUnityToolsResult.Type;
 
 export const GameUnityTextResult = Schema.Struct({ text: Schema.String });
 export type GameUnityTextResult = typeof GameUnityTextResult.Type;

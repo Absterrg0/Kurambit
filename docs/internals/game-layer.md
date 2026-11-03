@@ -58,7 +58,13 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the GameRun loop launches get play-level tools only (status, check, import,
-export, explore start/act/close, bot run/view, blender tools). Packaging, preview, stop and the
+export, explore start/act/close, bot run/view, blender and unity tools). The `game_unity_*` tools
+are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
+`game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
+editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
+worker and `-job-worker-count 2` (the worker count is a per-user setting in
+`UserSettings/EditorUserSettings.asset`, rewritten before every start), because Unity's default
+three import workers cost about 0.7 GB each. Packaging, preview, stop and the
 run's own status and steer tools stay outside their catalog.
 
 The creator's session and a live run share the game folder, and the run's git resets would undo the

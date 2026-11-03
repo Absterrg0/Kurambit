@@ -6,14 +6,17 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
 1. You have no local Unity binary: never look for one or run it. The
    `game_unity_*` tools drive this game's one live batchmode editor (the
    first call opens it; that can take a few minutes on a fresh project).
+   Kurambit runs it lean: one asset import worker and two job threads, so
+   imports are serial; keep imported files few and small.
 2. Write C# yourself under `unity/Assets/Scripts/`. After a script change run
    `game_unity_recompile` (or `game_check`) and fix every `file:line` error
    before anything else: a project that does not compile cannot play.
 3. Edit scenes through the editor, never by hand-editing `.unity`,
-   `.prefab` or `.asset` YAML: `game_unity_scene` to read the hierarchy,
-   `game_unity_object` to create, move, rename and delete GameObjects and
-   add or set components, `game_unity_eval` for anything else in C#. Save
-   with `game_unity_scene` action save; unsaved edits are lost on close.
+   `.prefab` or `.asset` YAML. `game_unity_tools` lists the editing tools
+   (scene, gameobject, component, prefab, material, settings) with their
+   inputs; call one with `game_unity_edit` (open scenes are saved after each
+   call). `game_unity_eval` runs C# in the editor for anything else.
+   Attach your scripts with `script_attach` after they compile.
 4. `Assets/Scenes/Main.unity` is the entry scene and first in the build list.
 5. Input goes through the Input System (`Keyboard.current`, `Mouse.current`
    or Input Actions). The harness injects keys and mouse there; the legacy
