@@ -125,6 +125,23 @@ keep their references.
 Stopping the agent's turn stops its Blender and Godot commands, but a game that is already running
 keeps running; use **Stop** in the stage to close it.
 
+## Asset library
+
+Agents can use a built-in library of free game art and sound: 2D sprites and tilesets, UI kits and
+icons, fonts, sound effects, short music, animated 3D characters, 3D kits and textures, from
+creators such as Kenney, Quaternius and ambientCG. Everything in it is CC0 (public domain), so you
+can ship and sell games that use it without credit. No account or API key is needed.
+
+Ask for it in the brief or a follow-up, for example "use library characters and UI". The agent
+looks at a contact sheet of the files before it picks, copies them into the game under
+`assets/library/<pack>/` (`unity/Assets/Library/<pack>/` for Unity), and lists each file, its pack
+and source page in `ASSETS.md`. It never replaces a file already in the game.
+
+Each pack downloads once, the first time an agent looks inside it, into
+`~/.local/share/kurambit/asset-library`, which every game on the machine shares. Each download is
+checked against the copy Kurambit was released with; if a source site has changed the file, that pack
+is refused rather than used.
+
 ## What is in a game folder
 
 Each game is a self-contained git repository you can move, back up, or open on another machine:

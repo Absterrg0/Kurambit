@@ -5,11 +5,15 @@ Original to this studio, kept short.
 1. Sound from files, from the start. Every answer a player action gets
    has a sound: move, jump, hit, pickup, win, lose, UI click.
 2. One music loop as an audio file, mixed low enough to sit under effects.
-3. Synthesize them with numpy and Python's `wave` module inside the live
-   Blender (`game_blender_code`); nothing else is installed for you. Record
-   each file as synthesized in ASSETS.md. Placeholders are silence, never
-   engine beeps described as final.
-4. Keep clips short and levels even. A loud UI click ruins a quiet scene.
+3. Library first: `game_assets_search` with `kind` sfx or music finds CC0
+   packs of clicks, hits, pickups, footsteps, jingles and chiptune loops with
+   their lengths; `game_assets_add` copies the ones you pick and credits them
+   in ASSETS.md. Keep one sound family per game.
+4. Synthesize what the library lacks with numpy and Python's `wave` module
+   inside the live Blender (`game_blender_code`). Record each file as
+   synthesized in ASSETS.md. Placeholders are silence, never engine beeps
+   described as final.
+5. Keep clips short and levels even. A loud UI click ruins a quiet scene.
    You cannot listen, so print each clip's length and peak and compare them.
 
 The working directory is the game root; print every path you write:
