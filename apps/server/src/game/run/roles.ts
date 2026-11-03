@@ -6,7 +6,7 @@ import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
 // The game's AGENTS.md also speaks to the creator's own session; a role follows its prompt.
 const TOOL_RULE =
-  "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_assets_*, game_status). ";
+  "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot, Blender or Unity binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_unity_* in a Unity game, game_assets_*, game_status). ";
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYTEST_LINE = "Read ./studio-skills/playtest.md before you play. ";
 const B = GAME_EXPLORE_BOUNDS;
@@ -119,8 +119,10 @@ export const retryDirection = (direction: string, lane: string): string =>
 export const builderFirst = (whole: boolean, lane: string, direction: string): string =>
   `${whole ? wholeBuildRule(lane) : buildRule(lane)}${SKILL_LINE}\n\nThis block's direction (follow it exactly; play weakness first):\n${direction}\nNote learnings in NOTES.md. Do not use subagents. Never commit, never reset git.`;
 
+// A builder that finished the direction early otherwise spends its follow-ups
+// rewriting NOTES.md until the no-change limit ends the block.
 export const builderMore = (minutes: number, direction: string): string =>
-  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nDo not redo what works. No subagents. No commits.`;
+  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nIf it is all done, play your build for a minute with game_explore_start/act/close: first replay what the direction changed and keep it working, then fix a problem outside it that you saw in play, in small changes. If play shows nothing worth changing, say so and stop; notes alone end the block. Do not redo what works. No subagents. No commits.`;
 
 // The service records every bot run itself in .studio/bot-results.jsonl, so
 // the tester never appends there. With a Jev key the tester also explores.

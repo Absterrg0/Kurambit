@@ -418,21 +418,51 @@ const LIBRARY_NOT_COPIED = [
 ];
 
 /**
+ * Whether any process on this machine has `projectDir` open as a Unity
+ * project: the user's own editor, or another Kurambit server's. Paths are
+ * compared real (git reports the main checkout through symlinks resolved, an
+ * editor may name it through a link), and a relative -projectPath is read
+ * against that process's own working directory. Read-only: it reads /proc
+ * and signals nothing.
+ */
+const editorHasProjectOpen = async (projectDir: string): Promise<boolean> => {
+  const real = (path: string) => NodeFSP.realpath(path).catch(() => NodePath.resolve(path));
+  const want = await real(projectDir);
+  for (const pid of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
+    if (!/^\d+$/.test(pid)) continue;
+    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`).catch(() => null);
+    if (raw === null || raw.length === 0) continue;
+    const args = raw.toString("utf8").split("\0");
+    const at = args.findIndex((arg) => arg.toLowerCase() === "-projectpath");
+    const value = at >= 0 ? args[at + 1] : undefined;
+    if (value === undefined || value === "") continue;
+    const cwd = await NodeFSP.readlink(`/proc/${pid}/cwd`).catch(() => "/");
+    if ((await real(NodePath.resolve(cwd, value))) === want) return true;
+  }
+  return false;
+};
+
+/**
  * A worktree checkout starts with no Library/, which would cost a full asset
  * import. It gets a copy-on-write copy of its main checkout's import cache
- * instead, so Unity reimports only what differs at this commit. The copy is
- * made while no editor of ours has the main project open, and lands whole or
- * not at all. Removing the worktree removes the copy with it.
+ * instead, so Unity reimports only what differs at this commit. The copy
+ * lands whole or not at all, and removing the worktree removes it. Answers
+ * why it did not copy, or null when it did: while any editor has the main
+ * project open (the user's own, or another server's; ours is reaped before
+ * this) its asset database may be mid-write, so the worktree imports cold.
  */
 const seedLibrary = async (
   mainProjectDir: string,
   projectDir: string,
   scratch: string,
-): Promise<void> => {
+): Promise<string | null> => {
   const target = NodePath.join(projectDir, "Library");
-  if ((await NodeFSP.stat(target).catch(() => null)) !== null) return;
+  if ((await NodeFSP.stat(target).catch(() => null)) !== null) return "it already has one";
   const source = NodePath.join(mainProjectDir, "Library");
-  if (!(await NodeFSP.stat(source).catch(() => null))?.isDirectory()) return;
+  if (!(await NodeFSP.stat(source).catch(() => null))?.isDirectory())
+    return "the main checkout has none yet";
+  if (await editorHasProjectOpen(mainProjectDir))
+    return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
     await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
@@ -441,6 +471,7 @@ const seedLibrary = async (
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
+    return null;
   } finally {
     await NodeFSP.rm(staging, { recursive: true, force: true });
   }
@@ -717,8 +748,8 @@ const make = Effect.gen(function* () {
         });
         // After the drops above: the main checkout's editor is closed, so its
         // import cache is copied whole.
-        if (checkout.kind === "linked")
-          yield* Effect.tryPromise({
+        if (checkout.kind === "linked") {
+          const notSeeded = yield* Effect.tryPromise({
             try: () =>
               seedLibrary(
                 NodePath.join(checkout.main, NodePath.relative(root, projectDir)),
@@ -734,6 +765,9 @@ const make = Effect.gen(function* () {
                 cause,
               ),
           });
+          if (notSeeded !== null && notSeeded !== "it already has one")
+            yield* Effect.logWarning("Unity worktree imports cold", { root, reason: notSeeded });
+        }
         const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
         if (displayNum === null)
           return yield* opError(
