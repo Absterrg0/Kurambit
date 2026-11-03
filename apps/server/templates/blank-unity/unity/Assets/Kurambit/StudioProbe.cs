@@ -26,6 +26,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.UI;
+using UnityEngine.UIElements;
 
 namespace Kurambit
 {
@@ -138,19 +139,19 @@ namespace Kurambit
         private static List<KeyValuePair<string, string>> VisibleText()
         {
             var found = new List<KeyValuePair<string, string>>();
-            foreach (var text in FindObjectsByType<Text>(FindObjectsSortMode.None))
+            foreach (var text in FindObjectsByType<Text>())
                 if (text.isActiveAndEnabled && !string.IsNullOrWhiteSpace(text.text))
                     found.Add(new KeyValuePair<string, string>(PathOf(text.transform), text.text.Trim()));
-            foreach (var text in FindObjectsByType<TMPro.TMP_Text>(FindObjectsSortMode.None))
+            foreach (var text in FindObjectsByType<TMPro.TMP_Text>())
                 if (text.isActiveAndEnabled && !string.IsNullOrWhiteSpace(text.text))
                     found.Add(new KeyValuePair<string, string>(PathOf(text.transform), text.text.Trim()));
-            foreach (var document in FindObjectsByType<UnityEngine.UIElements.UIDocument>(FindObjectsSortMode.None))
+            foreach (var document in FindObjectsByType<UIDocument>())
             {
                 if (!document.isActiveAndEnabled || document.rootVisualElement == null) continue;
                 var index = 0;
-                document.rootVisualElement.Query<UnityEngine.UIElements.TextElement>().ForEach(label =>
+                document.rootVisualElement.Query<TextElement>().ForEach(label =>
                 {
-                    if (label.resolvedStyle.display == UnityEngine.UIElements.DisplayStyle.None || string.IsNullOrWhiteSpace(label.text)) return;
+                    if (label.resolvedStyle.display == DisplayStyle.None || string.IsNullOrWhiteSpace(label.text)) return;
                     var name = string.IsNullOrEmpty(label.name) ? $"#{index}" : label.name;
                     found.Add(new KeyValuePair<string, string>($"{PathOf(document.transform)}/{name}", label.text.Trim()));
                     index++;
@@ -446,7 +447,7 @@ namespace Kurambit
         }
 
         private static int ButtonMask(string name) =>
-            name == "right" ? 1 << (int)MouseButton.Right : name == "middle" ? 1 << (int)MouseButton.Middle : 1 << (int)MouseButton.Left;
+            name == "right" ? 1 << (int)UnityEngine.InputSystem.LowLevel.MouseButton.Right : name == "middle" ? 1 << (int)UnityEngine.InputSystem.LowLevel.MouseButton.Middle : 1 << (int)UnityEngine.InputSystem.LowLevel.MouseButton.Left;
 
         private IEnumerator Click(Vector2 at, string button)
         {
