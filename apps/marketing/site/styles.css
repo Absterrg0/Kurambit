@@ -2071,43 +2071,56 @@ body {
     var(--paper);
 }
 
-/* Its long edges are deckled, as they come off the mould, with a little
-   shadow where the sheet lifts from the surface. */
+/* Its long edges are deckled, as they come off the mould: the sheet's own
+   paper runs out to a soft, torn edge that fades into the surface, with a
+   wide, faint shadow where it lifts. */
+.page {
+  box-shadow: 0 0 36px -12px rgb(23 21 17 / 10%);
+}
+
 .page::before,
 .page::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -20px;
-  width: 20px;
-  background: url("deckle.svg") 0 0 / 20px 800px repeat-y;
+  left: calc(var(--edge) * -1);
+  width: var(--edge);
+  /* The tile is offset so the paper runs on from the page without a seam. */
+  background:
+    url("washi.svg") var(--edge) 0 / 420px 420px,
+    var(--paper);
+  -webkit-mask: url("deckle-left.svg") 0 0 / var(--edge) 800px repeat-y;
+  mask: url("deckle-left.svg") 0 0 / var(--edge) 800px repeat-y;
   pointer-events: none;
 }
 
 .page::after {
-  left: auto;
-  right: -20px;
-  transform: scaleX(-1);
+  left: 100%;
+  background-position:
+    calc(var(--page) * -1) 0,
+    0 0;
+  -webkit-mask-image: url("deckle-right.svg");
+  mask-image: url("deckle-right.svg");
+}
+
+.page {
+  --edge: 24px;
 }
 
 /* Below 1312px the sheet has a 16px margin; the edge keeps inside it. */
 @media (max-width: 1312px) {
-  .page::before,
-  .page::after {
-    left: -14px;
-    width: 14px;
-    background-size: 14px 800px;
-  }
-
-  .page::after {
-    left: auto;
-    right: -14px;
+  .page {
+    --edge: 15px;
   }
 }
 
 /* On a phone the sheet fills the screen, so it has no edge to show. */
 @media (max-width: 640px) {
+  .page {
+    box-shadow: none;
+  }
+
   .page::before,
   .page::after {
     display: none;
