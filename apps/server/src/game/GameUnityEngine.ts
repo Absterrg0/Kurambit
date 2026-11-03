@@ -194,10 +194,17 @@ export const makeUnityBackend = (
             "unity-play-frames",
             90_000,
           );
-          if (!waited.ok || resultOf(waited)?.["met"] !== true)
+          void waited;
+          const after = yield* command(
+            ctx.root,
+            ["script", "eval", "return UnityEngine.Time.frameCount;"],
+            "unity-frame",
+          );
+          const advanced = Number(resultOf(after)?.["result"] ?? 0) - first;
+          if (!(advanced >= CHECK_FRAMES))
             warnings.push({
               file: ctx.projectName,
-              message: `Play mode did not advance ${CHECK_FRAMES} frames within 60 s; runtime errors after that were not exercised.`,
+              message: `Play mode advanced ${Number.isFinite(advanced) ? advanced : 0} of ${CHECK_FRAMES} frames within 60 s; runtime errors after that were not exercised.`,
             });
           const consoleRead = yield* command(
             ctx.root,

@@ -412,9 +412,7 @@ export class GameUnity extends Context.Service<
       timeoutMs?: number,
     ) => Effect.Effect<McpContent, GameOperationError>;
     /** The editing tools `game_unity_edit` may call, with their input schemas. */
-    readonly tools: (
-      root: string,
-    ) => Effect.Effect<
+    readonly tools: (root: string) => Effect.Effect<
       ReadonlyArray<{
         readonly name: string;
         readonly description: string;
@@ -643,6 +641,24 @@ const make = Effect.gen(function* () {
             `The Unity editor did not become ready (${ready.errorCode ?? `exit ${ready.process.exitCode}`}: ${ready.errorMessage ?? "no answer"}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`,
           );
         }
+        // A batchmode editor starts on an untitled scene; edits, saves and the
+        // camera capture all belong to the game's main scene.
+        const manifest = yield* projects.read(root);
+        yield* runCli(
+          root,
+          unity.cli,
+          [
+            "command",
+            "scene",
+            "open",
+            "--project-path",
+            projectDir,
+            "--",
+            "--path",
+            manifest.gameplayScene ?? "Assets/Scenes/Main.unity",
+          ],
+          { operation: "unity-open-scene", timeoutMs: 120_000 },
+        );
         const mcpLog = NodeFS.openSync(NodePath.join(homeDir, "mcp.log"), "w");
         const transport = new StdioClientTransport({
           command: unity.cli,

@@ -1,7 +1,7 @@
 import type { GameCheckIssue } from "@kurambit/contracts";
 
 const CSHARP_DIAGNOSTIC =
-  /(?:^|\s)((?:Assets|Packages)\/[^\s(]+\.cs)\((\d+),\d+\):\s*(error|warning)\s+(CS\d{4}):\s*(.+)$/;
+  /(?:^|[\s"])((?:Assets|Packages)\/[^\s("]+\.cs)\((\d+),\d+\):\s*(error|warning)\s+(CS\d{4}):\s*(.+)$/;
 
 /**
  * C# compiler lines as Unity prints them in its log and in the CLI's
@@ -25,7 +25,8 @@ export const parseCSharpDiagnostics = (
     const issue = {
       file: `${projectName}/${file}`,
       line: Number(lineNumber),
-      message: `${code}: ${message.trim()}`.slice(0, 500),
+      // A line quoted inside the CLI's JSON report ends with `",`.
+      message: `${code}: ${message.trim().replace(/",?$/, "")}`.slice(0, 500),
     };
     (level === "error" ? errors : warnings).push(issue);
   }
