@@ -21,7 +21,8 @@ exported with the same `game_*` tools as a Godot game.
    end it with `GameState.win(text, stats)` or `GameState.lose(text, stats)`,
    and restyle the shell instead of replacing it; for the title backdrop,
    set `--title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png")`
-   in `style.css` with the key art there. Use `ctx.keys`,
+   in `style.css` with the key art there, and replace the placeholder tab icon
+   `web/assets/ui/icon.png` with a 256x256 cut of its main subject. Use `ctx.keys`,
    `ctx.mouse`, `ctx.listen` and `ctx.after`, never raw listeners,
    `setTimeout` or `requestAnimationFrame`: those run through pause and pile
    up across retries. Retry resets every plain-data GameState value (numbers,
