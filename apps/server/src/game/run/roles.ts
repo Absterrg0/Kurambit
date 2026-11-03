@@ -25,6 +25,10 @@ const PLAYBOOK = `${TOOL_RULE}Play first with the game_explore_* tools (default 
 export const laneAssets = (lane: string): string =>
   lane === "unity" ? "unity/Assets" : `${lane}/assets`;
 
+/** Where library packs land under the lane's asset dir. */
+export const laneLibrary = (lane: string): string =>
+  `${laneAssets(lane)}/${lane === "unity" ? "Library" : "library"}`;
+
 /** Bot runs play Godot and three.js games; Unity games are played through explore only. */
 export const laneBots = (lane: string): boolean => lane !== "unity";
 
@@ -54,13 +58,22 @@ export const stage = (name: "vision" | "plan" | "art", lane: string): string => 
 
 // The art stage's first render is judged by a fresh session, never by its maker.
 export const artReview = (lane: string): string =>
-  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${laneAssets(lane)} (for 3D models, look at a render made with the game_blender_* tools). Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background). Write .studio/art-review.md: a short list of concrete defects, one line each naming the file, what is wrong and what would fix it. Then end the file with exactly one line, ART: KEEP or ART: REDO, alone on that line. REDO only when a listed defect makes the game look worse than its vision promises. You may only write .studio/art-review.md; change no other file. Do not use subagents.`;
+  `${TOOL_RULE}You are the art director for this game's asset set. Read VISION.md and ./studio-skills/art-director.md. Open the key-art image VISION.md names and look at it, then read ASSETS.md and open every image file it lists under ${laneAssets(lane)} (for 3D models, look at a render made with the game_blender_* tools). If VISION.md names a style-source library pack, look at it with game_assets_search (pack: that id) and judge the set's style against it; a different rendering style (smooth renders against pixel art) is a cohesion defect. Judge the key art and the set against VISION.md: cohesion with the key art, readability at play size, glaring defects, and anything that looks placeholder or code-drawn (flat shapes, plain dots, missing light, glow or shading, a crowded composition, animation frames that barely differ, a flat background). Write .studio/art-review.md: a short list of concrete defects, one line each naming the file, what is wrong and what would fix it. Then end the file with exactly one line, ART: KEEP or ART: REDO, alone on that line. REDO only when a listed defect makes the game look worse than its vision promises. You may only write .studio/art-review.md; change no other file. Do not use subagents.`;
 
 // GameRun appends this at launch: the facts come from disk and the policy stays pure.
 // Only ASSETS.md against the disk: the code is not wired to the new art yet, so which files
 // it references says nothing about the art.
-export const artFacts = (facts: string): string =>
-  `\n\nFile facts on the asset set (static scan of ASSETS.md against the files on disk): ${facts}`;
+export const artFacts = (facts: string, sprites: string): string =>
+  `\n\nFile facts on the asset set (static scan of ASSETS.md against the files on disk): ${facts}${spriteBlock(sprites)}`;
+
+/** Measured pixel facts, given to the art director and to the redo that answers it. The redo is
+ * told the numbers predate it, so it fixes the director's defects instead of chasing each one. */
+export const spriteBlock = (sprites: string, redo = false): string =>
+  sprites.length === 0
+    ? ""
+    : redo
+      ? `\n\nMeasured image facts, measured before your redo (pixels decoded from the files; numbers, not verdicts). Fix only the listed defects; a number here is not a defect unless the list names it:\n${sprites}`
+      : `\n\nMeasured image facts (pixels decoded from the files; numbers, not verdicts; look at the files yourself):\n${sprites}`;
 
 // Works as a follow-up on the art thread and as a fresh art role alike.
 export const artRedo = (defects: string, lane: string): string =>

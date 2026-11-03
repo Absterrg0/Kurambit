@@ -44,7 +44,8 @@ import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
-import { artFacts } from "./run/roles.ts";
+import { artFacts, spriteBlock } from "./run/roles.ts";
+import { spriteFacts } from "./run/spriteFacts.ts";
 import * as State from "./run/state.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
@@ -492,11 +493,20 @@ export const layer = (options: { readonly stateDir: string }) => {
         switch (step.kind) {
           case "role":
             return Effect.gen(function* () {
-              // The art director judges files, so it also gets the static asset-use facts.
+              // The art director judges files, so it gets the asset-list and measured image facts;
+              // the redo that answers it sees the same measurements.
+              const task = state.task;
+              const redo = step.role === "art" && task._tag === "stage" && task.phase === "redo";
+              const sprites =
+                step.role === "art-director" || redo
+                  ? (yield* Effect.promise(() => spriteFacts(root, state.lane))).full
+                  : "";
               const prompt =
                 step.role === "art-director"
-                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)))}`
-                  : step.prompt;
+                  ? `${step.prompt}${artFacts(yield* Effect.promise(() => artAssetFacts(root, state.lane)), sprites)}`
+                  : redo
+                    ? `${step.prompt}${spriteBlock(sprites, true)}`
+                    : step.prompt;
               return yield* runRole(
                 d.deps,
                 {
