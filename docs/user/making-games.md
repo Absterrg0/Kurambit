@@ -98,6 +98,7 @@ its right.
 - **Play** serves the selected build, even when the game's files have changed. If no build exists,
   it builds the web version and plays it in the stage. It is the real game, not a recording; click
   the picture once so the keyboard reaches it, and use **Fullscreen** to give it the whole screen.
+  A game made from the starter opens on its title screen: choose Play there, or press Enter.
   Opening **Run** or **Builds** keeps the game running; it pauses and mutes while hidden
   and resumes when you come back. Only **Stop**, a rebuild that lands a new build, or pressing Play
   again starts a new session.
@@ -105,7 +106,7 @@ its right.
   the stage says so and offers to rebuild.
 - **Stop** ends only the processes Kurambit
   started for this game, and closes its preview server.
-- **Export Windows** writes a 64-bit build to `builds/windows/game.exe` (Godot games only;
+- **Export Windows** writes a 64-bit build to `builds/windows/game.exe` (Godot and Unity games;
   three.js games export Web only and Windows and Linux are refused with the reason). The standard preset embeds
   the game data, so you can copy that one file to a Windows PC. A game whose Windows preset does not
   embed it also gets `builds/windows/game.pck`, and both files must be copied together; the export
@@ -142,8 +143,10 @@ icons, fonts, sound effects, short music, animated 3D characters, 3D kits and te
 creators such as Kenney, Quaternius and ambientCG. Everything in it is CC0 (public domain), so you
 can ship and sell games that use it without credit. No account or API key is needed.
 
-Ask for it in the brief or a follow-up, for example "use library characters and UI". The agent
-looks at a contact sheet of the files before it picks, copies them into the game under
+A production run looks through it on its own: the vision step can choose one pack as the game's
+style source, and the art step takes what fits from it before making the rest to match. In a chat
+you can ask for it too, for example "use library characters and UI". The agent looks at a contact
+sheet of the files before it picks, copies them into the game under
 `assets/library/<pack>/` (`unity/Assets/Library/<pack>/` for Unity), and lists each file, its pack
 and source page in `ASSETS.md`. It never replaces a file already in the game.
 
