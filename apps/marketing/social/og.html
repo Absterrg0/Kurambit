@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit share card</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      body {
+        display: grid;
+        grid-template-columns: 1fr calc(372 * var(--u));
+        column-gap: calc(24 * var(--u));
+        padding: calc(60 * var(--u)) calc(60 * var(--u)) 0 calc(76 * var(--u));
+      }
+
+      .copy {
+        display: flex;
+        flex-direction: column;
+        padding-bottom: calc(56 * var(--u));
+      }
+
+      .brand {
+        font-size: calc(32 * var(--u));
+      }
+
+      h1 {
+        margin-top: auto;
+        font-size: calc(80 * var(--u));
+        white-space: nowrap;
+      }
+
+      .stroke {
+        width: calc(220 * var(--u));
+        margin-top: calc(20 * var(--u));
+        font-size: calc(80 * var(--u));
+      }
+
+      .sub {
+        max-width: 21em;
+        margin-top: calc(24 * var(--u));
+        font-family: var(--display);
+        font-style: italic;
+        font-size: calc(28 * var(--u));
+        line-height: 1.28;
+        color: var(--ink-2);
+      }
+
+      .url {
+        margin-top: calc(40 * var(--u));
+        font-size: calc(19 * var(--u));
+      }
+
+      .stage {
+        position: relative;
+      }
+
+      .enso {
+        inset: calc(30 * var(--u)) calc(-34 * var(--u)) calc(96 * var(--u));
+      }
+
+      #fox {
+        position: absolute;
+        inset: calc(14 * var(--u)) 0 calc(44 * var(--u));
+        width: 100%;
+        height: calc(100% - 58 * var(--u));
+      }
+
+      /* The ground the fox sits on: the site's brush rule under the hero. */
+      .ground {
+        position: absolute;
+        left: calc(-40 * var(--u));
+        right: calc(-60 * var(--u));
+        bottom: calc(38 * var(--u));
+        height: calc(8 * var(--u));
+        background: var(--ink);
+        opacity: 0.7;
+        -webkit-mask: url("../site/brush-rule.svg") 0 0 / 100% 100% no-repeat;
+        mask: url("../site/brush-rule.svg") 0 0 / 100% 100% no-repeat;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="copy">
+      <div class="brand"><img src="../site/fox-head-ink.webp" alt="" />Kurambit</div>
+      <h1>Your coding agent,<br />now a game studio.</h1>
+      <i class="stroke"></i>
+      <p class="sub">
+        It builds in Godot and Blender, plays every build, and keeps only what makes the game
+        better.
+      </p>
+      <p class="url mono">kurambit.com</p>
+    </div>
+    <div class="stage">
+      <i class="enso"></i>
+      <canvas id="fox"></canvas>
+      <i class="ground"></i>
+    </div>
+    <script src="kit.js"></script>
+    <script>
+      const { height } = sizePage(1200, 630);
+      const unit = height / 630;
+      document.documentElement.style.setProperty("--u", `${unit}px`);
+      whenDrawn(
+        document.fonts.ready.then(() =>
+          inkImage(document.getElementById("fox"), "../site/fox-ink.webp", {
+            cell: Math.max(3, Math.round(5 * unit)),
+            align: "bottom",
+          }),
+        ),
+      );
+    </script>
+  </body>
+</html>
