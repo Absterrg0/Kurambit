@@ -124,8 +124,12 @@ const SpriteSize = Schema.Int.check(Schema.isBetween({ minimum: 8, maximum: 512 
 export const GameBlenderRenderSpritesInput = Schema.Struct({
   /** Game-relative path prefix under the engine directory; frames are `<output>_0.png`, `<output>_1.png`, ... */
   output: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
-  /** Object or collection names; children come along. Omitted means every visible object in the scene. */
+  /** Object or collection names; children come along. Omitted works only when the scene has one top-level object with geometry. */
   objects: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(64))),
+  /** Output pixels per Blender unit. Omitted fits this clip; pass the value a first strip reports to every other strip of the same character. */
+  pixelsPerUnit: Schema.optionalKey(
+    Schema.Number.check(Schema.isBetween({ minimum: 0.001, maximum: 100000 })),
+  ),
   views: Schema.optionalKey(
     Schema.Array(GameBlenderSpriteView).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   ),

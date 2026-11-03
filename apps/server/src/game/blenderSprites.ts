@@ -9,6 +9,7 @@ import {
   GameOperationError,
   type GameBlenderRenderSpritesInput,
   type GameBlenderRenderSpritesResult,
+  type GameEngineId,
   type GameManifest,
 } from "@kurambit/contracts";
 import { laneLibrary } from "./run/roles.ts";
@@ -23,9 +24,11 @@ import {
   hardAlpha,
   hexColour,
   colourCounts,
+  lightness,
   outline,
   quantize,
   sheet,
+  travel,
 } from "./spriteRender.ts";
 import {
   spriteRenderCode,
@@ -38,9 +41,23 @@ const OP = "blender-render-sprites";
 const TOOL = "game_blender_render_sprites";
 const BLEND_REL = "art/blender/live.blend";
 const SCRATCH = "builds/logs/sprite-render";
-/** Renders per Blender command: the pinned server gives each command 180 s. */
+/**
+ * The first Blender command's renders, before per-render time is known: the pinned server gives
+ * each command 180 s, and a render costs about a second or two before its pixels count.
+ */
+const FIRST_CALL_RENDERS = 8;
 const RENDER_PIXELS_PER_CALL = 8 * 256 * 256;
+/** Seconds of rendering later commands aim for, sized from the first command's per-render time. */
+const SECONDS_PER_CALL = 90;
 const MAX_RENDERS = 128;
+/** Output pixels per call, so the palette and measuring passes stay well under a second on the server. */
+const MAX_OUTPUT_PIXELS = 4 * 1024 * 1024;
+/** Blender-rendered pixels per call (output times supersample squared), which bounds render time and downscaling. */
+const MAX_RENDERED_PIXELS = 32 * 1024 * 1024;
+/** The outline without a palette: a frame's darkest colour unless that is lighter than this OKLab L. */
+const OUTLINE_MAX_LIGHTNESS = 0.3;
+const NEAR_BLACK = 0x14141a;
+const SPLIT = "split by view, and give each call its own output";
 const MAX_RENDER_SIDE = 2048;
 const PALETTE_FILES = 400;
 const PALETTE_PIXELS = 16 * 1024 * 1024;
@@ -180,7 +197,17 @@ const viewsOf = (input: GameBlenderRenderSpritesInput): SpriteView[] => {
 const spanText = (files: ReadonlyArray<string>) =>
   files.length === 1 ? files[0]! : `${files[0]} … ${NodePath.basename(files.at(-1)!)}`;
 
-/** One provenance line per strip, replaced when the same strip is rendered again. */
+/** Where the agent's own words start on a provenance line; a re-render keeps what follows. */
+const FILL_MARKERS = ["Depicts / loaded by: ", "Loaded by: "];
+const suffixOf = (line: string) => {
+  for (const marker of FILL_MARKERS) {
+    const at = line.lastIndexOf(marker);
+    if (at >= 0) return { at, marker, rest: line.slice(at + marker.length) };
+  }
+  return null;
+};
+
+/** One provenance line per strip, replaced in place when the same strip is rendered again, keeping what the agent filled in. */
 const recordProvenance = (
   realRoot: string,
   lines: ReadonlyArray<{ first: string; line: string }>,
@@ -197,11 +224,25 @@ const recordProvenance = (
             try: () => NodeFSP.readFile(path, "utf8"),
             catch: io("ASSETS.md"),
           });
-    const kept = current
-      .split("\n")
-      .filter((l) => !(l.includes(TOOL) && lines.some(({ first }) => l.includes(`\`${first}`))));
+    const kept = current.split("\n");
     while (kept.length > 0 && kept.at(-1) === "") kept.pop();
-    const next = `${[...kept, ...lines.map(({ line }) => line)].join("\n")}\n`;
+    const added: string[] = [];
+    for (const { first, line } of lines) {
+      const at = kept.findIndex(
+        (l) => l.includes(TOOL) && (l.includes(`\`${first}\``) || l.includes(`\`${first} `)),
+      );
+      if (at < 0) {
+        added.push(line);
+        continue;
+      }
+      const old = suffixOf(kept[at]!);
+      const fresh = suffixOf(line);
+      kept[at] =
+        old === null || fresh === null || old.rest === "(fill in)."
+          ? line
+          : `${line.slice(0, fresh.at + fresh.marker.length)}${old.rest}`;
+    }
+    const next = `${[...kept, ...added].join("\n")}\n`;
     yield* Effect.tryPromise({
       try: () => writeOwn(path, Buffer.from(next)),
       catch: io("ASSETS.md"),
@@ -210,6 +251,16 @@ const recordProvenance = (
       ? "ASSETS.md created with the provenance."
       : "ASSETS.md records the provenance.";
   });
+
+/** How this game's engine puts a node's origin on the ground line `ground` rows from the top. */
+const groundHint = (engine: GameEngineId, width: number, height: number, ground: number) => {
+  const up = Number(((height - ground) / height).toFixed(4));
+  if (engine === "three")
+    return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;
+  if (engine === "unity")
+    return `Unity: set the sprite's Pivot to Custom (0.5, ${up}) in its import settings (Pixels Per Unit is yours to match the tiles) to put the transform on the ground line.`;
+  return `Godot: Sprite2D offset (0, ${height / 2 - ground}) puts the node origin on the ground line (x=${width / 2} is already the origin).`;
+};
 
 export interface SpriteDeps {
   readonly callText: (
@@ -282,6 +333,8 @@ export const renderSprites = (
     const outDir = yield* realDir(realRoot, dirRel);
 
     const objects = input.objects ?? [];
+    const k2 = k * k;
+    const outputPixels = (renders: number) => renders * width * height;
     const fitText = yield* deps.callText(root, "execute_blender_code", {
       code: spriteRenderCode({
         phase: "fit",
@@ -302,9 +355,22 @@ export const renderSprites = (
           objects?: string[];
           collections?: string[];
           actions?: string[];
+          roots?: string[];
         })
       | null;
     if (fitted === null) return yield* fail(OP, "command-failed", fitText.slice(0, 2000));
+    if (fitted.error === "ambiguous")
+      return yield* fail(
+        "objects",
+        "invalid-input",
+        `Pass objects: the scene has ${(fitted.roots ?? []).length} top-level objects with geometry, and a sprite shows one subject. Top-level objects: ${(fitted.roots ?? []).join(", ")}. Collections: ${(fitted.collections ?? []).join(", ") || "none"}.`,
+      );
+    if (fitted.error === "tweak")
+      return yield* fail(
+        (fitted.objects ?? []).join(", "),
+        "invalid-input",
+        `${(fitted.objects ?? []).join(", ")} ${(fitted.objects ?? []).length === 1 ? "is" : "are"} in NLA tweak mode (editing a strip), which makes the active action read-only, so ${input.action} cannot play. Leave tweak mode first (in game_blender_code: obj.animation_data.use_tweak_mode = False); nothing was changed.`,
+      );
     if (fitted.error === "missing")
       return yield* fail(
         (fitted.missing ?? []).join(", "),
@@ -329,37 +395,76 @@ export const renderSprites = (
       return yield* fail(
         input.output,
         "invalid-input",
-        `${frames.length} frames x ${views.length} views is over ${MAX_RENDERS} renders; render fewer frames or views per call.`,
+        `${frames.length} frames x ${views.length} views is over ${MAX_RENDERS} renders; ${SPLIT}.`,
       );
-    const framing = frameCameras(fit, width, height, inset, anchorKinds);
+    const renders = frames.length * views.length;
+    if (
+      outputPixels(renders) > MAX_OUTPUT_PIXELS ||
+      outputPixels(renders) * k2 > MAX_RENDERED_PIXELS
+    )
+      return yield* fail(
+        input.output,
+        "invalid-input",
+        `${renders} renders of ${width}x${height}${k > 1 ? ` (rendered at ${width * k}x${height * k})` : ""} are over the ${
+          outputPixels(renders) > MAX_OUTPUT_PIXELS
+            ? `${MAX_OUTPUT_PIXELS / (1024 * 1024)}M output pixels`
+            : `${MAX_RENDERED_PIXELS / (1024 * 1024)}M rendered pixels`
+        } one call takes; ${SPLIT}, or render fewer frames.`,
+      );
+    const moved = travel(fit, anchorKinds);
+    if (moved !== null)
+      return yield* fail(
+        input.action ?? input.output,
+        "invalid-input",
+        `This clip moves the character (root motion): in view ${moved.view} its whole silhouette travels ${moved.distance.toFixed(2)} units across the frames, more than half its ${moved.size.toFixed(2)}-unit size, so a fitted camera would shrink it and it would slide across the canvas. Use an in-place clip, or render a copy of the clip with the root's location keys removed; the game moves the sprite.`,
+      );
+    const framing = frameCameras(fit, width, height, inset, anchorKinds, input.pixelsPerUnit);
     if (framing === null)
       return yield* fail(
         input.output,
         "invalid-input",
         "The margin leaves no room on the canvas, or the subject has no size.",
       );
+    if (framing.need.width > width || framing.need.height > height)
+      return yield* fail(
+        input.output,
+        "invalid-input",
+        `At pixelsPerUnit ${framing.pixelsPerUnit} this subject needs a ${framing.need.width}x${framing.need.height} canvas (with the ${inset} px margin), more than ${width}x${height}. Pass size ${framing.need.width}${framing.need.height === framing.need.width ? "" : ` and height ${framing.need.height}`}, or keep the size and pass a smaller pixelsPerUnit for every strip of this character.`,
+      );
 
     const jobs = views.flatMap((_, vi) =>
       frames.map((frame, fi) => ({ view: vi, frame, path: NodePath.join(raw, `${vi}_${fi}.png`) })),
     );
-    const perCall = Math.max(1, Math.floor(RENDER_PIXELS_PER_CALL / (width * k * height * k)));
-    for (let at = 0; at < jobs.length; at += perCall) {
+    let perCall = Math.max(
+      1,
+      Math.min(FIRST_CALL_RENDERS, Math.floor(RENDER_PIXELS_PER_CALL / (width * k * height * k))),
+    );
+    for (let at = 0; at < jobs.length;) {
+      const batch = jobs.slice(at, at + perCall);
       const text = yield* deps.callText(root, "execute_blender_code", {
         code: spriteRenderCode({
           phase: "render",
-          objects,
-          action: fit.action,
+          // The fitted geometry, so the render draws exactly what was fitted.
+          objects: fit.objects,
+          // As the fit did: no action means each object's own animation, untouched.
+          action: input.action ?? null,
           lighting: input.lighting ?? "studio",
           width: width * k,
           height: height * k,
           orthoScale: framing.orthoScale,
           cameras: framing.cameras,
-          jobs: jobs.slice(at, at + perCall),
+          jobs: batch,
         }),
       });
-      const done = spriteRenderOutput(text) as { written?: string[] } | null;
+      const done = spriteRenderOutput(text) as { written?: string[]; seconds?: number } | null;
       if (done?.written === undefined)
         return yield* fail(OP, "command-failed", text.slice(0, 2000));
+      at += batch.length;
+      if (typeof done.seconds === "number" && done.seconds > 0)
+        perCall = Math.max(
+          1,
+          Math.min(64, Math.floor(SECONDS_PER_CALL / (done.seconds / batch.length))),
+        );
     }
 
     // Every render back, then the pixel work over the whole set at once (one shared palette).
@@ -379,6 +484,7 @@ export const renderSprites = (
             "command-failed",
             `Blender's render could not be read: ${decoded.skip}.`,
           );
+        yield* Effect.yieldNow;
         let img = decoded;
         if (pixel !== undefined) {
           img = downscale(decoded, k, pixel.downscale ?? "area");
@@ -393,7 +499,16 @@ export const renderSprites = (
     if (pixel !== undefined) {
       const colors = pixel.colors ?? 16;
       const used = quantize(all, palette?.colours ?? null, colors);
-      const line = explicitOutline ?? (outlined ? darkest(palette?.colours ?? used) : null);
+      const own = palette === null ? darkest(used) : null;
+      const line =
+        explicitOutline ??
+        (!outlined
+          ? null
+          : palette !== null
+            ? darkest(palette.colours)
+            : own !== null && lightness(own) <= OUTLINE_MAX_LIGHTNESS
+              ? own
+              : NEAR_BLACK);
       if (line !== null) for (const img of all) outline(img, line);
       paletteText = `Pixel art: rendered at ${width * k}x${height * k}, ${pixel.downscale ?? "area"} downscale by ${k}, hard alpha, ${used.length} colours ${
         palette === null
@@ -464,9 +579,16 @@ export const renderSprites = (
     const colours = colourCounts(all).length;
     const empty = measured.filter((m) => m.box === null).length;
 
+    // Without an action each object plays its own; the fit's action only gave the frame range.
+    const playing =
+      fit.action === null
+        ? null
+        : input.action === undefined
+          ? `each object's own animation (frame range of ${fit.action})`
+          : fit.action;
     const describe = [
       `objects ${fit.objects.join(", ")}`,
-      fit.action === null ? null : `action ${fit.action}`,
+      playing === null ? null : `action ${playing}`,
       `frames ${frames.join(", ")}`,
       `${width}x${height}`,
       pixel === undefined
@@ -495,7 +617,7 @@ export const renderSprites = (
     ]);
 
     const text = [
-      `Rendered ${frames.length} frame${frames.length === 1 ? "" : "s"} x ${views.length} view${views.length === 1 ? "" : "s"} (${views.map((v) => `${v.name}: azimuth ${v.azimuth}, elevation ${v.elevation}`).join("; ")}) of ${fit.objects.join(", ")}${fit.action === null ? "" : ` playing ${fit.action}`}; frames ${frames.join(", ")}.`,
+      `Rendered ${frames.length} frame${frames.length === 1 ? "" : "s"} x ${views.length} view${views.length === 1 ? "" : "s"} (${views.map((v) => `${v.name}: azimuth ${v.azimuth}, elevation ${v.elevation}`).join("; ")}) of ${fit.objects.join(", ")}${playing === null ? "" : ` playing ${playing}`}; frames ${frames.join(", ")}.`,
       ...views.map(
         (_, vi) => `- ${spanText(files.slice(vi * frames.length, (vi + 1) * frames.length))}`,
       ),
@@ -507,12 +629,13 @@ export const renderSprites = (
       ...(stale.length > 0
         ? [`Removed stale frames from an earlier render: ${stale.join(", ")}.`]
         : []),
-      `One orthographic camera per view, fitted to the subject across every frame: nothing is cut off, ${(1 / framing.unitsPerPixel).toFixed(2)} px per Blender unit in every frame and view, ${inset} px clear on every side.`,
+      `One orthographic camera per view, fixed across every frame: nothing is cut off, ${inset} px clear on every side, ${framing.pixelsPerUnit} px per Blender unit in every frame and view (${input.pixelsPerUnit === undefined ? "fitted to this clip" : "as asked"}). Pass pixelsPerUnit: ${framing.pixelsPerUnit} for this character's other strips, so the body is the same size in all of them.`,
       ...views.map((v, vi) => {
         const a = framing.anchors[vi]!;
+        const column = `x=${a.x} is ${a.onOrigin && fit.anchorObject !== null ? `${fit.anchorObject}'s origin` : "the middle of the subject"}`;
         return a.kind === "feet"
-          ? `Anchor (${v.name}): ground line y=${groundOf(a)} (the red line on the contact sheet), centre x=${a.x}, fixed in every frame: the lowest point across all frames rests on it, so any bob or lifted foot is the animation's own. Godot: Sprite2D offset (0, ${height / 2 - groundOf(a)}) puts the node origin on the ground line.`
-          : `Anchor (${v.name}): the subject is centred at ${a.x},${a.y} in every frame.`;
+          ? `Anchor (${v.name}): ground line y=${groundOf(a)} (the red line on the contact sheet), ${column}, fixed in every frame: the lowest point across all frames rests on it, so any bob or lifted foot is the animation's own. ${groundHint(manifest.engine.name, width, height, groundOf(a))}`
+          : `Anchor (${v.name}): ${a.x},${a.y}, the canvas centre (${column}), in every frame: the engine's default centred sprite puts the node origin there.`;
       }),
       ...(paletteText === "" ? [] : [paletteText]),
       `Measured: ${colours} colours over the strip; mean luminance of visible pixels ${Math.round(Math.min(...lumas))}-${Math.round(Math.max(...lumas))} (0-255)${empty > 0 ? `; ${empty} frames are empty` : ""}.`,

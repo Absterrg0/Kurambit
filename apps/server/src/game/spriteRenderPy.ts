@@ -35,6 +35,8 @@ export interface SpriteFit {
   readonly frames: ReadonlyArray<number>;
   readonly action: string | null;
   readonly objects: ReadonlyArray<string>;
+  /** The object whose origin is the sprite's anchor: the subject's single top-level root, or its armature. */
+  readonly anchorObject: string | null;
   readonly views: ReadonlyArray<{
     readonly name: string;
     /** Projected extents across every frame: right (x) and up (y) in world units, depth along the view. */
@@ -44,6 +46,10 @@ export interface SpriteFit {
     readonly y1: number;
     readonly d0: number;
     readonly d1: number;
+    /** The same extents per frame, as [x0, x1, y0, y1], in frame order. */
+    readonly perFrame: ReadonlyArray<ReadonlyArray<number>>;
+    /** The anchor object's projected origin (x, y), averaged over the frames, or null without one. */
+    readonly origin: ReadonlyArray<number> | null;
   }>;
   readonly basis: ReadonlyArray<{
     readonly right: ReadonlyArray<number>;
@@ -70,12 +76,17 @@ export interface SpriteRenderParams {
 }
 
 const SCRIPT = String.raw`
-import bpy, json, math, os
+import bpy, json, math, os, time
 import numpy as np
 from mathutils import Matrix, Vector
 
 GEOM = {"MESH", "CURVE", "SURFACE", "FONT", "META"}
 scene = bpy.context.scene
+
+def top(o):
+    while o.parent is not None:
+        o = o.parent
+    return o
 
 def resolve(names):
     picked, missing = [], []
@@ -92,6 +103,9 @@ def resolve(names):
             missing.append(n)
     else:
         picked = [o for o in scene.objects if o.type in GEOM and o.visible_get()]
+        roots = sorted({top(o).name for o in picked})
+        if len(roots) > 1:
+            return None, roots
     geo, seen = [], set()
     for ob in picked:
         for o in [ob, *ob.children_recursive]:
@@ -127,15 +141,15 @@ class Animated:
     one action with six slots), so each object takes the slot named for it; an object the action
     does not animate holds its current pose."""
     def __init__(self, owners, action_name):
+        self.owners = owners
         self.saved = []
-        self.action = None
-        if action_name is None:
-            return
-        self.action = bpy.data.actions.get(action_name)
+        self.action = None if action_name is None else bpy.data.actions.get(action_name)
+    def play(self):
+        # Each object is recorded before it is touched, so restore() undoes a raise partway.
         if self.action is None:
             return
         slotted = hasattr(self.action, "slots")
-        for o in owners:
+        for o in self.owners:
             ad = o.animation_data
             created = ad is None
             if created:
@@ -143,6 +157,7 @@ class Animated:
                 if o.type != "ARMATURE":
                     continue
                 ad = o.animation_data_create()
+            own = not created and (ad.action is not None or len(ad.nla_tracks) > 0)
             self.saved.append((o, created, ad.action, getattr(ad, "action_slot", None), [(t, t.mute) for t in ad.nla_tracks]))
             for t in ad.nla_tracks:
                 t.mute = True
@@ -155,7 +170,7 @@ class Animated:
                 continue
             if mine:
                 ad.action_slot = mine[0]
-            elif len(self.action.slots) == 1 and len(ad.action_suitable_slots) == 1:
+            elif not own and len(self.action.slots) == 1 and len(ad.action_suitable_slots) == 1:
                 ad.action_slot = ad.action_suitable_slots[0]
             else:
                 ad.action = None
@@ -175,6 +190,11 @@ class Animated:
                     pass
             for t, m in mutes:
                 t.mute = m
+        self.saved = []
+
+def tweaking(owners):
+    # A strip in NLA tweak mode makes the active action read-only, so an action cannot be played.
+    return [o.name for o in owners if o.animation_data is not None and o.animation_data.use_tweak_mode]
 
 def active_action(owners):
     for o in owners:
@@ -220,6 +240,9 @@ def view_basis(az, el):
 
 def fit(P):
     geo, missing = resolve(P["objects"])
+    if geo is None:
+        return {"error": "ambiguous", "roots": missing[:60],
+                "collections": [c.name for c in scene.collection.children][:30]}
     if missing:
         return {"error": "missing", "missing": missing,
                 "objects": [o.name for o in scene.objects][:60],
@@ -229,10 +252,16 @@ def fit(P):
     owners = drivers(geo)
     if P["action"] is not None and bpy.data.actions.get(P["action"]) is None:
         return {"error": "action", "actions": [a.name for a in bpy.data.actions][:60]}
+    if P["action"] is not None and tweaking(owners):
+        return {"error": "tweak", "objects": tweaking(owners)}
+    roots = {top(o).name: top(o) for o in geo}
+    rigs = [o for o in owners if o.type == "ARMATURE"]
+    anchor = next(iter(roots.values())) if len(roots) == 1 else (rigs[0] if len(rigs) == 1 else None)
     anim = Animated(owners, P["action"])
     sc = None
     keep = scene.frame_current, scene.frame_subframe
     try:
+        anim.play()
         sc = temp_scene(geo, owners, "studio")
         act = anim.action or active_action(owners)
         frames = P["frames"]
@@ -259,10 +288,15 @@ def fit(P):
         F = np.array([[*b[2]] for b in bases])
         lo_x = np.full(len(bases), np.inf); hi_x = np.full(len(bases), -np.inf)
         lo_y = lo_x.copy(); hi_y = hi_x.copy(); lo_d = lo_x.copy(); hi_d = hi_x.copy()
+        per_frame, origins = [], []
         for f in frames:
             set_frame(sc, f)
             dg = sc.view_layers[0].depsgraph
             dg.update()
+            fx0 = np.full(len(bases), np.inf); fx1 = -fx0.copy(); fy0 = fx0.copy(); fy1 = -fx0.copy()
+            if anchor is not None:
+                o = np.array(anchor.evaluated_get(dg).matrix_world.translation)
+                origins.append((R @ o, U @ o))
             for o in geo:
                 ev = o.evaluated_get(dg)
                 me = ev.to_mesh()
@@ -281,15 +315,23 @@ def fit(P):
                 lo_x = np.minimum(lo_x, px.min(0)); hi_x = np.maximum(hi_x, px.max(0))
                 lo_y = np.minimum(lo_y, py.min(0)); hi_y = np.maximum(hi_y, py.max(0))
                 lo_d = np.minimum(lo_d, pd.min(0)); hi_d = np.maximum(hi_d, pd.max(0))
+                fx0 = np.minimum(fx0, px.min(0)); fx1 = np.maximum(fx1, px.max(0))
+                fy0 = np.minimum(fy0, py.min(0)); fy1 = np.maximum(fy1, py.max(0))
+            per_frame.append((fx0, fx1, fy0, fy1))
         if not np.isfinite(lo_x).all():
             return {"error": "empty", "objects": [o.name for o in scene.objects][:60]}
         return {
             "frames": frames,
             "action": act.name if act is not None and animated else None,
             "objects": [o.name for o in geo],
+            "anchorObject": anchor.name if anchor is not None else None,
             "views": [{"name": v["name"], "x0": float(lo_x[i]), "x1": float(hi_x[i]),
                        "y0": float(lo_y[i]), "y1": float(hi_y[i]),
-                       "d0": float(lo_d[i]), "d1": float(hi_d[i])} for i, v in enumerate(P["views"])],
+                       "d0": float(lo_d[i]), "d1": float(hi_d[i]),
+                       "perFrame": [[float(a[i]), float(b[i]), float(c[i]), float(d[i])] for a, b, c, d in per_frame
+                                    if np.isfinite(a[i])],
+                       "origin": [float(np.mean([x[i] for x, _ in origins])), float(np.mean([y[i] for _, y in origins]))]
+                                 if origins else None} for i, v in enumerate(P["views"])],
             "basis": [{"right": list(b[0]), "up": list(b[1]), "forward": list(b[2])} for b in bases],
         }
     finally:
@@ -324,15 +366,18 @@ def aim(ob, toward):
 
 def render(P):
     geo, missing = resolve(P["objects"])
-    if missing or not geo:
+    if geo is None or missing or not geo:
         return {"error": "missing", "missing": missing}
     owners = drivers(geo)
+    if P["action"] is not None and tweaking(owners):
+        return {"error": "tweak", "objects": tweaking(owners)}
     anim = Animated(owners, P["action"])
     sc = None
     made, world = [], None
     keep = scene.frame_current, scene.frame_subframe
     written = []
     try:
+        anim.play()
         sc = temp_scene(geo, owners, P["lighting"])
         try:
             sc.render.engine = "BLENDER_EEVEE_NEXT"
@@ -365,6 +410,7 @@ def render(P):
         if P["lighting"] == "studio":
             lights, world = studio_lights(sc, made)
         current = None
+        started = time.monotonic()
         for job in P["jobs"]:
             c = P["cameras"][job["view"]]
             if current != job["view"]:
@@ -381,7 +427,7 @@ def render(P):
             sc.render.filepath = job["path"]
             bpy.ops.render.render(write_still=True, scene=sc.name)
             written.append(job["path"])
-        return {"written": written}
+        return {"written": written, "seconds": time.monotonic() - started}
     finally:
         anim.restore()
         if sc is not None:

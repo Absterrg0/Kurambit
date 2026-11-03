@@ -53,6 +53,12 @@ contact sheet: look at it, and use the anchor offset it gives.
   }
   ```
 
+- One character, one scale: leave out `pixelsPerUnit` for its first strip,
+  then pass the value that strip reports to every other strip of the same
+  character (idle, walk, attack), or an attack renders smaller than the idle.
+  If a bigger clip no longer fits, the tool says which `size` it needs.
+- Render in-place clips. A clip that moves the character across the ground
+  (root motion) is refused; the game moves the sprite.
 - Views: side-scroller `right` (flip it for left); top-down `front`, `back`,
   `left`, `right` with `elevation` 35, or `top`; `isometric`.
 - The model lives in the live scene: a library character (its clips are

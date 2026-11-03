@@ -198,6 +198,9 @@ export const quantize = (
   return [...new Set(map.values())];
 };
 
+/** OKLab lightness, 0 black to 1 white. */
+export const lightness = (c: number) => oklab(c)[0];
+
 /** The darkest colour as seen, for an outline that reads against the palette. */
 export const darkest = (colours: ReadonlyArray<number>): number | null => {
   let best: number | null = null;
@@ -284,8 +287,9 @@ export const sheet = (rows: ReadonlyArray<ReadonlyArray<Rgba>>): Rgba => {
 };
 
 /**
- * Every frame enlarged by a whole number on a checker, one row per view, with each row's
- * ground line (-1 for none) drawn behind the sprite in red: what a reviewer needs to judge framing, drift and colour.
+ * Every frame enlarged by a whole number on a checker, each view's frames wrapped into rows of at
+ * most 12 that fit `maxWidth`, with each view's ground line (-1 for none) drawn behind the sprite
+ * in red: what a reviewer needs to judge framing, drift and colour.
  */
 export const contactSheet = (
   rows: ReadonlyArray<ReadonlyArray<Rgba>>,
@@ -294,23 +298,24 @@ export const contactSheet = (
 ): { image: Rgba; zoom: number } => {
   const w = rows[0]![0]!.width;
   const h = rows[0]![0]!.height;
-  const columns = Math.max(...rows.map((r) => r.length));
+  const frames = Math.max(...rows.map((r) => r.length));
   const gap = 6;
-  const zoom = Math.max(
-    1,
-    Math.min(8, Math.floor((maxWidth - gap) / (columns * w + gap * columns))),
-  );
+  // Balanced rows (16 frames are two rows of 8, not 12 and 4), never wider than maxWidth at 1x.
+  const fit = Math.max(1, Math.floor((maxWidth - gap) / (w + gap)));
+  const columns = Math.min(fit, Math.ceil(frames / Math.ceil(frames / 12)));
+  const lines = Math.ceil(frames / columns);
+  const zoom = Math.max(1, Math.min(8, Math.floor((maxWidth - gap) / (columns * (w + gap)))));
   const cw = w * zoom;
   const ch = h * zoom;
   const width = gap + columns * (cw + gap);
-  const height = gap + rows.length * (ch + gap);
+  const height = gap + rows.length * lines * (ch + gap);
   const data = new Uint8Array(width * height * 4);
   for (let i = 0; i < data.length; i += 4) data.set([24, 24, 28, 255], i);
   const square = Math.max(4, zoom * 4);
   rows.forEach((row, ry) =>
-    row.forEach((img, cx) => {
-      const ox = gap + cx * (cw + gap);
-      const oy = gap + ry * (ch + gap);
+    row.forEach((img, fi) => {
+      const ox = gap + (fi % columns) * (cw + gap);
+      const oy = gap + (ry * lines + Math.floor(fi / columns)) * (ch + gap);
       for (let y = 0; y < ch; y++)
         for (let x = 0; x < cw; x++) {
           const o = ((oy + y) * width + ox + x) * 4;
@@ -332,6 +337,10 @@ export const contactSheet = (
 export interface Framing {
   /** World units per output pixel, the same in every frame and view. */
   readonly unitsPerPixel: number;
+  /** Output pixels per world unit: the one asked for, or the fitted scale rounded down to 3 figures. */
+  readonly pixelsPerUnit: number;
+  /** The canvas this scale needs to hold the subject with the inset, which may exceed the one asked for. */
+  readonly need: { readonly width: number; readonly height: number };
   readonly orthoScale: number;
   readonly cameras: ReadonlyArray<SpriteCamera>;
   /** Per view: the output pixel row the subject stands on (feet) or is centred on, and the centre column. */
@@ -339,13 +348,28 @@ export interface Framing {
     readonly x: number;
     readonly y: number;
     readonly kind: "feet" | "center";
+    /** The centre column is the anchor object's origin, not the middle of the silhouette. */
+    readonly onOrigin: boolean;
   }>;
 }
 
+const floorFigures = (x: number, figures: number) => {
+  const step = 10 ** (Math.floor(Math.log10(x)) - figures + 1);
+  return Number((Math.floor(x / step) * step).toPrecision(figures));
+};
+
+/** The anchor on one axis: the anchor object's projected origin when it lies over the subject, else the middle. */
+const over = (lo: number, hi: number, origin: number | undefined): origin is number =>
+  origin !== undefined && origin >= lo && origin <= hi;
+const anchorAt = (lo: number, hi: number, origin: number | undefined) =>
+  over(lo, hi, origin) ? origin : (lo + hi) / 2;
+
 /**
  * Fixed orthographic cameras fitted to the union of the subject's extents across every frame:
- * nothing is cut off, one scale serves every frame and view, and the anchor never moves.
- * `inset` is the clear border in output pixels on every side.
+ * nothing is cut off, one scale serves every frame and view, and the anchor never moves. The
+ * anchor column (and centre row) is the anchor object's origin, so a strip whose silhouette grows
+ * to one side, like an attack reaching forward, does not shift the body. `inset` is the clear
+ * border in output pixels on every side; `pixelsPerUnit` fixes the scale instead of fitting it.
  */
 export const frameCameras = (
   fit: SpriteFit,
@@ -353,18 +377,29 @@ export const frameCameras = (
   height: number,
   inset: number,
   anchors: ReadonlyArray<"feet" | "center">,
+  pixelsPerUnit?: number,
 ): Framing | null => {
   const room = { x: width - 2 * inset, y: height - 2 * inset };
   if (room.x < 1 || room.y < 1) return null;
-  const unitsPerPixel = Math.max(
-    ...fit.views.map((v) => Math.max((v.x1 - v.x0) / room.x, (v.y1 - v.y0) / room.y)),
-  );
-  if (!(unitsPerPixel > 0) || !Number.isFinite(unitsPerPixel)) return null;
+  const spans = fit.views.map((v, i) => {
+    const cx = anchorAt(v.x0, v.x1, v.origin?.[0]);
+    const cy = anchors[i] === "feet" ? v.y0 : anchorAt(v.y0, v.y1, v.origin?.[1]);
+    const x = 2 * Math.max(cx - v.x0, v.x1 - cx);
+    const y = anchors[i] === "feet" ? v.y1 - v.y0 : 2 * Math.max(cy - v.y0, v.y1 - cy);
+    return { cx, cy, x, y };
+  });
+  const fitted = Math.max(...spans.map((s) => Math.max(s.x / room.x, s.y / room.y)));
+  if (!(fitted > 0) || !Number.isFinite(fitted)) return null;
+  const ppu = pixelsPerUnit ?? floorFigures(1 / fitted, 3);
+  const unitsPerPixel = 1 / ppu;
+  const need = {
+    width: Math.ceil(Math.max(...spans.map((s) => s.x)) * ppu - 1e-6) + 2 * inset,
+    height: Math.ceil(Math.max(...spans.map((s) => s.y)) * ppu - 1e-6) + 2 * inset,
+  };
   const cameras = fit.views.map((v, i) => {
     const { right: r, up: u, forward: f } = fit.basis[i]!;
-    const cx = (v.x0 + v.x1) / 2;
-    const cy =
-      anchors[i] === "feet" ? v.y0 + (height / 2 - inset) * unitsPerPixel : (v.y0 + v.y1) / 2;
+    const { cx } = spans[i]!;
+    const cy = anchors[i] === "feet" ? v.y0 + (height / 2 - inset) * unitsPerPixel : spans[i]!.cy;
     const depth = v.d1 - v.d0;
     const pad = Math.max(0.5, depth * 0.1);
     const at = (k: number) => cx * r[k]! + cy * u[k]! + (v.d0 - pad) * f[k]!;
@@ -376,12 +411,48 @@ export const frameCameras = (
   });
   return {
     unitsPerPixel,
+    pixelsPerUnit: ppu,
+    need,
     orthoScale: unitsPerPixel * Math.max(width, height),
     cameras,
-    anchors: anchors.map((kind) => ({
+    anchors: anchors.map((kind, i) => ({
       x: width / 2,
       y: kind === "feet" ? height - inset : height / 2,
       kind,
+      onOrigin: over(fit.views[i]!.x0, fit.views[i]!.x1, fit.views[i]!.origin?.[0]),
     })),
   };
+};
+
+/**
+ * How far a view's whole silhouette moves from the first frame to the last, both edges the same
+ * way, as root motion does. A stride or an attack reaching forward moves one edge, or both apart;
+ * a lunge that steps out and back ends where it began. Horizontal for side views; top views also
+ * vertical.
+ */
+export const travel = (
+  fit: SpriteFit,
+  anchors: ReadonlyArray<"feet" | "center">,
+): { view: string; distance: number; size: number } | null => {
+  for (const [i, v] of fit.views.entries()) {
+    const first = v.perFrame[0];
+    const last = v.perFrame.at(-1);
+    if (first === undefined || last === undefined) continue;
+    const axes: ReadonlyArray<readonly [number, number]> =
+      anchors[i] === "center"
+        ? [
+            [0, 1],
+            [2, 3],
+          ]
+        : [[0, 1]];
+    for (const [lo, hi] of axes) {
+      const d0 = last[lo]! - first[lo]!;
+      const d1 = last[hi]! - first[hi]!;
+      const distance = Math.sign(d0) === Math.sign(d1) ? Math.min(Math.abs(d0), Math.abs(d1)) : 0;
+      const size =
+        v.perFrame.reduce((s, f) => s + f[hi]! - f[lo]!, 0) / Math.max(1, v.perFrame.length);
+      if (distance > size / 2) return { view: v.name, distance, size };
+    }
+  }
+  return null;
 };
