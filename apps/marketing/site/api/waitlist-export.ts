@@ -1,21 +1,19 @@
-import { database, send, tokenMatches } from "./_lib.js";
+import { type ApiRequest, type ApiResponse, bearer, database, send, tokenMatches } from "./_lib.js";
 
 // Spreadsheet apps execute cells that start with these; prefix them so a
 // signup cannot plant a formula in the export.
-const csvCell = (value) => {
+const csvCell = (value: unknown) => {
   const text = value === null || value === undefined ? "" : String(value);
   const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   return `"${safe.replaceAll('"', '""')}"`;
 };
 
-export default async function handler(request, response) {
+export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== "GET") {
     response.setHeader("Allow", "GET");
     return send(response, 405, { error: "method" });
   }
-  const header = request.headers.authorization;
-  const token = typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!tokenMatches(token, process.env.WAITLIST_ADMIN_TOKEN)) {
+  if (!tokenMatches(bearer(request), process.env["WAITLIST_ADMIN_TOKEN"])) {
     return send(response, 404, { error: "not-found" });
   }
   const sql = database();
@@ -26,7 +24,13 @@ export default async function handler(request, response) {
   const lines = [
     "email,name,role,source,signed_up_at",
     ...rows.map((row) =>
-      [row.email, row.name, row.role, row.source, new Date(row.created_at).toISOString()]
+      [
+        row["email"],
+        row["name"],
+        row["role"],
+        row["source"],
+        new Date(row["created_at"]).toISOString(),
+      ]
         .map(csvCell)
         .join(","),
     ),

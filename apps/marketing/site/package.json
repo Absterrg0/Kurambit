@@ -3,7 +3,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@neondatabase/serverless": "1.2.0"
+    "@neondatabase/serverless": "1.2.0",
+    "@vercel/functions": "3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5"
   },
   "engines": {
     "node": ">=20"

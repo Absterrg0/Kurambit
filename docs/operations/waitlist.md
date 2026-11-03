@@ -1,9 +1,24 @@
 # Waitlist
 
 The kurambit.com waitlist is two Vercel functions in
-[`apps/marketing/site/api`](../../apps/marketing/site/api) backed by the `kurambit-waitlist` Neon
-Postgres database, provisioned through the Vercel Neon integration and connected to the `kurambit`
-project. The site never reads the list; only the functions can reach the database.
+[`apps/marketing/site/api`](../../apps/marketing/site/api), written in TypeScript that Vercel
+compiles itself, backed by the `kurambit-waitlist` Neon Postgres database, provisioned through the
+Vercel Neon integration and connected to the `kurambit` project. The site never reads the list;
+only the functions can reach the database.
+
+## Email
+
+A new signup gets a short welcome, and the owner gets a notice; replying to either reaches the other
+person. Mail goes through [Resend](https://resend.com) from a verified `kurambit.com`, only for an
+address that was not already listed, and only after the form has been answered, so neither the
+timing nor the inbox reveals whether someone signed up before. If Resend fails, the signup is still
+stored and the function logs the Resend error name, never an address.
+
+Without `RESEND_API_KEY` and `WAITLIST_FROM`, signups are stored and nothing is sent. Resend's free
+plan allows 100 emails a day, which is 50 signups.
+
+To check the functions, run `npm install` in `apps/marketing/site`, then `tsc -p apps/marketing/site`
+from the repository root.
 
 ## Export the list
 
@@ -24,8 +39,12 @@ Production environment variables on the `kurambit` Vercel project:
   stored. Rotating it resets the rate-limit windows and nothing else.
 - `WAITLIST_ADMIN_TOKEN`: the bearer token for the export. Rotate it by setting a new value and
   updating your local copy.
+- `RESEND_API_KEY`: a sending-only Resend key for the verified `kurambit.com` domain.
+- `WAITLIST_FROM`: the sender, such as `Kurambit <hello@kurambit.com>`.
+- `WAITLIST_NOTIFY_EMAIL`: where signup notices go. Leave it unset to send only welcomes.
 
-Preview deployments get neither secret, so the form there answers that the waitlist is closed.
+Preview deployments get none of the waitlist secrets, so the form there answers that the waitlist is
+closed and sends nothing.
 
 ## What the signup endpoint guards against
 
