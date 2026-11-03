@@ -136,7 +136,11 @@ The Godot starter's main scene is a genre-free demo shell (title, pause, setting
 and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
 them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
 instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
-native explore runner resumes the game's own pause after each act instead of forcing it off. The manifest's
+native explore runner resumes the game's own pause after each act instead of forcing it off.
+The three.js starter carries the same shell in `web/shell/`: it owns the render loop and calls
+the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
+so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the
+three.js check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
 exports and the loop resolve it unchanged. `GameRun` reads the manifest once per loop (`laneOf`) for
 the engine directory and prompt paths; everything else in the loop is engine-neutral.

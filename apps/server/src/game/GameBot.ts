@@ -2158,7 +2158,12 @@ const make = Effect.gen(function* () {
           observation: {
             tick: ticks,
             t,
-            probe: { gameState, player: pos, hudText },
+            // The kit's posOf reads {x, y, z}, the shape the native runner sends.
+            probe: {
+              gameState,
+              player: pos === null ? null : { x: pos[0], y: pos[1], z: pos[2] },
+              hudText,
+            },
             errors: pageErrors.slice(-5).map((entry) => ({ message: entry.message, where: "" })),
           },
           runContext: {

@@ -116,8 +116,10 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     id: "blank-three",
     name: "Blank (browser)",
     description:
-      "An empty three.js static project: a lit 3D scene, a read-only studio probe and a single static web export. No install step; three.js is vendored.",
+      "An empty three.js game inside a demo shell (title, pause, settings, end and credits screens), a game feel kit, a read-only studio probe and a single static web export. No install step; three.js is vendored.",
     dimension: "3d",
+    // The page opens on the shell's title; "?play" boots straight into a run, so the check covers gameplay start.
+    gameplayScene: "index.html?play",
     probe: true,
   },
   {

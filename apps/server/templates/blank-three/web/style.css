@@ -1,3 +1,24 @@
+/* One theme for the whole page. The art pass restyles the game by changing
+   these tokens first, then the screen rules below. */
+:root {
+  --ui-font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --ui-display-font: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --ui-bg: #0b0e14;
+  --ui-ink: #eef1f7;
+  --ui-dim: #9aa3b5;
+  --ui-accent: #ffc94d;
+  --ui-on-accent: #1a1406;
+  --ui-win: #8be28b;
+  --ui-lose: #ff7a6b;
+  --ui-panel: rgb(20 25 36 / 0.92);
+  --ui-button: rgb(255 255 255 / 0.07);
+  --ui-line: rgb(255 255 255 / 0.12);
+  --ui-scrim: rgb(5 7 12 / 0.6);
+  --ui-radius: 12px;
+  --ui-size: clamp(16px, 0.7rem + 1.1vmin, 22px);
+  --ui-title-size: clamp(40px, 10vmin, 104px);
+}
+
 html,
 body {
   margin: 0;
@@ -5,7 +26,11 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0b0e14;
+  background: var(--ui-bg);
+}
+
+[hidden] {
+  display: none !important;
 }
 
 #game {
@@ -15,16 +40,235 @@ body {
   touch-action: none;
 }
 
-#hud {
+#ui {
   position: fixed;
-  top: 12px;
-  left: 12px;
-  max-width: 60ch;
-  font:
-    14px/1.5 system-ui,
-    sans-serif;
-  color: #e8ecf4;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+  inset: 0;
   pointer-events: none;
+  font: 500 var(--ui-size) / 1.4 var(--ui-font);
+  color: var(--ui-ink);
+}
+
+/* The game's own overlay (ctx.hud). The probe reports its text, so keep the
+   values that matter on screen. */
+#hud {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  max-width: 60ch;
+  font-size: 0.8em;
+  line-height: 1.5;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.85);
   white-space: pre-line;
+}
+
+#flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+#backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 38%, rgb(255 201 77 / 0.1), transparent 70%),
+    radial-gradient(ellipse at 50% 40%, #1a2335 0%, var(--ui-bg) 75%);
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1.6em;
+  pointer-events: auto;
+}
+
+.screen-card {
+  background: var(--ui-scrim);
+  backdrop-filter: blur(3px);
+}
+
+.title-block {
+  text-align: center;
+}
+
+.title-name {
+  margin: 0;
+  max-width: 16ch;
+  font: 800 var(--ui-title-size) / 1 var(--ui-display-font);
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+  text-shadow: 0 4px 24px rgb(0 0 0 / 0.5);
+}
+
+.title-name::after {
+  content: "";
+  display: block;
+  width: 2.2em;
+  height: 0.08em;
+  margin: 0.35em auto 0;
+  border-radius: 1em;
+  background: var(--ui-accent);
+  font-size: 0.4em;
+}
+
+.hint {
+  position: absolute;
+  bottom: 1.4em;
+  margin: 0;
+  font-size: 0.75em;
+  color: var(--ui-dim);
+}
+
+.card {
+  display: grid;
+  gap: 1.1em;
+  min-width: min(22em, 86vw);
+  max-width: 90vw;
+  padding: 1.6em 1.8em 1.8em;
+  border: 1px solid var(--ui-line);
+  border-radius: calc(var(--ui-radius) + 4px);
+  background: var(--ui-panel);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+}
+
+.card-heading {
+  margin: 0;
+  text-align: center;
+  font: 800 1.6em / 1.15 var(--ui-display-font);
+  letter-spacing: 0.02em;
+}
+
+.menu {
+  display: grid;
+  gap: 0.6em;
+  justify-items: stretch;
+  min-width: 12em;
+}
+
+.menu-row {
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+.screen button {
+  font: inherit;
+  font-weight: 650;
+  color: var(--ui-ink);
+  padding: 0.6em 1.4em;
+  border: 2px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-button);
+  cursor: pointer;
+  transition:
+    background-color 80ms,
+    color 80ms,
+    transform 80ms;
+}
+
+.screen button:focus {
+  outline: none;
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+
+.screen :focus-visible,
+[data-input="keys"] .screen :focus {
+  outline: 3px solid var(--ui-ink);
+  outline-offset: 3px;
+}
+
+.screen button:active {
+  transform: scale(0.97);
+}
+
+.screen button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: auto minmax(8em, 1fr) 3.5em;
+  align-items: center;
+  gap: 0.8em 1em;
+}
+
+.settings-grid label {
+  color: var(--ui-dim);
+}
+
+.settings-grid output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-grid input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--ui-accent);
+  cursor: pointer;
+}
+
+.screen input[type="range"]:focus {
+  outline: 3px solid var(--ui-accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.toggle {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+}
+
+.toggle-state {
+  opacity: 0.8;
+}
+
+.end-heading {
+  font-size: 2em;
+}
+
+#end[data-result="won"] .end-heading {
+  color: var(--ui-win);
+}
+
+#end[data-result="lost"] .end-heading {
+  color: var(--ui-lose);
+}
+
+.stats {
+  display: grid;
+  gap: 0.35em;
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 2em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.stat dt {
+  color: var(--ui-dim);
+}
+
+.stat dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.credits-text {
+  max-height: 46vh;
+  overflow: auto;
+  text-align: center;
+  white-space: pre-line;
+  color: var(--ui-dim);
 }

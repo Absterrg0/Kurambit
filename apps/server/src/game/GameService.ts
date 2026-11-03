@@ -2736,7 +2736,10 @@ ${built.result.message}`.slice(-3000),
           if (run.timedOut)
             errors.unshift({
               file: projectFile,
-              message: `The ${backend.displayName} check timed out before finishing its physics frames.`,
+              message:
+                backend.id === "three"
+                  ? "The three.js check timed out: the page never reported ready within 60 s."
+                  : `The ${backend.displayName} check timed out before finishing its physics frames.`,
             });
           if (run.exitCode !== 0 && errors.length === 0)
             errors.unshift({
@@ -2745,7 +2748,8 @@ ${built.result.message}`.slice(-3000),
             });
           // A game created before gameplay entries is checked as it always was, but
           // the warning says what the check did not cover rather than implying it did.
-          // three.js games have no gameplay scene concept; the check loads the page.
+          // A three.js game's gameplay entry is a page URL (the starter's is
+          // index.html?play) that the check loads after the page itself.
           const warnings = [
             ...(reported?.warnings ?? []),
             ...(manifest.gameplayScene == null && backend.id === "godot"
