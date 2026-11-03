@@ -270,9 +270,9 @@ export const unpackArchive = (archivePath: string, target: string, limits: Unpac
         if (!isPathInside(destination, target) || destination === NodePath.resolve(target))
           return yield* unsafe(`Member ${shown} resolves outside the pack.`);
         if (!entry.fileName.endsWith("/")) {
-          if (seen.has(entry.fileName))
-            return yield* unsafe(`Member ${shown} is a duplicate entry.`);
-          seen.add(entry.fileName);
+          const key = NodePath.relative(target, destination);
+          if (seen.has(key)) return yield* unsafe(`Member ${shown} is a duplicate entry.`);
+          seen.add(key);
         }
         if (entry.fileName.endsWith("/")) {
           yield* Effect.tryPromise({

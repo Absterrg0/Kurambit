@@ -163,6 +163,10 @@ const readSaved = (pack: LibraryPack, dir: string) =>
     () => null,
   );
 
+// The index version is part of the folder name: servers of different versions
+// share this cache, and each must only ever replace a folder of its own version.
+const packKey = (pack: LibraryPack) => `${pack.id}-${pack.sha256.slice(0, 12)}-i${INDEX_VERSION}`;
+
 /** Moves a finished staging folder into place; another server sharing the cache may have placed it first. */
 const place = async (pack: LibraryPack, staging: string, dir: string, built: LibraryIndex) => {
   for (let attempt = 0; ; attempt += 1) {
@@ -253,8 +257,7 @@ const make = Effect.gen(function* () {
       : Effect.succeed(pack);
   };
 
-  const packDir = (pack: LibraryPack) =>
-    NodePath.join(directory, "packs", `${pack.id}-${pack.sha256.slice(0, 12)}`);
+  const packDir = (pack: LibraryPack) => NodePath.join(directory, "packs", packKey(pack));
 
   /** Downloads, verifies, unpacks and indexes a pack; runs under that pack's own lock. */
   const fetchPack = (pack: LibraryPack) =>
@@ -536,8 +539,7 @@ const make = Effect.gen(function* () {
       const cached = yield* cachedIds;
       const kind = input.kind;
       const wanted = kind === undefined ? undefined : KIND_MEDIA[kind];
-      const fetched = (pack: LibraryPack) =>
-        cached.has(`${pack.id}-${pack.sha256.slice(0, 12)}`) ? ", fetched" : "";
+      const fetched = (pack: LibraryPack) => (cached.has(packKey(pack)) ? ", fetched" : "");
       let hidden = 0;
       const ranked = LIBRARY_CATALOG.flatMap((pack, order) => {
         if (kind !== undefined && !pack.kinds.includes(kind)) return [];
@@ -851,23 +853,26 @@ const make = Effect.gen(function* () {
         );
       }
       // One format per model across the folders, the one search shows; textures come with the models that load them.
-      const best = new Map<string, LibraryFile>();
+      const bestFormat = new Map<string, LibraryFile["format"]>();
       for (const file of folderFiles.values()) {
         if (file.media !== "model") continue;
-        const prior = best.get(stemOf(file.path));
-        if (prior === undefined || modelRank(engine, file.format) < modelRank(engine, prior.format))
-          best.set(stemOf(file.path), file);
+        const prior = bestFormat.get(stemOf(file.path));
+        if (prior === undefined || modelRank(engine, file.format) < modelRank(engine, prior))
+          bestFormat.set(stemOf(file.path), file.format);
       }
+      let models = 0;
       let otherFormats = 0;
       for (const file of folderFiles.values()) {
         if (file.media === "model") {
-          if (best.get(stemOf(file.path)) === file) take(file);
-          else otherFormats += 1;
-        } else if (best.size === 0 || !loadedByModels.has(file.path)) take(file);
+          if (bestFormat.get(stemOf(file.path)) === file.format) {
+            take(file);
+            models += 1;
+          } else otherFormats += 1;
+        } else if (bestFormat.size === 0 || !loadedByModels.has(file.path)) take(file);
       }
       if (otherFormats > 0)
         notes.push(
-          `${best.size} models, one format each (${[...new Set([...best.values()].map((file) => file.format))].join(", ")}); ${otherFormats} copies in other formats left out.`,
+          `${models} models, one format each (${[...new Set(bestFormat.values())].join(", ")}); ${otherFormats} copies in other formats left out.`,
         );
       // A licence note travels with the files it covers: the pack's own, or one kept in their folder.
       const picked = [...chosen.values()];
