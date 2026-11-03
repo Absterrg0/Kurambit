@@ -16,6 +16,8 @@ OhMyGame's sprite-pipeline quality gates (Apache-2.0).
 6. Animation frames that barely differ and flat single-color backgrounds are defects.
 7. Sprite sets hold together: one canvas size and one anchor (feet or
    contact point) across a strip, the exact frame count the animation
-   uses, a transparent background, no scale drift, and the same identity,
-   palette and camera angle in every frame. Judge them at play size, not
-   zoomed in.
+   uses, a transparent background, nothing cut off at the canvas edge, no
+   scale drift, and the same identity, palette and camera angle in every
+   frame. Judge them at play size, not zoomed in. The measured image facts
+   in your prompt say where to look first; open each file they name and
+   judge it yourself.
