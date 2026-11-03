@@ -210,16 +210,11 @@ const decode = async (file: Buffer, maxPixels: number): Promise<Decoded> => {
   }
   if (idat.length === 0 || (type === 3 && palette === null)) return UNREADABLE;
   const entries = palette === null ? 0 : palette.length / 3;
-  if (
-    trns !== null &&
-    (type === 0
-      ? trns.length !== 2
-      : type === 2
-        ? trns.length !== 6
-        : type === 3
-          ? trns.length > entries
-          : true)
-  )
+  // As libpng: tRNS is ignored where the pixels carry alpha (types 4 and 6),
+  // and an over-long palette tRNS is cut to the palette.
+  if (type === 4 || type === 6) trns = null;
+  else if (type === 3 && trns !== null && trns.length > entries) trns = trns.subarray(0, entries);
+  if (trns !== null && (type === 0 ? trns.length !== 2 : type === 2 ? trns.length !== 6 : false))
     return UNREADABLE;
   const channels = CHANNELS[type]!;
   const bits = channels * depth;
@@ -394,7 +389,8 @@ interface Shot {
   readonly m: Measure;
 }
 
-const pct = (share: number) => `${Math.round(share * 100)}%`;
+const pct = (share: number) =>
+  `${share > 0 && share < 0.01 ? "<1" : share < 1 && share > 0.99 ? ">99" : Math.round(share * 100)}%`;
 const colourText = (n: number) => (n > COLOUR_CAP ? `${COLOUR_CAP}+` : `${n}`);
 const hasBackground = (m: Measure) => m.transparentShare >= TRANSPARENT_SHARE;
 const touched = (m: Measure) =>
@@ -699,7 +695,7 @@ export const spriteFacts = async (root: string, lane: string): Promise<SpriteFac
     packParts.push(
       kept.length === 0
         ? `${id} (${named}): no transparent-background image among ${tried} of its ${images.length} PNGs`
-        : `${id} (${named}): ${colourText(packPool.size)} over ${plural(kept.length, "image")} (${sizesText(kept)}) sampled across its ${images.length} PNGs`,
+        : `${id} (${named}): ${colourText(packPool.size)} over ${plural(kept.length, "image")} (${sizesText(kept)}; median ${colourText(median(kept.map((k) => k.colours)))} per image) sampled across its ${images.length} PNGs`,
     );
   }
 
@@ -741,7 +737,7 @@ export const spriteFacts = async (root: string, lane: string): Promise<SpriteFac
       `Distinct colours (RGBA values of visible pixels, pooled over each side's transparent-background images, so a sheet and its separate tiles count alike), library pack against the game: ${packParts.join("; ")}; the game's own under ${laneAssets(lane)}: ${
         transparent.length === 0
           ? "no transparent-background image"
-          : `${colourText(pool.size)} over ${plural(transparent.length, "image")} (${sizesText(transparent.map((s) => s.m))}); most in one image: ${most.map((s) => `${s.path} ${colourText(s.m.colours)}`).join(", ")}`
+          : `${colourText(pool.size)} over ${plural(transparent.length, "image")} (${sizesText(transparent.map((s) => s.m))}; median ${colourText(median(transparent.map((s) => s.m.colours)))} per image); most in one image: ${most.map((s) => `${s.path} ${colourText(s.m.colours)}`).join(", ")}`
       }.`,
     );
   }
