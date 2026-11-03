@@ -67,10 +67,14 @@ body {
   opacity: 0;
 }
 
+/* To show the game's key art behind the title, set
+   --title-art: url("assets/ui/title_bg.png"); in :root above. */
 #backdrop {
   position: absolute;
   inset: 0;
   background:
+    linear-gradient(rgb(0 0 0 / 0.38), rgb(0 0 0 / 0.38)),
+    var(--title-art, none) center / cover no-repeat,
     radial-gradient(ellipse 70% 55% at 50% 38%, rgb(255 201 77 / 0.1), transparent 70%),
     radial-gradient(ellipse at 50% 40%, #1a2335 0%, var(--ui-bg) 75%);
 }

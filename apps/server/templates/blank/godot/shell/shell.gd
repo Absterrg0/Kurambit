@@ -17,6 +17,9 @@ const BOOT_INTO_PLAY := false
 ## Played on every shell button press once the file exists.
 const CLICK_SOUND := "res://assets/sfx/ui_click.wav"
 const CREDITS_FILE := "res://credits.txt"
+## Shown behind the title once the file exists (the game's key art fits);
+## the gradient in scenes/main.tscn stays as the fallback.
+const TITLE_ART := "res://assets/ui/title_bg.png"
 const SETTINGS_FILE := "user://settings.cfg"
 ## Real seconds and time scale of the slow-motion beat before the end screen.
 const END_BEAT_S := 0.6
@@ -47,6 +50,11 @@ var _config := ConfigFile.new()
 
 func _ready() -> void:
 	(_title.get_node("Center/Name") as Label).text = str(ProjectSettings.get_setting("application/config/name", ""))
+	if ResourceLoader.exists(TITLE_ART):
+		var art := _title.get_node("Background") as TextureRect
+		art.texture = load(TITLE_ART)
+		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		art.modulate = Color(0.62, 0.62, 0.68)
 	_title.get_node("Center/Buttons/Quit").visible = not OS.has_feature("web")
 	for button in find_children("*", "BaseButton", true, false):
 		(button as BaseButton).pressed.connect(_click)
