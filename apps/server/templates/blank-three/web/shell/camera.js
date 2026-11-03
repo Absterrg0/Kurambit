@@ -39,9 +39,11 @@ export function followCamera2D(ctx, target, options = {}) {
   // u/v are the two axes the target moves on; the third keeps its offset.
   const v = plane === "xz" ? "z" : "y";
   const focus = new THREE.Vector2(target.position.x, target.position[v]);
+  // The whole offset as placed, so a tilted top-down camera stays tilted; the
+  // third axis stays where the target started, so a jump does not bob the view.
   const offset = new THREE.Vector3().subVectors(camera.position, target.position);
-  offset.x = 0;
-  offset[v] = 0;
+  const third = target.position[plane === "xz" ? "y" : "z"];
+  const base = new THREE.Vector3();
   const ahead = new THREE.Vector2();
   const last = focus.clone();
   const rig = {
@@ -72,10 +74,10 @@ export function followCamera2D(ctx, target, options = {}) {
       if (goal.y > focus.y + dzY) focus.y += (goal.y - dzY - focus.y) * ease(smooth, dt);
       else if (goal.y < focus.y - dzY) focus.y += (goal.y + dzY - focus.y) * ease(smooth, dt);
       if (bounds !== null) clampFocus(focus);
-      camera.position.set(focus.x, 0, 0);
-      camera.position[v] = focus.y;
-      camera.position.add(offset);
-      if (plane === "xz") camera.lookAt(focus.x, target.position.y, focus.y);
+      if (plane === "xz") base.set(focus.x, third, focus.y);
+      else base.set(focus.x, focus.y, third);
+      camera.position.copy(base).add(offset);
+      if (plane === "xz") camera.lookAt(base);
     },
   };
   const clampFocus = (f) => {

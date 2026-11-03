@@ -185,7 +185,9 @@ export function animate(gltf, { fade = 0.2 } = {}) {
 // The shell's side: tick every animator on game time; a new run starts empty.
 export const animateShell = {
   update(dt) {
-    for (const animator of live) animator.mixer.update(dt);
+    // A model taken out of the scene (a defeated enemy) costs nothing; it
+    // resumes if it is added back. dispose() forgets it for good.
+    for (const animator of live) if (animator.root.parent !== null) animator.mixer.update(dt);
   },
   reset() {
     for (const animator of live) animator.mixer.stopAllAction();

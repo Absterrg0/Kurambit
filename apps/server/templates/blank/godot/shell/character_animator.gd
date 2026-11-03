@@ -65,6 +65,16 @@ static func on(model: Node) -> CharacterAnimator:
 		push_warning("CharacterAnimator: no AnimationPlayer under %s" % model.name)
 		return animator
 	animator.player = found[0]
+	# Every instance of one GLB shares its Animation resources and _start sets
+	# loop_mode on them, so each animator plays its own copies: one character's
+	# one-shot must never stop another's loop.
+	for library_name in animator.player.get_animation_library_list():
+		var library := animator.player.get_animation_library(library_name)
+		var own := AnimationLibrary.new()
+		for clip_name in library.get_animation_list():
+			own.add_animation(clip_name, library.get_animation(clip_name).duplicate())
+		animator.player.remove_animation_library(library_name)
+		animator.player.add_animation_library(library_name, own)
 	animator.clips = animator.player.get_animation_list()
 	animator.player.animation_finished.connect(animator._on_finished)
 	var roles: PackedStringArray = []
@@ -134,6 +144,8 @@ func play(wanted: String, options := {}) -> void:
 	if _current == clip and not _current_once:
 		state = wanted
 		player.speed_scale = speed
+		if not player.is_playing():
+			player.play(clip)
 		return
 	_start(wanted, clip, false, speed, options.get("fade", fade))
 

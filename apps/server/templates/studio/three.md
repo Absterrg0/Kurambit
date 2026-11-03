@@ -52,7 +52,8 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    side or top-down view, `followCamera3D(ctx, player, { blockers: [level] })`
    for third person, moving the player relative to `cam.yaw`. Juice.shake
    applies on top. Each `ctx.assets.model` call is its own copy, so every
-   character or enemy gets its own `animate`.
+   character or enemy gets its own `animate`; call its `dispose()` when the
+   enemy is gone for good.
 6. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).

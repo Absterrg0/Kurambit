@@ -648,6 +648,14 @@ export const renderSprites = (
           ]),
     ]);
 
+    // The animation name the example uses: a model copies it literally.
+    const stripKey =
+      input.action ??
+      (NodePath.basename(manifestRel)
+        .replace(/\.sprite\.json$/, "")
+        .split(/[_-]/)
+        .at(-1) ||
+        "anim");
     const text = [
       `Rendered ${frames.length} frame${frames.length === 1 ? "" : "s"} x ${views.length} view${views.length === 1 ? "" : "s"} (${views.map((v) => `${v.name}: azimuth ${v.azimuth}, elevation ${v.elevation}`).join("; ")}) of ${fit.objects.join(", ")}${playing === null ? "" : ` playing ${playing}`}; frames ${frames.join(", ")}.`,
       ...views.map(
@@ -655,7 +663,7 @@ export const renderSprites = (
       ),
       `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): ${
         manifest.engine.name === "godot"
-          ? `SpriteStrips.apply($AnimatedSprite2D, {"walk": "res://${manifestRel.slice(lane.length + 1)}"}, "${views[0]!.name}") loads it`
+          ? `SpriteStrips.apply($AnimatedSprite2D, {${JSON.stringify(stripKey)}: "res://${manifestRel.slice(lane.length + 1)}"}, "${views[0]!.name}") loads it`
           : "read it for the frame rate and anchor"
       }.`,
       ...(sheetRel === undefined
