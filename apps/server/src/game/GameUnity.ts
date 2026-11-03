@@ -537,7 +537,8 @@ const make = Effect.gen(function* () {
         const projectDir = yield* projectDirOf(root);
         // One Unity editor per server: a second one would double a 2-3 GB
         // process and fight the first for the Licensing Client.
-        for (const other of [...sessions.keys()]) yield* Effect.promise(() => drop(other));
+        // drop() deletes from the map, so iterate a copy.
+        for (const other of Array.from(sessions.keys())) yield* Effect.promise(() => drop(other));
         yield* Effect.promise(() => drop(root));
         const xvfbPath = yield* Effect.promise(() =>
           GameProcesses.findExecutable("Xvfb", {
