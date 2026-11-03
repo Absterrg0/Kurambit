@@ -19,6 +19,8 @@ import {
   gameRunRoleLabel,
   type GameCreateInput,
   type GameProjectResult,
+  type GameRunRestoreResult,
+  type GameRunRoundDetail,
   type GameRunStartInput,
   type GameRunStatusResult,
   type GameRunSteerResult,
@@ -41,6 +43,7 @@ import { finishExports } from "./run/finish.ts";
 import { makeGit } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { runRole, type RoleDeps } from "./run/roleRunner.ts";
+import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts } from "./run/roles.ts";
 import * as State from "./run/state.ts";
 
@@ -257,6 +260,22 @@ export class GameRun extends Context.Service<
       threadId: ThreadId,
       text: string,
     ) => Effect.Effect<GameRunSteerResult, GameRunError>;
+    /**
+     * One round's evidence, read on demand. `videoFile` is the canonical bot
+     * video inside the game's builds/logs, for the transport to mint a URL.
+     */
+    readonly roundDetail: (
+      threadId: ThreadId,
+      round: number,
+    ) => Effect.Effect<{ detail: GameRunRoundDetail; videoFile: string | null }, GameRunError>;
+    /**
+     * Makes a kept round's build the game's sources again with a new commit on
+     * trunk. Refused while a run is live, mid-round, off trunk or with uncommitted work.
+     */
+    readonly restoreRound: (
+      threadId: ThreadId,
+      round: number,
+    ) => Effect.Effect<GameRunRestoreResult, GameRunError>;
     /** At server start: resume every run a restart cut off (no ending, no stop request). */
     readonly resumeInterrupted: () => Effect.Effect<void>;
     /** MCP catalog role: "run" for threads this service launched, else null. */
@@ -289,6 +308,8 @@ export const layer = (options: { readonly stateDir: string }) => {
     // One slot per game root, claimed before runStart's first yield so two
     // starts can never both fork a loop.
     const active = new Map<string, RunSlot>();
+    // Games whose tree a restore is moving; a run cannot start under one.
+    const restoring = new Set<string>();
     // Serializes appends to a steer file with the driver taking it, so no note
     // lands between the driver's read and its removal.
     const steerLock = Semaphore.makeUnsafe(1);
@@ -780,6 +801,13 @@ export const layer = (options: { readonly stateDir: string }) => {
 
     const runStart = Effect.fn("GameRun.runStart")(function* (input: GameRunStartInput) {
       const target = yield* resolveGame(input.threadId);
+      if (restoring.has(target.root))
+        return yield* new GameRunError({
+          operation: "run-start",
+          path: target.root,
+          reason: "restoring",
+          detail: "A round is being restored for this game. Start the run once it finishes.",
+        });
       const existing = active.get(target.root);
       if (existing !== undefined) {
         const loaded = yield* load(target.root);
@@ -841,6 +869,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           move: r.move,
           branch: r.branch,
           kept: r.kept,
+          outcome: roundOutcome(r),
           verdicts: r.verdicts,
           linesChanged: r.linesChanged,
           testerNote: r.testerNote ?? null,
@@ -904,6 +933,142 @@ export const layer = (options: { readonly stateDir: string }) => {
       } satisfies GameRunSteerResult;
     });
 
+    const refuse = (operation: string, path: string, reason: string, detail: string) =>
+      new GameRunError({ operation, path, reason, detail });
+
+    // The run record and the round asked for, plus the game's engine directory.
+    const findRound = Effect.fn("GameRun.findRound")(function* (
+      operation: string,
+      threadId: ThreadId,
+      round: number,
+    ) {
+      const target = yield* resolveGame(threadId);
+      const loaded = yield* load(target.root);
+      if (loaded.kind === "none" || loaded.kind === "unreadable")
+        return yield* refuse(
+          operation,
+          target.root,
+          "no-run",
+          loaded.kind === "none"
+            ? "No run recorded for this game."
+            : "The run record (.studio/run.json) could not be read.",
+        );
+      const record = loaded.state.rounds.find((r) => r.round === round);
+      if (record === undefined)
+        return yield* refuse(
+          operation,
+          target.root,
+          "round-not-found",
+          `Round ${round} is not recorded; the run has ${loaded.state.rounds.length} finished round${loaded.state.rounds.length === 1 ? "" : "s"}.`,
+        );
+      const manifest = yield* target.projects.read(target.root).pipe(Effect.option);
+      const lane = Option.isSome(manifest) ? manifest.value.godotProject : loaded.state.lane;
+      const trunk = loaded.state.trunk.length > 0 ? loaded.state.trunk : "main";
+      return { ...target, loaded, state: loaded.state, record, lane: lane || "godot", trunk };
+    });
+
+    const roundDetail = Effect.fn("GameRun.roundDetail")(function* (
+      threadId: ThreadId,
+      round: number,
+    ) {
+      const found = yield* findRound("run-round", threadId, round);
+      const { root, state, record } = found;
+      const evidence = yield* Effect.promise(() => readRoundEvidence(root, state, record));
+      const git = makeGit(root, found.lane, () => Effect.void);
+      const sha = record.kept ? yield* git.keptCommit(record.branch, found.trunk) : null;
+      const current = sha === null ? false : yield* git.sameBuild(sha);
+      return {
+        detail: { ...evidence.detail, restorable: sha !== null, current },
+        videoFile: evidence.videoFile,
+      };
+    });
+
+    const restoreRound = Effect.fn("GameRun.restoreRound")(function* (
+      threadId: ThreadId,
+      round: number,
+    ) {
+      const found = yield* findRound("run-restore", threadId, round);
+      const { root, state, record, trunk } = found;
+      const no = (reason: string, detail: string) => refuse("run-restore", root, reason, detail);
+      // Checked and claimed with no yield between, like runStart's slot.
+      if (active.has(root) || restoring.has(root))
+        return yield* no(
+          "run-live",
+          "A production run is live for this game. Stop it before restoring a round.",
+        );
+      if (!record.kept)
+        return yield* no(
+          "not-kept",
+          `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
+        );
+      restoring.add(root);
+      return yield* Effect.gen(function* () {
+        const log = (line: string) => logLine(root, line);
+        const git = makeGit(root, found.lane, log);
+        const on = yield* git.current;
+        if (on !== trunk)
+          return yield* no(
+            "off-trunk",
+            `The game is on ${on === "HEAD" || on === "" ? "a detached commit" : `branch ${on}`}, not ${trunk}. Resume the run to let it return to ${trunk}, or switch back yourself, then restore.`,
+          );
+        // A stopped run resumes onto its round's branch; moving trunk under it
+        // would leave that round judged against a build the tree no longer has.
+        const expected = Policy.expectedBranch(state);
+        if (expected !== null && expected !== trunk && CONTINUABLE.has(state.ending))
+          return yield* no(
+            "mid-round",
+            `The stopped run is in the middle of its work on ${expected}. Resume it and let the round finish, or start a new run, before restoring.`,
+          );
+        const dirty = yield* git.uncommitted;
+        if (dirty.length > 0)
+          return yield* no(
+            "uncommitted-work",
+            `The game has uncommitted changes, so nothing was restored: ${git.summary(dirty.join("\n"))}. Commit or discard them first.`,
+          );
+        const sha = yield* git.keptCommit(record.branch, trunk);
+        if (sha === null)
+          return yield* no(
+            "commit-missing",
+            `Round ${round}'s commit (branch ${record.branch}) is no longer on ${trunk}.`,
+          );
+        if (yield* git.sameBuild(sha))
+          return {
+            sha,
+            message: `Round ${round}'s build is already the game's current build.`,
+          } satisfies GameRunRestoreResult;
+        const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
+        if (!(yield* git.sameBuild(sha)))
+          return yield* no(
+            "restore-incomplete",
+            `Restoring round ${round} did not reproduce its build; see .studio/run.log and the game's git status.`,
+          );
+        // The restored build becomes the run's judged best, so a resumed run
+        // compares its next round against what the creator chose.
+        if (found.loaded.kind === "v3")
+          yield* Effect.promise(() =>
+            writeAtomic(
+              paths(root).run,
+              `${JSON.stringify(State.encodeRunState({ ...state, best: restored, pending: null }), null, 2)}\n`,
+            ),
+          );
+        yield* log(
+          `creator restored round ${round} (${sha.slice(0, 8)}) as ${restored.slice(0, 8)} on ${trunk}`,
+        );
+        return {
+          sha: restored,
+          message: `Round ${round}'s build is now the game's sources (commit ${restored.slice(0, 8)} on ${trunk}). Later commits stay in git history, and restoring a later kept round goes forward again.`,
+        } satisfies GameRunRestoreResult;
+      }).pipe(
+        Effect.catchTags({
+          RunGitError: (cause) =>
+            Effect.fail(
+              no("git-failed", `${cause.message} See .studio/run.log and the game's git status.`),
+            ),
+        }),
+        Effect.ensuring(Effect.sync(() => restoring.delete(root))),
+      );
+    });
+
     const toolRole = (caller: { readonly threadId: ThreadId }): Effect.Effect<"run" | null> =>
       Effect.promise(async () =>
         (await readText(callerFile(caller.threadId)))?.includes('"run"') === true
@@ -962,6 +1127,8 @@ export const layer = (options: { readonly stateDir: string }) => {
       runStatus,
       runStop,
       runSteer,
+      roundDetail,
+      restoreRound,
       resumeInterrupted,
       toolRole,
     });

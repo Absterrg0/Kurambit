@@ -18,6 +18,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameRunStatus]: "game",
   [WS_METHODS.gameRunStop]: "game",
   [WS_METHODS.gameRunSteer]: "game",
+  [WS_METHODS.gameRunRound]: "game",
+  [WS_METHODS.gameRunRestore]: "game",
   [WS_METHODS.gameStatus]: "game",
   [WS_METHODS.gameList]: "game",
   [WS_METHODS.gameCreate]: "game",

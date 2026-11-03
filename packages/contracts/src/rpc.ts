@@ -5,6 +5,10 @@ import {
   GameRunStatusResult,
   GameRunSteerInput,
   GameRunSteerResult,
+  GameRunRoundInput,
+  GameRunRoundDetail,
+  GameRunRestoreInput,
+  GameRunRestoreResult,
   GameRunStopInput,
   GameRunStopResult,
 } from "./gameRun.ts";
@@ -345,6 +349,8 @@ export const WS_METHODS = {
   gameRunStatus: "game.runStatus",
   gameRunStop: "game.runStop",
   gameRunSteer: "game.runSteer",
+  gameRunRound: "game.runRound",
+  gameRunRestore: "game.runRestore",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1481,6 +1487,16 @@ const WsGameRunSteerRpc = Rpc.make(WS_METHODS.gameRunSteer, {
   success: GameRunSteerResult,
   error: gameError,
 });
+const WsGameRunRoundRpc = Rpc.make(WS_METHODS.gameRunRound, {
+  payload: GameRunRoundInput,
+  success: GameRunRoundDetail,
+  error: gameError,
+});
+const WsGameRunRestoreRpc = Rpc.make(WS_METHODS.gameRunRestore, {
+  payload: GameRunRestoreInput,
+  success: GameRunRestoreResult,
+  error: gameError,
+});
 const WsSubscribeGameEventsRpc = Rpc.make(WS_METHODS.subscribeGameEvents, {
   payload: Schema.Struct({}),
   success: GameOperationEvent,
@@ -1506,6 +1522,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameRunStatusRpc,
   WsGameRunStopRpc,
   WsGameRunSteerRpc,
+  WsGameRunRoundRpc,
+  WsGameRunRestoreRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

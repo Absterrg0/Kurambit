@@ -1787,6 +1787,45 @@ const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.gameRunRound]: ({ threadId, round }) =>
+          gameRun.roundDetail(threadId, round).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-round",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+            // Like a package download, the video streams through a capability
+            // minted here: the asset route serves that exact file (path and
+            // inode) with range requests. A video that cannot be signed is just absent.
+            Effect.flatMap(({ detail, videoFile }) => {
+              const video = detail.video;
+              if (videoFile === null || video === null) return Effect.succeed(detail);
+              return issueAssetUrl({
+                resource: { _tag: "media-file", threadId, path: videoFile },
+              }).pipe(
+                Effect.map((asset) => ({ ...detail, video: { ...video, url: asset.relativeUrl } })),
+                Effect.orElseSucceed(() => detail),
+              );
+            }),
+          ),
+        [WS_METHODS.gameRunRestore]: ({ threadId, round }) =>
+          gameRun.restoreRound(threadId, round).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-restore",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameRun.createGame(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),

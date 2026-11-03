@@ -27,6 +27,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
+import { GameRunRoundRow } from "./GameRunRounds";
 
 /** The smallest working surface for a production run: start, status, steer, stop. */
 export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
@@ -278,60 +279,12 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           <h3 className="text-sm font-medium">Rounds</h3>
           <ul className="space-y-2">
             {status?.rounds.map((round) => (
-              <li
+              <GameRunRoundRow
                 key={round.round}
-                className="space-y-1 rounded-lg border border-border bg-card p-3"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium">Round {round.round}</span>
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-2xs ${
-                      round.kept
-                        ? "border-success/40 bg-secondary text-success-foreground"
-                        : "border-border bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {round.kept ? "Kept" : "Not kept"}
-                  </span>
-                  <span className="ml-auto text-2xs text-muted-foreground">
-                    {Math.round(round.durationMs / 1000)}s
-                    {round.linesChanged > 0 ? ` · ${round.linesChanged} lines` : ""}
-                  </span>
-                </div>
-                {round.steer.length > 0 ? (
-                  <ul className="space-y-0.5">
-                    {round.steer.map((asked, index) => (
-                      // oxlint-disable-next-line react/no-array-index-key -- notes may repeat and never reorder
-                      <li key={index} className="text-2xs text-foreground">
-                        You asked: {asked}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <p className="line-clamp-3 text-xs text-muted-foreground">{round.move}</p>
-                {round.verdicts.length > 0 ? (
-                  <ul className="space-y-0.5">
-                    {round.verdicts.map((verdict) => (
-                      <li
-                        key={`${verdict.order}:${verdict.verdict}:${verdict.reason.slice(0, 24)}`}
-                        className="text-2xs text-muted-foreground"
-                      >
-                        <span className="font-mono">{verdict.order}</span> →{" "}
-                        <span className="font-medium text-foreground">{verdict.verdict}</span>
-                        {verdict.reason ? ` — ${verdict.reason}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {round.testerNote ? (
-                  <p className="line-clamp-3 text-2xs text-muted-foreground">
-                    Tester: {round.testerNote}
-                  </p>
-                ) : null}
-                {round.note ? (
-                  <p className="text-2xs text-warning-foreground">{round.note}</p>
-                ) : null}
-              </li>
+                threadRef={threadRef}
+                round={round}
+                live={active}
+              />
             ))}
           </ul>
         </section>

@@ -69,6 +69,18 @@ export const gameEnvironment = {
     idleTtlMs: 60_000,
     refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
   }),
+  // Read when a round row opens, never for every round; a finished round's
+  // evidence does not change, so an open row is not polled.
+  runRound: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:runRound",
+    tag: WS_METHODS.gameRunRound,
+    staleTimeMs: 60_000,
+    idleTtlMs: 60_000,
+  }),
+  runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runRestore",
+    tag: WS_METHODS.gameRunRestore,
+  }),
   runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runStop",
     tag: WS_METHODS.gameRunStop,

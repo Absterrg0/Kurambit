@@ -338,5 +338,54 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
   const untrack = (paths: ReadonlyArray<string>) =>
     exec(root, ["rm", "--cached", "-q", "--ignore-unmatch", "--", ...paths]).pipe(Effect.asVoid);
 
-  return { run, untrack, current };
+  // A kept round's build: its branch tip, provided trunk still contains it.
+  const keptCommit = Effect.fn("RunGit.keptCommit")(function* (branch: string, trunk: string) {
+    const tip = yield* out(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
+    if (tip.length === 0) return null;
+    const contained = yield* exec(root, [
+      "merge-base",
+      "--is-ancestor",
+      tip,
+      `refs/heads/${trunk}`,
+    ]);
+    return contained.code === 0 ? tip : null;
+  });
+
+  // The creator's restore, on a tree already checked clean: the engine
+  // directory becomes `sha`'s (files added since go) as one new commit, so
+  // nothing later is lost. Import sidecars go back too, for a faithful build.
+  const restoreBuild = Effect.fn("RunGit.restoreBuild")(function* (sha: string, message: string) {
+    const restored = yield* exec(
+      root,
+      [
+        "restore",
+        `--source=${sha}`,
+        "--staged",
+        "--worktree",
+        "--",
+        lane,
+        `:(exclude)${lane}/.godot`,
+      ],
+      SLOW_MS,
+    );
+    if (restored.code !== 0) return yield* fail("restore", "restore failed", restored);
+    return yield* commitAll(message);
+  });
+
+  // Whether HEAD's game sources are those of `sha`. A failed diff says no.
+  const sameBuild = (sha: string) =>
+    exec(root, ["diff", "--quiet", sha, "HEAD", "--", ...gamePaths(lane)], SLOW_MS).pipe(
+      Effect.map((r) => r.code === 0),
+    );
+
+  // Every uncommitted change in the tree, untracked files included; run state is ignored.
+  const uncommitted = exec(root, ["status", "--porcelain=v1"], SLOW_MS).pipe(
+    Effect.flatMap((r) =>
+      r.code === 0
+        ? Effect.succeed(r.stdout.split("\n").filter(Boolean))
+        : fail("status", "status failed", r),
+    ),
+  );
+
+  return { run, untrack, current, keptCommit, restoreBuild, sameBuild, uncommitted, summary };
 };

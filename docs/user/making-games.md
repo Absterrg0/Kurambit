@@ -46,9 +46,18 @@ The **Run** tab in the stage drives the whole build: vision, prototypes, a blind
 then round after round of building, playtesting and judging until a ship review passes, the
 run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
 opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
-line says where the run is; the rounds list shows each round's move, whether it was kept, the
-judges' verdicts and the tester's note; role threads link to the sessions that did the work.
-**Stop run** ends it; rejected work stays on its branch.
+line says where the run is; each round in the list says what it tried and whether it was kept,
+tied (inconclusive), rejected or never judged. Open a round to read the evidence: the blind judges'
+verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
+and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
+what happened in a round. Role threads link to the sessions that did the work. **Stop run** ends
+it; rejected work stays on its branch.
+
+To go back to an earlier kept round, stop the run, open the round and choose **Restore this
+round**. The game's sources return to that build as a new commit, so later commits stay in git
+history, and restoring a later kept round goes forward again. A resumed run judges its next
+round against the restored build. Restore refuses while a run is live, while a stopped run is in
+the middle of a round, and while the game has uncommitted changes; it never discards work.
 
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
