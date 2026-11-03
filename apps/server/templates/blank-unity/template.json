@@ -1,0 +1,8 @@
+{
+  "id": "blank-unity",
+  "name": "Blank (Unity)",
+  "description": "An empty Unity 6 project: one main scene with a camera and a light, a GameState and a live StudioProbe, Linux and Windows builds.",
+  "dimension": "3d",
+  "gameplayScene": "Assets/Scenes/Main.unity",
+  "probe": true
+}

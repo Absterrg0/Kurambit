@@ -791,9 +791,18 @@ const make = Effect.gen(function* () {
     args: Record<string, unknown>,
   ): Effect.Effect<string, GameOperationError> => call(root, name, args).pipe(Effect.map(textOf));
 
-  /** The game's engine project directory (godot/ or web/), from the manifest. */
-  const exportDirOf = (root: string) =>
-    projects.read(root).pipe(Effect.map((manifest) => `${manifest.godotProject}/assets/blender`));
+  /**
+   * Where GLBs land in the engine project, from the manifest. Unity imports
+   * only what sits under Assets/, where the template's glTFast reads GLB.
+   */
+  const assetDirOf = (manifest: {
+    readonly godotProject: string;
+    readonly engine: { readonly name: string };
+  }) =>
+    manifest.engine.name === "unity"
+      ? `${manifest.godotProject}/Assets/Blender`
+      : `${manifest.godotProject}/assets/blender`;
+  const exportDirOf = (root: string) => projects.read(root).pipe(Effect.map(assetDirOf));
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
@@ -930,7 +939,7 @@ const make = Effect.gen(function* () {
         // save the .blend source like every other scene-changing call.
         const manifest = yield* projects.read(root);
         const engineDir = manifest.godotProject;
-        const file = input.file ?? `${engineDir}/assets/blender/scene.glb`;
+        const file = input.file ?? `${assetDirOf(manifest)}/scene.glb`;
         if (!file.startsWith(`${engineDir}/`) || !file.endsWith(".glb") || file.includes(".."))
           return yield* opError(
             "blender-export",

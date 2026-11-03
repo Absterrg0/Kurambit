@@ -4,7 +4,7 @@ import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, ModelSelection } from "@kurambit/contracts";
+import type { EnvironmentId, GameEngineId, ModelSelection } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { FolderIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -108,7 +108,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   const [directory, setDirectory] = useState(dialog === "create" ? "~/Games" : "");
   const [brief, setBrief] = useState(draft?.brief ?? "");
   const [artDirection, setArtDirection] = useState("");
-  const [engine, setEngine] = useState<"godot" | "three">(draft?.engine ?? "godot");
+  const [engine, setEngine] = useState<GameEngineId>(draft?.engine ?? "godot");
   const [editingFolder, setEditingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -197,13 +197,13 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
           <DialogHeader>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {isCreate
-                ? "Describe the game; your agent builds it as a native Godot game or a quick three.js browser game."
+                ? "Describe the game; your agent builds it as a native Godot or Unity game, or a quick three.js browser game."
                 : "Continue a game that already lives on this machine."}
             </div>
             <DialogTitle>{isCreate ? "Name your game" : "Open game"}</DialogTitle>
             <DialogDescription>
               {isCreate
-                ? "Every Godot game starts from the same blank native project; every browser game from the same blank three.js project."
+                ? "Every game starts from its engine's blank project: Godot, Unity or three.js."
                 : "Open a game folder containing game.json."}
             </DialogDescription>
           </DialogHeader>
@@ -267,6 +267,24 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
                       <span className="font-medium">three.js browser</span>
                       <span className="block text-xs text-muted-foreground">
                         A quick static browser game, no install step. Web export only.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 px-3 py-2 has-checked:border-primary has-checked:bg-primary/5">
+                    <input
+                      type="radio"
+                      name="game-engine"
+                      value="unity"
+                      checked={engine === "unity"}
+                      onChange={() => setEngine("unity")}
+                      disabled={busy}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="font-medium">Unity native</span>
+                      <span className="block text-xs text-muted-foreground">
+                        A Unity 6 project in C#. Linux and Windows builds. Needs Unity installed
+                        from Game tools and a Unity Personal licence from Unity Hub.
                       </span>
                     </span>
                   </label>

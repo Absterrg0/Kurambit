@@ -166,11 +166,12 @@ function BriefComposer({
             value={[engine]}
             onValueChange={(value) => {
               const next = value[0];
-              if (next === "godot" || next === "three") setEngine(next);
+              if (next === "godot" || next === "three" || next === "unity") setEngine(next);
             }}
           >
             <Toggle value="godot">Godot · native</Toggle>
             <Toggle value="three">three.js · browser</Toggle>
+            <Toggle value="unity">Unity · native</Toggle>
           </ToggleGroup>
           <Button type="button" variant="ghost" size="sm" onClick={onOpenFolder}>
             <FolderOpenIcon aria-hidden />

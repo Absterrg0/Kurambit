@@ -19,6 +19,7 @@ import {
   GameManifest,
   GameOperationError,
   THREE_VIEWPORT,
+  UNITY_VIEWPORT,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameListResult,
@@ -481,6 +482,8 @@ const make = Effect.gen(function* () {
       const expensive = yield* Effect.tryPromise({
         try: async () => {
           if (manifest.engine.name === "three") return { viewport: { ...THREE_VIEWPORT } };
+          // Unity players boot at the lane's fixed resolution; see UNITY_VIEWPORT.
+          if (manifest.engine.name === "unity") return { viewport: { ...UNITY_VIEWPORT } };
           const engineRoot = insideGame(root, manifest.godotProject);
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),

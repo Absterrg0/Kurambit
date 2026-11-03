@@ -84,7 +84,7 @@ export const GameBlenderExportInput = Schema.Struct({
   /**
    * Game-relative destination, which must sit under the engine directory
    * (`godot/` or `web/`) and end with `.glb`. Omitted means
-   * `<engine dir>/assets/blender/scene.glb`.
+   * `<engine dir>/assets/blender/scene.glb` (`unity/Assets/Blender/scene.glb` for Unity).
    */
   file: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
 });

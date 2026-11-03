@@ -122,7 +122,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -133,7 +133,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb. The .blend source is saved in the game with the export. Run game_import after.",
+    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,

@@ -23,6 +23,8 @@ const textFileExtensions = [
   ".html",
   ".css",
   ".js",
+  // Unity's ProjectSettings.asset carries the product name.
+  ".asset",
 ];
 
 export const isTemplateTextFile = (relativePath: string): boolean =>
@@ -81,7 +83,7 @@ const copyFailure = (path: string) => (cause: unknown) =>
   new GameOperationError({ operation: "copy-template", path, reason: "io", cause });
 
 /**
- * Copies a starter template's engine tree (`godot/`, `web/`, whichever the
+ * Copies a starter template's engine tree (`godot/`, `web/`, `unity/`, whichever the
  * template ships) and `TEMPLATE.md` into a new game folder, substituting the
  * game name in text files.
  */
@@ -103,7 +105,7 @@ export const copyTemplateIntoGame = Effect.fn("GameTemplates.copyIntoGame")(func
       path: input.templateId,
       reason: "unknown-template",
     });
-  for (const tree of ["godot", "web"]) {
+  for (const tree of ["godot", "web", "unity"]) {
     const treeSource = path.join(templateDirectory, tree);
     const treeExists = yield* fs.exists(treeSource).pipe(Effect.orElseSucceed(() => false));
     if (!treeExists) continue;

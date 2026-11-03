@@ -2,6 +2,8 @@ import {
   GAME_TEMPLATES,
   THREE_PINNED_VERSION,
   THREE_PROJECT_DIRECTORY,
+  UNITY_PINNED_VERSION,
+  UNITY_PROJECT_DIRECTORY,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
@@ -29,8 +31,16 @@ export function scaffoldManifest(input: GameCreateInput): GameManifest {
     engine:
       engine === "three"
         ? { name: "three", version: THREE_PINNED_VERSION }
-        : { name: "godot", version: "4.7.2" },
-    godotProject: engine === "three" ? THREE_PROJECT_DIRECTORY : "godot",
+        : engine === "unity"
+          ? { name: "unity", version: UNITY_PINNED_VERSION }
+          : { name: "godot", version: "4.7.2" },
+    // The engine project directory for every lane, despite the legacy name.
+    godotProject:
+      engine === "three"
+        ? THREE_PROJECT_DIRECTORY
+        : engine === "unity"
+          ? UNITY_PROJECT_DIRECTORY
+          : "godot",
     assets: [],
   };
 }
@@ -54,14 +64,21 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   const manifest = scaffoldManifest(input);
   const engine = createEngine(input);
   const projectLine =
-    engine === "three"
+    engine === "unity"
       ? `# Kurambit project
+
+Build BRIEF.md's game in Unity ${UNITY_PINNED_VERSION} (C#, Input System). unity/ is the project: unity/Assets/Scenes/Main.unity is the main scene, unity/Assets/Scripts for game code, unity/Assets/Kurambit/StudioProbe.cs stays as shipped.
+
+Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
+`
+      : engine === "three"
+        ? `# Kurambit project
 
 Build BRIEF.md's game with three.js (vendored in web/vendor, no install step). web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `
-      : `# Kurambit project
+        : `# Kurambit project
 
 Build BRIEF.md's game in Godot 4.7 (GDScript, Compatibility). godot/ is the project.
 
@@ -73,6 +90,6 @@ Use the game_* tools to check, play, export and package the game; never run Godo
     "AGENTS.md": `${projectLine}\n${CREATOR_SESSION_SECTION}`,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore":
-      "builds/\ngodot/.godot/\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\n.studio/player-report.md\n.studio/pick.txt\n.studio/next.md\n.studio/ship.md\n.studio/exports.json\n.studio/final-video.json\n.studio/tester-*.md\n.studio/reviewer-*.md\n.studio/worktrees/\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
+      "builds/\ngodot/.godot/\nunity/[Ll]ibrary/\nunity/[Tt]emp/\nunity/[Ll]ogs/\nunity/[Uu]ser[Ss]ettings/\nunity/[Oo]bj/\nunity/*.csproj\nunity/*.sln\n*.blend1\n.studio/run.json\n.studio/rounds.jsonl\n.studio/stop\n.studio/run.log\n.studio/bot-results.jsonl\n.studio/player-report.md\n.studio/pick.txt\n.studio/next.md\n.studio/ship.md\n.studio/exports.json\n.studio/final-video.json\n.studio/tester-*.md\n.studio/reviewer-*.md\n.studio/worktrees/\nPICK-NOTES.md\nJUDGE-NOTES.md\n",
   };
 }
