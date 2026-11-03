@@ -122,7 +122,7 @@ export const builderFirst = (whole: boolean, lane: string, direction: string): s
 // A builder that finished the direction early otherwise spends its follow-ups
 // rewriting NOTES.md until the no-change limit ends the block.
 export const builderMore = (minutes: number, direction: string): string =>
-  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nIf it is all done, play your build for a minute with game_explore_start/act/close and fix the most important problem you see in how it plays, feels or looks; only a change to game files counts as progress. Do not redo what works. No subagents. No commits.`;
+  `${minutes} minutes left in this block. Keep going with what's still undone from this block's direction:\n${direction}\nIf it is all done, play your build for a minute with game_explore_start/act/close: first replay what the direction changed and keep it working, then fix a problem outside it that you saw in play, in small changes. If play shows nothing worth changing, say so and stop; notes alone end the block. Do not redo what works. No subagents. No commits.`;
 
 // The service records every bot run itself in .studio/bot-results.jsonl, so
 // the tester never appends there. With a Jev key the tester also explores.

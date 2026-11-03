@@ -418,19 +418,16 @@ const LIBRARY_NOT_COPIED = [
 ];
 
 /**
- * A worktree checkout starts with no Library/, which would cost a full asset
- * import. It gets a copy-on-write copy of its main checkout's import cache
- * instead, so Unity reimports only what differs at this commit. The copy is
- * made while no editor of ours has the main project open, and lands whole or
- * not at all. Removing the worktree removes the copy with it.
- */
-/**
  * Whether any process on this machine has `projectDir` open as a Unity
- * project: the user's own editor, or another Kurambit server's. Read-only: it
- * reads /proc command lines and signals nothing.
+ * project: the user's own editor, or another Kurambit server's. Paths are
+ * compared real (git reports the main checkout through symlinks resolved, an
+ * editor may name it through a link), and a relative -projectPath is read
+ * against that process's own working directory. Read-only: it reads /proc
+ * and signals nothing.
  */
 const editorHasProjectOpen = async (projectDir: string): Promise<boolean> => {
-  const want = NodePath.resolve(projectDir);
+  const real = (path: string) => NodeFSP.realpath(path).catch(() => NodePath.resolve(path));
+  const want = await real(projectDir);
   for (const pid of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
     if (!/^\d+$/.test(pid)) continue;
     const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`).catch(() => null);
@@ -438,16 +435,21 @@ const editorHasProjectOpen = async (projectDir: string): Promise<boolean> => {
     const args = raw.toString("utf8").split("\0");
     const at = args.findIndex((arg) => arg.toLowerCase() === "-projectpath");
     const value = at >= 0 ? args[at + 1] : undefined;
-    if (value !== undefined && value !== "" && NodePath.resolve(value) === want) return true;
+    if (value === undefined || value === "") continue;
+    const cwd = await NodeFSP.readlink(`/proc/${pid}/cwd`).catch(() => "/");
+    if ((await real(NodePath.resolve(cwd, value))) === want) return true;
   }
   return false;
 };
 
 /**
- * Copies the main checkout's import cache into a worktree that has none.
- * Answers why it did not, or null when it copied: an editor still writing
- * the main Library (the user's own, another server's, or ours still exiting)
- * could hand the copy a torn asset database, so the worktree then imports cold.
+ * A worktree checkout starts with no Library/, which would cost a full asset
+ * import. It gets a copy-on-write copy of its main checkout's import cache
+ * instead, so Unity reimports only what differs at this commit. The copy
+ * lands whole or not at all, and removing the worktree removes it. Answers
+ * why it did not copy, or null when it did: while any editor has the main
+ * project open (the user's own, or another server's; ours is reaped before
+ * this) its asset database may be mid-write, so the worktree imports cold.
  */
 const seedLibrary = async (
   mainProjectDir: string,
