@@ -1,8 +1,8 @@
 {
   "id": "blank-unity",
   "name": "Blank (Unity)",
-  "description": "An empty Unity 6 project: one main scene with a camera and a light, a GameState and a live StudioProbe, Linux and Windows builds.",
+  "description": "An empty Unity 6 game inside a demo shell (title, pause, settings, controls, end and credits screens), HUD, feel, animation, camera and level kits, a live StudioProbe, Linux and Windows builds.",
   "dimension": "3d",
-  "gameplayScene": "Assets/Scenes/Main.unity",
+  "gameplayScene": "Assets/Scenes/Game.unity",
   "probe": true
 }

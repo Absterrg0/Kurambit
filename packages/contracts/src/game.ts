@@ -126,9 +126,10 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     id: "blank-unity",
     name: "Blank (Unity)",
     description:
-      "An empty Unity 6 project: one main scene with a camera and a light, a GameState and a live StudioProbe, Linux and Windows builds.",
+      "An empty Unity 6 game inside a demo shell (title, pause, settings, controls, end and credits screens), HUD, feel, animation, camera and level kits, a live StudioProbe, Linux and Windows builds.",
     dimension: "3d",
-    gameplayScene: "Assets/Scenes/Main.unity",
+    // Main.unity is the shell's entry; the check plays Game.unity, which boots straight into a run around it.
+    gameplayScene: "Assets/Scenes/Game.unity",
     probe: true,
   },
 ];
