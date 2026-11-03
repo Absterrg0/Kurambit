@@ -68,6 +68,7 @@ import {
 } from "@kurambit/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  isNestedUnderLiveParent,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -456,10 +457,14 @@ function useSidebarThreads(input: {
     gameProjectKeys,
   } = input;
   const allThreads = useThreadShells();
+  const liveThreadIds = new Set<string>(
+    allThreads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
+  );
   const gameThreads = allThreads.filter(
     (thread) =>
       thread.deletedAt === null &&
       thread.archivedAt === null &&
+      !isNestedUnderLiveParent(thread, liveThreadIds) &&
       gameProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
   );
   const gameThreadsByProjectKey = new Map<string, EnvironmentThreadShell[]>();

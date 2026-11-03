@@ -95,6 +95,8 @@ export interface ThreadLaunchInput {
   };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+  /** Groups the new thread under this thread as a `role` child; see the lineage contract. */
+  readonly parentThreadId?: ThreadId;
 }
 
 type PreparationInput = Pick<
@@ -919,6 +921,9 @@ const make = Effect.gen(function* () {
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),
+                ...(input.parentThreadId === undefined
+                  ? {}
+                  : { parentThreadId: input.parentThreadId }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
               });

@@ -109,7 +109,7 @@ const make = Effect.gen(function* () {
       }
       const child = yield* projections.getThread(event.threadId);
       const parentThreadId = child.lineage.parentThreadId;
-      if (parentThreadId === null) return;
+      if (parentThreadId === null || child.lineage.relationshipToParent !== "subagent") return;
       const request = yield* projections.getRuntimeRequest(event.threadId, event.payload.id);
       const key = `${parentThreadId}:${event.payload.id}`;
       const messageId = MessageId.make(`message:delegated-task-question:${key}`);

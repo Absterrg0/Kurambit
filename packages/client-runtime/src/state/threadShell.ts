@@ -6,7 +6,12 @@ import type {
   ScopedThreadRef,
   ThreadId,
 } from "@kurambit/contracts";
-import { isProviderNativeSubagentThread, OrchestrationV2ThreadShell } from "@kurambit/contracts";
+import {
+  bubblesRequestsToParent,
+  isNestedUnderLiveParent,
+  isProviderNativeSubagentThread,
+  OrchestrationV2ThreadShell,
+} from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 
@@ -52,7 +57,7 @@ function subagentRequest(thread: OrchestrationV2ThreadShell): PendingSubagentReq
   if (
     kind === undefined ||
     kind === "auth_refresh" ||
-    thread.lineage.relationshipToParent !== "subagent" ||
+    !bubblesRequestsToParent(thread) ||
     isProviderNativeSubagentThread(thread) ||
     !isChildRunLive(thread)
   ) {
@@ -72,7 +77,7 @@ export function pendingSubagentRequestsByThread(
     byId ??= new Map(threads.map((thread) => [thread.id, thread] as const));
     const seen = new Set<ThreadId>([child.id]);
     let current: OrchestrationV2ThreadShell | undefined = child;
-    while (current?.lineage.relationshipToParent === "subagent") {
+    while (current !== undefined && bubblesRequestsToParent(current)) {
       const parentId: ThreadId | null = current.lineage.parentThreadId;
       if (parentId === null || seen.has(parentId)) break;
       seen.add(parentId);
@@ -288,7 +293,7 @@ export function createEnvironmentThreadShellAtoms(input: {
       const children = new Map<ThreadId, OrchestrationV2ThreadShell[]>();
       for (const thread of get(environmentThreadsAtom(ref.environmentId))) {
         const parent = thread.lineage.parentThreadId;
-        if (parent === null || thread.lineage.relationshipToParent !== "subagent") continue;
+        if (parent === null || !bubblesRequestsToParent(thread)) continue;
         const siblings = children.get(parent);
         if (siblings) siblings.push(thread);
         else children.set(parent, [thread]);
@@ -393,9 +398,10 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next: EnvironmentThreadShell[] = [];
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
-      for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
-          continue;
+      const threads = get(environmentThreadsAtom(environmentId));
+      const live = new Set<string>(threads.filter((t) => t.deletedAt === null).map((t) => t.id));
+      for (const thread of threads) {
+        if (thread.archivedAt !== null || isNestedUnderLiveParent(thread, live)) continue;
         next.push(scopedThread(environmentId, thread, subagentRequests));
       }
     }

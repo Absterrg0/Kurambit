@@ -482,6 +482,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                   root,
                   lane: state.lane,
                   projectId: d.projectId,
+                  creator: d.creator,
                   runId: state.runId,
                   selection: d.selection,
                   runtimeMode: d.runtimeMode,

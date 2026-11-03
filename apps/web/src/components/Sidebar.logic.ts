@@ -8,7 +8,12 @@ import {
 } from "@kurambit/client-runtime/state/runtime";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { threadSearchMatchKey } from "@kurambit/client-runtime/state/thread-search";
-import type { ContextMenuItem, EnvironmentId, ThreadId } from "@kurambit/contracts";
+import {
+  isNestedUnderLiveParent,
+  type ContextMenuItem,
+  type EnvironmentId,
+  type ThreadId,
+} from "@kurambit/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
 import { planPinnedReorder } from "@kurambit/client-runtime/state/thread-sort";
@@ -513,20 +518,18 @@ export function buildMultiSelectThreadContextMenuItems(input: {
   ];
 }
 
-export function isSidebarSubagentThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
-  return thread.lineage.relationshipToParent === "subagent";
-}
-
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
+    id: string;
     environmentId: string;
     projectId: string;
   },
 >(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
+  const listed = new Set<string>(threads.map((thread) => thread.id));
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      !isSidebarSubagentThread(thread) &&
+      !isNestedUnderLiveParent(thread, listed) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
@@ -1309,7 +1312,7 @@ export function sortLogicalProjectsForSidebar<
 
 export function sortSidebarV2ProjectGroups<
   TProject extends LogicalSidebarProject,
-  TThread extends ScopedSidebarThread & Pick<SidebarThreadSummary, "lineage">,
+  TThread extends ScopedSidebarThread & Pick<SidebarThreadSummary, "lineage"> & { id: string },
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],

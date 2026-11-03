@@ -8,7 +8,7 @@ import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadShells } from "../../state/entities";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
-import type { EnvironmentId, GameSummary } from "@kurambit/contracts";
+import { isNestedUnderLiveParent, type EnvironmentId, type GameSummary } from "@kurambit/contracts";
 import { KurambitMark } from "../brand/KurambitBrand";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -38,8 +38,16 @@ export function GamesHome() {
   const threads = useThreadShells();
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
+  const liveThreadIds = new Set<string>(
+    threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
+  );
   const newestThreads = newestThreadByProject(
-    threads.filter((thread) => thread.archivedAt === null && thread.deletedAt === null),
+    threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        thread.deletedAt === null &&
+        !isNestedUnderLiveParent(thread, liveThreadIds),
+    ),
   );
   const cards = games
     .map((game) => ({
