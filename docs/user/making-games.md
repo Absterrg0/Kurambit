@@ -25,7 +25,9 @@ downloads Unity's official CLI (checked against its published hash) and uses it 
 licence on this machine: open Unity Hub, sign in, and add a free Unity Personal licence under
 **Preferences → Licenses**. Kurambit reads that the licence is active and tells you when it is
 missing or needs a refresh; it never asks for or stores your Unity account. A Unity editor uses 2-3
-GB of memory, so Kurambit keeps at most one open at a time and closes it after ten idle minutes.
+GB of memory, so Kurambit keeps at most one open at a time and closes it after ten idle minutes;
+while one Unity game is checking, playing or exporting, another Unity game's request reports the
+editor busy instead of closing it.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.
@@ -45,7 +47,8 @@ through the same tools, with a Web export only. The run loop, Play, preview and 
 the same on both. Unity native is a Unity 6 project in C#: the agent edits it through one live Unity
 editor on a private display, plays real Linux builds of it, and exports Linux and Windows builds.
 Unity games have no Web export, so Play and web packaging are not available for them, and bot runs
-do not play them yet.
+do not play them yet. A production run's prototype and blind-comparison players work in separate
+checkouts of the game, which cannot open a Unity editor yet, so those steps cannot play a Unity game.
 
 To continue an existing game, choose its card under **Your games**, or use **Open game** and pick a
 folder that contains `game.json`. Opening a game resumes its latest session instead of starting an
