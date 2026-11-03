@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[node name="Game" type="Node3D"]
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(0, 2, 5)
+current = true
+
+[node name="Light" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-45, -30, 0)

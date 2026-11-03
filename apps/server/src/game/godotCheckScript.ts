@@ -131,14 +131,17 @@ func _run_entry(scene_path: String, label: String, noun: String) -> void:
 	if not is_instance_valid(instance):
 		_add_error(scene_path, "The %s freed itself during its first %d physics frames." % [noun, PHYSICS_FRAMES])
 		return
-	await _lint_tree(instance, scene_path)
+	await _lint_tree(instance, scene_path, label)
 	if instance.get_parent() != null:
 		instance.queue_free()
 		# Let the freed tree leave the scene before the next entry adds its own.
 		await process_frame
 
-func _lint_tree(instance: Node, scene_path: String) -> void:
-	if not _tree_has_camera(instance):
+func _lint_tree(instance: Node, scene_path: String, label: String) -> void:
+	# A main scene that is only a menu around a separately declared gameplay
+	# scene has no camera of its own; the gameplay entry is where one belongs.
+	var menu_only := label == "main" and not _gameplay_scene.is_empty() and _gameplay_scene != _main_scene
+	if not menu_only and not _tree_has_camera(instance):
 		_add_warning(scene_path, "No Camera2D or Camera3D in this scene tree.")
 	_lint_nodes(instance, scene_path)
 	_lint_control_fonts(instance, scene_path)

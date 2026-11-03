@@ -132,7 +132,10 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `game.json` and `BRIEF.md` describe the game.
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
   `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
-  and vendored `vendor/three.*.js`).
+  and vendored `vendor/three.*.js`). A new Godot game starts inside a demo shell: a title
+  screen, pause (Esc or P), settings for volume and fullscreen, a win or lose screen with Retry,
+  and credits. The gameplay lives in `godot/scenes/game.tscn`, and the credits screen shows
+  `godot/credits.txt`.
 - Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
   Unity 6000.6.7f1. Its `Library/`, `Temp/` and `Logs/` folders are Unity's caches and are not
   committed. A Unity export is a folder: copy all of `builds/linux/` or `builds/windows/`, not just

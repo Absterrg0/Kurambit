@@ -23,3 +23,6 @@ play rules (Apache-2.0, ramenvr/autopilot).
    on a screen you did not see.
 5. A session that did not play cannot judge. If you did not play, say so
    and judge nothing.
+6. A missing or broken title, pause, end or retry flow is a defect, and so
+   is an action the game does not answer: judge the feel (shake, flash,
+   sound, a pop) of every player action you tried.

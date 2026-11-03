@@ -106,10 +106,10 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     id: "blank",
     name: "Blank",
     description:
-      "An empty Godot project: a camera, a light, a live state probe and Web, Windows and Linux export presets.",
+      "An empty Godot game inside a demo shell (title, pause, settings, end and credits screens), a game feel kit, a live state probe and Web, Windows and Linux export presets.",
     dimension: "3d",
-    // Blank has no menu: its main scene is the game, and the check runs it once.
-    gameplayScene: "res://scenes/main.tscn",
+    // The main scene is the shell's menu; the check also runs the gameplay scene it instances.
+    gameplayScene: "res://scenes/game.tscn",
     probe: true,
   },
   {

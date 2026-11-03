@@ -66,11 +66,17 @@ export const artFacts = (facts: string): string =>
 export const artRedo = (defects: string, lane: string): string =>
   `${TOOL_RULE}${SKILL_LINE}An independent art director reviewed the key art and the asset set and asked for one redo. Its defect list:\n${defects}\n\nFix every listed defect: re-render the named files (the key art VISION.md names, files under ${laneAssets(lane)}) held to the look VISION.md describes, keep each file's path, and update ASSETS.md where a file changed. Look at each new render before you finish. This is the only redo. Do not write game code. Do not use subagents. Do not commit.`;
 
+// Games made from the Godot starter carry a demo shell; older ones do not, so the line defers to TEMPLATE.md.
+const shellLine = (lane: string): string =>
+  lane === "godot"
+    ? "When TEMPLATE.md describes the demo shell, use it: gameplay goes in godot/scenes/game.tscn, a run ends with GameState.win or GameState.lose, every player action gets an answer through Juice, values that must survive a retry go in KEEP_ACROSS_RUNS, and you build no menus of your own. "
+    : "";
+
 export const proto = (lane: string): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. Keep the boot clean. Do not use subagents. Do not commit.`;
+  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${shellLine(lane)}Keep the boot clean. Do not use subagents. Do not commit.`;
 
 export const firstDirection = (lane: string): string =>
-  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. End with something a player notices in the first minute; game files under ${lane}/ only.`;
+  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${shellLine(lane)}End with something a player notices in the first minute; game files under ${lane}/ only.`;
 
 const concreteAsk = (lane: string) =>
   `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane}/; notes, bots and skill files do not count.`;

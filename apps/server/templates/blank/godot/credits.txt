@@ -1,0 +1,6 @@
+# The credits screen shows this file, one line per credit; lines starting
+# with # are skipped and blank lines add space. ASSETS.md is the full record
+# of every file's source and licence; this is what the player reads. Every
+# asset whose licence asks for attribution gets its line here.
+Made with the Godot Engine
+godotengine.org/license
