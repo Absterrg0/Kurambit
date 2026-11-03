@@ -40,9 +40,17 @@ export const pngSize = async (path: string): Promise<{ w: number; h: number } | 
       head.toString("latin1", 12, 16) !== "IHDR"
     )
       return null;
+    // A truncated frame (a capture cut off mid-write) has no IEND trailer, and
+    // one undecodable input fails the whole ffmpeg tile.
+    const { size } = await handle.stat();
+    const tail = Buffer.alloc(12);
+    const { bytesRead: tailRead } = await handle.read(tail, 0, 12, Math.max(0, size - 12));
+    if (tailRead < 12 || tail.toString("latin1", 4, 8) !== "IEND") return null;
     return { w: head.readUInt32BE(16), h: head.readUInt32BE(20) };
+  } catch {
+    return null;
   } finally {
-    await handle.close();
+    await handle.close().catch(() => undefined);
   }
 };
 
