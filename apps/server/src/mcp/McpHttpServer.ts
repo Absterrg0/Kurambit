@@ -1,5 +1,7 @@
 import {
   GameToolkit,
+  GameAssetsSearchTool,
+  GameAssetsSearchToolkit,
   GameBlenderLookTool,
   GameBlenderLookToolkit,
   GameUnityScreenshotTool,
@@ -799,6 +801,26 @@ const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook
   );
 });
 
+const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* GameAssetsSearchToolkit;
+  yield* registerImageTool(
+    GameAssetsSearchTool,
+    (payload, options) =>
+      built
+        .handle("game_assets_search", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "assets-search",
+    (error) => (error instanceof Error ? error.message : "Game assets search failed."),
+  );
+});
+
 const registerGameUnityScreenshot = Effect.fn("McpHttpServer.registerGameUnityScreenshot")(
   function* () {
     const games = yield* GameService.GameService;
@@ -937,8 +959,14 @@ export const layerGameUnityScreenshot = imageToolRegistration(
   GameHandlers.layerUnityScreenshot,
 );
 
+export const layerGameAssetsSearch = imageToolRegistration(
+  registerGameAssetsSearch(),
+  GameHandlers.layerAssetsSearch,
+);
+
 export const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
+  layerGameAssetsSearch,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );

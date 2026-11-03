@@ -183,6 +183,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "thread-dispatch",
       "invalid-input",
       "license-missing",
+      "source-changed",
+      "unsafe-archive",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -216,6 +218,10 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
       "license-missing":
         "Unity needs an active licence on this machine. Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses, then retry. Kurambit never stores Unity credentials.",
+      "source-changed":
+        "The source changed: this library pack no longer matches the SHA-256 it was pinned with, so its bytes were not used. Pick another pack.",
+      "unsafe-archive":
+        "This library pack names an unsafe path or link, or unpacks past the size limits, so nothing from it was kept. Pick another pack.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
