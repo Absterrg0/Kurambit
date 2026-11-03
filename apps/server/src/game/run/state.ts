@@ -55,6 +55,12 @@ export type Evidence = typeof Evidence.Type;
 const Side = Schema.Literals(["x", "y"]);
 export type Side = typeof Side.Type;
 
+/**
+ * A comparator's checkout: one parentless commit of the empty tree, so its
+ * folder, HEAD and log hold nothing of either build or of the run.
+ */
+export const BLANK = "blank";
+
 const RoleStep = Schema.Struct({
   kind: Schema.Literal("role"),
   id: Schema.Number,
@@ -62,7 +68,7 @@ const RoleStep = Schema.Struct({
   title: Schema.String,
   // null launches a fresh thread; otherwise a follow-up turn on that thread.
   thread: Schema.NullOr(ThreadId),
-  // A sha plays a T3 worktree at that commit; null works in the game root.
+  // A sha plays a T3 worktree at that commit; BLANK an empty one of its own; null works in the game root.
   at: Schema.NullOr(Schema.String),
   prompt: Schema.String,
   // A duration, not a deadline: a resumed step gets a fresh cap after a pause.
@@ -72,8 +78,14 @@ const RoleStep = Schema.Struct({
   source: Schema.Boolean,
   bots: Schema.Boolean,
   release: Schema.Boolean,
+  // Game-root files a BLANK worktree gets before its first turn, under the names it reads them by.
+  copy: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String })).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
   // Where the runner draws this thread's explore frames as one sheet, game-relative; "" draws none.
   sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // Total explore input this thread may use across its sessions; 0 sets none.
+  inputCapMs: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
   // Written by the driver once the turn exists, so a resume waits on it.
   attached: Schema.NullOr(Schema.Struct({ threadId: ThreadId, runId: RunId })),
 });

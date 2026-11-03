@@ -92,7 +92,9 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the GameRun loop launches get play-level tools only (status, check, import,
-export, explore start/act/close, bot run/view, blender, unity and asset library tools). The `game_unity_*` tools
+export, explore start/act/close, bot run/view, blender, unity and asset library tools); every
+other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
+`EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
 `game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
 editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
@@ -124,7 +126,12 @@ comparators run, the tester's last play bot plays both builds in fresh worktrees
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and run.log and the comparison record say why. A failing bot never drops the round. The only hard
+and run.log and the comparison record say why. A failing bot never drops the round. Comparators
+never work in the game folder, where run.json and run.log map every sample to its sha: each gets a
+worktree of its own at one parentless empty-tree commit, holding only its two frame sheets under
+neutral names, and writes `.compare/verdict.md`; the root keeps the write-ups once all verdicts are
+in. That worktree still links to the game's repository, so its history and the root stay reachable
+by path; what is blind by construction is the comparator's folder, HEAD and prompt. The only hard
 checks are boots, exports and keep-or-revert verdicts. A fresh art director judges the art stage's
 renders against the vision and may ask for one bounded redo (`ART: REDO`) before the art is
 committed; a missing verdict keeps the art.

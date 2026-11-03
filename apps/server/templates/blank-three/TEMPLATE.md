@@ -50,6 +50,11 @@ demo needs, so build the game, not the menus.
   console warning, so build those in `start`. Name the values that must
   outlive a run in `export const KEEP_ACROSS_RUNS = ["best"]`; they persist
   in localStorage between visits and Settings shows "Reset progress".
+- Name every model and texture in `export const ASSETS = { knight:
+"assets/models/knight.glb" }`: the shell loads them behind a loading bar
+  before the title, and `ctx.assets.model("knight")` returns a fresh copy
+  (with `.animations`) and `ctx.assets.texture(name)` a texture, ready in
+  `start`. A path that fails to load is reported as a page error.
 - `GameState.state` reads `"title"`, `"playing"`, `"paused"` or `"ended"`
   (`GameState.result` is `"won"` or `"lost"` after a run). The shell sets it;
   the game reads it.
@@ -76,7 +81,7 @@ The comment block at the top of the file shows each call.
 
 ## Characters and cameras
 
-`animate(gltf)` (`web/shell/animate.js`) plays a GLB's clips by state: call
+`animate(ctx.assets.model("hero"))` (`web/shell/animate.js`) plays a model's clips by state: call
 `hero.play("idle" | "walk" | "run" | "jump" | "fall" | "attack" | "hit" |
 "die", { speed })` every frame and it crossfades, returns from one-shots and
 falls back (run to walk to idle) when a clip is missing. `followCamera2D`

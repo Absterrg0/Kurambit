@@ -2,6 +2,7 @@
 // pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
 import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
 import * as Roles from "./roles.ts";
+import { BLANK } from "./state.ts";
 import type {
   Block,
   BotFact,
@@ -112,6 +113,8 @@ export type Applied = {
   readonly state: RunState;
   readonly logs: ReadonlyArray<string>;
   readonly files: ReadonlyArray<{ readonly path: string; readonly text: string }>;
+  /** Role threads with no turn left, whose worktrees the driver now removes. */
+  readonly release: ReadonlyArray<ThreadId>;
 };
 
 // ── Declared lines. Code never interprets any other prose. ─────────────────
@@ -205,7 +208,9 @@ const role = (id: number, spec: RoleSpec): Step => ({
   source: false,
   bots: false,
   release: false,
+  copy: [],
   sheet: "",
+  inputCapMs: 0,
   attached: null,
   ...spec,
 });
@@ -285,9 +290,13 @@ const lastSample = (c: Compare, side: Side): Sample | null =>
 const usable = (s: Sample | null) =>
   s !== null && s.phase === "done" && validatePlayEvidence(s.evidence, s.evidence) === null;
 const sampleFile = (s: Pick<Sample, "label">) => `.studio/play-${s.label}.md`;
+// The game root keeps each comparator's write-up here once the comparison is over.
 const judgeFile = (j: Pick<Judge, "id">) => `.studio/comparisons/${j.id}.md`;
-// Named by the sample's neutral label, like its report: the name never says which build it shows.
 const sheetFile = (s: Pick<Sample, "label">) => `.studio/comparisons/frames-${s.label}.jpg`;
+// A comparator sees only these names in its own BLANK worktree; none carries a
+// label, judge id or sha, and A and B follow its order, not the builds.
+const VERDICT = ".compare/verdict.md";
+const SHEET = { a: ".compare/sheet-a.jpg", b: ".compare/sheet-b.jpg" } as const;
 
 type CompareMove =
   | { readonly kind: "sample"; readonly side: Side; readonly current: Sample | null }
@@ -407,6 +416,7 @@ const compareStep = (
         at,
         prompt: Roles.samplePlay(c.question, sampleFile(s)),
         capMs: CAP.judge,
+        inputCapMs: Roles.SAMPLE_INPUT_MS,
       });
       return { cmp: { ...c, samples: [...c.samples, s] }, step, logs: [] };
     }
@@ -421,6 +431,7 @@ const compareStep = (
           at,
           prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
           capMs: CAP.judge,
+          inputCapMs: Roles.SAMPLE_INPUT_MS,
         }),
         logs: [],
       };
@@ -431,6 +442,9 @@ const compareStep = (
       at,
       prompt: Roles.sampleWrite(sampleFile(s)),
       capMs: CAP.write,
+      // After a restart only this turn re-registers the thread's cap, and a
+      // model that plays on here would void the sample.
+      inputCapMs: Roles.SAMPLE_INPUT_MS,
       read: [sampleFile(s)],
       release: true,
       sheet: sheetFile(s),
@@ -455,22 +469,28 @@ const compareStep = (
         return `Recorded play: ${JSON.stringify(s?.evidence ?? null)}\n${s?.notes ?? ""}${botReport(c, side)}`;
       };
       const other: Side = move.aIs === "x" ? "y" : "x";
+      const sheets = sheetsShown(c);
       const step = role(id, {
         role: `compare-${j.id}`,
         title: "studio blind comparison",
+        at: BLANK,
+        copy: sheets
+          ? [
+              { from: lastSample(c, move.aIs)!.sheet, to: SHEET.a },
+              { from: lastSample(c, other)!.sheet, to: SHEET.b },
+            ]
+          : [],
         prompt: Roles.compare(
           c.question,
           report(move.aIs),
           report(other),
           j.aFirst,
-          judgeFile(j),
+          VERDICT,
           botsShown(c),
-          sheetsShown(c)
-            ? { a: lastSample(c, move.aIs)!.sheet, b: lastSample(c, other)!.sheet }
-            : null,
+          sheets ? SHEET : null,
         ),
         capMs: CAP.write,
-        read: [judgeFile(j)],
+        read: [VERDICT],
       });
       return { cmp: { ...c, judges: [...c.judges, j] }, step, logs: [] };
     }
@@ -479,16 +499,22 @@ const compareStep = (
       role: `compare-${j.id}`,
       title: "studio blind comparison",
       thread: j.thread,
-      prompt: Roles.correct(judgeFile(j)),
+      at: BLANK,
+      prompt: Roles.correct(VERDICT),
       capMs: CAP.write,
-      read: [judgeFile(j)],
+      read: [VERDICT],
     });
     return { cmp: c, step, logs: [] };
   }
   throw new Error("compareStep called on a finished comparison");
 };
 
-const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
+const applyCompare = (
+  c: Compare,
+  res: StepResult,
+  logs: string[],
+  release: ThreadId[],
+): Compare => {
   if (res.kind === "bot") {
     const move = compareMove(c);
     if (move.kind !== "bot") return c;
@@ -535,7 +561,7 @@ const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
     logs.push(`comparator ${j.id} could not finish`);
     return { ...c, judges: c.judges.with(ji, { ...j, phase: "done" }) };
   }
-  const text = textOf(res, judgeFile(j));
+  const text = textOf(res, VERDICT);
   const verdict = parseCompare(text);
   const next: Judge =
     verdict === null && j.phase === "compare"
@@ -548,13 +574,28 @@ const applyCompare = (c: Compare, res: StepResult, logs: string[]): Compare => {
           reason: reasonsAfter(text, /^COMPARE:\s*(A|B|TIE)\s*$/i),
           notes: text,
         };
+  if (next.phase === "done") release.push(res.threadId);
   if (next.phase === "done" && next.verdict === "NONE" && j.attempt === 0)
     logs.push(`comparator gave no verdict (A=${j.aIs}); retrying once`);
   return { ...c, judges: c.judges.with(ji, next) };
 };
 
-// Written only after the verdicts, so the build mapping is never on disk
-// while a comparator works.
+// The comparison's record, written once the verdicts are in, with each
+// comparator's write-up. The build mapping is in the game root all along
+// (run.json and run.log name every sample's sha); comparators stay blind by
+// working outside it, in BLANK worktrees that hold only their neutral files.
+const comparisonFiles = (
+  tag: string,
+  id: string,
+  c: Compare,
+  gate: string | null,
+  names: Record<Side, string>,
+) => [
+  comparisonFile(tag, id, c, gate, names),
+  ...c.judges.flatMap((j) =>
+    j.notes.length === 0 ? [] : [{ path: judgeFile(j), text: `${j.notes}\n` }],
+  ),
+];
 const comparisonFile = (
   tag: string,
   id: string,
@@ -757,6 +798,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           role: `compare-${j?.id ?? "select"}`,
           title: "studio blind comparison",
           thread: j?.thread ?? null,
+          at: BLANK,
           prompt: Roles.SELECT,
           capMs: CAP.write,
         });
@@ -907,7 +949,8 @@ export const applyResult = (
 ): Applied => {
   const logs: string[] = [];
   const files: Array<{ path: string; text: string }> = [];
-  const out = (s: RunState): Applied => ({ state: s, logs, files });
+  const release: ThreadId[] = [];
+  const out = (s: RunState): Applied => ({ state: s, logs, files, release });
   // Usage limits and a provider that stays down end the run resumably; the
   // step stays in flight so a resume reattaches to its thread.
   if (res.kind === "ended")
@@ -1022,6 +1065,7 @@ export const applyResult = (
         return out(afterStage(g!.ok ? { ...s, best: g!.sha } : s, "pick", now));
       }
       if (t.phase === "select") {
+        if (res.kind === "done") release.push(res.threadId);
         const text = res.kind === "done" ? res.text : "";
         const chosen = parseSelect(text);
         if (chosen === null) {
@@ -1035,10 +1079,10 @@ export const applyResult = (
           task: { ...t, phase: "adopt", chosen: chosen === "A" ? t.cmp.x : t.cmp.y },
         });
       }
-      const cmp = applyCompare(t.cmp, res, logs);
+      const cmp = applyCompare(t.cmp, res, logs, release);
       const move = compareMove(cmp);
       if (move.kind !== "done") return out({ ...s, task: { ...t, cmp } });
-      files.push(comparisonFile("pick", input.id, cmp, move.gate, { x: "A", y: "B" }));
+      files.push(...comparisonFiles("pick", input.id, cmp, move.gate, { x: "A", y: "B" }));
       const j = move.gate === null ? finalJudge(cmp, "x") : null;
       const verdict = j?.verdict ?? "NONE";
       if (verdict === "A" || verdict === "B")
@@ -1049,8 +1093,11 @@ export const applyResult = (
         });
       // TIE compares honestly, but creation needs a base: the comparator picks
       // which prototype to continue, a selection rather than a win.
-      if (verdict === "TIE")
+      if (verdict === "TIE") {
+        // Its comparator makes the selection on the same thread, so its worktree stays.
+        release.splice(0, release.length, ...release.filter((thread) => thread !== j!.thread));
         return out({ ...s, task: { ...t, cmp, phase: "select", notes: j!.notes } });
+      }
       logs.push(`pick incomplete: ${move.gate ?? "no verdict"}`);
       return out(afterStage(s, "pick", now));
     }
@@ -1072,7 +1119,7 @@ export const applyResult = (
       if (t.phase === "restore") return out({ ...s, task: { ...t, phase: "trunk" } });
       return out({ ...s, ending: "budget", task: newRound(s, now) });
     case "round":
-      return out(applyRound(s, t, res, input, logs, files));
+      return out(applyRound(s, t, res, input, logs, files, release));
   }
 };
 
@@ -1083,6 +1130,7 @@ const applyRound = (
   input: Inputs,
   logs: string[],
   files: Array<{ path: string; text: string }>,
+  release: ThreadId[],
 ): RunState => {
   const now = input.now;
   const lane = s.lane;
@@ -1243,17 +1291,21 @@ const applyRound = (
         r.candidate,
         s.best,
         bit(input.coin, 0),
-        ["x", "y"],
+        // Which comparator sees the candidate as A is a coin too, so no
+        // ordinal (thread order, step id) can tell a judge which build is new.
+        bit(input.coin, 2) ? ["y", "x"] : ["x", "y"],
         lanePlaysBots ? r.bot : "",
         r.botDecider,
       );
       return at({ phase: "compare", cmp });
     }
     case "compare": {
-      const cmp = applyCompare(r.cmp!, res, logs);
+      const cmp = applyCompare(r.cmp!, res, logs, release);
       const move = compareMove(cmp);
       if (move.kind !== "done") return at({ cmp });
-      files.push(comparisonFile(r.branch, input.id, cmp, move.gate, { x: "candidate", y: "best" }));
+      files.push(
+        ...comparisonFiles(r.branch, input.id, cmp, move.gate, { x: "candidate", y: "best" }),
+      );
       return classify(s, { ...r, cmp }, move.gate, logs);
     }
     case "outcome": {

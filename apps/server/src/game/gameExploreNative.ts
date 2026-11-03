@@ -23,7 +23,9 @@ export const exploreStepsNominalMs = (
   target: "native" | "web",
 ): number => {
   let total = 0;
-  for (const step of steps) total += exploreStepNominalMs(step, target);
+  // Whole milliseconds, so every sum of them is exact and the input cap and
+  // the void rule never disagree in the last bit.
+  for (const step of steps) total += Math.round(exploreStepNominalMs(step, target));
   return total;
 };
 

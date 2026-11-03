@@ -25,9 +25,10 @@ import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementS
 import type * as GameService from "../GameService.ts";
 import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
+import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
 import { CONTINUE } from "./roles.ts";
-import type { RoleStep } from "./state.ts";
+import { BLANK, type RoleStep } from "./state.ts";
 
 class RoleRunError extends Schema.TaggedError<RoleRunError>()("RoleRunError", {
   op: Schema.String,
@@ -213,7 +214,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     ));
   if (gone) {
     if (step.at !== null)
-      return { kind: "failed", reason: "sample thread was deleted" } satisfies StepResult;
+      return { kind: "failed", reason: "worktree role thread was deleted" } satisfies StepResult;
     yield* ctx.log(`${step.role}: thread ${target} is gone; relaunching the step`);
     target = null;
   }
@@ -227,13 +228,30 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     runId = yield* send(threadId, step.prompt);
     yield* ctx.attach(threadId, runId);
   } else {
-    for (const file of step.clear)
-      yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
+    const blank = step.at === BLANK ? yield* blankWorktree(deps, ctx, step) : null;
+    if (step.at === BLANK && blank === null)
+      return {
+        kind: "failed",
+        reason: `${step.role}: no worktree of its own`,
+      } satisfies StepResult;
+    if (blank === null)
+      for (const file of step.clear)
+        yield* Effect.promise(() => NodeFSP.rm(NodePath.join(root, file), { force: true }));
     // A deleted creator chat cannot be a parent; the role then stands alone rather than failing.
     const creatorLive = yield* threads.getThreadShell(ctx.creator).pipe(
       Effect.map((shell) => shell !== null && shell.deletedAt === null),
       Effect.orElseSucceed(() => false),
     );
+    // A blind sample plays a neutral commit of its build: the same game, but
+    // no round notes, bots or round-named HEAD that would tell the builds apart.
+    const baseRef =
+      blank === null && step.at !== null
+        ? ((yield* neutralBuild(ctx.root, step.at)) ?? step.at)
+        : step.at;
+    if (blank === null && step.at !== null && baseRef === step.at)
+      yield* ctx.log(
+        `${step.role}: no neutral commit for ${step.at.slice(0, 12)}; playing the build's own`,
+      );
     const launched = yield* deps.launches
       .launch({
         commandId: CommandId.make(`studio:${ctx.runId}:${step.id}${gone ? ":relaunch" : ""}`),
@@ -244,25 +262,41 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         // Roles must edit files whatever mode the creator chats in.
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         workspaceStrategy:
-          step.at === null
-            ? { type: "root" }
-            : { type: "worktree", baseRef: step.at, branch: `studio-wt/${ctx.runId}-${step.id}` },
+          blank !== null
+            ? { type: "existing_worktree", worktreePath: blank.path, branch: blank.branch }
+            : step.at === null
+              ? { type: "root" }
+              : {
+                  type: "worktree",
+                  baseRef: baseRef ?? step.at,
+                  branch: `studio-wt/${ctx.runId}-${step.id}`,
+                },
         initialMessage: { text: step.prompt, attachments: [] },
         createdBy: "user",
         creationSource: "server",
         ...(creatorLive ? { parentThreadId: ctx.creator } : {}),
       })
       .pipe(Effect.option);
-    if (Option.isNone(launched))
+    // No thread owns a blank checkout until a launch succeeds, so a failed
+    // one removes it here or nothing ever will (the retry gets a new step id).
+    const dropBlank = blank === null ? Effect.void : removeBlank(deps, ctx, blank);
+    if (Option.isNone(launched)) {
+      yield* dropBlank;
       return { kind: "failed", reason: `${step.role}: thread launch failed` } satisfies StepResult;
+    }
     threadId = launched.value.threadId;
     const first = launched.value.projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
-    if (first === undefined)
+    if (first === undefined) {
+      yield* dropBlank;
       return { kind: "failed", reason: `${step.role}: launch made no run` } satisfies StepResult;
+    }
     runId = first.id;
     yield* ctx.attach(threadId, runId);
   }
   const live = threadId;
+  // The sample budget is enforced where input happens: an act past it is
+  // refused, which costs nothing, where passing it would void the sample.
+  if (step.inputCapMs > 0) yield* deps.game.limitExploreInput(live, step.inputCapMs);
 
   type Waited =
     | { readonly kind: "run"; readonly run: OrchestrationV2Run | null; readonly timedOut: boolean }
@@ -399,12 +433,83 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   } satisfies StepResult;
 });
 
+// A blind comparator's checkout, made before its thread so the model's first
+// look finds its files in place: the BLANK commit, outside the game root,
+// holding only the step's copies. A resumed step reuses the checkout an
+// interrupted attempt left under the same branch, since a replayed launch is
+// bound to that path. Any failure leaves no checkout behind.
+const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
+  Effect.gen(function* () {
+    const vcs = deps.vcs;
+    if (vcs === null) return null;
+    const branch = `studio-wt/${ctx.runId}-${step.id}`;
+    yield* vcs.pruneWorktrees({ cwd: ctx.root }).pipe(Effect.ignore);
+    const refs = yield* vcs.listRefs({
+      cwd: ctx.root,
+      query: branch,
+      refKind: "local",
+      refresh: true,
+    });
+    const found = refs.refs.find((ref) => ref.name === branch);
+    let path = found?.worktreePath ?? null;
+    if (found !== undefined && path === null)
+      yield* vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true });
+    if (path === null) {
+      const sha = yield* blankCommit(ctx.root);
+      if (sha === null) return null;
+      path = (yield* vcs.createWorktree({
+        cwd: ctx.root,
+        refName: sha,
+        newRefName: branch,
+        path: null,
+      })).worktree.path;
+    }
+    const dir = path;
+    const placed = yield* Effect.promise(() =>
+      (async () => {
+        for (const file of step.clear) await NodeFSP.rm(NodePath.join(dir, file), { force: true });
+        for (const { from, to } of step.copy) {
+          const target = NodePath.join(dir, to);
+          await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
+          await NodeFSP.copyFile(NodePath.join(ctx.root, from), target);
+        }
+      })().then(
+        () => true,
+        () => false,
+      ),
+    );
+    if (placed) return { path: dir, branch };
+    yield* ctx.log(`${step.role}: could not copy its files into ${dir}`);
+    yield* removeBlank(deps, ctx, { path: dir, branch });
+    return null;
+  }).pipe(
+    Effect.catchCause(() =>
+      ctx.log(`${step.role}: its worktree could not be made`).pipe(Effect.as(null)),
+    ),
+  );
+
+const removeBlank = (
+  deps: RoleDeps,
+  ctx: RoleContext,
+  blank: { readonly path: string; readonly branch: string },
+) =>
+  deps.vcs === null
+    ? Effect.void
+    : Effect.gen(function* () {
+        yield* deps.vcs!.removeWorktree({ cwd: ctx.root, path: blank.path, force: true });
+        yield* deps.vcs!.deleteLocalBranch({ cwd: ctx.root, refName: blank.branch, force: true });
+      }).pipe(Effect.ignore);
+
 // T3 removes a thread's worktree the way the client does after deleting a
 // thread: the checkout goes, then the thread forgets it, then its branch.
 // An editor still open on the checkout (a Unity sample's player build) closes
 // first, so nothing writes into a folder being deleted.
 // Any failure keeps the worktree for the creator to see; nothing is rm'd by hand.
-const releaseWorktree = (deps: RoleDeps, ctx: RoleContext, threadId: ThreadId) =>
+export const releaseWorktree = (
+  deps: RoleDeps,
+  ctx: Pick<RoleContext, "root" | "log">,
+  threadId: ThreadId,
+) =>
   Effect.gen(function* () {
     const shell = yield* deps.threads.getThreadShell(threadId);
     if (shell === null || shell.worktreePath === null) return;

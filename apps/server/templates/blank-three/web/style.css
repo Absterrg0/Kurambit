@@ -94,6 +94,27 @@ body {
   backdrop-filter: blur(3px);
 }
 
+.loading-text {
+  margin: 0;
+  color: var(--ui-dim);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.loading-bar {
+  width: min(320px, 60vw);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line);
+  overflow: hidden;
+}
+
+#loading-fill {
+  width: 0;
+  height: 100%;
+  background: var(--ui-accent);
+}
+
 .title-block {
   text-align: center;
 }

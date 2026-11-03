@@ -4,8 +4,8 @@
 // freezes on pause).
 //
 //   import { animate } from "./shell/animate.js";
-//   const gltf = await new GLTFLoader().loadAsync("./assets/models/hero.glb");
-//   const hero = animate(gltf);            // gltf.scene, its clips found by role
+//   // main.js lists the model: export const ASSETS = { hero: "assets/models/hero.glb" };
+//   const hero = animate(ctx.assets.model("hero")); // a fresh copy, its clips found by role
 //   scene.add(hero.root);
 //   // every frame in update(dt, ctx):
 //   hero.play(!onFloor ? "fall" : speed > 4 ? "run" : speed > 0.1 ? "walk" : "idle",

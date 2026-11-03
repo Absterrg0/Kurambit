@@ -49,6 +49,8 @@ const exec = (
           env: { ...strippedEnv(), ...env },
           timeout: timeoutMs,
         });
+        // No call writes stdin; one that reads it (mktree) sees an empty input, not a hang.
+        child.stdin.end();
         let stdout = "";
         let output = "";
         child.stdout.on("data", (chunk: Buffer) => {
@@ -62,6 +64,67 @@ const exec = (
         child.on("error", () => resolve({ code: null, stdout, output }));
       }),
   );
+
+/**
+ * The commit a comparator's worktree checks out: the empty tree with no parent,
+ * a fixed identity and dates, so it is the same commit every time and says
+ * nothing about the run, its rounds or either build.
+ */
+export const blankCommit = (root: string): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    const tree = yield* exec(root, ["mktree"]);
+    if (tree.code !== 0) return null;
+    const made = yield* exec(
+      root,
+      [...IDENTITY, "commit-tree", tree.stdout.trim(), "-m", "blind comparison"],
+      60_000,
+      { GIT_AUTHOR_DATE: "@0 +0000", GIT_COMMITTER_DATE: "@0 +0000" },
+    );
+    const sha = made.stdout.trim();
+    return made.code === 0 && sha.length > 0 ? sha : null;
+  });
+
+/** What a blind player must not see: files that differ by round, not by game. */
+const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
+
+/**
+ * The commit a blind sample's worktree checks out: the build's own tree minus
+ * the files that tell builds apart (its bots, run records and round notes),
+ * with no parent and a fixed identity, dates and message. Its HEAD and log
+ * then say nothing about the round, and identical game trees get one commit.
+ */
+export const neutralBuild = (root: string, sha: string): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    const gitDir = yield* exec(root, ["rev-parse", "--absolute-git-dir"]);
+    if (gitDir.code !== 0) return null;
+    const index = NodePath.join(
+      gitDir.stdout.trim(),
+      `kurambit-neutral-${NodeCrypto.randomUUID()}.index`,
+    );
+    const env = { GIT_INDEX_FILE: index };
+    return yield* Effect.gen(function* () {
+      if ((yield* exec(root, ["read-tree", sha], 60_000, env)).code !== 0) return null;
+      const removed = yield* exec(
+        root,
+        // A private index: --cached never touches the tree, so -f only skips
+        // the check against the checkout's own differing files.
+        ["rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ...NOT_IN_SAMPLE],
+        60_000,
+        env,
+      );
+      if (removed.code !== 0) return null;
+      const tree = yield* exec(root, ["write-tree"], 60_000, env);
+      if (tree.code !== 0) return null;
+      const made = yield* exec(
+        root,
+        [...IDENTITY, "commit-tree", tree.stdout.trim(), "-m", "build"],
+        60_000,
+        { GIT_AUTHOR_DATE: "@0 +0000", GIT_COMMITTER_DATE: "@0 +0000" },
+      );
+      const commit = made.stdout.trim();
+      return made.code === 0 && commit.length > 0 ? commit : null;
+    }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(index, { force: true }))));
+  });
 
 /** The game's own sources: bots, notes and skill files never count as game change. */
 const gamePaths = (lane: string) => [

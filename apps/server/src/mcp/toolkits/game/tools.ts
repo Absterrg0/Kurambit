@@ -1,6 +1,4 @@
 import { McpSchema, Tool, Toolkit } from "effect/ai";
-import * as Context from "effect/Context";
-import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import {
   GAME_EXPLORE_BOUNDS,
@@ -63,24 +61,13 @@ const dependencies = [
   ThreadManagementService.ThreadManagementService,
 ];
 const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
-void Context;
-void Fiber;
 /**
  * Run threads from the GameRun production loop get play-level tools only
  * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*, game_assets_*).
- * Everything else hides from them through this check.
+ * Every other game tool hides from them, as non-game tools do by default.
  */
-const isGameRunThread = () => {
-  const fiber = Fiber.getCurrent();
-  if (fiber === undefined) return false;
-  return (
-    Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext)
-      ?.gameRunRole === "run"
-  );
-};
-/** Play-level tools stay visible to run threads; the rest hide from them. */
 const visibleToRunThreads = () => true;
-const hiddenFromRunThreads = () => !isGameRunThread();
+const hiddenFromRunThreads = () => !McpInvocationContext.isGameRunThread();
 const GameStatusTool = Tool.make("game_status", {
   description:
     "Inspect this thread's Kurambit project: brief path, toolchain readiness and actionable repair instructions, assets with derived scene usage, scenes, builds, managed processes, log directory and playable preview URL. Requires game.json in this thread's workspace. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",

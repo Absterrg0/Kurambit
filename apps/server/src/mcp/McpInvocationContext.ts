@@ -8,8 +8,10 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@kurambit/contracts";
+import { McpSchema } from "effect/ai";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 
 const ALL_MCP_CAPABILITIES = ["preview", "orchestration", "worktree"] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
@@ -124,3 +126,20 @@ export const requireThreadScope = (scope: McpInvocationScope, operation: string)
   scope.thread === undefined
     ? Effect.fail(threadCallerRequired(operation))
     : Effect.succeed(scope as McpThreadInvocationScope);
+
+/** True inside a tool call from a thread the GameRun production loop launched. */
+export const isGameRunThread = () => {
+  const fiber = Fiber.getCurrent();
+  if (fiber === undefined) return false;
+  return Context.getOrUndefined(fiber.context, McpInvocationContext)?.gameRunRole === "run";
+};
+
+/**
+ * A tool that says nothing about production-run threads hides from them. A
+ * blind sample or comparator that could list threads, worktrees or projects
+ * could read which build is which; the game tools choose for themselves.
+ */
+export const runThreadDefault = <I>(annotations: Context.Context<I>) =>
+  Context.getOrUndefined(annotations, McpSchema.EnabledWhen) === undefined
+    ? Context.add(annotations, McpSchema.EnabledWhen, () => !isGameRunThread())
+    : annotations;
