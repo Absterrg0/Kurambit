@@ -4,6 +4,8 @@ import {
   GameAssetsSearchToolkit,
   GameBlenderLookTool,
   GameBlenderLookToolkit,
+  GameBlenderRenderSpritesTool,
+  GameBlenderRenderSpritesToolkit,
   GameUnityScreenshotTool,
   GameUnityScreenshotToolkit,
 } from "./toolkits/game/tools.ts";
@@ -801,6 +803,28 @@ const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook
   );
 });
 
+const registerGameBlenderRenderSprites = Effect.fn(
+  "McpHttpServer.registerGameBlenderRenderSprites",
+)(function* () {
+  const games = yield* GameService.GameService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* GameBlenderRenderSpritesToolkit;
+  yield* registerImageTool(
+    GameBlenderRenderSpritesTool,
+    (payload, options) =>
+      built
+        .handle("game_blender_render_sprites", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(GameService.GameService, games),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "blender-render-sprites",
+    (error) => (error instanceof Error ? error.message : "Game blender sprite render failed."),
+  );
+});
+
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
   const games = yield* GameService.GameService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -964,6 +988,11 @@ export const layerGameBlenderLook = imageToolRegistration(
   GameHandlers.layerBlenderLook,
 );
 
+export const layerGameBlenderRenderSprites = imageToolRegistration(
+  registerGameBlenderRenderSprites(),
+  GameHandlers.layerBlenderRenderSprites,
+);
+
 export const layerGameUnityScreenshot = imageToolRegistration(
   registerGameUnityScreenshot(),
   GameHandlers.layerUnityScreenshot,
@@ -976,6 +1005,7 @@ export const layerGameAssetsSearch = imageToolRegistration(
 
 export const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
+  layerGameBlenderRenderSprites,
   layerGameAssetsSearch,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
