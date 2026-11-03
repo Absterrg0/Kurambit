@@ -157,6 +157,16 @@ const handlers = {
       return yield* runs.runStatus(scope.thread.threadId).pipe(Effect.mapError(runFailure));
     }),
   ),
+  game_run_round: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      const { detail } = yield* runs
+        .roundDetail(scope.thread.threadId, input.round)
+        .pipe(Effect.mapError(runFailure));
+      return detail;
+    }),
+  ),
   game_run_steer: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;

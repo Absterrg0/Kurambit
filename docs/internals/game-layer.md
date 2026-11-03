@@ -47,7 +47,7 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the GameRun loop launches get play-level tools only (status, check, import,
 export, explore start/act/close, bot run/view, blender tools). Packaging, preview, stop and the
-run's own status and steer tools stay outside their catalog.
+run's own status, round and steer tools stay outside their catalog.
 
 The creator's session and a live run share the game folder, and the run's git resets would undo the
 session's edits. The game's AGENTS.md tells the creator's agent to pass requests to the run with

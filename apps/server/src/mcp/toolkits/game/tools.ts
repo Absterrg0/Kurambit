@@ -19,6 +19,7 @@ import {
   GameBlenderAssetsImportResult,
   GameCheckResult,
   GameOperationFailure,
+  GameRunRoundDetail,
   GameRunStatusResult,
   GameRunSteerResult,
   GameStatus,
@@ -299,6 +300,19 @@ const RunStatusTool = Tool.make("game_run_status", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const RunRoundTool = Tool.make("game_run_round", {
+  description:
+    "One finished round of this game's production run, read from the run's records: the move, the outcome (kept, inconclusive, rejected or unjudged), each blind comparator's verdict and reasoning, the blind players' reports, bot facts and bot runs, the tester's note and the reviewer's direction for the next round. Long texts are cut and end in an ellipsis. Read-only; use game_run_status for the round numbers.",
+  parameters: Schema.Struct({
+    round: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  }),
+  success: GameRunRoundDetail,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
     "Pass the creator's request to this game's live production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. Fails plainly when no run is live: then work on the game directly. Say the creator's request in their words, one request per call.",
@@ -334,5 +348,6 @@ export const GameToolkit = Toolkit.make(
   BotViewTool,
   BotReportTool,
   RunStatusTool,
+  RunRoundTool,
   RunSteerTool,
 );

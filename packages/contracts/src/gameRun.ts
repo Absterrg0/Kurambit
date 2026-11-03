@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { ThreadId } from "./baseSchemas.ts";
+import { PositiveInt, ThreadId } from "./baseSchemas.ts";
 
 /** Production loop as a Kurambit service: one game's run from vision to an ending. */
 
@@ -35,11 +35,21 @@ export const GameRunThreadRef = Schema.Struct({
 });
 export type GameRunThreadRef = typeof GameRunThreadRef.Type;
 
+/** How a round ended: merged, tied or split (best stands), lost both orders, or never judged. */
+export const GameRunRoundOutcome = Schema.Literals([
+  "kept",
+  "inconclusive",
+  "rejected",
+  "unjudged",
+]);
+export type GameRunRoundOutcome = typeof GameRunRoundOutcome.Type;
+
 export const GameRunRoundRef = Schema.Struct({
   round: Schema.Number,
   move: Schema.String,
   branch: Schema.String,
   kept: Schema.Boolean,
+  outcome: GameRunRoundOutcome,
   verdicts: Schema.Array(
     Schema.Struct({
       order: Schema.String,
@@ -70,6 +80,92 @@ export const GameRunStatusResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameRunStatusResult = typeof GameRunStatusResult.Type;
+
+export const GameRunRoundInput = Schema.Struct({
+  threadId: ThreadId,
+  round: PositiveInt,
+});
+export type GameRunRoundInput = typeof GameRunRoundInput.Type;
+
+const GameRunBotFinal = Schema.Record(
+  Schema.String,
+  Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
+);
+
+/**
+ * One round's evidence, read on demand from the game's .studio folder. Long
+ * texts are bounded server-side and end in "…" when cut.
+ */
+export const GameRunRoundDetail = Schema.Struct({
+  round: Schema.Number,
+  outcome: GameRunRoundOutcome,
+  move: Schema.String,
+  branch: Schema.String,
+  durationMs: Schema.Number,
+  linesChanged: Schema.Number,
+  note: Schema.NullOr(Schema.String),
+  steer: Schema.Array(Schema.String),
+  verdicts: GameRunRoundRef.fields.verdicts,
+  /** The blind comparison: null when the round never reached one. */
+  comparison: Schema.NullOr(
+    Schema.Struct({
+      /** Why the comparison stopped before the comparators, if it did. */
+      gate: Schema.NullOr(Schema.String),
+      playOrder: Schema.String,
+      /** Each comparator's full answer, in the order it was asked. */
+      judges: Schema.Array(
+        Schema.Struct({ order: Schema.String, verdict: Schema.String, reasoning: Schema.String }),
+      ),
+      /** The blind players' reports; the players never knew which build they had. */
+      reports: Schema.Array(Schema.Struct({ build: Schema.String, text: Schema.String })),
+      bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: Schema.String })),
+      botWithheld: Schema.NullOr(Schema.String),
+      bots: Schema.Array(
+        Schema.Struct({
+          build: Schema.String,
+          ending: Schema.String,
+          seconds: Schema.Number,
+          final: GameRunBotFinal,
+          note: Schema.String,
+        }),
+      ),
+    }),
+  ),
+  testerNote: Schema.NullOr(Schema.String),
+  reviewerNotes: Schema.NullOr(Schema.String),
+  /** The reviewer's direction for the round after this one. */
+  direction: Schema.NullOr(Schema.String),
+  /** Bot runs recorded in the game folder while this round was built and tested, latest last. */
+  botRuns: Schema.Array(
+    Schema.Struct({
+      runId: Schema.String,
+      file: Schema.String,
+      mode: Schema.String,
+      ending: Schema.String,
+      seconds: Schema.Number,
+      findings: Schema.Number,
+      at: Schema.String,
+    }),
+  ),
+  /** The round's latest bot video; `url` is a short-lived signed path the client streams. */
+  video: Schema.NullOr(
+    Schema.Struct({ runId: Schema.String, file: Schema.String, url: Schema.NullOr(Schema.String) }),
+  ),
+  /** A kept round's commit can become the game's working tree again. */
+  restorable: Schema.Boolean,
+  /** The game's committed sources are this round's build right now. */
+  current: Schema.Boolean,
+});
+export type GameRunRoundDetail = typeof GameRunRoundDetail.Type;
+
+export const GameRunRestoreInput = GameRunRoundInput;
+export type GameRunRestoreInput = typeof GameRunRestoreInput.Type;
+
+export const GameRunRestoreResult = Schema.Struct({
+  sha: Schema.String,
+  message: Schema.String,
+});
+export type GameRunRestoreResult = typeof GameRunRestoreResult.Type;
 
 export const GameRunStopInput = Schema.Struct({ threadId: ThreadId });
 export type GameRunStopInput = typeof GameRunStopInput.Type;

@@ -2,6 +2,9 @@
 // Async git for one game root. Every op verifies its outcome and fails loudly; none stashes,
 // and none moves trunk away from a commit that is not preserved on another branch.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { GitOutcome } from "./policy.ts";
@@ -32,13 +35,18 @@ type Exec = { readonly code: number | null; readonly stdout: string; readonly ou
 
 // Every git call is an async child: a synchronous `git add -A` on a game with
 // assets would freeze the server and every connected client.
-const exec = (root: string, args: ReadonlyArray<string>, timeoutMs = 60_000): Effect.Effect<Exec> =>
+const exec = (
+  root: string,
+  args: ReadonlyArray<string>,
+  timeoutMs = 60_000,
+  env: Readonly<Record<string, string>> = {},
+): Effect.Effect<Exec> =>
   Effect.promise(
     () =>
       new Promise<Exec>((resolve) => {
         const child = NodeChildProcess.spawn("git", [...args], {
           cwd: root,
-          env: strippedEnv(),
+          env: { ...strippedEnv(), ...env },
           timeout: timeoutMs,
         });
         let stdout = "";
@@ -62,6 +70,14 @@ const gamePaths = (lane: string) => [
   `:(exclude)${lane}/**/*.uid`,
   `:(exclude)${lane}/.godot`,
 ];
+
+const BESIDE_ENGINE = ["art", "ASSETS.md"];
+/**
+ * What a creator's restore brings back: the engine project and the art
+ * sources with their map, so built assets and the .blend files they came from
+ * stay together. Run notes, plans, bots and .studio stay as they are.
+ */
+export const restoredPaths = (lane: string) => [lane, ...BESIDE_ENGINE];
 
 export const makeGit = (root: string, lane: string, log: (line: string) => Effect.Effect<void>) => {
   const fail = (op: string, reason: string, result?: Exec) =>
@@ -338,5 +354,97 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
   const untrack = (paths: ReadonlyArray<string>) =>
     exec(root, ["rm", "--cached", "-q", "--ignore-unmatch", "--", ...paths]).pipe(Effect.asVoid);
 
-  return { run, untrack, current };
+  // A kept round's build: its branch tip, provided trunk still contains it.
+  const keptCommit = Effect.fn("RunGit.keptCommit")(function* (branch: string, trunk: string) {
+    const tip = yield* out(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
+    if (tip.length === 0) return null;
+    const contained = yield* exec(root, [
+      "merge-base",
+      "--is-ancestor",
+      tip,
+      `refs/heads/${trunk}`,
+    ]);
+    return contained.code === 0 ? tip : null;
+  });
+
+  // The creator's restore: `restoredPaths` become `sha`'s (files added since
+  // go) as one new commit on HEAD, so nothing later is lost. The commit is
+  // built in a private index and the working tree is first touched by
+  // `reset --keep`, which refuses when local changes touch a file the restore
+  // changes. A failure before that leaves trunk, index and tree as they were.
+  // Untracked files are never added.
+  const restoreBuild = Effect.fn("RunGit.restoreBuild")(function* (sha: string, message: string) {
+    const base = yield* head;
+    if (base.length === 0) return yield* fail("restore", "no HEAD");
+    // A pathspec in neither commit fails the whole `git restore`.
+    const present: Array<string> = [];
+    for (const path of restoredPaths(lane)) {
+      const inSha = (yield* exec(root, ["cat-file", "-e", `${sha}:${path}`])).code === 0;
+      if (inSha || (yield* exec(root, ["cat-file", "-e", `${base}:${path}`])).code === 0)
+        present.push(path);
+    }
+    const gitDir = yield* out(["rev-parse", "--absolute-git-dir"]);
+    if (gitDir.length === 0) return yield* fail("restore", "no git directory");
+    const index = NodePath.join(gitDir, `kurambit-restore-${NodeCrypto.randomUUID()}.index`);
+    const env = { GIT_INDEX_FILE: index };
+    const created = yield* Effect.gen(function* () {
+      const read = yield* exec(root, ["read-tree", base], SLOW_MS, env);
+      if (read.code !== 0) return yield* fail("restore", "read-tree failed", read);
+      const staged = yield* exec(
+        root,
+        ["restore", `--source=${sha}`, "--staged", "--", ...present, `:(exclude)${lane}/.godot`],
+        SLOW_MS,
+        env,
+      );
+      if (staged.code !== 0) return yield* fail("restore", "restore failed", staged);
+      const tree = yield* exec(root, ["write-tree"], SLOW_MS, env);
+      if (tree.code !== 0) return yield* fail("restore", "write-tree failed", tree);
+      const made = yield* exec(
+        root,
+        [...IDENTITY, "commit-tree", tree.stdout.trim(), "-p", base, "-m", message.slice(0, 200)],
+        SLOW_MS,
+      );
+      const commit = made.stdout.trim();
+      if (made.code !== 0 || commit.length === 0)
+        return yield* fail("restore", "commit failed", made);
+      return commit;
+    }).pipe(
+      Effect.ensuring(Effect.promise(() => NodeFSP.rm(index, { force: true }).catch(() => {}))),
+    );
+    // A commit that landed since `base` would drop off trunk with the reset.
+    const now = yield* head;
+    if (now !== base) return yield* fail("restore", `trunk moved to ${now.slice(0, 8)} meanwhile`);
+    const reset = yield* exec(root, ["reset", "-q", "--keep", created], SLOW_MS);
+    const after = yield* head;
+    if (reset.code !== 0)
+      return yield* fail(
+        "restore-apply",
+        after === base
+          ? summary(reset.output)
+          : `trunk moved to ${after.slice(0, 8)}: ${summary(reset.output)}`,
+        reset,
+      );
+    if (after !== created) return yield* fail("restore", "HEAD is not the restored commit", reset);
+    return created;
+  });
+
+  // Whether HEAD's restorable sources are those of `sha`; import sidecars do
+  // not count. A failed diff says no.
+  const sameBuild = (sha: string) =>
+    exec(
+      root,
+      ["diff", "--quiet", sha, "HEAD", "--", ...gamePaths(lane), ...BESIDE_ENGINE],
+      SLOW_MS,
+    ).pipe(Effect.map((r) => r.code === 0));
+
+  // Every uncommitted change in the tree, untracked files included; run state is ignored.
+  const uncommitted = exec(root, ["status", "--porcelain=v1"], SLOW_MS).pipe(
+    Effect.flatMap((r) =>
+      r.code === 0
+        ? Effect.succeed(r.stdout.split("\n").filter(Boolean))
+        : fail("status", "status failed", r),
+    ),
+  );
+
+  return { run, untrack, current, keptCommit, restoreBuild, sameBuild, uncommitted, summary };
 };

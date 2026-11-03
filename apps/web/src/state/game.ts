@@ -6,6 +6,7 @@ import {
 } from "@kurambit/client-runtime/state/runtime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 
 const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "game:events",
@@ -28,6 +29,14 @@ const gameEventSignal = Atom.family((environmentId: string) =>
       : "";
   }).pipe(Atom.withLabel(`game:event-signal:${environmentId}`)),
 );
+
+// Bumped after a restore: every open round's "current build" may have changed.
+const runRestoredSignal = Atom.family((environmentId: string) =>
+  Atom.make(0).pipe(Atom.keepAlive, Atom.withLabel(`game:run-restored:${environmentId}`)),
+);
+
+export const noteRunRestored = (environmentId: EnvironmentId): void =>
+  appAtomRegistry.update(runRestoredSignal(environmentId), (n) => n + 1);
 
 export const gameEnvironment = {
   toolchain: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -68,6 +77,19 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
     refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+  }),
+  // Read when a round row opens, never for every round; a finished round's
+  // evidence does not change, so an open row is not polled, only reread after a restore.
+  runRound: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:runRound",
+    tag: WS_METHODS.gameRunRound,
+    staleTimeMs: 60_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => runRestoredSignal(environmentId),
+  }),
+  runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runRestore",
+    tag: WS_METHODS.gameRunRestore,
   }),
   runStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runStop",
