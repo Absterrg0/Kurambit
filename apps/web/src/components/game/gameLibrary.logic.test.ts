@@ -18,6 +18,8 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   name,
   template: "blank",
   operation: null,
+  run: null,
+  keyArt: null,
   updatedAt,
 });
 

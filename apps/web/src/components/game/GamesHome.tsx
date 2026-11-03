@@ -23,6 +23,7 @@ import {
   gameTemplateAppearance,
   newestThreadByProject,
 } from "./gameLibrary.logic";
+import { GameKeyArt } from "./GameKeyArt";
 import { gameProgress } from "./gameProgress";
 import { useGameLibrary } from "./useGameLibrary";
 
@@ -266,7 +267,13 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
         >
           {initial}
         </span>
-        {progress.kind === "building" ? (
+        <GameKeyArt
+          environmentId={card.game.environmentId}
+          threadId={card.latestThread?.id ?? null}
+          path={card.game.keyArt}
+          className="transition-transform duration-300 group-hover:scale-[1.02]"
+        />
+        {progress.kind !== "idle" ? (
           <Tooltip>
             <TooltipTrigger
               render={

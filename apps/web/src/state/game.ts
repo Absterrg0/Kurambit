@@ -87,6 +87,14 @@ export const gameEnvironment = {
     idleTtlMs: 60_000,
     refreshTrigger: ({ environmentId }) => runRestoredSignal(environmentId),
   }),
+  // Read when the pick row opens; reread on the run's step pushes while the pick is open.
+  runPick: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:runPick",
+    tag: WS_METHODS.gameRunPick,
+    staleTimeMs: 60_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameEventSignal(environmentId),
+  }),
   runRestore: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:runRestore",
     tag: WS_METHODS.gameRunRestore,

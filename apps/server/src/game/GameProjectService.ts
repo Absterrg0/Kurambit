@@ -34,6 +34,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as GameProcesses from "./GameProcesses.ts";
 import { commandDetail } from "./commandDetail.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
+import { findKeyArt } from "./keyArt.ts";
 import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { createEngine, scaffoldFiles } from "./scaffold.ts";
@@ -430,6 +431,9 @@ const make = Effect.gen(function* () {
             if (Option.isNone(manifest)) return null;
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
+            const keyArt = yield* Effect.promise(() =>
+              findKeyArt(root, manifest.value.godotProject),
+            );
             const summary: GameSummary = {
               projectId: project.id,
               root,
@@ -439,6 +443,8 @@ const make = Effect.gen(function* () {
                 currentOperation === null
                   ? null
                   : { name: currentOperation.name, state: currentOperation.state },
+              run: operations.run(root),
+              keyArt,
               updatedAt: latestGameActivity(
                 project.updatedAt,
                 latestThread === null ? null : DateTime.formatIso(latestThread.updatedAt),

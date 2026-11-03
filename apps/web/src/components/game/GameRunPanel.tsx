@@ -1,10 +1,20 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { PlayIcon, RefreshCwIcon, SendIcon, SquareIcon } from "lucide-react";
 import {
+  CheckIcon,
+  ChevronRightIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  SendIcon,
+  SquareIcon,
+} from "lucide-react";
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
+import {
+  GAME_RUN_STAGES,
   gameRunRoleLabel,
   type GameRunStatusResult,
+  type GameRunThreadRef,
   type ModelSelection,
   type ScopedThreadRef,
   type ThreadId,
@@ -23,11 +33,19 @@ import { useEnvironmentProviders } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { cn } from "../../lib/utils";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { GameRunRoundRow } from "./GameRunRounds";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { GameElapsed } from "./GameElapsed";
+import { GameKeyArt } from "./GameKeyArt";
+import { GameRunPickRow, GameRunRoundRow } from "./GameRunRounds";
+import { formatRunDuration, groupRoleThreads } from "./gameRunView.logic";
+import { useGameLibrary } from "./useGameLibrary";
 
 /** The smallest working surface for a production run: start, status, steer, stop. */
 export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
@@ -61,14 +79,10 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const [error, setError] = useState<string | null>(null);
   const status: GameRunStatusResult | null = statusQuery.data ?? null;
   const active = status?.active ?? false;
-  // Run progress has no push event; a slow read keeps the stage, rounds and
-  // verdicts current while a run is live, and stops when it ends.
-  const refreshStatus = statusQuery.refresh;
-  useEffect(() => {
-    if (!active) return;
-    const interval = window.setInterval(refreshStatus, 15_000);
-    return () => window.clearInterval(interval);
-  }, [active, refreshStatus]);
+  // The run pushes a game event on every step change, which rereads this
+  // status; nothing polls while a run is live.
+  const game = useGameLibrary().games.find((entry) => entry.projectId === shell?.projectId) ?? null;
+  const startedAt = status?.startedAt == null ? Number.NaN : Date.parse(status.startedAt);
 
   // A run record that is not live can be resumed without a new brief.
   const resumable = status !== null && status.runId !== null && status.ending !== "ready";
@@ -130,18 +144,35 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
 
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
-      <section className="space-y-2 rounded-lg border border-border bg-card p-4">
+      <section className="space-y-3 rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
+          {game?.keyArt != null ? (
+            <span className="relative block aspect-video w-24 shrink-0 overflow-hidden rounded-md bg-muted">
+              <GameKeyArt
+                environmentId={threadRef.environmentId}
+                threadId={threadRef.threadId}
+                path={game.keyArt}
+              />
+            </span>
+          ) : null}
           <h3 className="text-sm font-medium">Production run</h3>
-          <span
-            className={`rounded-full border px-2 py-0.5 text-2xs ${
-              active
-                ? "border-success/40 bg-secondary text-success-foreground"
-                : "border-border bg-muted text-muted-foreground"
-            }`}
-          >
-            {active ? "Running" : (status?.ending ?? "Not started")}
-          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge
+                  size="sm"
+                  variant={active ? "success" : status?.ending === "failed" ? "error" : "outline"}
+                />
+              }
+            >
+              {active
+                ? "Running"
+                : status?.runId != null
+                  ? endingLabel(status.ending)
+                  : "Not started"}
+            </TooltipTrigger>
+            {status?.runId != null ? <TooltipPopup>Run {status.runId}</TooltipPopup> : null}
+          </Tooltip>
           <Button
             size="xs"
             variant="ghost"
@@ -154,7 +185,30 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           </Button>
         </div>
         {status !== null && status.runId !== null ? (
-          <p className="text-xs text-muted-foreground">{status.message}</p>
+          <>
+            {active ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{status.step ?? status.stage}</span>
+                {Number.isFinite(startedAt) ? (
+                  <>
+                    {" · "}
+                    <GameElapsed since={startedAt} />
+                    {" in"}
+                  </>
+                ) : null}
+                {status.progress?.next != null ? ` · next: ${status.progress.next}` : ""}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{status.message}</p>
+            )}
+            {status.progress !== null ? (
+              <RunPipeline
+                stage={status.progress.stage}
+                finished={status.ending === "ready"}
+                live={active}
+              />
+            ) : null}
+          </>
         ) : (
           <p className="text-xs text-muted-foreground">
             Start a run to build, play, judge and keep improving this game until the budget ends.
@@ -274,10 +328,13 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </section>
       ) : null}
 
-      {(status?.rounds.length ?? 0) > 0 ? (
+      {(status?.rounds.length ?? 0) > 0 || status?.pick != null ? (
         <section className="space-y-2">
-          <h3 className="text-sm font-medium">Rounds</h3>
+          <h3 className="text-sm font-medium">Timeline</h3>
           <ul className="space-y-2">
+            {status?.pick != null ? (
+              <GameRunPickRow threadRef={threadRef} pick={status.pick} />
+            ) : null}
             {status?.rounds.map((round) => (
               <GameRunRoundRow
                 key={round.round}
@@ -293,24 +350,172 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       {(status?.threads.length ?? 0) > 0 ? (
         <section className="space-y-2">
           <h3 className="text-sm font-medium">Role threads</h3>
-          <ul className="space-y-1">
-            {status?.threads.map((thread) => (
-              <li key={`${thread.role}:${thread.threadId}`}>
-                <button
-                  type="button"
-                  onClick={() => openThread(thread.threadId)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-left text-xs hover:border-foreground/25"
-                >
-                  <span className="truncate font-medium">{gameRunRoleLabel(thread.role)}</span>
-                  <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
-                    {thread.startedAt ? new Date(thread.startedAt).toLocaleString() : ""}
-                  </span>
-                </button>
-              </li>
+          <div className="space-y-1">
+            {groupRoleThreads(status?.threads ?? []).map((group, index, groups) => (
+              <RoleThreadGroup
+                // oxlint-disable-next-line react/no-array-index-key -- groups only grow at the end
+                key={`${index}:${group.label}`}
+                threadRef={threadRef}
+                label={group.label}
+                threads={group.threads}
+                defaultOpen={index === groups.length - 1}
+                onOpen={openThread}
+              />
             ))}
-          </ul>
+          </div>
         </section>
       ) : null}
     </div>
+  );
+}
+
+const ENDING: Record<string, string> = {
+  ready: "Ready",
+  stopped: "Stopped",
+  budget: "Budget spent",
+  failed: "Failed",
+  stalled: "Stalled",
+  "usage-limit": "Usage limit",
+  "provider-down": "Provider down",
+};
+const endingLabel = (ending: string | null): string =>
+  ending === null ? "Paused" : (ENDING[ending] ?? ending);
+
+/** The run's stages in order: done ones checked, the current one marked. */
+function RunPipeline({
+  stage,
+  finished,
+  live,
+}: {
+  stage: number;
+  finished: boolean;
+  live: boolean;
+}) {
+  return (
+    <ol className="flex flex-wrap items-center gap-x-1 gap-y-1 text-2xs" aria-label="Run stages">
+      {GAME_RUN_STAGES.map((label, index) => {
+        const done = finished || index < stage;
+        const current = !finished && index === stage;
+        return (
+          <li
+            key={label}
+            aria-current={current ? "step" : undefined}
+            className={cn(
+              "flex items-center gap-1",
+              done && "text-muted-foreground",
+              current && "font-medium text-foreground",
+              !done && !current && "text-muted-foreground/60",
+            )}
+          >
+            {index > 0 ? <ChevronRightIcon className="size-3 opacity-50" aria-hidden /> : null}
+            {done ? <CheckIcon className="size-3 text-success" aria-hidden /> : null}
+            {current ? (
+              <span
+                className={cn("size-1.5 rounded-full", live ? "bg-info" : "bg-muted-foreground")}
+                aria-hidden
+              />
+            ) : null}
+            {label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function RoleThreadGroup({
+  threadRef,
+  label,
+  threads,
+  defaultOpen,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  label: string;
+  threads: ReadonlyArray<GameRunThreadRef>;
+  defaultOpen: boolean;
+  onOpen: (threadId: string) => void;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1 text-left text-2xs font-medium text-muted-foreground">
+        <ChevronRightIcon className={cn("size-3", open && "rotate-90")} aria-hidden />
+        {label}
+        <span className="font-normal">· {threads.length}</span>
+      </CollapsibleTrigger>
+      <CollapsiblePanel animate={false}>
+        {open ? (
+          <ul className="space-y-1 pb-1">
+            {threads.map((thread) => (
+              <RoleThreadRow
+                key={`${thread.role}:${thread.threadId}`}
+                threadRef={threadRef}
+                thread={thread}
+                onOpen={onOpen}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
+/** One role thread, with its live state from the thread shell the client already holds. */
+function RoleThreadRow({
+  threadRef,
+  thread,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  thread: GameRunThreadRef;
+  onOpen: (threadId: string) => void;
+}) {
+  const shell = useThreadShell({
+    environmentId: threadRef.environmentId,
+    threadId: thread.threadId as ThreadId,
+  });
+  const running = threadRuntimeIsActive(shell?.runtime);
+  const latest = shell?.latestRun ?? null;
+  const started = Date.parse(thread.startedAt);
+  const ended = latest?.completedAt == null ? Number.NaN : Date.parse(latest.completedAt);
+  const state = running
+    ? ({ label: "Running", variant: "info" } as const)
+    : latest?.status === "completed"
+      ? ({ label: "Done", variant: "success" } as const)
+      : latest?.status === "failed"
+        ? ({ label: "Failed", variant: "error" } as const)
+        : latest?.status === "interrupted" || latest?.status === "cancelled"
+          ? ({ label: "Interrupted", variant: "warning" } as const)
+          : null;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(thread.threadId)}
+        aria-current={running ? "step" : undefined}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-left text-xs hover:border-foreground/25",
+          running ? "border-info/50" : "border-border",
+        )}
+      >
+        <span className="truncate font-medium">{gameRunRoleLabel(thread.role)}</span>
+        {state !== null ? (
+          <Badge size="sm" variant={state.variant}>
+            {state.label}
+          </Badge>
+        ) : null}
+        <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
+          {running && Number.isFinite(started) ? (
+            <GameElapsed since={started} />
+          ) : Number.isFinite(started) && Number.isFinite(ended) && ended >= started ? (
+            formatRunDuration(ended - started)
+          ) : Number.isFinite(started) ? (
+            new Date(started).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          ) : null}
+        </span>
+      </button>
+    </li>
   );
 }

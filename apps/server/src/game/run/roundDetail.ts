@@ -4,7 +4,12 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
-import type { GameRunRoundDetail, GameRunRoundOutcome } from "@kurambit/contracts";
+import type {
+  GameRunPickDetail,
+  GameRunRoundDetail,
+  GameRunRoundOutcome,
+} from "@kurambit/contracts";
+import { pickRef } from "./progress.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 // Every text is bounded so one expanded round stays a few KB on the wire.
@@ -56,9 +61,19 @@ const BotFactFile = Schema.Struct({
   final: Schema.Record(Schema.String, Primitive),
   note: Schema.String,
 });
+const EvidenceFile = Schema.Struct({
+  sessions: Schema.Number,
+  actions: Schema.Number,
+  nominalMs: Schema.Number,
+  images: Schema.Number,
+});
 // Older comparison files lack the bot fields; every key is optional.
 const ComparisonFile = Schema.Struct({
+  // The pick names its blind labels' prototype branches.
+  A: Schema.optionalKey(Schema.String),
+  B: Schema.optionalKey(Schema.String),
   playOrder: Schema.optionalKey(Schema.String),
+  evidence: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(EvidenceFile))),
   gate: Schema.optionalKey(Schema.NullOr(Schema.String)),
   reports: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   bot: Schema.optionalKey(
@@ -137,9 +152,10 @@ const comparisonOf = async (
 ): Promise<{
   readonly comparison: GameRunRoundDetail["comparison"];
   readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+  readonly sides: Readonly<Record<string, string>>;
 }> => {
   const found = await latestComparison(root, branch);
-  if (found === null) return { comparison: null, sheetFiles: [] };
+  if (found === null) return { comparison: null, sheetFiles: [], sides: {} };
   const { file } = found;
   const playOrder = file.playOrder ?? "";
   const builds = playOrder.split(",").filter((name) => name.length > 0);
@@ -169,7 +185,17 @@ const comparisonOf = async (
     judges,
     reports: order.flatMap((build) => {
       const text = file.reports?.[build];
-      return text === undefined ? [] : [{ build, text: bounded(text) }];
+      const seen = file.evidence?.[build];
+      const exposure =
+        seen === undefined || seen === null
+          ? null
+          : {
+              sessions: seen.sessions,
+              actions: seen.actions,
+              nominalMs: seen.nominalMs,
+              images: seen.images,
+            };
+      return text === undefined ? [] : [{ build, text: bounded(text), exposure }];
     }),
     bot: file.bot ?? null,
     botWithheld: file.botWithheld ?? null,
@@ -186,7 +212,48 @@ const comparisonOf = async (
     })),
     sheetsShown: file.sheetsShown ?? false,
   };
-  return { comparison, sheetFiles };
+  const sides: Record<string, string> = {};
+  if (file.A !== undefined) sides.A = file.A;
+  if (file.B !== undefined) sides.B = file.B;
+  return { comparison, sheetFiles, sides };
+};
+
+/** The pick's blind labels by prototype branch, from its latest comparison record. */
+export const pickSides = async (root: string): Promise<Readonly<Record<string, string>>> =>
+  (await comparisonOf(root, "pick")).sides;
+
+export type PickEvidence = {
+  readonly detail: GameRunPickDetail;
+  readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+};
+
+/** The prototype pick's evidence: its blind comparison and what the run made of it. */
+export const readPickEvidence = async (root: string, state: RunState): Promise<PickEvidence> => {
+  const compared = await comparisonOf(root, "pick");
+  // While the pick is open its record is not written yet; the task holds the labels.
+  const t = state.task;
+  const sides =
+    compared.comparison === null && t._tag === "pick" && t.cmp.x.length > 0
+      ? { A: t.cmp.x, B: t.cmp.y }
+      : compared.sides;
+  const chosen = pickRef(state, sides)?.chosen ?? null;
+  const single = compared.comparison === null && t._tag !== "pick" && chosen !== null;
+  const note = single
+    ? "Only one prototype booted, so it was adopted without a comparison."
+    : /^SELECT: (A|B) \(continuation choice/m.test(state.pickNotes)
+      ? "The comparator called it a tie, then chose this one to continue from."
+      : chosen === null && t._tag !== "pick" && state.pickNotes.length > 0
+        ? "No prototype was adopted; the first build started without one."
+        : null;
+  return {
+    detail: {
+      sides: Object.entries(sides).map(([build, branch]) => ({ build, branch })),
+      chosen,
+      note,
+      comparison: compared.comparison,
+    },
+    sheetFiles: compared.sheetFiles,
+  };
 };
 
 // Bot runs recorded in the game folder between this round's first builder or
