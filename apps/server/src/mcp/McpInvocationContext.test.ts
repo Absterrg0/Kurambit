@@ -118,8 +118,10 @@ it.effect("hides tools with no run-thread rule from production-run threads only"
   const chosen = McpInvocationContext.runThreadDefault(
     Context.make(McpSchema.EnabledWhen, () => true),
   );
-  const visible = (annotations: typeof plain) =>
-    Effect.sync(() => Context.get(annotations, McpSchema.EnabledWhen)(profile));
+  const visible = (annotations: Context.Context<never>) =>
+    Effect.sync(
+      () => Context.getOrUndefined(annotations, McpSchema.EnabledWhen)?.(profile) ?? true,
+    );
   return Effect.gen(function* () {
     const inRun = (effect: Effect.Effect<boolean>) =>
       effect.pipe(Effect.provideService(McpInvocationContext.McpInvocationContext, scope("run")));
