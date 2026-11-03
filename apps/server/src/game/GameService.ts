@@ -1366,14 +1366,18 @@ const make = Effect.gen(function* () {
           if (action.screenshot !== "" && !frames.some((frame) => frame.step === action.index))
             frames.push({
               step: action.index,
-              path: yield* Effect.promise(() =>
-                ExploreEvidence.keepFrame(
-                  evidenceDir,
-                  owner,
-                  session.id,
-                  NodePath.join(session.traceDir, action.screenshot),
-                ),
-              ),
+              // Only a capped thread (a blind sample) draws a sheet, so only its
+              // frames are kept past a reboot; others record the scratch path.
+              path: exploreInputCaps.has(owner)
+                ? yield* Effect.promise(() =>
+                    ExploreEvidence.keepFrame(
+                      evidenceDir,
+                      owner,
+                      session.id,
+                      NodePath.join(session.traceDir, action.screenshot),
+                    ),
+                  )
+                : NodePath.join(session.traceDir, action.screenshot),
             });
         const next = ExploreEvidence.upsert(record, {
           id: session.id,
@@ -2953,9 +2957,18 @@ ${built.result.message}`.slice(-3000),
   // checks the same deadlines lazily.
   yield* Effect.forkScoped(
     Effect.gen(function* () {
-      for (;;) {
+      for (let sweep = 1; ; sweep += 1) {
         yield* Effect.sleep(Duration.seconds(30));
         yield* exploreReap;
+        // A server that runs for weeks never restarts to prune; once an hour.
+        if (sweep % 120 === 0) {
+          const now = yield* Clock.currentTimeMillis;
+          yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Pruning explore evidence failed.", { cause }),
+            ),
+          );
+        }
       }
     }),
   );
