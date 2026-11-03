@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError } from "@kurambit/contracts";
 import { botEnding, botFinalState } from "../GameBot.ts";
+import { memoryEnded, waitOutLowMemory } from "./lowMemory.ts";
 import type { StepResult } from "./policy.ts";
 import type { RoleDeps } from "./roleRunner.ts";
 import type { Step } from "./state.ts";
@@ -34,7 +35,7 @@ export const runBotFact = (
     readonly log: (line: string) => Effect.Effect<void>;
   },
   step: BotStep,
-): Effect.Effect<BotResult> => {
+): Effect.Effect<BotResult | ReturnType<typeof memoryEnded>> => {
   const errorFact = (note: string): BotResult => ({
     kind: "bot",
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
@@ -83,12 +84,16 @@ export const runBotFact = (
               detail: `could not copy the bot files into the build checkout (${cause instanceof Error && "code" in cause ? String(cause.code) : "copy failed"})`,
             }),
         });
-        const result = yield* deps.game.botRunIn(worktree.path, {
-          file: step.file,
-          seconds: step.seconds,
-          mode: "play",
-          decider: step.decider,
-        });
+        const result = yield* waitOutLowMemory(
+          deps.game.botRunIn(worktree.path, {
+            file: step.file,
+            seconds: step.seconds,
+            mode: "play",
+            decider: step.decider,
+          }),
+          "bot run",
+          ctx.log,
+        );
         // The tester's decider is replayed; without its key the bot's own policy chose.
         const fallback =
           result.policyNote === null ? "" : "no Jev key here, so the bot's own policy chose; ";
@@ -109,11 +114,16 @@ export const runBotFact = (
         Effect.catchCause(() => ctx.log(`bot checkout ${branch} kept: cleanup failed`)),
       ),
   );
-  // A bot that cannot run on a build withholds bot facts, never drops the round.
+  // A bot that cannot run on a build withholds bot facts, never drops the round;
+  // memory that stays short ends the run resumably, as it would for any step.
   // Error messages open with generic advice; detail carries the cause.
   return play.pipe(
     Effect.catch((error) =>
-      Effect.succeed(errorFact(error.detail ?? error.reason ?? "the bot run failed")),
+      Effect.succeed(
+        error.reason === "low-memory"
+          ? memoryEnded(error)
+          : errorFact(error.detail ?? error.reason ?? "the bot run failed"),
+      ),
     ),
   );
 };

@@ -27,7 +27,8 @@ import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
 import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
-import { CONTINUE } from "./roles.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS } from "./lowMemory.ts";
+import { CONTINUE, MEMORY_RETRY } from "./roles.ts";
 import { BLANK, type RoleStep } from "./state.ts";
 
 class RoleRunError extends Schema.TaggedError<RoleRunError>()("RoleRunError", {
@@ -296,11 +297,13 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   }
   const live = threadId;
   // The cap runs from the launch: a Unity sample's player is prepared before
-  // it, outside the play time both sides of a comparison get alike.
+  // it, outside the play time both sides of a comparison get alike. Time an
+  // explore start spent waiting for memory is given back for the same reason.
   const started = Date.now();
-  const capEnd = started + step.capMs;
-  const budgetBound = ctx.budgetEndsAt !== null && ctx.budgetEndsAt < capEnd;
-  const deadline = budgetBound ? ctx.budgetEndsAt! : capEnd;
+  let capEnd = started + step.capMs;
+  let credited = (yield* deps.game.exploreMemoryWait(live)).waitedMs;
+  const budgetBound = () => ctx.budgetEndsAt !== null && ctx.budgetEndsAt < capEnd;
+  const deadline = () => (budgetBound() ? ctx.budgetEndsAt! : capEnd);
   // The sample budget is enforced where input happens: an act past it is
   // refused, which costs nothing, where passing it would void the sample.
   if (step.inputCapMs > 0) yield* deps.game.limitExploreInput(live, step.inputCapMs);
@@ -310,7 +313,31 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     | Extract<StepResult, { kind: "ended" | "failed" }>;
   const waitLoop = Effect.gen(function* () {
     let retries = 0;
+    let memoryWaits = 0;
     let continued = false;
+    // A sample whose explore start was refused for memory has not played: it
+    // waits like the boot check, then plays again on a fresh clock. Memory
+    // that never frees ends the run resumably instead of voiding the sample.
+    // Only play turns: the write-up (the turn that releases) does not play.
+    const plays = step.inputCapMs > 0 && !step.release;
+    const memoryRefused = Effect.gen(function* () {
+      if (!plays || !(yield* deps.game.exploreMemoryWait(live)).refused) return null;
+      if (memoryWaits >= MEMORY_WAITS)
+        return {
+          kind: "ended",
+          ending: "low-memory",
+          reason: `${step.role}: explore start refused, memory short`,
+        } satisfies Waited;
+      memoryWaits += 1;
+      yield* ctx.log(
+        `${step.role}: explore start refused, memory short; waiting ${MEMORY_PAUSE} (${memoryWaits} of ${MEMORY_WAITS})`,
+      );
+      yield* Effect.sleep(MEMORY_PAUSE);
+      capEnd = Date.now() + step.capMs;
+      credited = (yield* deps.game.exploreMemoryWait(live)).waitedMs;
+      runId = yield* send(live, `${MEMORY_RETRY}\n\n${step.prompt}`);
+      return "retry" as const;
+    });
     for (;;) {
       // A resume follows the thread's latest run: T3 may have resumed it
       // after a usage-limit reset on its own.
@@ -319,11 +346,18 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
           projectId,
           threadId: live,
           ...(runId === undefined ? {} : { runId }),
-          timeoutMs: Math.max(1, deadline - Date.now()),
+          timeoutMs: Math.max(1, deadline() - Date.now()),
         })
         .pipe(Effect.mapError(roleError("wait", live, "thread-wait")));
       if (waited.timedOut) {
+        const { waitedMs } = yield* deps.game.exploreMemoryWait(live);
+        capEnd += waitedMs - credited;
+        credited = waitedMs;
+        if (deadline() > Date.now()) continue;
         yield* stop(live);
+        const refused = yield* memoryRefused;
+        if (refused === "retry") continue;
+        if (refused !== null) return refused;
         return { kind: "run", run: waited.run, timedOut: true } satisfies Waited;
       }
       const run = waited.run;
@@ -371,6 +405,9 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
           continue;
         }
       }
+      const refused = yield* memoryRefused;
+      if (refused === "retry") continue;
+      if (refused !== null) return refused;
       return { kind: "run", run, timedOut: false } satisfies Waited;
     }
   }).pipe(Effect.onInterrupt(() => stop(live).pipe(Effect.ignore)));
@@ -378,7 +415,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   if (waited.kind === "ended") return waited;
   const release =
     step.at !== null &&
-    (step.release || waited.kind === "failed" || (waited.timedOut && budgetBound));
+    (step.release || waited.kind === "failed" || (waited.timedOut && budgetBound()));
 
   // Evidence is cumulative per thread; closing here also releases the
   // thread's explorer so nothing stays open between roles.
@@ -429,7 +466,7 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     files,
     evidence,
     timedOut: waited.timedOut,
-    budgetCut: waited.timedOut && budgetBound,
+    budgetCut: waited.timedOut && budgetBound(),
     elapsedMs: Date.now() - started,
     sourceBefore,
     sourceAfter: step.source ? yield* sourceId() : "",
