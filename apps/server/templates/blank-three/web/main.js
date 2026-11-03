@@ -31,7 +31,6 @@ export const ACTIONS = {
   action: null,
   alt: null,
 };
-const MOVES = ["move_up", "move_left", "move_down", "move_right"];
 
 const GOAL = 5;
 const SPEED = 5;
@@ -99,7 +98,7 @@ function placeBeacon(x, z) {
 }
 
 export function update(dt, ctx) {
-  const { input, camera, hud } = ctx;
+  const { input, camera, ui } = ctx;
   elapsed += dt;
   GameState.time_left = Math.max(0, Math.ceil(TIME_LIMIT_S - elapsed));
   // y is down the screen, which is +z towards this camera; a stick gives less than 1.
@@ -124,6 +123,7 @@ export function update(dt, ctx) {
     Juice.shake(0.25);
     Juice.pop(rover);
     placeBeacon(THREE.MathUtils.randFloat(-10, 10), THREE.MathUtils.randFloat(-12, 4));
+    if (GameState.score < GOAL) ui.toast(`Beacon ${GameState.score} found`);
     if (GameState.score >= GOAL) {
       const time = Math.round(elapsed);
       GameState.best_time = GameState.best_time === 0 ? time : Math.min(GameState.best_time, time);
@@ -136,9 +136,11 @@ export function update(dt, ctx) {
   }
   camera.position.set(rover.position.x, 7, rover.position.z + 9);
   camera.lookAt(rover.position.x, 0.5, rover.position.z);
-  // Write the overlay only when it changes: a DOM write every frame costs layout.
-  const text =
-    `beacons ${GameState.score} / ${GOAL}   time ${GameState.time_left}\n` +
-    `${MOVES.map(input.label).join("")} to roam, ${input.label("dash")} to dash`;
-  if (hud.textContent !== text) hud.textContent = text;
+  ui.counter("Beacons", GameState.score, GOAL);
+  ui.timer("Time", TIME_LIMIT_S - elapsed);
+  ui.objective("Reach every beacon before the clock runs out");
+  ui.hint("{move_up}{move_left}{move_down}{move_right} to roam", {
+    until: () => GameState.moves > 1,
+  });
+  ui.hint("{dash} to dash", { until: () => dashLeft > 0 });
 }

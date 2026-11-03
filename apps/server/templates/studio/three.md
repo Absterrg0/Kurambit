@@ -37,6 +37,9 @@ exported with the same `game_*` tools as a Godot game.
    ones that must survive (best score, unlocks) in
    `export const KEEP_ACROSS_RUNS = [...]`; the shell saves those between
    visits (numbers, strings, arrays, plain objects) and Settings can reset them.
+   Show the score, health, timer, objective, event toasts and control hints
+   through `ctx.ui` (`web/shell/hud.js`; TEMPLATE.md), never raw text, and
+   teach each control with a `hint` the first time it matters.
    Answer every player action through `Juice` (`web/shell/juice.js`):
    `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
    `sfx`.

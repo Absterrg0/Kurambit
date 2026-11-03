@@ -12,7 +12,8 @@
 //   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
-// camera, player, assets (model(name) / texture(name), shell/assets.js),
+// camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
+// hint; shell/hud.js), assets (model(name) / texture(name), shell/assets.js),
 // input (named actions from keys, mouse and gamepad, which
 // the player can rebind: input.down("jump"), input.pressed("action"),
 // input.vector(); the table and the calls are in shell/controls.js), keys
@@ -44,6 +45,7 @@ import {
 import { Juice, juiceShell } from "./juice.js";
 import { animateShell } from "./animate.js";
 import { cameraShell } from "./camera.js";
+import { createHud } from "./hud.js";
 import { assets, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
 import {
@@ -125,6 +127,8 @@ function newContext() {
     /** The player object (an Object3D or {x, y, z}); the studio probe reports its position. */
     player: null,
     input: input.api,
+    /** HUD widgets by name (shell/hud.js); call them every frame from update(). */
+    ui: createHud(hud, input.api),
     keys: {
       down: (code) => down.has(code),
       pressed: (code) => pressed.has(code),
@@ -670,6 +674,7 @@ function step(dt) {
     game.update?.(dt, run.ctx);
     animateShell.update(dt);
     cameraShell.update(dt);
+    run.ctx.ui.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
     if (!run.reported) reportError(error);
