@@ -36,14 +36,29 @@ import {
   alive,
   displayInRange,
   findXvfb,
+  memoryShortfall,
   pickDisplay,
   readRecord,
   reapVerified,
+  underIdleMemoryFloor,
   type RecordedPid,
 } from "./liveProcess.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
+/**
+ * Free memory a live Blender needs to open, in MB: Blender, its Xvfb and the
+ * MCP child peaked about 1.2 GB (PSS) on this machine through code, an asset
+ * import, a GLB export and solid looks; 1.5 GB leaves a little headroom.
+ */
+const NEEDED_MB = 1536;
+/**
+ * Further free memory a rendered look needs, in MB: on the same machine a
+ * `shading: "rendered"` look took the session to about 3 GB and MemAvailable
+ * fell 1.55 GB during it. Checked before each rendered look, not at open,
+ * since most sessions never render.
+ */
+const RENDER_NEEDED_MB = 2048;
 const BLEND_REL = "art/blender/live.blend";
 const SESSION_FILE = "session.json";
 
@@ -331,6 +346,22 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const sessions = new Map<string, Session>();
+  /** Public operations running per game right now; a sweep never closes a held game's Blender. */
+  const held = new Map<string, number>();
+  const holding = <A>(
+    root: string,
+    effect: Effect.Effect<A, GameOperationError>,
+  ): Effect.Effect<A, GameOperationError> =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => held.set(root, (held.get(root) ?? 0) + 1)),
+      () => effect,
+      () =>
+        Effect.sync(() => {
+          const left = (held.get(root) ?? 1) - 1;
+          if (left > 0) held.set(root, left);
+          else held.delete(root);
+        }),
+    );
 
   // Addon keys, when set, as env for Blender/MCP children. Values never
   // leave the secret store except into the child environment; absence
@@ -377,17 +408,24 @@ const make = Effect.gen(function* () {
     return { blender, uvx, xvfb: yield* Effect.promise(findXvfb) };
   });
 
+  /** Ends the in-memory session synchronously, so a sweep's idle check and the close are one step. */
+  const take = (root: string): Session | undefined => {
+    const session = sessions.get(root);
+    if (session !== undefined) {
+      sessions.delete(root);
+      killPid(session.mcpPid);
+      killPid(session.blenderPid);
+      killPid(session.xvfbPid);
+      void session.client.close().catch(() => undefined);
+    }
+    return session;
+  };
+
   /** Ends the in-memory session, then reaps whatever the record still names (a previous server's session included). */
-  const drop = (root: string): Effect.Effect<void> =>
+  const drop = (root: string): Effect.Effect<void> => Effect.suspend(() => reap(root, take(root)));
+
+  const reap = (root: string, session: Session | undefined): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const session = sessions.get(root);
-      if (session !== undefined) {
-        sessions.delete(root);
-        killPid(session.mcpPid);
-        killPid(session.blenderPid);
-        killPid(session.xvfbPid);
-        void session.client.close().catch(() => undefined);
-      }
       // A live session is checked against what it was launched from, so a
       // Blender path change never orphans it; only a record without one (a
       // previous server's) resolves the toolchain.
@@ -475,6 +513,10 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "Xvfb is needed for the live Blender's private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
         );
+      const short = yield* Effect.promise(() =>
+        memoryShortfall("live Blender", NEEDED_MB, "KURAMBIT_BLENDER_MEMORY_MB"),
+      );
+      if (short !== null) return yield* opError("blender-live", root, "low-memory", short);
       const addonKeys = yield* readAddonKeyEnv;
       const homeDir = homeDirOf(root);
       const port = portFor(root);
@@ -798,13 +840,26 @@ const make = Effect.gen(function* () {
     });
 
   // Idle sessions die on a detached sweep so one forgotten game cannot hold
-  // Blender, Xvfb and the MCP child forever.
+  // Blender, Xvfb and the MCP child forever, and close early when the
+  // machine runs short of memory. A held game's Blender is never idle.
   yield* Effect.forever(
     Effect.gen(function* () {
-      yield* Effect.sleep("60 seconds");
+      yield* Effect.sleep("15 seconds");
       const now = yield* Clock.currentTimeMillis;
-      for (const [root, session] of sessions)
-        if (now - session.lastActive > IDLE_MS) yield* drop(root);
+      const idle = (root: string) => (held.get(root) ?? 0) === 0 && sessions.has(root);
+      const roots = Array.from(sessions.keys()).filter(idle);
+      const shortMb = roots.length === 0 ? null : yield* Effect.promise(underIdleMemoryFloor);
+      for (const root of roots) {
+        const expired = now - (sessions.get(root)?.lastActive ?? now) > IDLE_MS;
+        if (!expired && shortMb === null) continue;
+        if (!expired)
+          yield* Effect.logWarning("closing an idle live Blender: memory is short", {
+            root,
+            availableMb: shortMb,
+          });
+        // Re-checked in the same synchronous step that ends the session.
+        yield* Effect.suspend(() => (idle(root) ? reap(root, take(root)) : Effect.void));
+      }
     }),
   ).pipe(Effect.forkDetach);
   yield* Effect.addFinalizer(() =>
@@ -813,148 +868,187 @@ const make = Effect.gen(function* () {
 
   return GameBlender.of({
     code: (root, input) =>
-      Effect.gen(function* () {
-        const text = yield* callText(root, "execute_blender_code", { code: input.code });
-        const blend = yield* saveBlend(root);
-        return { output: `${text}\nSaved .blend source: ${blend}` };
-      }),
+      holding(
+        root,
+        Effect.gen(function* () {
+          const text = yield* callText(root, "execute_blender_code", { code: input.code });
+          const blend = yield* saveBlend(root);
+          return { output: `${text}\nSaved .blend source: ${blend}` };
+        }),
+      ),
     look: (root, input) =>
-      Effect.gen(function* () {
-        const result = yield* call(root, "look", {
-          ...(input.mode === undefined ? {} : { mode: input.mode }),
-          ...(input.target === undefined ? {} : { target: input.target }),
-          ...(input.views === undefined ? {} : { views: input.views }),
-          ...(input.distance === undefined ? {} : { distance: input.distance }),
-          ...(input.shading === undefined ? {} : { shading: input.shading }),
-          ...(input.frames === undefined ? {} : { frames: input.frames }),
-          ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
-          ...(input.view === undefined ? {} : { view: input.view }),
-          max_size: input.maxSize ?? 768,
-        });
-        const text = textOf(result);
-        const image = (result.content ?? []).find((entry) => entry.type === "image");
-        if (image?.data === undefined)
-          return { text: text === "" ? "Blender returned no image." : text };
-        const size = pngSizeOf(image.data, input.maxSize ?? 768);
-        return {
-          text: text === "" ? "See the attached viewport image." : text,
-          screenshot: {
-            mimeType: "image/png" as const,
-            data: image.data,
-            width: size.width,
-            height: size.height,
-          },
-        };
-      }),
-    scene: (root, input) =>
-      Effect.gen(function* () {
-        const text = yield* callText(root, "get_scene_info", { ...input });
-        return { text };
-      }),
-    assetsSearch: (root, input) =>
-      Effect.gen(function* () {
-        const text = yield* callText(root, "search_assets", {
-          source: input.source,
-          ...(input.query === undefined ? {} : { query: input.query }),
-          ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
-          ...(input.category === undefined ? {} : { category: input.category }),
-          limit: input.limit ?? 10,
-        });
-        return { text };
-      }),
-    assetsImport: (root, input) =>
-      Effect.gen(function* () {
-        const text = yield* callText(root, "import_asset", {
-          source: input.source,
-          id: input.id,
-          ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
-          ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
-          ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-          ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
-        });
-        const blend = yield* saveBlend(root);
-        // Library models arrive at arbitrary scale: normalize the id to a
-        // file name, export the scene's meshes as one GLB the game can
-        // preload, and keep the .blend source in the game.
-        const safe =
-          input.id
-            .toLowerCase()
-            .replace(/[^a-z0-9_-]+/g, "-")
-            .slice(0, 60) || "asset";
-        const exportRel = `${yield* exportDirOf(root)}/${safe}.glb`;
-        const absolute = NodePath.join(root, exportRel);
-        yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(NodePath.dirname(absolute), { recursive: true }),
-          catch: (cause) => opError("blender-live", exportRel, "io", undefined, cause),
-        });
-        const exported = yield* callText(root, "execute_blender_code", {
-          code: [
-            "import bpy",
-            `fp = ${JSON.stringify(absolute)}`,
-            "obs = [o for o in bpy.context.scene.objects if o.type == 'MESH']",
-            "bpy.ops.object.select_all(action='DESELECT')",
-            "for o in obs: o.select_set(True)",
-            "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True)",
-            "print(f'STUDIO_EXPORTED {len(obs)}')",
-          ].join("\n"),
-        });
-        if (!exported.includes("STUDIO_EXPORTED"))
+      holding(
+        root,
+        Effect.gen(function* () {
+          if (input.shading === "rendered") {
+            const short = yield* Effect.promise(() =>
+              memoryShortfall(
+                "rendered Blender look",
+                RENDER_NEEDED_MB,
+                "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
+              ),
+            );
+            if (short !== null)
+              return yield* opError(
+                "blender-look",
+                root,
+                "low-memory",
+                `${short} A solid look (the default shading) needs far less and works now.`,
+              );
+          }
+          const result = yield* call(root, "look", {
+            ...(input.mode === undefined ? {} : { mode: input.mode }),
+            ...(input.target === undefined ? {} : { target: input.target }),
+            ...(input.views === undefined ? {} : { views: input.views }),
+            ...(input.distance === undefined ? {} : { distance: input.distance }),
+            ...(input.shading === undefined ? {} : { shading: input.shading }),
+            ...(input.frames === undefined ? {} : { frames: input.frames }),
+            ...(input.frameCount === undefined ? {} : { frame_count: input.frameCount }),
+            ...(input.view === undefined ? {} : { view: input.view }),
+            max_size: input.maxSize ?? 768,
+          });
+          const text = textOf(result);
+          const image = (result.content ?? []).find((entry) => entry.type === "image");
+          if (image?.data === undefined)
+            return { text: text === "" ? "Blender returned no image." : text };
+          const size = pngSizeOf(image.data, input.maxSize ?? 768);
           return {
-            text: `${text}\nSaved .blend source: ${blend}\nGLB export failed: ${exported.slice(0, 500)}`,
+            text: text === "" ? "See the attached viewport image." : text,
+            screenshot: {
+              mimeType: "image/png" as const,
+              data: image.data,
+              width: size.width,
+              height: size.height,
+            },
           };
-        return {
-          text: `${text}\nSaved .blend source: ${blend}\nExported ${exportRel}. Run game_import after.`,
-          blend,
-          export: exportRel,
-        };
-      }),
+        }),
+      ),
+    scene: (root, input) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const text = yield* callText(root, "get_scene_info", { ...input });
+          return { text };
+        }),
+      ),
+    assetsSearch: (root, input) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const text = yield* callText(root, "search_assets", {
+            source: input.source,
+            ...(input.query === undefined ? {} : { query: input.query }),
+            ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
+            ...(input.category === undefined ? {} : { category: input.category }),
+            limit: input.limit ?? 10,
+          });
+          return { text };
+        }),
+      ),
+    assetsImport: (root, input) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const text = yield* callText(root, "import_asset", {
+            source: input.source,
+            id: input.id,
+            ...(input.assetType === undefined ? {} : { asset_type: input.assetType }),
+            ...(input.targetSize === undefined ? {} : { target_size: input.targetSize }),
+            ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+            ...(input.applyTo === undefined ? {} : { apply_to: input.applyTo }),
+          });
+          const blend = yield* saveBlend(root);
+          // Library models arrive at arbitrary scale: normalize the id to a
+          // file name, export the scene's meshes as one GLB the game can
+          // preload, and keep the .blend source in the game.
+          const safe =
+            input.id
+              .toLowerCase()
+              .replace(/[^a-z0-9_-]+/g, "-")
+              .slice(0, 60) || "asset";
+          const exportRel = `${yield* exportDirOf(root)}/${safe}.glb`;
+          const absolute = NodePath.join(root, exportRel);
+          yield* Effect.tryPromise({
+            try: () => NodeFSP.mkdir(NodePath.dirname(absolute), { recursive: true }),
+            catch: (cause) => opError("blender-live", exportRel, "io", undefined, cause),
+          });
+          const exported = yield* callText(root, "execute_blender_code", {
+            code: [
+              "import bpy",
+              `fp = ${JSON.stringify(absolute)}`,
+              "obs = [o for o in bpy.context.scene.objects if o.type == 'MESH']",
+              "bpy.ops.object.select_all(action='DESELECT')",
+              "for o in obs: o.select_set(True)",
+              "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True)",
+              "print(f'STUDIO_EXPORTED {len(obs)}')",
+            ].join("\n"),
+          });
+          if (!exported.includes("STUDIO_EXPORTED"))
+            return {
+              text: `${text}\nSaved .blend source: ${blend}\nGLB export failed: ${exported.slice(0, 500)}`,
+            };
+          return {
+            text: `${text}\nSaved .blend source: ${blend}\nExported ${exportRel}. Run game_import after.`,
+            blend,
+            export: exportRel,
+          };
+        }),
+      ),
     exportGlb: (root, input) =>
-      Effect.gen(function* () {
-        // Thin path from the live scene to a GLB the game can load: select
-        // the named objects (or every mesh) and run the glTF exporter, then
-        // save the .blend source like every other scene-changing call.
-        const manifest = yield* projects.read(root);
-        const engineDir = manifest.godotProject;
-        const file = input.file ?? `${assetDirOf(manifest)}/scene.glb`;
-        if (!file.startsWith(`${engineDir}/`) || !file.endsWith(".glb") || file.includes(".."))
-          return yield* opError(
-            "blender-export",
-            file,
-            "invalid-input",
-            `The destination must be a game-relative path under ${engineDir}/ ending with .glb.`,
-          );
-        const absolute = NodePath.join(root, file);
-        const names = input.objects ?? [];
-        const exported = yield* callText(root, "execute_blender_code", {
-          code: [
-            "import bpy, os, json",
-            `fp = ${JSON.stringify(absolute)}`,
-            `wanted = ${JSON.stringify(names)}`,
-            "allnames = [o.name for o in bpy.data.objects]",
-            "obs = [bpy.data.objects.get(n) for n in wanted] if wanted else [o for o in bpy.context.scene.objects if o.type == 'MESH']",
-            "obs = [o for o in obs if o is not None]",
-            "missing = [n for n in wanted if bpy.data.objects.get(n) is None]",
-            "bpy.ops.object.select_all(action='DESELECT')",
-            "for o in obs: o.select_set(True)",
-            "print('STUDIO_ALL ' + json.dumps(allnames[:40]))",
-            "print('STUDIO_MISSING ' + json.dumps(missing)) if missing else None",
-            "print('STUDIO_EMPTY') if len(obs) == 0 else None",
-            "os.makedirs(os.path.dirname(fp), exist_ok=True)",
-            "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True) if len(obs) > 0 else None",
-            "print(f'STUDIO_EXPORTED {len(obs)} ' + str(os.path.getsize(fp))) if len(obs) > 0 else None",
-          ].join("\n"),
-        });
-        if (exported.includes("STUDIO_MISSING") || exported.includes("STUDIO_EMPTY"))
-          return yield* opError("blender-export", file, "invalid-input", exported.slice(0, 1000));
-        if (!exported.includes("STUDIO_EXPORTED"))
-          return yield* opError("blender-export", file, "command-failed", exported.slice(0, 1000));
-        const blend = yield* saveBlend(root);
-        return {
-          text: `${exported}\nSaved .blend source: ${blend}\nRun game_import after.`,
-          blend,
-          export: file,
-        };
-      }),
+      holding(
+        root,
+        Effect.gen(function* () {
+          // Thin path from the live scene to a GLB the game can load: select
+          // the named objects (or every mesh) and run the glTF exporter, then
+          // save the .blend source like every other scene-changing call.
+          const manifest = yield* projects.read(root);
+          const engineDir = manifest.godotProject;
+          const file = input.file ?? `${assetDirOf(manifest)}/scene.glb`;
+          if (!file.startsWith(`${engineDir}/`) || !file.endsWith(".glb") || file.includes(".."))
+            return yield* opError(
+              "blender-export",
+              file,
+              "invalid-input",
+              `The destination must be a game-relative path under ${engineDir}/ ending with .glb.`,
+            );
+          const absolute = NodePath.join(root, file);
+          const names = input.objects ?? [];
+          const exported = yield* callText(root, "execute_blender_code", {
+            code: [
+              "import bpy, os, json",
+              `fp = ${JSON.stringify(absolute)}`,
+              `wanted = ${JSON.stringify(names)}`,
+              "allnames = [o.name for o in bpy.data.objects]",
+              "obs = [bpy.data.objects.get(n) for n in wanted] if wanted else [o for o in bpy.context.scene.objects if o.type == 'MESH']",
+              "obs = [o for o in obs if o is not None]",
+              "missing = [n for n in wanted if bpy.data.objects.get(n) is None]",
+              "bpy.ops.object.select_all(action='DESELECT')",
+              "for o in obs: o.select_set(True)",
+              "print('STUDIO_ALL ' + json.dumps(allnames[:40]))",
+              "print('STUDIO_MISSING ' + json.dumps(missing)) if missing else None",
+              "print('STUDIO_EMPTY') if len(obs) == 0 else None",
+              "os.makedirs(os.path.dirname(fp), exist_ok=True)",
+              "bpy.ops.export_scene.gltf(filepath=fp, export_format='GLB', use_selection=True) if len(obs) > 0 else None",
+              "print(f'STUDIO_EXPORTED {len(obs)} ' + str(os.path.getsize(fp))) if len(obs) > 0 else None",
+            ].join("\n"),
+          });
+          if (exported.includes("STUDIO_MISSING") || exported.includes("STUDIO_EMPTY"))
+            return yield* opError("blender-export", file, "invalid-input", exported.slice(0, 1000));
+          if (!exported.includes("STUDIO_EXPORTED"))
+            return yield* opError(
+              "blender-export",
+              file,
+              "command-failed",
+              exported.slice(0, 1000),
+            );
+          const blend = yield* saveBlend(root);
+          return {
+            text: `${exported}\nSaved .blend source: ${blend}\nRun game_import after.`,
+            blend,
+            export: file,
+          };
+        }),
+      ),
     stop: drop,
   });
 });

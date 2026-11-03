@@ -522,10 +522,15 @@ export const layer = (options: { readonly stateDir: string }) => {
             );
           case "boot": {
             // A check that could not run is not a verdict on the build: a busy
-            // game or a cancelled check is retried; a missing tool ends the
-            // run (resumable) rather than rejecting good work. Anything else
-            // the check reports is the build failing to boot.
-            const check = (attempt: number): Effect.Effect<Policy.StepResult, GameOperationError> =>
+            // game or a cancelled check is retried; memory short is waited out
+            // (it clears on its own, often when the run's own processes end);
+            // a missing tool, or memory still short after about 15 minutes,
+            // ends the run (resumable) rather than rejecting good work.
+            // Anything else the check reports is the build failing to boot.
+            const check = (
+              attempt: number,
+              memoryWaits = 0,
+            ): Effect.Effect<Policy.StepResult, GameOperationError> =>
               d.deps.game.check(d.creator).pipe(
                 Effect.map(
                   (r) =>
@@ -542,9 +547,17 @@ export const layer = (options: { readonly stateDir: string }) => {
                     if (transient && attempt < 3)
                       return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
                         Effect.andThen(Effect.sleep("5 seconds")),
-                        Effect.andThen(check(attempt + 1)),
+                        Effect.andThen(check(attempt + 1, memoryWaits)),
                       );
-                    if (error.reason === "tool-missing") return Effect.fail(error);
+                    if (error.reason === "low-memory" && memoryWaits < 7)
+                      return log(
+                        `boot check refused, memory short (${(error.detail ?? "").split("\n").at(-1)?.slice(0, 200) ?? ""}); waiting 2 minutes (${memoryWaits + 1} of 7)`,
+                      ).pipe(
+                        Effect.andThen(Effect.sleep("2 minutes")),
+                        Effect.andThen(check(attempt, memoryWaits + 1)),
+                      );
+                    if (error.reason === "tool-missing" || error.reason === "low-memory")
+                      return Effect.fail(error);
                     return Effect.succeed({
                       kind: "boot",
                       ok: false,

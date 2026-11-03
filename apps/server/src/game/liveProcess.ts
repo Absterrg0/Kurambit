@@ -28,6 +28,57 @@ export const readCmdline = async (pid: number): Promise<string[] | null> => {
 export const readExe = (pid: number): Promise<string | null> =>
   NodeFSP.readlink(`/proc/${pid}/exe`).catch(() => null);
 
+/** MemAvailable from /proc/meminfo text, in bytes; null when the line is missing. */
+export const parseMemAvailable = (meminfo: string): number | null => {
+  const kb = /^MemAvailable:\s+(\d+) kB$/m.exec(meminfo)?.[1];
+  return kb === undefined ? null : Number(kb) * 1024;
+};
+
+/**
+ * The kernel's estimate of memory new work can take without swapping. Null
+ * without /proc (off Linux) or when unreadable, which turns the memory
+ * guards off.
+ */
+export const memAvailable = async (): Promise<number | null> =>
+  parseMemAvailable(await NodeFSP.readFile("/proc/meminfo", "utf8").catch(() => ""));
+
+const MB = 1024 * 1024;
+const gb = (bytes: number) => (bytes / 1024 / MB).toFixed(1);
+
+/**
+ * Null when there is room to open `editor`, else the detail of a
+ * `low-memory` refusal. An editor started short of memory gets OOM-killed
+ * mid-build once other processes grow, or the machine hangs on full swap;
+ * a refusal up front is the honest answer. `env` (whole MB, 0 turns the
+ * check off) overrides `neededMb` for machines that know better.
+ */
+export const memoryShortfall = async (
+  editor: string,
+  neededMb: number,
+  env: string,
+): Promise<string | null> => {
+  const override = process.env[env];
+  const needed =
+    (override !== undefined && /^\d+$/.test(override) ? Number(override) : neededMb) * MB;
+  const available = await memAvailable();
+  if (available === null || available >= needed) return null;
+  return `The ${editor} needs about ${gb(needed)} GB of free memory to open safely and this machine has ${gb(available)} GB available. Opening it now risks the system killing it mid-work, or the whole machine hanging on swap.`;
+};
+
+/**
+ * Below this much available memory an idle live editor is closed. The kernel
+ * starts reclaiming hard and the OOM killer is close; an idle editor is the
+ * cheapest memory Kurambit can give back, since the next call reopens it
+ * (or refuses honestly). An editor in a call is never closed.
+ */
+const IDLE_MEMORY_FLOOR = 1024 * MB;
+
+/** Available memory in MB while it is under the idle floor, else null (always null off Linux). */
+export const underIdleMemoryFloor = async (): Promise<number | null> => {
+  const available = await memAvailable();
+  return available !== null && available < IDLE_MEMORY_FLOOR ? Math.round(available / MB) : null;
+};
+
 /** The Xvfb every live editor launches, and the only Xvfb its records may name. */
 export const findXvfb = (): Promise<string | null> =>
   findExecutable("Xvfb", { pathEnv: process.env.PATH, override: process.env.KURAMBIT_XVFB });
@@ -144,6 +195,15 @@ export const reapVerified = async (
       (await identityOf(pid)) === identity
     )
       signal(pid, "SIGKILL");
+  }
+  // A memory check right after a reap must see the memory given back: wait
+  // (briefly) for every signalled process, workers included, to be gone.
+  for (let waited = 0; waited < 3_000; waited += 100) {
+    let left = false;
+    for (const [pid, identity] of signalled)
+      if (alive(pid) && identity !== null && (await identityOf(pid)) === identity) left = true;
+    if (!left) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 };
 
