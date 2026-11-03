@@ -9,6 +9,7 @@ import {
   type GameStageInput,
   nextGamePreviewFrame,
   gameSourceFreshnessLabel,
+  toolchainReadyFor,
 } from "./gameStageLogic";
 
 const BASE: GameStageInput = {
@@ -185,4 +186,29 @@ it("describes unknown source freshness and preserves selected Play", () => {
   expect(gameSourceFreshnessLabel("unknown")).toContain("Check");
   expect(gameSourceFreshnessLabel(true)).toContain("Play keeps that build");
   expect(gameSourceFreshnessLabel(false)).toContain("last check");
+});
+
+it("counts only the tools the game's engine needs", () => {
+  const tool = (name: "blender" | "godot" | "uv" | "unity", ready: boolean) => ({
+    tool: name,
+    path: null,
+    version: null,
+    ready,
+    verified: ready,
+    message: "",
+  });
+  const withoutUnity = {
+    toolsDirectory: "/tools",
+    installing: false,
+    tools: [tool("blender", true), tool("godot", true), tool("uv", true), tool("unity", false)],
+  };
+  expect(toolchainReadyFor(withoutUnity, "godot")).toBe(true);
+  expect(toolchainReadyFor(withoutUnity, "three")).toBe(true);
+  expect(toolchainReadyFor(withoutUnity, "unity")).toBe(false);
+  const withoutGodot = {
+    ...withoutUnity,
+    tools: [tool("blender", true), tool("godot", false), tool("uv", true)],
+  };
+  expect(toolchainReadyFor(withoutGodot, "three")).toBe(true);
+  expect(toolchainReadyFor(withoutGodot, "godot")).toBe(false);
 });

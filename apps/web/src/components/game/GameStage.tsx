@@ -50,6 +50,7 @@ import {
   deriveGameStagePhase,
   nextGamePreviewFrame,
   type GamePreviewServe,
+  toolchainReadyFor,
 } from "./gameStageLogic";
 
 type GameStageTab = "play" | "run" | "builds";
@@ -165,7 +166,7 @@ export function GameStage({
   const activeTab = tab ?? (runStatus.data?.active === true ? "run" : "play");
   const webBuild = data.builds.find((build) => build.target === "Web");
   const phase = deriveGameStagePhase({
-    toolchainReady: data.toolchain.tools.every((tool) => tool.ready),
+    toolchainReady: toolchainReadyFor(data.toolchain, data.manifest.engine.name),
     operation: data.operation,
     hasWebBuild: webBuild !== undefined,
     webBuildStale: data.webBuildStale,
