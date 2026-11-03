@@ -10,10 +10,11 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 
 ; GameState is the game's single source of truth and StudioProbe is the
 ; read-only bridge game_web_playtest reads from. Keep both names. Juice is
-; the game feel kit (shell/juice.gd).
+; the game feel kit (shell/juice.gd), Hud the HUD kit (shell/hud.gd).
 GameState="*res://scripts/game_state.gd"
 StudioProbe="*res://scripts/studio_probe.gd"
 Juice="*res://shell/juice.gd"
+Hud="*res://shell/hud.gd"
 
 [display]
 window/size/viewport_width=960

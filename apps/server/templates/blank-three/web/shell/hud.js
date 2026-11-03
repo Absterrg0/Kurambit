@@ -19,6 +19,7 @@ import { Juice } from "./juice.js";
 
 const TOAST_S = 1.8;
 const FADE_S = 0.25;
+const TOAST_AGAIN_S = 4;
 
 export function createHud(layer, input) {
   const area = (name) => {
@@ -33,6 +34,8 @@ export function createHud(layer, input) {
   let top = null;
   const widgets = new Map();
   const toasts = [];
+  // Toast text that ended a moment ago, with the seconds until it may show again.
+  const recent = new Map();
   const hints = [];
   let toast = null;
   let hint = null;
@@ -122,8 +125,13 @@ export function createHud(layer, input) {
       top.hidden = text === "";
     },
     toast(text, seconds = TOAST_S) {
-      // Called from a condition every frame, the same text would queue forever.
-      if ((toast !== null && centre?.textContent === text) || toasts.some((t) => t.text === text))
+      // Called from a condition every frame, the same text would show forever:
+      // it waits while it shows or queues and for a few seconds after.
+      if (
+        (toast !== null && centre?.textContent === text) ||
+        recent.has(text) ||
+        toasts.some((t) => t.text === text)
+      )
         return;
       toasts.push({ text, seconds });
     },
@@ -134,6 +142,9 @@ export function createHud(layer, input) {
     },
     /** The shell's tick, on game time after update(). */
     update(dt) {
+      for (const [text, left] of recent)
+        if (left - dt <= 0) recent.delete(text);
+        else recent.set(text, left - dt);
       if (toast === null && toasts.length > 0) {
         const next = toasts.shift();
         centre ??= area("toast");
@@ -146,6 +157,7 @@ export function createHud(layer, input) {
         if (toast.left <= -FADE_S) {
           // Hidden, not only transparent: the probe reads text that is on screen.
           centre.hidden = true;
+          recent.set(centre.textContent, TOAST_AGAIN_S);
           toast = null;
         }
       }

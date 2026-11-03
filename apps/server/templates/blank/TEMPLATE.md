@@ -52,8 +52,15 @@ but it ships the shell a demo needs, so build the game, not the menus.
   Controls lists only controls that work.
 - Settings > Controls lists every action with its keys and gamepad inputs,
   rebinds keys (saved with the other settings; Reset to defaults) and is the
-  place players and testers read the controls. Name keys in a HUD hint with
-  `GameState.key_label("jump")`, so the hint stays true after a rebind.
+  place players and testers read the controls. Name keys in a HUD hint as
+  `{jump}`, so the hint stays true after a rebind.
+- Put every HUD line through the `Hud` autoload (`shell/hud.gd`), called each
+  frame from `_process`: `Hud.counter("Gems", n, 5)`, `Hud.bar("Health", hp, 3)`
+  (hearts up to 10), `Hud.timer("Time", seconds)`, `Hud.objective(text)`;
+  `Hud.toast("Gate opened!")` on the event; `Hud.hint("{jump} to jump",
+func(): return jumped)` teaches a control once. The shell clears it on every
+  run, it pauses with the game, and its labels are what the probe reads. Do
+  not build your own HUD labels beside it.
 - Menus take the mouse, the keys and a gamepad (d-pad, A, B, Start).
 
 ## Game feel
