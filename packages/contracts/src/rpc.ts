@@ -1441,7 +1441,8 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   error: gameError,
 });
 const WsGameInstallRpc = Rpc.make(WS_METHODS.gameInstall, {
-  payload: Schema.Struct({}),
+  /** `unity` installs the pinned Unity CLI and editor (a ~4.5 GB download) instead of Blender, Godot and uv. */
+  payload: Schema.Struct({ unity: Schema.optionalKey(Schema.Boolean) }),
   success: GameToolchainStatus,
   error: gameError,
 });

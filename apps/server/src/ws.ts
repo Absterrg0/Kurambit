@@ -1842,7 +1842,7 @@ const layerWsRpc = (
           }),
         [WS_METHODS.subscribeGameEvents]: () => game.events,
         [WS_METHODS.gameToolchainStatus]: () => gameToolchain.status,
-        [WS_METHODS.gameInstall]: () => gameToolchain.install,
+        [WS_METHODS.gameInstall]: (input) => gameToolchain.install(input),
         [WS_METHODS.gameVerify]: () => gameToolchain.verify,
         [WS_METHODS.gameSecretsStatus]: () => game.secretsStatus(),
         [WS_METHODS.gameSecretsSet]: (input) => game.setSecret(input),
