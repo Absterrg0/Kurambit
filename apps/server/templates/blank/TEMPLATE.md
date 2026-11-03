@@ -83,6 +83,14 @@ loads `game_blender_render_sprites` strips into an AnimatedSprite2D.
 and `FollowCamera3D` (a SpringArm3D that pulls in at walls, with orbit) follow
 the player. The comment block at the top of each file shows each call.
 
+## Levels
+
+`LevelMap` (`shell/level_map.gd`) builds a level from a text map and a
+legend: `LevelMap.build_2d` fills TileMapLayers from a tile sheet,
+`LevelMap.build_3d` places piece scenes; both give walls real collision and
+return `spawns` by letter and `bounds`. The comment block at the top of the
+file shows each call.
+
 ## Project structure
 
 - `project.godot` uses the Compatibility renderer and boots `scenes/main.tscn`.

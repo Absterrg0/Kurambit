@@ -57,23 +57,32 @@ animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
    applies on top. Each `ctx.assets.model` call is its own copy, so every
    character or enemy gets its own `animate`; call its `dispose()` when the
    enemy is gone for good.
-6. Keep `window.__studio`: `ready` after the first frame, `getState()`
+6. Write every top-down level (rows run along x/z on the ground) as a text map with `buildLevel(ctx, rows, legend, { floor })`
+   (`web/shell/level.js`), never pieces placed by coordinates: `#` walls,
+   `.` floor, a letter per spawn, the legend naming ASSETS models. Make more
+   than one room, joined by corridors, when the brief allows. Put the player,
+   enemies and pickups at `level.spawns.P[0]`, `level.spawns.E`, never at
+   hard-coded positions; move them with `level.move(position, step, radius)`
+   so they slide along walls (keep the radius under half a cell); a side-view
+   level is built by hand; pass `level.walls` to `followCamera3D`'s
+   `blockers` and `level.bounds` to `followCamera2D`.
+7. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).
    Extend `GameState`, not the bridge.
-7. Keep `GameState` the single source of truth with public primitives only
+8. Keep `GameState` the single source of truth with public primitives only
    (the probe reports those; Retry resets them too). Build meshes, class
    instances and functions in `start(ctx)`, never on `GameState`.
    Keep the values that matter on screen too (the probe reports the overlay).
    Set `ctx.player` so the probe reports the player's position.
-8. Playtest with `game_explore_*` (target web): real keys
+9. Playtest with `game_explore_*` (target web): real keys
    (`"Enter"`, `"w"`, `"ArrowLeft"`, not Godot action names), real clicks.
    The game opens on the title: press `"Enter"` to play.
    Bots read the probe and write `clickAt(x, y)`; id-clicks have no control
    to land on. `setState` reaches late content; verdicts still come from
    real input after.
-9. Export checklist before calling it done: web export builds, the page
-   stays clean in `game_check`, the game is playable from `web/index.html`
-   on a fresh checkout.
-10. Work in `./web` plus VISION.md, PLAN.md and NOTES.md. Never commit,
+10. Export checklist before calling it done: web export builds, the page
+    stays clean in `game_check`, the game is playable from `web/index.html`
+    on a fresh checkout.
+11. Work in `./web` plus VISION.md, PLAN.md and NOTES.md. Never commit,
     never reset git, never use subagents.

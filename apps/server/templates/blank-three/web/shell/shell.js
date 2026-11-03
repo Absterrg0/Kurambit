@@ -180,6 +180,8 @@ function clearFrameInput() {
 function dispose(scene) {
   scene.traverse((object) => {
     object.geometry?.dispose?.();
+    // An InstancedMesh holds its per-instance matrices on the GPU too.
+    if (object.isInstancedMesh) object.dispose();
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of materials) {
       if (material == null) continue;
