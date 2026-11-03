@@ -100,9 +100,9 @@ import {
   hashWebBuildDirectory,
 } from "./webBuild.ts";
 import {
-  changedFiles,
   comparedSource,
-  matchesCommit,
+  headCommit,
+  restoredToCommit,
   snapshotBuildSource,
 } from "./sourceSnapshot.ts";
 import * as GameOperations from "./GameOperations.ts";
@@ -672,6 +672,7 @@ const make = Effect.gen(function* () {
     );
     return yield* Effect.gen(function* () {
       const before = yield* snapshot(root, godotProject);
+      const headBefore = yield* Effect.promise(() => headCommit(root));
       // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
       yield* Effect.promise(async () => {
         const parent = NodePath.dirname(destination);
@@ -727,15 +728,17 @@ const make = Effect.gen(function* () {
         };
       const after = yield* snapshot(root, godotProject);
       let comparison = comparedSource(before, after, "export");
-      // A first build after a fresh import has URP re-save its pipeline
-      // assets, putting back the committed bytes the import had rewritten.
-      // A build whose every changed file now holds its committed content
-      // built those sources; any other change mid-build still fails.
-      if (comparison.kind === "changed" && before.kind === "known" && after.kind === "known") {
-        const changed = changedFiles(before, after).map((path) => `${godotProject}/${path}`);
-        if (yield* Effect.promise(() => matchesCommit(root, changed)))
-          comparison = { kind: "current", sourceId: after.sourceId };
-      }
+      // URP's re-save of its pipeline assets is the one mid-build change that
+      // still built these sources (restoredToCommit says exactly when).
+      if (
+        comparison.kind === "changed" &&
+        before.kind === "known" &&
+        after.kind === "known" &&
+        (yield* Effect.promise(() =>
+          restoredToCommit(root, godotProject, before, after, headBefore),
+        ))
+      )
+        comparison = { kind: "current", sourceId: after.sourceId };
       if (comparison.kind !== "current")
         return {
           result: { ...result, success: false, message: comparison.detail },

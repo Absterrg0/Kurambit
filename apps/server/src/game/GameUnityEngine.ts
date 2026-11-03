@@ -280,13 +280,19 @@ export const makeUnityBackend = (
             NodePath.resolve(report["outputPath"]) === NodePath.resolve(input.outputPath);
       let last = queued;
       let finished = false;
+      let seen = false;
+      let idleUnseen = 0;
       return yield* Effect.gen(function* () {
         for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
           yield* Effect.sleep("15 seconds");
           last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
           const status = resultOf(last)?.["status"];
-          // An unanswered poll says nothing; every state but these two is final.
-          if (typeof status === "string") finished = status !== "queued" && status !== "building";
+          // An unanswered poll says nothing. Every state but these two is final,
+          // except an idle editor that has not picked the build up yet: that
+          // gets a minute before the wait gives up on it.
+          if (status === "queued" || status === "building") seen = true;
+          else if (typeof status === "string")
+            finished = status !== "idle" || seen || (idleUnseen += 1) >= 4;
         }
         if (!finished) {
           // Unity has no build cancel here; the editor would keep writing into

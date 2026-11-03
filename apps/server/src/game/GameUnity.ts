@@ -658,13 +658,27 @@ const make = Effect.gen(function* () {
         // process and fight the first for the Licensing Client. An editor in
         // use is never closed under its caller.
         for (const [otherRoot, other] of Array.from(sessions))
-          if (otherRoot !== root && other.inFlight > 0)
+          if (otherRoot !== root && other.inFlight > 0) {
+            const [mine, theirs] = yield* Effect.promise(() =>
+              Promise.all([checkoutOf(root), checkoutOf(otherRoot)]),
+            );
+            // A production run builds its blind samples in worktrees of the
+            // game; stopping one from the game's own thread would not free the
+            // editor and would sabotage the run.
+            const sameGame =
+              (theirs.kind === "linked" &&
+                NodePath.resolve(theirs.main) === NodePath.resolve(root)) ||
+              (mine.kind === "linked" &&
+                NodePath.resolve(mine.main) === NodePath.resolve(otherRoot));
             return yield* opError(
               "unity-live",
               root,
               "busy",
-              `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_stop there.`,
+              sameGame
+                ? "The live Unity editor is busy: the production run is building a copy of this game in a worktree to play it blind. Only one Unity editor runs at a time; retry in a few minutes, or steer the run with game_run_steer."
+                : `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_stop there.`,
             );
+          }
         for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
         yield* drop(root);
         const xvfbPath = yield* Effect.promise(findXvfb);

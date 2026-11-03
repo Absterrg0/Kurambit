@@ -61,7 +61,8 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   Blind samples play in T3 worktrees at a sha, each a separate Unity project with no `Library/`.
   Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
   (`cp -a --reflink=auto`) of its main checkout's `Library/`, found through git's common dir and
-  taken after the main checkout's idle editor closed, so no asset is reimported. The compiled-script
+  taken after the main checkout's idle editor closed, so only what differs at that commit is
+  reimported (about a minute warm, against two cold). The compiled-script
   state (`Bee/`, `ScriptAssemblies/`, the player data caches) is left out: it is keyed by the main
   checkout's path, a player built from it lost the scene's MonoBehaviours, and the worktree
   recompiles its scripts anyway. The editor is

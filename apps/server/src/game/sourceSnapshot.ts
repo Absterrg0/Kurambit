@@ -195,28 +195,56 @@ export const changedFiles = (
   return [...changed].sort();
 };
 
-/**
- * Whether every one of `paths` (relative to the game root) now holds exactly
- * its committed content: tracked, unmodified, and neither untracked nor
- * ignored. A path in neither the commit nor the tree counts as matching. Any
- * git failure answers false.
- */
-export const matchesCommit = async (
-  root: string,
-  paths: ReadonlyArray<string>,
-): Promise<boolean> => {
-  if (paths.length === 0) return true;
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-  );
-  return new Promise((resolve) => {
+const gitEnv = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+
+const gitOut = (root: string, args: ReadonlyArray<string>): Promise<Buffer | null> =>
+  new Promise((resolve) => {
     NodeChildProcess.execFile(
       "git",
-      ["status", "--porcelain", "--ignored", "--untracked-files=all", "--", ...paths],
-      { cwd: root, env, timeout: 30_000, maxBuffer: 1 << 20 },
-      (error, stdout) => resolve(error === null && stdout.trim() === ""),
+      [...args],
+      { cwd: root, env: gitEnv(), timeout: 30_000, maxBuffer: 64 << 20, encoding: "buffer" },
+      (error, stdout) => resolve(error === null ? stdout : null),
     );
   });
+
+/** The game repository's HEAD commit, or null when it has none or git fails. */
+export const headCommit = async (root: string): Promise<string | null> => {
+  const out = await gitOut(root, ["rev-parse", "--verify", "-q", "HEAD"]);
+  const head = out?.toString("utf8").trim() ?? "";
+  return /^[0-9a-f]{40,64}$/.test(head) ? head : null;
+};
+
+/**
+ * The one change a Unity build may make and still have built its sources: the
+ * first build after a fresh import has URP re-save its pipeline `.asset`
+ * files, putting back the committed bytes the import had rewritten. True only
+ * when HEAD did not move during the build, and every changed path (relative to
+ * `engineDir`) is a Unity `.asset` file present before and after, whose bytes
+ * differed from HEAD's before the build and equal HEAD's after it. An edit, a
+ * new or deleted file, a commit, a revert of anything else, or any git failure
+ * answers false.
+ */
+export const restoredToCommit = async (
+  root: string,
+  engineDir: string,
+  before: Extract<SourceSnapshot, { kind: "known" }>,
+  after: Extract<SourceSnapshot, { kind: "known" }>,
+  headBefore: string | null,
+): Promise<boolean> => {
+  const changed = changedFiles(before, after);
+  if (changed.length === 0) return true;
+  if (headBefore === null || (await headCommit(root)) !== headBefore) return false;
+  for (const path of changed) {
+    const was = before.files.get(path);
+    const now = after.files.get(path);
+    if (was === undefined || now === undefined || !path.endsWith(".asset")) return false;
+    const blob = await gitOut(root, ["cat-file", "blob", `${headBefore}:${engineDir}/${path}`]);
+    if (blob === null) return false;
+    const committed = `${blob.length}:${NodeCrypto.createHash("sha256").update(blob).digest("hex")}`;
+    if (now !== committed || was === committed) return false;
+  }
+  return true;
 };
 
 export type SourceComparison =
