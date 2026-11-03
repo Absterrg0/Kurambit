@@ -271,6 +271,10 @@ value = 1.0
 layout_mode = 2
 text = "Fullscreen"
 
+[node name="Controls" type="Button" parent="Settings/Center/Card/Box"]
+layout_mode = 2
+text = "Controls"
+
 [node name="ResetProgress" type="Button" parent="Settings/Center/Card/Box"]
 layout_mode = 2
 text = "Reset progress"
@@ -328,4 +332,72 @@ autowrap_mode = 3
 
 [node name="Back" type="Button" parent="Credits/Center/Card/Box"]
 layout_mode = 2
+text = "Back"
+
+[node name="Controls" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 22
+visible = false
+
+[node name="Dim" type="ColorRect" parent="Controls"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.04, 0.75)
+
+[node name="Center" type="CenterContainer" parent="Controls"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Controls/Center"]
+custom_minimum_size = Vector2(600, 0)
+layout_mode = 2
+
+[node name="Box" type="VBoxContainer" parent="Controls/Center/Card"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Heading" type="Label" parent="Controls/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HeadingLabel"
+text = "Controls"
+horizontal_alignment = 1
+
+[node name="Scroll" type="ScrollContainer" parent="Controls/Center/Card/Box"]
+custom_minimum_size = Vector2(0, 320)
+layout_mode = 2
+focus_mode = 0
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="List" type="GridContainer" parent="Controls/Center/Card/Box/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 2
+columns = 3
+
+[node name="Note" type="Label" parent="Controls/Center/Card/Box"]
+layout_mode = 2
+theme_type_variation = &"HintLabel"
+horizontal_alignment = 1
+
+[node name="Buttons" type="HBoxContainer" parent="Controls/Center/Card/Box"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="Reset" type="Button" parent="Controls/Center/Card/Box/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reset to defaults"
+
+[node name="Back" type="Button" parent="Controls/Center/Card/Box/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
 text = "Back"

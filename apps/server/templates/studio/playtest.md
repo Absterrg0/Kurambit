@@ -17,7 +17,8 @@ play rules (Apache-2.0, ramenvr/autopilot).
    held steps per call, keeping each call within its input-seconds limit
    (game_explore_act's description and your prompt give the numbers; a
    call past them is rejected). Study the frame after each batch so a
-   missed input or overshoot is visible.
+   missed input or overshoot is visible. Settings > Controls lists every
+   action with its keys; read it there when the controls are unclear.
 4. Report separately what was verified and what was not. Name the steps
    you ran, what you saw, and what you never reached. Never claim a pass
    on a screen you did not see.

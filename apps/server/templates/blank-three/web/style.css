@@ -50,15 +50,101 @@ body {
 
 /* The game's own overlay (ctx.hud). The probe reports its text, so keep the
    values that matter on screen. */
-#hud {
+#hud,
+#hud-kit {
   position: absolute;
-  top: 14px;
-  left: 16px;
-  max-width: 60ch;
+  inset: 0;
+  padding: 14px 16px;
+  pointer-events: none;
   font-size: 0.8em;
   line-height: 1.5;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.85);
   white-space: pre-line;
+}
+
+/* The HUD kit (shell/hud.js): stats top left, objective top centre, toasts
+   centre, hints bottom centre, so the middle of the play area stays clear. */
+.hud-stats {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  font-size: 1.2em;
+  font-weight: 650;
+}
+
+/* Inline, not flex: the probe reads each widget as one line of text. */
+.hud-widget {
+  white-space: nowrap;
+}
+
+.hud-widget img {
+  width: 1.4em;
+  height: 1.4em;
+  margin-right: 6px;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.hud-pips {
+  color: var(--ui-lose);
+  font-size: 1.25em;
+  letter-spacing: 0.06em;
+}
+
+.hud-track {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+  width: 8em;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ui-line);
+  overflow: hidden;
+}
+
+.hud-track > div {
+  height: 100%;
+  background: var(--ui-accent);
+}
+
+.hud-objective,
+.hud-toast,
+.hud-hint {
+  position: absolute;
+  left: 50%;
+  max-width: 80%;
+  translate: -50% 0;
+  text-align: center;
+}
+
+.hud-objective {
+  top: 14px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.35);
+  font-size: 1.1em;
+}
+
+.hud-toast {
+  top: 26%;
+  font: 700 1.8em / 1.2 var(--ui-display-font);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.hud-hint {
+  bottom: 8%;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.45);
+  font-size: 1.1em;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.hud-toast.shown,
+.hud-hint.shown {
+  opacity: 1;
 }
 
 #flash {
@@ -92,6 +178,27 @@ body {
 .screen-card {
   background: var(--ui-scrim);
   backdrop-filter: blur(3px);
+}
+
+.loading-text {
+  margin: 0;
+  color: var(--ui-dim);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.loading-bar {
+  width: min(320px, 60vw);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line);
+  overflow: hidden;
+}
+
+#loading-fill {
+  width: 0;
+  height: 100%;
+  background: var(--ui-accent);
 }
 
 .title-block {
@@ -267,6 +374,39 @@ body {
   margin: 0;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: auto minmax(7em, auto) auto;
+  align-items: center;
+  gap: 0.3em 1em;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+/* The rows join the grid above, so the three columns line up with the heads. */
+.controls-rows {
+  display: contents;
+}
+
+.controls-head {
+  font-size: 0.75em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-dim);
+}
+
+.controls-grid button {
+  padding: 0.15em 0.7em;
+  text-align: left;
+}
+
+.controls-note {
+  margin: 0;
+  text-align: center;
+  font-size: 0.8em;
+  color: var(--ui-dim);
 }
 
 .credits-text {

@@ -9,10 +9,15 @@
 //   export function setState(target, values, ctx) {} // optional studio reach; ctx is null
 //                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
+//   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
-// camera, player, keys.down(code) / keys.pressed(code) (KeyboardEvent.code
-// such as "KeyW", "ArrowLeft", "Space", or the key itself such as "w"),
+// camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
+// hint; shell/hud.js), assets (model(name) / texture(name), shell/assets.js),
+// input (named actions from keys, mouse and gamepad, which
+// the player can rebind: input.down("jump"), input.pressed("action"),
+// input.vector(); the table and the calls are in shell/controls.js), keys
+// (raw keys, kept for older games: keys.down("KeyW"), keys.pressed("Space")),
 // mouse (x, y in canvas pixels, ndc.x / ndc.y from -1 to 1 for a Raycaster,
 // movement.x / movement.y this frame, also under pointer lock, and
 // down(button) / pressed(button), 0 the left button), listen(target, type,
@@ -38,6 +43,11 @@ import {
   resetProgress,
 } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
+import { animateShell } from "./animate.js";
+import { cameraShell } from "./camera.js";
+import { createHud } from "./hud.js";
+import { assets, preloadAssets } from "./assets.js";
+import { createControls, createInput } from "./controls.js";
 import {
   VOLUME_NAMES,
   getVolume,
@@ -56,6 +66,7 @@ const CLICK_SOUND = "";
 const CREDITS_FILE = "./credits.txt";
 const SETTINGS_KEY = `settings:${location.pathname}`;
 const KEEP = Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : [];
+const controls = createControls(game.ACTIONS);
 /** Real seconds and time scale of the slow-motion beat before the end screen. */
 const END_BEAT_S = 0.6;
 const END_BEAT_SCALE = 0.3;
@@ -65,14 +76,18 @@ const END_GUARD_S = 0.4;
 const byId = (id) => document.getElementById(id);
 const canvas = byId("game");
 const hud = byId("hud");
+// ctx.ui's own layer: a game writing raw text into ctx.hud cannot wipe it.
+const hudKit = byId("hud-kit");
 const ui = byId("ui");
 const backdrop = byId("backdrop");
 const screens = {
+  loading: byId("loading"),
   title: byId("title"),
   pause: byId("pause"),
   settings: byId("settings"),
   end: byId("end"),
   credits: byId("credits"),
+  controls: byId("controls"),
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -88,6 +103,10 @@ let endSerial = 0;
 let held = false;
 let redraw = true;
 let hadPointerLock = false;
+/** The action whose key the Controls screen is waiting for, or null. */
+let listening = null;
+/** The first connected gamepad this frame, or null. */
+let gamepad = null;
 // Where the pointer last was on the canvas; a new run starts aiming there.
 const pointer = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
 
@@ -98,14 +117,20 @@ function newContext() {
   const timers = [];
   const buttons = new Set();
   const clicked = new Set();
+  const input = createInput(controls);
   const ctx = {
     renderer,
     canvas,
     hud,
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500),
+    /** The models and textures main.js lists in ASSETS, loaded before the title (shell/assets.js). */
+    assets,
     /** The player object (an Object3D or {x, y, z}); the studio probe reports its position. */
     player: null,
+    input: input.api,
+    /** HUD widgets by name (shell/hud.js); call them every frame from update(). */
+    ui: createHud(hudKit, input.api),
     keys: {
       down: (code) => down.has(code),
       pressed: (code) => pressed.has(code),
@@ -129,7 +154,7 @@ function newContext() {
       timers.push({ left: seconds, fn });
     },
   };
-  return { ctx, down, pressed, buttons, clicked, listeners, timers, reported: false };
+  return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
 }
 
 const keyNames = (event) => [
@@ -169,6 +194,8 @@ function clearRun() {
   endBeat = 0;
   ending = null;
   juiceShell.reset();
+  animateShell.reset();
+  cameraShell.reset();
   if (run !== null) {
     const ended = run;
     run = null;
@@ -182,6 +209,7 @@ function clearRun() {
   }
   Juice.stage = null;
   hud.replaceChildren();
+  hudKit.replaceChildren();
 }
 
 function startRun() {
@@ -214,6 +242,7 @@ function pause() {
 function resume() {
   if (GameState.state !== "paused") return;
   show(null);
+  run?.input.settle();
   GameState.state = "playing";
 }
 
@@ -265,6 +294,7 @@ function showEnd() {
 
 function show(screen) {
   openScreen = screen;
+  if (screen !== screens.controls) listening = null;
   for (const each of Object.values(screens)) each.hidden = each !== screen;
   // Settings and credits opened from the title keep its backdrop behind them.
   backdrop.hidden = !(GameState.state === "title" && screen !== null);
@@ -292,6 +322,8 @@ function moveFocus(by) {
   const at = list.indexOf(document.activeElement);
   const next = at < 0 ? 0 : (at + by + list.length) % list.length;
   list[next].focus({ preventScroll: true });
+  // A long Controls list scrolls inside its card; the selection stays in view.
+  list[next].scrollIntoView({ block: "nearest" });
 }
 
 function nudgeSlider(by) {
@@ -304,7 +336,9 @@ function nudgeSlider(by) {
 
 /** Esc, P, gamepad B and Start. Returns whether the press was used. */
 function back(pauseKey) {
-  if (openScreen === screens.settings) closeSettings();
+  if (listening !== null) stopListening("Not changed");
+  else if (openScreen === screens.controls) show(screens.settings);
+  else if (openScreen === screens.settings) closeSettings();
   else if (openScreen === screens.credits) show(screens.title);
   else if (GameState.state === "playing" && pauseKey) pause();
   else if (GameState.state === "paused" && openScreen === screens.pause) resume();
@@ -313,7 +347,7 @@ function back(pauseKey) {
 }
 
 function saveSettings() {
-  const values = {};
+  const values = { controls: controls.saved() };
   for (const name of VOLUME_NAMES) values[name] = getVolume(name);
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(values));
@@ -331,6 +365,7 @@ function loadSettings() {
   }
   for (const name of VOLUME_NAMES)
     if (typeof values[name] === "number") setVolume(name, values[name]);
+  controls.load(values.controls);
   for (const slider of screens.settings.querySelectorAll("input[data-volume]")) {
     slider.value = String(Math.round(getVolume(slider.dataset.volume) * 100));
     showVolume(slider);
@@ -387,6 +422,62 @@ function openCredits() {
     });
 }
 
+// The Controls screen: one row per action with its keys (a button: select it,
+// press a key) and its gamepad inputs, as plain text a tester can read.
+function renderControls() {
+  const list = byId("controls-list");
+  const rows = [];
+  for (const action of controls.actions.values()) {
+    const { keyboard, gamepad: pad } = controls.describe(action);
+    const name = document.createElement("span");
+    name.textContent = action.label;
+    const keys = document.createElement("button");
+    keys.type = "button";
+    keys.dataset.action = "rebind";
+    keys.dataset.bind = action.name;
+    keys.disabled = action.fixed;
+    keys.textContent = listening === action.name ? "Press a key" : keyboard || "None";
+    const padText = document.createElement("span");
+    padText.textContent = pad || "None";
+    rows.push(name, keys, padText);
+  }
+  list.replaceChildren(...rows);
+}
+
+function openControls() {
+  byId("controls-note").textContent = "Select a key binding, then press the new key";
+  renderControls();
+  show(screens.controls);
+}
+
+function startListening(control) {
+  listening = control.dataset.bind;
+  byId("controls-note").textContent = "Press a key for it · Esc cancels";
+  renderControls();
+  screens.controls.querySelector(`[data-bind="${listening}"]`)?.focus({ preventScroll: true });
+}
+
+function stopListening(note) {
+  const name = listening;
+  listening = null;
+  byId("controls-note").textContent = note;
+  renderControls();
+  screens.controls.querySelector(`[data-bind="${name}"]`)?.focus({ preventScroll: true });
+}
+
+function rebind(code) {
+  const note = controls.rebind(listening, code);
+  stopListening(note);
+  saveSettings();
+}
+
+function resetControls() {
+  controls.reset();
+  saveSettings();
+  byId("controls-note").textContent = "Controls reset to defaults";
+  renderControls();
+}
+
 const actions = {
   play: startRun,
   retry: startRun,
@@ -397,6 +488,9 @@ const actions = {
   back: () => back(false),
   fullscreen: toggleFullscreen,
   "reset-progress": confirmResetProgress,
+  controls: openControls,
+  rebind: startListening,
+  "reset-controls": resetControls,
 };
 
 // Two presses, so a stray click cannot wipe a best score.
@@ -416,7 +510,8 @@ ui.addEventListener("click", (event) => {
   if (control === null || control.disabled || !openScreen?.contains(control)) return;
   if (CLICK_SOUND === "") playTick();
   else playSfx(CLICK_SOUND, { volume: 0.6, pitch: 0.03 });
-  actions[control.dataset.action]?.();
+  if (listening !== null) stopListening("Not changed");
+  actions[control.dataset.action]?.(control);
 });
 
 ui.addEventListener("input", (event) => {
@@ -445,7 +540,14 @@ window.addEventListener("pointermove", (event) => {
 window.addEventListener("keydown", (event) => {
   document.documentElement.dataset.input = "keys";
   const code = event.code;
-  if (code === "Escape" || code === "KeyP") {
+  if (listening !== null) {
+    event.preventDefault();
+    if (event.repeat) return;
+    if (code === "Escape") stopListening("Not changed");
+    else rebind(code);
+    return;
+  }
+  if (code === "Escape" || controls.keysOf("pause").includes(code)) {
     if (!event.repeat && back(true)) event.preventDefault();
     return;
   }
@@ -537,14 +639,18 @@ window.addEventListener("gamepadconnected", () => (pads += 1));
 window.addEventListener("gamepaddisconnected", () => (pads = Math.max(0, pads - 1)));
 
 function pollGamepad(now) {
+  gamepad = null;
   if (pads === 0) return;
   const pad = [...(navigator.getGamepads?.() ?? [])].find((each) => each != null);
   if (pad === undefined) return;
+  gamepad = pad;
   const isDown = (i) => pad.buttons[i]?.pressed === true;
   const pressedNow = (i) => isDown(i) && padWas[i] !== true;
   if (pad.buttons.some((_, i) => pressedNow(i))) unlockAudio();
   if (pressedNow(9)) back(true);
-  else if (openScreen !== null) {
+  else if (listening !== null) {
+    if (pressedNow(1)) back(false);
+  } else if (openScreen !== null) {
     if (pressedNow(1)) back(false);
     else if (pressedNow(0) && openScreen.contains(document.activeElement))
       document.activeElement.click();
@@ -561,12 +667,17 @@ function pollGamepad(now) {
 }
 
 function step(dt) {
+  const { down, pressed, buttons, clicked } = run;
+  run.input.sample({ down, pressed, buttons, clicked, pad: gamepad });
   const due = [];
   for (let i = run.timers.length - 1; i >= 0; i -= 1)
     if ((run.timers[i].left -= dt) <= 0) due.unshift(...run.timers.splice(i, 1));
   try {
     for (const timer of due) timer.fn();
     game.update?.(dt, run.ctx);
+    animateShell.update(dt);
+    cameraShell.update(dt);
+    run.ctx.ui.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
     if (!run.reported) reportError(error);
@@ -627,6 +738,14 @@ const studio = installStudio({
 
 loadSettings();
 loadProgress(KEEP);
+// Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets too.
+if (Object.keys(game.ASSETS ?? {}).length > 0) {
+  show(screens.loading);
+  const fill = byId("loading-fill");
+  await preloadAssets(game.ASSETS, (done, total) => {
+    fill.style.width = `${total === 0 ? 100 : (done / total) * 100}%`;
+  });
+}
 if (BOOT_INTO_PLAY || new URLSearchParams(location.search).has("play")) startRun();
 else showTitle();
 

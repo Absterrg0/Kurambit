@@ -34,8 +34,10 @@ never with your own camera, light or render code. It fits a fixed orthographic
 camera to the objects across every frame, so nothing is cut off, the scale is
 the same in every frame and view, the feet stand on the same row in every
 frame, and studio lights keep small sprites readable. It writes
-`<output>_0.png ... <output>_N.png`, records them in ASSETS.md and returns a
-contact sheet: look at it, and use the anchor offset it gives.
+`<output>_0.png ... <output>_N.png` and `<output>.sprite.json` (frame size,
+fps, anchor per view), records them in ASSETS.md and returns a contact sheet:
+look at it. In Godot, `SpriteStrips.apply` loads strips from the `.sprite.json`;
+elsewhere use the anchor offset it gives.
 
 - Pixel-art game: pass the style pack VISION.md names as the palette, and the
   size the sprite has in that pack's own pixels (a 16 px tile pack wants a
