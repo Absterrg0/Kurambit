@@ -143,7 +143,9 @@ harness makes these true regardless of what the model says: a separate tester pl
 fresh sessions review it, blind compare reverts the loser, and the clock enforces bold moves in
 every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
 for the browser lane, `unity.md` for Unity) and the bot
-kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product. `GameCreateInput.engine`
+kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product. A
+resume keeps the run's copy, so every build of one run is made and judged under the same guidance and no
+build's commit carries harness text. `GameCreateInput.engine`
 (`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
 project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
