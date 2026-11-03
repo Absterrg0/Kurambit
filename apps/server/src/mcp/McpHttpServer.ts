@@ -22,7 +22,7 @@ import type * as SchemaAST from "effect/SchemaAST";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
-import { AiError, McpProtocol, McpSchema, McpServer, Tool, type Toolkit } from "effect/ai";
+import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contracts";
 
@@ -461,7 +461,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
         openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
       },
     }),
-    annotations: tool.annotations,
+    annotations: McpInvocationContext.runThreadDefault(tool.annotations),
     handle: (payload) =>
       Effect.withFiber((fiber) => {
         const invocation = Context.getUnsafe(
@@ -700,7 +700,7 @@ const registerImageTool = <T extends Tool.Any, E, R>(
           openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
         },
       }),
-      annotations: tool.annotations,
+      annotations: McpInvocationContext.runThreadDefault(tool.annotations),
       handle: (payload) =>
         Effect.withFiber((fiber) => {
           const invocation = Context.getUnsafe(
@@ -867,6 +867,16 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
   );
 });
 
+const withRunThreadDefault = <Tools extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<Tools>,
+) =>
+  // Same tools under the same names, so the handlers still match.
+  Toolkit.make(
+    ...Object.values(toolkit.tools).map((tool) =>
+      tool.annotateMerge(McpInvocationContext.runThreadDefault(tool.annotations)),
+    ),
+  ) as unknown as Toolkit.Toolkit<Tools>;
+
 /**
  * `McpServer.toolkit` asks for every service its tools declare when it
  * registers them, but the auth middleware provides `McpInvocationContext` to
@@ -877,7 +887,7 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
   toolkit: Toolkit.Toolkit<Tools>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) => {
-  const registration = McpServer.toolkit(toolkit);
+  const registration = McpServer.toolkit(withRunThreadDefault(toolkit));
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
     never,

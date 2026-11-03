@@ -92,7 +92,9 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
 
 Agents reach the services through the `game_*` MCP toolkit; the client reaches the same services
 over RPC. Threads the GameRun loop launches get play-level tools only (status, check, import,
-export, explore start/act/close, bot run/view, blender, unity and asset library tools). The `game_unity_*` tools
+export, explore start/act/close, bot run/view, blender, unity and asset library tools); every
+other MCP tool (threads, worktrees, projects, previews) hides from them unless it declares
+`EnabledWhen` itself, since a blind role that could list threads could map builds to reports. The `game_unity_*` tools
 are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
 `game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
 editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
