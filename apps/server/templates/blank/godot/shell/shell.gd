@@ -50,11 +50,16 @@ var _config := ConfigFile.new()
 
 func _ready() -> void:
 	(_title.get_node("Center/Name") as Label).text = str(ProjectSettings.get_setting("application/config/name", ""))
+	# A file not yet imported (or a failed import) loads as null; the gradient stays.
+	var art_texture: Texture2D = null
 	if ResourceLoader.exists(TITLE_ART):
+		art_texture = load(TITLE_ART) as Texture2D
+	if art_texture != null:
 		var art := _title.get_node("Background") as TextureRect
-		art.texture = load(TITLE_ART)
+		art.texture = art_texture
 		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		art.modulate = Color(0.62, 0.62, 0.68)
+		# Dark enough that the plain buttons read over a bright sky.
+		art.modulate = Color(0.45, 0.45, 0.5)
 	_title.get_node("Center/Buttons/Quit").visible = not OS.has_feature("web")
 	for button in find_children("*", "BaseButton", true, false):
 		(button as BaseButton).pressed.connect(_click)
