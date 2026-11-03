@@ -470,8 +470,19 @@ const make = Effect.gen(function* () {
         envMode: "replace",
       })
       .pipe(
-        Effect.map((run): UnityCliResult => {
-          const envelope = parseCliEnvelope(run.stdout);
+        Effect.flatMap((run) =>
+          // Large reports (a build status lists every step and file) outgrow
+          // the 64 KB stdout tail; the operation log holds the whole envelope.
+          parseCliEnvelope(run.stdout) !== null
+            ? Effect.succeed({ run, stdout: run.stdout })
+            : Effect.promise(() =>
+                NodeFSP.readFile(run.logPath, "utf8")
+                  .catch(() => run.stdout)
+                  .then((text) => ({ run, stdout: text })),
+              ),
+        ),
+        Effect.map(({ run, stdout }): UnityCliResult => {
+          const envelope = parseCliEnvelope(stdout);
           const first = envelope?.errors[0];
           return {
             data: envelope?.data ?? null,

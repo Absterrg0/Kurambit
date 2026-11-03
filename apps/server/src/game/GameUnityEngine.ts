@@ -265,8 +265,8 @@ export const makeUnityBackend = (
           input.outputPath,
         );
       let last = queued;
-      for (let waited = 0; waited < 1_800_000; waited += 5_000) {
-        yield* Effect.sleep("5 seconds");
+      for (let waited = 0; waited < 1_800_000; waited += 15_000) {
+        yield* Effect.sleep("15 seconds");
         last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
         const status = resultOf(last)?.["status"];
         if (status === "completed" || status === "idle") break;

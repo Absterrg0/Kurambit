@@ -648,6 +648,14 @@ const make = Effect.gen(function* () {
     );
     return yield* Effect.gen(function* () {
       const before = yield* snapshot(root, godotProject);
+      // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
+      yield* Effect.promise(async () => {
+        const parent = NodePath.dirname(destination);
+        const prefix = `.${NodePath.basename(destination)}-`;
+        for (const name of await NodeFSP.readdir(parent).catch(() => [] as string[]))
+          if (name.startsWith(prefix))
+            await NodeFSP.rm(NodePath.join(parent, name), { recursive: true, force: true });
+      });
       yield* Effect.tryPromise({
         try: () => NodeFSP.mkdir(staging, { recursive: true }),
         catch: (cause) => new GameOperationError({ operation, path: staging, reason: "io", cause }),
