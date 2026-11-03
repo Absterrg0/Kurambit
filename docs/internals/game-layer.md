@@ -147,11 +147,14 @@ kit under `apps/server/templates/bot-kit/`; both are copied into each game, not 
 (`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
 project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
-The Godot starter's main scene is a genre-free demo shell (title, pause, settings, end, credits)
+The Godot starter's main scene is a genre-free demo shell (title, pause, settings, controls, end, credits)
 and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
 them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
 instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
 native explore runner resumes the game's own pause after each act instead of forcing it off.
+Both shells carry the controls as named actions (the Godot InputMap, `web/shell/controls.js`)
+that players rebind on the Controls screen; every default keeps a keyboard key, because explore
+acts and bots press keys by name and cannot reach an action bound only to a gamepad.
 The three.js starter carries the same shell in `web/shell/`: it owns the render loop and calls
 the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the

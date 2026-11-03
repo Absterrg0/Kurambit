@@ -25,7 +25,11 @@ exported with the same `game_*` tools as a Godot game.
    and restyle the shell instead of replacing it; for the title backdrop,
    set `--title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png")`
    in `style.css` with the key art there, and replace the placeholder tab icon
-   `web/assets/ui/icon.png` with a 256x256 cut of its main subject. Use `ctx.keys`,
+   `web/assets/ui/icon.png` with a 256x256 cut of its main subject. Read controls as named actions
+   through `ctx.input` (`vector()`, `down`, `pressed`), never key codes, so
+   the gamepad and the player's rebinding work; add the game's own and drop
+   unused defaults with `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad: ["rb"] }, jump: null }`
+   in `main.js` (TEMPLATE.md). Use `ctx.input`,
    `ctx.mouse`, `ctx.listen` and `ctx.after`, never raw listeners,
    `setTimeout` or `requestAnimationFrame`: those run through pause and pile
    up across retries. Retry resets every plain-data GameState value (numbers,

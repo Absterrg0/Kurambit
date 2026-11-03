@@ -8,8 +8,10 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
    play with `game_explore_*`, build with `game_export`.
 3. Keep the boot clean: no script errors, no parse errors. Engine shutdown
    noise after quit is not failure; anything while the game runs is.
-4. Main scene set in project.godot. Input actions in the project settings,
-   not hardcoded keys in gameplay code.
+4. Main scene set in project.godot. Controls are the named actions in
+   project.godot `[input]` (TEMPLATE.md): read them with `Input.get_vector`
+   and `Input.is_action_*`, never key codes, so the gamepad and the
+   player's rebinding work.
 5. Export checklist before calling it done: `game_export` succeeds for Web
    and Linux, and `game_check` reports every entry clean.
 6. Work in ./godot plus VISION.md, PLAN.md and NOTES.md. Never commit,
@@ -73,15 +75,14 @@ alone, or a `Node.new()` never added, leaves an orphan. Bot results report
 scene node and orphan counts: orphans that grow, or nodes that keep rising
 while play stays in one place, are a leak to fix.
 
-An input action in project.godot (A key; 4194319 is the Left arrow):
+The starter declares `move_left`, `move_right`, `move_up`, `move_down`,
+`jump`, `action`, `alt` and `pause` with keyboard and gamepad defaults.
+Add the game's own action as one line under `[input]` (L key and gamepad
+RB; the comment above the actions lists the codes), and delete the ones the
+game never reads:
 
 ```
-[input]
-move_left={
-"deadzone": 0.2,
-"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
-]
-}
+dash={"deadzone": 0.25, "events": [Object(InputEventKey,"device":-1,"physical_keycode":76), Object(InputEventJoypadButton,"device":-1,"button_index":10)]}
 ```
 
 Library frames (numbered PNGs with no `.sprite.json`) as an animation, and a sound:

@@ -13,8 +13,8 @@ demo needs, so build the game, not the menus.
   keeps the volumes in the browser, while each Game panel rebuild is a new
   origin and starts at full volume), an
   end screen (the result message, the game's stats, Retry, Main menu) and
-  credits. Menus work with the mouse, the keys (arrows, Enter, Esc) and a
-  gamepad.
+  credits, plus a Controls screen under Settings. Menus work with the mouse,
+  the keys (arrows, Enter, Esc) and a gamepad (d-pad, A, B, Start).
 - Gameplay plugs in at `web/main.js`, which exports `start(ctx)`,
   `update(dt, ctx)` and optionally `stop(ctx)`. The shell calls `start` on
   Play and on Retry with a fresh `ctx` (a new `ctx.scene` and `ctx.camera`),
@@ -26,18 +26,17 @@ demo needs, so build the game, not the menus.
   already refits a perspective or orthographic `ctx.camera`.
 - `ctx` also carries `renderer`, `canvas`, `hud` (the game's DOM overlay,
   emptied each run), `player` (set it to the player object so the probe
-  reports its position), `keys.down("KeyW")` / `keys.pressed("Space")` (held
-  and just-pressed keys, by `KeyboardEvent.code` or the key itself),
-  `mouse` (`x`, `y` in canvas pixels, `ndc.x` / `ndc.y` for a `Raycaster`,
+  reports its position), `input` (the controls, below), `mouse` (`x`, `y` in canvas pixels, `ndc.x` / `ndc.y` for a `Raycaster`,
   `movement.x` / `movement.y` this frame, also under pointer lock, and
   `down(0)` / `pressed(0)` for the left button), `listen(target, type, fn)`
-  and `after(seconds, fn)`. Keys and mouse carry gameplay input only: a click
+  and `after(seconds, fn)`. `ctx.keys` (raw keys) stays for older games;
+  new code reads `ctx.input`. Input and mouse carry gameplay input only: a click
   on a menu never reaches them. Listeners and timers made through `ctx` fire
   only during play (timers also through the slow-motion end beat) and end
   with the run; a raw `addEventListener`, `setTimeout` or
   `requestAnimationFrame` keeps running through pause and stacks up across
-  retries. The starter uses `ctx.mouse` for its dash and `ctx.after` for its
-  clock.
+  retries. The starter uses `ctx.input` for its moves and dash and
+  `ctx.after` for its clock.
 - End a run with `GameState.win("You escaped!", {Time: "1:42"})` or
   `GameState.lose("Out of fuel", {Distance: "340 m"})` (import `GameState`
   from `./shell/run-state.js`). The last hit plays out in slow motion for a
@@ -70,6 +69,29 @@ demo needs, so build the game, not the menus.
   replace the synthesized menu tick.
 - Play music with `playMusic(url)` and effects with `Juice.sfx(url)` (or
   `playSfx`) from `./shell/audio.js`, so the volume sliders reach them.
+
+## Controls
+
+- Gameplay reads named actions through `ctx.input`, never keys:
+  `input.vector()` (`{x, y}` from the four moves, y down, analog on a
+  stick), `input.down("jump")`, `input.pressed("action")` (once per press),
+  `input.released("alt")`, `input.axis("move_left", "move_right")`. A raw
+  key check skips the gamepad and the player's rebinding.
+- The defaults (`web/shell/controls.js`): `move_left` / `move_right` /
+  `move_up` / `move_down` (WASD, arrows, left stick, d-pad), `jump` (Space,
+  gamepad A), `action` (J, Enter, left click on the canvas, gamepad X), `alt`
+  (K, Shift, gamepad B) and the shell's `pause` (Esc, P, Start).
+- `main.js` changes them in one place:
+  `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad: ["rb"] }, jump: null };`
+  adds `dash` (keys are `KeyboardEvent.code` values; pad names are listed at
+  the top of `controls.js`), gives a default new bindings when you name it,
+  and drops one the game never reads with `null`, so Settings > Controls
+  lists only controls that work. Reading an undeclared action throws.
+- Settings > Controls lists every action with its keys and gamepad inputs,
+  rebinds keys (saved with the other settings; Reset to defaults) and is the
+  place players and testers read the controls. Name keys in a HUD hint with
+  `input.label("dash")`, as the starter does, so the hint stays true after
+  a rebind.
 
 ## Game feel
 

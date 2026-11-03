@@ -290,6 +290,39 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.controls-grid {
+  display: grid;
+  grid-template-columns: auto minmax(7em, auto) auto;
+  align-items: center;
+  gap: 0.3em 1em;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+/* The rows join the grid above, so the three columns line up with the heads. */
+.controls-rows {
+  display: contents;
+}
+
+.controls-head {
+  font-size: 0.75em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-dim);
+}
+
+.controls-grid button {
+  padding: 0.15em 0.7em;
+  text-align: left;
+}
+
+.controls-note {
+  margin: 0;
+  text-align: center;
+  font-size: 0.8em;
+  color: var(--ui-dim);
+}
+
 .credits-text {
   max-height: 46vh;
   overflow: auto;
