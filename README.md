@@ -5,7 +5,7 @@
 <h1 align="center">Kurambit</h1>
 
 <p align="center">
-  <strong>A game studio that plays what it builds.</strong><br />
+  <strong>Nobody made the game you want. So make it.</strong><br />
   Open source · local first · bring your own coding agent
 </p>
 

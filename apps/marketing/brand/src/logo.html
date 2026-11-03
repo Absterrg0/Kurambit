@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-clear>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kurambit logo</title>
+    <link rel="stylesheet" href="kit.css" />
+    <style>
+      /* Logos on a transparent ground. v: lockup (the fox head and the name
+         in Redaction) or pixel (the footer's dithered wordmark). t=dark
+         prints them light for dark grounds. */
+
+      .lockup {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 0.32em;
+        font-size: calc(var(--h) * 0.56);
+      }
+
+      [data-v="lockup"] .lockup {
+        display: flex;
+      }
+
+      .lockup i {
+        width: 1.04em;
+        height: 1.04em;
+        margin-top: -0.12em;
+      }
+
+      #pixel {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lockup brand"><i></i>Kurambit</div>
+    <canvas id="pixel"></canvas>
+    <script src="kit.js"></script>
+    <script>
+      const { width, params } = sizePage(1600, 440);
+      const root = document.documentElement;
+      root.dataset.v ??= "lockup";
+      const ink = root.dataset.t === "dark" ? MOONLIT : INK;
+      whenDrawn(
+        root.dataset.v === "pixel"
+          ? wordmark(document.getElementById("pixel"), Math.round(width / 220), { ink })
+          : document.fonts.load('400 100px "Redaction"'),
+        new Promise((done) => setTimeout(done, 300)),
+      );
+    </script>
+  </body>
+</html>
