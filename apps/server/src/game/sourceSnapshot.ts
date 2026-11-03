@@ -154,7 +154,11 @@ export const snapshotBuildSource = async (
         if (
           unityProject &&
           directory === engineRoot &&
-          (name.endsWith(".csproj") || name.endsWith(".sln"))
+          (name.endsWith(".csproj") ||
+            name.endsWith(".sln") ||
+            // Mono's crash dumps, written here whenever an editor is stopped:
+            // counted, every editor close would make a fresh player stale.
+            name.startsWith("mono_crash."))
         )
           continue;
         let hashed: { readonly size: number; readonly sha256: string };

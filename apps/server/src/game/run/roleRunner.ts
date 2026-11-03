@@ -107,10 +107,6 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
 ) {
   const { threads } = deps;
   const { projectId, root } = ctx;
-  const started = Date.now();
-  const capEnd = started + step.capMs;
-  const budgetBound = ctx.budgetEndsAt !== null && ctx.budgetEndsAt < capEnd;
-  const deadline = budgetBound ? ctx.budgetEndsAt! : capEnd;
   const roleError = (op: string, threadId: string, reason: string) => (cause: unknown) =>
     new RoleRunError({ op, threadId, reason, cause });
 
@@ -252,6 +248,11 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
       yield* ctx.log(
         `${step.role}: no neutral commit for ${step.at.slice(0, 12)}; playing the build's own`,
       );
+    const sample =
+      blank === null && step.at !== null && ctx.lane === "unity"
+        ? yield* unitySampleWorktree(deps, ctx, step, baseRef ?? step.at)
+        : null;
+    const own = blank ?? sample;
     const launched = yield* deps.launches
       .launch({
         commandId: CommandId.make(`studio:${ctx.runId}:${step.id}${gone ? ":relaunch" : ""}`),
@@ -262,8 +263,8 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         // Roles must edit files whatever mode the creator chats in.
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         workspaceStrategy:
-          blank !== null
-            ? { type: "existing_worktree", worktreePath: blank.path, branch: blank.branch }
+          own !== null
+            ? { type: "existing_worktree", worktreePath: own.path, branch: own.branch }
             : step.at === null
               ? { type: "root" }
               : {
@@ -277,9 +278,9 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         ...(creatorLive ? { parentThreadId: ctx.creator } : {}),
       })
       .pipe(Effect.option);
-    // No thread owns a blank checkout until a launch succeeds, so a failed
+    // No thread owns a checkout made here until a launch succeeds, so a failed
     // one removes it here or nothing ever will (the retry gets a new step id).
-    const dropBlank = blank === null ? Effect.void : removeBlank(deps, ctx, blank);
+    const dropBlank = own === null ? Effect.void : removeBlank(deps, ctx, own);
     if (Option.isNone(launched)) {
       yield* dropBlank;
       return { kind: "failed", reason: `${step.role}: thread launch failed` } satisfies StepResult;
@@ -294,6 +295,12 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     yield* ctx.attach(threadId, runId);
   }
   const live = threadId;
+  // The cap runs from the launch: a Unity sample's player is prepared before
+  // it, outside the play time both sides of a comparison get alike.
+  const started = Date.now();
+  const capEnd = started + step.capMs;
+  const budgetBound = ctx.budgetEndsAt !== null && ctx.budgetEndsAt < capEnd;
+  const deadline = budgetBound ? ctx.budgetEndsAt! : capEnd;
   // The sample budget is enforced where input happens: an act past it is
   // refused, which costs nothing, where passing it would void the sample.
   if (step.inputCapMs > 0) yield* deps.game.limitExploreInput(live, step.inputCapMs);
@@ -433,12 +440,16 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   } satisfies StepResult;
 });
 
-// A blind comparator's checkout, made before its thread so the model's first
-// look finds its files in place: the BLANK commit, outside the game root,
-// holding only the step's copies. A resumed step reuses the checkout an
+// A worktree step's own checkout, made before its thread: the one its branch
+// already has, or a new one at `ref`. A resumed step reuses the checkout an
 // interrupted attempt left under the same branch, since a replayed launch is
-// bound to that path. Any failure leaves no checkout behind.
-const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
+// bound to that path.
+const stepWorktree = (
+  deps: RoleDeps,
+  ctx: RoleContext,
+  step: RoleStep,
+  ref: Effect.Effect<string | null>,
+) =>
   Effect.gen(function* () {
     const vcs = deps.vcs;
     if (vcs === null) return null;
@@ -450,12 +461,12 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
       refKind: "local",
       refresh: true,
     });
-    const found = refs.refs.find((ref) => ref.name === branch);
+    const found = refs.refs.find((each) => each.name === branch);
     let path = found?.worktreePath ?? null;
     if (found !== undefined && path === null)
       yield* vcs.deleteLocalBranch({ cwd: ctx.root, refName: branch, force: true });
     if (path === null) {
-      const sha = yield* blankCommit(ctx.root);
+      const sha = yield* ref;
       if (sha === null) return null;
       path = (yield* vcs.createWorktree({
         cwd: ctx.root,
@@ -464,7 +475,17 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
         path: null,
       })).worktree.path;
     }
-    const dir = path;
+    return { path, branch };
+  });
+
+// A blind comparator's checkout, made before its thread so the model's first
+// look finds its files in place: the BLANK commit, outside the game root,
+// holding only the step's copies. Any failure leaves no checkout behind.
+const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
+  Effect.gen(function* () {
+    const made = yield* stepWorktree(deps, ctx, step, blankCommit(ctx.root));
+    if (made === null) return null;
+    const { path: dir, branch } = made;
     const placed = yield* Effect.promise(() =>
       (async () => {
         for (const file of step.clear) await NodeFSP.rm(NodePath.join(dir, file), { force: true });
@@ -487,6 +508,44 @@ const blankWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep) =>
       ctx.log(`${step.role}: its worktree could not be made`).pipe(Effect.as(null)),
     ),
   );
+
+// A Unity sample's checkout at its neutral build commit, made before its
+// thread so its player is ready before the play clock starts: copied from the
+// main checkout when that holds one of the same sources, else built here.
+// Either way both sides of a comparison start on a ready player. A failed
+// preparation still plays (its first explore start builds, as it always
+// could), and only this log, which comparators never read, says which.
+const unitySampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, ref: string) =>
+  Effect.gen(function* () {
+    const made = yield* stepWorktree(deps, ctx, step, Effect.succeed(ref)).pipe(
+      Effect.catchCause(() =>
+        ctx
+          .log(`${step.role}: its Unity worktree could not be made; the launch makes one`)
+          .pipe(Effect.as(null)),
+      ),
+    );
+    if (made === null) return null;
+    const from = Date.now();
+    const seconds = () => `${Math.round((Date.now() - from) / 1000)} s`;
+    yield* deps.game.unityPreparePlayer(made.path).pipe(
+      Effect.matchEffect({
+        onSuccess: (prepared) =>
+          ctx.log(
+            `${step.role}: Unity player ${prepared.origin} for ${prepared.sourceId.slice(0, 12)} in ${seconds()} before launch`,
+          ),
+        onFailure: (error) =>
+          ctx.log(
+            `${step.role}: Unity player not prepared after ${seconds()} (${(error.detail ?? error.reason).slice(0, 300)}); its first explore start builds one`,
+          ),
+      }),
+      Effect.catchCause(() =>
+        ctx.log(
+          `${step.role}: Unity player preparation broke after ${seconds()}; its first explore start builds one`,
+        ),
+      ),
+    );
+    return made;
+  });
 
 const removeBlank = (
   deps: RoleDeps,
