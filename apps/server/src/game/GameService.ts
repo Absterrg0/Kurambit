@@ -163,6 +163,11 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       action: GameAction,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
+    /**
+     * Close the live Blender and Unity editors without saving, so a scene held
+     * in memory cannot save over files restored on disk; the next call reopens them.
+     */
+    readonly closeLiveEditors: (root: string) => Effect.Effect<void>;
     /** Live Blender scene: run bpy code, auto-saving the .blend source. */
     readonly blenderCode: (
       threadId: ThreadId,
@@ -3281,6 +3286,8 @@ ${built.result.message}`.slice(-3000),
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
       withRoot(threadId, "Blender export", (root) => liveBlender.exportGlb(root, input)),
+    closeLiveEditors: (root) =>
+      Effect.all([liveBlender.stop(root), liveUnity.stop(root)], { discard: true }),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
       const root = yield* projects.resolve(threadId);
       if (action === "stop") {

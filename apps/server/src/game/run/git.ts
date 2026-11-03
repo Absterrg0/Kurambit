@@ -369,9 +369,9 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
 
   // The creator's restore: `restoredPaths` become `sha`'s (files added since
   // go) as one new commit on HEAD, so nothing later is lost. The commit is
-  // built in a private index and the working tree is first touched by
-  // `reset --keep`, which refuses when local changes touch a file the restore
-  // changes. A failure before that leaves trunk, index and tree as they were.
+  // built in a private index and the working tree is first touched by a
+  // fast-forward merge, which refuses when local changes touch a file the
+  // restore changes. A failure before that leaves trunk, index and tree as they were.
   // Untracked files are never added.
   const restoreBuild = Effect.fn("RunGit.restoreBuild")(function* (sha: string, message: string) {
     const base = yield* head;
@@ -383,6 +383,8 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
       if (inSha || (yield* exec(root, ["cat-file", "-e", `${base}:${path}`])).code === 0)
         present.push(path);
     }
+    // An exclude-only pathspec would mean every path.
+    if (present.length === 0) return yield* fail("restore", "nothing to restore");
     const gitDir = yield* out(["rev-parse", "--absolute-git-dir"]);
     if (gitDir.length === 0) return yield* fail("restore", "no git directory");
     const index = NodePath.join(gitDir, `kurambit-restore-${NodeCrypto.randomUUID()}.index`);
@@ -414,7 +416,10 @@ export const makeGit = (root: string, lane: string, log: (line: string) => Effec
     // A commit that landed since `base` would drop off trunk with the reset.
     const now = yield* head;
     if (now !== base) return yield* fail("restore", `trunk moved to ${now.slice(0, 8)} meanwhile`);
-    const reset = yield* exec(root, ["reset", "-q", "--keep", created], SLOW_MS);
+    // A fast-forward refuses when local changes touch a file it changes, and
+    // its ref update fails if HEAD moved since the check; unrelated staged
+    // changes survive.
+    const reset = yield* exec(root, ["merge", "-q", "--ff-only", created], SLOW_MS);
     const after = yield* head;
     if (reset.code !== 0)
       return yield* fail(

@@ -1006,11 +1006,13 @@ export const layer = (options: { readonly stateDir: string }) => {
             "not-kept",
             `Round ${round} was not kept (${roundOutcome(record)}); only a kept round's build can be restored. Its work stays on branch ${record.branch}.`,
           );
-        // A crash-saved step replays on resume from the run's old position.
-        if (state.inFlight !== null && CONTINUABLE.has(state.ending))
+        // A saved git step replays on resume with the commit ids it froze (the
+        // round's branch, the old best), which a restore would leave stale. Role,
+        // facts and bot steps on trunk just replay against the restored build.
+        if (state.inFlight?.kind === "git" && CONTINUABLE.has(state.ending))
           return yield* no(
             "mid-step",
-            `The stopped run saved an unfinished ${state.inFlight.kind} step and would replay it on resume. Resume the run and let it finish, or start a new run, before restoring.`,
+            "The stopped run saved an unfinished git step and would replay it on resume. Resume the run and let that step finish, then restore.",
           );
         const log = (line: string) => logLine(root, line);
         const git = makeGit(root, lane, log);
@@ -1026,7 +1028,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         if (expected !== null && expected !== trunk && CONTINUABLE.has(state.ending))
           return yield* no(
             "mid-round",
-            `The stopped run is in the middle of its work on ${expected}. Resume it and let the round finish, or start a new run, before restoring.`,
+            `The stopped run is in the middle of its work on ${expected}. Resume it and let the round finish, then restore.`,
           );
         const dirty = yield* git.uncommitted;
         if (dirty.length > 0)
@@ -1047,6 +1049,8 @@ export const layer = (options: { readonly stateDir: string }) => {
             message: `Round ${round}'s build (${what}) is already the game's current build.`,
           } satisfies GameRunRestoreResult;
         const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
+        const game = yield* Effect.serviceOption(GameService.GameService);
+        if (Option.isSome(game)) yield* game.value.closeLiveEditors(root);
         if (!(yield* git.sameBuild(sha)))
           return yield* no(
             "restore-incomplete",
@@ -1075,7 +1079,7 @@ export const layer = (options: { readonly stateDir: string }) => {
               cause.op === "restore-apply"
                 ? no(
                     "local-changes",
-                    `Nothing was restored: changes made meanwhile touch files the restore would change (${cause.reason}). Commit or discard those changes, then restore again.`,
+                    `Nothing was restored: git refused to apply it (${cause.reason}). Usually a change made meanwhile touches a restored file, or another git command is running; commit or discard the change, then restore again.`,
                   )
                 : no(
                     "git-failed",
