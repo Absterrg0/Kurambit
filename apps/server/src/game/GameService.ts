@@ -1300,6 +1300,26 @@ const make = Effect.gen(function* () {
     images: 0,
   });
   const exploreEvidence = new Map<string, ReturnType<typeof emptyExploreEvidence>>();
+  const exploreBudget =
+    `This session holds ${GAME_EXPLORE_BOUNDS.maxCalls} acts and ` +
+    `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, about ` +
+    `${(GAME_EXPLORE_BOUNDS.maxTotalNominalMs / GAME_EXPLORE_BOUNDS.maxCalls / 1000).toFixed(1)} s per act.`;
+  // Weak players held ~0.8 s per step and ran out of acts at 13-30 s of a
+  // 60 s session even with acts-left shown; the seconds per remaining act
+  // that would spend the rest is the number they can act on.
+  const explorePace = (session: ExploreSession) => {
+    const s = (ms: number) => (ms / 1000).toFixed(1);
+    const actsLeft = GAME_EXPLORE_BOUNDS.maxCalls - session.calls;
+    const leftMs = GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs;
+    const earlierMs = exploreEvidence.get(String(session.threadId))?.nominalMs ?? 0;
+    const used =
+      `input used: ${s(session.totalNominalMs)} s of this session's ` +
+      `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s` +
+      (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
+    if (actsLeft <= 0 || leftMs <= 0) return `${used}; this session is spent.`;
+    const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
+    return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s): about ${s(perAct)} s of input per act spends it.`;
+  };
   /**
    * Releases a session's player and scratch. The caller holds the session
    * lock; the transition is uninterruptible once it starts so a cancelled
@@ -1729,7 +1749,7 @@ const make = Effect.gen(function* () {
         message:
           `Native exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
           `at ${baseViewport.width}x${baseViewport.height} (paused between calls). ` +
-          `Act with short input steps plus ui and inspect steps, then game_explore_close. ` +
+          `${exploreBudget} Act with held input steps plus ui and inspect steps, then game_explore_close. ` +
           (hasDisplay ? "" : noPicture + " ") +
           `This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
@@ -2054,8 +2074,8 @@ ${built.result.message}`.slice(-3000),
         bootMs,
         message:
           `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
-          `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System; ` +
-          `act with short input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
+          `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System. ` +
+          `${exploreBudget} Act with held input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
@@ -2187,7 +2207,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Web exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
           `at ${handle.viewport.width}x${handle.viewport.height} (real time: the game keeps running between calls). ` +
-          `Act with short input steps, then game_explore_close. ` +
+          `${exploreBudget} Act with held input steps, then game_explore_close. ` +
           `This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
@@ -2394,7 +2414,7 @@ ${built.result.message}`.slice(-3000),
           (clean.uiResults.length > 0
             ? `${received}/${clean.uiResults.length} ui action(s) received; `
             : "") +
-          `${GAME_EXPLORE_BOUNDS.maxCalls - callIndex} act(s) left. ` +
+          `${explorePace(session)} ` +
           `This observation is descriptive only, never a verdict.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
         totalNominalMs: session.totalNominalMs,
@@ -2524,7 +2544,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Act ${callIndex} ran ${input.steps.length} step(s) ` +
           `(${observed.executedInputSteps} input, +${nominalMs}ms nominal); ` +
-          `${GAME_EXPLORE_BOUNDS.maxCalls - callIndex} act(s) left. ` +
+          `${explorePace(session)} ` +
           `This observation is descriptive only, never a verdict.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
         totalNominalMs: session.totalNominalMs,
