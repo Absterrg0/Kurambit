@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "@effect/vitest";
-import { readAssetUse } from "./assetUse.ts";
+import { assetUseSummary, readAssetUse } from "./assetUse.ts";
 
 const roots: string[] = [];
 afterAll(() =>
@@ -161,6 +161,33 @@ describe("readAssetUse", () => {
     expect(use.listedMissing).toEqual(["assets/sprites/gone_*.png"]);
     expect(use.unlisted).toEqual(["assets/sprites/stray.png"]);
     expect(use.listed).toBe(15);
+  });
+
+  it("counts library pack files apart, so the game's own unreferenced art stays visible", async () => {
+    const root = await fixture({
+      "ASSETS.md":
+        "- `godot/assets/hero.png` hero\n- `godot/assets/library/kenney-nature-kit/Models/*.glb` — library pack kenney-nature-kit\n",
+      "godot/project.godot": '[application]\nrun/main_scene="res://main.tscn"\n',
+      "godot/main.tscn":
+        '[gd_scene format=3]\n[ext_resource type="Texture2D" path="res://assets/hero.png" id="1"]\n[ext_resource type="PackedScene" path="res://assets/library/kenney-nature-kit/Models/tree.glb" id="2"]\n',
+      "godot/assets/hero.png": "",
+      "godot/assets/spare.png": "",
+      ...Object.fromEntries(
+        ["tree", "rock", "bush", "log"].map((name) => [
+          `godot/assets/library/kenney-nature-kit/Models/${name}.glb`,
+          "",
+        ]),
+      ),
+    });
+    const use = await readAssetUse(root, "godot");
+    expect(use.assets).toBe(2);
+    expect(use.unused).toEqual(["assets/spare.png"]);
+    expect(use.library).toEqual({ files: 4, referenced: 1 });
+    expect(use.listedMissing).toEqual([]);
+    expect(use.unlisted).toEqual(["assets/spare.png"]);
+    expect(assetUseSummary(use, "godot")).toContain(
+      "never referenced: assets/spare.png. Library: 4 files from packs, 1 referenced by loaded code.",
+    );
   });
 
   it("counts linked files, skips linked folders, and trusts a live uid over a stale path", async () => {
