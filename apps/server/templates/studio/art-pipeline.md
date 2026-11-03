@@ -15,10 +15,17 @@ renderer; you have no local Blender, Godot or image tools. `<engine>` is
 4. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at
    it, and redo the weak ones.
-5. Library assets: `game_blender_assets_search` and `_import` (Poly Haven is
-   CC0, no key; Sketchfab and Poly Pizza need the user's keys). Never scrape
-   websites. Record every file's source and licence in ASSETS.md;
-   unknown-source files do not ship.
+5. Library first for characters, tiles, UI, icons and fonts:
+   `game_assets_search` finds CC0 packs (no key); pass `pack` to look inside
+   one and look at its contact sheet before you pick. `game_assets_add` copies
+   files or whole folders into `<engine>/assets/library/<pack>/` and credits
+   them in ASSETS.md. One style per game: take a game's sprites, tiles and UI
+   from packs that look alike (same pixel size or same vector look), never a
+   mix. Make your own art (below) when nothing fits or the look must be
+   unique. Realistic models and textures: `game_blender_assets_search` and
+   `_import` (Poly Haven is CC0, no key; Sketchfab and Poly Pizza need the
+   user's keys). Never scrape websites. Record every file's source and
+   licence in ASSETS.md; unknown-source files do not ship.
 
 ## Sprites and animation frames
 

@@ -183,6 +183,9 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "thread-dispatch",
       "invalid-input",
       "license-missing",
+      "source-changed",
+      "unsafe-archive",
+      "symlink",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -192,6 +195,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
     const fixes = {
       "invalid-project": "Open a folder containing a valid game.json, or create a new game.",
       "invalid-path": "Use a relative path inside the game project.",
+      symlink:
+        "A symbolic link is on the way to this path. Game tools write only real files and folders inside the game and never follow a link; replace the link with a real folder or file and retry.",
       "tool-missing":
         "The executable is missing, is not a file, or cannot be executed. Fix its path in Settings > General > Game tools or KURAMBIT_BLENDER / KURAMBIT_GODOT. To use the managed version, clear the override and click Install tools in Settings > General > Game tools.",
       "wrong-version":
@@ -216,6 +221,10 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
       "license-missing":
         "Unity needs an active licence on this machine. Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses, then retry. Kurambit never stores Unity credentials.",
+      "source-changed":
+        "The source changed: this library pack no longer matches the SHA-256 it was pinned with, so its bytes were not used. Pick another pack.",
+      "unsafe-archive":
+        "This library pack names an unsafe path or link, or unpacks past the size limits, so nothing from it was kept. Pick another pack.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }

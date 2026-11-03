@@ -17,6 +17,10 @@ import {
   GameBlenderAssetsSearchResult,
   GameBlenderAssetsImportInput,
   GameBlenderAssetsImportResult,
+  GameAssetsAddInput,
+  GameAssetsAddResult,
+  GameAssetsSearchInput,
+  GameAssetsSearchResult,
   GameCheckResult,
   GameUnityConsoleInput,
   GameUnityEditInput,
@@ -61,7 +65,7 @@ void Context;
 void Fiber;
 /**
  * Run threads from the GameRun production loop get play-level tools only
- * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*).
+ * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*, game_assets_*).
  * Everything else hides from them through this check.
  */
 const isGameRunThread = () => {
@@ -153,6 +157,29 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
+export const GameAssetsSearchTool = Tool.make("game_assets_search", {
+  description:
+    "Search Kurambit's pinned CC0 asset library: 2D sprites, tilesets, UI kits, icons, fonts, sound effects, music, animated 3D characters, 3D kits and PBR textures from Kenney, Quaternius, ambientCG and others. Public domain, no key, no attribution needed. Without pack it lists matching packs with their style, or every pack on one line each when you pass no query and no kind; pass pack to look inside one: the pack is downloaded once (checked against its pinned SHA-256) and matching files come with a contact sheet image numbered like the list (models are shown by their pictures), or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one pack style per game. Add files with game_assets_add by the exact paths listed.",
+  parameters: GameAssetsSearchInput,
+  success: GameAssetsSearchResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+export const GameAssetsSearchToolkit = Toolkit.make(GameAssetsSearchTool);
+const AssetsAddTool = Tool.make("game_assets_add", {
+  description:
+    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game: godot/assets/library/<pack>/, web/assets/library/<pack>/ or unity/Assets/Library/<pack>/, with names made path-safe. Models bring the textures they load; a folder add keeps one format per model, the one search shows. Never overwrites a file that differs; files already there are left alone. Appends each file's pack, source page and CC0 licence to ASSETS.md. Run game_import after.",
+  parameters: GameAssetsAddInput,
+  success: GameAssetsAddResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const UnityToolsTool = Tool.make("game_unity_tools", {
   description:
     "List the editing tools of this Unity game's live editor (Unity's official `unity mcp`): scene, GameObject, component, prefab, material, settings and lighting tools, each with its input schema. Call one with game_unity_edit. The first game_unity_* call opens the editor on a private display, which can take a few minutes on a fresh project.",
@@ -419,6 +446,7 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsSearchTool,
   BlenderAssetsImportTool,
   BlenderExportTool,
+  AssetsAddTool,
   UnityToolsTool,
   UnityEditTool,
   UnityEvalTool,

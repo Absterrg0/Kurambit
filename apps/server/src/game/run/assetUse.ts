@@ -17,8 +17,10 @@ export interface AssetUse {
   readonly engine: "godot" | "web" | "unity";
   /** Set when the folder is past the scan's bounds; the other facts are then empty. */
   readonly tooLarge: string | null;
+  /** The game's own asset files; files copied from library packs are counted in `library`. */
   readonly assets: number;
   readonly unused: ReadonlyArray<string>;
+  readonly library: { readonly files: number; readonly referenced: number };
   readonly missing: ReadonlyArray<string>;
   readonly listed: number | null;
   readonly listedMissing: ReadonlyArray<string>;
@@ -45,6 +47,10 @@ const SKIP_DIRS = new Set([".godot", ".git", "builds", "node_modules"]);
 // Third-party code: its files exist, but it is not the game's code or the game's art.
 const LIBRARY_DIRS = new Set(["vendor", "lib", "node_modules"]);
 const LIBRARY_FILE = /\.min\.m?js$|(?:^|\/)three\.(?:module|core)(?:\.min)?\.js$/;
+
+// Where game_assets_add copies pack files, relative to the engine dir. A pack brings far more
+// files than a game uses, so they are counted apart and never drown the game's own unused art.
+const PACK_DIR = /^(?:assets\/library|Assets\/Library)\//;
 
 const isLibrary = (path: string) =>
   LIBRARY_FILE.test(path) ||
@@ -494,6 +500,7 @@ const tooLargeUse = (engine: AssetUse["engine"], tooLarge: string): AssetUse => 
   tooLarge,
   assets: 0,
   unused: [],
+  library: { files: 0, referenced: 0 },
   missing: [],
   listed: null,
   listedMissing: [],
@@ -523,11 +530,13 @@ export const scanAssetUse = (
     !path.endsWith(".uid") &&
     // Editor-only scripts never ship in the player.
     !(engine === "unity" && /(^|\/)Editor\//.test(path));
-  const assets = files
+  const allAssets = files
     .map((f) => f.path)
     .filter((p) => ASSET.test(p) && !isLibrary(p))
     .sort();
-  const assetSet = new Set(assets);
+  const assetSet = new Set(allAssets);
+  const assets = allAssets.filter((p) => !PACK_DIR.test(p));
+  const packFiles = allAssets.filter((p) => PACK_DIR.test(p));
 
   // Godot names files by uid as well as by path, and imported copies point back at their source.
   const uids = new Map<string, string>();
@@ -636,7 +645,8 @@ export const scanAssetUse = (
   }
   if (index.exhausted()) return tooLargeUse(engine, "too many path patterns to match");
 
-  const listed = assetsMd === null ? null : listedIn(assetsMd, assets, lane);
+  // Pack files are matched too, so ASSETS.md's glob lines for them are not reported missing.
+  const listed = assetsMd === null ? null : listedIn(assetsMd, allAssets, lane);
 
   const drawn = new Map<string, number>();
   for (const path of [...loaded].sort()) {
@@ -654,6 +664,7 @@ export const scanAssetUse = (
     tooLarge: null,
     assets: assets.length,
     unused: assets.filter((a) => !used.has(a)),
+    library: { files: packFiles.length, referenced: packFiles.filter((a) => used.has(a)).length },
     missing: [...missing].sort(),
     listed: listed === null ? null : listed.inList.size + listed.missing.size,
     listedMissing: listed === null ? [] : [...listed.missing].sort(),
@@ -775,6 +786,9 @@ export const assetUseSummary = (use: AssetUse, lane: string): string => {
     use.drawn.length === 0 ? "none" : use.drawn.map(([name, n]) => `${name} ${n}`).join(", ");
   return [
     `Asset use (static scan of ${lane}/, code reached from ${entry}): ${use.assets} asset files, ${use.assets - use.unused.length} referenced by loaded code; never referenced: ${list(use.unused)}.`,
+    use.library.files > 0
+      ? `Library: ${use.library.files} files from packs, ${use.library.referenced} referenced by loaded code.`
+      : "",
     missingLine(use),
     listedLine(use),
     `Drawn in loaded code: ${drawn}.`,

@@ -54,6 +54,10 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderAssetsImportInput,
   type GameBlenderAssetsImportResult,
+  type GameAssetsAddInput,
+  type GameAssetsAddResult,
+  type GameAssetsSearchInput,
+  type GameAssetsSearchResult,
   type GameUnityConsoleInput,
   type GameUnityEditInput,
   type GameUnityEvalInput,
@@ -75,6 +79,7 @@ import {
 } from "@kurambit/contracts";
 import * as GameExploreNative from "./gameExploreNative.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -206,6 +211,16 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
+    /** The pinned CC0 library: packs, or files inside one pack with a contact sheet. */
+    readonly assetsSearch: (
+      threadId: ThreadId,
+      input: GameAssetsSearchInput,
+    ) => Effect.Effect<GameAssetsSearchResult, GameOperationError>;
+    /** Copy library files into the engine's asset dir and credit them in ASSETS.md. */
+    readonly assetsAdd: (
+      threadId: ThreadId,
+      input: GameAssetsAddInput,
+    ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     readonly export: (
       threadId: ThreadId,
@@ -382,6 +397,7 @@ const make = Effect.gen(function* () {
   const liveUnity = yield* GameUnity.GameUnity;
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
+  const library = yield* GameAssetLibrary.GameAssetLibrary;
   const gameBot = yield* GameBot.GameBot;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const operations = yield* GameOperations.GameOperations;
@@ -3286,6 +3302,11 @@ ${built.result.message}`.slice(-3000),
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
       withRoot(threadId, "Blender export", (root) => liveBlender.exportGlb(root, input)),
+    // Search only reads the game and writes its contact sheet under builds/, so it never waits on the game's lock.
+    assetsSearch: (threadId, input) =>
+      projects.resolve(threadId).pipe(Effect.flatMap((root) => library.search(root, input))),
+    assetsAdd: (threadId, input) =>
+      withRoot(threadId, "Library add", (root) => library.add(root, input)),
     closeLiveEditors: (root) =>
       Effect.all([liveBlender.stop(root), liveUnity.stop(root)], { discard: true }),
     action: Effect.fn("GameService.action")(function* (threadId, action) {
@@ -3344,6 +3365,7 @@ export const layer = Layer.effect(GameService, make).pipe(
   // After GameEngine, so the engine backend and the service share one live editor.
   Layer.provide(GameUnity.layer),
   Layer.provide(GameBlender.layer),
+  Layer.provide(GameAssetLibrary.layer),
   Layer.provide(GameBot.layer),
   Layer.provideMerge(GameOperations.layer),
 );

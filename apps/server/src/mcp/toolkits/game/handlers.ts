@@ -4,7 +4,12 @@ import * as GameRun from "../../../game/GameRun.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { GameToolkit, GameBlenderLookToolkit, GameUnityScreenshotToolkit } from "./tools.ts";
+import {
+  GameToolkit,
+  GameAssetsSearchToolkit,
+  GameBlenderLookToolkit,
+  GameUnityScreenshotToolkit,
+} from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
@@ -43,6 +48,13 @@ const handlers = {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
       return yield* game.blenderAssetsSearch(scope.thread.threadId, input);
+    }),
+  ),
+  game_assets_add: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.assetsAdd(scope.thread.threadId, input);
     }),
   ),
   game_blender_assets_import: McpToolAccess.actsAsCaller((input) =>
@@ -248,4 +260,19 @@ const unityScreenshotHandlers = {
 export const layerUnityScreenshot = McpToolAccess.toLayer(
   GameUnityScreenshotToolkit,
   unityScreenshotHandlers,
+);
+
+/** Registered like the Blender look, so the contact sheet becomes real image content. */
+const assetsSearchHandlers = {
+  game_assets_search: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.assetsSearch(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameAssetsSearchToolkit.tools>;
+export const layerAssetsSearch = McpToolAccess.toLayer(
+  GameAssetsSearchToolkit,
+  assetsSearchHandlers,
 );
