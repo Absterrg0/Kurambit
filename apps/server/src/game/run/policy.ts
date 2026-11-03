@@ -1054,18 +1054,29 @@ export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Appli
           halves: rest,
           results: pair.results.filter((r) => r.id !== rerun && rest.some((h) => h.id === r.id)),
         };
+  // Leaving the comparison (a budget end on either half) drops every sample
+  // in it, so each finished worktree play gives its checkout back, including
+  // one applied earlier in this pair that was kept for a follow-up turn.
+  // Releasing an already released checkout is a no-op.
+  const leave = (next: RunState): Applied => {
+    for (const each of pair.halves) {
+      const r = resultOf(each);
+      // A budget-cut half already gave its own checkout back in the role runner.
+      if (
+        each.kind === "role" &&
+        each.at !== null &&
+        r?.kind === "done" &&
+        !(r.timedOut && r.budgetCut) &&
+        !release.includes(r.threadId)
+      )
+        release.push(r.threadId);
+    }
+    return out(next);
+  };
   let s: RunState = { ...state, inFlight: null };
   for (const [i, half] of pair.halves.entries()) {
     const rest = pair.halves.slice(i);
-    if (!inComparison(s)) {
-      // A finished worktree play nobody will apply still gives its checkout back.
-      for (const left of rest) {
-        const r = resultOf(left);
-        if (left.kind === "role" && left.at !== null && r?.kind === "done")
-          release.push(r.threadId);
-      }
-      return out(s);
-    }
+    if (!inComparison(s)) return leave(s);
     const res = resultOf(half);
     if (res === undefined) return out({ ...s, inFlight: keep(rest, null) });
     const applied = applyResult(s, half, res, input);
@@ -1076,7 +1087,7 @@ export const applyPair = (state: RunState, pair: PairStep, input: Inputs): Appli
     // Kept in flight (a budget end outside a round): it re-runs on resume, as a serial step would.
     if (s.inFlight !== null) return out({ ...s, inFlight: keep(rest, half.id) });
   }
-  return out(s);
+  return inComparison(s) ? out(s) : leave(s);
 };
 
 export const applyResult = (

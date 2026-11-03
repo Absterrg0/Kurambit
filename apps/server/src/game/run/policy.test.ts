@@ -576,6 +576,24 @@ describe("parallel samples", () => {
     expect(applied.release).toEqual([`t-${y!.id}`]);
   });
 
+  it("gives the first half's worktree back when the second half ends the round", () => {
+    const { state, pair } = planPair(atCompare());
+    const [x, y] = roles(pair);
+    const applied = Policy.applyPair(
+      state,
+      {
+        ...pair,
+        results: [
+          { id: x!.id, result: done(x!) as State.HalfResult },
+          { id: y!.id, result: done(y!, { timedOut: true, budgetCut: true }) as State.HalfResult },
+        ],
+      },
+      { now: T0, coin: 0, id: "a" },
+    );
+    expect(applied.state.task._tag).toBe("leave");
+    expect(applied.release).toEqual([`t-${x!.id}`]);
+  });
+
   it("keeps Unity samples one at a time", () => {
     const { pairs } = drive(
       atRound({ lane: "unity" }),

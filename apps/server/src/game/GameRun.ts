@@ -647,7 +647,11 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.gen(function* () {
           const ended: Array<Extract<Policy.StepResult, { kind: "ended" }>> = [];
           const exits = yield* Effect.forEach(
-            pair.halves.filter((half) => !pair.results.some((r) => r.id === half.id)),
+            // Launched in play order (ids follow the coin), so the candidate
+            // never systematically starts first and wins the boot lock.
+            pair.halves
+              .filter((half) => !pair.results.some((r) => r.id === half.id))
+              .toSorted((a, b) => a.id - b.id),
             (half) =>
               Effect.gen(function* () {
                 const result = yield* execute(half);
