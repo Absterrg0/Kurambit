@@ -6,7 +6,7 @@ import { GAME_EXPLORE_BOUNDS } from "@kurambit/contracts";
 // the game_* MCP tools are the only way to check, play, export, bot-test or model.
 // The game's AGENTS.md also speaks to the creator's own session; a role follows its prompt.
 const TOOL_RULE =
-  "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot or Blender binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_assets_*, game_status). ";
+  "You are one role in this game's production run; where AGENTS.md says otherwise, follow this prompt. You have no local Godot, Blender or Unity binaries and must never look for any. Check, play, export, bot-test and model ONLY with the game_* MCP tools (game_check, game_explore_start/act/close, game_bot_run, game_bot_view, game_export, game_blender_*, game_unity_* in a Unity game, game_assets_*, game_status). ";
 const SKILL_LINE = "Read the skill files in ./studio-skills first and follow them. ";
 const PLAYTEST_LINE = "Read ./studio-skills/playtest.md before you play. ";
 const B = GAME_EXPLORE_BOUNDS;
