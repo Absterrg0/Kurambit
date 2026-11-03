@@ -143,6 +143,16 @@ export function createControls(gameActions) {
     if (spec === null) delete declared[name];
     else if (typeof spec === "object") declared[name] = spec;
   }
+  // One key on two actions fires both: name it, so the check sees it.
+  const owners = new Map();
+  for (const [name, spec] of Object.entries(declared))
+    for (const key of strings(spec?.keys)) {
+      if (owners.has(key))
+        console.error(
+          `Controls: ${key} is bound to both ${owners.get(key)} and ${name}; give one of them another key or drop it with null in ACTIONS.`,
+        );
+      else owners.set(key, name);
+    }
   // Pause lists last, under the game's own.
   const { pause, ...rest } = declared;
   const actions = new Map();
