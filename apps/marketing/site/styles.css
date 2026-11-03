@@ -2044,7 +2044,9 @@ h3 {
 
 :root {
   --paper: #efeee9;
-  --desk: #e3e2dc;
+  /* The margins are the same paper as the sheet; only its torn edge and a
+     faint shadow mark where the sheet ends. */
+  --desk: var(--paper);
   /* Pictures are printed on a brighter stock than the page, so they read as
      sheets laid on it rather than marks on the same paper. */
   --print: #fcfcfa;
