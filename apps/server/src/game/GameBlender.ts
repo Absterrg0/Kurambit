@@ -25,6 +25,8 @@ import {
   type GameBlenderExportResult,
   type GameBlenderLookInput,
   type GameBlenderLookResult,
+  type GameBlenderRenderSpritesInput,
+  type GameBlenderRenderSpritesResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
 } from "@kurambit/contracts";
@@ -32,6 +34,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { renderSprites } from "./blenderSprites.ts";
 import {
   alive,
   displayInRange,
@@ -335,6 +338,11 @@ export class GameBlender extends Context.Service<
       root: string,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
+    /** Live Blender scene: render named objects to a strip of sprite PNGs with a fitted camera. */
+    readonly renderSprites: (
+      root: string,
+      input: GameBlenderRenderSpritesInput,
+    ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
     /** Stop one game's live session by root; game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
@@ -1047,6 +1055,19 @@ const make = Effect.gen(function* () {
             blend,
             export: file,
           };
+        }),
+      ),
+    renderSprites: (root, input) =>
+      holding(
+        root,
+        Effect.gen(function* () {
+          const short = yield* Effect.promise(() =>
+            memoryShortfall("sprite render", RENDER_NEEDED_MB, "KURAMBIT_BLENDER_RENDER_MEMORY_MB"),
+          );
+          if (short !== null)
+            return yield* opError("blender-render-sprites", root, "low-memory", short);
+          // Renders in a throwaway scene and changes nothing in the live one, so no .blend save.
+          return yield* renderSprites({ callText, manifest: projects.read }, root, input);
         }),
       ),
     stop: drop,

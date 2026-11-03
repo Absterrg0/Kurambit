@@ -11,6 +11,8 @@ import {
   GameBlenderExportResult,
   GameBlenderLookInput,
   GameBlenderLookResult,
+  GameBlenderRenderSpritesInput,
+  GameBlenderRenderSpritesResult,
   GameBlenderSceneInput,
   GameBlenderSceneResult,
   GameBlenderAssetsSearchInput,
@@ -157,6 +159,18 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
+export const GameBlenderRenderSpritesTool = Tool.make("game_blender_render_sprites", {
+  description:
+    "Render 2D sprites from the live Blender scene, framed correctly by construction: use this instead of writing camera, light and render code. Each view gets a fixed orthographic camera fitted to the objects across every frame of the animation, so nothing is cut off, the scale is the same in every frame and view, and the feet stand on the same pixel row in every frame. Pass objects (object or collection names; children come along; default every visible object), views (front, back, left, right, top, isometric, or {name, azimuth, elevation}; default right; elevation tilts the side views down, 30-45 for a top-down 3/4 look), an animation (action, which plays over its own frame range in frameCount frames, default 8; or frameStart/frameEnd; or an explicit frames list; nothing renders the current pose), size (canvas px, default 64; height for non-square), anchor (feet, default, or center; top views centre), margin (px) and lighting (studio key/fill/rim that reads at small size, default, or scene). For a pixel-art game pass pixelArt: renders large, downscales, makes alpha hard, quantizes every frame to one shared palette (palette: the style pack's id or a PNG or folder in this game, colors: how many, default 16; without palette, the frames' own colours), and outline: true or #rrggbb adds a 1 px outline. Writes <output>_0.png ... <output>_N.png under the engine directory (<output>_<view>_N.png with several views), optionally <output>_sheet.png, records provenance in ASSETS.md and returns the files, the anchor and a contact sheet image to look at. The .blend stays the source and is not changed. Run game_import after.",
+  parameters: GameBlenderRenderSpritesInput,
+  success: GameBlenderRenderSpritesResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+export const GameBlenderRenderSpritesToolkit = Toolkit.make(GameBlenderRenderSpritesTool);
 export const GameAssetsSearchTool = Tool.make("game_assets_search", {
   description:
     "Search Kurambit's pinned CC0 asset library: 2D sprites, tilesets, UI kits, icons, fonts, sound effects, music, animated 3D characters, 3D kits and PBR textures from Kenney, Quaternius, ambientCG and others. Public domain, no key, no attribution needed. Without pack it lists matching packs with their style, or every pack on one line each when you pass no query and no kind; pass pack to look inside one: the pack is downloaded once (checked against its pinned SHA-256) and matching files come with a contact sheet image numbered like the list (models are shown by their pictures), or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding, and keep one pack style per game. Add files with game_assets_add by the exact paths listed.",

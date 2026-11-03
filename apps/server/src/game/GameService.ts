@@ -46,6 +46,8 @@ import {
   type GameBlenderCodeResult,
   type GameBlenderExportInput,
   type GameBlenderExportResult,
+  type GameBlenderRenderSpritesInput,
+  type GameBlenderRenderSpritesResult,
   type GameBlenderLookInput,
   type GameBlenderLookResult,
   type GameBlenderSceneInput,
@@ -216,6 +218,11 @@ export class GameService extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
+    /** Live Blender scene: sprite PNGs with a camera fitted across every frame, plus a contact sheet. */
+    readonly blenderRenderSprites: (
+      threadId: ThreadId,
+      input: GameBlenderRenderSpritesInput,
+    ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
     /** The pinned CC0 library: packs, or files inside one pack with a contact sheet. */
     readonly assetsSearch: (
       threadId: ThreadId,
@@ -3350,6 +3357,8 @@ ${built.result.message}`.slice(-3000),
       withRoot(threadId, "Blender assets import", (root) => liveBlender.assetsImport(root, input)),
     blenderExport: (threadId, input) =>
       withRoot(threadId, "Blender export", (root) => liveBlender.exportGlb(root, input)),
+    blenderRenderSprites: (threadId, input) =>
+      withRoot(threadId, "Blender sprites", (root) => liveBlender.renderSprites(root, input)),
     // Search only reads the game and writes its contact sheet under builds/, so it never waits on the game's lock.
     assetsSearch: (threadId, input) =>
       projects.resolve(threadId).pipe(Effect.flatMap((root) => library.search(root, input))),

@@ -8,6 +8,7 @@ import {
   GameToolkit,
   GameAssetsSearchToolkit,
   GameBlenderLookToolkit,
+  GameBlenderRenderSpritesToolkit,
   GameUnityScreenshotToolkit,
 } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
@@ -246,6 +247,21 @@ const blenderLookHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
 export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
+
+/** Registered like the Blender look, so the contact sheet becomes real image content. */
+const blenderRenderSpritesHandlers = {
+  game_blender_render_sprites: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.blenderRenderSprites(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameBlenderRenderSpritesToolkit.tools>;
+export const layerBlenderRenderSprites = McpToolAccess.toLayer(
+  GameBlenderRenderSpritesToolkit,
+  blenderRenderSpritesHandlers,
+);
 
 /** Registered like the Blender look, so the capture becomes real image content. */
 const unityScreenshotHandlers = {
