@@ -2059,7 +2059,12 @@ h3 {
 
 /* The page is one sheet of handmade washi lying on a darker surface. */
 body {
+  --edge: 24px;
   background:
+    url("deckle-shade-left.svg") calc(50% - var(--page) / 2 - var(--edge) / 2) 0 / var(--edge) 800px
+      repeat-y,
+    url("deckle-shade-right.svg") calc(50% + var(--page) / 2 + var(--edge) / 2) 0 / var(--edge)
+      800px repeat-y,
     url("washi.svg?v=warm") 0 0 / 420px 420px,
     var(--desk);
 }
@@ -2072,12 +2077,9 @@ body {
 }
 
 /* Its long edges are deckled, as they come off the mould: the sheet's own
-   paper runs out to a soft, torn edge that fades into the surface, with a
-   wide, faint shadow where it lifts. */
-.page {
-  box-shadow: 0 0 36px -12px rgb(23 21 17 / 10%);
-}
-
+   paper runs out to a torn edge, a little paler where the paper thins, with
+   a fine shadow and a few loose fibres on the surface beyond it. The shadow
+   and fibres sit in the body's background, lined up with the tear. */
 .page::before,
 .page::after {
   content: "";
@@ -2086,8 +2088,9 @@ body {
   bottom: 0;
   left: calc(var(--edge) * -1);
   width: var(--edge);
-  /* The tile is offset so the paper runs on from the page without a seam. */
+  /* The paper tile is offset so the paper runs on from the page without a seam. */
   background:
+    url("deckle-rim-left.svg") 0 0 / var(--edge) 800px repeat-y,
     url("washi.svg?v=warm") var(--edge) 0 / 420px 420px,
     var(--paper);
   -webkit-mask: url("deckle-left.svg") 0 0 / var(--edge) 800px repeat-y;
@@ -2097,28 +2100,27 @@ body {
 
 .page::after {
   left: 100%;
+  background-image: url("deckle-rim-right.svg"), url("washi.svg?v=warm");
   background-position:
-    calc(var(--page) * -1) 0,
-    0 0;
+    0 0,
+    calc(var(--page) * -1) 0;
   -webkit-mask-image: url("deckle-right.svg");
   mask-image: url("deckle-right.svg");
 }
 
-.page {
-  --edge: 24px;
-}
-
 /* Below 1312px the sheet has a 16px margin; the edge keeps inside it. */
 @media (max-width: 1312px) {
-  .page {
+  body {
     --edge: 15px;
   }
 }
 
 /* On a phone the sheet fills the screen, so it has no edge to show. */
 @media (max-width: 640px) {
-  .page {
-    box-shadow: none;
+  body {
+    background:
+      url("washi.svg?v=warm") 0 0 / 420px 420px,
+      var(--desk);
   }
 
   .page::before,
@@ -2168,15 +2170,13 @@ body {
   pointer-events: none;
 }
 
-/* The nav: a strip of paper mounted like a print, with a faint outer edge
-   and a keyline just inside it. */
+/* The nav: a smooth strip of paper mounted like a print, with a faint outer
+   edge and a keyline just inside it. */
 .bar,
 .bar[data-scrolled] {
   border: 0;
   border-radius: 8px;
-  background:
-    url("washi.svg?v=warm") 0 0 / 420px 420px,
-    rgb(249 245 236 / 96%);
+  background: rgb(250 247 240 / 97%);
   box-shadow:
     0 0 0 1px rgb(23 21 17 / 10%),
     0 1px 0 rgb(23 21 17 / 6%),
