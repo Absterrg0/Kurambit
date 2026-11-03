@@ -698,7 +698,14 @@ export const layer = (options: { readonly stateDir: string }) => {
         // flight re-runs instead (every op is safe to repeat).
         const expected = Policy.expectedBranch(state);
         if (expected !== null && state.inFlight?.kind !== "git") {
-          const entered = yield* git.run({ _tag: "enter", branch: expected }).pipe(Effect.option);
+          // Through gitStep, so live editors close before the checkout moves.
+          const entered = yield* gitStep(d.deps.game, git, root, {
+            _tag: "enter",
+            branch: expected,
+          }).pipe(
+            Effect.map((r) => r.git),
+            Effect.option,
+          );
           if (Option.isNone(entered) || !entered.value.ok)
             yield* log(`resume: could not enter ${expected}; continuing where HEAD is`);
         }

@@ -3891,17 +3891,21 @@ ${built.result.message}`.slice(0, 3000),
     unityWarmEditor: Effect.fn("GameService.unityWarmEditor")(function* (root) {
       if ((yield* projects.read(root)).engine.name !== "unity") return false;
       const { cwd } = yield* engine(root);
-      const cached = yield* Effect.promise(() =>
-        NodeFSP.stat(NodePath.join(cwd, "Library")).then(
-          (stat) => stat.isDirectory(),
+      // Unity creates Library/ as soon as it starts importing, so a warm-up cut
+      // short (stop, restart, memory) leaves one behind. Only a finished open
+      // writes this marker (Library/ is gitignored), so a partial one is redone.
+      const marker = NodePath.join(cwd, "Library", "kurambit-warm");
+      const warm = yield* Effect.promise(() =>
+        NodeFSP.access(marker).then(
+          () => true,
           () => false,
         ),
       );
-      if (cached) return false;
+      if (warm) return false;
       yield* exclusive(
         root,
         "Unity warm-up",
-        liveUnity.hold(root)(Effect.void),
+        liveUnity.hold(root)(Effect.promise(() => NodeFSP.writeFile(marker, "warm\n"))),
         "game run warm-up",
       );
       yield* liveUnity.stop(root);
