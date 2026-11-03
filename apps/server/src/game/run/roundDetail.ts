@@ -9,7 +9,7 @@ import type {
   GameRunRoundDetail,
   GameRunRoundOutcome,
 } from "@kurambit/contracts";
-import { pickRef } from "./progress.ts";
+import { pickRef, type PickRecord } from "./progress.ts";
 import type { RoundRecord, RunState } from "./state.ts";
 
 // Every text is bounded so one expanded round stays a few KB on the wire.
@@ -218,9 +218,11 @@ const comparisonOf = async (
   return { comparison, sheetFiles, sides };
 };
 
-/** The pick's blind labels by prototype branch, from its latest comparison record. */
-export const pickSides = async (root: string): Promise<Readonly<Record<string, string>>> =>
-  (await comparisonOf(root, "pick")).sides;
+/** The pick's blind labels and comparator verdict, from its latest comparison record. */
+export const pickRecord = async (root: string): Promise<PickRecord> => {
+  const compared = await comparisonOf(root, "pick");
+  return { sides: compared.sides, verdict: compared.comparison?.judges[0]?.verdict ?? null };
+};
 
 export type PickEvidence = {
   readonly detail: GameRunPickDetail;
@@ -236,7 +238,8 @@ export const readPickEvidence = async (root: string, state: RunState): Promise<P
     compared.comparison === null && t._tag === "pick" && t.cmp.x.length > 0
       ? { A: t.cmp.x, B: t.cmp.y }
       : compared.sides;
-  const chosen = pickRef(state, sides)?.chosen ?? null;
+  const verdict = compared.comparison?.judges[0]?.verdict ?? null;
+  const chosen = pickRef(state, { sides, verdict })?.chosen ?? null;
   const single = compared.comparison === null && t._tag !== "pick" && chosen !== null;
   const note = single
     ? "Only one prototype booted, so it was adopted without a comparison."

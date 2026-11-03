@@ -56,20 +56,29 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
   }
 };
 
-// The pick's notes open with a legend naming the blind label the game continued from.
+// The pick's notes open with a legend naming the blind label the game continued from;
+// notes from before the legend name a tie's selection on a SELECT line.
 const LEGEND = /^\(In these notes, (A|B) is the prototype the game continued from/;
+const SELECT = /^SELECT:\s*(A|B)\b/m;
 
-/** The blind label ("A" or "B") the pick continued from, read from the notes it left. */
-export const pickedLabel = (pickNotes: string): "A" | "B" | null => {
-  const found = LEGEND.exec(pickNotes.trimStart())?.[1];
+/**
+ * The blind label ("A" or "B") the pick continued from: the notes' legend or
+ * selection, else the comparator's own verdict, which the policy adopts as is.
+ */
+export const pickedLabel = (pickNotes: string, verdict: string | null): "A" | "B" | null => {
+  const found =
+    LEGEND.exec(pickNotes.trimStart())?.[1] ?? SELECT.exec(pickNotes)?.[1] ?? verdict ?? "";
   return found === "A" || found === "B" ? found : null;
 };
 
+/** The pick's comparison record as the run left it: blind labels and the comparator's verdict. */
+export type PickRecord = {
+  readonly sides: Readonly<Record<string, string>>;
+  readonly verdict: string | null;
+};
+
 /** How the pick reads from the run record: still open, or which prototype the game became. */
-export const pickRef = (
-  state: RunState,
-  sides: Readonly<Record<string, string>>,
-): GameRunPickRef | null => {
+export const pickRef = (state: RunState, { sides, verdict }: PickRecord): GameRunPickRef | null => {
   const t = state.task;
   const startedAt = state.threads.find((thread) => thread.role === "proto-0")?.startedAt;
   const endedAt = state.threads.find((thread) => thread.role === "plan")?.startedAt;
@@ -84,7 +93,7 @@ export const pickRef = (
       chosen: t.phase === "adopt" && t.chosen.length > 0 ? t.chosen : null,
       durationMs: null,
     };
-  const label = pickedLabel(state.pickNotes);
+  const label = pickedLabel(state.pickNotes, verdict);
   const booted = state.protos.filter((proto) => proto.booted);
   const chosen =
     label !== null ? (sides[label] ?? null) : booted.length === 1 ? booted[0]!.branch : null;

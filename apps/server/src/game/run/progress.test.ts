@@ -26,17 +26,22 @@ const state = (patch: Partial<State.RunState>): State.RunState => ({
   ],
   ...patch,
 });
-const sides = { A: "proto-1", B: "proto-0" };
+const record = { sides: { A: "proto-1", B: "proto-0" }, verdict: null };
 
 describe("pickRef", () => {
   it("maps the legend's blind label to its prototype", () => {
     const notes =
       "(In these notes, B is the prototype the game continued from, now on main; A is the one set aside.)\nCOMPARE: B";
-    expect(pickRef(state({ pickNotes: notes }), sides)?.chosen).toBe("proto-0");
+    expect(pickRef(state({ pickNotes: notes }), record)?.chosen).toBe("proto-0");
+  });
+
+  it("falls back to the comparator's verdict for notes written before the legend", () => {
+    const old = state({ pickNotes: "COMPARE: A\n\nA plays better." });
+    expect(pickRef(old, { ...record, verdict: "A" })?.chosen).toBe("proto-1");
   });
 
   it("names no winner for an unresolved tie and the lone booted prototype otherwise", () => {
-    expect(pickRef(state({ pickNotes: "COMPARE: TIE" }), sides)).toEqual({
+    expect(pickRef(state({ pickNotes: "COMPARE: TIE" }), { ...record, verdict: "TIE" })).toEqual({
       phase: "done",
       chosen: null,
       durationMs: null,
@@ -47,10 +52,10 @@ describe("pickRef", () => {
         { branch: "proto-1", booted: true },
       ],
     });
-    expect(pickRef(single, {})?.chosen).toBe("proto-1");
+    expect(pickRef(single, { sides: {}, verdict: null })?.chosen).toBe("proto-1");
   });
 
   it("is absent for a run that never reached prototypes", () => {
-    expect(pickRef(state({ protos: [] }), {})).toBeNull();
+    expect(pickRef(state({ protos: [] }), { sides: {}, verdict: null })).toBeNull();
   });
 });

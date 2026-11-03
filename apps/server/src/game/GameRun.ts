@@ -45,8 +45,13 @@ import { finishExports } from "./run/finish.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
-import { pickedLabel, pickRef, runProgress } from "./run/progress.ts";
-import { pickSides, readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
+import { pickRef, runProgress } from "./run/progress.ts";
+import {
+  pickRecord,
+  readPickEvidence,
+  readRoundEvidence,
+  roundOutcome,
+} from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
 import { modelFacts } from "./run/modelFacts.ts";
@@ -931,7 +936,9 @@ export const layer = (options: { readonly stateDir: string }) => {
       const step = running ? currentStep(state) : null;
       const queued = parseSteer((yield* Effect.promise(() => readText(paths(root).steer))) ?? "");
       const sides =
-        pickedLabel(state.pickNotes) === null ? {} : yield* Effect.promise(() => pickSides(root));
+        state.pickNotes.length === 0
+          ? { sides: {}, verdict: null }
+          : yield* Effect.promise(() => pickRecord(root));
       return {
         active: running,
         runId: state.runId,
