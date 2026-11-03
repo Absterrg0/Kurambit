@@ -115,6 +115,9 @@ export const makeThreeBackend = (): GameEngineBackend => {
           entries.push(["gameplay", new URL(input.gameplayScene, served.url).href]);
         for (const [entry, entryUrl] of entries) {
           let entryBooted = false;
+          // A page error or a script that failed to load: either can stop the
+          // modules for good, so the bridge never appears.
+          let pageErrored = false;
           const page = yield* Effect.promise(() =>
             launched.newPage({ viewport: { ...THREE_VIEWPORT } }),
           ).pipe(
@@ -147,10 +150,16 @@ export const makeThreeBackend = (): GameEngineBackend => {
             const text = (error instanceof Error ? error.message : String(error)).slice(0, 500);
             const stack = error instanceof Error ? error.stack : undefined;
             log(`pageerror: ${text}`);
+            pageErrored = true;
             issues.push({
               file: stackToGameFile(stack, origin),
               message: `Page error: ${text}`,
             });
+          });
+          page.on("response", (response) => {
+            if (response.status() < 400 || response.request().resourceType() !== "script") return;
+            log(`script failed to load: ${response.url()} (${response.status()})`);
+            pageErrored = true;
           });
           const bootTimeoutMs = 60_000;
           const started = Date.now();
@@ -173,6 +182,9 @@ export const makeThreeBackend = (): GameEngineBackend => {
                 if (entry === "boot") booted = true;
                 break;
               }
+              // Top-level await can delay the bridge past load, so only an error
+              // and no bridge together end the wait early.
+              if (pageErrored && ready === null) break;
             } catch {
               // Evaluations race the page navigation; keep polling until the deadline.
             }
@@ -198,7 +210,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
           file: "web/index.html",
           message: timedOut
             ? "The page never reported ready (window.__studio.ready stayed false past 60s)."
-            : "The page did not boot: window.__studio is missing. Keep the studio bridge from the starter.",
+            : "The page did not boot: window.__studio never appeared. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.join("\n")}\n`).catch(() => undefined),
