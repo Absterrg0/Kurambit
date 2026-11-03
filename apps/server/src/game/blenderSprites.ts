@@ -561,6 +561,38 @@ export const renderSprites = (
     }
     // The outline grows the silhouette by a pixel, so the feet's outline row is the ground.
     const groundOf = (a: { y: number }) => a.y + (outlined ? 1 : 0);
+    // The engine-facing facts in one file the templates' strip loaders read, so frame rate and
+    // anchor never get retyped from prose.
+    const step = frames.length > 1 ? (frames.at(-1)! - frames[0]!) / (frames.length - 1) : 0;
+    const manifestRel = `${dirRel}/${base}.sprite.json`;
+    const spriteManifest = {
+      frameWidth: width,
+      frameHeight: height,
+      fps: step > 0 ? Math.round((fit.fps / step) * 100) / 100 : 0,
+      loop: input.loop ?? true,
+      views: Object.fromEntries(
+        views.map((view, vi) => {
+          const a = framing.anchors[vi]!;
+          return [
+            view.name,
+            {
+              frames: files
+                .slice(vi * frames.length, (vi + 1) * frames.length)
+                .map((file) => NodePath.posix.basename(file)),
+              anchor: { kind: a.kind, x: a.x, y: a.kind === "feet" ? groundOf(a) : a.y },
+            },
+          ];
+        }),
+      ),
+    };
+    yield* Effect.tryPromise({
+      try: () =>
+        writeOwn(
+          NodePath.join(outDir, `${base}.sprite.json`),
+          Buffer.from(`${JSON.stringify(spriteManifest, null, 2)}\n`),
+        ),
+      catch: io(manifestRel),
+    });
     const contact = contactSheet(
       rows,
       framing.anchors.map((a) => (a.kind === "feet" ? groundOf(a) : -1)),
@@ -621,6 +653,11 @@ export const renderSprites = (
       ...views.map(
         (_, vi) => `- ${spanText(files.slice(vi * frames.length, (vi + 1) * frames.length))}`,
       ),
+      `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): ${
+        manifest.engine.name === "godot"
+          ? `SpriteStrips.apply($AnimatedSprite2D, {"walk": "res://${manifestRel.slice(lane.length + 1)}"}, "${views[0]!.name}") loads it`
+          : "read it for the frame rate and anchor"
+      }.`,
       ...(sheetRel === undefined
         ? []
         : [

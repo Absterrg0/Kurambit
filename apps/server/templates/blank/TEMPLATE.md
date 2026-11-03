@@ -44,6 +44,18 @@ but it ships the shell a demo needs, so build the game, not the menus.
 `Juice.burst(position, color)` and `Juice.sfx("res://assets/sfx/hit.wav")`.
 The comment block at the top of the file shows each call.
 
+## Characters and cameras
+
+`CharacterAnimator.on($Model)` (`shell/character_animator.gd`) plays an
+instanced GLB's clips by state: `anim.play("idle" | "walk" | "run" | "jump" |
+"fall" | "attack" | "hit" | "die", {"speed": s})` every frame crossfades,
+returns from one-shots and falls back (run to walk to idle) when a clip is
+missing. `SpriteStrips.apply(sprite, {...}, view)` (`shell/sprite_strips.gd`)
+loads `game_blender_render_sprites` strips into an AnimatedSprite2D.
+`FollowCamera2D` (Camera2D smoothing, drag margins and limits plus look-ahead)
+and `FollowCamera3D` (a SpringArm3D that pulls in at walls, with orbit) follow
+the player. The comment block at the top of each file shows each call.
+
 ## Project structure
 
 - `project.godot` uses the Compatibility renderer and boots `scenes/main.tscn`.

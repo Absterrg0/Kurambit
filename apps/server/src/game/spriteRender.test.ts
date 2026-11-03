@@ -25,7 +25,15 @@ const basis = { right: [0, -1, 0], up: [0, 0, 1], forward: [1, 0, 0] };
 describe("frameCameras", () => {
   it("fits the tallest extent inside the inset and stands the lowest point on the bottom inset", () => {
     const framing = frameCameras(
-      { frames: [0], action: null, objects: [], anchorObject: null, views: [side], basis: [basis] },
+      {
+        frames: [0],
+        fps: 24,
+        action: null,
+        objects: [],
+        anchorObject: null,
+        views: [side],
+        basis: [basis],
+      },
       64,
       64,
       2,
@@ -49,6 +57,7 @@ describe("frameCameras", () => {
     const reach = { ...side, x1: 2.5, origin: [0, 0] };
     const fit = {
       frames: [0],
+      fps: 24,
       action: null,
       objects: [],
       anchorObject: "hero",
@@ -64,6 +73,7 @@ describe("frameCameras", () => {
   it("finds root motion, and not a stride or a lunge", () => {
     const fit = (perFrame: number[][]) => ({
       frames: [0, 1, 2],
+      fps: 24,
       action: null,
       objects: [],
       anchorObject: null,
@@ -95,6 +105,7 @@ describe("frameCameras", () => {
       frameCameras(
         {
           frames: [0],
+          fps: 24,
           action: null,
           objects: [],
           anchorObject: null,

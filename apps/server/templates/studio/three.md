@@ -9,9 +9,12 @@ exported with the same `game_*` tools as a Godot game.
    `web/main.js` (the gameplay), `web/style.css`, `web/assets/` for every
    visual and sound.
    Nothing loads from the network at runtime.
-   Models are GLB files under `web/assets/`, loaded with the vendored
-   `GLTFLoader` (`import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"`,
-   mapped by the import map in `index.html`). Keep the import map.
+   Models are GLB files under `web/assets/`. Name every model and texture in
+   `export const ASSETS = { knight: "assets/models/knight.glb", ... }` in
+   `main.js`: the shell loads them before the title, and `ctx.assets.model("knight")`
+   returns a fresh copy (skinned characters included; `.animations` holds its
+   clips) and `ctx.assets.texture(name)` a texture, both synchronously in
+   `start`. Never load files inside `start` or `update`. Keep the import map.
 3. Never launch your own browser. Check, play, export, bot-test and package
    ONLY with the `game_*` tools (`game_check` to check, `game_export`
    to export).
@@ -33,23 +36,36 @@ exported with the same `game_*` tools as a Godot game.
    Answer every player action through `Juice` (`web/shell/juice.js`):
    `shake`, `hitPause`, `pop`, `squash`, `flash`, `flashScreen`, `burst`,
    `sfx`.
-5. Keep `window.__studio`: `ready` after the first frame, `getState()`
+5. Never hand-write clip switching or camera follow; the shell kits do it
+   and the shell ticks them on game time. Character: `const hero =
+animate(ctx.assets.model("knight"))` (`web/shell/animate.js`), then every frame
+   `hero.play(state, { speed })` with the state chosen from gameplay (on
+   floor, speed, attacking) and `hero.play("attack")` on the event; it finds
+   clips by name, crossfades, returns from one-shots, and the console line
+   says which clip each state got. Library models face +z: face the move
+   direction with `rotation.y = Math.atan2(dir.x, dir.z)`. Camera
+   (`web/shell/camera.js`): `followCamera2D(ctx, player, { bounds })` for a
+   side or top-down view, `followCamera3D(ctx, player, { blockers: [level] })`
+   for third person, moving the player relative to `cam.yaw`. Juice.shake
+   applies on top. Each `ctx.assets.model` call is its own copy, so every
+   character or enemy gets its own `animate`.
+6. Keep `window.__studio`: `ready` after the first frame, `getState()`
    returning `{gameState, player, hudText}`, page errors in `errors[]`,
    `setState(target, values)` for named late content (the starter refuses).
    Extend `GameState`, not the bridge.
-6. Keep `GameState` the single source of truth with public primitives only
+7. Keep `GameState` the single source of truth with public primitives only
    (the probe reports those; Retry resets them too). Build meshes, class
    instances and functions in `start(ctx)`, never on `GameState`.
    Keep the values that matter on screen too (the probe reports the overlay).
    Set `ctx.player` so the probe reports the player's position.
-7. Playtest with `game_explore_*` (target web): real keys
+8. Playtest with `game_explore_*` (target web): real keys
    (`"Enter"`, `"w"`, `"ArrowLeft"`, not Godot action names), real clicks.
    The game opens on the title: press `"Enter"` to play.
    Bots read the probe and write `clickAt(x, y)`; id-clicks have no control
    to land on. `setState` reaches late content; verdicts still come from
    real input after.
-8. Export checklist before calling it done: web export builds, the page
+9. Export checklist before calling it done: web export builds, the page
    stays clean in `game_check`, the game is playable from `web/index.html`
    on a fresh checkout.
-9. Work in `./web` plus VISION.md, PLAN.md and NOTES.md. Never commit,
-   never reset git, never use subagents.
+10. Work in `./web` plus VISION.md, PLAN.md and NOTES.md. Never commit,
+    never reset git, never use subagents.

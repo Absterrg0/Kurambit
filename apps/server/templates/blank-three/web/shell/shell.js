@@ -9,9 +9,10 @@
 //   export function setState(target, values, ctx) {} // optional studio reach; ctx is null
 //                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
+//   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
-// camera, player, keys.down(code) / keys.pressed(code) (KeyboardEvent.code
+// camera, player, assets (model(name) / texture(name), shell/assets.js), keys.down(code) / keys.pressed(code) (KeyboardEvent.code
 // such as "KeyW", "ArrowLeft", "Space", or the key itself such as "w"),
 // mouse (x, y in canvas pixels, ndc.x / ndc.y from -1 to 1 for a Raycaster,
 // movement.x / movement.y this frame, also under pointer lock, and
@@ -38,6 +39,9 @@ import {
   resetProgress,
 } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
+import { animateShell } from "./animate.js";
+import { cameraShell } from "./camera.js";
+import { assets, preloadAssets } from "./assets.js";
 import {
   VOLUME_NAMES,
   getVolume,
@@ -68,6 +72,7 @@ const hud = byId("hud");
 const ui = byId("ui");
 const backdrop = byId("backdrop");
 const screens = {
+  loading: byId("loading"),
   title: byId("title"),
   pause: byId("pause"),
   settings: byId("settings"),
@@ -104,6 +109,8 @@ function newContext() {
     hud,
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500),
+    /** The models and textures main.js lists in ASSETS, loaded before the title (shell/assets.js). */
+    assets,
     /** The player object (an Object3D or {x, y, z}); the studio probe reports its position. */
     player: null,
     keys: {
@@ -169,6 +176,8 @@ function clearRun() {
   endBeat = 0;
   ending = null;
   juiceShell.reset();
+  animateShell.reset();
+  cameraShell.reset();
   if (run !== null) {
     const ended = run;
     run = null;
@@ -567,6 +576,8 @@ function step(dt) {
   try {
     for (const timer of due) timer.fn();
     game.update?.(dt, run.ctx);
+    animateShell.update(dt);
+    cameraShell.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
     if (!run.reported) reportError(error);
@@ -627,6 +638,14 @@ const studio = installStudio({
 
 loadSettings();
 loadProgress(KEEP);
+// Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets too.
+if (Object.keys(game.ASSETS ?? {}).length > 0) {
+  show(screens.loading);
+  const fill = byId("loading-fill");
+  await preloadAssets(game.ASSETS, (done, total) => {
+    fill.style.width = `${total === 0 ? 100 : (done / total) * 100}%`;
+  });
+}
 if (BOOT_INTO_PLAY || new URLSearchParams(location.search).has("play")) startRun();
 else showTitle();
 
