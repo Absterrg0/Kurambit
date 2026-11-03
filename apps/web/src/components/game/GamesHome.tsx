@@ -269,7 +269,7 @@ function GameCard({ card, onOpen }: { card: GameCard; onOpen: () => void }) {
         </span>
         <GameKeyArt
           environmentId={card.game.environmentId}
-          threadId={card.latestThread?.id ?? null}
+          root={card.game.root}
           path={card.game.keyArt}
           className="transition-transform duration-300 group-hover:scale-[1.02]"
         />

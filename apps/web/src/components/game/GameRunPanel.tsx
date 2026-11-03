@@ -150,7 +150,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             <span className="relative block aspect-video w-24 shrink-0 overflow-hidden rounded-md bg-muted">
               <GameKeyArt
                 environmentId={threadRef.environmentId}
-                threadId={threadRef.threadId}
+                root={game.root}
                 path={game.keyArt}
               />
             </span>

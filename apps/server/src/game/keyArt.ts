@@ -4,12 +4,13 @@ import * as NodePath from "node:path";
 import { laneAssets } from "./run/roles.ts";
 
 const IMAGE = /\.(png|jpe?g|webp)$/i;
-// VISION.md names its key art like "Key art: `art/key-art.png` (…)".
-const NAMED = /key[ -]art\b[^`\n]{0,40}`([^`\n]{1,200})`/i;
+// VISION.md names its key art in its own words: "Key art: `art/key-art.png`",
+// "## Key art" with the path on a later line, or a markdown link.
+const NAMED = /key[ -]?art\b[\s\S]{0,300}?[`(]([^`()\s]{1,200}\.(?:png|jpe?g|webp))[`)]/i;
 
 /**
- * The game's key art as its real path, only when it resolves to a non-empty
- * file inside the game's real root: the 16:9 title art the art step saves,
+ * The game's key art as a game-relative path, only when it resolves to a
+ * non-empty file inside the game's real root: the 16:9 title art the art step saves,
  * else the key art VISION.md names. A link leading out of the game is refused.
  */
 export const findKeyArt = async (root: string, lane: string): Promise<string | null> => {
@@ -26,7 +27,7 @@ export const findKeyArt = async (root: string, lane: string): Promise<string | n
     if (relative.length === 0 || relative.startsWith("..") || NodePath.isAbsolute(relative))
       continue;
     const info = await NodeFSP.stat(real).catch(() => null);
-    if (info?.isFile() === true && info.size > 0) return real;
+    if (info?.isFile() === true && info.size > 0) return relative.split(NodePath.sep).join("/");
   }
   return null;
 };

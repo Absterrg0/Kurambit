@@ -1,28 +1,29 @@
 import { useState } from "react";
-import type { EnvironmentId, ThreadId } from "@kurambit/contracts";
+import type { EnvironmentId } from "@kurambit/contracts";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { cn } from "../../lib/utils";
 
 /**
  * The game's key art over whatever sits beneath it (initials), through a
- * signed asset URL for the file the server found inside the game folder.
+ * signed asset URL resolved inside the game folder like any workspace file.
  * Renders nothing until the image is ready, and nothing when it fails.
  */
 export function GameKeyArt({
   environmentId,
-  threadId,
+  root,
   path,
   className,
 }: {
   environmentId: EnvironmentId;
-  threadId: ThreadId | null;
+  root: string;
+  /** Relative to the game root. */
   path: string | null;
   className?: string;
 }) {
   const state = useAssetUrlState(
     environmentId,
-    threadId === null || path === null ? null : { _tag: "media-file", threadId, path },
+    path === null ? null : { _tag: "draft-workspace-file", cwd: root, path },
   );
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (state._tag !== "Success" || state.url === failedUrl) return null;
