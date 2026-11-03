@@ -7,6 +7,9 @@
 ## these screens keep running. A run's end plays out in slow motion for a
 ## moment (the last hit's shake, flash and burst stay visible), then play
 ## freezes the same way and the end screen opens.
+## Controls are the named actions in project.godot [input]; Settings >
+## Controls lists each with its keys and gamepad inputs, and rebinds keys
+## (saved in SETTINGS_FILE). Gameplay reads actions, never raw keys.
 ## Restyle the screens in scenes/main.tscn and shell/theme.tres.
 extends Node
 
@@ -27,6 +30,17 @@ const END_BEAT_SCALE := 0.3
 ## The end screen then ignores input this long, so a button mashed at the
 ## moment the run ends cannot skip it.
 const END_GUARD_S := 0.4
+## Actions the Controls screen lists but never rebinds: a player can always reach the menu.
+const FIXED_ACTIONS := ["pause"]
+const PAD_BUTTONS := {
+	JOY_BUTTON_A: "A", JOY_BUTTON_B: "B", JOY_BUTTON_X: "X", JOY_BUTTON_Y: "Y",
+	JOY_BUTTON_BACK: "Back", JOY_BUTTON_GUIDE: "Guide", JOY_BUTTON_START: "Start",
+	JOY_BUTTON_LEFT_STICK: "L3", JOY_BUTTON_RIGHT_STICK: "R3",
+	JOY_BUTTON_LEFT_SHOULDER: "LB", JOY_BUTTON_RIGHT_SHOULDER: "RB",
+	JOY_BUTTON_DPAD_UP: "D-pad up", JOY_BUTTON_DPAD_DOWN: "D-pad down",
+	JOY_BUTTON_DPAD_LEFT: "D-pad left", JOY_BUTTON_DPAD_RIGHT: "D-pad right",
+}
+const MOUSE_BUTTONS := {MOUSE_BUTTON_LEFT: "Left click", MOUSE_BUTTON_RIGHT: "Right click", MOUSE_BUTTON_MIDDLE: "Middle click"}
 ## Settings slider name -> audio bus.
 const VOLUME_BUSES := {"Master": "Master", "Music": "Music", "Sfx": "SFX"}
 
@@ -39,13 +53,16 @@ const VOLUME_BUSES := {"Master": "Master", "Music": "Music", "Sfx": "SFX"}
 @onready var _end: CanvasLayer = $End
 @onready var _settings: CanvasLayer = $Settings
 @onready var _credits: CanvasLayer = $Credits
-@onready var _screens: Array[CanvasLayer] = [_title, _pause, _end, _settings, _credits]
+@onready var _controls: CanvasLayer = $Controls
+@onready var _screens: Array[CanvasLayer] = [_title, _pause, _end, _settings, _credits, _controls]
 
 var _game: Node = null
 var _settings_from: CanvasLayer = null
 var _play_mouse_mode := Input.MOUSE_MODE_VISIBLE
 var _end_serial := 0
 var _config := ConfigFile.new()
+## The action the Controls screen waits on a key for, or "".
+var _rebinding := ""
 
 
 func _ready() -> void:
@@ -73,6 +90,9 @@ func _ready() -> void:
 	_on_press(_end, "Center/Card/Box/Buttons/Retry", start_run)
 	_on_press(_end, "Center/Card/Box/Buttons/MainMenu", show_title)
 	_on_press(_settings, "Center/Card/Box/Back", _close_settings)
+	_on_press(_settings, "Center/Card/Box/Controls", _open_controls)
+	_on_press(_controls, "Center/Card/Box/Buttons/Reset", _reset_controls)
+	_on_press(_controls, "Center/Card/Box/Buttons/Back", _show.bind(_settings))
 	_on_press(_credits, "Center/Card/Box/Back", _show.bind(_title))
 	for slider_name in VOLUME_BUSES:
 		_slider(slider_name).value_changed.connect(_set_volume.bind(VOLUME_BUSES[slider_name]))
@@ -81,6 +101,7 @@ func _ready() -> void:
 	# Deferred: a game ends a run from physics callbacks, where pausing the
 	# tree mid-flush is unsafe; the state already reads "ended" meanwhile.
 	GameState.ended.connect(_on_ended, CONNECT_DEFERRED)
+	_add_menu_pad_buttons()
 	_load_settings()
 	GameState.load_progress()
 	if BOOT_INTO_PLAY:
@@ -95,7 +116,9 @@ func _on_key(event: InputEvent) -> void:
 	var pause_key := event.is_action_pressed("pause")
 	if not pause_key and not event.is_action_pressed("ui_cancel"):
 		return
-	if _settings.visible:
+	if _controls.visible:
+		_show(_settings)
+	elif _settings.visible:
 		_close_settings()
 	elif _credits.visible:
 		_show(_title)
@@ -214,6 +237,8 @@ func _clear_game() -> void:
 
 
 func _show(screen: CanvasLayer) -> void:
+	if screen != _controls:
+		_rebinding = ""
 	for each in _screens:
 		each.visible = each == screen
 	# Settings and credits opened from the title keep its backdrop behind them.
@@ -284,6 +309,10 @@ func _open_credits() -> void:
 
 func _load_settings() -> void:
 	_config.load(SETTINGS_FILE)
+	if _config.has_section("controls"):
+		for action in _config.get_section_keys("controls"):
+			if InputMap.has_action(action) and not FIXED_ACTIONS.has(action):
+				_set_keys(action, Array(_config.get_value("controls", action, [])))
 	for slider_name in VOLUME_BUSES:
 		var bus: String = VOLUME_BUSES[slider_name]
 		var volume := float(_config.get_value("audio", bus, 1.0))
@@ -308,6 +337,271 @@ func _set_fullscreen(on: bool) -> void:
 	_config.set_value("video", "fullscreen", on)
 	_config.save(SETTINGS_FILE)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if on else DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+## Gamepad A presses the focused button and B backs out, like Enter and Esc:
+## Godot's built-in ui_accept and ui_cancel carry no gamepad buttons.
+func _add_menu_pad_buttons() -> void:
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var button := InputEventJoypadButton.new()
+		button.button_index = pair[1]
+		if not InputMap.action_has_event(pair[0], button):
+			InputMap.action_add_event(pair[0], button)
+
+
+## Every action project.godot declares, in its order, pause last.
+func _control_actions() -> Array[String]:
+	var names: Array[String] = []
+	for property in ProjectSettings.get_property_list():
+		var key := str(property.name)
+		if not key.begins_with("input/") or key.begins_with("input/ui_"):
+			continue
+		var action := key.trim_prefix("input/")
+		if InputMap.has_action(action) and not FIXED_ACTIONS.has(action):
+			names.append(action)
+	for action in FIXED_ACTIONS:
+		if InputMap.has_action(action):
+			names.append(action)
+	return names
+
+
+func _controls_list() -> GridContainer:
+	return _controls.get_node("Center/Card/Box/Scroll/List") as GridContainer
+
+
+func _open_controls() -> void:
+	_rebinding = ""
+	var grid := _controls_list()
+	for child in grid.get_children():
+		grid.remove_child(child)
+		child.queue_free()
+	for head in ["Action", "Keyboard", "Gamepad"]:
+		_controls_label(head).theme_type_variation = &"StatName"
+	for action in _control_actions():
+		_controls_label(_action_label(action))
+		var button := Button.new()
+		button.name = action
+		button.disabled = FIXED_ACTIONS.has(action)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.add_theme_font_size_override("font_size", 18)
+		button.pressed.connect(_click)
+		button.pressed.connect(_start_rebind.bind(action))
+		grid.add_child(button)
+		# The theme's button, tighter, so a full action list fits the card.
+		for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+			var box := button.get_theme_stylebox(state).duplicate() as StyleBox
+			box.content_margin_top = 1
+			box.content_margin_bottom = 1
+			box.content_margin_left = 12
+			box.content_margin_right = 12
+			button.add_theme_stylebox_override(state, box)
+		var pad := _controls_label(_binding_text(action, false))
+		pad.name = action + "_pad"
+	_refresh_controls("Select a key binding, then press the new key")
+	_show(_controls)
+	_fit_controls_list.call_deferred()
+
+
+## The list takes the height it needs up to what the card has room for, and
+## scrolls past that (the focused row stays in view).
+func _fit_controls_list() -> void:
+	var scroll := _controls.get_node("Center/Card/Box/Scroll") as ScrollContainer
+	scroll.custom_minimum_size.y = minf(_controls_list().get_combined_minimum_size().y, 320.0)
+
+
+func _controls_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 18)
+	_controls_list().add_child(label)
+	return label
+
+
+func _refresh_controls(note: String) -> void:
+	(_controls.get_node("Center/Card/Box/Note") as Label).text = note
+	for action in _control_actions():
+		var button := _controls_list().get_node_or_null(action) as Button
+		if button != null:
+			button.text = "Press a key" if _rebinding == action else _binding_text(action, true)
+
+
+func _start_rebind(action: String) -> void:
+	_rebinding = action
+	_refresh_controls("Press a key for it · Esc cancels")
+
+
+func _stop_rebind(note: String) -> void:
+	_rebinding = ""
+	_refresh_controls(note)
+
+
+## The Keys node hands every input here first while a rebind waits, before
+## the focused button or the menu keys can use it. Returns whether it was used.
+func capture_rebind(event: InputEvent) -> bool:
+	if _rebinding == "" or not _controls.visible:
+		return false
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo:
+			var code := key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+			if code == KEY_ESCAPE:
+				_stop_rebind("Not changed")
+			else:
+				_stop_rebind(_rebind(_rebinding, code))
+				_save_controls()
+		return true
+	if event is InputEventJoypadButton and event.is_action_pressed("ui_cancel"):
+		_stop_rebind("Not changed")
+		return true
+	return false
+
+
+## Puts `code` first among the action's keys. A key another action holds
+## moves over in exchange for this one's old key; a fixed action's key is
+## refused. Returns the sentence the Controls screen shows.
+func _rebind(action: String, code: int) -> String:
+	var label := _action_label(action)
+	var keys := _keys_of(action)
+	var old: int = keys[0] if not keys.is_empty() else KEY_NONE
+	if old == code:
+		return "%s stays on %s" % [label, _key_name(code)]
+	var other := ""
+	for each in _control_actions():
+		if _keys_of(each).has(code):
+			other = each
+	if FIXED_ACTIONS.has(other):
+		return "%s stays on %s" % [_key_name(code), _action_label(other)]
+	if other == action:
+		keys[keys.find(code)] = old
+		keys[0] = code
+		_set_keys(action, keys)
+		return "%s: %s first" % [label, _key_name(code)]
+	if old == KEY_NONE:
+		keys.append(code)
+	else:
+		keys[0] = code
+	_set_keys(action, keys)
+	if other == "":
+		return "%s is now %s" % [label, _key_name(code)]
+	var other_keys := _keys_of(other)
+	if old == KEY_NONE:
+		other_keys.erase(code)
+		_set_keys(other, other_keys)
+		return "%s is now %s, taken from %s" % [label, _key_name(code), _action_label(other)]
+	other_keys[other_keys.find(code)] = old
+	_set_keys(other, other_keys)
+	return "%s is now %s; %s moved to %s" % [label, _key_name(code), _key_name(old), _action_label(other)]
+
+
+func _reset_controls() -> void:
+	# Only the listed actions' keys: reloading the whole InputMap would also
+	# drop actions the game added at runtime.
+	for action in _control_actions():
+		_set_keys(action, _default_keys(action))
+	if _config.has_section("controls"):
+		_config.erase_section("controls")
+	_config.save(SETTINGS_FILE)
+	_rebinding = ""
+	_refresh_controls("Controls reset to defaults")
+
+
+## Stores only the actions whose keys differ from project.godot's.
+func _save_controls() -> void:
+	for action in _control_actions():
+		var defaults := _default_keys(action)
+		var keys := _keys_of(action)
+		if keys == defaults:
+			if _config.has_section_key("controls", action):
+				_config.erase_section_key("controls", action)
+		else:
+			_config.set_value("controls", action, keys)
+	_config.save(SETTINGS_FILE)
+
+
+func _default_keys(action: String) -> Array:
+	var defaults: Array = []
+	var declared: Variant = ProjectSettings.get_setting("input/" + action)
+	if declared is Dictionary:
+		for event in (declared as Dictionary).get("events", []):
+			if event is InputEventKey:
+				defaults.append(_code_of(event))
+	return defaults
+
+
+func _keys_of(action: String) -> Array:
+	var keys: Array = []
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			keys.append(_code_of(event))
+	return keys
+
+
+## Replaces the action's keyboard keys; its mouse and gamepad inputs stay.
+func _set_keys(action: String, keys: Array) -> void:
+	var rest: Array[InputEvent] = []
+	for event in InputMap.action_get_events(action):
+		if not event is InputEventKey:
+			rest.append(event)
+	InputMap.action_erase_events(action)
+	for code in keys:
+		var key := InputEventKey.new()
+		key.device = -1
+		key.physical_keycode = int(code)
+		InputMap.action_add_event(action, key)
+	for event in rest:
+		InputMap.action_add_event(action, event)
+
+
+## "move_left" -> "Move left".
+static func _action_label(action: String) -> String:
+	var words := action.replace("_", " ")
+	return words.left(1).to_upper() + words.substr(1)
+
+
+static func _code_of(key: InputEventKey) -> int:
+	return key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+
+
+static func _key_name(code: int) -> String:
+	return OS.get_keycode_string(code)
+
+
+## One action's keyboard (and mouse) or gamepad inputs as the screen shows them.
+func _binding_text(action: String, keyboard: bool) -> String:
+	var parts: PackedStringArray = []
+	var mouse: PackedStringArray = []
+	for event in InputMap.action_get_events(action):
+		if keyboard and event is InputEventKey:
+			parts.append(_key_name(_code_of(event)))
+		elif keyboard and event is InputEventMouseButton:
+			var index := (event as InputEventMouseButton).button_index
+			mouse.append(MOUSE_BUTTONS.get(index, "Mouse %d" % index))
+		elif not keyboard and event is InputEventJoypadButton:
+			var index := (event as InputEventJoypadButton).button_index
+			parts.append(PAD_BUTTONS.get(index, "Button %d" % index))
+		elif not keyboard and event is InputEventJoypadMotion:
+			parts.append(_axis_name(event as InputEventJoypadMotion))
+	parts.append_array(mouse)
+	return ", ".join(parts) if not parts.is_empty() else "None"
+
+
+static func _axis_name(motion: InputEventJoypadMotion) -> String:
+	var negative := motion.axis_value < 0.0
+	match motion.axis:
+		JOY_AXIS_LEFT_X:
+			return "Stick left" if negative else "Stick right"
+		JOY_AXIS_LEFT_Y:
+			return "Stick up" if negative else "Stick down"
+		JOY_AXIS_RIGHT_X:
+			return "Right stick left" if negative else "Right stick right"
+		JOY_AXIS_RIGHT_Y:
+			return "Right stick up" if negative else "Right stick down"
+		JOY_AXIS_TRIGGER_LEFT:
+			return "LT"
+		JOY_AXIS_TRIGGER_RIGHT:
+			return "RT"
+	return "Axis %d" % motion.axis
 
 
 func _slider(slider_name: String) -> Range:

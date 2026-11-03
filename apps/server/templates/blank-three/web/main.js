@@ -4,8 +4,9 @@
 // GameState.win(text, stats) or GameState.lose(text, stats). Retry calls
 // start() again on a fresh ctx, so build everything here, not at the top level.
 //
-// The starter: roam with WASD or the arrow keys, dash with a click or Space,
-// and touch the beacon five times before the clock runs out.
+// The starter: roam (move_*), dash, and touch the beacon five times before
+// the clock runs out. It reads named actions through ctx.input, never raw
+// keys, so the player's rebinding on the Controls screen reaches it.
 import * as THREE from "./vendor/three.module.js";
 import { GameState } from "./shell/run-state.js";
 import { Juice } from "./shell/juice.js";
@@ -22,6 +23,15 @@ GameState.beacon_x = 0;
 GameState.beacon_z = 0;
 GameState.best_time = 0;
 export const KEEP_ACROSS_RUNS = ["best_time"];
+// The shell's default actions (shell/controls.js) plus a dash, minus the ones
+// this game never reads, so the Controls screen lists only controls that work.
+export const ACTIONS = {
+  dash: { keys: ["Space", "ShiftLeft"], pad: ["a", "rb"], mouse: [0] },
+  jump: null,
+  action: null,
+  alt: null,
+};
+const MOVES = ["move_up", "move_left", "move_down", "move_right"];
 
 const GOAL = 5;
 const SPEED = 5;
@@ -89,25 +99,22 @@ function placeBeacon(x, z) {
 }
 
 export function update(dt, ctx) {
-  const { keys, mouse, camera, hud } = ctx;
+  const { input, camera, hud } = ctx;
   elapsed += dt;
   GameState.time_left = Math.max(0, Math.ceil(TIME_LIMIT_S - elapsed));
-  let dx = 0;
-  let dz = 0;
-  if (keys.down("KeyA") || keys.down("ArrowLeft")) dx -= 1;
-  if (keys.down("KeyD") || keys.down("ArrowRight")) dx += 1;
-  if (keys.down("KeyW") || keys.down("ArrowUp")) dz -= 1;
-  if (keys.down("KeyS") || keys.down("ArrowDown")) dz += 1;
-  const moving = dx !== 0 || dz !== 0;
-  if (moving) heading.set(dx, 0, dz).normalize();
+  // y is down the screen, which is +z towards this camera; a stick gives less than 1.
+  const move = input.vector();
+  const push = Math.hypot(move.x, move.y);
+  const moving = push > 0;
+  if (moving) heading.set(move.x, 0, move.y).normalize();
   if (moving && !wasMoving) GameState.moves += 1;
   wasMoving = moving;
-  if ((mouse.pressed() || keys.pressed("Space")) && dashLeft <= 0) {
+  if (input.pressed("dash") && dashLeft <= 0) {
     dashLeft = DASH_S;
     Juice.squash(rover);
   }
   dashLeft -= dt;
-  const speed = dashLeft > 0 ? DASH_SPEED : moving ? SPEED : 0;
+  const speed = dashLeft > 0 ? DASH_SPEED : SPEED * push;
   rover.position.x = THREE.MathUtils.clamp(rover.position.x + heading.x * speed * dt, -28, 28);
   rover.position.z = THREE.MathUtils.clamp(rover.position.z + heading.z * speed * dt, -28, 28);
   beacon.rotation.y += dt * 0.8;
@@ -132,6 +139,6 @@ export function update(dt, ctx) {
   // Write the overlay only when it changes: a DOM write every frame costs layout.
   const text =
     `beacons ${GameState.score} / ${GOAL}   time ${GameState.time_left}\n` +
-    "WASD or arrows to roam, click or Space to dash";
+    `${MOVES.map(input.label).join("")} to roam, ${input.label("dash")} to dash`;
   if (hud.textContent !== text) hud.textContent = text;
 }

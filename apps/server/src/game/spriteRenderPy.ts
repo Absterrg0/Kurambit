@@ -33,6 +33,8 @@ export interface SpriteCamera {
 
 export interface SpriteFit {
   readonly frames: ReadonlyArray<number>;
+  /** The scene's frame rate, so the strip can play at the clip's own speed. */
+  readonly fps: number;
   readonly action: string | null;
   readonly objects: ReadonlyArray<string>;
   /** The object whose origin is the sprite's anchor: the subject's single top-level root, or its armature. */
@@ -322,6 +324,7 @@ def fit(P):
             return {"error": "empty", "objects": [o.name for o in scene.objects][:60]}
         return {
             "frames": frames,
+            "fps": scene.render.fps / scene.render.fps_base,
             "action": act.name if act is not None and animated else None,
             "objects": [o.name for o in geo],
             "anchorObject": anchor.name if anchor is not None else None,

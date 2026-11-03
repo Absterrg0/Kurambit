@@ -8,8 +8,10 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
    play with `game_explore_*`, build with `game_export`.
 3. Keep the boot clean: no script errors, no parse errors. Engine shutdown
    noise after quit is not failure; anything while the game runs is.
-4. Main scene set in project.godot. Input actions in the project settings,
-   not hardcoded keys in gameplay code.
+4. Main scene set in project.godot. Controls are the named actions in
+   project.godot `[input]` (TEMPLATE.md): read them with `Input.get_vector`
+   and `Input.is_action_*`, never key codes, so the gamepad and the
+   player's rebinding work.
 5. Export checklist before calling it done: `game_export` succeeds for Web
    and Linux, and `game_check` reports every entry clean.
 6. Work in ./godot plus VISION.md, PLAN.md and NOTES.md. Never commit,
@@ -34,6 +36,30 @@ exists: put the game's key art there (16:9), and the title stops looking like
 a template. `assets/ui/icon.png` is the window, web tab and Windows .exe icon:
 replace the placeholder with a 256x256 cut of the key art's main subject.
 
+## Characters and cameras
+
+Never hand-write clip switching or camera follow; the shell kits do it.
+
+- 3D character: `var anim := CharacterAnimator.on($Model)` on the instanced
+  GLB. Every physics frame choose the state from gameplay (on floor, speed,
+  attacking) and call `anim.play("idle" | "walk" | "run" | "fall" | ...,
+{"speed": speed / clip_speed})`; `anim.play("attack")`, `"hit"`, `"die"` on
+  the event. It finds clips by name, crossfades, returns from one-shots and
+  prints which clip each state got: read that line after `game_check`.
+  Library models face +Z: rotate the model child 180 degrees so the body's -Z
+  faces where it moves.
+- 2D character from `game_blender_render_sprites`: `SpriteStrips.apply(sprite,
+{"idle": "res://assets/sprites/hero_idle.sprite.json", "walk": ...}, "right")`
+  loads the strips at their own fps with the feet on the node origin; then
+  `sprite.play(state)` every frame and `flip_h` to face left.
+- 2D camera: a `FollowCamera2D` under the player, `bounds` set to the level
+  rect (dead zone, look-ahead, smoothing, limits built in).
+- 3D camera: a `FollowCamera3D` in the game scene with `target = player`;
+  walls block it through their collision shapes. Move relative to it:
+  `cam.flat_basis() * Vector3(input.x, 0, input.y)`.
+- Juice.shake works on top of both; never set a camera's `offset`,
+  `h_offset` or `v_offset` yourself.
+
 ## Godot 4 patterns (each verified on 4.7)
 
 Godot 3 code fails the check. Use the Godot 4 form:
@@ -49,18 +75,17 @@ alone, or a `Node.new()` never added, leaves an orphan. Bot results report
 scene node and orphan counts: orphans that grow, or nodes that keep rising
 while play stays in one place, are a leak to fix.
 
-An input action in project.godot (A key; 4194319 is the Left arrow):
+The starter declares `move_left`, `move_right`, `move_up`, `move_down`,
+`jump`, `action`, `alt` and `pause` with keyboard and gamepad defaults.
+Add the game's own action as one line under `[input]` (L key and gamepad
+RB; the comment above the actions lists the codes), and delete the ones the
+game never reads:
 
 ```
-[input]
-move_left={
-"deadzone": 0.2,
-"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
-]
-}
+dash={"deadzone": 0.25, "events": [Object(InputEventKey,"device":-1,"physical_keycode":76), Object(InputEventJoypadButton,"device":-1,"button_index":10)]}
 ```
 
-A numbered PNG sequence as an animation, and a sound:
+Library frames (numbered PNGs with no `.sprite.json`) as an animation, and a sound:
 
 ```gdscript
 @onready var sprite: AnimatedSprite2D = $Sprite

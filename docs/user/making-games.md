@@ -163,8 +163,11 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `godot/` is a normal Godot 4.7 project you can open in the Godot editor (three.js games hold
   `web/` instead: a static three.js project with `index.html`, `main.js`, `style.css`, `assets/`
   and vendored `vendor/three.*.js`). A new Godot or three.js game starts inside a demo shell: a
-  title screen, pause (Esc or P), settings for volume and fullscreen, a win or lose screen with
-  Retry, and credits. The gameplay lives in `godot/scenes/game.tscn` (`web/main.js` for
+  title screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where
+  players rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best
+  scores and unlocks are saved between launches, and Settings can reset them. The game's icon
+  (`assets/ui/icon.png`, cut from the key art) shows on the window, the browser tab and the
+  Windows `.exe`. The gameplay lives in `godot/scenes/game.tscn` (`web/main.js` for
   three.js), and the credits screen shows `godot/credits.txt` (`web/credits.txt`).
 - Unity games hold `unity/` instead: a normal Unity project you can open in Unity Hub with
   Unity 6000.6.7f1. Its `Library/`, `Temp/` and `Logs/` folders are Unity's caches and are not

@@ -9,7 +9,7 @@ but it ships the shell a demo needs, so build the game, not the menus.
   screen (the project name, Play, Settings, Credits, Quit; Quit hides on Web),
   pause on Esc, P or gamepad Start (Resume, Settings, Main menu), settings
   (master, music and sound-effect volume on the `Master`, `Music` and `SFX`
-  buses, plus fullscreen, saved to `user://settings.cfg`), an end screen
+  buses, fullscreen and Controls, saved to `user://settings.cfg`), an end screen
   (the result message, the game's stats, Retry, Main menu) and credits.
 - Gameplay plugs in at `scenes/game.tscn`. The shell instances it on Play and
   on Retry (a fresh instance each run) and freezes it on pause and at the end.
@@ -36,6 +36,26 @@ but it ships the shell a demo needs, so build the game, not the menus.
 - Music plays on the `Music` bus and effects on `SFX`, so the volume sliders
   reach them.
 
+## Controls
+
+- Gameplay reads named actions, never keys:
+  `Input.get_vector("move_left", "move_right", "move_up", "move_down")`,
+  `Input.is_action_just_pressed("jump")`, `Input.is_action_pressed("action")`.
+  A `KEY_*` check skips the gamepad and the player's rebinding.
+- `project.godot` `[input]` declares them, one line each: `move_left` /
+  `move_right` / `move_up` / `move_down` (WASD, arrows, left stick, d-pad),
+  `jump` (Space, gamepad A), `action` (J, Enter, left click, gamepad X),
+  `alt` (K, Shift, gamepad B) and the shell's `pause` (Esc, P, Start).
+  Add the game's own as one more line (the comment there lists the codes):
+  `dash={"deadzone": 0.25, "events": [Object(InputEventKey,"device":-1,"physical_keycode":76), Object(InputEventJoypadButton,"device":-1,"button_index":10)]}`
+  is L and RB. Delete the defaults the game never reads, so Settings >
+  Controls lists only controls that work.
+- Settings > Controls lists every action with its keys and gamepad inputs,
+  rebinds keys (saved with the other settings; Reset to defaults) and is the
+  place players and testers read the controls. Name keys in a HUD hint with
+  `GameState.key_label("jump")`, so the hint stays true after a rebind.
+- Menus take the mouse, the keys and a gamepad (d-pad, A, B, Start).
+
 ## Game feel
 
 `Juice` (`shell/juice.gd`) answers player actions in one call each:
@@ -43,6 +63,18 @@ but it ships the shell a demo needs, so build the game, not the menus.
 `Juice.squash(node)`, `Juice.flash(node)`, `Juice.tint(node, color)`,
 `Juice.burst(position, color)` and `Juice.sfx("res://assets/sfx/hit.wav")`.
 The comment block at the top of the file shows each call.
+
+## Characters and cameras
+
+`CharacterAnimator.on($Model)` (`shell/character_animator.gd`) plays an
+instanced GLB's clips by state: `anim.play("idle" | "walk" | "run" | "jump" |
+"fall" | "attack" | "hit" | "die", {"speed": s})` every frame crossfades,
+returns from one-shots and falls back (run to walk to idle) when a clip is
+missing. `SpriteStrips.apply(sprite, {...}, view)` (`shell/sprite_strips.gd`)
+loads `game_blender_render_sprites` strips into an AnimatedSprite2D.
+`FollowCamera2D` (Camera2D smoothing, drag margins and limits plus look-ahead)
+and `FollowCamera3D` (a SpringArm3D that pulls in at walls, with orbit) follow
+the player. The comment block at the top of each file shows each call.
 
 ## Project structure
 

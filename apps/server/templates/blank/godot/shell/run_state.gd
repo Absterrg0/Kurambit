@@ -46,6 +46,18 @@ func is_playing() -> bool:
 	return state == "playing"
 
 
+## The name of the first key bound to an action ("Space"), for a HUD hint
+## that stays true after the player rebinds it on the Controls screen.
+func key_label(action: String) -> String:
+	if not InputMap.has_action(action):
+		return ""
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			var key := event as InputEventKey
+			return OS.get_keycode_string(key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode)
+	return ""
+
+
 ## The shell calls this before every Play and Retry, before the gameplay scene
 ## exists. Every value game_state.gd declares returns to what it was when the
 ## first run began, except the names in its KEEP_ACROSS_RUNS constant, so a
