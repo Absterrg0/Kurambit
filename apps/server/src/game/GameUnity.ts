@@ -424,15 +424,43 @@ const LIBRARY_NOT_COPIED = [
  * made while no editor of ours has the main project open, and lands whole or
  * not at all. Removing the worktree removes the copy with it.
  */
+/**
+ * Whether any process on this machine has `projectDir` open as a Unity
+ * project: the user's own editor, or another Kurambit server's. Read-only: it
+ * reads /proc command lines and signals nothing.
+ */
+const editorHasProjectOpen = async (projectDir: string): Promise<boolean> => {
+  const want = NodePath.resolve(projectDir);
+  for (const pid of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
+    if (!/^\d+$/.test(pid)) continue;
+    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`).catch(() => null);
+    if (raw === null || raw.length === 0) continue;
+    const args = raw.toString("utf8").split("\0");
+    const at = args.findIndex((arg) => arg.toLowerCase() === "-projectpath");
+    const value = at >= 0 ? args[at + 1] : undefined;
+    if (value !== undefined && value !== "" && NodePath.resolve(value) === want) return true;
+  }
+  return false;
+};
+
+/**
+ * Copies the main checkout's import cache into a worktree that has none.
+ * Answers why it did not, or null when it copied: an editor still writing
+ * the main Library (the user's own, another server's, or ours still exiting)
+ * could hand the copy a torn asset database, so the worktree then imports cold.
+ */
 const seedLibrary = async (
   mainProjectDir: string,
   projectDir: string,
   scratch: string,
-): Promise<void> => {
+): Promise<string | null> => {
   const target = NodePath.join(projectDir, "Library");
-  if ((await NodeFSP.stat(target).catch(() => null)) !== null) return;
+  if ((await NodeFSP.stat(target).catch(() => null)) !== null) return "it already has one";
   const source = NodePath.join(mainProjectDir, "Library");
-  if (!(await NodeFSP.stat(source).catch(() => null))?.isDirectory()) return;
+  if (!(await NodeFSP.stat(source).catch(() => null))?.isDirectory())
+    return "the main checkout has none yet";
+  if (await editorHasProjectOpen(mainProjectDir))
+    return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
     await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
@@ -441,6 +469,7 @@ const seedLibrary = async (
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
+    return null;
   } finally {
     await NodeFSP.rm(staging, { recursive: true, force: true });
   }
@@ -717,8 +746,8 @@ const make = Effect.gen(function* () {
         });
         // After the drops above: the main checkout's editor is closed, so its
         // import cache is copied whole.
-        if (checkout.kind === "linked")
-          yield* Effect.tryPromise({
+        if (checkout.kind === "linked") {
+          const notSeeded = yield* Effect.tryPromise({
             try: () =>
               seedLibrary(
                 NodePath.join(checkout.main, NodePath.relative(root, projectDir)),
@@ -734,6 +763,9 @@ const make = Effect.gen(function* () {
                 cause,
               ),
           });
+          if (notSeeded !== null && notSeeded !== "it already has one")
+            yield* Effect.logWarning("Unity worktree imports cold", { root, reason: notSeeded });
+        }
         const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
         if (displayNum === null)
           return yield* opError(
