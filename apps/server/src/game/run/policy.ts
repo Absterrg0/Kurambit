@@ -434,6 +434,9 @@ const compareStep = (
       at,
       prompt: Roles.sampleWrite(sampleFile(s)),
       capMs: CAP.write,
+      // After a restart only this turn re-registers the thread's cap, and a
+      // model that plays on here would void the sample.
+      inputCapMs: Roles.SAMPLE_INPUT_MS,
       read: [sampleFile(s)],
       release: true,
       sheet: sheetFile(s),

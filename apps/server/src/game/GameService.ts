@@ -2314,7 +2314,7 @@ ${built.result.message}`.slice(-3000),
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const threadCap = exploreInputCaps.get(String(threadId));
-      // From disk, not the cache: right after a restart the cache is cold.
+      // The cache, else disk: right after a restart the cache is cold.
       const usedBefore =
         threadCap === undefined
           ? 0
@@ -2963,11 +2963,14 @@ ${built.result.message}`.slice(-3000),
         // A server that runs for weeks never restarts to prune; once an hour.
         if (sweep % 120 === 0) {
           const now = yield* Clock.currentTimeMillis;
-          yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Pruning explore evidence failed.", { cause }),
-            ),
-          );
+          // Locked: a thread resuming mid-prune must not lose its fresh write.
+          yield* evidenceLock
+            .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Pruning explore evidence failed.", { cause }),
+              ),
+            );
         }
       }
     }),
