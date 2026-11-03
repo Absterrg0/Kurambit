@@ -11,6 +11,7 @@ import type { RoleDeps } from "./roleRunner.ts";
 import type { Step } from "./state.ts";
 
 type BotStep = Extract<Step, { kind: "bot" }>;
+type BotResult = Extract<StepResult, { kind: "bot" }>;
 
 // Notes land in run.log and the comparison record: the cause, never a machine
 // path. Only paths under these roots go; a game's own node or res:// paths stay.
@@ -33,8 +34,8 @@ export const runBotFact = (
     readonly log: (line: string) => Effect.Effect<void>;
   },
   step: BotStep,
-): Effect.Effect<StepResult> => {
-  const errorFact = (note: string): StepResult => ({
+): Effect.Effect<BotResult> => {
+  const errorFact = (note: string): BotResult => ({
     kind: "bot",
     fact: { ending: "error", seconds: 0, final: {}, note: plain(note, ctx.root) },
   });
@@ -100,7 +101,7 @@ export const runBotFact = (
             ...(result.perf === undefined ? {} : { perf: result.perf }),
             note: plain(`${fallback}${result.status.note}`, ctx.root),
           },
-        } satisfies StepResult;
+        } satisfies BotResult;
       }),
     ({ worktree }) =>
       vcs.removeWorktree({ cwd: ctx.root, path: worktree.path, force: true }).pipe(
