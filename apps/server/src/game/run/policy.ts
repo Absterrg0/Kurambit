@@ -340,7 +340,7 @@ const botReport = (c: Compare, side: Side): string => {
 const nodeCounts = (f: BotFact): string =>
   f.perf === undefined
     ? ""
-    : ` Scene nodes: ${f.perf.nodesStart} at start, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (removed from the tree but never freed) at the end. Nodes that keep climbing or any orphans usually mean something spawns without being freed, which slows a longer session.`;
+    : ` Scene nodes: ${f.perf.nodesStart} at boot, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (out of the tree, not freed) at the end. A build that reached more of the game is expected to have more nodes; many orphans, or nodes far above what the visible play needs, suggest something spawned and was not freed.`;
 
 const compareStep = (
   id: number,

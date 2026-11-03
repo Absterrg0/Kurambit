@@ -27,7 +27,8 @@ Godot 3 code fails the check. Use the Godot 4 form:
 
 Free what you spawn: `queue_free()` removes a node for good; `remove_child`
 alone, or a `Node.new()` never added, leaves an orphan. Bot results report
-scene node and orphan counts, so a count that keeps climbing is a leak to fix.
+scene node and orphan counts: orphans that grow, or nodes that keep rising
+while play stays in one place, are a leak to fix.
 
 An input action in project.godot (A key; 4194319 is the Left arrow):
 

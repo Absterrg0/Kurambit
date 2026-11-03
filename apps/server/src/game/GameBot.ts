@@ -226,7 +226,8 @@ const perfFrom = (raw: unknown, prev: GameBotPerf | null): GameBotPerf | null =>
   if (raw === null || typeof raw !== "object") return prev;
   const nodes = asNumber((raw as Record<string, unknown>)["nodes"]);
   const orphans = asNumber((raw as Record<string, unknown>)["orphans"]);
-  if (nodes === null || orphans === null) return prev;
+  if (nodes === null || orphans === null || !Number.isInteger(nodes) || !Number.isInteger(orphans))
+    return prev;
   return {
     nodesStart: prev?.nodesStart ?? nodes,
     nodesPeak: Math.max(prev?.nodesPeak ?? nodes, nodes),
