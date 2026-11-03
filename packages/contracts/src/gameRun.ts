@@ -77,11 +77,19 @@ export const GAME_RUN_STAGES = [
   "Rounds",
 ] as const;
 
+/**
+ * How the pick chose the prototype the game became: a comparator's win, its
+ * selection after a tie, or the only prototype that booted.
+ */
+export const GameRunPickHow = Schema.Literals(["won", "selected", "only-booted"]);
+export type GameRunPickHow = typeof GameRunPickHow.Type;
+
 /** The prototype pick as a timeline entry; its evidence is read with `game.runPick`. */
 export const GameRunPickRef = Schema.Struct({
   phase: Schema.Literals(["prototypes", "comparing", "done"]),
   /** The prototype branch the game continued from, null while open or when none was adopted. */
   chosen: Schema.NullOr(Schema.String),
+  how: Schema.NullOr(GameRunPickHow),
   durationMs: Schema.NullOr(Schema.Number),
 });
 export type GameRunPickRef = typeof GameRunPickRef.Type;
@@ -220,6 +228,7 @@ export const GameRunPickDetail = Schema.Struct({
   /** Blind label to prototype branch ("A" → "proto-1"). */
   sides: Schema.Array(Schema.Struct({ build: Schema.String, branch: Schema.String })),
   chosen: Schema.NullOr(Schema.String),
+  how: Schema.NullOr(GameRunPickHow),
   /** How the choice was made when it was not a plain comparator win. */
   note: Schema.NullOr(Schema.String),
   comparison: Schema.NullOr(GameRunComparison),

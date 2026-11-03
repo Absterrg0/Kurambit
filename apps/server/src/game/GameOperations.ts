@@ -9,7 +9,12 @@ import type { GameOperationEvent, GameStatus } from "@kurambit/contracts";
 /** The status-shaped operation the stage renders. */
 export type GameOperation = NonNullable<GameStatus["operation"]>;
 export type GameOperationEventState = GameOperationEvent["state"];
-export type GameRunLive = { readonly step: string; readonly startedAt: string };
+export type GameRunLive = {
+  readonly step: string;
+  readonly startedAt: string;
+  /** Role threads launched so far: a new one is news even while the step label stays. */
+  readonly threads: number;
+};
 
 /**
  * The one in-memory record of what each game is doing, and the push clients
@@ -67,7 +72,11 @@ export const layer = Layer.effect(
       recordRun: (root, run) =>
         Effect.gen(function* () {
           const before = runs.get(root);
-          if (run === null ? before === undefined : before?.step === run.step) return;
+          const same =
+            run === null
+              ? before === undefined
+              : before?.step === run.step && before.threads === run.threads;
+          if (same) return;
           if (run === null) runs.delete(root);
           else runs.set(root, run);
           yield* PubSub.publish(events, {

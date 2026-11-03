@@ -6,6 +6,7 @@ import {
   type EnvironmentId,
   type GameRunComparison,
   type GameRunPickDetail,
+  type GameRunPickHow,
   type GameRunPickRef,
   type GameRunRoundDetail,
   type GameRunRoundOutcome,
@@ -477,6 +478,12 @@ function PickDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
+const PICK_HOW: Record<GameRunPickHow, string> = {
+  won: "won",
+  selected: "selected after a tie",
+  "only-booted": "adopted, the only one that booted",
+};
+
 const PICK_PHASE: Record<GameRunPickRef["phase"], string> = {
   prototypes: "Building prototypes",
   comparing: "Blind comparison",
@@ -494,9 +501,9 @@ export function GameRunPickRow({
   const [open, setOpen] = useState(false);
   const summary =
     pick.chosen !== null
-      ? `${gameRunRoleLabel(pick.chosen)} won`
+      ? `${gameRunRoleLabel(pick.chosen)} ${PICK_HOW[pick.how ?? "won"]}`
       : pick.phase === "done"
-        ? "No prototype adopted"
+        ? "No adopted prototype recorded"
         : "Two prototypes, played blind";
   return (
     <li className="rounded-lg border border-border bg-card">
@@ -511,7 +518,9 @@ export function GameRunPickRow({
             size="sm"
             variant={pick.phase !== "done" ? "info" : pick.chosen !== null ? "success" : "outline"}
           >
-            {pick.phase === "done" && pick.chosen === null ? "No pick" : PICK_PHASE[pick.phase]}
+            {pick.phase === "done" && pick.chosen === null
+              ? "Not recorded"
+              : PICK_PHASE[pick.phase]}
           </Badge>
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{summary}</span>
           {pick.durationMs !== null ? (

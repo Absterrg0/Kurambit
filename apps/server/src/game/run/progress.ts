@@ -56,29 +56,8 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
   }
 };
 
-// The pick's notes open with a legend naming the blind label the game continued from;
-// notes from before the legend name a tie's selection on a SELECT line.
-const LEGEND = /^\(In these notes, (A|B) is the prototype the game continued from/;
-const SELECT = /^SELECT:\s*(A|B)\b/m;
-
-/**
- * The blind label ("A" or "B") the pick continued from: the notes' legend or
- * selection, else the comparator's own verdict, which the policy adopts as is.
- */
-export const pickedLabel = (pickNotes: string, verdict: string | null): "A" | "B" | null => {
-  const found =
-    LEGEND.exec(pickNotes.trimStart())?.[1] ?? SELECT.exec(pickNotes)?.[1] ?? verdict ?? "";
-  return found === "A" || found === "B" ? found : null;
-};
-
-/** The pick's comparison record as the run left it: blind labels and the comparator's verdict. */
-export type PickRecord = {
-  readonly sides: Readonly<Record<string, string>>;
-  readonly verdict: string | null;
-};
-
 /** How the pick reads from the run record: still open, or which prototype the game became. */
-export const pickRef = (state: RunState, { sides, verdict }: PickRecord): GameRunPickRef | null => {
+export const pickRef = (state: RunState): GameRunPickRef | null => {
   const t = state.task;
   const startedAt = state.threads.find((thread) => thread.role === "proto-0")?.startedAt;
   const endedAt = state.threads.find((thread) => thread.role === "plan")?.startedAt;
@@ -86,17 +65,11 @@ export const pickRef = (state: RunState, { sides, verdict }: PickRecord): GameRu
     startedAt === undefined || endedAt === undefined
       ? null
       : Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)) || null;
-  if (t._tag === "proto") return { phase: "prototypes", chosen: null, durationMs: null };
-  if (t._tag === "pick")
-    return {
-      phase: "comparing",
-      chosen: t.phase === "adopt" && t.chosen.length > 0 ? t.chosen : null,
-      durationMs: null,
-    };
-  const label = pickedLabel(state.pickNotes, verdict);
-  const booted = state.protos.filter((proto) => proto.booted);
-  const chosen =
-    label !== null ? (sides[label] ?? null) : booted.length === 1 ? booted[0]!.branch : null;
-  if (chosen === null && state.pickNotes.length === 0 && state.protos.length === 0) return null;
-  return { phase: "done", chosen, durationMs };
+  if (t._tag === "proto") return { phase: "prototypes", chosen: null, how: null, durationMs: null };
+  if (t._tag === "pick") return { phase: "comparing", chosen: null, how: null, durationMs: null };
+  // Only an adopt that succeeded records what the game became.
+  if (state.picked !== null)
+    return { phase: "done", chosen: state.picked.branch, how: state.picked.how, durationMs };
+  if (state.pickNotes.length === 0 && state.protos.length === 0) return null;
+  return { phase: "done", chosen: null, how: null, durationMs };
 };

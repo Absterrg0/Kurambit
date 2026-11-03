@@ -78,6 +78,9 @@ export class GameProjectService extends Context.Service<
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
+// The library carries only what a card shows of a live run.
+const liveRun = (run: GameOperations.GameRunLive | null): GameSummary["run"] =>
+  run === null ? null : { step: run.step, startedAt: run.startedAt };
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -443,7 +446,7 @@ const make = Effect.gen(function* () {
                 currentOperation === null
                   ? null
                   : { name: currentOperation.name, state: currentOperation.state },
-              run: operations.run(root),
+              run: liveRun(operations.run(root)),
               keyArt,
               updatedAt: latestGameActivity(
                 project.updatedAt,

@@ -314,6 +314,13 @@ const Round = Schema.TaggedStruct("round", {
 });
 export type Round = typeof Round.Type;
 
+const Picked = Schema.Struct({
+  branch: Schema.String,
+  how: Schema.Literals(["won", "selected", "only-booted"]),
+  comparison: Schema.NullOr(Schema.String),
+});
+export type Picked = typeof Picked.Type;
+
 const Task = Schema.Union([
   Schema.TaggedStruct("init", {}),
   Schema.TaggedStruct("stage", {
@@ -338,6 +345,9 @@ const Task = Schema.Union([
     cmp: Compare,
     chosen: Schema.String,
     notes: Schema.String,
+    // The id of the comparison record this pick wrote ("" before it has one, or with no comparison).
+    // Older run.json files have none.
+    comparison: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   }),
   Round,
   Schema.TaggedStruct("ship", {
@@ -380,6 +390,10 @@ const RunState = Schema.Struct({
   best: Schema.String,
   protos: Schema.Array(Schema.Struct({ branch: Schema.String, booted: Schema.Boolean })),
   pickNotes: Schema.String,
+  // The prototype the game became, set only when the pick's adopt succeeded:
+  // how it was chosen and the id of the comparison record it came from.
+  // Older run.json files have none.
+  picked: Schema.NullOr(Picked).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   next: Schema.String,
   lastDirection: Schema.String,
   // The creator's notes for the next round, folded in from .studio/steer.jsonl
@@ -459,6 +473,7 @@ export const freshState = (
   best: "",
   protos: [],
   pickNotes: "",
+  picked: null,
   next: "",
   lastDirection: "",
   steer: [],

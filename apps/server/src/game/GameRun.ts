@@ -47,12 +47,7 @@ import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { pickRef, runProgress } from "./run/progress.ts";
-import {
-  pickRecord,
-  readPickEvidence,
-  readRoundEvidence,
-  roundOutcome,
-} from "./run/roundDetail.ts";
+import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
 import { modelFacts } from "./run/modelFacts.ts";
@@ -490,7 +485,11 @@ export const layer = (options: { readonly stateDir: string }) => {
           Effect.andThen(
             next.ending !== null
               ? Effect.void
-              : operations.recordRun(root, { step: currentStep(next), startedAt: next.startedAt }),
+              : operations.recordRun(root, {
+                  step: currentStep(next),
+                  startedAt: next.startedAt,
+                  threads: next.threads.length,
+                }),
           ),
         );
       };
@@ -855,6 +854,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           // Stages a previous run finished are not redone.
           stage: prior === null ? State.legacyResumeStage("starting", rounds.length) : prior.stage,
           pickNotes: prior?.pickNotes ?? "",
+          picked: prior?.picked ?? null,
           lastDirection: prior?.lastDirection ?? "",
           steer: prior?.steer ?? [],
           creator: input.threadId,
@@ -993,10 +993,6 @@ export const layer = (options: { readonly stateDir: string }) => {
       const failure = state.lastFailure.length > 0 ? ` Last failure: ${state.lastFailure}` : "";
       const step = running ? currentStep(state) : null;
       const queued = parseSteer((yield* Effect.promise(() => readText(paths(root).steer))) ?? "");
-      const sides =
-        state.pickNotes.length === 0
-          ? { sides: {}, verdict: null }
-          : yield* Effect.promise(() => pickRecord(root));
       return {
         active: running,
         runId: state.runId,
@@ -1005,7 +1001,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         ending,
         startedAt: state.startedAt,
         progress: runProgress(state),
-        pick: pickRef(state, sides),
+        pick: pickRef(state),
         rounds: state.rounds.map((r) => ({
           round: r.round,
           move: r.move,

@@ -9,8 +9,7 @@ import type {
   GameRunRoundDetail,
   GameRunRoundOutcome,
 } from "@kurambit/contracts";
-import { pickRef, type PickRecord } from "./progress.ts";
-import type { RoundRecord, RunState } from "./state.ts";
+import type { Picked, RoundRecord, RunState } from "./state.ts";
 
 // Every text is bounded so one expanded round stays a few KB on the wire.
 const TEXT_MAX = 3000;
@@ -114,10 +113,13 @@ const SAFE_RUN_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 // The comparison record is named `${branch}-${uuid}.json`; a branch "round-1"
 // must not pick up "round-10-…" or a suffixed "round-1-x-…" branch's file.
-const latestComparison = async (root: string, branch: string) => {
+const latestComparison = async (root: string, branch: string, id?: string) => {
   const dir = NodePath.join(root, ".studio", "comparisons");
   const names = (await NodeFSP.readdir(dir).catch(() => [] as string[])).filter(
-    (name) => name.startsWith(`${branch}-`) && UUID_JSON.test(name.slice(branch.length + 1)),
+    (name) =>
+      name.startsWith(`${branch}-`) &&
+      UUID_JSON.test(name.slice(branch.length + 1)) &&
+      (id === undefined || name === `${branch}-${id}.json`),
   );
   let best: { name: string; at: number } | null = null;
   for (const name of names) {
@@ -146,15 +148,17 @@ const sheetFile = async (root: string, recorded: string | null | undefined) => {
   return real !== null && info?.isFile() === true && info.size > 0 ? real : null;
 };
 
+// With an id, only that comparison record: the pick names the one it came from.
 const comparisonOf = async (
   root: string,
   branch: string,
+  id?: string,
 ): Promise<{
   readonly comparison: GameRunRoundDetail["comparison"];
   readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
   readonly sides: Readonly<Record<string, string>>;
 }> => {
-  const found = await latestComparison(root, branch);
+  const found = await latestComparison(root, branch, id);
   if (found === null) return { comparison: null, sheetFiles: [], sides: {} };
   const { file } = found;
   const playOrder = file.playOrder ?? "";
@@ -218,40 +222,46 @@ const comparisonOf = async (
   return { comparison, sheetFiles, sides };
 };
 
-/** The pick's blind labels and comparator verdict, from its latest comparison record. */
-export const pickRecord = async (root: string): Promise<PickRecord> => {
-  const compared = await comparisonOf(root, "pick");
-  return { sides: compared.sides, verdict: compared.comparison?.judges[0]?.verdict ?? null };
-};
-
 export type PickEvidence = {
   readonly detail: GameRunPickDetail;
   readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
 };
 
-/** The prototype pick's evidence: its blind comparison and what the run made of it. */
+const PICK_NOTE: Record<Picked["how"], string | null> = {
+  won: null,
+  selected: "The comparator called it a tie, then selected this one to continue from.",
+  "only-booted": "Only one prototype booted, so it was adopted without a comparison.",
+};
+
+/**
+ * The prototype pick's evidence: what the run recorded it became and the one
+ * comparison record it came from, never a record an earlier run left behind.
+ */
 export const readPickEvidence = async (root: string, state: RunState): Promise<PickEvidence> => {
-  const compared = await comparisonOf(root, "pick");
-  // While the pick is open its record is not written yet; the task holds the labels.
   const t = state.task;
+  const open = t._tag === "pick";
+  const id = open ? t.comparison : (state.picked?.comparison ?? "");
+  const compared =
+    id === ""
+      ? { comparison: null, sheetFiles: [], sides: {} }
+      : await comparisonOf(root, "pick", id);
+  // While the pick compares, its record is not written yet; the task holds the labels.
   const sides =
-    compared.comparison === null && t._tag === "pick" && t.cmp.x.length > 0
+    compared.comparison === null && open && t.cmp.x.length > 0
       ? { A: t.cmp.x, B: t.cmp.y }
       : compared.sides;
-  const verdict = compared.comparison?.judges[0]?.verdict ?? null;
-  const chosen = pickRef(state, { sides, verdict })?.chosen ?? null;
-  const single = compared.comparison === null && t._tag !== "pick" && chosen !== null;
-  const note = single
-    ? "Only one prototype booted, so it was adopted without a comparison."
-    : /^SELECT: (A|B) \(continuation choice/m.test(state.pickNotes)
-      ? "The comparator called it a tie, then chose this one to continue from."
-      : chosen === null && t._tag !== "pick" && state.pickNotes.length > 0
-        ? "No prototype was adopted; the first build started without one."
+  const picked = open ? null : state.picked;
+  const note =
+    picked !== null
+      ? PICK_NOTE[picked.how]
+      : !open && (state.pickNotes.length > 0 || state.protos.length > 0)
+        ? "No adopted prototype is recorded for this run."
         : null;
   return {
     detail: {
       sides: Object.entries(sides).map(([build, branch]) => ({ build, branch })),
-      chosen,
+      chosen: picked?.branch ?? null,
+      how: picked?.how ?? null,
       note,
       comparison: compared.comparison,
     },

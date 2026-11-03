@@ -883,6 +883,7 @@ describe("blind comparators", () => {
         phase: "compare",
         chosen: "",
         notes: "",
+        comparison: "",
         cmp: {
           question: "which prototype?",
           x: "proto1",
@@ -921,6 +922,78 @@ describe("blind comparators", () => {
     expect(select.kind === "role" && select.thread).not.toBeNull();
     expect(chose.released).toEqual([select.kind === "role" ? select.thread : null]);
     expect(chose.state.task._tag === "pick" && chose.state.task.chosen).toBe("proto2");
+  });
+
+  // The run records what the game became only when the adopt lands; the Run
+  // view reads this record, never the pick's notes.
+  const atPick = (
+    task: Partial<Extract<State.RunState["task"], { _tag: "pick" }>> = {},
+  ): State.RunState =>
+    base({
+      trunk: "main",
+      best: "trunk0",
+      stage: "vision",
+      protos: [
+        { branch: "proto1", booted: true },
+        { branch: "proto2", booted: true },
+      ],
+      task: {
+        _tag: "pick",
+        phase: "compare",
+        chosen: "",
+        notes: "",
+        comparison: "",
+        cmp: {
+          question: "which prototype?",
+          x: "proto1",
+          y: "proto2",
+          xFirst: true,
+          orders: ["x"],
+          samples: [],
+          bot: "",
+          botDecider: "policy",
+          bots: [],
+          botWithheld: "",
+          judges: [],
+        },
+        ...task,
+      },
+    });
+  const comparing =
+    (verdict: string): Responder =>
+    (step, state) =>
+      step.kind === "role" && step.role.startsWith("compare")
+        ? step.prompt.startsWith("The comparison is a tie")
+          ? done(step, { text: "SELECT: B\nreasons to continue from B" })
+          : done(step, { files: { [step.read[0]!]: `COMPARE: ${verdict}\nreasons` } })
+        : roundResponder("A", "B")(step, state);
+  const past = (s: State.RunState) => s.task._tag !== "pick";
+
+  it("records a comparator's win with the comparison it came from", () => {
+    const { state, written } = drive(atPick(), comparing("A"), past);
+    expect(state.picked).toMatchObject({ branch: "proto1", how: "won" });
+    expect(written[`.studio/comparisons/pick-${state.picked?.comparison}.json`]).toBeDefined();
+  });
+
+  it("records a tie's continuation as a selection, not a win", () => {
+    const { state } = drive(atPick(), comparing("TIE"), past);
+    expect(state.picked).toMatchObject({ branch: "proto2", how: "selected" });
+    expect(state.picked?.comparison).not.toBeNull();
+  });
+
+  it("records nothing when the adopt fails", () => {
+    const adopting = atPick({ phase: "adopt", chosen: "proto1", comparison: "c1" });
+    const planned = Policy.plan(adopting, { now: T0, coin: 0.3, id: "p" });
+    if (planned.kind !== "step") throw new Error("expected the adopt step");
+    const applied = Policy.applyResult(
+      planned.state,
+      planned.step,
+      gitOk({ ok: false, detail: "conflict" }),
+      { now: T0, coin: 0.3, id: "a" },
+    );
+    expect(applied.state.task._tag).not.toBe("pick");
+    expect(applied.state.picked).toBeNull();
+    expect(applied.state.best).toBe("trunk0");
   });
 });
 
