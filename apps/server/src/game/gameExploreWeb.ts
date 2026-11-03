@@ -217,6 +217,22 @@ export const openExploreWeb = async (input: {
       let executedInputSteps = 0;
       let nominalMs = 0;
       const held: string[] = [];
+      // Each step releases its own keys, as the native runner does: a key held
+      // into the next step would move the player through it, and pressing the
+      // same key again would arrive as auto-repeat, which games ignore.
+      const holdKeys = async (keys: ReadonlyArray<string>, ms: number) => {
+        const mapped = keys.map(toPlaywrightKey);
+        for (const key of mapped) {
+          await page.keyboard.down(key);
+          held.push(key);
+        }
+        await sleep(ms, actSignal);
+        for (const key of mapped) {
+          await page.keyboard.up(key);
+          held.splice(held.indexOf(key), 1);
+        }
+        executedInputSteps += 1;
+      };
       try {
         for (const step of steps) {
           actSignal?.throwIfAborted();
@@ -255,31 +271,13 @@ export const openExploreWeb = async (input: {
             pointer = next;
             executedInputSteps += 1;
           } else if ("keys" in step) {
-            for (const key of step.keys) {
-              const mapped = toPlaywrightKey(key);
-              await page.keyboard.down(mapped);
-              held.push(mapped);
-            }
-            await sleep(step.holdMs, actSignal);
-            executedInputSteps += 1;
+            await holdKeys(step.keys, step.holdMs);
           } else if ("key" in step) {
-            const mapped = toPlaywrightKey(step.key);
-            await page.keyboard.down(mapped);
-            held.push(mapped);
-            await sleep(step.holdMs, actSignal);
-            executedInputSteps += 1;
+            await holdKeys([step.key], step.holdMs);
           } else if ("hold" in step) {
-            const mapped = toPlaywrightKey(step.hold);
-            await page.keyboard.down(mapped);
-            held.push(mapped);
-            await sleep(step.holdMs, actSignal);
-            executedInputSteps += 1;
+            await holdKeys([step.hold], step.holdMs);
           } else if ("press" in step) {
-            const mapped = toPlaywrightKey(step.press);
-            await page.keyboard.down(mapped);
-            held.push(mapped);
-            await sleep(50, actSignal);
-            executedInputSteps += 1;
+            await holdKeys([step.press], 50);
           } else {
             // ui/inspect steps never reach the runner: act validation refuses
             // them for web sessions before any browser work.
