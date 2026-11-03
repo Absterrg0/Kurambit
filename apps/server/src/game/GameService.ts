@@ -1310,15 +1310,16 @@ const make = Effect.gen(function* () {
   const explorePace = (session: ExploreSession) => {
     const s = (ms: number) => (ms / 1000).toFixed(1);
     const actsLeft = GAME_EXPLORE_BOUNDS.maxCalls - session.calls;
+    const stepsLeft = GAME_EXPLORE_BOUNDS.maxTotalSteps - session.totalSteps;
     const leftMs = GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs;
     const earlierMs = exploreEvidence.get(String(session.threadId))?.nominalMs ?? 0;
     const used =
       `input used: ${s(session.totalNominalMs)} s of this session's ` +
       `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s` +
       (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
-    if (actsLeft <= 0 || leftMs <= 0) return `${used}; this session is spent.`;
+    if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0) return `${used}; this session is spent.`;
     const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
-    return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s): about ${s(perAct)} s of input per act spends it.`;
+    return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
   };
   /**
    * Releases a session's player and scratch. The caller holds the session
@@ -1749,7 +1750,7 @@ const make = Effect.gen(function* () {
         message:
           `Native exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
           `at ${baseViewport.width}x${baseViewport.height} (paused between calls). ` +
-          `${exploreBudget} Act with held input steps plus ui and inspect steps, then game_explore_close. ` +
+          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. ` +
           (hasDisplay ? "" : noPicture + " ") +
           `This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
@@ -2075,7 +2076,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
           `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System. ` +
-          `${exploreBudget} Act with held input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
+          `${exploreBudget} Act with input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
@@ -2207,7 +2208,7 @@ ${built.result.message}`.slice(-3000),
         message:
           `Web exploration session ${id.slice(0, 8)} opened on the current sources ${before.sourceId.slice(0, 12)} ` +
           `at ${handle.viewport.width}x${handle.viewport.height} (real time: the game keeps running between calls). ` +
-          `${exploreBudget} Act with held input steps, then game_explore_close. ` +
+          `${exploreBudget} Act with input steps, then game_explore_close. ` +
           `This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
