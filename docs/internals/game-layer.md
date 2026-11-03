@@ -19,7 +19,14 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   detector findings. `GameBlender` keeps a live Blender with its pinned MCP addon per game on a
   private display. `GameUnity` does the same for Unity: one batchmode editor on a private display
   (one per server, since an editor costs 2-3 GB), reached through the official `unity` CLI and its
-  `unity mcp` server, with the same session.json pid records, reaping and idle shutdown.
+  `unity mcp` server, with the same session.json pid records, reaping and idle shutdown
+  (`liveProcess.ts` holds the shared display, record and reap code). A record's pids are signalled
+  only while their argv names the executables the live toolchain would launch now, never paths
+  from the record, and of the editor's process tree only processes running from the pinned editor
+  directory, CLI or Xvfb; a Unity Licensing Client is never signalled. Unity also keeps a copy of
+  its record under the server state dir, reaped at startup, so a crashed server's editor dies
+  even if its game is never reopened. Every call or operation holds the editor; another game's
+  open closes it only while it is idle, and fails `busy` naming the holder otherwise.
   `GameToolchain` manages Blender/Godot/Unity installs; `GamePreview` serves builds;
   `GameProcesses` tracks child processes; `GameOperations` keeps the last operation per game.
 - `GameEngine`/`GameGodotEngine`/`GameThreeEngine` is the engine adapter seam: import, check,
@@ -35,6 +42,14 @@ one never lands, and keeps working until a ship review says yes, it stalls, or t
   `builds/linux` or `builds/windows` only after its files and the source identity check out.
   Unity editors run with the real HOME so they reach the user's Licensing Client; Kurambit only
   reads the entitlement file to say whether a licence is active and never stores credentials.
+  Every `unity` CLI call (status, command, recompile, mcp) runs under the CLI's own HOME in the
+  tools directory, because the CLI logs each invocation with its full arguments to
+  `~/.config/unityhub/logs/cli-log.json`; it reaches the live editor through the project's
+  `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
+  The run's worktree roles (prototypes, blind samples, bot facts) cannot open a Unity editor yet:
+  each checkout is a separate project with an empty `Library/`, so it would cost a full import and
+  close the creator's editor every round. `GameUnity` refuses worktree roots plainly, and the
+  loop drops bot duty and bot facts for the Unity lane.
 - Web play shares the services: `gameExploreWeb` opens real-time headless-Chromium sessions on
   the served static folder (real keyboard/mouse, one screenshot per act, console errors, the
   read-only `window.__studio` probe; no pause between acts). `gameChromium` resolves the

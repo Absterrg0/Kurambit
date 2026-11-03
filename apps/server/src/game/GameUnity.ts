@@ -1,8 +1,8 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the native editor process, private display and MCP-stdio boundary; wall-clock pids and CLI JSON envelopes are the domain here.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
-import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -13,13 +13,31 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { GameOperationError, type GameProcessResult } from "@kurambit/contracts";
+import * as ServerConfig from "../config.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { UNITY_LICENSE_FAILURE, unityChildEnv } from "./unityToolchain.ts";
+import {
+  alive,
+  displayInRange,
+  findXvfb,
+  pickDisplay,
+  processTreeOf,
+  readRecord,
+  reapVerified,
+  type RecordedPid,
+} from "./liveProcess.ts";
+import {
+  UNITY_LICENSE_FAILURE,
+  isUnityLicensingClient,
+  unityCliEnv,
+  unityEditorEnv,
+} from "./unityToolchain.ts";
 
 const IDLE_MS = 10 * 60_000;
 const SESSION_FILE = "session.json";
+/** Unity's private displays; Blender and the bot pick from other ranges. */
+const DISPLAYS = { first: 251, last: 399 } as const;
 /** A first open resolves packages and imports every asset; later opens reuse Library/. */
 const READY_TIMEOUT_S = 900;
 /**
@@ -69,10 +87,18 @@ interface Session {
   readonly client: Client;
   readonly logPath: string;
   lastActive: number;
+  /** Calls and operations holding this editor right now; only an idle editor is ever evicted or swept. */
+  inFlight: number;
 }
 
-/** What a live session left on disk so a later server can reap it. */
+/**
+ * What a live session left on disk so a later server can reap it: in the
+ * game folder, and a copy under the server's state dir so a crashed
+ * server's editor is found again even when no one reopens its game.
+ */
 interface SessionRecord {
+  readonly root: string;
+  readonly homeDir: string;
   readonly display: string;
   readonly editor: string;
   readonly projectDir: string;
@@ -118,67 +144,41 @@ const opError = (
     ...(cause === undefined ? {} : { cause }),
   });
 
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const readCmdline = async (pid: number): Promise<string[] | null> => {
-  try {
-    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`, "utf8");
-    const argv = raw.split("\0").filter((part) => part !== "");
-    return argv.length === 0 ? null : argv;
-  } catch {
-    return null;
-  }
-};
+/** What this server would launch now; a recorded pid must still run one of them. */
+interface LiveExecutables {
+  readonly editor: string;
+  readonly editorDir: string;
+  readonly cli: string;
+  readonly xvfb: string | null;
+}
 
 /**
- * A recorded pid is ours only while its argv still names the binary we
- * launched and this session's project or display; a reused pid never matches.
- * The editor leads its own process group, so its asset workers and shader
- * compilers go with it.
+ * A recorded pid is ours only while its argv names the binary this server
+ * would launch (from the live toolchain, never the record, which an agent
+ * can write) and this session's project or display; a reused pid or a
+ * forged record never matches.
  */
 const recordedOwners = (
-  record: SessionRecord,
-): Array<{ pid: number; group: boolean; owns: (argv: string[]) => boolean }> => {
-  const out: Array<{ pid: number; group: boolean; owns: (argv: string[]) => boolean }> = [];
-  if (record.mcpPid !== undefined)
-    out.push({
-      pid: record.mcpPid,
-      group: false,
-      owns: (argv) => argv[0] === record.cli && argv.includes("mcp"),
-    });
-  if (record.editorPid !== undefined)
-    out.push({
-      pid: record.editorPid,
-      group: true,
-      owns: (argv) => argv[0] === record.editor && argv.includes(record.projectDir),
-    });
-  if (record.xvfbPid !== undefined)
-    out.push({
-      pid: record.xvfbPid,
-      group: false,
-      owns: (argv) => argv[0] === record.xvfb && argv[1] === record.display,
-    });
-  return out;
-};
-
-const signalOwned = (pid: number, group: boolean, signal: NodeJS.Signals): void => {
-  try {
-    process.kill(group ? -pid : pid, signal);
-  } catch {
-    try {
-      if (group) process.kill(pid, signal);
-    } catch {
-      /* gone */
-    }
-  }
-};
+  record: Partial<SessionRecord>,
+  live: LiveExecutables,
+): ReadonlyArray<RecordedPid> => [
+  { pid: record.mcpPid, owns: (argv) => argv[0] === live.cli && argv.includes("mcp") },
+  {
+    pid: record.editorPid,
+    owns: (argv) =>
+      argv[0] === live.editor &&
+      typeof record.projectDir === "string" &&
+      argv[argv.indexOf("-projectPath") + 1] === record.projectDir,
+  },
+  {
+    pid: record.xvfbPid,
+    owns: (argv) =>
+      live.xvfb !== null &&
+      argv[0] === live.xvfb &&
+      displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
+      argv[1] === record.display,
+  },
+];
 
 /**
  * Unity starts three out-of-process asset import workers of about 0.7 GB
@@ -218,32 +218,6 @@ export const capImportWorkers = async (projectDir: string): Promise<void> => {
 };
 
 /**
- * Every process below a pid, read from /proc. Unity's import workers start
- * their own sessions, so a process-group signal does not reach them; walking
- * the parent links from the editor pid we spawned does, without matching any
- * name.
- */
-const descendantsOf = async (pid: number): Promise<number[]> => {
-  const parents = new Map<number, number[]>();
-  for (const entry of await NodeFSP.readdir("/proc").catch(() => [] as string[])) {
-    if (!/^\d+$/.test(entry)) continue;
-    const stat = await NodeFSP.readFile(`/proc/${entry}/stat`, "utf8").catch(() => null);
-    const ppid = stat === null ? NaN : Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-    if (!Number.isFinite(ppid)) continue;
-    parents.set(ppid, [...(parents.get(ppid) ?? []), Number(entry)]);
-  }
-  const out: number[] = [];
-  const queue = [pid];
-  while (queue.length > 0) {
-    for (const child of parents.get(queue.shift()!) ?? []) {
-      out.push(child);
-      queue.push(child);
-    }
-  }
-  return out;
-};
-
-/**
  * A killed editor leaves its Unity.DataStore shared memory in /dev/shm, and
  * the next editor on the project hangs before its first refresh trying to
  * reuse it. The segment names carry the namespace this editor logged, so
@@ -258,63 +232,31 @@ const dropDataStoreMemory = async (homeDir: string): Promise<void> => {
       await NodeFSP.rm(NodePath.join("/dev/shm", name), { force: true });
 };
 
-/** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
-const reapRecorded = async (homeDir: string): Promise<void> => {
-  const file = NodePath.join(homeDir, SESSION_FILE);
-  let record: SessionRecord;
-  try {
-    record = JSON.parse(await NodeFSP.readFile(file, "utf8")) as SessionRecord;
-  } catch {
-    return;
-  }
-  const owned = async () => {
-    const live: Array<{ pid: number; group: boolean }> = [];
-    for (const { pid, group, owns } of recordedOwners(record)) {
-      const argv = await readCmdline(pid);
-      if (argv !== null && owns(argv)) live.push({ pid, group });
-    }
-    return live;
-  };
-  let live = await owned();
-  // Taken while the editor still lives: once it exits, its workers reparent.
-  const editorTree =
-    record.editorPid !== undefined && live.some((entry) => entry.pid === record.editorPid)
-      ? await descendantsOf(record.editorPid)
-      : [];
-  for (const entry of live) signalOwned(entry.pid, entry.group, "SIGTERM");
-  for (const pid of editorTree) signalOwned(pid, false, "SIGTERM");
-  for (let waited = 0; live.length > 0 && waited < 15_000; waited += 200) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    live = await owned();
-  }
-  for (const entry of live) signalOwned(entry.pid, entry.group, "SIGKILL");
-  for (const pid of editorTree) if (alive(pid)) signalOwned(pid, false, "SIGKILL");
+/**
+ * SIGTERM the recorded pids that verify as ours plus the editor's workers,
+ * wait, then SIGKILL stragglers. Of the editor's descendants and process
+ * group, only processes running from the pinned editor directory, the pinned
+ * CLI or the resolved Xvfb are signalled; a Unity Licensing Client the editor
+ * started serves the user's own editors too and is never touched.
+ */
+const reapRecord = async (
+  record: Partial<SessionRecord>,
+  homeDir: string,
+  live: LiveExecutables,
+): Promise<void> => {
+  const editorDir = await NodeFSP.realpath(live.editorDir).catch(() => live.editorDir);
+  const keep = (exe: string) =>
+    !isUnityLicensingClient(exe) &&
+    (exe.startsWith(`${editorDir}${NodePath.sep}`) || exe === live.cli || exe === live.xvfb);
+  const editorPid = record.editorPid;
+  await reapVerified(recordedOwners(record, live), {
+    waitMs: 15_000,
+    pollMs: 200,
+    // Taken while the editor still lives: once it exits, its workers reparent.
+    tree: async (owned) =>
+      editorPid !== undefined && owned.includes(editorPid) ? processTreeOf(editorPid, keep) : [],
+  });
   await dropDataStoreMemory(homeDir);
-  await NodeFSP.rm(file, { force: true });
-};
-
-const pickDisplay = async (): Promise<number | null> => {
-  for (let n = 251; n < 400; n++) {
-    try {
-      await NodeFSP.access(`/tmp/.X${n}-lock`);
-      continue;
-    } catch {
-      /* candidate */
-    }
-    const taken = await new Promise<boolean>((resolve) => {
-      const s = NodeNet.connect(6000 + n, "127.0.0.1");
-      s.once("connect", () => {
-        s.destroy();
-        resolve(true);
-      });
-      s.once("error", () => {
-        s.destroy();
-        resolve(false);
-      });
-    });
-    if (!taken) return n;
-  }
-  return null;
 };
 
 export const textOf = (result: McpContent): string =>
@@ -407,13 +349,15 @@ export class GameUnity extends Context.Service<
   GameUnity,
   {
     /**
-     * Ensure this game's live editor is open and ready: a batchmode editor
-     * on a private display with the Pipeline package serving. Only one Unity
-     * editor runs at a time on this server; opening one closes any other.
+     * Run `effect` holding this game's live editor: open and ready (a
+     * batchmode editor on a private display with the Pipeline package
+     * serving), and never evicted or swept while held. Only one Unity editor
+     * runs on this server; opening one closes another only while it is idle,
+     * and fails `busy` naming the game that holds it otherwise.
      */
-    readonly open: (
+    readonly hold: (
       root: string,
-    ) => Effect.Effect<{ readonly projectDir: string }, GameOperationError>;
+    ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | GameOperationError, R>;
     /** One `unity <args> --format json` against this game's live editor. */
     readonly cli: (
       root: string,
@@ -447,20 +391,59 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
+  const { stateDir } = yield* ServerConfig.ServerConfig;
   const sessions = new Map<string, Session>();
   // Opening an editor takes minutes; two callers for one game must share it.
   const openLock = Semaphore.makeUnsafe(1);
+  const install = tools.unityInstall;
+  const serverRecords = NodePath.join(stateDir, "unity-live");
 
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/unity-live");
+  const serverRecordOf = (root: string) =>
+    NodePath.join(
+      serverRecords,
+      `${NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 24)}.json`,
+    );
+  const liveExecutables = async (): Promise<LiveExecutables> => ({
+    editor: install.editor,
+    editorDir: install.editorDir,
+    cli: install.cli,
+    xvfb: await findXvfb(),
+  });
 
-  const drop = async (root: string): Promise<void> => {
-    const session = sessions.get(root);
-    if (session !== undefined) {
-      sessions.delete(root);
-      void session.client.close().catch(() => undefined);
-    }
-    await reapRecorded(homeDirOf(root));
+  /** Reaps one record file and removes it; a missing or unreadable record reaps nothing. */
+  const reapFile = async (file: string, homeDir: string, live: LiveExecutables) => {
+    const record = await readRecord<SessionRecord>(file);
+    if (record !== null) await reapRecord(record, homeDir, live);
+    await NodeFSP.rm(file, { force: true });
   };
+
+  /** Ends the in-memory session, then reaps whatever its records still name (a previous server's session included). */
+  const drop = (root: string): Effect.Effect<void> =>
+    Effect.promise(async () => {
+      const session = sessions.get(root);
+      if (session !== undefined) {
+        sessions.delete(root);
+        void session.client.close().catch(() => undefined);
+      }
+      const live = await liveExecutables();
+      await reapFile(NodePath.join(homeDirOf(root), SESSION_FILE), homeDirOf(root), live);
+      await reapFile(serverRecordOf(root), homeDirOf(root), live);
+    });
+
+  // An editor orphaned by a crashed server is found through the server's own
+  // copy of its record, whether or not its game is ever opened again.
+  yield* Effect.promise(async () => {
+    const live = await liveExecutables();
+    for (const name of await NodeFSP.readdir(serverRecords).catch(() => [] as string[])) {
+      if (!name.endsWith(".json")) continue;
+      const file = NodePath.join(serverRecords, name);
+      const record = await readRecord<SessionRecord>(file);
+      if (record !== null && typeof record.homeDir === "string")
+        await reapRecord(record, record.homeDir, live);
+      await NodeFSP.rm(file, { force: true });
+    }
+  });
 
   const projectDirOf = (root: string) =>
     projects
@@ -482,7 +465,7 @@ const make = Effect.gen(function* () {
         args: withCliFlags(args, ["--format", "json"]),
         operation: options.operation,
         timeoutMs: options.timeoutMs,
-        env: unityChildEnv(),
+        env: unityCliEnv(install.cliHome),
         envMode: "replace",
       })
       .pipe(
@@ -519,7 +502,21 @@ const make = Effect.gen(function* () {
       return text.slice(-3000);
     });
 
-  const ensure = (root: string): Effect.Effect<Session, GameOperationError> =>
+  const gameName = (root: string) =>
+    projects.read(root).pipe(
+      Effect.map((manifest) => manifest.name),
+      Effect.orElseSucceed(() => NodePath.basename(root)),
+    );
+
+  /**
+   * The game's ready session, counted as held: `take` runs synchronously
+   * with the count going up, under the open lock, so no other game's open
+   * can see this session idle between the lookup and the hold.
+   */
+  const acquire = (
+    root: string,
+    take: (session: Session) => void,
+  ): Effect.Effect<Session, GameOperationError> =>
     openLock.withPermits(1)(
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -528,24 +525,46 @@ const make = Effect.gen(function* () {
           existing !== undefined &&
           alive(existing.editorPid) &&
           alive(existing.xvfbPid) &&
-          now - existing.lastActive < IDLE_MS
+          (existing.inFlight > 0 || now - existing.lastActive < IDLE_MS)
         ) {
           existing.lastActive = now;
+          take(existing);
           return existing;
         }
+        // The production run plays prototypes and blind samples in git
+        // worktrees at other commits. For Unity each would be a separate
+        // project with an empty Library/: a full import and a second 2-3 GB
+        // editor that evicts the creator's, round after round. Refused until
+        // a checkout can share the creator's import cache.
+        const worktree = yield* Effect.promise(() =>
+          NodeFSP.stat(NodePath.join(root, ".git")).then(
+            (stat) => stat.isFile(),
+            () => false,
+          ),
+        );
+        if (worktree)
+          return yield* opError(
+            "unity-live",
+            root,
+            "invalid-input",
+            "This Unity game folder is a git worktree checkout (the production run plays prototypes and blind samples in those). The live Unity editor runs only in the game's own folder for now: each checkout would need its own editor and a full asset import, and would close the creator's editor. Play and edit the game from its own folder.",
+          );
         const unity = yield* tools.unity;
         const projectDir = yield* projectDirOf(root);
         // One Unity editor per server: a second one would double a 2-3 GB
-        // process and fight the first for the Licensing Client.
-        // drop() deletes from the map, so iterate a copy.
-        for (const other of Array.from(sessions.keys())) yield* Effect.promise(() => drop(other));
-        yield* Effect.promise(() => drop(root));
-        const xvfbPath = yield* Effect.promise(() =>
-          GameProcesses.findExecutable("Xvfb", {
-            pathEnv: `${process.env.PATH ?? ""}${NodePath.delimiter}${process.env.HOME ?? ""}/.gs-tmp/xvfb-local/usr/bin`,
-            override: process.env.KURAMBIT_XVFB,
-          }),
-        );
+        // process and fight the first for the Licensing Client. An editor in
+        // use is never closed under its caller.
+        for (const [otherRoot, other] of Array.from(sessions))
+          if (otherRoot !== root && other.inFlight > 0)
+            return yield* opError(
+              "unity-live",
+              root,
+              "busy",
+              `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_stop there.`,
+            );
+        for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
+        yield* drop(root);
+        const xvfbPath = yield* Effect.promise(findXvfb);
         if (xvfbPath === null)
           return yield* opError(
             "unity-live",
@@ -557,22 +576,26 @@ const make = Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: async () => {
             await NodeFSP.mkdir(homeDir, { recursive: true });
+            await NodeFSP.mkdir(serverRecords, { recursive: true });
+            await NodeFSP.mkdir(install.cliHome, { recursive: true });
             await capImportWorkers(projectDir);
             // Every earlier editor for this game was reaped above.
             await dropDataStoreMemory(homeDir);
           },
           catch: (cause) => opError("unity-live", homeDir, "io", undefined, cause),
         });
-        const displayNum = yield* Effect.promise(() => pickDisplay());
+        const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
         if (displayNum === null)
           return yield* opError(
             "unity-live",
             root,
             "busy",
-            "No free private Xvfb display (:251–:399).",
+            `No free private Xvfb display (:${DISPLAYS.first}–:${DISPLAYS.last}).`,
           );
         const display = `:${displayNum}`;
         let record: SessionRecord = {
+          root,
+          homeDir,
           display,
           editor: unity.editor,
           projectDir,
@@ -583,18 +606,17 @@ const make = Effect.gen(function* () {
         // next open or game_stop something to reap.
         const remember = (pids: Partial<SessionRecord>) =>
           Effect.tryPromise({
-            try: () => {
+            try: async () => {
               record = { ...record, ...pids };
-              return NodeFSP.writeFile(
-                NodePath.join(homeDir, SESSION_FILE),
-                JSON.stringify(record),
-              );
+              const text = JSON.stringify(record);
+              await NodeFSP.writeFile(NodePath.join(homeDir, SESSION_FILE), text);
+              await NodeFSP.writeFile(serverRecordOf(root), text);
             },
             catch: (cause) => opError("unity-live", SESSION_FILE, "io", undefined, cause),
           });
         const fail = (detail: string, reason: GameOperationError["reason"] = "command-failed") =>
           Effect.gen(function* () {
-            yield* Effect.promise(() => drop(root));
+            yield* drop(root);
             return yield* opError("unity-live", root, reason, detail);
           });
         const xvfb = NodeChildProcess.spawn(
@@ -630,7 +652,7 @@ const make = Effect.gen(function* () {
             ],
             {
               cwd: root,
-              env: unityChildEnv({ DISPLAY: display, LIBGL_ALWAYS_SOFTWARE: "1" }),
+              env: unityEditorEnv({ DISPLAY: display, LIBGL_ALWAYS_SOFTWARE: "1" }),
               detached: true,
               stdio: "ignore",
             },
@@ -693,7 +715,7 @@ const make = Effect.gen(function* () {
         const transport = new StdioClientTransport({
           command: unity.cli,
           args: ["mcp", "--project-path", projectDir, "--tools", UNITY_MCP_TOOLS.join(",")],
-          env: stringEnv(unityChildEnv()),
+          env: stringEnv(unityCliEnv(install.cliHome)),
           stderr: mcpLog,
         });
         const client = new Client({ name: "kurambit-game-unity", version: "1.0.0" }, {});
@@ -708,7 +730,7 @@ const make = Effect.gen(function* () {
               cause,
             ),
         }).pipe(
-          Effect.tapError(() => Effect.promise(() => drop(root))),
+          Effect.tapError(() => drop(root)),
           Effect.ensuring(Effect.sync(() => NodeFS.closeSync(mcpLog))),
         );
         const mcpPid = transport.pid;
@@ -730,11 +752,35 @@ const make = Effect.gen(function* () {
           client,
           logPath,
           lastActive: yield* Clock.currentTimeMillis,
+          inFlight: 0,
         };
         sessions.set(root, session);
+        take(session);
         return session;
       }),
     );
+
+  const withSession = <A, E, R>(
+    root: string,
+    use: (session: Session) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | GameOperationError, R> =>
+    Effect.suspend(() => {
+      let held: Session | null = null;
+      return acquire(root, (session) => {
+        session.inFlight += 1;
+        held = session;
+      }).pipe(
+        Effect.flatMap(use),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            const session: Session | null = held;
+            if (session === null) return;
+            session.inFlight -= 1;
+            session.lastActive = yield* Clock.currentTimeMillis;
+          }),
+        ),
+      );
+    });
 
   /**
    * Waits until the editor's Pipeline server answers again. A recompile that
@@ -742,15 +788,12 @@ const make = Effect.gen(function* () {
    * server is gone for a few seconds and calls in that window fail.
    */
   const waitReady = (root: string, session: Session) =>
-    Effect.gen(function* () {
-      const unity = yield* tools.unity;
-      return yield* runCli(
-        root,
-        unity.cli,
-        ["status", "--until-ready", "--project-path", session.projectDir, "--timeout", "180"],
-        { operation: "unity-ready", timeoutMs: 200_000 },
-      );
-    });
+    runCli(
+      root,
+      install.cli,
+      ["status", "--until-ready", "--project-path", session.projectDir, "--timeout", "180"],
+      { operation: "unity-ready", timeoutMs: 200_000 },
+    );
   const RELOADING =
     /socket hang up|No Pipeline instance found|ECONNREFUSED|ECONNRESET|EDITOR_NOT_READY|not ready/i;
 
@@ -780,91 +823,98 @@ const make = Effect.gen(function* () {
     });
 
   const call: GameUnity["Service"]["call"] = (root, name, args, timeoutMs = 2 * 60_000) =>
-    Effect.gen(function* () {
-      const session = yield* ensure(root);
-      let result = yield* attempt(session, name, args, timeoutMs);
-      // One retry after the editor is ready again: a domain reload is not
-      // the agent's error, and the call never reached the editor.
-      if (result.isError === true && RELOADING.test(textOf(result))) {
-        yield* waitReady(root, session);
-        result = yield* attempt(session, name, args, timeoutMs);
-      }
-      session.lastActive = yield* Clock.currentTimeMillis;
-      if (result.isError === true)
-        return yield* opError(
-          "unity-live",
-          name,
-          "command-failed",
-          textOf(result).trim() || `The Unity editor reported an error for '${name}'.`,
-        );
-      return result;
-    });
+    withSession(root, (session) =>
+      Effect.gen(function* () {
+        let result = yield* attempt(session, name, args, timeoutMs);
+        // One retry after the editor is ready again: a domain reload is not
+        // the agent's error, and the call never reached the editor.
+        if (result.isError === true && RELOADING.test(textOf(result))) {
+          yield* waitReady(root, session);
+          result = yield* attempt(session, name, args, timeoutMs);
+        }
+        if (result.isError === true)
+          return yield* opError(
+            "unity-live",
+            name,
+            "command-failed",
+            textOf(result).trim() || `The Unity editor reported an error for '${name}'.`,
+          );
+        return result;
+      }),
+    );
 
-  // Idle sessions die on a detached sweep so one forgotten game cannot hold
-  // a 2-3 GB editor and its display forever.
-  yield* Effect.forever(
-    Effect.gen(function* () {
-      yield* Effect.sleep("60 seconds");
-      const now = yield* Clock.currentTimeMillis;
-      for (const [root, session] of sessions)
-        if (now - session.lastActive > IDLE_MS) yield* Effect.promise(() => drop(root));
-    }),
-  ).pipe(Effect.forkDetach);
+  // Idle sessions die on a sweep so one forgotten game cannot hold a 2-3 GB
+  // editor and its display forever; a held editor is never idle.
+  yield* Effect.forkScoped(
+    Effect.forever(
+      Effect.gen(function* () {
+        yield* Effect.sleep("60 seconds");
+        const now = yield* Clock.currentTimeMillis;
+        for (const [root, session] of Array.from(sessions))
+          if (session.inFlight === 0 && now - session.lastActive > IDLE_MS)
+            yield* openLock.withPermits(1)(
+              // Re-read under the lock: a call may have taken it meanwhile.
+              Effect.suspend(() =>
+                session.inFlight === 0 && sessions.get(root) === session ? drop(root) : Effect.void,
+              ),
+            );
+      }),
+    ),
+  );
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => Promise.all([...sessions.keys()].map(drop))),
+    Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );
 
   return GameUnity.of({
-    open: (root) =>
-      ensure(root).pipe(Effect.map((session) => ({ projectDir: session.projectDir }))),
+    hold: (root) => (effect) => withSession(root, () => effect),
     cli: (root, args, options) =>
-      Effect.gen(function* () {
-        const session = yield* ensure(root);
-        const unity = yield* tools.unity;
-        const run = () =>
-          runCli(
-            root,
-            unity.cli,
-            withCliFlags(args, ["--project-path", session.projectDir]),
-            options,
-          );
-        let result = yield* run();
-        if (
-          !result.ok &&
-          (result.process.exitCode === 12 ||
-            RELOADING.test(`${result.errorCode} ${result.errorMessage}`))
-        ) {
-          yield* waitReady(root, session);
-          result = yield* run();
-        }
-        session.lastActive = yield* Clock.currentTimeMillis;
-        return result;
-      }),
+      withSession(root, (session) =>
+        Effect.gen(function* () {
+          const run = () =>
+            runCli(
+              root,
+              install.cli,
+              withCliFlags(args, ["--project-path", session.projectDir]),
+              options,
+            );
+          let result = yield* run();
+          if (
+            !result.ok &&
+            (result.process.exitCode === 12 ||
+              RELOADING.test(`${result.errorCode} ${result.errorMessage}`))
+          ) {
+            yield* waitReady(root, session);
+            result = yield* run();
+          }
+          return result;
+        }),
+      ),
     call,
     tools: (root) =>
-      Effect.gen(function* () {
-        const session = yield* ensure(root);
-        const listed = yield* Effect.tryPromise({
-          try: () => session.client.listTools(),
-          catch: (cause) =>
-            opError(
-              "unity-live",
-              root,
-              "command-failed",
-              "`unity mcp` did not list its tools.",
-              cause,
-            ),
-        });
-        return listed.tools
-          .filter((tool) => UNITY_EDIT_TOOL.test(tool.name))
-          .map((tool) => ({
-            name: tool.name,
-            description: (tool.description ?? "").slice(0, 600),
-            input: tool.inputSchema,
-          }));
-      }),
+      withSession(root, (session) =>
+        Effect.gen(function* () {
+          const listed = yield* Effect.tryPromise({
+            try: () => session.client.listTools(),
+            catch: (cause) =>
+              opError(
+                "unity-live",
+                root,
+                "command-failed",
+                "`unity mcp` did not list its tools.",
+                cause,
+              ),
+          });
+          return listed.tools
+            .filter((tool) => UNITY_EDIT_TOOL.test(tool.name))
+            .map((tool) => ({
+              name: tool.name,
+              description: (tool.description ?? "").slice(0, 600),
+              input: tool.inputSchema,
+            }));
+        }),
+      ),
     logTail,
-    stop: (root) => Effect.promise(() => drop(root)),
+    stop: drop,
   });
 });
 

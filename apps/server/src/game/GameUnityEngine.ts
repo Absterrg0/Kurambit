@@ -18,6 +18,7 @@ import type { GameEngineBackend } from "./GameEngine.ts";
 
 /** Frames the check lets the main scene run in play mode before it reads the console. */
 const CHECK_FRAMES = 120;
+const BUILD_TIMEOUT_MS = 30 * 60_000;
 
 const unityTarget = (target: string) =>
   target === "Windows" ? "StandaloneWindows64" : "StandaloneLinux64";
@@ -133,7 +134,7 @@ export const makeUnityBackend = (
         ),
         issues: compiled.errors,
       };
-    });
+    }).pipe(live.hold(ctx.root));
 
   const runCheck: GameEngineBackend["runCheck"] = (ctx, input) =>
     Effect.gen(function* () {
@@ -166,74 +167,77 @@ export const makeUnityBackend = (
           });
         if (started?.ok === true) {
           entries.push("main");
-          yield* live.cli(ctx.root, ["status", "--until-ready", "--timeout", "120"], {
-            operation: "unity-play-ready",
-            timeoutMs: 150_000,
-          });
-          const frame = yield* command(
-            ctx.root,
-            ["script", "eval", "return UnityEngine.Time.frameCount;"],
-            "unity-frame",
-          );
-          const first = Number(resultOf(frame)?.["result"] ?? 0);
-          const waited = yield* command(
-            ctx.root,
-            [
-              "job",
-              "wait",
-              "--",
-              "--condition",
-              JSON.stringify({
-                member: "UnityEngine.Time.frameCount",
-                op: "greaterThan",
-                value: first + CHECK_FRAMES,
-              }),
-              "--timeout",
-              "60",
-            ],
-            "unity-play-frames",
-            90_000,
-          );
-          void waited;
-          const after = yield* command(
-            ctx.root,
-            ["script", "eval", "return UnityEngine.Time.frameCount;"],
-            "unity-frame",
-          );
-          const advanced = Number(resultOf(after)?.["result"] ?? 0) - first;
-          if (!(advanced >= CHECK_FRAMES))
-            warnings.push({
-              file: ctx.projectName,
-              message: `Play mode advanced ${Number.isFinite(advanced) ? advanced : 0} of ${CHECK_FRAMES} frames within 60 s; runtime errors after that were not exercised.`,
+          // Play mode is left even when a read fails or the check is cancelled.
+          run = yield* Effect.gen(function* () {
+            yield* live.cli(ctx.root, ["status", "--until-ready", "--timeout", "120"], {
+              operation: "unity-play-ready",
+              timeoutMs: 150_000,
             });
-          const consoleRead = yield* command(
-            ctx.root,
-            ["console", "get", "--", "--level", "error", "--tail", "50"],
-            "unity-console",
-          );
-          run = consoleRead.process;
-          // The Pipeline logs its own failed commands as console errors; they are not the game's.
-          const logged = (resultOf(consoleRead)?.["entries"] ?? []) as ReadonlyArray<unknown>;
-          errors.push(
-            ...consoleIssues(
-              logged.filter(
-                (entry) =>
-                  !String((entry as Record<string, unknown>)?.["message"] ?? "").startsWith(
-                    "Command '",
-                  ),
+            const frame = yield* command(
+              ctx.root,
+              ["script", "eval", "return UnityEngine.Time.frameCount;"],
+              "unity-frame",
+            );
+            const first = Number(resultOf(frame)?.["result"] ?? 0);
+            const waited = yield* command(
+              ctx.root,
+              [
+                "job",
+                "wait",
+                "--",
+                "--condition",
+                JSON.stringify({
+                  member: "UnityEngine.Time.frameCount",
+                  op: "greaterThan",
+                  value: first + CHECK_FRAMES,
+                }),
+                "--timeout",
+                "60",
+              ],
+              "unity-play-frames",
+              90_000,
+            );
+            void waited;
+            const after = yield* command(
+              ctx.root,
+              ["script", "eval", "return UnityEngine.Time.frameCount;"],
+              "unity-frame",
+            );
+            const advanced = Number(resultOf(after)?.["result"] ?? 0) - first;
+            if (!(advanced >= CHECK_FRAMES))
+              warnings.push({
+                file: ctx.projectName,
+                message: `Play mode advanced ${Number.isFinite(advanced) ? advanced : 0} of ${CHECK_FRAMES} frames within 60 s; runtime errors after that were not exercised.`,
+              });
+            const consoleRead = yield* command(
+              ctx.root,
+              ["console", "get", "--", "--level", "error", "--tail", "50"],
+              "unity-console",
+            );
+            // The Pipeline logs its own failed commands as console errors; they are not the game's.
+            const logged = (resultOf(consoleRead)?.["entries"] ?? []) as ReadonlyArray<unknown>;
+            errors.push(
+              ...consoleIssues(
+                logged.filter(
+                  (entry) =>
+                    !String((entry as Record<string, unknown>)?.["message"] ?? "").startsWith(
+                      "Command '",
+                    ),
+                ),
+                ctx.projectName,
               ),
-              ctx.projectName,
+            );
+            return consoleRead.process;
+          }).pipe(
+            Effect.ensuring(
+              command(ctx.root, ["editor.playmode", "stop"], "unity-stop").pipe(Effect.ignore),
             ),
           );
-          yield* command(ctx.root, ["editor.playmode", "stop"], "unity-stop");
         }
       }
-      return {
-        reported: { entries, errors, warnings },
-        issues: [],
-        run: { ...run, exitCode: errors.length === 0 ? 0 : 1 },
-      };
-    });
+      // The process is the last CLI call's own; the issues above carry the verdict.
+      return { reported: { entries, errors, warnings }, issues: [], run };
+    }).pipe(live.hold(ctx.root));
 
   /**
    * The live editor builds the player (`build run` queues it and returns);
@@ -265,11 +269,28 @@ export const makeUnityBackend = (
           input.outputPath,
         );
       let last = queued;
-      for (let waited = 0; waited < 1_800_000; waited += 15_000) {
+      // `idle` right after queueing means the editor has not picked the
+      // build up yet; it ends the wait only once this build was seen.
+      let seen = false;
+      let finished = false;
+      for (let waited = 0; waited < BUILD_TIMEOUT_MS && !finished; waited += 15_000) {
         yield* Effect.sleep("15 seconds");
         last = yield* command(ctx.root, ["build", "status"], `${input.operation}-status`);
         const status = resultOf(last)?.["status"];
-        if (status === "completed" || status === "idle") break;
+        if (status === "completed") finished = true;
+        else if (status === "idle") finished = seen;
+        else if (status !== undefined) seen = true;
+      }
+      if (!finished) {
+        // Unity has no build cancel here; the editor would keep writing into
+        // a staging folder the caller is about to delete, so it is closed.
+        yield* live.stop(ctx.root);
+        return asResult(
+          last.process,
+          false,
+          `The Unity ${input.preset} build did not finish within ${BUILD_TIMEOUT_MS / 60_000} minutes (last status: ${String(resultOf(last)?.["status"] ?? "none")}); the live editor was closed to stop it, and the next Unity call reopens it.`,
+          input.outputPath,
+        );
       }
       const report = resultOf(last) ?? {};
       const present = yield* Effect.promise(() =>
@@ -288,7 +309,7 @@ export const makeUnityBackend = (
           : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${JSON.stringify(report["errors"] ?? []).slice(0, 1500)}`,
         input.outputPath,
       );
-    });
+    }).pipe(live.hold(ctx.root));
 
   return {
     id: "unity",

@@ -32,6 +32,15 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import {
+  alive,
+  displayInRange,
+  findXvfb,
+  pickDisplay,
+  readRecord,
+  reapVerified,
+  type RecordedPid,
+} from "./liveProcess.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -88,15 +97,6 @@ const opError = (
     ...(detail === undefined ? {} : { detail }),
     ...(cause === undefined ? {} : { cause }),
   });
-
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 const portFor = (root: string): number => {
   const h = NodeCrypto.createHash("sha1").update(NodePath.resolve(root)).digest();
@@ -188,29 +188,8 @@ const toolNetworkEnv = (): NodeJS.ProcessEnv => {
   return out;
 };
 
-const pickDisplay = async (): Promise<number | null> => {
-  for (let n = 119; n < 250; n++) {
-    try {
-      await NodeFSP.access(`/tmp/.X${n}-lock`);
-      continue;
-    } catch {
-      /* candidate */
-    }
-    const taken = await new Promise<boolean>((resolve) => {
-      const s = NodeNet.connect(6000 + n, "127.0.0.1");
-      s.once("connect", () => {
-        s.destroy();
-        resolve(true);
-      });
-      s.once("error", () => {
-        s.destroy();
-        resolve(false);
-      });
-    });
-    if (!taken) return n;
-  }
-  return null;
-};
+/** Blender's private displays; Unity and the bot pick from other ranges. */
+const DISPLAYS = { first: 119, last: 249 } as const;
 
 /** PNG IHDR dimensions without a decoder: width/height at bytes 16/20. */
 const pngSizeOf = (data: string, fallback: number): { width: number; height: number } => {
@@ -257,82 +236,57 @@ interface SessionRecord {
   readonly mcpPid?: number;
 }
 
-const readCmdline = async (pid: number): Promise<string[] | null> => {
-  try {
-    const raw = await NodeFSP.readFile(`/proc/${pid}/cmdline`, "utf8");
-    const argv = raw.split("\0").filter((part) => part !== "");
-    return argv.length === 0 ? null : argv;
-  } catch {
-    return null;
-  }
-};
+/** The executables this server would launch now; a recorded pid must still run one of them. */
+interface LiveExecutables {
+  readonly blender: string | null;
+  readonly uvx: string | null;
+  readonly xvfb: string | null;
+}
 
 /**
- * A recorded pid is ours only while its argv still names the binary we
- * launched and this session's own boot script, display or port; a reused
- * pid or another game's session never matches. Without /proc nothing
- * verifies, so nothing is killed.
+ * A recorded pid is ours only while its argv still names the binary this
+ * server would launch (from the live toolchain, never the record) and this
+ * session's own boot script, display or port; a reused pid, another game's
+ * session or a forged record never matches.
  */
 const recordedOwners = (
-  record: SessionRecord,
-): Array<{ pid: number; owns: (argv: string[]) => boolean }> => {
-  const out: Array<{ pid: number; owns: (argv: string[]) => boolean }> = [];
-  if (record.mcpPid !== undefined)
-    out.push({
-      pid: record.mcpPid,
-      // uvx re-execs as its sibling `uv tool uvx ...`, so match the directory.
-      owns: (argv) =>
-        argv[0] !== undefined &&
-        NodePath.dirname(argv[0]) === NodePath.dirname(record.uvx) &&
-        argv.includes(PINNED_PKG) &&
-        argv[argv.indexOf("--port") + 1] === String(record.port),
-    });
-  if (record.blenderPid !== undefined)
-    out.push({
-      pid: record.blenderPid,
-      owns: (argv) => argv[0] === record.blender && argv.includes(record.bootPy),
-    });
-  if (record.xvfbPid !== undefined)
-    out.push({
-      pid: record.xvfbPid,
-      owns: (argv) => argv[0] === record.xvfb && argv[1] === record.display,
-    });
-  return out;
-};
+  record: Partial<SessionRecord>,
+  live: LiveExecutables,
+  bootPy: string,
+): ReadonlyArray<RecordedPid> => [
+  {
+    pid: record.mcpPid,
+    // uvx re-execs as its sibling `uv tool uvx ...`, so match the directory.
+    owns: (argv) =>
+      live.uvx !== null &&
+      argv[0] !== undefined &&
+      NodePath.dirname(argv[0]) === NodePath.dirname(live.uvx) &&
+      argv.includes(PINNED_PKG) &&
+      argv[argv.indexOf("--port") + 1] === String(record.port),
+  },
+  {
+    pid: record.blenderPid,
+    owns: (argv) => live.blender !== null && argv[0] === live.blender && argv.includes(bootPy),
+  },
+  {
+    pid: record.xvfbPid,
+    owns: (argv) =>
+      live.xvfb !== null &&
+      argv[0] === live.xvfb &&
+      displayInRange(record.display, DISPLAYS.first, DISPLAYS.last) &&
+      argv[1] === record.display,
+  },
+];
 
 /** SIGTERM the recorded pids that are verifiably ours, wait, then SIGKILL stragglers. */
-const reapRecorded = async (homeDir: string): Promise<void> => {
+const reapRecorded = async (homeDir: string, live: LiveExecutables): Promise<void> => {
   const file = NodePath.join(homeDir, SESSION_FILE);
-  let record: SessionRecord;
-  try {
-    record = JSON.parse(await NodeFSP.readFile(file, "utf8")) as SessionRecord;
-  } catch {
-    return;
-  }
-  const owned = async () => {
-    const live: number[] = [];
-    for (const { pid, owns } of recordedOwners(record)) {
-      const argv = await readCmdline(pid);
-      if (argv !== null && owns(argv)) live.push(pid);
-    }
-    return live;
-  };
-  const signal = (pids: number[], name: NodeJS.Signals) => {
-    for (const pid of pids) {
-      try {
-        process.kill(pid, name);
-      } catch {
-        /* gone */
-      }
-    }
-  };
-  let live = await owned();
-  signal(live, "SIGTERM");
-  for (let waited = 0; live.length > 0 && waited < 5_000; waited += 100) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    live = await owned();
-  }
-  signal(live, "SIGKILL");
+  const record = await readRecord<SessionRecord>(file);
+  if (record === null) return;
+  await reapVerified(recordedOwners(record, live, NodePath.join(homeDir, "boot_server.py")), {
+    waitMs: 5_000,
+    pollMs: 100,
+  });
   await NodeFSP.rm(file, { force: true });
 };
 
@@ -409,18 +363,32 @@ const make = Effect.gen(function* () {
 
   const homeDirOf = (root: string) => NodePath.join(root, "builds/logs/blender-live");
 
+  const liveExecutables: Effect.Effect<LiveExecutables> = Effect.gen(function* () {
+    const blender = yield* tools.executable("blender").pipe(
+      Effect.map((resolved): string | null => resolved.path),
+      Effect.orElseSucceed(() => null),
+    );
+    const uvx = yield* resolveUv.pipe(
+      Effect.map((uv): string | null => uv.uvx),
+      Effect.orElseSucceed(() => null),
+    );
+    return { blender, uvx, xvfb: yield* Effect.promise(findXvfb) };
+  });
+
   /** Ends the in-memory session, then reaps whatever the record still names (a previous server's session included). */
-  const drop = async (root: string): Promise<void> => {
-    const session = sessions.get(root);
-    if (session !== undefined) {
-      sessions.delete(root);
-      killPid(session.mcpPid);
-      killPid(session.blenderPid);
-      killPid(session.xvfbPid);
-      void session.client.close().catch(() => undefined);
-    }
-    await reapRecorded(homeDirOf(root));
-  };
+  const drop = (root: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const session = sessions.get(root);
+      if (session !== undefined) {
+        sessions.delete(root);
+        killPid(session.mcpPid);
+        killPid(session.blenderPid);
+        killPid(session.xvfbPid);
+        void session.client.close().catch(() => undefined);
+      }
+      const live = yield* liveExecutables;
+      yield* Effect.promise(() => reapRecorded(homeDirOf(root), live));
+    });
 
   const failMissingUv = (): GameOperationError =>
     opError(
@@ -484,15 +452,10 @@ const make = Effect.gen(function* () {
         existing.lastActive = now;
         return existing;
       }
-      yield* Effect.promise(() => drop(root));
+      yield* drop(root);
       const uv = yield* resolveUv;
       const blender = yield* tools.executable("blender");
-      const xvfbPath = yield* Effect.promise(() =>
-        GameProcesses.findExecutable("Xvfb", {
-          pathEnv: process.env.PATH,
-          override: process.env.KURAMBIT_XVFB,
-        }),
-      );
+      const xvfbPath = yield* Effect.promise(findXvfb);
       if (xvfbPath === null)
         return yield* opError(
           "blender-live",
@@ -572,7 +535,7 @@ const make = Effect.gen(function* () {
           "Could not enable the Blender addon in the isolated config.",
           enable,
         );
-      const displayNum = yield* Effect.promise(() => pickDisplay());
+      const displayNum = yield* Effect.promise(() => pickDisplay(DISPLAYS.first, DISPLAYS.last));
       if (displayNum === null)
         return yield* opError(
           "blender-live",
@@ -828,11 +791,11 @@ const make = Effect.gen(function* () {
       yield* Effect.sleep("60 seconds");
       const now = yield* Clock.currentTimeMillis;
       for (const [root, session] of sessions)
-        if (now - session.lastActive > IDLE_MS) yield* Effect.promise(() => drop(root));
+        if (now - session.lastActive > IDLE_MS) yield* drop(root);
     }),
   ).pipe(Effect.forkDetach);
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => Promise.all([...sessions.keys()].map(drop))),
+    Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );
 
   return GameBlender.of({
@@ -979,7 +942,7 @@ const make = Effect.gen(function* () {
           export: file,
         };
       }),
-    stop: (root) => Effect.promise(() => drop(root)),
+    stop: drop,
   });
 });
 

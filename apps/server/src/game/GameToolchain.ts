@@ -27,7 +27,7 @@ import {
   UNITY_CLI_VERSION,
   UNITY_EXTRA_MODULES,
   parseUnityLicense,
-  unityChildEnv,
+  unityCliEnv,
   unityLicenseFile,
   unityLicenseMessage,
   unityPaths,
@@ -97,6 +97,11 @@ export class GameToolchain extends Context.Service<
      * is active, before any editor starts.
      */
     readonly unity: Effect.Effect<UnityTools, GameOperationError>;
+    /**
+     * Where the pinned Unity CLI and editor live, installed or not and with
+     * or without a licence: the only executables a Unity pid record may name.
+     */
+    readonly unityInstall: UnityInstall;
     readonly status: Effect.Effect<GameToolchainStatus>;
     readonly verify: Effect.Effect<GameToolchainStatus, GameOperationError>;
     /** Blender, Godot and uv by default; `unity` installs the Unity CLI and editor instead. */
@@ -105,9 +110,15 @@ export class GameToolchain extends Context.Service<
     }) => Effect.Effect<GameToolchainStatus, GameOperationError>;
   }
 >()("kurambit/game/GameToolchain") {}
-export interface UnityTools {
+export interface UnityInstall {
   readonly cli: string;
   readonly editor: string;
+  /** The editor's install root; its asset workers, shader compilers and Bee run from inside it. */
+  readonly editorDir: string;
+  /** The HOME every CLI call runs under. */
+  readonly cliHome: string;
+}
+export interface UnityTools extends UnityInstall {
   readonly version: string;
   readonly license: Extract<UnityLicense, { kind: "active" }>;
 }
@@ -236,9 +247,18 @@ const make = Effect.gen(function* () {
     );
     return parseUnityLicense(xml, yield* Clock.currentTimeMillis);
   });
-  const unity: GameToolchain["Service"]["unity"] = Effect.gen(function* () {
-    const cli = process.env.KURAMBIT_UNITY_CLI?.trim() || unityFiles.cli;
+  const unityInstall: UnityInstall = (() => {
     const editor = process.env.KURAMBIT_UNITY_EDITOR?.trim() || unityFiles.editor;
+    return {
+      cli: process.env.KURAMBIT_UNITY_CLI?.trim() || unityFiles.cli,
+      editor,
+      // <editorDir>/Editor/Unity
+      editorDir: NodePath.dirname(NodePath.dirname(editor)),
+      cliHome: unityFiles.installHome,
+    };
+  })();
+  const unity: GameToolchain["Service"]["unity"] = Effect.gen(function* () {
+    const { cli, editor } = unityInstall;
     const installHint =
       "Click Install Unity in Settings > General > Game tools (about 4.5 GB), or set KURAMBIT_UNITY_CLI / KURAMBIT_UNITY_EDITOR.";
     if (!(yield* Effect.promise(() => isExecutable(cli))))
@@ -259,7 +279,7 @@ const make = Effect.gen(function* () {
         reason: "license-missing",
         detail: unityLicenseMessage(license),
       });
-    return { cli, editor, version: UNITY_PINNED_VERSION, license };
+    return { ...unityInstall, version: UNITY_PINNED_VERSION, license };
   });
   const unityStatus = Effect.gen(function* () {
     const resolved = yield* unity.pipe(
@@ -769,7 +789,7 @@ const make = Effect.gen(function* () {
         args: ["--version"],
         operation: "unity-cli-version",
         timeoutMs: 30_000,
-        env: unityChildEnv(),
+        env: unityCliEnv(unityFiles.installHome),
         envMode: "replace",
       });
       if (version.exitCode !== 0 || !version.stdout.includes(UNITY_CLI_VERSION))
@@ -797,13 +817,7 @@ const make = Effect.gen(function* () {
           ],
           operation: "install-unity",
           timeoutMs: 3 * 60 * 60_000,
-          env: unityChildEnv({
-            HOME: home,
-            XDG_CONFIG_HOME: NodePath.join(home, ".config"),
-            XDG_CACHE_HOME: NodePath.join(home, ".cache"),
-            XDG_DATA_HOME: NodePath.join(home, ".local/share"),
-            ...networkEnv(),
-          }),
+          env: unityCliEnv(home, networkEnv()),
           envMode: "replace",
         });
         if (
@@ -837,7 +851,7 @@ const make = Effect.gen(function* () {
   });
   const install: GameToolchain["Service"]["install"] = (input) =>
     input.unity === true ? installUnity : installCore;
-  return GameToolchain.of({ executable, unity, status, verify, install });
+  return GameToolchain.of({ executable, unity, unityInstall, status, verify, install });
 });
 const isExecutable = async (file: string) => {
   try {

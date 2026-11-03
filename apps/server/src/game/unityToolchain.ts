@@ -18,7 +18,7 @@ export const unityPaths = (toolsDirectory: string) => {
   return {
     cliDir,
     cli: NodePath.join(cliDir, "unity"),
-    /** The CLI's own state while installing (download cache, hub-style config), off the user's Hub. */
+    /** The CLI's own HOME for every call (logs, download cache, hub-style config), off the user's Hub. */
     installHome: NodePath.join(cliDir, "home"),
     editorRoot,
     editorDir,
@@ -68,13 +68,7 @@ export const unityLicenseMessage = (license: UnityLicense): string =>
 export const UNITY_LICENSE_FAILURE =
   /No valid Unity Editor license found|License is not active|Licensing initialization failed|com\.unity\.editor\.headless was not found|Unity Editor license is not valid/i;
 
-/**
- * The environment every Unity CLI and editor child gets. It keeps the real
- * HOME so the editor reaches the user's Licensing Client and entitlement,
- * never a display variable (a private DISPLAY is added by the caller that
- * owns one), and turns off the CLI's pager, prompts, banners and telemetry.
- */
-export const unityChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+const unityBaseEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
   engineChildEnv({
     TERM: "dumb",
     NO_COLOR: "1",
@@ -90,3 +84,31 @@ export const unityChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
     DO_NOT_TRACK: "1",
     ...extra,
   });
+
+/**
+ * The editor keeps the real HOME so it reaches the user's Licensing Client
+ * and entitlement. Never a display variable: a private DISPLAY is added by
+ * the caller that owns one.
+ */
+export const unityEditorEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => unityBaseEnv(extra);
+
+/**
+ * Every Unity CLI call runs under Kurambit's own HOME and XDG dirs: the CLI
+ * logs each invocation with its full arguments (C# eval code, project paths)
+ * to ~/.config/unityhub/logs/cli-log.json and keeps Hub-style config there.
+ * It finds a live editor through the project's Library/Pipeline port file,
+ * so the user's HOME is never needed to reach it.
+ */
+export const unityCliEnv = (home: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+  unityBaseEnv({
+    HOME: home,
+    XDG_CONFIG_HOME: NodePath.join(home, ".config"),
+    XDG_CACHE_HOME: NodePath.join(home, ".cache"),
+    XDG_DATA_HOME: NodePath.join(home, ".local/share"),
+    XDG_STATE_HOME: NodePath.join(home, ".local/state"),
+    ...extra,
+  });
+
+/** Unity Licensing Client binaries, whoever started them, are never signalled. */
+export const isUnityLicensingClient = (exe: string): boolean =>
+  /(^|\/)Unity\.Licensing\.|\/Licensing\/Client\//.test(exe);

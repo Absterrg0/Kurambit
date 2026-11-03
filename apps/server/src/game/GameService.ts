@@ -630,7 +630,7 @@ const make = Effect.gen(function* () {
    * A Unity player is a folder (the executable, its `game_Data/` and the
    * engine runtime library), so it builds into a staging folder and replaces
    * builds/linux or builds/windows only once its files check out and the
-   * sources did not change during the build.
+   * sources did not change during the build. The caller imports first.
    */
   const buildUnityPlayer = Effect.fnUntraced(function* (
     root: string,
@@ -639,8 +639,6 @@ const make = Effect.gen(function* () {
     operation: string,
   ) {
     const { backend, godot, cwd, godotProject } = yield* engine(root);
-    const imported = yield* importGame(root);
-    if (!imported.success) return { result: imported, sourceId: null };
     const executable = target === "Windows" ? "game.exe" : "game.x86_64";
     const staging = NodePath.join(
       NodePath.dirname(destination),
@@ -713,7 +711,13 @@ const make = Effect.gen(function* () {
           const old = `${destination}.old-${NodeCrypto.randomUUID()}`;
           const existing = await NodeFSP.stat(destination).catch(() => null);
           if (existing !== null) await NodeFSP.rename(destination, old);
-          await NodeFSP.rename(staging, destination);
+          try {
+            await NodeFSP.rename(staging, destination);
+          } catch (cause) {
+            // The previous build goes back rather than leaving no build at all.
+            if (existing !== null) await NodeFSP.rename(old, destination).catch(() => undefined);
+            throw cause;
+          }
           await NodeFSP.rm(old, { recursive: true, force: true });
         },
         catch: (cause) =>
@@ -745,11 +749,18 @@ const make = Effect.gen(function* () {
         detail: "Unity games export Linux and Windows only; Web (WebGL) is refused for now.",
       });
     const directory = target === "Windows" ? "builds/windows" : "builds/linux";
-    const built = yield* buildUnityPlayer(
-      root,
-      target,
-      NodePath.join(root, directory),
-      `export-${target.toLowerCase()}`,
+    // One hold for import and build: another game cannot take the editor between them.
+    const built = yield* liveUnity.hold(root)(
+      Effect.gen(function* () {
+        const imported = yield* importGame(root);
+        if (!imported.success) return { result: imported, sourceId: null };
+        return yield* buildUnityPlayer(
+          root,
+          target,
+          NodePath.join(root, directory),
+          `export-${target.toLowerCase()}`,
+        );
+      }),
     );
     if (!built.result.success) return built.result;
     return {
@@ -1544,7 +1555,7 @@ const make = Effect.gen(function* () {
               try {
                 line = await GameExploreNative.nextRunnerLine(lineState, combined);
               } catch (cause) {
-                if (signal?.aborted) throw new Error("aborted");
+                if (signal?.aborted) throw new Error("aborted", { cause });
                 throw new GameOperationError({
                   operation: "Explore session",
                   path: root,
@@ -1695,54 +1706,94 @@ const make = Effect.gen(function* () {
    * runner's protocol over loopback TCP, so acts, pictures, probe reads and
    * closing share the Godot native path. The game is paused between acts.
    */
+  /**
+   * The Linux player a Unity session plays: built once per source identity
+   * under ignored builds/logs. Runs as the game's exclusive operation, so it
+   * never races game_export or game_check for the editor, and outside the
+   * start lock every game's explore shares.
+   */
+  const unityPlayerFor = (threadId: ThreadId, root: string) =>
+    Effect.gen(function* () {
+      const { godotProject } = yield* engine(root);
+      const known = (detail: string) =>
+        Effect.flatMap(snapshot(root, godotProject), (source) =>
+          source.kind === "known"
+            ? Effect.succeed(source.sourceId)
+            : Effect.fail(exploreInvalid(root, detail)),
+        );
+      const playerOf = (sourceId: string) =>
+        NodePath.join(unityPlayerDirectory(root, sourceId), "game.x86_64");
+      const cached = (sourceId: string) =>
+        Effect.promise(() =>
+          NodeFSP.stat(playerOf(sourceId)).then(
+            (stat) => stat.isFile(),
+            () => false,
+          ),
+        );
+      const before = yield* known(
+        "The game sources could not be identified before the Unity session ran; the result would not be current.",
+      );
+      if (yield* cached(before)) return { player: playerOf(before), sourceId: before };
+      return yield* exclusive(
+        root,
+        "Unity play build",
+        liveUnity.hold(root)(
+          Effect.gen(function* () {
+            // The refresh writes .meta files for new assets, so the identity
+            // the player is built and cached under is taken after it.
+            const imported = yield* importGame(root);
+            if (!imported.success)
+              return yield* new GameOperationError({
+                operation: "Explore session",
+                path: root,
+                reason: "command-failed",
+                detail: `The Unity import failed, so no session was opened.
+${imported.message}`.slice(-3000),
+              });
+            const sourceId = yield* known(
+              "The game sources could not be identified after the Unity import; the result would not be current.",
+            );
+            if (yield* cached(sourceId)) return { player: playerOf(sourceId), sourceId };
+            // One play build is kept: older ones are the previous sources' players.
+            yield* Effect.promise(async () => {
+              const logs = NodePath.join(root, "builds/logs");
+              for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
+                if (name.startsWith("unity-play-"))
+                  await NodeFSP.rm(NodePath.join(logs, name), { recursive: true, force: true });
+            });
+            const built = yield* buildUnityPlayer(
+              root,
+              "Linux",
+              unityPlayerDirectory(root, sourceId),
+              "unity-play-build",
+            );
+            if (!built.result.success)
+              return yield* new GameOperationError({
+                operation: "Explore session",
+                path: root,
+                reason: "command-failed",
+                detail: `The Unity play build failed, so no session was opened.
+${built.result.message}`.slice(-3000),
+              });
+            if (built.sourceId !== sourceId)
+              return yield* exploreInvalid(
+                root,
+                "The game sources changed while the Unity play build ran; start the session again.",
+              );
+            return { player: playerOf(sourceId), sourceId };
+          }),
+        ),
+        String(threadId),
+      );
+    });
   const exploreStartUnity = (
     threadId: ThreadId,
     root: string,
     input: typeof GameExploreStartInput.Type,
+    prepared: { readonly player: string; readonly sourceId: string },
   ) =>
     Effect.gen(function* () {
-      const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
-      if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
-      const resolved = yield* engine(root);
-      const source = yield* snapshot(root, resolved.godotProject);
-      if (source.kind !== "known")
-        return yield* exploreInvalid(
-          root,
-          "The game sources could not be identified before the Unity session ran; the result would not be current.",
-        );
-      const playerDir = unityPlayerDirectory(root, source.sourceId);
-      const player = NodePath.join(playerDir, "game.x86_64");
-      const cached = yield* Effect.promise(() =>
-        NodeFSP.stat(player).then(
-          (stat) => stat.isFile(),
-          () => false,
-        ),
-      );
-      if (!cached) {
-        // One play build is kept: older ones are the previous sources' players.
-        yield* Effect.promise(async () => {
-          const logs = NodePath.join(root, "builds/logs");
-          for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
-            if (name.startsWith("unity-play-"))
-              await NodeFSP.rm(NodePath.join(logs, name), { recursive: true, force: true });
-        });
-        const built = yield* buildUnityPlayer(root, "Linux", playerDir, "unity-play-build");
-        if (!built.result.success)
-          return yield* new GameOperationError({
-            operation: "Explore session",
-            path: root,
-            reason: "command-failed",
-            detail:
-              `The Unity play build failed, so no session was opened.\n${built.result.message}`.slice(
-                -3000,
-              ),
-          });
-        if (built.sourceId !== source.sourceId)
-          return yield* exploreInvalid(
-            root,
-            "The game sources changed while the Unity play build ran; start the session again.",
-          );
-      }
+      const { player, sourceId } = prepared;
       const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -1847,11 +1898,14 @@ const make = Effect.gen(function* () {
           const timeout = AbortSignal.timeout(bootTimeoutMs);
           const combined = signal.aborted ? timeout : AbortSignal.any([signal, timeout]);
           for (;;) {
-            const line = await GameExploreNative.nextRunnerLine(lineState, combined).catch(() => {
-              throw new Error(
-                `The Unity player did not report in within ${bootTimeoutMs}ms; no exploration session was opened. Player log: ${NodePath.join(traceDir, "player.log")}`,
-              );
-            });
+            const line = await GameExploreNative.nextRunnerLine(lineState, combined).catch(
+              (cause: unknown) => {
+                throw new Error(
+                  `The Unity player did not report in within ${bootTimeoutMs}ms; no exploration session was opened. Player log: ${NodePath.join(traceDir, "player.log")}`,
+                  { cause },
+                );
+              },
+            );
             if (line === null) {
               if (runnerSocket !== null) throw new Error("The Unity player exited before booting.");
               continue;
@@ -1887,8 +1941,8 @@ const make = Effect.gen(function* () {
         id,
         root,
         threadId,
-        buildId: source.sourceId,
-        sourceId: source.sourceId,
+        buildId: sourceId,
+        sourceId: sourceId,
         viewport,
         bootMs,
         // Close removes the player's scratch HOME; pictures and player.log stay as evidence.
@@ -1936,13 +1990,13 @@ const make = Effect.gen(function* () {
       exploreLive.set(root, live);
       return {
         sessionId: id,
-        buildId: source.sourceId,
-        sourceId: source.sourceId,
+        buildId: sourceId,
+        sourceId: sourceId,
         viewport,
         booted: true,
         bootMs,
         message:
-          `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${source.sourceId.slice(0, 12)} ` +
+          `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
           `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System; ` +
           `act with short input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
@@ -2084,35 +2138,51 @@ const make = Effect.gen(function* () {
       } satisfies typeof GameExploreStartResult.Type;
     });
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
-    exploreStartLock.withPermits(1)(
-      Effect.gen(function* () {
-        const root = yield* projects.resolve(threadId);
-        const existing = exploreLive.get(root);
-        if (existing !== undefined)
-          return yield* exploreInvalid(
-            existing.id,
-            "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
-          );
-        const manifest = yield* projects.read(root);
-        const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
-        if (target === "web") {
-          if (manifest.engine.name !== "three")
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const unity = (yield* projects.read(root)).engine.name === "unity" && input.target !== "web";
+      if (unity) {
+        const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
+        if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
+      }
+      // The player build takes minutes and is the game's own exclusive
+      // operation; the start lock is held only to launch and register.
+      const unityPlayer =
+        unity && !exploreLive.has(root) ? yield* unityPlayerFor(threadId, root) : null;
+      return yield* exploreStartLock.withPermits(1)(
+        Effect.gen(function* () {
+          const existing = exploreLive.get(root);
+          if (existing !== undefined)
+            return yield* exploreInvalid(
+              existing.id,
+              "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
+            );
+          const manifest = yield* projects.read(root);
+          const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
+          if (target === "web") {
+            if (manifest.engine.name !== "three")
+              return yield* exploreInvalid(
+                root,
+                `${manifest.engine.name === "unity" ? "Unity" : "Godot"} web play is not in this build; start the session without a target (or with target native).`,
+              );
+            return yield* exploreStartWeb(threadId, root, input);
+          }
+          if (manifest.engine.name === "three")
             return yield* exploreInvalid(
               root,
-              `${manifest.engine.name === "unity" ? "Unity" : "Godot"} web play is not in this build; start the session without a target (or with target native).`,
+              "This is a three.js browser game; start the session with target web.",
             );
-          return yield* exploreStartWeb(threadId, root, input);
-        }
-        if (manifest.engine.name === "three")
-          return yield* exploreInvalid(
-            root,
-            "This is a three.js browser game; start the session with target web.",
-          );
-        if (manifest.engine.name === "unity")
-          return yield* exploreStartUnity(threadId, root, input);
-        return yield* exploreStartNative(threadId, root, input);
-      }),
-    );
+          if (manifest.engine.name === "unity")
+            return unityPlayer === null
+              ? yield* exploreInvalid(
+                  root,
+                  "An exploration session for this game closed while this one was starting; start the session again.",
+                )
+              : yield* exploreStartUnity(threadId, root, input, unityPlayer);
+          return yield* exploreStartNative(threadId, root, input);
+        }),
+      );
+    });
   /**
    * Runs one native act through the runner's TCP connection and persists the
    * returned picture where one exists. Headless runs keep no picture; the
@@ -3118,13 +3188,17 @@ const make = Effect.gen(function* () {
               detail:
                 "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
             });
-          const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
-          // Edits live in the open scene until saved; a later close discards them.
-          const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
-            Effect.map(GameUnity.textOf),
-            Effect.orElseSucceed(() => "Saving the scene failed."),
+          // Edits live in the open scene until saved, so the edit and its save hold one editor.
+          return yield* liveUnity.hold(root)(
+            Effect.gen(function* () {
+              const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
+              const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
+                Effect.map(GameUnity.textOf),
+                Effect.orElseSucceed(() => "Saving the scene failed."),
+              );
+              return { text: `${GameUnity.textOf(result).slice(0, 8000)}\n${saved}` };
+            }),
           );
-          return { text: `${GameUnity.textOf(result).slice(0, 8000)}\n${saved}` };
         }),
       ),
     unityEval: (threadId, input) =>
