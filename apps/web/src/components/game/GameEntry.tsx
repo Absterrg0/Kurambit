@@ -3,8 +3,9 @@ import { ensureLocalApi } from "../../localApi";
 import { isElectron } from "../../env";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
+import * as Schema from "effect/Schema";
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, GameEngineId, ModelSelection } from "@kurambit/contracts";
+import { ModelSelection, type EnvironmentId, type GameEngineId } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { FolderIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -34,6 +35,7 @@ import {
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { gameSlug } from "./gameLibrary.logic";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useGameLibraryRefresh } from "./useGameLibrary";
 
 const BRIEF_PLACEHOLDER =
@@ -80,6 +82,8 @@ export function GameDialogHost() {
   ) : null;
 }
 
+const lastGameModelSchema = Schema.NullOr(ModelSelection);
+
 function GameEntryForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentProviders().get(environmentId) ?? [];
@@ -88,7 +92,22 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
   );
   const defaultSelection = resolveAppModelSelectionState(settings, providers);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  const model = selection ?? defaultSelection;
+  // The model the last game was made or opened with, while its provider is usable;
+  // otherwise the app default (the text-generation model).
+  const [lastGameModel, setLastGameModel] = useLocalStorage(
+    `game-entry-model:${environmentId}`,
+    null,
+    lastGameModelSchema,
+  );
+  const remembered =
+    lastGameModel !== null &&
+    entries.some(
+      (entry) =>
+        entry.instanceId === lastGameModel.instanceId && entry.enabled && entry.isAvailable,
+    )
+      ? lastGameModel
+      : null;
+  const model = selection ?? remembered ?? defaultSelection;
   const options = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -169,6 +188,7 @@ function GameEntryForEnvironment({ environmentId }: { environmentId: Environment
       setError(String(squashAtomCommandFailure(result)));
       return;
     }
+    setLastGameModel(model);
     refreshLibrary();
     setDialog(null);
     // The thread's own game stage takes over the workspace once its status
