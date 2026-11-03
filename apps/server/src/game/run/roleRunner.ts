@@ -25,7 +25,7 @@ import type * as ThreadManagement from "../../orchestration-v2/ThreadManagementS
 import type * as GameService from "../GameService.ts";
 import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
-import { blankCommit } from "./git.ts";
+import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
 import { CONTINUE } from "./roles.ts";
 import { BLANK, type RoleStep } from "./state.ts";
@@ -242,6 +242,16 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
       Effect.map((shell) => shell !== null && shell.deletedAt === null),
       Effect.orElseSucceed(() => false),
     );
+    // A blind sample plays a neutral commit of its build: the same game, but
+    // no round notes, bots or round-named HEAD that would tell the builds apart.
+    const baseRef =
+      blank === null && step.at !== null
+        ? ((yield* neutralBuild(ctx.root, step.at)) ?? step.at)
+        : step.at;
+    if (blank === null && step.at !== null && baseRef === step.at)
+      yield* ctx.log(
+        `${step.role}: no neutral commit for ${step.at.slice(0, 12)}; playing the build's own`,
+      );
     const launched = yield* deps.launches
       .launch({
         commandId: CommandId.make(`studio:${ctx.runId}:${step.id}${gone ? ":relaunch" : ""}`),
@@ -256,7 +266,11 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
             ? { type: "existing_worktree", worktreePath: blank.path, branch: blank.branch }
             : step.at === null
               ? { type: "root" }
-              : { type: "worktree", baseRef: step.at, branch: `studio-wt/${ctx.runId}-${step.id}` },
+              : {
+                  type: "worktree",
+                  baseRef: baseRef ?? step.at,
+                  branch: `studio-wt/${ctx.runId}-${step.id}`,
+                },
         initialMessage: { text: step.prompt, attachments: [] },
         createdBy: "user",
         creationSource: "server",
