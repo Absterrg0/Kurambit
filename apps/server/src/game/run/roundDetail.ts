@@ -14,6 +14,24 @@ const BOT_RUNS_MAX = 6;
 const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch(() => null);
 
+// `file`'s real path when it lies strictly inside `dir` of the game's real
+// root; a link leading out of there is refused.
+const realInside = async (root: string, dir: string, file: string): Promise<string | null> => {
+  const base = await NodeFSP.realpath(root).catch(() => null);
+  const real = await NodeFSP.realpath(file).catch(() => null);
+  if (base === null || real === null) return null;
+  const relative = NodePath.relative(NodePath.join(base, dir), real);
+  return relative.length === 0 || relative.startsWith("..") || NodePath.isAbsolute(relative)
+    ? null
+    : real;
+};
+
+// Evidence the run wrote under .studio; a symlink there never reads outside it.
+const readStudio = async (root: string, ...parts: ReadonlyArray<string>) => {
+  const real = await realInside(root, ".studio", NodePath.join(root, ".studio", ...parts));
+  return real === null ? null : readText(real);
+};
+
 export const bounded = (text: string, max = TEXT_MAX): string => {
   const trimmed = text.trim();
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max).trimEnd()}…`;
@@ -89,8 +107,8 @@ const latestComparison = async (root: string, branch: string) => {
     if (best === null || at > best.at) best = { name, at };
   }
   if (best === null) return null;
-  const decoded = decodeComparison((await readText(NodePath.join(dir, best.name))) ?? "");
-  return decoded._tag === "Some" ? { dir, file: decoded.value } : null;
+  const decoded = decodeComparison((await readStudio(root, "comparisons", best.name)) ?? "");
+  return decoded._tag === "Some" ? { file: decoded.value } : null;
 };
 
 const comparisonOf = async (
@@ -99,7 +117,7 @@ const comparisonOf = async (
 ): Promise<GameRunRoundDetail["comparison"]> => {
   const found = await latestComparison(root, branch);
   if (found === null) return null;
-  const { dir, file } = found;
+  const { file } = found;
   const playOrder = file.playOrder ?? "";
   const builds = playOrder.split(",").filter((name) => name.length > 0);
   const order = [
@@ -110,7 +128,7 @@ const comparisonOf = async (
   for (const verdict of file.verdicts ?? []) {
     // The record names its comparator file; only a plain name inside comparisons/ is read.
     const name = verdict.comparison === null ? "" : NodePath.basename(verdict.comparison);
-    const text = SAFE_NAME.test(name) ? await readText(NodePath.join(dir, name)) : null;
+    const text = SAFE_NAME.test(name) ? await readStudio(root, "comparisons", name) : null;
     judges.push({
       order: verdict.order,
       verdict: verdict.verdict,
@@ -152,7 +170,7 @@ const botRunsOf = async (root: string, state: RunState, n: number) => {
   const from = Math.min(...own);
   const later = startedAt(n + 1);
   const until = later.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...later);
-  const text = (await readText(NodePath.join(root, ".studio", "bot-results.jsonl"))) ?? "";
+  const text = (await readStudio(root, "bot-results.jsonl")) ?? "";
   return text
     .split("\n")
     .flatMap((line) => {
@@ -182,7 +200,7 @@ const botRunsOf = async (root: string, state: RunState, n: number) => {
 export const botVideoFile = async (root: string, runId: string): Promise<string | null> => {
   if (!SAFE_RUN_ID.test(runId)) return null;
   const logs = await NodeFSP.realpath(NodePath.join(root, "builds", "logs")).catch(() => null);
-  if (logs === null) return null;
+  if (logs === null || (await realInside(root, "builds", logs)) === null) return null;
   const file = await NodeFSP.realpath(NodePath.join(logs, `game-bot-${runId}`, "run.mp4")).catch(
     () => null,
   );
@@ -205,7 +223,7 @@ export const readRoundEvidence = async (
   record: RoundRecord,
 ): Promise<RoundEvidence> => {
   const n = record.round;
-  const studio = (name: string) => readText(NodePath.join(root, ".studio", name));
+  const studio = (name: string) => readStudio(root, name);
   const nextRound = state.rounds.find((r) => r.round === n + 1);
   const latest = state.rounds.at(-1)?.round === n;
   const botRuns = await botRunsOf(root, state, n);

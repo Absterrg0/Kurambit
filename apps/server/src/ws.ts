@@ -1802,6 +1802,9 @@ const layerWsRpc = (
             // Like a package download, the video streams through a capability
             // minted here: the asset route serves that exact file (path and
             // inode) with range requests. A video that cannot be signed is just absent.
+            // Read scope is enough to mint it because the client never names
+            // the path: roundDetail builds it from the run id and resolves it
+            // inside the game's builds/logs.
             Effect.flatMap(({ detail, videoFile }) => {
               const video = detail.video;
               if (videoFile === null || video === null) return Effect.succeed(detail);
