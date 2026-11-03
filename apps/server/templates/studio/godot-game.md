@@ -15,6 +15,15 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
 6. Work in ./godot plus VISION.md, PLAN.md and NOTES.md. Never commit,
    never reset git, never use subagents.
 
+## The shell and the feel kit
+
+The starter already has a title, pause, settings, end and credits screens
+(TEMPLATE.md). Never build your own menus: put gameplay in
+`scenes/game.tscn`, end a run with `GameState.win(text, stats)` or
+`GameState.lose(text, stats)`, and restyle the shell instead of replacing it.
+Answer every player action through `Juice` (shell/juice.gd): `shake`,
+`hit_pause`, `pop`, `squash`, `flash`, `tint`, `burst`, `sfx`.
+
 ## Godot 4 patterns (each verified on 4.7)
 
 Godot 3 code fails the check. Use the Godot 4 form:

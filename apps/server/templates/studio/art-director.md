@@ -14,6 +14,8 @@ OhMyGame's sprite-pipeline quality gates (Apache-2.0).
    is the creator's call; a piece the core loop needs to work (a goal, a
    way to lose, feedback for an action) missing is a defect.
 6. Animation frames that barely differ and flat single-color backgrounds are defects.
+   So is a missing or broken title, pause, end or retry flow, and a player
+   action with no answer (no shake, flash, pop or sound): feel is judged.
 7. Sprite sets hold together: one canvas size and one anchor (feet or
    contact point) across a strip, the exact frame count the animation
    uses, a transparent background, no scale drift, and the same identity,
