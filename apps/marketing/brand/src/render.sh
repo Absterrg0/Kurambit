@@ -38,9 +38,17 @@ done
 
 posts="make tell played better agents join"
 
+# Headers and banners: the wall of games, edge to edge. The profile's name
+# and bio sit under it, so it carries no words; header-headline adds them.
+wall() {
+  local query="$1" w="$2" h="$3" out="$4"
+  shot "shelf.html?$query&w=$w&h=$h" "$w,$h" "$out"
+}
+
 # X: the header and six posts.
-card "m=make" 1500 500 x/header.png
-card "m=make&t=dark" 1500 500 x/header-dark.png
+wall "t=paper" 1500 500 x/header.png
+wall "t=dark" 1500 500 x/header-dark.png
+wall "t=paper&copy=1" 1500 500 x/header-headline.png
 n=1
 for m in $posts; do
   card "m=$m" 1600 900 "x/post-$n-$m.png"
@@ -57,9 +65,9 @@ card "m=make&t=dark" 1080 1920 instagram/story-make.png
 card "m=join" 1080 1920 instagram/story-join.png
 
 # LinkedIn, YouTube and GitHub.
-card "m=make" 1584 396 linkedin/banner-profile.png
-card "m=make" 1128 191 linkedin/banner-company.png
-card "m=make&safe=1546x423" 2560 1440 youtube/banner.png
+wall "t=paper" 1584 396 linkedin/banner-profile.png
+wall "t=paper&rows=2" 1128 191 linkedin/banner-company.png
+wall "t=paper&rows=9" 2560 1440 youtube/banner.png
 card "m=make" 1280 640 github/social-preview.png
 
 # The link card, which the site serves as ../site/og.png.

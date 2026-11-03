@@ -95,8 +95,9 @@ The app's Sumi theme shares the ink and vermilion but uses its own neutrals; see
 - **Pixel art:** the fox, the wordmark and the shelf dithered into square ink cells on an 8×8 Bayer
   grid. It is the site's signature; use it large and keep the cells at least 4px where it will be
   seen.
-- **The shelf:** a row of game cartridges in ink with one empty slot, dashed in vermilion, where
-  the fox stands: the game nobody made yet. It is the headline's picture.
+- **The shelf:** game cartridges in crisp pixel art with one empty slot, dashed in vermilion,
+  where the fox stands: the game nobody made yet. It is the headline's picture. Headers and banners
+  are a wall of it, edge to edge, so any crop still reads; posts show a single shelf.
 
 Print the fox only in ink, paper or vermilion. No outlines, gradients, drop shadows or photographs
 behind it. The ground is washi paper; for dark grounds it is ink (`#161411`) with the fox in
@@ -105,29 +106,30 @@ behind it. The ground is washi paper; for dark grounds it is ink (`#161411`) wit
 ## Brand kit
 
 Everything in [brand](brand) is rendered from the HTML templates in [brand/src](brand/src), which
-share the site's fonts, paper and dither. One card template lays itself out for any size: copy beside
-the picture on landscape cards, the picture over the copy on portrait posts and stories, and a
-headline beside the fox on banners.
+share the site's fonts, paper and dither. The card template lays itself out for any size: copy
+beside the picture on landscape cards, the picture over the copy on portrait posts and stories. The
+shelf template draws the headers and banners.
 
-| Folder                       | Files                                         | Size                 |
-| ---------------------------- | --------------------------------------------- | -------------------- |
-| [logo](brand/logo)           | Lockup and pixel wordmark, ink and light, PNG | 1600×440, 2200×560   |
-| [avatar](brand/avatar)       | Seal, paper, dark                             | 1024×1024            |
-| [x](brand/x)                 | Header (paper and dark), six posts            | 1500×500, 1600×900   |
-| [instagram](brand/instagram) | Six posts as a carousel, two stories          | 1080×1350, 1080×1920 |
-| [linkedin](brand/linkedin)   | Profile and company banners                   | 1584×396, 1128×191   |
-| [youtube](brand/youtube)     | Channel banner                                | 2560×1440            |
-| [github](brand/github)       | Repository social preview                     | 1280×640             |
-| [web](brand/web)             | The link card                                 | 1200×630             |
+| Folder                       | Files                                          | Size                 |
+| ---------------------------- | ---------------------------------------------- | -------------------- |
+| [logo](brand/logo)           | Lockup and pixel wordmark, ink and light, PNG  | 1600×440, 2200×560   |
+| [avatar](brand/avatar)       | Seal, paper, dark                              | 1024×1024            |
+| [x](brand/x)                 | Header (paper, dark, with headline), six posts | 1500×500, 1600×900   |
+| [instagram](brand/instagram) | Six posts as a carousel, two stories           | 1080×1350, 1080×1920 |
+| [linkedin](brand/linkedin)   | Profile and company banners                    | 1584×396, 1128×191   |
+| [youtube](brand/youtube)     | Channel banner                                 | 2560×1440            |
+| [github](brand/github)       | Repository social preview                      | 1280×640             |
+| [web](brand/web)             | The link card                                  | 1200×630             |
 
 Use the **seal** avatar everywhere a picture is cropped round: vermilion is the one colour that
 stands out in a feed. Pair it with the paper X header. The posts run in order: make, tell, played,
 better, agents, join.
 
-Profile pictures cover the bottom-left corner of X and LinkedIn banners, and Instagram's own buttons
-cover the top 250 and bottom 340 pixels of a story, so the templates keep copy out of those areas.
-YouTube shows the whole banner only on televisions; the copy stays inside the 1546×423 box that
-every device shows.
+Profile pictures cover the bottom-left corner of X and LinkedIn banners, so the empty slot sits
+right of centre. Instagram's own buttons cover the top 250 and bottom 340 pixels of a story, so the
+templates keep copy out of those areas. YouTube shows the whole banner only on televisions; the
+empty slot stays inside the 1546×423 box that every device shows. In avatars the fox head sits in
+the middle of the circle.
 
 Change a line or a picture in a template, then run `apps/marketing/brand/src/render.sh` (it needs
 Chrome, and Python 3 with Pillow; set `CHROME` to use another binary). The site serves its own link
@@ -136,8 +138,8 @@ card from [site/og.png](site/og.png); when that changes, bump its `?v=` in
 
 ## Handles
 
-Use one handle everywhere: **@kurambithq** on X, Instagram, Threads, YouTube and TikTok. Plain
-`@kurambit` is reserved on X and cannot be registered. On GitHub the `kurambit` organisation name was
+Use one handle everywhere: **@kurambit_gg**, as on X, for Instagram, Threads, YouTube and TikTok.
+Plain `@kurambit` is reserved on X and cannot be registered. On GitHub the `kurambit` organisation name was
 free in November 2026; claim it for the repository.
 
 ## Profile copy

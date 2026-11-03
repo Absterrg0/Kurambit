@@ -5,15 +5,15 @@
     <title>Kurambit avatar</title>
     <link rel="stylesheet" href="kit.css" />
     <style>
-      /* Profile pictures are cropped to a circle; the head sits low so its
-         ears clear the rim and its ruff runs out past the bottom. */
+      /* Profile pictures are cropped to a circle: the head sits in its
+         middle, small enough that ears and ruff stay clear of the rim. */
       .head {
         position: absolute;
         left: 50%;
-        bottom: -2%;
-        width: 74%;
-        height: 74%;
-        transform: translateX(-50%);
+        top: 50%;
+        width: var(--size, 66%);
+        height: var(--size, 66%);
+        transform: translate(-50%, -50%);
         background: var(--fox);
         -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
         mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
