@@ -12,7 +12,7 @@ export interface EngineFile {
 }
 
 export interface AssetUse {
-  readonly engine: "godot" | "web";
+  readonly engine: "godot" | "web" | "unity";
   readonly assets: number;
   readonly unused: ReadonlyArray<string>;
   readonly missing: ReadonlyArray<string>;
@@ -27,6 +27,10 @@ const ASSET =
   /\.(png|jpe?g|webp|svg|gif|bmp|tga|exr|hdr|ktx2|wav|ogg|mp3|flac|glb|gltf|fbx|obj|blend|dae)$/i;
 const SOURCE_GODOT = /\.(gd|tscn|tres|gdshader|godot|import|uid|gltf)$/i;
 const SOURCE_WEB = /\.(m?js|html?|css|json|gltf)$/i;
+// Unity's text-serialized scenes, prefabs and assets name files by GUID; .meta files map GUIDs to paths.
+const SOURCE_UNITY = /\.(cs|unity|prefab|asset|mat|controller|anim)$/i;
+const UNITY_VERSION_FILE = "ProjectSettings/ProjectVersion.txt";
+const UNITY_BUILD_SCENES = "ProjectSettings/EditorBuildSettings.asset";
 const SKIP_DIRS = new Set([".godot", ".git", "builds", "vendor", "node_modules"]);
 
 const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -150,6 +154,45 @@ const drawnGodot = (path: string, text: string): Array<readonly [string, number]
   ];
 };
 
+const UNITY_GUID = /\bguid: ([0-9a-f]{32})\b/g;
+const CS_ASSET_PATH = /"(Assets\/[^"\n]{1,200})"/g;
+const CS_RESOURCES = /\bResources\.Load(?:All|Async)?\s*(?:<[^>]*>)?\s*\(\s*"([^"\n]{1,200})"/g;
+
+const unityRefs = (text: string, path: string, guids: ReadonlyMap<string, string>) => {
+  const refs: Reference[] = [];
+  if (!path.endsWith(".cs")) {
+    // GUIDs of packages and built-in resources have no .meta here; they are not the game's files.
+    for (const m of text.matchAll(UNITY_GUID)) {
+      const target = guids.get(m[1] ?? "");
+      if (target !== undefined) refs.push({ raw: target, refs: [{ exact: target }] });
+    }
+    return refs;
+  }
+  for (const m of text.matchAll(CS_ASSET_PATH))
+    refs.push({ raw: m[1] ?? "", refs: [{ exact: norm(m[1] ?? "") }] });
+  for (const m of text.matchAll(CS_RESOURCES)) {
+    const name = m[1] ?? "";
+    refs.push({
+      raw: name,
+      refs: [{ pattern: new RegExp(`^(?:.*/)?Resources/${escapeRe(name)}(?:\\.[^/]+|/.*)?$`) }],
+    });
+  }
+  return refs;
+};
+
+const drawnUnity = (path: string, text: string): Array<readonly [string, number]> =>
+  path.endsWith(".cs")
+    ? [
+        ["CreatePrimitive calls", count(text, /\bGameObject\.CreatePrimitive\s*\(/g)],
+        ["procedural meshes", count(text, /\bnew\s+Mesh\s*\(/g)],
+      ]
+    : [
+        [
+          "built-in primitive meshes",
+          count(text, /m_Mesh: \{fileID: 102(?:02|06|07|08|09|10), guid: 0{16}e0{15}/g),
+        ],
+      ];
+
 const drawnWeb = (path: string, text: string): Array<readonly [string, number]> =>
   /\.m?js$/.test(path)
     ? [
@@ -182,11 +225,19 @@ export const scanAssetUse = (
   assetsMd: string | null,
 ): AssetUse => {
   const byPath = new Map(files.map((f) => [f.path, f]));
-  const engine = byPath.has("project.godot") ? "godot" : "web";
+  const engine = byPath.has("project.godot")
+    ? "godot"
+    : byPath.has(UNITY_VERSION_FILE)
+      ? "unity"
+      : "web";
   const isSource = (path: string) =>
-    (engine === "godot" ? SOURCE_GODOT : SOURCE_WEB).test(path) &&
+    (engine === "godot" ? SOURCE_GODOT : engine === "unity" ? SOURCE_UNITY : SOURCE_WEB).test(
+      path,
+    ) &&
     !path.endsWith(".import") &&
-    !path.endsWith(".uid");
+    !path.endsWith(".uid") &&
+    // Editor-only scripts never ship in the player.
+    !(engine === "unity" && /(^|\/)Editor\//.test(path));
   const assets = files
     .map((f) => f.path)
     .filter((p) => ASSET.test(p))
@@ -197,6 +248,13 @@ export const scanAssetUse = (
   const imported = new Map<string, string>();
   for (const f of files) {
     if (f.text === null) continue;
+    if (engine === "unity") {
+      const guid = f.path.endsWith(".meta")
+        ? /^guid: ([0-9a-f]{32})/m.exec(f.text)?.[1]
+        : undefined;
+      if (guid !== undefined) uids.set(guid, f.path.slice(0, -".meta".length));
+      continue;
+    }
     if (f.path.endsWith(".uid")) uids.set(f.text.trim(), f.path.slice(0, -".uid".length));
     else if (f.path.endsWith(".import")) {
       const source = f.path.slice(0, -".import".length);
@@ -215,7 +273,11 @@ export const scanAssetUse = (
     if (f.text !== null && isSource(f.path))
       refsOf.set(
         f.path,
-        engine === "godot" ? godotRefs(f.text, uids, imported) : webRefs(f.text, f.path),
+        engine === "godot"
+          ? godotRefs(f.text, uids, imported)
+          : engine === "unity"
+            ? unityRefs(f.text, f.path, uids)
+            : webRefs(f.text, f.path),
       );
 
   const matches = (ref: Reference, path: string) =>
@@ -223,16 +285,26 @@ export const scanAssetUse = (
 
   // Loaded code is what the engine reaches from its entry point; a global
   // class_name script counts once a loaded file names it.
+  // Unity starts from the build's scene list and from scripts it runs on load.
   const roots =
     engine === "godot"
       ? ["project.godot"]
-      : byPath.has("index.html")
-        ? ["index.html"]
-        : [...refsOf.keys()].filter((p) => /\.html?$/.test(p));
+      : engine === "unity"
+        ? [
+            UNITY_BUILD_SCENES,
+            ...[...refsOf.keys()].filter((p) =>
+              /\bRuntimeInitializeOnLoadMethod\b/.test(byPath.get(p)?.text ?? ""),
+            ),
+          ]
+        : byPath.has("index.html")
+          ? ["index.html"]
+          : [...refsOf.keys()].filter((p) => /\.html?$/.test(p));
   const classNames = new Map<string, string>();
-  if (engine === "godot")
+  if (engine !== "web")
     for (const [path] of refsOf) {
-      const name = /^class_name\s+(\w+)/m.exec(byPath.get(path)?.text ?? "")?.[1];
+      const name = (
+        engine === "godot" ? /^class_name\s+(\w+)/m : /\b(?:class|struct)\s+(\w+)/
+      ).exec(path.endsWith(".cs") || engine === "godot" ? (byPath.get(path)?.text ?? "") : "")?.[1];
       if (name !== undefined) classNames.set(path, name);
     }
   const loaded = new Set<string>(
@@ -287,7 +359,7 @@ export const scanAssetUse = (
         hits.length === 0 &&
         path.includes("/") &&
         !token.startsWith(`${lane}/`) &&
-        !path.startsWith("assets/") &&
+        !/^assets\//i.test(path) &&
         !m[0].startsWith("res://")
       )
         continue;
@@ -300,7 +372,11 @@ export const scanAssetUse = (
   const drawn = new Map<string, number>();
   for (const path of [...loaded].sort()) {
     const text = byPath.get(path)?.text ?? "";
-    for (const [name, n] of engine === "godot" ? drawnGodot(path, text) : drawnWeb(path, text))
+    for (const [name, n] of engine === "godot"
+      ? drawnGodot(path, text)
+      : engine === "unity"
+        ? drawnUnity(path, text)
+        : drawnWeb(path, text))
       if (n > 0) drawn.set(name, (drawn.get(name) ?? 0) + n);
   }
 
@@ -319,6 +395,12 @@ export const scanAssetUse = (
 
 const readEngine = async (dir: string): Promise<EngineFile[]> => {
   const files: EngineFile[] = [];
+  // A Unity project is read from Assets/ and its build scene list only:
+  // Library/, Temp/, Logs/ and the package cache are generated and huge.
+  const unity = await NodeFSP.access(NodePath.join(dir, UNITY_VERSION_FILE)).then(
+    () => true,
+    () => false,
+  );
   const visit = async (rel: string) => {
     const entries = await NodeFSP.readdir(NodePath.join(dir, rel), { withFileTypes: true }).catch(
       () => [],
@@ -331,7 +413,9 @@ const readEngine = async (dir: string): Promise<EngineFile[]> => {
       }
       if (!entry.isFile()) continue;
       const full = NodePath.join(dir, path);
-      const source = SOURCE_GODOT.test(path) || SOURCE_WEB.test(path);
+      const source = unity
+        ? SOURCE_UNITY.test(path) || path.endsWith(".meta")
+        : SOURCE_GODOT.test(path) || SOURCE_WEB.test(path);
       const size = source ? ((await NodeFSP.stat(full).catch(() => null))?.size ?? 0) : 0;
       // Large data files (baked glTF buffers, big JSON) are skipped rather than read.
       const text =
@@ -339,7 +423,16 @@ const readEngine = async (dir: string): Promise<EngineFile[]> => {
       files.push({ path, text });
     }
   };
-  await visit("");
+  if (!unity) {
+    await visit("");
+    return files;
+  }
+  await visit("Assets");
+  files.push({ path: UNITY_VERSION_FILE, text: null });
+  files.push({
+    path: UNITY_BUILD_SCENES,
+    text: await NodeFSP.readFile(NodePath.join(dir, UNITY_BUILD_SCENES), "utf8").catch(() => null),
+  });
   return files;
 };
 
@@ -357,7 +450,12 @@ const list = (paths: ReadonlyArray<string>, max = 6) =>
 
 /** A few bounded sentences; paths are relative to the engine dir. */
 export const assetUseSummary = (use: AssetUse, lane: string): string => {
-  const entry = use.engine === "godot" ? "project.godot" : "index.html";
+  const entry =
+    use.engine === "godot"
+      ? "project.godot"
+      : use.engine === "unity"
+        ? `${UNITY_BUILD_SCENES} scenes`
+        : "index.html";
   const listed =
     use.listed === null
       ? "ASSETS.md missing."

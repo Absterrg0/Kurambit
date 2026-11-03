@@ -758,7 +758,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "review-facts":
       return go({ kind: "facts", id });
     case "tester":
-      return tester(Roles.testerPlay(n, r.jev), CAP.tester);
+      return tester(Roles.testerPlay(n, r.jev, state.lane), CAP.tester);
     case "tester-write":
       return tester(Roles.testerWrite(n, r.move), CAP.write, [`.studio/tester-${n}.md`]);
     case "tester-duty":
@@ -1144,7 +1144,12 @@ const applyRound = (
       const bot = (res.kind === "done" && res.bot) || r.bot;
       const notes = res.kind === "done" ? textOf(res, `.studio/tester-${r.n}.md`) : "";
       const testerNotes = notes.length > 20 ? notes : r.testerNotes;
-      if (r.phase === "tester-write" && res.kind === "done" && res.botsAfter <= r.botsBefore) {
+      if (
+        r.phase === "tester-write" &&
+        res.kind === "done" &&
+        res.botsAfter <= r.botsBefore &&
+        Roles.laneBots(lane)
+      ) {
         logs.push(`round ${r.n}: tester ran no bot; one follow-up turn asks for it`);
         return at({ phase: "tester-duty", testerNotes, bot });
       }
@@ -1166,8 +1171,10 @@ const applyRound = (
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
       const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
-      const botFits = remaining(s, now) >= COMPARE_MIN_MS + BOT_FACTS_MS;
-      if (r.bot.length > 0 && !botFits)
+      const botFits = remaining(s, now) >= COMPARE_MIN_MS + BOT_FACTS_MS && Roles.laneBots(lane);
+      if (!Roles.laneBots(lane))
+        logs.push(`round ${r.n}: bot runs do not play ${lane} games; judging on play reports`);
+      else if (r.bot.length > 0 && !botFits)
         logs.push(`round ${r.n}: budget leaves no time for bot facts; judging on play reports`);
       const cmp = newCompare(
         question,

@@ -84,4 +84,38 @@ describe("readAssetUse", () => {
       ["primitive geometries", 1],
     ]);
   });
+
+  it("follows Unity GUIDs from the build scenes and never reads Library/", async () => {
+    const meta = (guid: string) => `fileFormatVersion: 2\nguid: ${guid}\n`;
+    const root = await fixture({
+      "ASSETS.md": "- `unity/Assets/Art/hero.png` hero\n",
+      "unity/ProjectSettings/ProjectVersion.txt": "m_EditorVersion: 6000.6.7f1\n",
+      "unity/ProjectSettings/EditorBuildSettings.asset": `m_Scenes:\n  - enabled: 1\n    path: Assets/Scenes/Main.unity\n    guid: ${"a".repeat(32)}\n`,
+      "unity/Assets/Scenes/Main.unity": `m_Script: {fileID: 11500000, guid: ${"b".repeat(32)}, type: 3}\nm_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}\nm_Texture: {fileID: 2800000, guid: ${"c".repeat(32)}, type: 3}\n`,
+      "unity/Assets/Scenes/Main.unity.meta": meta("a".repeat(32)),
+      "unity/Assets/Scripts/Player.cs":
+        'public class Player : MonoBehaviour { void Start() { Score.Add(); Resources.Load<AudioClip>("Sfx/jump"); GameObject.CreatePrimitive(PrimitiveType.Cube); } }\n',
+      "unity/Assets/Scripts/Player.cs.meta": meta("b".repeat(32)),
+      "unity/Assets/Scripts/Score.cs":
+        "public static class Score { public static void Add() {} }\n",
+      "unity/Assets/Scripts/Unused.cs": "public class Unused {}\n",
+      "unity/Assets/Editor/Tool.cs": "public class Tool {}\n",
+      "unity/Assets/Art/hero.png": "",
+      "unity/Assets/Art/hero.png.meta": meta("c".repeat(32)),
+      "unity/Assets/Art/spare.png": "",
+      "unity/Assets/Resources/Sfx/jump.wav": "",
+      "unity/Library/PackageCache/x/huge.png": "",
+    });
+    const use = await readAssetUse(root, "unity");
+    expect(use.engine).toBe("unity");
+    expect(use.assets).toBe(3);
+    expect(use.unused).toEqual(["Assets/Art/spare.png"]);
+    expect(use.missing).toEqual([]);
+    expect(use.listedMissing).toEqual([]);
+    expect(use.unloaded).toEqual(["Assets/Scripts/Unused.cs"]);
+    expect(use.drawn).toEqual([
+      ["built-in primitive meshes", 1],
+      ["CreatePrimitive calls", 1],
+    ]);
+  });
 });
