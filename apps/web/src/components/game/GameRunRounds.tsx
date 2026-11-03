@@ -12,7 +12,7 @@ import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime
 import { resolveAssetUrl } from "../../assets/assetUrls";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
-import { gameEnvironment } from "../../state/game";
+import { gameEnvironment, noteRunRestored } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -98,6 +98,9 @@ function RoundDetail({
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  // The signed video URL lasts an hour; one refetch per failure mints a new one,
+  // and a video that loaded may retry again later.
+  const [videoRetried, setVideoRetried] = useState(false);
   const detail: GameRunRoundDetail | null = query.data;
   if (detail === null)
     return (
@@ -115,7 +118,7 @@ function RoundDetail({
   const restore = async () => {
     if (restoring) return;
     const confirmed = await requestConfirmDialog(
-      `Restore round ${round}'s build?\nThe game's sources go back to this round's kept build with a new commit, so later work stays in git history. Uncommitted changes block the restore; nothing is discarded.`,
+      `Restore round ${round}'s build?\nThe engine project, art/ and ASSETS.md go back to this round's kept build with a new commit, so later work stays in git history. Notes, PLAN.md, VISION.md, bots and run records stay as they are. Uncommitted changes block the restore; nothing is discarded.`,
     );
     if (confirmed !== true) return;
     setRestoring(true);
@@ -130,7 +133,7 @@ function RoundDetail({
       return;
     }
     setRestoreMessage(result.value.message);
-    query.refresh();
+    noteRunRestored(threadRef.environmentId);
   };
 
   return (
@@ -251,7 +254,18 @@ function RoundDetail({
             ))}
           </ul>
           {videoUrl !== null ? (
-            <video controls preload="none" src={videoUrl} className="w-full rounded-md bg-black" />
+            <video
+              controls
+              preload="none"
+              src={videoUrl}
+              className="w-full rounded-md bg-black"
+              onLoadedMetadata={() => setVideoRetried(false)}
+              onError={() => {
+                if (videoRetried) return;
+                setVideoRetried(true);
+                query.refresh();
+              }}
+            />
           ) : null}
         </Field>
       ) : null}
@@ -263,16 +277,22 @@ function RoundDetail({
               This round is the game's current build.
             </p>
           ) : (
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={live || restoring || !canRestore}
-              title={live ? "Stop the run before restoring a round." : undefined}
-              onClick={() => void restore()}
-            >
-              <HistoryIcon aria-hidden="true" />
-              {restoring ? "Restoring…" : "Restore this round"}
-            </Button>
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={live || restoring || !canRestore}
+                onClick={() => void restore()}
+              >
+                <HistoryIcon aria-hidden="true" />
+                {restoring ? "Restoring…" : "Restore this round"}
+              </Button>
+              {live ? (
+                <p className="text-2xs text-muted-foreground">
+                  Stop the run before restoring a round.
+                </p>
+              ) : null}
+            </>
           )}
           {restoreMessage ? (
             <p className="text-2xs text-muted-foreground">{restoreMessage}</p>
