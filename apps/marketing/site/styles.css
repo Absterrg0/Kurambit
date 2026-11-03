@@ -2043,18 +2043,18 @@ h3 {
 }
 
 :root {
-  --paper: #efeee9;
-  --desk: #e3e2dc;
+  --paper: #ede6d7;
+  --desk: #ddd3bf;
   /* Pictures are printed on a brighter stock than the page, so they read as
      sheets laid on it rather than marks on the same paper. */
-  --print: #fcfcfa;
-  --sheet: #f8f7f3;
-  --ink: #141412;
-  --ink-2: #3a3935;
-  --pencil: #6f6d66;
-  --faint: #a19f98;
-  --rule: rgb(20 20 18 / 12%);
-  --rule-strong: rgb(20 20 18 / 24%);
+  --print: #fffdf8;
+  --sheet: #f9f5ec;
+  --ink: #171511;
+  --ink-2: #36322b;
+  --pencil: #6c665b;
+  --faint: #a59e90;
+  --rule: rgb(23 21 17 / 12%);
+  --rule-strong: rgb(23 21 17 / 24%);
 }
 
 /* The page is one sheet of handmade washi lying on a darker surface. */
@@ -2163,11 +2163,11 @@ body {
   border-radius: 8px;
   background:
     url("washi.svg") 0 0 / 420px 420px,
-    rgb(248 247 243 / 96%);
+    rgb(249 245 236 / 96%);
   box-shadow:
-    0 0 0 1px rgb(20 20 18 / 10%),
-    0 1px 0 rgb(20 20 18 / 6%),
-    0 16px 30px -24px rgb(20 20 18 / 55%);
+    0 0 0 1px rgb(23 21 17 / 10%),
+    0 1px 0 rgb(23 21 17 / 6%),
+    0 16px 30px -24px rgb(23 21 17 / 55%);
   backdrop-filter: none;
 }
 
@@ -2175,7 +2175,7 @@ body {
   content: "";
   position: absolute;
   inset: 4px;
-  border: 1px solid rgb(20 20 18 / 8%);
+  border: 1px solid rgb(23 21 17 / 8%);
   border-radius: 5px;
   pointer-events: none;
 }
@@ -2249,7 +2249,7 @@ body {
 }
 
 .btn:hover {
-  background: #2c2b27;
+  background: #2c2923;
 }
 
 .btn-primary,
@@ -2262,7 +2262,7 @@ body {
 }
 
 .btn-primary:hover {
-  background: #d24d1f;
+  background: #d1491b;
 }
 
 .btn:active {
@@ -2417,13 +2417,13 @@ body {
 .mat {
   border-radius: 6px;
   background:
-    linear-gradient(rgb(20 20 18 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
-    linear-gradient(90deg, rgb(20 20 18 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, rgb(23 21 17 / 3.5%) 1px, transparent 1px) 0 0 / 24px 24px,
     url("washi.svg") 0 0 / 420px 420px,
-    #e7e6df;
+    #e1d8c5;
   box-shadow:
-    0 0 0 1px rgb(20 20 18 / 12%),
-    0 30px 50px -38px rgb(20 20 18 / 55%);
+    0 0 0 1px rgb(23 21 17 / 12%),
+    0 30px 50px -38px rgb(23 21 17 / 55%);
 }
 
 /* Pictures are mounted like prints: a fine keyline at the image, a margin of
@@ -2435,10 +2435,10 @@ body {
   border-radius: 1px;
   background: var(--print);
   box-shadow:
-    0 0 0 1px rgb(20 20 18 / 30%),
-    0 0 0 10px #fbfbf8,
-    0 0 0 11px rgb(20 20 18 / 10%),
-    0 28px 44px -24px rgb(20 20 18 / 50%);
+    0 0 0 1px rgb(23 21 17 / 30%),
+    0 0 0 10px #faf6ee,
+    0 0 0 11px rgb(23 21 17 / 10%),
+    0 28px 44px -24px rgb(23 21 17 / 50%);
 }
 
 .compare {
@@ -2450,7 +2450,7 @@ body {
 }
 
 .asks button[aria-selected="true"] {
-  background: rgb(248 247 243 / 80%);
+  background: rgb(249 245 236 / 80%);
   box-shadow: none;
 }
 
@@ -2621,8 +2621,8 @@ body {
   left: 0;
   z-index: 0;
   border-radius: 6px;
-  background: rgb(250 250 247 / 92%);
-  box-shadow: 0 16px 30px -24px rgb(20 20 18 / 45%);
+  background: rgb(250 247 240 / 92%);
+  box-shadow: 0 16px 30px -24px rgb(23 21 17 / 45%);
   pointer-events: none;
   transition:
     transform 520ms var(--ease),
