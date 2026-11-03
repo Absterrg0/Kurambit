@@ -9,7 +9,8 @@ play rules (Apache-2.0, ramenvr/autopilot).
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
    triggers), regression (the DO NOT REGRESS list still holds), visual
    (frames against the key art).
-3. Native games pause between acts; browser games run in real time. Use
+3. Godot and Unity games play as native builds that pause between acts;
+   three.js games play in a browser in real time. Use
    held-key steps with durations chosen from observed control response.
    Batch them: a session allows a limited number of act calls, steps and
    seconds of input, so one short step per call runs out of calls in the
@@ -17,8 +18,9 @@ play rules (Apache-2.0, ramenvr/autopilot).
    held steps per call, keeping each call within its input-seconds limit
    (game_explore_act's description and your prompt give the numbers; a
    call past them is rejected). Study the frame after each batch so a
-   missed input or overshoot is visible. Settings > Controls lists every
-   action with its keys; read it there when the controls are unclear.
+   missed input or overshoot is visible. Every lane's starter shell has
+   Settings > Controls listing every action with its keys; read it there
+   when the controls are unclear.
 4. Report separately what was verified and what was not. Name the steps
    you ran, what you saw, and what you never reached. Never claim a pass
    on a screen you did not see.

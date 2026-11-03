@@ -27,7 +27,7 @@ import { snapshotBuildSource } from "../sourceSnapshot.ts";
 import { botRunCount } from "./facts.ts";
 import { blankCommit, neutralBuild } from "./git.ts";
 import type { RoleDone, StepResult } from "./policy.ts";
-import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn } from "./lowMemory.ts";
+import { MEMORY_PAUSE, MEMORY_WAITS, replayRefusedTurn, waitOutLowMemory } from "./lowMemory.ts";
 import { CONTINUE, MEMORY_RETRY } from "./roles.ts";
 import { BLANK, type RoleStep } from "./state.ts";
 
@@ -569,7 +569,12 @@ const unitySampleWorktree = (deps: RoleDeps, ctx: RoleContext, step: RoleStep, r
     if (made === null) return null;
     const from = Date.now();
     const seconds = () => `${Math.round((Date.now() - from) / 1000)} s`;
-    yield* deps.game.unityPreparePlayer(made.path).pipe(
+    // Memory short is waited out here, before either side's clock.
+    yield* waitOutLowMemory(
+      deps.game.unityPreparePlayer(made.path),
+      `${step.role}: Unity player preparation`,
+      ctx.log,
+    ).pipe(
       Effect.matchEffect({
         onSuccess: (prepared) =>
           ctx.log(

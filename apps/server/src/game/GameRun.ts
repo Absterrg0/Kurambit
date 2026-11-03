@@ -43,8 +43,9 @@ import * as Templates from "./templates.ts";
 import { runBotFact } from "./run/botFacts.ts";
 import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
-import { memoryEnded, waitOutLowMemory } from "./run/lowMemory.ts";
+import { waitOutLowMemory } from "./run/lowMemory.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
+import { bootStep, gitStep } from "./run/steps.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { pickRef, runProgress } from "./run/progress.ts";
@@ -587,6 +588,30 @@ export const layer = (options: { readonly stateDir: string }) => {
                   : redo
                     ? `${step.prompt}${spriteBlock(sprites, true)}${modelBlock(models, true)}`
                     : step.prompt;
+              // A Unity game's first editor open imports the whole project
+              // (minutes; later opens take seconds). Paid here, before any
+              // role's clock, so the first prototype is not capped on it
+              // while the second starts warm.
+              const warmFrom = Date.now();
+              if (state.lane === "unity" && step.at === null)
+                yield* waitOutLowMemory(
+                  d.deps.game.unityWarmEditor(root),
+                  "Unity warm-up",
+                  log,
+                ).pipe(
+                  Effect.matchEffect({
+                    onSuccess: (warmed) =>
+                      warmed
+                        ? log(
+                            `Unity warm-up: first import took ${Math.round((Date.now() - warmFrom) / 1000)} s, before ${step.role}'s clock`,
+                          )
+                        : Effect.void,
+                    onFailure: (error) =>
+                      log(
+                        `Unity warm-up skipped (${(error.detail ?? error.reason).slice(0, 200)}); the role opens the editor itself`,
+                      ),
+                  }),
+                );
               return yield* runRole(
                 d.deps,
                 {
@@ -605,58 +630,9 @@ export const layer = (options: { readonly stateDir: string }) => {
               );
             });
           case "git":
-            // A git op always finishes: a stop waits for it rather than leaving a half-moved tree.
-            return git.run(step.op).pipe(
-              Effect.map((outcome) => ({ kind: "git", git: outcome }) as const),
-              Effect.uninterruptible,
-            );
-          case "boot": {
-            // A check that could not run is not a verdict on the build: a busy
-            // game or a cancelled check is retried; memory short is waited out;
-            // a missing tool, or memory still short after the waits, ends the
-            // run (resumable) rather than rejecting good work. Anything else
-            // the check reports is the build failing to boot.
-            const check = (attempt: number): Effect.Effect<Policy.StepResult, GameOperationError> =>
-              waitOutLowMemory(d.deps.game.check(d.creator), "boot check", log).pipe(
-                Effect.map(
-                  (r) =>
-                    ({
-                      kind: "boot",
-                      ok: r.ok,
-                      // The run log says why a build was rejected, not only that it was.
-                      detail: r.ok
-                        ? "boot clean"
-                        : `check failed: ${
-                            r.errors
-                              .slice(0, 3)
-                              .map((e) =>
-                                `${e.file ? `${e.file}: ` : ""}${e.message}`.slice(0, 200),
-                              )
-                              .join("; ") || "no error lines (see the check log)"
-                          }`,
-                    }) as const,
-                ),
-                Effect.catchTags({
-                  GameOperationError: (error) => {
-                    const transient =
-                      error.reason === "busy" || error.detail === "Operation cancelled.";
-                    if (transient && attempt < 3)
-                      return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
-                        Effect.andThen(Effect.sleep("5 seconds")),
-                        Effect.andThen(check(attempt + 1)),
-                      );
-                    if (error.reason === "low-memory") return Effect.succeed(memoryEnded(error));
-                    if (error.reason === "tool-missing") return Effect.fail(error);
-                    return Effect.succeed({
-                      kind: "boot",
-                      ok: false,
-                      detail: (error.detail ?? error.reason).slice(0, 300),
-                    } as const);
-                  },
-                }),
-              );
-            return check(1);
-          }
+            return gitStep(d.deps.game, git, root, step.op);
+          case "boot":
+            return bootStep(d.deps.game, { creator: d.creator, root, lane: state.lane, log });
           case "facts":
             return Effect.gen(function* () {
               const jev =
@@ -722,7 +698,14 @@ export const layer = (options: { readonly stateDir: string }) => {
         // flight re-runs instead (every op is safe to repeat).
         const expected = Policy.expectedBranch(state);
         if (expected !== null && state.inFlight?.kind !== "git") {
-          const entered = yield* git.run({ _tag: "enter", branch: expected }).pipe(Effect.option);
+          // Through gitStep, so live editors close before the checkout moves.
+          const entered = yield* gitStep(d.deps.game, git, root, {
+            _tag: "enter",
+            branch: expected,
+          }).pipe(
+            Effect.map((r) => r.git),
+            Effect.option,
+          );
           if (Option.isNone(entered) || !entered.value.ok)
             yield* log(`resume: could not enter ${expected}; continuing where HEAD is`);
         }
@@ -1211,9 +1194,10 @@ export const layer = (options: { readonly stateDir: string }) => {
             sha,
             message: `Round ${round}'s build (${what}) is already the game's current build.`,
           } satisfies GameRunRestoreResult;
-        const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
+        // Closed first, so no live editor saves its in-memory scene over the restored files.
         const game = yield* Effect.serviceOption(GameService.GameService);
         if (Option.isSome(game)) yield* game.value.closeLiveEditors(root);
+        const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
         if (!(yield* git.sameBuild(sha)))
           return yield* no(
             "restore-incomplete",
