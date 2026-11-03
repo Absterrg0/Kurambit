@@ -119,6 +119,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gameRunStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameRunSteer]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameRunRound]: AuthOrchestrationReadScope,
+  [WS_METHODS.gameRunPick]: AuthOrchestrationReadScope,
   [WS_METHODS.gameRunRestore]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.gameList]: AuthOrchestrationReadScope,

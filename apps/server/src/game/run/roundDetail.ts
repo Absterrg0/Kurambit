@@ -4,8 +4,12 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
-import type { GameRunRoundDetail, GameRunRoundOutcome } from "@kurambit/contracts";
-import type { RoundRecord, RunState } from "./state.ts";
+import type {
+  GameRunPickDetail,
+  GameRunRoundDetail,
+  GameRunRoundOutcome,
+} from "@kurambit/contracts";
+import type { Picked, RoundRecord, RunState } from "./state.ts";
 
 // Every text is bounded so one expanded round stays a few KB on the wire.
 const TEXT_MAX = 3000;
@@ -56,9 +60,19 @@ const BotFactFile = Schema.Struct({
   final: Schema.Record(Schema.String, Primitive),
   note: Schema.String,
 });
+const EvidenceFile = Schema.Struct({
+  sessions: Schema.Number,
+  actions: Schema.Number,
+  nominalMs: Schema.Number,
+  images: Schema.Number,
+});
 // Older comparison files lack the bot fields; every key is optional.
 const ComparisonFile = Schema.Struct({
+  // The pick names its blind labels' prototype branches.
+  A: Schema.optionalKey(Schema.String),
+  B: Schema.optionalKey(Schema.String),
   playOrder: Schema.optionalKey(Schema.String),
+  evidence: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(EvidenceFile))),
   gate: Schema.optionalKey(Schema.NullOr(Schema.String)),
   reports: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   bot: Schema.optionalKey(
@@ -99,10 +113,13 @@ const SAFE_RUN_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 // The comparison record is named `${branch}-${uuid}.json`; a branch "round-1"
 // must not pick up "round-10-…" or a suffixed "round-1-x-…" branch's file.
-const latestComparison = async (root: string, branch: string) => {
+const latestComparison = async (root: string, branch: string, id?: string) => {
   const dir = NodePath.join(root, ".studio", "comparisons");
   const names = (await NodeFSP.readdir(dir).catch(() => [] as string[])).filter(
-    (name) => name.startsWith(`${branch}-`) && UUID_JSON.test(name.slice(branch.length + 1)),
+    (name) =>
+      name.startsWith(`${branch}-`) &&
+      UUID_JSON.test(name.slice(branch.length + 1)) &&
+      (id === undefined || name === `${branch}-${id}.json`),
   );
   let best: { name: string; at: number } | null = null;
   for (const name of names) {
@@ -131,15 +148,18 @@ const sheetFile = async (root: string, recorded: string | null | undefined) => {
   return real !== null && info?.isFile() === true && info.size > 0 ? real : null;
 };
 
+// With an id, only that comparison record: the pick names the one it came from.
 const comparisonOf = async (
   root: string,
   branch: string,
+  id?: string,
 ): Promise<{
   readonly comparison: GameRunRoundDetail["comparison"];
   readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+  readonly sides: Readonly<Record<string, string>>;
 }> => {
-  const found = await latestComparison(root, branch);
-  if (found === null) return { comparison: null, sheetFiles: [] };
+  const found = await latestComparison(root, branch, id);
+  if (found === null) return { comparison: null, sheetFiles: [], sides: {} };
   const { file } = found;
   const playOrder = file.playOrder ?? "";
   const builds = playOrder.split(",").filter((name) => name.length > 0);
@@ -169,7 +189,17 @@ const comparisonOf = async (
     judges,
     reports: order.flatMap((build) => {
       const text = file.reports?.[build];
-      return text === undefined ? [] : [{ build, text: bounded(text) }];
+      const seen = file.evidence?.[build];
+      const exposure =
+        seen === undefined || seen === null
+          ? null
+          : {
+              sessions: seen.sessions,
+              actions: seen.actions,
+              nominalMs: seen.nominalMs,
+              images: seen.images,
+            };
+      return text === undefined ? [] : [{ build, text: bounded(text), exposure }];
     }),
     bot: file.bot ?? null,
     botWithheld: file.botWithheld ?? null,
@@ -186,7 +216,57 @@ const comparisonOf = async (
     })),
     sheetsShown: file.sheetsShown ?? false,
   };
-  return { comparison, sheetFiles };
+  const sides: Record<string, string> = {};
+  if (file.A !== undefined) sides.A = file.A;
+  if (file.B !== undefined) sides.B = file.B;
+  return { comparison, sheetFiles, sides };
+};
+
+export type PickEvidence = {
+  readonly detail: GameRunPickDetail;
+  readonly sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+};
+
+const PICK_NOTE: Record<Picked["how"], string | null> = {
+  won: null,
+  selected: "The comparator called it a tie, then selected this one to continue from.",
+  "only-booted": "Only one prototype booted, so it was adopted without a comparison.",
+};
+
+/**
+ * The prototype pick's evidence: what the run recorded it became and the one
+ * comparison record it came from, never a record an earlier run left behind.
+ */
+export const readPickEvidence = async (root: string, state: RunState): Promise<PickEvidence> => {
+  const t = state.task;
+  const open = t._tag === "pick";
+  const id = open ? t.comparison : (state.picked?.comparison ?? "");
+  const compared =
+    id === ""
+      ? { comparison: null, sheetFiles: [], sides: {} }
+      : await comparisonOf(root, "pick", id);
+  // While the pick compares, its record is not written yet; the task holds the labels.
+  const sides =
+    compared.comparison === null && open && t.cmp.x.length > 0
+      ? { A: t.cmp.x, B: t.cmp.y }
+      : compared.sides;
+  const picked = open ? null : state.picked;
+  const note =
+    picked !== null
+      ? PICK_NOTE[picked.how]
+      : !open && (state.pickNotes.length > 0 || state.protos.length > 0)
+        ? "No adopted prototype is recorded for this run."
+        : null;
+  return {
+    detail: {
+      sides: Object.entries(sides).map(([build, branch]) => ({ build, branch })),
+      chosen: picked?.branch ?? null,
+      how: picked?.how ?? null,
+      note,
+      comparison: compared.comparison,
+    },
+    sheetFiles: compared.sheetFiles,
+  };
 };
 
 // Bot runs recorded in the game folder between this round's first builder or

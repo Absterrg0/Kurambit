@@ -456,6 +456,10 @@ export const GameSummary = Schema.Struct({
   template: Schema.NullOr(GameTemplateId),
   /** The operation running now, or the last one, for a building label. */
   operation: Schema.NullOr(Schema.Struct({ name: Schema.String, state: GameOperationState })),
+  /** The production run working on this game now: its current step and when the run started. */
+  run: Schema.NullOr(Schema.Struct({ step: Schema.String, startedAt: Schema.String })),
+  /** The game's key art, relative to `root`, for the library card; null when none exists yet. */
+  keyArt: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
 });
 export type GameSummary = typeof GameSummary.Type;

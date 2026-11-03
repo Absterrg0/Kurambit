@@ -13,6 +13,7 @@ import type {
   Judge,
   PairStep,
   Pending,
+  Picked,
   RoleStep,
   Round,
   RunState,
@@ -1190,7 +1191,7 @@ export const applyResult = (
       const pick = (cmp: Compare, chosen: string, phase: "compare" | "adopt"): RunState => ({
         ...s,
         protos,
-        task: { _tag: "pick", phase, cmp, chosen, notes: "" },
+        task: { _tag: "pick", phase, cmp, chosen, notes: "", comparison: "" },
       });
       if (booted.length >= 2) {
         // Labels, play order and report presentation are randomized independently.
@@ -1211,7 +1212,15 @@ export const applyResult = (
             ? `pick ${t.chosen} adopted at ${g!.sha.slice(0, 8)}`
             : `pick ${t.chosen} not adopted (${g!.detail}); staying on best`,
         );
-        return out(afterStage(g!.ok ? { ...s, best: g!.sha } : s, "pick", now));
+        // A lone booted prototype has no comparison; only a tie's selection leaves notes on the task.
+        const picked: Picked = {
+          branch: t.chosen,
+          how: t.cmp.x === "" ? "only-booted" : t.notes !== "" ? "selected" : "won",
+          comparison: t.comparison === "" ? null : t.comparison,
+        };
+        return out(
+          afterStage(g!.ok ? { ...s, best: g!.sha, picked } : { ...s, picked: null }, "pick", now),
+        );
       }
       if (t.phase === "select") {
         if (res.kind === "done") release.push(res.threadId);
@@ -1238,14 +1247,23 @@ export const applyResult = (
         return out({
           ...s,
           pickNotes: `${pickLegend(verdict)}\n${j!.notes}`,
-          task: { ...t, cmp, phase: "adopt", chosen: verdict === "A" ? cmp.x : cmp.y },
+          task: {
+            ...t,
+            cmp,
+            phase: "adopt",
+            chosen: verdict === "A" ? cmp.x : cmp.y,
+            comparison: input.id,
+          },
         });
       // TIE compares honestly, but creation needs a base: the comparator picks
       // which prototype to continue, a selection rather than a win.
       if (verdict === "TIE") {
         // Its comparator makes the selection on the same thread, so its worktree stays.
         release.splice(0, release.length, ...release.filter((thread) => thread !== j!.thread));
-        return out({ ...s, task: { ...t, cmp, phase: "select", notes: j!.notes } });
+        return out({
+          ...s,
+          task: { ...t, cmp, phase: "select", notes: j!.notes, comparison: input.id },
+        });
       }
       logs.push(`pick incomplete: ${move.gate ?? "no verdict"}`);
       return out(afterStage(s, "pick", now));

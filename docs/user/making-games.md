@@ -70,12 +70,15 @@ The **Run** tab in the stage drives the whole build: vision, prototypes, a blind
 then round after round of building, playtesting and judging until a ship review passes, the
 run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
 opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
-line says where the run is; each round in the list says what it tried and whether it was kept,
-tied (inconclusive), rejected or never judged. Open a round to read the evidence: the blind judges'
+line says what the run is doing, how long it has been going and what comes next; the sidebar and
+**Your games** say a game's run is working and on which step. The timeline starts with the
+prototype pick: which prototype the game continued from, the comparator's reasoning and each blind
+player's report and frames. Each round after it says what it tried and whether it was kept, tied
+(inconclusive), rejected or never judged. Open a round to read the evidence: the blind judges'
 verdicts and reasoning, the blind players' reports, the bot's results and video, the tester's note
 and the reviewer's direction. Your agent can read the same with `game_run_round`, so you can ask it
-what happened in a round. Role threads link to the sessions that did the work. **Stop run** ends
-it; rejected work stays on its branch.
+what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
+the work. **Stop run** ends it; rejected work stays on its branch.
 
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
 round**. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as

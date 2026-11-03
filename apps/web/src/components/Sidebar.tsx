@@ -85,6 +85,7 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   CircleDotDashedIcon,
+  CirclePlayIcon,
   ClockIcon,
   FolderIcon,
   GitBranchIcon,
@@ -2104,22 +2105,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       status === "working" || status === "waiting" || status === "approval" || status === "input";
     const progress = gameProgress(gameSummary);
     const progressIcon: Record<GameProgressKind, typeof CircleCheckIcon> = {
+      running: CirclePlayIcon,
       building: CircleDashedIcon,
       idle: CircleDotDashedIcon,
     };
     const progressClass: Record<GameProgressKind, string> = {
+      running: "text-info",
       building: "text-info",
       idle: "text-muted-foreground",
     };
-    const gameStatusLabel =
-      status === "failed"
-        ? "Needs attention"
-        : working
-          ? (topStatus?.label ?? "Working")
-          : progress.label;
-    const GameStatusIcon = status === "failed" ? CircleAlertIcon : progressIcon[progress.kind];
-    const gameStatusClass =
-      status === "failed" ? "text-error" : working ? "text-info" : progressClass[progress.kind];
+    // A live run is what the game is doing; a failed creator turn before it does not stop the run.
+    const needsAttention = status === "failed" && progress.kind !== "running";
+    const gameStatusLabel = needsAttention
+      ? "Needs attention"
+      : working
+        ? (topStatus?.label ?? "Working")
+        : progress.label;
+    const GameStatusIcon = needsAttention ? CircleAlertIcon : progressIcon[progress.kind];
+    const gameStatusClass = needsAttention
+      ? "text-error"
+      : working
+        ? "text-info"
+        : progressClass[progress.kind];
     return (
       <li
         data-thread-item={threadKey}

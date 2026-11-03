@@ -20,6 +20,7 @@ import {
   gameRunRoleLabel,
   type GameCreateInput,
   type GameProjectResult,
+  type GameRunPickDetail,
   type GameRunRestoreResult,
   type GameRunRoundDetail,
   type GameRunStartInput,
@@ -34,6 +35,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
@@ -44,7 +46,8 @@ import { finishExports } from "./run/finish.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
-import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
+import { pickRef, runProgress } from "./run/progress.ts";
+import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
 import { modelFacts } from "./run/modelFacts.ts";
@@ -279,6 +282,14 @@ export class GameRun extends Context.Service<
       },
       GameRunError
     >;
+    /** The prototype pick's evidence; `sheetFiles` are the frame sheets the transport may sign. */
+    readonly pickDetail: (threadId: ThreadId) => Effect.Effect<
+      {
+        detail: GameRunPickDetail;
+        sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>;
+      },
+      GameRunError
+    >;
     /**
      * Makes a kept round's build the game's sources again with a new commit on
      * trunk. Refused while a run is live, mid-round, off trunk or with uncommitted work.
@@ -315,7 +326,10 @@ export const layer = (options: { readonly stateDir: string }) => {
           ),
     );
 
-  const make = Effect.sync(() => {
+  // Game operations are this server's own in-memory record and push, with no
+  // dependencies of their own, so the layer takes them at build time: the run
+  // records its live step there for the library.
+  const build = (operations: GameOperations.GameOperations["Service"]) => {
     // One slot per game root, claimed before runStart's first yield so two
     // starts can never both fork a loop.
     const active = new Map<string, RunSlot>();
@@ -467,7 +481,17 @@ export const layer = (options: { readonly stateDir: string }) => {
       let state = initial;
       const save = (next: State.RunState) => {
         state = next;
-        return persist(root, next, written);
+        return persist(root, next, written).pipe(
+          Effect.andThen(
+            next.ending !== null
+              ? Effect.void
+              : operations.recordRun(root, {
+                  step: currentStep(next),
+                  startedAt: next.startedAt,
+                  threads: next.threads.length,
+                }),
+          ),
+        );
       };
       // Creator notes become run state before the policy sees them; the
       // policy uses them at the next round start and never touches files.
@@ -830,6 +854,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           // Stages a previous run finished are not redone.
           stage: prior === null ? State.legacyResumeStage("starting", rounds.length) : prior.stage,
           pickNotes: prior?.pickNotes ?? "",
+          picked: prior?.picked ?? null,
           lastDirection: prior?.lastDirection ?? "",
           steer: prior?.steer ?? [],
           creator: input.threadId,
@@ -890,7 +915,11 @@ export const layer = (options: { readonly stateDir: string }) => {
         Effect.forkDetach(
           Effect.scoped(drive(drives, state)).pipe(
             Effect.catchCause((cause) => logLine(root, `run loop failed: ${causeText(cause)}`)),
-            Effect.ensuring(Effect.sync(() => active.get(root) === slot && active.delete(root))),
+            Effect.ensuring(
+              Effect.sync(() => active.get(root) === slot && active.delete(root)).pipe(
+                Effect.andThen(operations.recordRun(root, null)),
+              ),
+            ),
           ),
         ).pipe(Effect.tap((forked) => Effect.sync(() => void (slot.fiber = forked)))),
       );
@@ -945,6 +974,9 @@ export const layer = (options: { readonly stateDir: string }) => {
           stage: "none",
           step: null,
           ending: null,
+          startedAt: null,
+          progress: null,
+          pick: null,
           rounds: [],
           steer: [],
           threads: [],
@@ -967,6 +999,9 @@ export const layer = (options: { readonly stateDir: string }) => {
         stage: state.stage,
         step,
         ending,
+        startedAt: state.startedAt,
+        progress: runProgress(state),
+        pick: pickRef(state),
         rounds: state.rounds.map((r) => ({
           round: r.round,
           move: r.move,
@@ -984,8 +1019,8 @@ export const layer = (options: { readonly stateDir: string }) => {
         threads: state.threads,
         message:
           ending === null
-            ? `Run ${state.runId}: ${step ?? state.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`
-            : `Run ${state.runId} ended: ${ending}.${failure}`,
+            ? `${step ?? state.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`
+            : `The run ended: ${ending}.${failure}`,
       } satisfies GameRunStatusResult;
     });
 
@@ -1085,6 +1120,21 @@ export const layer = (options: { readonly stateDir: string }) => {
         videoFile: evidence.videoFile,
         sheetFiles: evidence.sheetFiles,
       };
+    });
+
+    const pickDetail = Effect.fn("GameRun.pickDetail")(function* (threadId: ThreadId) {
+      const { root } = yield* resolveGame(threadId);
+      const loaded = yield* load(root);
+      if (loaded.kind === "none" || loaded.kind === "unreadable")
+        return yield* refuse(
+          "run-pick",
+          root,
+          "no-run",
+          loaded.kind === "none"
+            ? "No run recorded for this game."
+            : "The run record (.studio/run.json) could not be read.",
+        );
+      return yield* Effect.promise(() => readPickEvidence(root, loaded.state));
     });
 
     const restoreRound = Effect.fn("GameRun.restoreRound")(function* (
@@ -1254,10 +1304,16 @@ export const layer = (options: { readonly stateDir: string }) => {
       runStop,
       runSteer,
       roundDetail,
+      pickDetail,
       restoreRound,
       resumeInterrupted,
       toolRole,
     });
-  });
-  return Layer.effect(GameRun, make);
+  };
+  return Layer.effect(
+    GameRun,
+    Effect.gen(function* () {
+      return build(yield* GameOperations.GameOperations);
+    }),
+  );
 };

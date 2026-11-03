@@ -1,11 +1,17 @@
 import { useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { ChevronRightIcon, HistoryIcon } from "lucide-react";
-import type {
-  GameRunRoundDetail,
-  GameRunRoundOutcome,
-  GameRunRoundRef,
-  ScopedThreadRef,
+import {
+  gameRunRoleLabel,
+  type EnvironmentId,
+  type GameRunComparison,
+  type GameRunPickDetail,
+  type GameRunPickHow,
+  type GameRunPickRef,
+  type GameRunRoundDetail,
+  type GameRunRoundOutcome,
+  type GameRunRoundRef,
+  type ScopedThreadRef,
 } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
@@ -19,6 +25,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { exposureLine, formatRunDuration, pickSideLabel } from "./gameRunView.logic";
 
 const OUTCOME: Record<
   GameRunRoundOutcome,
@@ -36,11 +43,6 @@ const firstLine = (text: string): string =>
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0 && !line.startsWith("#")) ?? text.trim();
-
-const duration = (ms: number): string => {
-  const minutes = Math.round(ms / 60_000);
-  return minutes >= 1 ? `${minutes} min` : `${Math.round(ms / 1000)}s`;
-};
 
 /** A text that starts clamped and opens in place. */
 function LongText({ text, className }: { text: string; className?: string }) {
@@ -72,6 +74,114 @@ function Field({ title, children }: { title: string; children: ReactNode }) {
       <h4 className="text-2xs font-medium text-foreground">{title}</h4>
       {children}
     </div>
+  );
+}
+
+const asIs = (text: string): string => text;
+
+/** A blind comparison's evidence: the comparators, the players' reports with their frames, the bots. */
+function ComparisonFields({
+  environmentId,
+  comparison,
+  name = asIs,
+  judgeLabel = asIs,
+  onSheetLoad,
+  onSheetError,
+}: {
+  environmentId: EnvironmentId;
+  comparison: GameRunComparison;
+  /** How a build is named to the reader ("A" → "A · Prototype 2"). */
+  name?: (build: string) => string;
+  judgeLabel?: (order: string) => string;
+  onSheetLoad: () => void;
+  onSheetError: () => void;
+}) {
+  const connection = usePreparedConnection(environmentId);
+  return (
+    <>
+      {comparison.gate ? (
+        <p className="text-2xs text-warning-foreground">
+          Comparison stopped early: {comparison.gate}
+        </p>
+      ) : null}
+      {comparison.judges.some((judge) => judge.reasoning.length > 0) ? (
+        <Field title="Blind comparators">
+          <ul className="space-y-1.5">
+            {comparison.judges.map((judge) => (
+              <li key={judge.order} className="space-y-0.5">
+                <p className="text-2xs">
+                  <span className="font-mono text-muted-foreground">{judgeLabel(judge.order)}</span>{" "}
+                  → <span className="font-medium">{name(judge.verdict)}</span>
+                </p>
+                {judge.reasoning ? <LongText text={judge.reasoning} /> : null}
+              </li>
+            ))}
+          </ul>
+        </Field>
+      ) : null}
+      {comparison.reports.length > 0 ? (
+        <Field
+          title={
+            comparison.sheets.length > 0 && !comparison.sheetsShown
+              ? "Blind play reports (frame sheets were not shown to the judges)"
+              : "Blind play reports"
+          }
+        >
+          <ul className="space-y-1.5">
+            {comparison.reports.map((report) => {
+              const sheet = comparison.sheets.find((each) => each.build === report.build);
+              const sheetUrl =
+                sheet?.url != null && connection._tag === "Some"
+                  ? resolveAssetUrl(connection.value.httpBaseUrl, sheet.url)
+                  : null;
+              return (
+                <li key={report.build} className="space-y-0.5">
+                  <p className="text-2xs font-medium capitalize">{name(report.build)}</p>
+                  {report.exposure !== null ? (
+                    <p className="text-2xs text-muted-foreground">
+                      Saw {exposureLine(report.exposure)}
+                    </p>
+                  ) : null}
+                  <LongText text={report.text} />
+                  {sheetUrl !== null ? (
+                    <a href={sheetUrl} target="_blank" rel="noreferrer">
+                      <img
+                        src={sheetUrl}
+                        alt={`Frames from the ${name(report.build)} player's own play`}
+                        loading="lazy"
+                        width={1612}
+                        height={758}
+                        className="h-auto w-full rounded-md"
+                        onLoad={onSheetLoad}
+                        onError={onSheetError}
+                      />
+                    </a>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Field>
+      ) : null}
+      {comparison.bots.length > 0 || comparison.botWithheld ? (
+        <Field title="Bot facts">
+          <ul className="space-y-0.5">
+            {comparison.bots.map((bot) => (
+              <li key={bot.build} className="text-2xs text-muted-foreground">
+                <span className="font-medium text-foreground capitalize">{name(bot.build)}</span>:
+                ended {bot.ending} after {bot.seconds.toFixed(0)}s{bot.note ? ` (${bot.note})` : ""}{" "}
+                · {JSON.stringify(bot.final)}
+              </li>
+            ))}
+          </ul>
+          {comparison.botWithheld ? (
+            <p className="text-2xs text-muted-foreground">
+              Withheld from the comparators: {comparison.botWithheld}
+            </p>
+          ) : null}
+        </Field>
+      ) : null}
+    </>
   );
 }
 
@@ -172,90 +282,17 @@ function RoundDetail({
       ) : null}
 
       {comparison !== null ? (
-        <>
-          {comparison.gate ? (
-            <p className="text-2xs text-warning-foreground">
-              Comparison stopped early: {comparison.gate}
-            </p>
-          ) : null}
-          {comparison.judges.some((judge) => judge.reasoning.length > 0) ? (
-            <Field title="Blind comparators">
-              <ul className="space-y-1.5">
-                {comparison.judges.map((judge) => (
-                  <li key={judge.order} className="space-y-0.5">
-                    <p className="text-2xs">
-                      <span className="font-mono text-muted-foreground">{judge.order}</span> →{" "}
-                      <span className="font-medium">{judge.verdict}</span>
-                    </p>
-                    {judge.reasoning ? <LongText text={judge.reasoning} /> : null}
-                  </li>
-                ))}
-              </ul>
-            </Field>
-          ) : null}
-          {comparison.reports.length > 0 ? (
-            <Field
-              title={
-                comparison.sheets.length > 0 && !comparison.sheetsShown
-                  ? "Blind play reports (frame sheets were not shown to the judges)"
-                  : "Blind play reports"
-              }
-            >
-              <ul className="space-y-1.5">
-                {comparison.reports.map((report) => {
-                  const sheet = comparison.sheets.find((each) => each.build === report.build);
-                  const sheetUrl =
-                    sheet?.url != null && connection._tag === "Some"
-                      ? resolveAssetUrl(connection.value.httpBaseUrl, sheet.url)
-                      : null;
-                  return (
-                    <li key={report.build} className="space-y-0.5">
-                      <p className="text-2xs font-medium capitalize">{report.build}</p>
-                      <LongText text={report.text} />
-                      {sheetUrl !== null ? (
-                        <a href={sheetUrl} target="_blank" rel="noreferrer">
-                          <img
-                            src={sheetUrl}
-                            alt={`Frames from the ${report.build} player's own play`}
-                            loading="lazy"
-                            width={1612}
-                            height={758}
-                            className="h-auto w-full rounded-md"
-                            onLoad={() => setVideoRetried(false)}
-                            onError={() => {
-                              // Signed links last an hour, like the video's.
-                              if (videoRetried) return;
-                              setVideoRetried(true);
-                              query.refresh();
-                            }}
-                          />
-                        </a>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </Field>
-          ) : null}
-          {comparison.bots.length > 0 || comparison.botWithheld ? (
-            <Field title="Bot facts">
-              <ul className="space-y-0.5">
-                {comparison.bots.map((bot) => (
-                  <li key={bot.build} className="text-2xs text-muted-foreground">
-                    <span className="font-medium text-foreground capitalize">{bot.build}</span>:
-                    ended {bot.ending} after {bot.seconds.toFixed(0)}s
-                    {bot.note ? ` (${bot.note})` : ""} · {JSON.stringify(bot.final)}
-                  </li>
-                ))}
-              </ul>
-              {comparison.botWithheld ? (
-                <p className="text-2xs text-muted-foreground">
-                  Withheld from the comparators: {comparison.botWithheld}
-                </p>
-              ) : null}
-            </Field>
-          ) : null}
-        </>
+        <ComparisonFields
+          environmentId={threadRef.environmentId}
+          comparison={comparison}
+          onSheetLoad={() => setVideoRetried(false)}
+          onSheetError={() => {
+            // Signed links last an hour, like the video's.
+            if (videoRetried) return;
+            setVideoRetried(true);
+            query.refresh();
+          }}
+        />
       ) : null}
 
       {detail.testerNote ? (
@@ -373,11 +410,127 @@ export function GameRunRoundRow({
             {firstLine(round.move)}
           </span>
           <span className="shrink-0 text-2xs text-muted-foreground">
-            {duration(round.durationMs)}
+            {formatRunDuration(round.durationMs)}
           </span>
         </CollapsibleTrigger>
         <CollapsiblePanel animate={false}>
           {open ? <RoundDetail threadRef={threadRef} round={round.round} live={live} /> : null}
+        </CollapsiblePanel>
+      </Collapsible>
+    </li>
+  );
+}
+
+function PickDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const query = useEnvironmentQuery(
+    gameEnvironment.runPick({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
+  // One refetch per failure mints fresh sheet links; a sheet that loaded may retry later.
+  const [retried, setRetried] = useState(false);
+  const detail: GameRunPickDetail | null = query.data;
+  if (detail === null)
+    return (
+      <p className="px-3 pb-3 text-2xs text-muted-foreground">
+        {query.error ?? "Loading the pick's evidence…"}
+      </p>
+    );
+  const name = (build: string) => pickSideLabel(build, detail.sides);
+  return (
+    <div className="space-y-3 border-t border-border px-3 py-3">
+      {detail.sides.length > 0 ? (
+        <Field title="Blind labels">
+          <p className="text-2xs text-muted-foreground">
+            {detail.sides.map((side) => name(side.build)).join(", ")}. The players and comparators
+            saw only the letters.
+          </p>
+        </Field>
+      ) : null}
+      {detail.chosen !== null ? (
+        <p className="text-2xs">
+          The game continued from{" "}
+          <span className="font-medium">{gameRunRoleLabel(detail.chosen)}</span>.
+        </p>
+      ) : null}
+      {detail.note ? <p className="text-2xs text-muted-foreground">{detail.note}</p> : null}
+      {detail.comparison !== null ? (
+        <ComparisonFields
+          environmentId={threadRef.environmentId}
+          comparison={detail.comparison}
+          name={name}
+          judgeLabel={() => "Comparator"}
+          onSheetLoad={() => setRetried(false)}
+          onSheetError={() => {
+            if (retried) return;
+            setRetried(true);
+            query.refresh();
+          }}
+        />
+      ) : detail.note === null ? (
+        <p className="text-2xs text-muted-foreground">
+          The blind players' reports and the comparator's reasoning appear here once the pick is
+          judged.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const PICK_HOW: Record<GameRunPickHow, string> = {
+  won: "won",
+  selected: "selected after a tie",
+  "only-booted": "adopted, the only one that booted",
+};
+
+const PICK_PHASE: Record<GameRunPickRef["phase"], string> = {
+  prototypes: "Building prototypes",
+  comparing: "Blind comparison",
+  done: "Picked",
+};
+
+/** The prototype pick, shaped like a round: a summary line that opens to its evidence. */
+export function GameRunPickRow({
+  threadRef,
+  pick,
+}: {
+  threadRef: ScopedThreadRef;
+  pick: GameRunPickRef;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary =
+    pick.chosen !== null
+      ? `${gameRunRoleLabel(pick.chosen)} ${PICK_HOW[pick.how ?? "won"]}`
+      : pick.phase === "done"
+        ? "No adopted prototype recorded"
+        : "Two prototypes, played blind";
+  return (
+    <li className="rounded-lg border border-border bg-card">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left">
+          <ChevronRightIcon
+            className={cn("size-3.5 shrink-0 text-muted-foreground", open && "rotate-90")}
+            aria-hidden="true"
+          />
+          <span className="shrink-0 text-xs font-medium">Prototype pick</span>
+          <Badge
+            size="sm"
+            variant={pick.phase !== "done" ? "info" : pick.chosen !== null ? "success" : "outline"}
+          >
+            {pick.phase === "done" && pick.chosen === null
+              ? "Not recorded"
+              : PICK_PHASE[pick.phase]}
+          </Badge>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{summary}</span>
+          {pick.durationMs !== null ? (
+            <span className="shrink-0 text-2xs text-muted-foreground">
+              {formatRunDuration(pick.durationMs)}
+            </span>
+          ) : null}
+        </CollapsibleTrigger>
+        <CollapsiblePanel animate={false}>
+          {open ? <PickDetail threadRef={threadRef} /> : null}
         </CollapsiblePanel>
       </Collapsible>
     </li>

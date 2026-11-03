@@ -7,7 +7,7 @@ import * as GameService from "./game/GameService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameToolchain from "./game/GameToolchain.ts";
 import * as GamePackageDownload from "./game/GamePackageDownload.ts";
-import { OrchestrationDispatchCommandError } from "@kurambit/contracts";
+import { OrchestrationDispatchCommandError, type GameRunComparison } from "@kurambit/contracts";
 import * as Crypto from "effect/Crypto";
 
 import * as DateTime from "effect/DateTime";
@@ -232,6 +232,34 @@ import {
   withUsageLimitsCommands,
 } from "@kurambit/shared/usageLimits";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
+
+// Run evidence streams through a capability minted here: the asset route
+// serves that exact file (path and inode), with range requests for video.
+// Read scope is enough because the client never names the path: the run
+// service resolves it inside the game folder. A file that cannot be signed is just absent.
+const signRunFile = (threadId: ThreadId, path: string) =>
+  issueAssetUrl({ resource: { _tag: "media-file", threadId, path } }).pipe(
+    Effect.map((asset): string | null => asset.relativeUrl),
+    Effect.orElseSucceed(() => null),
+  );
+
+// The frame sheets a blind comparison's players made, signed the same way.
+const signComparisonSheets = (
+  threadId: ThreadId,
+  comparison: GameRunComparison | null,
+  sheetFiles: ReadonlyArray<{ readonly build: string; readonly path: string }>,
+) =>
+  comparison === null
+    ? Effect.succeed(null)
+    : Effect.map(
+        Effect.forEach(comparison.sheets, (sheet) => {
+          const file = sheetFiles.find((each) => each.build === sheet.build);
+          return file === undefined
+            ? Effect.succeed(sheet)
+            : Effect.map(signRunFile(threadId, file.path), (url) => ({ ...sheet, url }));
+        }),
+        (sheets) => ({ ...comparison, sheets }),
+      );
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
@@ -1799,40 +1827,41 @@ const layerWsRpc = (
                   cause,
                 }),
             ),
-            // Like a package download, the video streams through a capability
-            // minted here: the asset route serves that exact file (path and
-            // inode) with range requests. A video that cannot be signed is just absent.
-            // Read scope is enough to mint it because the client never names
-            // the path: roundDetail builds it from the run id and resolves it
-            // inside the game's builds/logs.
-            Effect.flatMap(({ detail, videoFile, sheetFiles }) => {
-              const sign = (path: string) =>
-                issueAssetUrl({ resource: { _tag: "media-file", threadId, path } }).pipe(
-                  Effect.map((asset): string | null => asset.relativeUrl),
-                  Effect.orElseSucceed(() => null),
-                );
-              return Effect.gen(function* () {
+            // roundDetail builds the video path from the run id inside builds/logs.
+            Effect.flatMap(({ detail, videoFile, sheetFiles }) =>
+              Effect.gen(function* () {
                 const video = detail.video;
                 const videoUrl =
-                  videoFile === null || video === null ? null : yield* sign(videoFile);
-                const comparison = detail.comparison;
-                // The frame sheets the blind comparators judged from, signed the same way.
-                const sheets =
-                  comparison === null
-                    ? []
-                    : yield* Effect.forEach(comparison.sheets, (sheet) => {
-                        const file = sheetFiles.find((each) => each.build === sheet.build);
-                        return file === undefined
-                          ? Effect.succeed(sheet)
-                          : sign(file.path).pipe(Effect.map((url) => ({ ...sheet, url })));
-                      });
+                  videoFile === null || video === null
+                    ? null
+                    : yield* signRunFile(threadId, videoFile);
                 return {
                   ...detail,
                   video: video === null || videoUrl === null ? video : { ...video, url: videoUrl },
-                  comparison: comparison === null ? null : { ...comparison, sheets },
+                  comparison: yield* signComparisonSheets(threadId, detail.comparison, sheetFiles),
                 };
-              });
-            }),
+              }),
+            ),
+          ),
+        // The pick's frame sheets are signed exactly like a round's.
+        [WS_METHODS.gameRunPick]: ({ threadId }) =>
+          gameRun.pickDetail(threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-pick",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+            Effect.flatMap(({ detail, sheetFiles }) =>
+              Effect.map(
+                signComparisonSheets(threadId, detail.comparison, sheetFiles),
+                (comparison) => ({ ...detail, comparison }),
+              ),
+            ),
           ),
         [WS_METHODS.gameRunRestore]: ({ threadId, round }) =>
           gameRun.restoreRound(threadId, round).pipe(

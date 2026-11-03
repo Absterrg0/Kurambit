@@ -1,6 +1,6 @@
 import type { GameSummary } from "@kurambit/contracts";
 
-export type GameProgressKind = "building" | "idle";
+export type GameProgressKind = "running" | "building" | "idle";
 
 export interface GameProgress {
   readonly kind: GameProgressKind;
@@ -11,10 +11,17 @@ export interface GameProgress {
 }
 
 /**
- * The library's status line. A running operation wins over everything else
- * because it is what the game is doing right now; otherwise the game is idle.
+ * The library's status line. A live production run wins: it is what the game
+ * is doing for hours, while its creator chat sits idle. A running operation
+ * comes next; otherwise the game is idle.
  */
-export const gameProgress = (summary: Pick<GameSummary, "operation">): GameProgress => {
+export const gameProgress = (summary: Pick<GameSummary, "operation" | "run">): GameProgress => {
+  if (summary.run !== null)
+    return {
+      kind: "running",
+      label: `Running · ${summary.run.step}`,
+      detail: `The production run is working on this game: ${summary.run.step}.`,
+    };
   const operation = summary.operation;
   if (operation?.state === "running")
     return {

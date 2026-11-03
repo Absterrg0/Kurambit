@@ -66,6 +66,34 @@ export const GameRunRoundRef = Schema.Struct({
 });
 export type GameRunRoundRef = typeof GameRunRoundRef.Type;
 
+/** The run's pipeline, in order; `GameRunStatusResult.progress.stage` indexes it. */
+export const GAME_RUN_STAGES = [
+  "Vision",
+  "Prototypes",
+  "Blind pick",
+  "Plan",
+  "Art",
+  "First build",
+  "Rounds",
+] as const;
+
+/**
+ * How the pick chose the prototype the game became: a comparator's win, its
+ * selection after a tie, or the only prototype that booted.
+ */
+export const GameRunPickHow = Schema.Literals(["won", "selected", "only-booted"]);
+export type GameRunPickHow = typeof GameRunPickHow.Type;
+
+/** The prototype pick as a timeline entry; its evidence is read with `game.runPick`. */
+export const GameRunPickRef = Schema.Struct({
+  phase: Schema.Literals(["prototypes", "comparing", "done"]),
+  /** The prototype branch the game continued from, null while open or when none was adopted. */
+  chosen: Schema.NullOr(Schema.String),
+  how: Schema.NullOr(GameRunPickHow),
+  durationMs: Schema.NullOr(Schema.Number),
+});
+export type GameRunPickRef = typeof GameRunPickRef.Type;
+
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
   runId: Schema.NullOr(Schema.String),
@@ -73,6 +101,13 @@ export const GameRunStatusResult = Schema.Struct({
   /** What the run is doing now (the role or phase in flight), null when no run is recorded. */
   step: Schema.NullOr(Schema.String),
   ending: Schema.NullOr(Schema.String),
+  /** When this run started (ISO), null when no run is recorded. */
+  startedAt: Schema.NullOr(Schema.String),
+  /** Where the run stands in GAME_RUN_STAGES and what comes after the current step. */
+  progress: Schema.NullOr(
+    Schema.Struct({ stage: Schema.Number, next: Schema.NullOr(Schema.String) }),
+  ),
+  pick: Schema.NullOr(GameRunPickRef),
   rounds: Schema.Array(GameRunRoundRef),
   /** Creator notes waiting for the next round. */
   steer: Schema.Array(Schema.String),
@@ -92,6 +127,56 @@ const GameRunBotFinal = Schema.Record(
   Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
 );
 
+/** How much of a build one blind player saw: sessions, actions, input time and frames. */
+export const GameRunExposure = Schema.Struct({
+  sessions: Schema.Number,
+  actions: Schema.Number,
+  nominalMs: Schema.Number,
+  images: Schema.Number,
+});
+export type GameRunExposure = typeof GameRunExposure.Type;
+
+/** One blind comparison of two builds, as the run recorded it. */
+export const GameRunComparison = Schema.Struct({
+  /** Why the comparison stopped before the comparators, if it did. */
+  gate: Schema.NullOr(Schema.String),
+  playOrder: Schema.String,
+  /** Each comparator's full answer, in the order it was asked. */
+  judges: Schema.Array(
+    Schema.Struct({ order: Schema.String, verdict: Schema.String, reasoning: Schema.String }),
+  ),
+  /** The blind players' reports; the players never knew which build they had. */
+  reports: Schema.Array(
+    Schema.Struct({
+      build: Schema.String,
+      text: Schema.String,
+      exposure: Schema.NullOr(GameRunExposure),
+    }),
+  ),
+  bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: Schema.String })),
+  botWithheld: Schema.NullOr(Schema.String),
+  bots: Schema.Array(
+    Schema.Struct({
+      build: Schema.String,
+      ending: Schema.String,
+      seconds: Schema.Number,
+      final: GameRunBotFinal,
+      note: Schema.String,
+    }),
+  ),
+  /** Each blind player's frame sheet, by build; `url` is a short-lived signed path. */
+  sheets: Schema.Array(
+    Schema.Struct({
+      build: Schema.String,
+      file: Schema.String,
+      url: Schema.NullOr(Schema.String),
+    }),
+  ),
+  /** Whether the comparators were shown the sheets (only when both players had one). */
+  sheetsShown: Schema.Boolean,
+});
+export type GameRunComparison = typeof GameRunComparison.Type;
+
 /**
  * One round's evidence, read on demand from the game's .studio folder. Long
  * texts are bounded server-side and end in "…" when cut.
@@ -107,40 +192,7 @@ export const GameRunRoundDetail = Schema.Struct({
   steer: Schema.Array(Schema.String),
   verdicts: GameRunRoundRef.fields.verdicts,
   /** The blind comparison: null when the round never reached one. */
-  comparison: Schema.NullOr(
-    Schema.Struct({
-      /** Why the comparison stopped before the comparators, if it did. */
-      gate: Schema.NullOr(Schema.String),
-      playOrder: Schema.String,
-      /** Each comparator's full answer, in the order it was asked. */
-      judges: Schema.Array(
-        Schema.Struct({ order: Schema.String, verdict: Schema.String, reasoning: Schema.String }),
-      ),
-      /** The blind players' reports; the players never knew which build they had. */
-      reports: Schema.Array(Schema.Struct({ build: Schema.String, text: Schema.String })),
-      bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: Schema.String })),
-      botWithheld: Schema.NullOr(Schema.String),
-      bots: Schema.Array(
-        Schema.Struct({
-          build: Schema.String,
-          ending: Schema.String,
-          seconds: Schema.Number,
-          final: GameRunBotFinal,
-          note: Schema.String,
-        }),
-      ),
-      /** Each blind player's frame sheet, by build; `url` is a short-lived signed path. */
-      sheets: Schema.Array(
-        Schema.Struct({
-          build: Schema.String,
-          file: Schema.String,
-          url: Schema.NullOr(Schema.String),
-        }),
-      ),
-      /** Whether the comparators were shown the sheets (only when both players had one). */
-      sheetsShown: Schema.Boolean,
-    }),
-  ),
+  comparison: Schema.NullOr(GameRunComparison),
   testerNote: Schema.NullOr(Schema.String),
   reviewerNotes: Schema.NullOr(Schema.String),
   /** The reviewer's direction for the round after this one. */
@@ -167,6 +219,21 @@ export const GameRunRoundDetail = Schema.Struct({
   current: Schema.Boolean,
 });
 export type GameRunRoundDetail = typeof GameRunRoundDetail.Type;
+
+export const GameRunPickInput = Schema.Struct({ threadId: ThreadId });
+export type GameRunPickInput = typeof GameRunPickInput.Type;
+
+/** The prototype pick's evidence: which prototype each blind label was and why one won. */
+export const GameRunPickDetail = Schema.Struct({
+  /** Blind label to prototype branch ("A" → "proto-1"). */
+  sides: Schema.Array(Schema.Struct({ build: Schema.String, branch: Schema.String })),
+  chosen: Schema.NullOr(Schema.String),
+  how: Schema.NullOr(GameRunPickHow),
+  /** How the choice was made when it was not a plain comparator win. */
+  note: Schema.NullOr(Schema.String),
+  comparison: Schema.NullOr(GameRunComparison),
+});
+export type GameRunPickDetail = typeof GameRunPickDetail.Type;
 
 export const GameRunRestoreInput = GameRunRoundInput;
 export type GameRunRestoreInput = typeof GameRunRestoreInput.Type;
