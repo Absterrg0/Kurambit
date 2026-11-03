@@ -618,7 +618,17 @@ export const layer = (options: { readonly stateDir: string }) => {
                     ({
                       kind: "boot",
                       ok: r.ok,
-                      detail: r.ok ? "boot clean" : "check failed",
+                      // The run log says why a build was rejected, not only that it was.
+                      detail: r.ok
+                        ? "boot clean"
+                        : `check failed: ${
+                            r.errors
+                              .slice(0, 3)
+                              .map((e) =>
+                                `${e.file ? `${e.file}: ` : ""}${e.message}`.slice(0, 200),
+                              )
+                              .join("; ") || "no error lines (see the check log)"
+                          }`,
                     }) as const,
                 ),
                 Effect.catchTags({
