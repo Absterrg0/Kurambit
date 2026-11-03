@@ -263,6 +263,9 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     yield* ctx.attach(threadId, runId);
   }
   const live = threadId;
+  // The sample budget is enforced where input happens: an act past it is
+  // refused, which costs nothing, where passing it would void the sample.
+  if (step.inputCapMs > 0) yield* deps.game.limitExploreInput(live, step.inputCapMs);
 
   type Waited =
     | { readonly kind: "run"; readonly run: OrchestrationV2Run | null; readonly timedOut: boolean }

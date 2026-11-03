@@ -167,6 +167,11 @@ export class GameService extends Context.Service<
       GameOperationError
     >;
     /**
+     * Caps the explore input this thread may use across all its sessions;
+     * starts and acts past it are refused with the reason.
+     */
+    readonly limitExploreInput: (threadId: ThreadId, totalMs: number) => Effect.Effect<void>;
+    /**
      * Tiles an even selection of the frames this thread's explore sessions kept
      * into one JPEG at `output` (absolute). Returns how many frames it drew; 0
      * draws nothing.
@@ -1394,18 +1399,30 @@ const make = Effect.gen(function* () {
   // Weak players held ~0.8 s per step and ran out of acts at 13-30 s of a
   // 60 s session even with acts-left shown; the seconds per remaining act
   // that would spend the rest is the number they can act on.
+  // Per-thread input budgets across sessions (a blind sample's), set by the run.
+  const exploreInputCaps = new Map<string, number>();
+  const inputUsedBefore = (threadId: ThreadId, sessionId: string | null) => {
+    const record = exploreEvidence.get(String(threadId));
+    return record === undefined ? 0 : ExploreEvidence.totals(record, sessionId ?? "").nominalMs;
+  };
   const explorePace = (session: ExploreSession) => {
     const s = (ms: number) => (ms / 1000).toFixed(1);
     const actsLeft = GAME_EXPLORE_BOUNDS.maxCalls - session.calls;
     const stepsLeft = GAME_EXPLORE_BOUNDS.maxTotalSteps - session.totalSteps;
-    const leftMs = GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs;
-    const record = exploreEvidence.get(String(session.threadId));
-    const earlierMs =
-      record === undefined ? 0 : ExploreEvidence.totals(record, session.id).nominalMs;
+    const earlierMs = inputUsedBefore(session.threadId, session.id);
+    const cap = exploreInputCaps.get(String(session.threadId));
+    const leftMs = Math.min(
+      GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs,
+      cap === undefined ? Number.POSITIVE_INFINITY : cap - earlierMs - session.totalNominalMs,
+    );
     const used =
       `input used: ${s(session.totalNominalMs)} s of this session's ` +
       `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s` +
-      (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
+      (cap !== undefined
+        ? ` (${s(earlierMs + session.totalNominalMs)} s of your ${s(cap)} s across sessions)`
+        : earlierMs > 0
+          ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)`
+          : "");
     if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0) return `${used}; this session is spent.`;
     const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
     return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
@@ -2292,6 +2309,19 @@ ${built.result.message}`.slice(-3000),
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
+      const threadCap = exploreInputCaps.get(String(threadId));
+      // From disk, not the cache: right after a restart the cache is cold.
+      const usedBefore =
+        threadCap === undefined
+          ? 0
+          : ExploreEvidence.totals(
+              yield* evidenceLock.withPermits(1)(loadEvidence(String(threadId), root)),
+            ).nominalMs;
+      if (threadCap !== undefined && usedBefore >= threadCap - 500)
+        return yield* exploreInvalid(
+          root,
+          `Your ${threadCap / 1000} s input budget across sessions is spent; do not start another session. Write your notes now.`,
+        );
       const unity = (yield* projects.read(root)).engine.name === "unity" && input.target !== "web";
       if (unity) {
         const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
@@ -2736,6 +2766,19 @@ ${built.result.message}`.slice(-3000),
               session.id,
               `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs}ms total nominal time; close it and start a new exploration.`,
             );
+          const threadCap = exploreInputCaps.get(String(session.threadId));
+          if (threadCap !== undefined) {
+            const record = yield* evidenceLock.withPermits(1)(
+              loadEvidence(String(session.threadId), session.root),
+            );
+            const usedMs =
+              ExploreEvidence.totals(record, session.id).nominalMs + session.totalNominalMs;
+            if (usedMs + nominalMs > threadCap)
+              return yield* exploreInvalid(
+                session.id,
+                `This act would pass your ${threadCap / 1000} s input budget across sessions (${(usedMs / 1000).toFixed(1)} s used, ${((threadCap - usedMs) / 1000).toFixed(1)} s left); use a shorter act, or close the session and write your notes.`,
+              );
+          }
           // Headless native acts persist no picture, so the image bound only
           // covers acts that actually keep one. Web acts always keep one.
           const keepsImage =
@@ -2991,6 +3034,10 @@ ${built.result.message}`.slice(-3000),
         yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
       return ExploreEvidence.totals(yield* threadEvidence(threadId, root));
     }),
+    limitExploreInput: (threadId, totalMs) =>
+      Effect.sync(() => {
+        exploreInputCaps.set(String(threadId), totalMs);
+      }),
     exploreSheet: Effect.fn("GameService.exploreSheet")(function* (threadId, output) {
       const root = yield* projects.resolve(threadId);
       const kept = ExploreEvidence.frames(yield* threadEvidence(threadId, root));

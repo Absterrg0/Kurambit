@@ -206,6 +206,7 @@ const role = (id: number, spec: RoleSpec): Step => ({
   bots: false,
   release: false,
   sheet: "",
+  inputCapMs: 0,
   attached: null,
   ...spec,
 });
@@ -407,6 +408,7 @@ const compareStep = (
         at,
         prompt: Roles.samplePlay(c.question, sampleFile(s)),
         capMs: CAP.judge,
+        inputCapMs: Roles.SAMPLE_INPUT_MS,
       });
       return { cmp: { ...c, samples: [...c.samples, s] }, step, logs: [] };
     }
@@ -421,6 +423,7 @@ const compareStep = (
           at,
           prompt: Roles.sampleMore(Math.round((s.evidence?.nominalMs ?? 0) / 1000), sampleFile(s)),
           capMs: CAP.judge,
+          inputCapMs: Roles.SAMPLE_INPUT_MS,
         }),
         logs: [],
       };
