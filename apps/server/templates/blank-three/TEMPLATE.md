@@ -82,7 +82,7 @@ demo needs, so build the game, not the menus.
   gamepad A), `action` (J, Enter, left click on the canvas, gamepad X), `alt`
   (K, Shift, gamepad B) and the shell's `pause` (Esc, P, Start).
 - `main.js` changes them in one place:
-  `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad: ["rb"] }, jump: null };`
+  `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad: ["rb"] }, alt: null };`
   adds `dash` (keys are `KeyboardEvent.code` values; pad names are listed at
   the top of `controls.js`), gives a default new bindings when you name it,
   and drops one the game never reads with `null`, so Settings > Controls

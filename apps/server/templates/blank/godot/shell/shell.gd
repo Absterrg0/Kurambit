@@ -496,8 +496,10 @@ func _rebind(action: String, code: int) -> String:
 
 
 func _reset_controls() -> void:
-	InputMap.load_from_project_settings()
-	_add_menu_pad_buttons()
+	# Only the listed actions' keys: reloading the whole InputMap would also
+	# drop actions the game added at runtime.
+	for action in _control_actions():
+		_set_keys(action, _default_keys(action))
 	if _config.has_section("controls"):
 		_config.erase_section("controls")
 	_config.save(SETTINGS_FILE)
@@ -508,12 +510,7 @@ func _reset_controls() -> void:
 ## Stores only the actions whose keys differ from project.godot's.
 func _save_controls() -> void:
 	for action in _control_actions():
-		var defaults: Array = []
-		var declared: Variant = ProjectSettings.get_setting("input/" + action)
-		if declared is Dictionary:
-			for event in (declared as Dictionary).get("events", []):
-				if event is InputEventKey:
-					defaults.append(_code_of(event))
+		var defaults := _default_keys(action)
 		var keys := _keys_of(action)
 		if keys == defaults:
 			if _config.has_section_key("controls", action):
@@ -521,6 +518,16 @@ func _save_controls() -> void:
 		else:
 			_config.set_value("controls", action, keys)
 	_config.save(SETTINGS_FILE)
+
+
+func _default_keys(action: String) -> Array:
+	var defaults: Array = []
+	var declared: Variant = ProjectSettings.get_setting("input/" + action)
+	if declared is Dictionary:
+		for event in (declared as Dictionary).get("events", []):
+			if event is InputEventKey:
+				defaults.append(_code_of(event))
+	return defaults
 
 
 func _keys_of(action: String) -> Array:

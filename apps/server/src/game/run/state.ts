@@ -115,29 +115,83 @@ export type GitOp = typeof GitOp.Type;
 
 // The decider the tester's bot ran with. Older run.json files have none: policy.
 const BotDecider = GameBotDecider.pipe(Schema.withDecodingDefaultKey(Effect.succeed("policy")));
+const BotFinal = Schema.Record(
+  Schema.String,
+  Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
+);
+
+// One scripted bot run on one build, in a checkout of its own at that sha.
+const BotStep = Schema.Struct({
+  kind: Schema.Literal("bot"),
+  id: Schema.Number,
+  sha: Schema.String,
+  file: Schema.String,
+  decider: BotDecider,
+  seconds: Schema.Number,
+});
+
+// How a half of a pair finished, kept in run.json until its partner finishes
+// too, so a resume never re-runs a half that already played.
+const HalfResult = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("done"),
+    threadId: ThreadId,
+    text: Schema.String,
+    files: Schema.Record(Schema.String, Schema.String),
+    evidence: Schema.NullOr(Evidence),
+    timedOut: Schema.Boolean,
+    budgetCut: Schema.Boolean,
+    elapsedMs: Schema.Number,
+    sourceBefore: Schema.String,
+    sourceAfter: Schema.String,
+    botsBefore: Schema.Number,
+    botsAfter: Schema.Number,
+    bot: Schema.NullOr(Schema.Struct({ file: Schema.String, decider: GameBotDecider })),
+    sheet: Schema.String,
+  }),
+  Schema.Struct({ kind: Schema.Literal("failed"), reason: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("bot"),
+    fact: Schema.Struct({
+      ending: Schema.String,
+      seconds: Schema.Number,
+      final: BotFinal,
+      perf: Schema.optionalKey(GameBotPerf),
+      note: Schema.String,
+    }),
+  }),
+]);
+export type HalfResult = typeof HalfResult.Type;
+
+// A blind comparison's two independent steps, run at once: both builds'
+// samples, or the bot on both builds. Halves are in x-then-y order, which is
+// the order their results apply in; their ids follow the play order, so no
+// id or launch order tells a player which build it has.
+const PairStep = Schema.Struct({
+  kind: Schema.Literal("pair"),
+  id: Schema.Number,
+  halves: Schema.Array(Schema.Union([RoleStep, BotStep])),
+  results: Schema.Array(Schema.Struct({ id: Schema.Number, result: HalfResult })),
+});
 
 const Step = Schema.Union([
   RoleStep,
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
   Schema.Struct({ kind: Schema.Literal("facts"), id: Schema.Number }),
-  // One scripted bot run on one build, in a checkout of its own at that sha.
-  Schema.Struct({
-    kind: Schema.Literal("bot"),
-    id: Schema.Number,
-    sha: Schema.String,
-    file: Schema.String,
-    decider: BotDecider,
-    seconds: Schema.Number,
-  }),
+  BotStep,
   Schema.Struct({
     kind: Schema.Literal("note"),
     id: Schema.Number,
     files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
   }),
+  PairStep,
 ]);
 export type Step = typeof Step.Type;
 export type RoleStep = typeof RoleStep.Type;
+export type BotStep = typeof BotStep.Type;
+export type PairStep = typeof PairStep.Type;
+export type Half = PairStep["halves"][number];
 
 const Block = Schema.Struct({
   tag: Schema.String,
@@ -161,6 +215,9 @@ const Sample = Schema.Struct({
   evidence: Schema.NullOr(Evidence),
   // The sheet of this player's own frames, game-relative; "" when it has none.
   sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // True once this sample was given its one extra play turn (the floor's, or
+  // catching up with the other build's exposure).
+  extra: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type Sample = typeof Sample.Type;
 
@@ -184,10 +241,7 @@ const BotFact = Schema.Struct({
   side: Side,
   ending: Schema.String,
   seconds: Schema.Number,
-  final: Schema.Record(
-    Schema.String,
-    Schema.Union([Schema.Number, Schema.Boolean, Schema.String, Schema.Null]),
-  ),
+  final: BotFinal,
   perf: Schema.optionalKey(GameBotPerf),
   note: Schema.String,
 });

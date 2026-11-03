@@ -126,7 +126,9 @@ comparators run, the tester's last play bot plays both builds in fresh worktrees
 time; its ending and final probe values sit beside each anonymous report as facts. The tester wrote
 that bot against the candidate, and a bot that fails on only one build would name it, so the
 comparators get bot facts only when the bot ran on both builds; otherwise neither report has them,
-and run.log and the comparison record say why. A failing bot never drops the round. Comparators
+and run.log and the comparison record say why. A failing bot never drops the round. A comparison's two plays,
+and its two bot runs, run at once (Unity's one at a time, behind its one editor); that holds only
+because explore sessions, bot runs and game operations are keyed by checkout root, not by game. Comparators
 never work in the game folder, where run.json and run.log map every sample to its sha: each gets a
 worktree of its own at one parentless empty-tree commit, holding only its two frame sheets under
 neutral names, and writes `.compare/verdict.md`; the root keeps the write-ups once all verdicts are
@@ -143,7 +145,9 @@ harness makes these true regardless of what the model says: a separate tester pl
 fresh sessions review it, blind compare reverts the loser, and the clock enforces bold moves in
 every round. Craft advice lives in the skill pack under `apps/server/templates/studio/` (plus `three.md`
 for the browser lane, `unity.md` for Unity) and the bot
-kit under `apps/server/templates/bot-kit/`; both are copied into each game, not the product. `GameCreateInput.engine`
+kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product. A
+resume keeps the run's copy, so every build of one run is made and judged under the same guidance and no
+build's commit carries harness text. `GameCreateInput.engine`
 (`godot` default, `three` for the browser lane, `unity`) picks the starter template (`blank` /
 `blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
 project with vendored three.js r0.180.0, MIT / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.

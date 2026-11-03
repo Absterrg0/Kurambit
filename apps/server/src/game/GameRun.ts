@@ -8,6 +8,7 @@ import * as NodeURL from "node:url";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -144,7 +145,7 @@ const parseSteer = (text: string): string[] =>
 
 const currentStep = (state: State.RunState): string => {
   const t = state.task;
-  const step = state.inFlight;
+  const step = state.inFlight?.kind === "pair" ? state.inFlight.halves[0] : state.inFlight;
   if (step?.kind === "role") {
     const label = gameRunRoleLabel(step.role);
     return t._tag === "round" && !label.includes("round") ? `Round ${t.n} · ${label}` : label;
@@ -221,6 +222,7 @@ const selectionFor = (current: ModelSelection, state: State.RunState): ModelSele
 };
 
 const describe = (step: State.Step): string => {
+  if (step.kind === "pair") return step.halves.map(describe).join(" | ");
   if (step.kind === "role")
     return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}${step.attached === null ? "" : " (reattach)"}`;
   if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
@@ -486,27 +488,52 @@ export const layer = (options: { readonly stateDir: string }) => {
         id: NodeCrypto.randomUUID(),
       });
 
+      // A pair's two halves write the in-flight step at once; each write reads
+      // the state only after it holds this lock, so neither loses the other's.
+      const inFlightLock = Semaphore.makeUnsafe(1);
       // The role records its thread and run before waiting, so a resumed
       // driver reattaches instead of launching a second thread.
-      const attach = (threadId: ThreadId, runId: RunId) =>
-        Effect.gen(function* () {
-          const step = state.inFlight;
-          if (step === null || step.kind !== "role") return;
-          const fresh = !state.threads.some((t) => t.threadId === threadId);
-          if (fresh) yield* markRoleThread(threadId);
-          yield* save({
-            ...state,
-            inFlight: { ...step, attached: { threadId, runId } },
-            threads: fresh
-              ? [
-                  ...state.threads,
-                  { role: step.role, threadId, startedAt: new Date().toISOString() },
-                ]
-              : state.threads,
-          });
-        });
+      const attach = (stepId: number) => (threadId: ThreadId, runId: RunId) =>
+        inFlightLock.withPermits(1)(
+          Effect.gen(function* () {
+            const step = state.inFlight;
+            const halves = step === null ? [] : step.kind === "pair" ? step.halves : [step];
+            const role = halves.find(
+              (h): h is State.RoleStep => h.kind === "role" && h.id === stepId,
+            );
+            if (step === null || role === undefined) return;
+            const attached = { ...role, attached: { threadId, runId } };
+            const fresh = !state.threads.some((t) => t.threadId === threadId);
+            if (fresh) yield* markRoleThread(threadId);
+            yield* save({
+              ...state,
+              inFlight:
+                step.kind === "pair"
+                  ? { ...step, halves: step.halves.map((h) => (h.id === stepId ? attached : h)) }
+                  : attached,
+              threads: fresh
+                ? [
+                    ...state.threads,
+                    { role: role.role, threadId, startedAt: new Date().toISOString() },
+                  ]
+                : state.threads,
+            });
+          }),
+        );
+      // A finished half is saved at once, so a resume never plays it again.
+      const recordHalf = (id: number, result: State.HalfResult) =>
+        inFlightLock.withPermits(1)(
+          Effect.suspend(() => {
+            const step = state.inFlight;
+            if (step?.kind !== "pair") return Effect.void;
+            return save({
+              ...state,
+              inFlight: { ...step, results: [...step.results, { id, result }] },
+            });
+          }),
+        );
 
-      const execute = (step: State.Step) => {
+      const execute = (step: Exclude<State.Step, State.PairStep>) => {
         switch (step.kind) {
           case "role":
             return Effect.gen(function* () {
@@ -538,7 +565,7 @@ export const layer = (options: { readonly stateDir: string }) => {
                   selection: d.selection,
                   runtimeMode: d.runtimeMode,
                   budgetEndsAt: state.budgetEndsAt,
-                  attach,
+                  attach: attach(step.id),
                   log,
                 },
                 { ...step, prompt },
@@ -625,6 +652,38 @@ export const layer = (options: { readonly stateDir: string }) => {
         }
       };
 
+      // Both halves run at once, each in its own worktree; one failing never
+      // cancels the other, and a stop interrupts both. The pair lands only once
+      // every half has finished; until then it stays in flight with the
+      // results it has, so a resume runs just the rest.
+      const runPair = (pair: State.PairStep) =>
+        Effect.gen(function* () {
+          const ended: Array<Extract<Policy.StepResult, { kind: "ended" }>> = [];
+          const exits = yield* Effect.forEach(
+            // Launched in play order (ids follow the coin), so the candidate
+            // never systematically starts first and wins the boot lock.
+            pair.halves
+              .filter((half) => !pair.results.some((r) => r.id === half.id))
+              .toSorted((a, b) => a.id - b.id),
+            (half) =>
+              Effect.gen(function* () {
+                const result = yield* execute(half);
+                yield* log(`  step ${half.id}: ${summarize(result)}`);
+                if (result.kind === "done" || result.kind === "failed" || result.kind === "bot")
+                  yield* recordHalf(half.id, result);
+                else if (result.kind === "ended") ended.push(result);
+              }).pipe(Effect.exit),
+            { concurrency: 2 },
+          );
+          const failed = exits.find(Exit.isFailure);
+          if (failed !== undefined) return yield* Effect.failCause(failed.cause);
+          yield* takeSteer;
+          const current = state.inFlight?.kind === "pair" ? state.inFlight : pair;
+          return ended[0] === undefined
+            ? Policy.applyPair(state, current, inputs())
+            : Policy.applyResult(state, current, ended[0], inputs());
+        });
+
       const loop = Effect.gen(function* () {
         yield* ensureScaffold(root, git.untrack, state.seq === 0);
         // Resume: put the tree where the next step expects it. A git step in
@@ -647,16 +706,15 @@ export const layer = (options: { readonly stateDir: string }) => {
           yield* save(planned.state);
           for (const line of planned.logs ?? []) yield* log(line);
           yield* log(describe(planned.step));
-          const result = yield* execute(planned.step);
-          yield* log(`  ${summarize(result)}`);
-          // Again before the result lands: a ship verdict must see a note sent during its turn.
-          yield* takeSteer;
-          const applied = Policy.applyResult(
-            state,
-            state.inFlight ?? planned.step,
-            result,
-            inputs(),
-          );
+          let applied: Policy.Applied;
+          if (planned.step.kind === "pair") applied = yield* runPair(planned.step);
+          else {
+            const result = yield* execute(planned.step);
+            yield* log(`  ${summarize(result)}`);
+            // Again before the result lands: a ship verdict must see a note sent during its turn.
+            yield* takeSteer;
+            applied = Policy.applyResult(state, state.inFlight ?? planned.step, result, inputs());
+          }
           for (const line of applied.logs) yield* log(line);
           for (const file of applied.files)
             yield* Effect.promise(() =>
