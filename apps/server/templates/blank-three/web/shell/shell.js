@@ -489,6 +489,8 @@ window.addEventListener("pointerdown", (event) => {
   run.clicked.add(event.button);
 });
 window.addEventListener("pointerup", (event) => run?.buttons.delete(event.button));
+// A cancelled touch never sends pointerup; without this the button stays down.
+window.addEventListener("pointercancel", (event) => run?.buttons.delete(event.button));
 // Exported web builds pause when their tab is hidden. The studio stage hides
 // with CSS, which leaves the page visible, so its own hold is unaffected.
 document.addEventListener("visibilitychange", () => {
@@ -580,7 +582,9 @@ window.addEventListener("resize", () => {
     try {
       game.resize?.(run.ctx);
     } catch (error) {
-      reportError(error);
+      // Once per run: dragging the window would otherwise flood the errors.
+      if (!run.reported) reportError(error);
+      run.reported = true;
     }
   redraw = true;
 });

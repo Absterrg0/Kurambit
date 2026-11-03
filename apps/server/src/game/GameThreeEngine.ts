@@ -210,7 +210,7 @@ export const makeThreeBackend = (): GameEngineBackend => {
           file: "web/index.html",
           message: timedOut
             ? "The page never reported ready (window.__studio.ready stayed false past 60s)."
-            : "The page did not boot: window.__studio never appeared. Fix the errors this check lists, and keep the studio bridge from the starter.",
+            : "The page did not boot: window.__studio had not appeared when the page errored. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.join("\n")}\n`).catch(() => undefined),

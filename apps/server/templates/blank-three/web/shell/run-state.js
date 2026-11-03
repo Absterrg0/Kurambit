@@ -43,14 +43,16 @@ export function onRunEnded(listener) {
   onEnded = listener;
 }
 
-// Retry resets only plain data: numbers, strings, booleans, arrays, plain
-// objects, Map and Set, copied so a retry never shares the last run's arrays
+// Retry resets only plain data: numbers, strings, booleans, arrays, typed
+// arrays, dates, plain objects, Map and Set, copied so a retry never shares the last run's arrays
 // or objects. A function, a class instance or a three.js object would come back
 // broken or detached from the scene, so it is left as it is.
 function isPlainData(value, seen = new Set()) {
   if (typeof value === "function" || typeof value === "symbol") return false;
   if (value === null || typeof value !== "object") return true;
   if (seen.has(value)) return true;
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof Date)
+    return true;
   seen.add(value);
   if (Array.isArray(value)) return value.every((each) => isPlainData(each, seen));
   if (value instanceof Map)
@@ -65,12 +67,12 @@ const NOT_RESET = Symbol("not reset");
 const warned = new Set();
 
 function copy(key, value) {
-  if (isPlainData(value))
-    try {
+  try {
+    if (isPlainData(value))
       return typeof value === "object" && value !== null ? structuredClone(value) : value;
-    } catch {
-      // Falls through to the warning below.
-    }
+  } catch {
+    // A throwing getter, a proxy or very deep nesting: not reset, warned below.
+  }
   if (!warned.has(key)) {
     warned.add(key);
     console.warn(
@@ -89,12 +91,15 @@ function copy(key, value) {
  */
 export function newRun(keep = []) {
   if (defaults === null) {
-    defaults = {};
+    // Built aside and set once complete: a half-filled table would delete
+    // every later value on each Retry.
+    const first = {};
     for (const [key, value] of Object.entries(GameState))
       if (SHELL_KEYS.includes(key)) continue;
       // A kept value never resets, so it needs no copy and no warning.
-      else if (keep.includes(key) && !isPlainData(value)) defaults[key] = NOT_RESET;
-      else defaults[key] = copy(key, value);
+      else if (keep.includes(key)) first[key] = NOT_RESET;
+      else first[key] = copy(key, value);
+    defaults = first;
   }
   for (const key of Object.keys(GameState)) {
     if (SHELL_KEYS.includes(key) || keep.includes(key)) continue;

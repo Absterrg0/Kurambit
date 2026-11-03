@@ -16,6 +16,8 @@ import { Juice } from "./shell/juice.js";
 GameState.score = 0;
 GameState.moves = 0;
 GameState.time_left = 0;
+// The goal's position, so a tester can steer to it. Expose one or two targets
+// like this, never every entity: the probe keeps a bounded number of values.
 GameState.beacon_x = 0;
 GameState.beacon_z = 0;
 GameState.best_time = 0;
