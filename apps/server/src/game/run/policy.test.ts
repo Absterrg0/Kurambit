@@ -78,9 +78,12 @@ const drive = (
   let state = start;
   const steps: string[] = [];
   const logs: string[] = [];
+  const released: string[] = [];
+  const written: Record<string, string> = {};
   for (let guard = 0; guard < 200 && !until(state) && state.ending === null; guard += 1) {
     const planned = Policy.plan(state, { now, coin: 0.3, id: `id${guard}` });
-    if (planned.kind === "end") return { state: { ...state, ending: planned.reason }, steps, logs };
+    if (planned.kind === "end")
+      return { state: { ...state, ending: planned.reason }, steps, logs, released, written };
     logs.push(...(planned.logs ?? []));
     state = planned.state;
     const s = planned.step;
@@ -93,9 +96,11 @@ const drive = (
       id: `a${guard}`,
     });
     logs.push(...applied.logs);
+    released.push(...applied.release);
+    for (const file of applied.files) written[file.path] = file.text;
     state = applied.state;
   }
-  return { state, steps, logs };
+  return { state, steps, logs, released, written };
 };
 
 // A responder for a whole round. v1 answers order 1 (A=candidate), v2 order 2 (A=best).
@@ -498,13 +503,13 @@ describe("bot facts", () => {
   });
 });
 
-describe("frame sheets", () => {
+describe("blind comparators", () => {
   // Each sample's last turn asks for its sheet; `drawn` says which builds' runners drew one.
-  const run = (drawn: ReadonlyArray<string>) => {
-    const prompts: string[] = [];
+  const run = (drawn: ReadonlyArray<string>, respond: Responder = roundResponder("A", "B")) => {
+    const compares: Array<Extract<State.Step, { kind: "role" }>> = [];
     const sheets: Record<string, string> = {};
-    const respond: Responder = (step, state) => {
-      if (step.kind === "role" && step.role.startsWith("compare")) prompts.push(step.prompt);
+    const seeing: Responder = (step, state) => {
+      if (step.kind === "role" && step.role.startsWith("compare")) compares.push(step);
       if (step.kind === "role" && step.sheet !== "" && step.at !== null) {
         expect(step.sheet).toMatch(/^\.studio\/comparisons\/frames-id\d+\.jpg$/);
         if (drawn.includes(step.at)) sheets[step.at] = step.sheet;
@@ -515,35 +520,145 @@ describe("frame sheets", () => {
           ),
         });
       }
-      return roundResponder("A", "B")(step, state);
+      return respond(step, state);
     };
-    drive(atRound(), respond, (s) => s.rounds.length === 1);
-    return { prompts, sheets };
+    const driven = drive(atRound(), seeing, (s) => s.rounds.length === 1);
+    return { ...driven, compares, sheets, prompts: compares.map((c) => c.prompt) };
   };
+  // Everything that would tell a comparator which report is which build.
+  const tells = (state: State.RunState, compares: ReadonlyArray<{ role: string }>) => [
+    "cand",
+    "best",
+    "round-",
+    ".studio",
+    "frames-",
+    ...compares.map((c) => c.role.replace("compare-", "")),
+    ...state.threads.map((t) => t.threadId),
+  ];
 
-  it("gives each comparator both sheets labelled as its reports are", () => {
-    const { prompts, sheets } = run(["cand", "best"]);
-    expect(prompts).toHaveLength(2);
-    // Order 1 shows the candidate as A, order 2 shows the best as A.
-    // The sheets follow the reports' presentation order; the mapping is what must hold.
-    expect(prompts[0]).toContain(`Build A's is ${sheets.cand}`);
-    expect(prompts[0]).toContain(`Build B's is ${sheets.best}`);
-    expect(prompts[1]).toContain(`Build A's is ${sheets.best}`);
-    expect(prompts[1]).toContain(`Build B's is ${sheets.cand}`);
-    for (const prompt of prompts) {
-      expect(prompt).toContain("frames from that player's own play, evenly sampled");
-      expect(prompt).toContain("Use only these reports and the two frame sheets,");
+  it("runs each comparator in a blank worktree with its sheets copied under neutral names", () => {
+    const { compares, sheets, state, written } = run(["cand", "best"]);
+    expect(compares).toHaveLength(2);
+    for (const step of compares) {
+      expect(step.at).toBe(State.BLANK);
+      expect(step.read).toEqual([".compare/verdict.md"]);
+      expect(step.prompt).toContain("Write .compare/verdict.md.");
+      expect(step.prompt).toContain("Use only these reports and the two frame sheets,");
+      expect(step.prompt).toContain("frames from that player's own play, evenly sampled");
     }
+    // Order 1 shows the candidate as A, order 2 the best; each copy follows its comparator's A and B.
+    const a = ".compare/sheet-a.jpg";
+    const b = ".compare/sheet-b.jpg";
+    expect(compares[0]!.copy).toEqual([
+      { from: sheets.cand, to: a },
+      { from: sheets.best, to: b },
+    ]);
+    expect(compares[1]!.copy).toEqual([
+      { from: sheets.best, to: a },
+      { from: sheets.cand, to: b },
+    ]);
+    for (const step of compares) {
+      expect(step.prompt).toMatch(/Build [AB]'s is \.compare\/sheet-[ab]\.jpg and Build [AB]'s is/);
+      expect(step.prompt).toContain(`Build A's is ${a}`);
+      expect(step.prompt).toContain(`Build B's is ${b}`);
+      for (const tell of tells(state, compares)) expect(step.prompt).not.toContain(tell);
+    }
+    // Once both verdicts are in, the game root keeps each write-up where the round detail reads it.
+    for (const step of compares)
+      expect(written[`.studio/comparisons/${step.role.replace("compare-", "")}.md`]).toMatch(
+        /^COMPARE: [AB]\nplay-based reasons/,
+      );
+    expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
   });
 
   it("withholds both sheets when one player has none", () => {
-    const { prompts, sheets } = run(["cand"]);
-    expect(prompts).toHaveLength(2);
-    for (const prompt of prompts) {
-      expect(prompt).not.toContain("frame sheet");
-      expect(prompt).not.toContain(sheets.cand!);
-      expect(prompt).toContain("Use only these reports, not the game folder");
+    const { compares, sheets, state } = run(["cand"]);
+    expect(compares).toHaveLength(2);
+    for (const step of compares) {
+      expect(step.at).toBe(State.BLANK);
+      expect(step.copy).toEqual([]);
+      expect(step.prompt).not.toContain("frame sheet");
+      expect(step.prompt).not.toContain(".compare/sheet");
+      expect(step.prompt).not.toContain(sheets.cand!);
+      expect(step.prompt).toContain("Use only these reports, not the game folder");
+      for (const tell of tells(state, compares)) expect(step.prompt).not.toContain(tell);
     }
+  });
+
+  it("releases each comparator's worktree once its verdict is in, after a format fix", () => {
+    // The first order's first answer has no declaration line; the follow-up fixes it.
+    let fixed = false;
+    const respond: Responder = (step, state) => {
+      if (
+        step.kind === "role" &&
+        step.role.startsWith("compare") &&
+        step.thread === null &&
+        !fixed
+      ) {
+        fixed = true;
+        return done(step, { files: { [step.read[0]!]: "A is better, clearly so in play" } });
+      }
+      return roundResponder("A", "B")(step, state);
+    };
+    const { compares, released, state } = run(["cand", "best"], respond);
+    expect(compares.map((c) => c.thread === null)).toEqual([true, false, true]);
+    const correct = compares[1]!;
+    expect(correct.at).toBe(State.BLANK);
+    expect(correct.read).toEqual([".compare/verdict.md"]);
+    expect(correct.prompt).toContain(".compare/verdict.md");
+    // The first comparator's thread outlives its unformatted answer, then goes with the other's.
+    expect(released).toEqual([correct.thread, "t-" + compares[2]!.id]);
+    expect(state.rounds[0]?.verdicts.map((v) => v.verdict)).toEqual(["A", "B"]);
+  });
+
+  it("keeps a tied pick's comparator worktree for its selection, then releases it", () => {
+    const pick = base({
+      trunk: "main",
+      best: "trunk0",
+      stage: "vision",
+      task: {
+        _tag: "pick",
+        phase: "compare",
+        chosen: "",
+        notes: "",
+        cmp: {
+          question: "which prototype?",
+          x: "proto1",
+          y: "proto2",
+          xFirst: true,
+          orders: ["x"],
+          samples: [],
+          bot: "",
+          botDecider: "policy",
+          bots: [],
+          botWithheld: "",
+          judges: [],
+        },
+      },
+    });
+    const selects: State.Step[] = [];
+    const respond: Responder = (step, state) => {
+      if (step.kind === "role" && step.prompt.startsWith("The comparison is a tie")) {
+        selects.push(step);
+        return done(step, { text: "SELECT: B\nreasons to continue from B" });
+      }
+      if (step.kind === "role" && step.role.startsWith("compare"))
+        return done(step, { files: { [step.read[0]!]: "COMPARE: TIE\nno difference shown" } });
+      return roundResponder("A", "B")(step, state);
+    };
+    const tied = drive(pick, respond, (s) => s.task._tag === "pick" && s.task.phase === "select");
+    expect(tied.released).toEqual([]);
+    const chose = drive(
+      tied.state,
+      respond,
+      (s) => s.task._tag === "pick" && s.task.phase === "adopt",
+    );
+    expect(selects).toHaveLength(1);
+    const select = selects[0]!;
+    expect(select.kind === "role" && select.at).toBe(State.BLANK);
+    expect(select.kind === "role" && select.thread).not.toBeNull();
+    expect(chose.released).toEqual([select.kind === "role" ? select.thread : null]);
+    expect(chose.state.task._tag === "pick" && chose.state.task.chosen).toBe("proto2");
   });
 });
 

@@ -42,7 +42,7 @@ import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
-import { runRole, type RoleDeps } from "./run/roleRunner.ts";
+import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, spriteBlock } from "./run/roles.ts";
 import { spriteFacts } from "./run/spriteFacts.ts";
@@ -643,6 +643,8 @@ export const layer = (options: { readonly stateDir: string }) => {
               writeAtomic(NodePath.join(root, file.path), file.text),
             ).pipe(Effect.ignore);
           yield* save(applied.state);
+          for (const thread of applied.release)
+            yield* releaseWorktree(d.deps, { root, log }, thread);
           if (state.ending !== null)
             return yield* log(
               `run ended: ${state.ending}${state.lastFailure ? ` (${state.lastFailure})` : ""}`,
