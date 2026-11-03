@@ -1,4 +1,5 @@
-Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif) InstrumentSerif-Italic.ttf: Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
+Redaction: Copyright 2019 MCKL Inc. (https://www.redaction.us)
+Dual licensed under the SIL Open Font License 1.1 and the LGPL 2.1; used here under the OFL.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
