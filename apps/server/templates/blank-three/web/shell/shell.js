@@ -38,6 +38,8 @@ import {
   resetProgress,
 } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
+import { animateShell } from "./animate.js";
+import { cameraShell } from "./camera.js";
 import {
   VOLUME_NAMES,
   getVolume,
@@ -169,6 +171,8 @@ function clearRun() {
   endBeat = 0;
   ending = null;
   juiceShell.reset();
+  animateShell.reset();
+  cameraShell.reset();
   if (run !== null) {
     const ended = run;
     run = null;
@@ -567,6 +571,8 @@ function step(dt) {
   try {
     for (const timer of due) timer.fn();
     game.update?.(dt, run.ctx);
+    animateShell.update(dt);
+    cameraShell.update(dt);
   } catch (error) {
     // One report a run: the loop keeps going so the menus keep working.
     if (!run.reported) reportError(error);

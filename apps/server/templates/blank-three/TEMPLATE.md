@@ -74,6 +74,17 @@ demo needs, so build the game, not the menus.
 `Juice.burst(position, color)` and `Juice.sfx("./assets/sfx/hit.wav")`.
 The comment block at the top of the file shows each call.
 
+## Characters and cameras
+
+`animate(gltf)` (`web/shell/animate.js`) plays a GLB's clips by state: call
+`hero.play("idle" | "walk" | "run" | "jump" | "fall" | "attack" | "hit" |
+"die", { speed })` every frame and it crossfades, returns from one-shots and
+falls back (run to walk to idle) when a clip is missing. `followCamera2D`
+and `followCamera3D` (`web/shell/camera.js`) follow the player with a dead
+zone, look-ahead, damping and level bounds, and in 3D pull in at walls.
+The shell ticks both after `update` and drops them between runs. The comment
+block at the top of each file shows each call.
+
 ## What else the template ships
 
 - `web/vendor/three.module.js` + `web/vendor/three.core.js` — three.js

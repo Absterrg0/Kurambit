@@ -33,6 +33,30 @@ The title shows `assets/ui/title_bg.png` behind the menu once that file
 exists: put the game's key art there (16:9), and the title stops looking like
 a template.
 
+## Characters and cameras
+
+Never hand-write clip switching or camera follow; the shell kits do it.
+
+- 3D character: `var anim := CharacterAnimator.on($Model)` on the instanced
+  GLB. Every physics frame choose the state from gameplay (on floor, speed,
+  attacking) and call `anim.play("idle" | "walk" | "run" | "fall" | ...,
+{"speed": speed / clip_speed})`; `anim.play("attack")`, `"hit"`, `"die"` on
+  the event. It finds clips by name, crossfades, returns from one-shots and
+  prints which clip each state got: read that line after `game_check`.
+  Library models face +Z: rotate the model child 180 degrees so the body's -Z
+  faces where it moves.
+- 2D character from `game_blender_render_sprites`: `SpriteStrips.apply(sprite,
+{"idle": "res://assets/sprites/hero_idle.sprite.json", "walk": ...}, "right")`
+  loads the strips at their own fps with the feet on the node origin; then
+  `sprite.play(state)` every frame and `flip_h` to face left.
+- 2D camera: a `FollowCamera2D` under the player, `bounds` set to the level
+  rect (dead zone, look-ahead, smoothing, limits built in).
+- 3D camera: a `FollowCamera3D` in the game scene with `target = player`;
+  walls block it through their collision shapes. Move relative to it:
+  `cam.flat_basis() * Vector3(input.x, 0, input.y)`.
+- Juice.shake works on top of both; never set a camera's `offset`,
+  `h_offset` or `v_offset` yourself.
+
 ## Godot 4 patterns (each verified on 4.7)
 
 Godot 3 code fails the check. Use the Godot 4 form:
@@ -59,7 +83,7 @@ move_left={
 }
 ```
 
-A numbered PNG sequence as an animation, and a sound:
+Library frames (numbered PNGs with no `.sprite.json`) as an animation, and a sound:
 
 ```gdscript
 @onready var sprite: AnimatedSprite2D = $Sprite
