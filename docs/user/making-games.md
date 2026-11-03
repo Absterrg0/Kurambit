@@ -31,12 +31,17 @@ editor busy instead of closing it.
 
 Kurambit refuses to open a live editor when the machine is short of memory: about 4 GB free for
 Unity, whose builds bring their own tools, and 1.5 GB for the live Blender view, plus about 2 GB
-more for a rendered look. An editor started with less tends to be killed by the system mid-build,
-or to make the whole machine hang on swap; a production run waits for memory rather than failing.
-The refusal says how much is needed and how much is free; close other apps or wait a few minutes,
-then ask again. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it
-and reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB` and
-`KURAMBIT_BLENDER_MEMORY_MB` change the requirement, and 0 turns the check off.
+more for a rendered look. Play sessions and bot runs check too, after waiting up to about a minute
+for memory to free: about 1.3 GB for a Godot session, 1 GB for a browser session and 1.5 GB for a
+bot run. Work started with less tends to be killed by the system midway, or to make the whole
+machine hang on swap; a production run waits for memory rather than failing, and if memory stays
+short it pauses, ready to resume. The refusal says how much is needed and how much is free; close
+other apps or wait a few minutes, then ask again. Kurambit never closes your other apps to make
+room. If free memory falls under about 1 GB while an editor sits idle, Kurambit closes it and
+reopens it on the next request; it never closes one mid-task. `KURAMBIT_UNITY_MEMORY_MB`,
+`KURAMBIT_BLENDER_MEMORY_MB`, `KURAMBIT_EXPLORE_NATIVE_MEMORY_MB`,
+`KURAMBIT_EXPLORE_WEB_MEMORY_MB` and `KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0
+turns the check off.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.

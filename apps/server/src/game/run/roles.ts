@@ -39,6 +39,8 @@ export const laneBots = (lane: string): boolean => lane !== "unity";
 export const laneParallel = (lane: string): boolean => lane !== "unity";
 
 export const CONTINUE = "Continue where you left off. Reply briefly, then keep working.";
+export const MEMORY_RETRY =
+  "Your exploration could not start earlier because this machine was short of memory; it has had time to free and your clock starts over now. Start the exploration again and do the whole task below.";
 
 const buildRule = (lane: string) =>
   `${TOOL_RULE}Make the smallest change that fixes this block's named top flaw. Follow its cause even when it needs a deeper rule or system change. Keep the game bootable; avoid filler and length targets. Use game_check for boot checks and focused play when needed to understand or verify the flaw. The harness independently plays and judges your build afterwards. Work under ${lane}/; changes only to notes, bots or skills do not count. Finish when the direction is addressed and report what changed and what remains unverified.`;

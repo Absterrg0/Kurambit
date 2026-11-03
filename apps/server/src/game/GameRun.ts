@@ -43,6 +43,7 @@ import * as Templates from "./templates.ts";
 import { runBotFact } from "./run/botFacts.ts";
 import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
 import { finishExports } from "./run/finish.ts";
+import { memoryEnded, waitOutLowMemory } from "./run/lowMemory.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
@@ -93,7 +94,15 @@ const RUN_STATE_IGNORES = [
 ] as const;
 
 // A shipped or stalled run starts over (keeping its history); every other ending resumes.
-const CONTINUABLE = new Set([null, "budget", "usage-limit", "provider-down", "stopped", "failed"]);
+const CONTINUABLE = new Set([
+  null,
+  "budget",
+  "usage-limit",
+  "provider-down",
+  "low-memory",
+  "stopped",
+  "failed",
+]);
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
@@ -603,16 +612,12 @@ export const layer = (options: { readonly stateDir: string }) => {
             );
           case "boot": {
             // A check that could not run is not a verdict on the build: a busy
-            // game or a cancelled check is retried; memory short is waited out
-            // (it clears on its own, often when the run's own processes end);
-            // a missing tool, or memory still short after about 15 minutes,
-            // ends the run (resumable) rather than rejecting good work.
-            // Anything else the check reports is the build failing to boot.
-            const check = (
-              attempt: number,
-              memoryWaits = 0,
-            ): Effect.Effect<Policy.StepResult, GameOperationError> =>
-              d.deps.game.check(d.creator).pipe(
+            // game or a cancelled check is retried; memory short is waited out;
+            // a missing tool, or memory still short after the waits, ends the
+            // run (resumable) rather than rejecting good work. Anything else
+            // the check reports is the build failing to boot.
+            const check = (attempt: number): Effect.Effect<Policy.StepResult, GameOperationError> =>
+              waitOutLowMemory(d.deps.game.check(d.creator), "boot check", log).pipe(
                 Effect.map(
                   (r) =>
                     ({
@@ -638,17 +643,10 @@ export const layer = (options: { readonly stateDir: string }) => {
                     if (transient && attempt < 3)
                       return log(`boot check ${error.detail ?? error.reason}; retrying`).pipe(
                         Effect.andThen(Effect.sleep("5 seconds")),
-                        Effect.andThen(check(attempt + 1, memoryWaits)),
+                        Effect.andThen(check(attempt + 1)),
                       );
-                    if (error.reason === "low-memory" && memoryWaits < 7)
-                      return log(
-                        `boot check refused, memory short (${(error.detail ?? "").split("\n").at(-1)?.slice(0, 200) ?? ""}); waiting 2 minutes (${memoryWaits + 1} of 7)`,
-                      ).pipe(
-                        Effect.andThen(Effect.sleep("2 minutes")),
-                        Effect.andThen(check(attempt, memoryWaits + 1)),
-                      );
-                    if (error.reason === "tool-missing" || error.reason === "low-memory")
-                      return Effect.fail(error);
+                    if (error.reason === "low-memory") return Effect.succeed(memoryEnded(error));
+                    if (error.reason === "tool-missing") return Effect.fail(error);
                     return Effect.succeed({
                       kind: "boot",
                       ok: false,
@@ -788,7 +786,8 @@ export const layer = (options: { readonly stateDir: string }) => {
           ),
         ),
       );
-      if (state.ending !== "stopped" && state.ending !== "failed")
+      // Exports need the memory a low-memory ending says is missing.
+      if (state.ending !== "stopped" && state.ending !== "failed" && state.ending !== "low-memory")
         yield* finishExports(root, d.creator, d.deps.game, log).pipe(Effect.ignore);
     });
 

@@ -80,6 +80,8 @@ import {
   type GameSecretsStatusResult,
 } from "@kurambit/contracts";
 import * as GameExploreNative from "./gameExploreNative.ts";
+import { memoryShortfall } from "./liveProcess.ts";
+import { admitWithMemory } from "./memoryAdmission.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as ExploreSheet from "./exploreSheet.ts";
@@ -162,6 +164,40 @@ const hashOpenFile = async (file: OpenMediaFile) => {
   return { bytes: offset, sha256: hash.digest("hex") };
 };
 
+type MemoryRoom = { readonly what: string; readonly neededMb: number; readonly env: string };
+/**
+ * Free memory an explore session or bot run needs to start, in MB, from
+ * whole-tree PSS peaks measured on this machine with small 2D games. A
+ * native session peaked at 740 MB during its cold Godot import (about
+ * 300 MB while playing); headroom covers bigger games' imports.
+ */
+const EXPLORE_NATIVE_ROOM: MemoryRoom = {
+  what: "native exploration session",
+  neededMb: 1280,
+  env: "KURAMBIT_EXPLORE_NATIVE_MEMORY_MB",
+};
+/** Headless Chromium peaked at 480 MB PSS and grows slowly over a session. */
+const EXPLORE_WEB_ROOM: MemoryRoom = {
+  what: "web exploration session",
+  neededMb: 1024,
+  env: "KURAMBIT_EXPLORE_WEB_MEMORY_MB",
+};
+/**
+ * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
+ * ffmpeg recording, Xvfb, bot child); a Chromium bot at 630 MB. Its
+ * Chromium launches after the memory gate, so two bots admitted together
+ * must both fit.
+ */
+const BOT_ROOM: MemoryRoom = {
+  what: "bot run",
+  neededMb: 1536,
+  env: "KURAMBIT_BOT_MEMORY_MB",
+};
+// Memory a run's own other half or a closing tool gives back frees within a
+// minute; past that, the refusal is the honest answer.
+const MEMORY_WAIT_MS = 75_000;
+const MEMORY_POLL = "5 seconds" as const;
+
 export class GameService extends Context.Service<
   GameService,
   {
@@ -181,6 +217,20 @@ export class GameService extends Context.Service<
      * starts and acts past it are refused with the reason.
      */
     readonly limitExploreInput: (threadId: ThreadId, totalMs: number) => Effect.Effect<void>;
+    /**
+     * Since this thread's last finishExploration: how long its explore starts
+     * waited for memory, how many were refused `low-memory` and whether the
+     * latest was; with the input steps its sessions have executed in all.
+     */
+    readonly exploreMemoryWait: (threadId: ThreadId) => Effect.Effect<
+      {
+        readonly waitedMs: number;
+        readonly refusals: number;
+        readonly refused: boolean;
+        readonly executedInputSteps: number;
+      },
+      GameOperationError
+    >;
     /**
      * Tiles an even selection of the frames this thread's explore sessions kept
      * into one JPEG at `output` (absolute). Returns how many frames it drew; 0
@@ -591,6 +641,39 @@ const make = Effect.gen(function* () {
   });
   const snapshot = (root: string, godotProject: string) =>
     Effect.promise((signal) => snapshotBuildSource(root, godotProject, { signal }));
+  // Blind samples and their bots start two at a time, and a check made before
+  // the other half has allocated would pass both. Each start holds this gate
+  // from its final memory check through its own peak (the Godot import, the
+  // boot), so the next check sees what the last start took.
+  const memoryGate = Semaphore.makeUnsafe(1);
+  /**
+   * Runs `start` once there is room for `room`, waiting up to
+   * {@link MEMORY_WAIT_MS}, else fails `low-memory` with what it needs against
+   * what is available. It never frees memory itself: everything else on the
+   * machine is someone's work.
+   */
+  const withMemoryRoom = <A, E, R>(
+    operation: string,
+    path: string,
+    room: MemoryRoom,
+    start: Effect.Effect<A, E, R>,
+    onWaited: (waitedMs: number, refused: boolean) => void = () => {},
+  ) =>
+    admitWithMemory({
+      gate: memoryGate,
+      shortfall: Effect.promise(() => memoryShortfall(room.what, room.neededMb, room.env)),
+      maxWaitMs: MEMORY_WAIT_MS,
+      poll: MEMORY_POLL,
+      refuse: (short, waitedMs) =>
+        new GameOperationError({
+          operation,
+          path,
+          reason: "low-memory",
+          detail: `${short} Waited ${Math.round(waitedMs / 1000)} s for memory to free.`,
+        }),
+      onWaited,
+      start,
+    });
   // No exclusive() here: a real-time run takes minutes and must not hold the
   // game's operation lock. The bot service refuses a second concurrent run
   // per checkout as busy.
@@ -604,19 +687,26 @@ const make = Effect.gen(function* () {
         detail:
           "Bot runs do not play Unity games yet. Play a Unity game with game_explore_start/act/close, which runs a real Linux build with real input.",
       });
-    // Static sources need no editor import; the bot plays the folder.
-    if (manifest.engine.name !== "three") {
-      const imported = yield* importGame(root);
-      if (!imported.success)
-        return yield* new GameOperationError({
-          operation: "Bot run",
-          path: imported.path ?? root,
-          reason: "command-failed",
-          detail: `The Godot import failed before the bot run started.\n${imported.message}`.slice(
-            -2000,
-          ),
-        });
-    }
+    yield* withMemoryRoom(
+      "Bot run",
+      root,
+      BOT_ROOM,
+      Effect.gen(function* () {
+        // Static sources need no editor import; the bot plays the folder.
+        if (manifest.engine.name === "three") return;
+        const imported = yield* importGame(root);
+        if (!imported.success)
+          return yield* new GameOperationError({
+            operation: "Bot run",
+            path: imported.path ?? root,
+            reason: "command-failed",
+            detail:
+              `The Godot import failed before the bot run started.\n${imported.message}`.slice(
+                -2000,
+              ),
+          });
+      }),
+    );
     return yield* gameBot.run(root, input);
   });
   const importGame = Effect.fnUntraced(function* (root: string, projectDir?: string) {
@@ -1347,6 +1437,24 @@ const make = Effect.gen(function* () {
   // consume another game's play budget. The thread lease still owns input.
   const exploreStartLock = Semaphore.makeUnsafe(1);
   const exploreLive = new Map<string, ExploreSession>();
+  // Per thread: how long its starts waited for memory (the role runner gives
+  // that time back to its clock), how many were refused, and whether the
+  // latest one was.
+  const exploreMemory = new Map<string, { waitedMs: number; refusals: number; refused: boolean }>();
+  const withExploreRoom = <A, E, R>(
+    threadId: ThreadId,
+    root: string,
+    room: MemoryRoom,
+    start: Effect.Effect<A, E, R>,
+  ) =>
+    withMemoryRoom("Explore session", root, room, start, (waitedMs, refused) => {
+      const prior = exploreMemory.get(String(threadId));
+      exploreMemory.set(String(threadId), {
+        waitedMs: (prior?.waitedMs ?? 0) + waitedMs,
+        refusals: (prior?.refusals ?? 0) + (refused ? 1 : 0),
+        refused,
+      });
+    });
   // A write-through cache of the records under `evidenceDir`; a restart
   // reloads them, so a sample's earlier play still counts.
   const exploreEvidence = new Map<string, ExploreEvidence.ThreadEvidence>();
@@ -2410,7 +2518,18 @@ ${built.result.message}`.slice(-3000),
           root,
           `Your ${threadCap / 1000} s input budget across sessions is spent; do not start another session. Write your notes now.`,
         );
-      const unity = (yield* projects.read(root)).engine.name === "unity" && input.target !== "web";
+      const engineName = (yield* projects.read(root)).engine.name;
+      const unity = engineName === "unity" && input.target !== "web";
+      // Only a start that can open a session waits for room: a wrong target or
+      // an open session is refused inside the lock without a memory wait.
+      const target = input.target ?? (engineName === "three" ? "web" : "native");
+      const room = exploreLive.has(root)
+        ? null
+        : target === "web" && engineName === "three"
+          ? EXPLORE_WEB_ROOM
+          : target === "native" && engineName === "godot"
+            ? EXPLORE_NATIVE_ROOM
+            : null;
       if (unity) {
         const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
         if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
@@ -2419,46 +2538,46 @@ ${built.result.message}`.slice(-3000),
       // operation; the start lock is held only to launch and register.
       const unityPlayer =
         unity && !exploreLive.has(root) ? yield* unityPlayerFor(String(threadId), root) : null;
-      return yield* exploreStartLock
-        .withPermits(1)(
-          Effect.gen(function* () {
-            const existing = exploreLive.get(root);
-            if (existing !== undefined)
-              return yield* exploreInvalid(
-                existing.id,
-                "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
-              );
-            const manifest = yield* projects.read(root);
-            const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
-            if (target === "web") {
-              if (manifest.engine.name !== "three")
-                return yield* exploreInvalid(
-                  root,
-                  `${manifest.engine.name === "unity" ? "Unity" : "Godot"} web play is not in this build; start the session without a target (or with target native).`,
-                );
-              return yield* exploreStartWeb(threadId, root, input);
-            }
-            if (manifest.engine.name === "three")
+      const locked = exploreStartLock.withPermits(1)(
+        Effect.gen(function* () {
+          const existing = exploreLive.get(root);
+          if (existing !== undefined)
+            return yield* exploreInvalid(
+              existing.id,
+              "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
+            );
+          const manifest = yield* projects.read(root);
+          const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
+          if (target === "web") {
+            if (manifest.engine.name !== "three")
               return yield* exploreInvalid(
                 root,
-                "This is a three.js browser game; start the session with target web.",
+                `${manifest.engine.name === "unity" ? "Unity" : "Godot"} web play is not in this build; start the session without a target (or with target native).`,
               );
-            if (manifest.engine.name === "unity")
-              return unityPlayer === null
-                ? yield* exploreInvalid(
-                    root,
-                    "An exploration session for this game closed while this one was starting; start the session again.",
-                  )
-                : yield* exploreStartUnity(threadId, root, input, unityPlayer);
-            return yield* exploreStartNative(threadId, root, input);
-          }),
-        )
-        .pipe(
-          Effect.tap((started) => {
-            const live = exploreLive.get(root);
-            return live?.id === started.sessionId ? persistSession(live) : Effect.void;
-          }),
-        );
+            return yield* exploreStartWeb(threadId, root, input);
+          }
+          if (manifest.engine.name === "three")
+            return yield* exploreInvalid(
+              root,
+              "This is a three.js browser game; start the session with target web.",
+            );
+          if (manifest.engine.name === "unity")
+            return unityPlayer === null
+              ? yield* exploreInvalid(
+                  root,
+                  "An exploration session for this game closed while this one was starting; start the session again.",
+                )
+              : yield* exploreStartUnity(threadId, root, input, unityPlayer);
+          return yield* exploreStartNative(threadId, root, input);
+        }),
+      );
+      // The memory gate is taken before the start lock, as by every gated start.
+      return yield* (room === null ? locked : withExploreRoom(threadId, root, room, locked)).pipe(
+        Effect.tap((started) => {
+          const live = exploreLive.get(root);
+          return live?.id === started.sessionId ? persistSession(live) : Effect.void;
+        }),
+      );
     });
   /**
    * Runs one native act through the runner's TCP connection and persists the
@@ -3132,12 +3251,23 @@ ${built.result.message}`.slice(-3000),
       const live = exploreLive.get(root);
       if (live !== undefined && String(live.threadId) === String(threadId))
         yield* live.lock.withPermits(1)(exploreFinalize(live, "role-finished"));
+      exploreMemory.delete(String(threadId));
       return ExploreEvidence.totals(yield* threadEvidence(threadId, root));
     }),
     limitExploreInput: (threadId, totalMs) =>
       Effect.sync(() => {
         exploreInputCaps.set(String(threadId), totalMs);
       }),
+    exploreMemoryWait: Effect.fn("GameService.exploreMemoryWait")(function* (threadId) {
+      const root = yield* projects.resolve(threadId);
+      const { executedInputSteps } = ExploreEvidence.totals(yield* threadEvidence(threadId, root));
+      const memory = exploreMemory.get(String(threadId)) ?? {
+        waitedMs: 0,
+        refusals: 0,
+        refused: false,
+      };
+      return { ...memory, executedInputSteps };
+    }),
     exploreSheet: Effect.fn("GameService.exploreSheet")(function* (threadId, output) {
       const root = yield* projects.resolve(threadId);
       const kept = ExploreEvidence.frames(yield* threadEvidence(threadId, root));

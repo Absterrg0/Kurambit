@@ -377,6 +377,7 @@ const ENDING: Record<string, string> = {
   stalled: "Stalled",
   "usage-limit": "Usage limit",
   "provider-down": "Provider down",
+  "low-memory": "Memory short",
 };
 const endingLabel = (ending: string | null): string =>
   ending === null ? "Paused" : (ENDING[ending] ?? ending);

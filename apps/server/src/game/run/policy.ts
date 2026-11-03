@@ -93,7 +93,7 @@ export type StepResult =
   | RoleDone
   | {
       readonly kind: "ended";
-      readonly ending: "usage-limit" | "provider-down";
+      readonly ending: "usage-limit" | "provider-down" | "low-memory";
       readonly reason: string;
     }
   | { readonly kind: "failed"; readonly reason: string }
@@ -1101,8 +1101,8 @@ export const applyResult = (
   const files: Array<{ path: string; text: string }> = [];
   const release: ThreadId[] = [];
   const out = (s: RunState): Applied => ({ state: s, logs, files, release });
-  // Usage limits and a provider that stays down end the run resumably; the
-  // step stays in flight so a resume reattaches to its thread.
+  // Usage limits, a provider that stays down and memory that stays short end
+  // the run resumably; the step stays in flight so a resume reattaches to its thread.
   if (res.kind === "ended")
     return out({ ...state, inFlight: done, ending: res.ending, lastFailure: res.reason });
   const s: RunState = { ...state, inFlight: null };
