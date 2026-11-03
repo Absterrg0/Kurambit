@@ -8,14 +8,31 @@ import * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { GameOperationError, type GameToolchainStatus } from "@kurambit/contracts";
+import {
+  GameOperationError,
+  UNITY_PINNED_VERSION,
+  type GameToolchainStatus,
+} from "@kurambit/contracts";
 import * as ServerSettings from "../serverSettings.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
+import {
+  UNITY_CLI_SHA256,
+  UNITY_CLI_URL,
+  UNITY_CLI_VERSION,
+  UNITY_EXTRA_MODULES,
+  parseUnityLicense,
+  unityCliEnv,
+  unityLicenseFile,
+  unityLicenseMessage,
+  unityPaths,
+  type UnityLicense,
+} from "./unityToolchain.ts";
 
 export const GODOT_VERSION = "4.7.2";
 export const BLENDER_VERSION = "4.5.14";
@@ -74,11 +91,37 @@ export class GameToolchain extends Context.Service<
       { path: string; version: string; templates: string | null },
       GameOperationError
     >;
+    /**
+     * The pinned Unity CLI and editor plus the licence they will run under.
+     * Fails with an actionable reason when either is missing or no licence
+     * is active, before any editor starts.
+     */
+    readonly unity: Effect.Effect<UnityTools, GameOperationError>;
+    /**
+     * Where the pinned Unity CLI and editor live, installed or not and with
+     * or without a licence: the only executables a Unity pid record may name.
+     */
+    readonly unityInstall: UnityInstall;
     readonly status: Effect.Effect<GameToolchainStatus>;
     readonly verify: Effect.Effect<GameToolchainStatus, GameOperationError>;
-    readonly install: Effect.Effect<GameToolchainStatus, GameOperationError>;
+    /** Blender, Godot and uv by default; `unity` installs the Unity CLI and editor instead. */
+    readonly install: (input: {
+      readonly unity?: boolean | undefined;
+    }) => Effect.Effect<GameToolchainStatus, GameOperationError>;
   }
 >()("kurambit/game/GameToolchain") {}
+export interface UnityInstall {
+  readonly cli: string;
+  readonly editor: string;
+  /** The editor's install root; its asset workers, shader compilers and Bee run from inside it. */
+  readonly editorDir: string;
+  /** The HOME every CLI call runs under. */
+  readonly cliHome: string;
+}
+export interface UnityTools extends UnityInstall {
+  readonly version: string;
+  readonly license: Extract<UnityLicense, { kind: "active" }>;
+}
 const pythonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const isGameOperationError = Schema.is(GameOperationError);
 const make = Effect.gen(function* () {
@@ -195,6 +238,77 @@ const make = Effect.gen(function* () {
       return { path: selected, version, templates };
     },
   );
+  const unityFiles = unityPaths(directory);
+  const unityMissing = (path: string, detail: string) =>
+    new GameOperationError({ operation: "unity", path, reason: "tool-missing", detail });
+  const readLicense = Effect.gen(function* () {
+    const xml = yield* Effect.promise(() =>
+      NodeFSP.readFile(unityLicenseFile(), "utf8").catch(() => null),
+    );
+    return parseUnityLicense(xml, yield* Clock.currentTimeMillis);
+  });
+  const unityInstall: UnityInstall = (() => {
+    const editor = process.env.KURAMBIT_UNITY_EDITOR?.trim() || unityFiles.editor;
+    return {
+      cli: process.env.KURAMBIT_UNITY_CLI?.trim() || unityFiles.cli,
+      editor,
+      // <editorDir>/Editor/Unity
+      editorDir: NodePath.dirname(NodePath.dirname(editor)),
+      cliHome: unityFiles.installHome,
+    };
+  })();
+  const unity: GameToolchain["Service"]["unity"] = Effect.gen(function* () {
+    const { cli, editor } = unityInstall;
+    const installHint =
+      "Click Install Unity in Settings > General > Game tools (about 4.5 GB), or set KURAMBIT_UNITY_CLI / KURAMBIT_UNITY_EDITOR.";
+    if (!(yield* Effect.promise(() => isExecutable(cli))))
+      return yield* unityMissing(
+        cli,
+        `The Unity CLI ${UNITY_CLI_VERSION} is not installed. ${installHint}`,
+      );
+    if (!(yield* Effect.promise(() => isExecutable(editor))))
+      return yield* unityMissing(
+        editor,
+        `The Unity ${UNITY_PINNED_VERSION} editor is not installed. ${installHint}`,
+      );
+    const license = yield* readLicense;
+    if (license.kind !== "active")
+      return yield* new GameOperationError({
+        operation: "unity",
+        path: unityLicenseFile(),
+        reason: "license-missing",
+        detail: unityLicenseMessage(license),
+      });
+    return { ...unityInstall, version: UNITY_PINNED_VERSION, license };
+  });
+  const unityStatus = Effect.gen(function* () {
+    const resolved = yield* unity.pipe(
+      Effect.map((tools) => ({ ok: true as const, tools })),
+      Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+    );
+    if (!resolved.ok)
+      return {
+        tool: "unity" as const,
+        path: resolved.error.path,
+        version: null,
+        ready: false,
+        verified: false,
+        message: resolved.error.detail ?? resolved.error.message,
+      };
+    const windows = yield* Effect.promise(() => awaitExists(unityFiles.windowsPlayer));
+    return {
+      tool: "unity" as const,
+      path: resolved.tools.editor,
+      version: resolved.tools.version,
+      ready: true,
+      verified: verified.get(resolved.tools.editor) === resolved.tools.version,
+      message:
+        `Unity ${resolved.tools.version} with CLI ${UNITY_CLI_VERSION}. ${unityLicenseMessage(resolved.tools.license)}` +
+        (windows
+          ? ""
+          : " Windows build support is missing from this editor: Windows exports are refused until it is reinstalled with the windows-mono module."),
+    };
+  });
   const status = Effect.gen(function* () {
     const tools = yield* Effect.forEach(["blender", "godot", "uv"] as const, (tool) =>
       executable(tool).pipe(
@@ -243,7 +357,7 @@ const make = Effect.gen(function* () {
         ),
       ),
     );
-    return { toolsDirectory: directory, installing, tools };
+    return { toolsDirectory: directory, installing, tools: [...tools, yield* unityStatus] };
   });
   const verify = Effect.gen(function* () {
     const scratch = yield* Effect.tryPromise({
@@ -338,7 +452,7 @@ const make = Effect.gen(function* () {
       Effect.ensuring(Effect.promise(() => NodeFSP.rm(scratch, { recursive: true, force: true }))),
     );
   });
-  const install = Effect.gen(function* () {
+  const installCore = Effect.gen(function* () {
     if ((yield* HostProcess.Platform) !== "linux" || (yield* HostProcess.Architecture) !== "x64")
       return yield* new GameOperationError({
         operation: "install",
@@ -604,8 +718,169 @@ const make = Effect.gen(function* () {
       ),
     );
   });
-  return GameToolchain.of({ executable, status, verify, install });
+  /**
+   * The pinned Unity CLI (sha256 against the published manifest value), then
+   * the pinned editor through that CLI's own installer, which md5-checks the
+   * archive. The CLI installs with its state in the tools directory so the
+   * 4.5 GB download never lands in the user's Hub cache.
+   */
+  const installUnity = Effect.gen(function* () {
+    if ((yield* HostProcess.Platform) !== "linux" || (yield* HostProcess.Architecture) !== "x64")
+      return yield* new GameOperationError({
+        operation: "install-unity",
+        path: directory,
+        reason: "unsupported-platform",
+      });
+    if (installing)
+      return yield* new GameOperationError({
+        operation: "install-unity",
+        path: directory,
+        reason: "busy",
+      });
+    installing = true;
+    return yield* Effect.gen(function* () {
+      if (!(yield* Effect.promise(() => isExecutable(unityFiles.cli)))) {
+        const stage = yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(directory, { recursive: true });
+            return NodeFSP.mkdtemp(NodePath.join(directory, ".install-"));
+          },
+          catch: (cause) =>
+            new GameOperationError({
+              operation: "install-unity",
+              path: directory,
+              reason: "io",
+              cause,
+            }),
+        });
+        yield* Effect.tryPromise({
+          try: async (signal) => {
+            const file = await downloadPlainFile(UNITY_CLI_URL, "unity", stage, signal);
+            const hash = NodeCrypto.createHash("sha256");
+            for await (const chunk of NodeFS.createReadStream(file)) hash.update(chunk);
+            if (hash.digest("hex") !== UNITY_CLI_SHA256)
+              throw new GameOperationError({
+                operation: "install-unity-cli",
+                path: UNITY_CLI_URL,
+                reason: "checksum",
+              });
+            await NodeFSP.chmod(file, 0o755);
+            await NodeFSP.mkdir(unityFiles.cliDir, { recursive: true });
+            await NodeFSP.rename(file, unityFiles.cli);
+          },
+          catch: (cause) =>
+            isGameOperationError(cause)
+              ? cause
+              : new GameOperationError({
+                  operation: "install-unity-cli",
+                  path: UNITY_CLI_URL,
+                  reason: "download",
+                  cause,
+                }),
+        }).pipe(
+          Effect.ensuring(
+            Effect.promise(() => NodeFSP.rm(stage, { recursive: true, force: true })),
+          ),
+        );
+      }
+      const version = yield* processes.run({
+        root: logRoot,
+        executable: unityFiles.cli,
+        args: ["--version"],
+        operation: "unity-cli-version",
+        timeoutMs: 30_000,
+        env: unityCliEnv(unityFiles.installHome),
+        envMode: "replace",
+      });
+      if (version.exitCode !== 0 || !version.stdout.includes(UNITY_CLI_VERSION))
+        return yield* new GameOperationError({
+          operation: "install-unity-cli",
+          path: unityFiles.cli,
+          reason: "wrong-version",
+          detail: `The Unity CLI reported ${(version.stdout + version.stderr).slice(0, 200)}; expected ${UNITY_CLI_VERSION}.`,
+        });
+      if (!(yield* Effect.promise(() => isExecutable(unityFiles.editor)))) {
+        const home = unityFiles.installHome;
+        yield* Effect.promise(() => NodeFSP.mkdir(home, { recursive: true }));
+        const installed = yield* processes.run({
+          root: logRoot,
+          executable: unityFiles.cli,
+          args: [
+            "install",
+            UNITY_PINNED_VERSION,
+            "-d",
+            unityFiles.editorRoot,
+            ...UNITY_EXTRA_MODULES.flatMap((module) => ["-m", module]),
+            "--accept-eula",
+            "--format",
+            "json",
+          ],
+          operation: "install-unity",
+          timeoutMs: 3 * 60 * 60_000,
+          env: unityCliEnv(home, networkEnv()),
+          envMode: "replace",
+        });
+        if (
+          installed.exitCode !== 0 ||
+          !(yield* Effect.promise(() => isExecutable(unityFiles.editor)))
+        )
+          return yield* new GameOperationError({
+            operation: "install-unity",
+            path: installed.logPath,
+            reason: "command-failed",
+            detail: commandDetail(installed),
+          });
+        // The download cache only serves a retry; a finished install drops it.
+        yield* Effect.promise(() =>
+          NodeFSP.rm(NodePath.join(home, ".config/unityhub/downloads"), {
+            recursive: true,
+            force: true,
+          }),
+        );
+      }
+      const resolved = yield* unity;
+      verified.set(resolved.editor, resolved.version);
+      return yield* status;
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          installing = false;
+        }),
+      ),
+    );
+  });
+  const install: GameToolchain["Service"]["install"] = (input) =>
+    input.unity === true ? installUnity : installCore;
+  return GameToolchain.of({ executable, unity, unityInstall, status, verify, install });
 });
+const isExecutable = async (file: string) => {
+  try {
+    await NodeFSP.access(file, NodeFSP.constants.X_OK);
+    return (await NodeFSP.stat(file)).isFile();
+  } catch {
+    return false;
+  }
+};
+/** Proxy and CA variables the Unity installer may need to reach Unity's CDN. */
+const networkEnv = (): NodeJS.ProcessEnv => {
+  const out: NodeJS.ProcessEnv = {};
+  for (const name of [
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+  ] as const) {
+    const value = process.env[name];
+    if (value !== undefined) out[name] = value;
+  }
+  return out;
+};
 const BASE_EXPORT_TEMPLATE_FILES = [
   "web_nothreads_release.zip",
   "web_nothreads_debug.zip",

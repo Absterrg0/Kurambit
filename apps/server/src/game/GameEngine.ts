@@ -14,13 +14,15 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
+import * as GameUnity from "./GameUnity.ts";
+import { makeUnityBackend } from "./GameUnityEngine.ts";
 
 /**
  * The game engines this build runs. The manifest still names one, so a
  * project that declares anything else fails here — before any engine
  * lookup or process launch — instead of being silently routed elsewhere.
  */
-export const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three"] as const;
+export const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three", "unity"] as const;
 export type SupportedGameEngineId = (typeof SUPPORTED_GAME_ENGINE_IDS)[number];
 
 export interface GameEngineBinary {
@@ -62,7 +64,7 @@ export interface GameEngineCheckReport {
  */
 export interface GameEngineBackend {
   readonly id: SupportedGameEngineId;
-  /** Short human name for honest operation messages ("Godot", "three.js"). */
+  /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
   readonly displayName: string;
   /** Which export targets this engine can release. Anything else is refused plainly. */
   readonly exportTargets: ReadonlyArray<"Web" | "Linux" | "Windows">;
@@ -142,9 +144,11 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const tools = yield* GameToolchain.GameToolchain;
   const processes = yield* GameProcesses.GameProcesses;
+  const unity = yield* GameUnity.GameUnity;
   const backends = new Map<string, GameEngineBackend>([
     ["godot", makeGodotBackend(processes, tools)],
     ["three", makeThreeBackend()],
+    ["unity", makeUnityBackend(unity, tools)],
   ]);
   const backendFor = (engineName: string): Effect.Effect<GameEngineBackend, GameOperationError> => {
     const backend = backends.get(engineName);

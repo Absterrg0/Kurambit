@@ -11,6 +11,17 @@ import * as NodePath from "node:path";
  */
 const DEFAULT_MAX_SOURCE_ENTRIES = 10_000;
 
+/** Directories Unity generates at its project root; see snapshotBuildSource. */
+const UNITY_OUTPUT_DIRECTORIES = new Set([
+  "Library",
+  "Temp",
+  "Logs",
+  "UserSettings",
+  "obj",
+  "Build",
+  "Builds",
+]);
+
 /** Opening without following a link makes a swapped-in symlink fail closed. */
 const READ_FLAGS = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW;
 
@@ -87,6 +98,14 @@ export const snapshotBuildSource = async (
   const limit = options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES;
   const signal = options.signal;
   const engineRoot = NodePath.join(root, godotProject);
+  // A Unity project's own caches sit at its root beside Assets/ and are
+  // rewritten by every editor start; they are output, never build input.
+  const unityProject = await NodeFSP.stat(
+    NodePath.join(engineRoot, "ProjectSettings/ProjectVersion.txt"),
+  ).then(
+    (stat) => stat.isFile(),
+    () => false,
+  );
   const lines: string[] = [];
   let visited = 0;
   try {
@@ -114,13 +133,22 @@ export const snapshotBuildSource = async (
         if (entry.isSymbolicLink())
           return { kind: "unknown", reason: "symlink", detail: `${godotProject}/${relative}` };
         if (entry.isDirectory()) {
-          if (name !== ".godot") stack.push(absolute);
+          if (name === ".godot") continue;
+          if (unityProject && directory === engineRoot && UNITY_OUTPUT_DIRECTORIES.has(name))
+            continue;
+          stack.push(absolute);
           continue;
         }
         if (!entry.isFile()) continue;
         // Sidecars the engine generates beside real sources. An import rewrites
         // them, so they can never be part of whether the build still matches.
         if (name.endsWith(".import") || name.endsWith(".uid")) continue;
+        if (
+          unityProject &&
+          directory === engineRoot &&
+          (name.endsWith(".csproj") || name.endsWith(".sln"))
+        )
+          continue;
         let hashed: { readonly size: number; readonly sha256: string };
         try {
           hashed = await hashFileContent(absolute, signal);

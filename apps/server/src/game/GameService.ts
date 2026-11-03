@@ -29,6 +29,7 @@ import {
   GAME_EXPLORE_BOUNDS,
   EXPLORE_CAPTURE_BOUNDS,
   THREE_VIEWPORT,
+  UNITY_VIEWPORT,
   exploreCaptureIssues,
   exploreStepIssues,
   GameExploreStartInput,
@@ -53,6 +54,15 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderAssetsImportInput,
   type GameBlenderAssetsImportResult,
+  type GameUnityConsoleInput,
+  type GameUnityEditInput,
+  type GameUnityEvalInput,
+  type GameUnityPlayInput,
+  type GameUnityRecompileResult,
+  type GameUnityScreenshotInput,
+  type GameUnityScreenshotResult,
+  type GameUnityTextResult,
+  type GameUnityToolsResult,
   type GameBotRunInput,
   type GameBotRunResult,
   type GameBotReportResult,
@@ -68,6 +78,8 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
+import * as GameUnity from "./GameUnity.ts";
+import { unityPlayerDirectory } from "./GameUnityEngine.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as GamePreview from "./GamePreview.ts";
@@ -307,6 +319,39 @@ export class GameService extends Context.Service<
       input: GameBotViewInput,
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
     readonly check: (threadId: ThreadId) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /** Live Unity editor: the editing tools game_unity_edit may call, with input schemas. */
+    readonly unityTools: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
+    /** Live Unity editor: call one editing tool, then save the open scenes. */
+    readonly unityEdit: (
+      threadId: ThreadId,
+      input: GameUnityEditInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: evaluate C# on the editor's main thread. */
+    readonly unityEval: (
+      threadId: ThreadId,
+      input: GameUnityEvalInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: import changed files and compile, with C# errors at file:line. */
+    readonly unityRecompile: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameUnityRecompileResult, GameOperationError>;
+    /** Live Unity editor: enter or leave play mode. */
+    readonly unityPlay: (
+      threadId: ThreadId,
+      input: GameUnityPlayInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
+    /** Live Unity editor: the Game view through the main camera, as one image. */
+    readonly unityScreenshot: (
+      threadId: ThreadId,
+      input: GameUnityScreenshotInput,
+    ) => Effect.Effect<GameUnityScreenshotResult, GameOperationError>;
+    /** Live Unity editor: recent console entries. */
+    readonly unityConsole: (
+      threadId: ThreadId,
+      input: GameUnityConsoleInput,
+    ) => Effect.Effect<GameUnityTextResult, GameOperationError>;
   }
 >()("kurambit/game/GameService") {}
 const isGameOperationError = Schema.is(GameOperationError);
@@ -329,6 +374,7 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const tools = yield* GameToolchain.GameToolchain;
   const gameEngine = yield* GameEngine.GameEngine;
+  const liveUnity = yield* GameUnity.GameUnity;
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
   const gameBot = yield* GameBot.GameBot;
@@ -469,6 +515,14 @@ const make = Effect.gen(function* () {
   // per checkout as busy.
   const botRunIn = Effect.fnUntraced(function* (root: string, input: GameBotRunInput) {
     const manifest = yield* projects.read(root);
+    if (manifest.engine.name === "unity")
+      return yield* new GameOperationError({
+        operation: "Bot run",
+        path: root,
+        reason: "invalid-input",
+        detail:
+          "Bot runs do not play Unity games yet. Play a Unity game with game_explore_start/act/close, which runs a real Linux build with real input.",
+      });
     // Static sources need no editor import; the bot plays the folder.
     if (manifest.engine.name !== "three") {
       const imported = yield* importGame(root);
@@ -572,6 +626,151 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+  /**
+   * A Unity player is a folder (the executable, its `game_Data/` and the
+   * engine runtime library), so it builds into a staging folder and replaces
+   * builds/linux or builds/windows only once its files check out and the
+   * sources did not change during the build. The caller imports first.
+   */
+  const buildUnityPlayer = Effect.fnUntraced(function* (
+    root: string,
+    target: "Linux" | "Windows",
+    destination: string,
+    operation: string,
+  ) {
+    const { backend, godot, cwd, godotProject } = yield* engine(root);
+    const executable = target === "Windows" ? "game.exe" : "game.x86_64";
+    const staging = NodePath.join(
+      NodePath.dirname(destination),
+      `.${NodePath.basename(destination)}-${NodeCrypto.randomUUID()}`,
+    );
+    return yield* Effect.gen(function* () {
+      const before = yield* snapshot(root, godotProject);
+      // An interrupted build leaves its staging folder; only this build's own name prefix is cleared.
+      yield* Effect.promise(async () => {
+        const parent = NodePath.dirname(destination);
+        const prefix = `.${NodePath.basename(destination)}-`;
+        for (const name of await NodeFSP.readdir(parent).catch(() => [] as string[]))
+          if (name.startsWith(prefix))
+            await NodeFSP.rm(NodePath.join(parent, name), { recursive: true, force: true });
+      });
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(staging, { recursive: true }),
+        catch: (cause) => new GameOperationError({ operation, path: staging, reason: "io", cause }),
+      });
+      const result = yield* backend.runExportRelease(
+        { root, projectDir: cwd, projectName: godotProject, binary: godot },
+        { preset: target, outputPath: NodePath.join(staging, executable), operation },
+      );
+      if (!result.success) return { result, sourceId: null };
+      // Unity names this debug-symbol folder itself: it is never shipped.
+      yield* Effect.promise(() =>
+        NodeFSP.rm(NodePath.join(staging, "game_BackUpThisFolder_ButDontShipItWithYourGame"), {
+          recursive: true,
+          force: true,
+        }),
+      );
+      const runtime = target === "Windows" ? "UnityPlayer.dll" : "UnityPlayer.so";
+      const missing = yield* Effect.promise(async () => {
+        const absent: string[] = [];
+        for (const [name, kind] of [
+          [executable, "file"],
+          ["game_Data", "directory"],
+          [runtime, "file"],
+        ] as const) {
+          const stat = await NodeFSP.stat(NodePath.join(staging, name)).catch(() => null);
+          if (
+            stat === null ||
+            (kind === "file" ? !stat.isFile() || stat.size === 0 : !stat.isDirectory())
+          )
+            absent.push(name);
+        }
+        return absent;
+      });
+      if (missing.length > 0)
+        return {
+          result: {
+            ...result,
+            success: false,
+            message:
+              `The Unity ${target} build is missing ${missing.join(", ")}; nothing was replaced.\n${result.message}`.slice(
+                -4096,
+              ),
+          },
+          sourceId: null,
+        };
+      const after = yield* snapshot(root, godotProject);
+      const comparison = comparedSource(before, after, "export");
+      if (comparison.kind !== "current")
+        return {
+          result: { ...result, success: false, message: comparison.detail },
+          sourceId: null,
+        };
+      yield* Effect.tryPromise({
+        try: async () => {
+          const old = `${destination}.old-${NodeCrypto.randomUUID()}`;
+          const existing = await NodeFSP.stat(destination).catch(() => null);
+          if (existing !== null) await NodeFSP.rename(destination, old);
+          try {
+            await NodeFSP.rename(staging, destination);
+          } catch (cause) {
+            // The previous build goes back rather than leaving no build at all.
+            if (existing !== null) await NodeFSP.rename(old, destination).catch(() => undefined);
+            throw cause;
+          }
+          await NodeFSP.rm(old, { recursive: true, force: true });
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation,
+            path: destination,
+            reason: "io",
+            detail: "The checked Unity build could not be moved into place.",
+            cause,
+          }),
+      });
+      return {
+        result: { ...result, path: NodePath.join(destination, executable) },
+        sourceId: comparison.sourceId,
+      };
+    }).pipe(
+      Effect.ensuring(Effect.promise(() => NodeFSP.rm(staging, { recursive: true, force: true }))),
+    );
+  });
+  const runUnityExport = Effect.fnUntraced(function* (
+    root: string,
+    target: "Web" | "Linux" | "Windows",
+  ) {
+    if (target === "Web")
+      return yield* new GameOperationError({
+        operation: "Unity export",
+        path: root,
+        reason: "invalid-input",
+        detail: "Unity games export Linux and Windows only; Web (WebGL) is refused for now.",
+      });
+    const directory = target === "Windows" ? "builds/windows" : "builds/linux";
+    // One hold for import and build: another game cannot take the editor between them.
+    const built = yield* liveUnity.hold(root)(
+      Effect.gen(function* () {
+        const imported = yield* importGame(root);
+        if (!imported.success) return { result: imported, sourceId: null };
+        return yield* buildUnityPlayer(
+          root,
+          target,
+          NodePath.join(root, directory),
+          `export-${target.toLowerCase()}`,
+        );
+      }),
+    );
+    if (!built.result.success) return built.result;
+    return {
+      ...built.result,
+      message:
+        target === "Windows"
+          ? "Unity Windows x86_64 build ready at builds/windows/game.exe with game_Data/, UnityPlayer.dll and MonoBleedingEdge/ beside it; ship the whole folder. This machine did not run it on Windows."
+          : "Unity Linux x86_64 build ready at builds/linux/game.x86_64 with game_Data/ and UnityPlayer.so beside it; ship the whole folder.",
+    };
+  });
   const runExport = Effect.fnUntraced(function* (
     root: string,
     target: "Web" | "Linux" | "Windows",
@@ -584,6 +783,7 @@ const make = Effect.gen(function* () {
         reason: "invalid-input",
         detail: `${backend.displayName} games export ${backend.exportTargets.join(", ")} only; ${target} is refused for this engine.`,
       });
+    if (backend.id === "unity") return yield* runUnityExport(root, target);
     const toolStatus = yield* tools.status;
     const engineStatus =
       backend.id === "godot"
@@ -1355,7 +1555,7 @@ const make = Effect.gen(function* () {
               try {
                 line = await GameExploreNative.nextRunnerLine(lineState, combined);
               } catch (cause) {
-                if (signal?.aborted) throw new Error("aborted");
+                if (signal?.aborted) throw new Error("aborted", { cause });
                 throw new GameOperationError({
                   operation: "Explore session",
                   path: root,
@@ -1500,6 +1700,311 @@ const make = Effect.gen(function* () {
       } satisfies typeof GameExploreStartResult.Type;
     });
   /**
+   * Opens a Unity exploration session: a real Linux player of the current
+   * sources, built once per source identity under ignored builds/logs, runs
+   * on a private display. The template's StudioProbe speaks the native
+   * runner's protocol over loopback TCP, so acts, pictures, probe reads and
+   * closing share the Godot native path. The game is paused between acts.
+   */
+  /**
+   * The Linux player a Unity session plays: built once per source identity
+   * under ignored builds/logs. Runs as the game's exclusive operation, so it
+   * never races game_export or game_check for the editor, and outside the
+   * start lock every game's explore shares.
+   */
+  const unityPlayerFor = (threadId: ThreadId, root: string) =>
+    Effect.gen(function* () {
+      const { godotProject } = yield* engine(root);
+      const known = (detail: string) =>
+        Effect.flatMap(snapshot(root, godotProject), (source) =>
+          source.kind === "known"
+            ? Effect.succeed(source.sourceId)
+            : Effect.fail(exploreInvalid(root, detail)),
+        );
+      const playerOf = (sourceId: string) =>
+        NodePath.join(unityPlayerDirectory(root, sourceId), "game.x86_64");
+      const cached = (sourceId: string) =>
+        Effect.promise(() =>
+          NodeFSP.stat(playerOf(sourceId)).then(
+            (stat) => stat.isFile(),
+            () => false,
+          ),
+        );
+      const before = yield* known(
+        "The game sources could not be identified before the Unity session ran; the result would not be current.",
+      );
+      if (yield* cached(before)) return { player: playerOf(before), sourceId: before };
+      return yield* exclusive(
+        root,
+        "Unity play build",
+        liveUnity.hold(root)(
+          Effect.gen(function* () {
+            // The refresh writes .meta files for new assets, so the identity
+            // the player is built and cached under is taken after it.
+            const imported = yield* importGame(root);
+            if (!imported.success)
+              return yield* new GameOperationError({
+                operation: "Explore session",
+                path: root,
+                reason: "command-failed",
+                detail: `The Unity import failed, so no session was opened.
+${imported.message}`.slice(-3000),
+              });
+            const sourceId = yield* known(
+              "The game sources could not be identified after the Unity import; the result would not be current.",
+            );
+            if (yield* cached(sourceId)) return { player: playerOf(sourceId), sourceId };
+            // One play build is kept: older ones are the previous sources' players.
+            yield* Effect.promise(async () => {
+              const logs = NodePath.join(root, "builds/logs");
+              for (const name of await NodeFSP.readdir(logs).catch(() => [] as string[]))
+                if (name.startsWith("unity-play-"))
+                  await NodeFSP.rm(NodePath.join(logs, name), { recursive: true, force: true });
+            });
+            const built = yield* buildUnityPlayer(
+              root,
+              "Linux",
+              unityPlayerDirectory(root, sourceId),
+              "unity-play-build",
+            );
+            if (!built.result.success)
+              return yield* new GameOperationError({
+                operation: "Explore session",
+                path: root,
+                reason: "command-failed",
+                detail: `The Unity play build failed, so no session was opened.
+${built.result.message}`.slice(-3000),
+              });
+            if (built.sourceId !== sourceId)
+              return yield* exploreInvalid(
+                root,
+                "The game sources changed while the Unity play build ran; start the session again.",
+              );
+            return { player: playerOf(sourceId), sourceId };
+          }),
+        ),
+        String(threadId),
+      );
+    });
+  const exploreStartUnity = (
+    threadId: ThreadId,
+    root: string,
+    input: typeof GameExploreStartInput.Type,
+    prepared: { readonly player: string; readonly sourceId: string },
+  ) =>
+    Effect.gen(function* () {
+      const { player, sourceId } = prepared;
+      const xvfb = yield* Effect.promise(() => GameExploreNative.findXvfb()).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (xvfb === null)
+        return yield* exploreInvalid(
+          root,
+          "Unity exploration needs xvfb-run for the player's private display; install the system Xvfb package.",
+        );
+      const id = NodeCrypto.randomUUID();
+      const traceDir = NodePath.join(exploreScratchBase(), id);
+      const token = GameExploreNative.nativeSessionToken();
+      const requestPath = NodePath.join(traceDir, "request.json");
+      const playerHome = NodePath.join(traceDir, "home");
+      const dropScratch = Effect.promise(() =>
+        NodeFSP.rm(traceDir, { recursive: true, force: true }),
+      ).pipe(Effect.ignore);
+      const server: NodeNet.Server = yield* Effect.tryPromise({
+        try: async () => {
+          await NodeFSP.mkdir(playerHome, { recursive: true });
+          const listener = NodeNet.createServer();
+          await new Promise<void>((resolve, reject) => {
+            listener.once("error", reject);
+            listener.listen(0, "127.0.0.1", () => {
+              listener.off("error", reject);
+              resolve();
+            });
+          });
+          return listener;
+        },
+        catch: (cause) =>
+          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
+      });
+      const lineState: GameExploreNative.NativeLineState = {
+        buffer: "",
+        notify: null,
+        closed: false,
+      };
+      let runnerSocket: NodeNet.Socket | null = null;
+      server.on("connection", (sock) => {
+        if (runnerSocket !== null) {
+          sock.destroy();
+          return;
+        }
+        runnerSocket = sock;
+        GameExploreNative.attachLineState(sock, lineState);
+      });
+      const port = (server.address() as NodeNet.AddressInfo).port;
+      const dropAll = Effect.gen(function* () {
+        yield* processes.stop(root).pipe(Effect.ignore);
+        yield* Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())));
+        yield* dropScratch;
+      });
+      yield* Effect.tryPromise({
+        // @effect-diagnostics-next-line preferSchemaOverJson:off -- The player's request file is the runner protocol's fixed two-field JSON.
+        try: () => NodeFSP.writeFile(requestPath, JSON.stringify({ port, token })),
+        catch: (cause) =>
+          new GameOperationError({ operation: "Explore session", path: root, reason: "io", cause }),
+      }).pipe(Effect.tapError(() => dropAll));
+      const viewport = { ...UNITY_VIEWPORT };
+      // The player keeps its prefs and log under the session's scratch HOME,
+      // never the user's ~/.config/unity3d.
+      const env: NodeJS.ProcessEnv = {
+        ...GameProcesses.engineChildEnv(),
+        HOME: playerHome,
+        XDG_CONFIG_HOME: NodePath.join(playerHome, ".config"),
+        LIBGL_ALWAYS_SOFTWARE: "1",
+        LP_NUM_THREADS: "2",
+      };
+      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
+      const bootWallStart = Date.now();
+      const launched = yield* processes
+        .start({
+          root,
+          executable: xvfb,
+          args: [
+            "-a",
+            "-s",
+            `-screen 0 ${viewport.width}x${viewport.height}x24`,
+            player,
+            "-kurambitExplore",
+            requestPath,
+            "-screen-fullscreen",
+            "0",
+            "-screen-width",
+            String(viewport.width),
+            "-screen-height",
+            String(viewport.height),
+            "-force-glcore",
+            "-logFile",
+            NodePath.join(traceDir, "player.log"),
+          ],
+          operation: "explore-unity",
+          timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
+          env,
+          envMode: "replace",
+          ownedProcessGroup: true,
+        })
+        .pipe(Effect.tapError(() => dropAll));
+      const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
+      const hello = yield* Effect.tryPromise({
+        try: async (signal) => {
+          const timeout = AbortSignal.timeout(bootTimeoutMs);
+          const combined = signal.aborted ? timeout : AbortSignal.any([signal, timeout]);
+          for (;;) {
+            const line = await GameExploreNative.nextRunnerLine(lineState, combined).catch(
+              (cause: unknown) => {
+                throw new Error(
+                  `The Unity player did not report in within ${bootTimeoutMs}ms; no exploration session was opened. Player log: ${NodePath.join(traceDir, "player.log")}`,
+                  { cause },
+                );
+              },
+            );
+            if (line === null) {
+              if (runnerSocket !== null) throw new Error("The Unity player exited before booting.");
+              continue;
+            }
+            let parsed: unknown = null;
+            try {
+              // @effect-diagnostics-next-line preferSchemaOverJson:off -- Runner protocol lines are sanitized field by field below.
+              parsed = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (typeof parsed !== "object" || parsed === null) continue;
+            const record = parsed as Record<string, unknown>;
+            if (record["token"] !== token)
+              throw new Error("The Unity player presented a wrong session token.");
+            return record;
+          }
+        },
+        catch: (cause) =>
+          new GameOperationError({
+            operation: "Explore session",
+            path: root,
+            reason: "command-failed",
+            detail: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }).pipe(Effect.tapError(() => dropAll));
+      // @effect-diagnostics-next-line globalDateInEffect:off -- Wall-clock boot latency for honest bootMs.
+      const bootMs = Date.now() - bootWallStart;
+      const clean = GameExploreNative.sanitizeNativeObservation(hello);
+      const now = yield* Clock.currentTimeMillis;
+      const live: ExploreSession = {
+        id,
+        root,
+        threadId,
+        buildId: sourceId,
+        sourceId: sourceId,
+        viewport,
+        bootMs,
+        // Close removes the player's scratch HOME; pictures and player.log stay as evidence.
+        profileDir: playerHome,
+        traceDir,
+        native: {
+          socket: runnerSocket!,
+          lineState,
+          token,
+          hasDisplay: true,
+          pid: launched.pid,
+          server,
+          nextId: 1,
+        },
+        web: null,
+        lock: Semaphore.makeUnsafe(1),
+        lastActiveMs: now,
+        wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
+        calls: 0,
+        totalSteps: 0,
+        totalNominalMs: 0,
+        images: 0,
+        actions: [],
+        closed: false,
+        closeReason: null,
+        closedAt: null,
+      };
+      if (clean.probe !== null)
+        live.actions.push({
+          index: 0,
+          steps: [],
+          executedInputSteps: 0,
+          nominalMs: 0,
+          probe: {
+            gameState: { ...clean.probe.gameState },
+            player: clean.probe.player === null ? null : { ...clean.probe.player },
+          },
+          screenshot: "",
+          consoleMessages: [],
+          consoleTruncated: 0,
+          screenText: { ...clean.screenText },
+          ui: clean.ui.map((control) => ({ ...control, rect: { ...control.rect } })),
+          errors: clean.errors.map((error) => ({ ...error })),
+        });
+      exploreLive.set(root, live);
+      return {
+        sessionId: id,
+        buildId: sourceId,
+        sourceId: sourceId,
+        viewport,
+        booted: true,
+        bootMs,
+        message:
+          `Unity exploration session ${id.slice(0, 8)} opened on a Linux player of the current sources ${sourceId.slice(0, 12)} ` +
+          `at ${viewport.width}x${viewport.height} (paused between calls). Keys and mouse go in through the Input System; ` +
+          `act with short input steps plus ui and inspect steps, then game_explore_close. This session never qualifies the build.`,
+        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
+        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
+        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
+      } satisfies typeof GameExploreStartResult.Type;
+    });
+  /**
    * Opens a web exploration session on the current game sources. The static
    * folder is served over loopback and headless Chromium plays it in real
    * time: real keyboard and mouse input, screenshots, console errors and the
@@ -1633,33 +2138,51 @@ const make = Effect.gen(function* () {
       } satisfies typeof GameExploreStartResult.Type;
     });
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
-    exploreStartLock.withPermits(1)(
-      Effect.gen(function* () {
-        const root = yield* projects.resolve(threadId);
-        const existing = exploreLive.get(root);
-        if (existing !== undefined)
-          return yield* exploreInvalid(
-            existing.id,
-            "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
-          );
-        const manifest = yield* projects.read(root);
-        const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
-        if (target === "web") {
-          if (manifest.engine.name !== "three")
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const unity = (yield* projects.read(root)).engine.name === "unity" && input.target !== "web";
+      if (unity) {
+        const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
+        if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
+      }
+      // The player build takes minutes and is the game's own exclusive
+      // operation; the start lock is held only to launch and register.
+      const unityPlayer =
+        unity && !exploreLive.has(root) ? yield* unityPlayerFor(threadId, root) : null;
+      return yield* exploreStartLock.withPermits(1)(
+        Effect.gen(function* () {
+          const existing = exploreLive.get(root);
+          if (existing !== undefined)
+            return yield* exploreInvalid(
+              existing.id,
+              "Another exploration session is open for this game; its owning thread must close it before this game can start another.",
+            );
+          const manifest = yield* projects.read(root);
+          const target = input.target ?? (manifest.engine.name === "three" ? "web" : "native");
+          if (target === "web") {
+            if (manifest.engine.name !== "three")
+              return yield* exploreInvalid(
+                root,
+                `${manifest.engine.name === "unity" ? "Unity" : "Godot"} web play is not in this build; start the session without a target (or with target native).`,
+              );
+            return yield* exploreStartWeb(threadId, root, input);
+          }
+          if (manifest.engine.name === "three")
             return yield* exploreInvalid(
               root,
-              "Godot web play is not in this build; start the session without a target (or with target native).",
+              "This is a three.js browser game; start the session with target web.",
             );
-          return yield* exploreStartWeb(threadId, root, input);
-        }
-        if (manifest.engine.name === "three")
-          return yield* exploreInvalid(
-            root,
-            "This is a three.js browser game; start the session with target web.",
-          );
-        return yield* exploreStartNative(threadId, root, input);
-      }),
-    );
+          if (manifest.engine.name === "unity")
+            return unityPlayer === null
+              ? yield* exploreInvalid(
+                  root,
+                  "An exploration session for this game closed while this one was starting; start the session again.",
+                )
+              : yield* exploreStartUnity(threadId, root, input, unityPlayer);
+          return yield* exploreStartNative(threadId, root, input);
+        }),
+      );
+    });
   /**
    * Runs one native act through the runner's TCP connection and persists the
    * returned picture where one exists. Headless runs keep no picture; the
@@ -2185,6 +2708,22 @@ const make = Effect.gen(function* () {
         }
       }
     });
+  const unityRoot = (root: string) =>
+    projects.read(root).pipe(
+      Effect.flatMap((manifest) =>
+        manifest.engine.name === "unity"
+          ? Effect.void
+          : Effect.fail(
+              new GameOperationError({
+                operation: "Unity editor",
+                path: root,
+                reason: "invalid-input",
+                detail:
+                  "The game_unity_* tools work on Unity games; this game runs another engine.",
+              }),
+            ),
+      ),
+    );
   const withRoot = Effect.fnUntraced(function* <A>(
     threadId: ThreadId,
     name: string,
@@ -2391,6 +2930,14 @@ const make = Effect.gen(function* () {
     packageWindows: (threadId) =>
       withRoot(threadId, "Package Windows build", (root) =>
         Effect.gen(function* () {
+          if ((yield* projects.read(root)).engine.name === "unity")
+            return yield* new GameOperationError({
+              operation: "Package Windows build",
+              path: NodePath.join(root, "builds/windows"),
+              reason: "invalid-input",
+              detail:
+                "Windows packaging reads a Godot executable and pack. A Unity Windows build is the whole builds/windows folder; zip that folder to ship it.",
+            });
           const packaged = yield* Effect.tryPromise({
             try: (signal) => packageWindowsRelease({ root, signal }),
             catch: (cause) =>
@@ -2614,9 +3161,114 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const manifest = yield* projects.read(root);
-        const label = manifest.engine.name === "three" ? "three.js check" : "Godot check";
+        const label =
+          manifest.engine.name === "three"
+            ? "three.js check"
+            : manifest.engine.name === "unity"
+              ? "Unity check"
+              : "Godot check";
         return yield* withRoot(threadId, label, checkGame);
       }),
+    unityTools: (threadId) =>
+      withRoot(threadId, "Unity tools", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(liveUnity.tools(root)),
+          Effect.map((tools) => ({ tools })),
+        ),
+      ),
+    unityEdit: (threadId, input) =>
+      withRoot(threadId, "Unity edit", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          if (!GameUnity.UNITY_EDIT_TOOL.test(input.tool))
+            return yield* new GameOperationError({
+              operation: "Unity edit",
+              path: input.tool,
+              reason: "invalid-input",
+              detail:
+                "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
+            });
+          // Edits live in the open scene until saved, so the edit and its save hold one editor.
+          return yield* liveUnity.hold(root)(
+            Effect.gen(function* () {
+              const result = yield* liveUnity.call(root, input.tool, { ...input.arguments });
+              const saved = yield* liveUnity.call(root, "editor_save_all", {}).pipe(
+                Effect.map(GameUnity.textOf),
+                Effect.orElseSucceed(() => "Saving the scene failed."),
+              );
+              return { text: `${GameUnity.textOf(result).slice(0, 8000)}\n${saved}` };
+            }),
+          );
+        }),
+      ),
+    unityEval: (threadId, input) =>
+      withRoot(threadId, "Unity eval", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(
+            liveUnity.call(root, "script_eval", { code: input.code, timeout: 60 }, 90_000),
+          ),
+          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 8000) })),
+        ),
+      ),
+    unityRecompile: (threadId) =>
+      withRoot(threadId, "Unity recompile", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          const { backend, godot, cwd, godotProject } = yield* engine(root);
+          const imported = yield* backend.importProject({
+            root,
+            projectDir: cwd,
+            projectName: godotProject,
+            binary: godot,
+          });
+          return {
+            ok: imported.result.success,
+            errors: imported.issues,
+            warnings: [],
+            text: imported.result.success
+              ? imported.result.message
+              : imported.result.message.slice(0, 4000),
+          };
+        }),
+      ),
+    unityPlay: (threadId, input) =>
+      withRoot(threadId, "Unity play", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          // An unfocused editor freezes play mode at frame 1 without auto-tick.
+          if (input.action === "start") yield* liveUnity.call(root, "editor_set_auto_tick", {});
+          const result = yield* liveUnity.call(
+            root,
+            input.action === "start" ? "editor_playmode_start" : "editor_playmode_stop",
+            {},
+            120_000,
+          );
+          return { text: GameUnity.textOf(result) };
+        }),
+      ),
+    unityScreenshot: (threadId, input) =>
+      withRoot(threadId, "Unity screenshot", (root) =>
+        Effect.gen(function* () {
+          yield* unityRoot(root);
+          const result = yield* liveUnity.call(root, "capture_game_view", {
+            source: "camera",
+            max_resolution: input.maxSize ?? 960,
+          });
+          return GameUnity.screenshotOf(result);
+        }),
+      ),
+    unityConsole: (threadId, input) =>
+      withRoot(threadId, "Unity console", (root) =>
+        unityRoot(root).pipe(
+          Effect.andThen(
+            liveUnity.call(root, "console_get", {
+              level: input.level ?? "log",
+              tail: input.tail ?? 50,
+            }),
+          ),
+          Effect.map((result) => ({ text: GameUnity.textOf(result).slice(0, 12000) })),
+        ),
+      ),
     blenderCode: (threadId, input) =>
       withRoot(threadId, "Blender code", (root) => liveBlender.code(root, input)),
     blenderLook: (threadId, input) =>
@@ -2635,6 +3287,7 @@ const make = Effect.gen(function* () {
         yield* cancel(root);
         yield* processes.stop(root);
         yield* liveBlender.stop(root).pipe(Effect.ignore);
+        yield* liveUnity.stop(root).pipe(Effect.ignore);
         yield* gameBot.stop(root).pipe(Effect.ignore);
         yield* preview.stop(root);
         return {
@@ -2681,6 +3334,8 @@ const make = Effect.gen(function* () {
 });
 export const layer = Layer.effect(GameService, make).pipe(
   Layer.provide(GameEngine.layer),
+  // After GameEngine, so the engine backend and the service share one live editor.
+  Layer.provide(GameUnity.layer),
   Layer.provide(GameBlender.layer),
   Layer.provide(GameBot.layer),
   Layer.provideMerge(GameOperations.layer),

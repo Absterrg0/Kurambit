@@ -1,4 +1,24 @@
-import type { GameStatus } from "@kurambit/contracts";
+import type { GameEngineId, GameStatus } from "@kurambit/contracts";
+
+/**
+ * The toolchain entries a game of this engine needs. Unity is an optional
+ * install, so a Godot or three.js game must not read as "tools missing"
+ * without it, and three.js never needs Godot.
+ */
+const ENGINE_TOOLS: Record<GameEngineId, ReadonlyArray<string>> = {
+  godot: ["blender", "godot", "uv"],
+  three: ["blender", "uv"],
+  unity: ["blender", "uv", "unity"],
+};
+
+export function toolchainReadyFor(
+  toolchain: GameStatus["toolchain"],
+  engine: GameEngineId,
+): boolean {
+  return ENGINE_TOOLS[engine].every((name) =>
+    toolchain.tools.some((tool) => tool.tool === name && tool.ready),
+  );
+}
 
 /**
  * What the stage shows for the play surface. Ordered by what the user most

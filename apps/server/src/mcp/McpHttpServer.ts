@@ -1,4 +1,10 @@
-import { GameToolkit, GameBlenderLookTool, GameBlenderLookToolkit } from "./toolkits/game/tools.ts";
+import {
+  GameToolkit,
+  GameBlenderLookTool,
+  GameBlenderLookToolkit,
+  GameUnityScreenshotTool,
+  GameUnityScreenshotToolkit,
+} from "./toolkits/game/tools.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -793,6 +799,28 @@ const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook
   );
 });
 
+const registerGameUnityScreenshot = Effect.fn("McpHttpServer.registerGameUnityScreenshot")(
+  function* () {
+    const games = yield* GameService.GameService;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const built = yield* GameUnityScreenshotToolkit;
+    yield* registerImageTool(
+      GameUnityScreenshotTool,
+      (payload, options) =>
+        built
+          .handle("game_unity_screenshot", payload, undefined, options)
+          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+      (effect) =>
+        effect.pipe(
+          Effect.provideService(GameService.GameService, games),
+          Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+        ),
+      "unity-screenshot",
+      (error) => (error instanceof Error ? error.message : "Game Unity screenshot failed."),
+    );
+  },
+);
+
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;
   const threads = yield* ThreadManagementService.ThreadManagementService;
@@ -904,8 +932,14 @@ export const layerGameBlenderLook = imageToolRegistration(
   GameHandlers.layerBlenderLook,
 );
 
+export const layerGameUnityScreenshot = imageToolRegistration(
+  registerGameUnityScreenshot(),
+  GameHandlers.layerUnityScreenshot,
+);
+
 export const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
+  layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
 );
 

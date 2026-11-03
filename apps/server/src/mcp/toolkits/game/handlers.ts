@@ -4,7 +4,7 @@ import * as GameRun from "../../../game/GameRun.ts";
 import * as GameService from "../../../game/GameService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { GameToolkit, GameBlenderLookToolkit } from "./tools.ts";
+import { GameToolkit, GameBlenderLookToolkit, GameUnityScreenshotToolkit } from "./tools.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
@@ -57,6 +57,48 @@ const handlers = {
       const scope = yield* caller;
       const game = yield* GameService.GameService;
       return yield* game.blenderExport(scope.thread.threadId, input);
+    }),
+  ),
+  game_unity_tools: McpToolAccess.readsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityTools(scope.thread.threadId);
+    }),
+  ),
+  game_unity_edit: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityEdit(scope.thread.threadId, input);
+    }),
+  ),
+  game_unity_eval: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityEval(scope.thread.threadId, input);
+    }),
+  ),
+  game_unity_recompile: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityRecompile(scope.thread.threadId);
+    }),
+  ),
+  game_unity_play: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityPlay(scope.thread.threadId, input);
+    }),
+  ),
+  game_unity_console: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityConsole(scope.thread.threadId, input);
     }),
   ),
   game_import: McpToolAccess.actsAsCaller(() =>
@@ -192,3 +234,18 @@ const blenderLookHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
 export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
+
+/** Registered like the Blender look, so the capture becomes real image content. */
+const unityScreenshotHandlers = {
+  game_unity_screenshot: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const game = yield* GameService.GameService;
+      return yield* game.unityScreenshot(scope.thread.threadId, input);
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameUnityScreenshotToolkit.tools>;
+export const layerUnityScreenshot = McpToolAccess.toLayer(
+  GameUnityScreenshotToolkit,
+  unityScreenshotHandlers,
+);

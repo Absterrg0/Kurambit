@@ -1,0 +1,10 @@
+# Unity regenerates these on every editor start; they are never sources.
+/[Ll]ibrary/
+/[Tt]emp/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+*.csproj
+*.sln

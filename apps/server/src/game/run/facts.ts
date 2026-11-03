@@ -3,6 +3,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { assetListSummary, assetUseSummary, readAssetUse } from "./assetUse.ts";
+import { laneBots } from "./roles.ts";
 
 const readText = (path: string) => NodeFSP.readFile(path, "utf8").catch(() => "");
 
@@ -69,23 +70,25 @@ export const artAssetFacts = async (root: string, lane: string): Promise<string>
 
 /** Code facts plus the player report, as one sentence block for the reviewer. */
 export const reviewerFacts = async (root: string, lane: string): Promise<string> => {
-  const web = lane !== "godot";
+  const ext = lane === "godot" ? [".gd"] : lane === "unity" ? [".cs"] : [".js", ".mjs"];
+  // A Unity project's own files live under Assets/; everything beside it is generated.
+  const base = lane === "unity" ? NodePath.join(root, lane, "Assets") : NodePath.join(root, lane);
   const sources: Array<{ f: string; n: number }> = [];
   let images = 0;
   let audio = 0;
   let models = 0;
   await walk(
-    NodePath.join(root, lane),
+    base,
     async (full, name) => {
       if (
-        (web ? [".js", ".mjs"] : [".gd"]).some((ext) => name.endsWith(ext)) &&
+        ext.some((suffix) => name.endsWith(suffix)) &&
         !full.includes(`${NodePath.sep}vendor${NodePath.sep}`)
       )
         sources.push({
           f: NodePath.relative(root, full),
           n: (await readText(full)).split("\n").length,
         });
-      if (name.endsWith(".import")) return;
+      if (name.endsWith(".import") || name.endsWith(".meta")) return;
       if (/\.(png|jpg|jpeg|webp|svg)$/i.test(name)) images += 1;
       else if (/\.(wav|ogg|mp3|mid|midi)$/i.test(name)) audio += 1;
       else if (/\.(glb|gltf|fbx|obj|blend)$/i.test(name)) models += 1;
@@ -97,9 +100,9 @@ export const reviewerFacts = async (root: string, lane: string): Promise<string>
     sources
       .slice(0, 5)
       .map((s) => `${s.f} ${s.n} lines`)
-      .join("; ") || (web ? "no js files" : "no gd files");
+      .join("; ") || `no ${ext[0]!.slice(1)} files`;
   const report = (await readText(NodePath.join(root, ".studio", "player-report.md")))
     .trim()
     .slice(0, 3000);
-  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)} Bots: ${await botLine(root)}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
+  return `Largest sources: ${top}. Files: ${images} images, ${audio} audio, ${models} 3D models. ${await assetFacts(root, lane)} Bots: ${laneBots(lane) ? await botLine(root) : "bot runs do not play this engine's games"}.${report.length > 0 ? `\nPlayer report (facts from bot runs across the game, no interpretation):\n${report}` : "\nNo player report recorded yet."}`;
 };

@@ -19,6 +19,7 @@ import {
   GameManifest,
   GameOperationError,
   THREE_VIEWPORT,
+  UNITY_VIEWPORT,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameListResult,
@@ -258,16 +259,19 @@ const make = Effect.gen(function* () {
             await NodeFSP.mkdir(NodePath.dirname(root), { recursive: true });
             await NodeFSP.mkdir(root); // Never adopt or overwrite an existing directory during creation.
             created = true;
+            const engine = createEngine(input);
+            // The Unity template ships its own Assets/ tree, and Unity has no web build.
             const engineDirs =
-              createEngine(input) === "three"
-                ? ["web/assets"]
-                : ["godot/assets/models", "godot/scripts"];
+              engine === "three"
+                ? ["web/assets", "builds/web"]
+                : engine === "unity"
+                  ? []
+                  : ["godot/assets/models", "godot/scripts", "builds/web"];
             for (const relative of [
               "art/blender",
               "art/scripts",
               "art/previews",
               ...engineDirs,
-              "builds/web",
               "builds/linux",
             ])
               await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
@@ -481,6 +485,8 @@ const make = Effect.gen(function* () {
       const expensive = yield* Effect.tryPromise({
         try: async () => {
           if (manifest.engine.name === "three") return { viewport: { ...THREE_VIEWPORT } };
+          // Unity players boot at the lane's fixed resolution; see UNITY_VIEWPORT.
+          if (manifest.engine.name === "unity") return { viewport: { ...UNITY_VIEWPORT } };
           const engineRoot = insideGame(root, manifest.godotProject);
           const projectGodot = await NodeFSP.readFile(
             NodePath.join(engineRoot, "project.godot"),

@@ -1,7 +1,8 @@
+import type { GameEngineId } from "@kurambit/contracts";
 import { create } from "zustand";
 
 /** What the home screen's brief box hands the New game dialog. */
-export type GameDraft = { readonly brief: string; readonly engine: "godot" | "three" };
+export type GameDraft = { readonly brief: string; readonly engine: GameEngineId };
 
 export const useGameDialogStore = create<{
   dialog: "create" | "open" | null;

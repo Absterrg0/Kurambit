@@ -59,10 +59,13 @@ export const GameAsset = Schema.Struct({
   inputs: Schema.optionalKey(Schema.Array(GameBlenderInputSource)),
   updatedAt: Schema.String,
 });
-export const GameTemplateId = Schema.Literals(["blank", "blank-three"]);
+export const GameTemplateId = Schema.Literals(["blank", "blank-three", "blank-unity"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
-/** The engine every game build runs on. Godot is the native lane; three.js is the quick browser lane. */
-export const GameEngineId = Schema.Literals(["godot", "three"]);
+/**
+ * The engine every game build runs on. Godot is the native lane; three.js is
+ * the quick browser lane; Unity is the native lane on Unity 6.
+ */
+export const GameEngineId = Schema.Literals(["godot", "three", "unity"]);
 export type GameEngineId = typeof GameEngineId.Type;
 /** Game-relative directory holding a three.js game's static sources. */
 export const THREE_PROJECT_DIRECTORY = "web";
@@ -70,6 +73,12 @@ export const THREE_PROJECT_DIRECTORY = "web";
 export const THREE_PINNED_VERSION = "0.180.0";
 /** Design resolution three.js games boot, explore and bot-play at. */
 export const THREE_VIEWPORT = { width: 1280, height: 720 } as const;
+/** Game-relative directory holding a Unity game's project. */
+export const UNITY_PROJECT_DIRECTORY = "unity";
+/** The pinned Unity editor every Unity game opens, checks and builds with. */
+export const UNITY_PINNED_VERSION = "6000.6.7f1";
+/** Resolution Unity players boot, explore and screenshot at. */
+export const UNITY_VIEWPORT = { width: 1280, height: 720 } as const;
 export const GameTemplate = Schema.Struct({
   id: GameTemplateId,
   name: Schema.String,
@@ -111,11 +120,20 @@ export const GAME_TEMPLATES: readonly GameTemplate[] = [
     dimension: "3d",
     probe: true,
   },
+  {
+    id: "blank-unity",
+    name: "Blank (Unity)",
+    description:
+      "An empty Unity 6 project: one main scene with a camera and a light, a GameState and a live StudioProbe, Linux and Windows builds.",
+    dimension: "3d",
+    gameplayScene: "Assets/Scenes/Main.unity",
+    probe: true,
+  },
 ];
 export const DEFAULT_GAME_TEMPLATE: GameTemplateId = "blank";
 /** The starter template a create request's engine maps to. */
 export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
-  engine === "three" ? "blank-three" : "blank";
+  engine === "three" ? "blank-three" : engine === "unity" ? "blank-unity" : "blank";
 export const GameManifest = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   name: Schema.String,
@@ -164,6 +182,7 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "project-not-found",
       "thread-dispatch",
       "invalid-input",
+      "license-missing",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     cause: Schema.optionalKey(Schema.Defect()),
@@ -195,6 +214,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The turn that follows this game operation could not be sent. Retry the operation.",
       "invalid-input":
         "The request is outside the limits this operation accepts. Read the detail, shrink the request, and retry.",
+      "license-missing":
+        "Unity needs an active licence on this machine. Open Unity Hub, sign in, and add a Unity Personal licence under Preferences > Licenses, then retry. Kurambit never stores Unity credentials.",
     };
     return `${this.operation}: ${fixes[this.reason]} Path: ${this.path}${this.detail ? `\n${this.detail}` : ""}`;
   }
@@ -209,7 +230,7 @@ export const GameOperationFailure = Schema.Struct({
   message: Schema.String,
 });
 export const GameToolStatus = Schema.Struct({
-  tool: Schema.Literals(["blender", "godot", "uv"]),
+  tool: Schema.Literals(["blender", "godot", "uv", "unity"]),
   path: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),
   ready: Schema.Boolean,

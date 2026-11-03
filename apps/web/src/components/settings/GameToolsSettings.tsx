@@ -32,7 +32,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   const [keyBusy, setKeyBusy] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
   const data = verified ?? query.data;
-  const perform = async (operation: "save" | "verify" | "install") => {
+  const perform = async (operation: "save" | "verify" | "install" | "install-unity") => {
     if (busy) return;
     setBusy(operation);
     setError(null);
@@ -55,10 +55,13 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
         setBlenderPath(null);
         setGodotPath(null);
       }
-      const result = await (operation === "install" ? install : verify)({
-        environmentId,
-        input: {},
-      });
+      const result =
+        operation === "install" || operation === "install-unity"
+          ? await install({
+              environmentId,
+              input: operation === "install-unity" ? { unity: true } : {},
+            })
+          : await verify({ environmentId, input: {} });
       if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
       else setVerified(result.value);
     } finally {
@@ -96,7 +99,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
         {data?.tools.map((tool) => (
           <div key={tool.tool} className="space-y-1 break-words">
             <p className="font-medium">
-              {tool.tool === "blender" ? "Blender" : "Godot"} · {tool.version ?? "missing"} ·{" "}
+              {TOOL_NAMES[tool.tool]} · {tool.version ?? "missing"} ·{" "}
               {tool.verified ? "verified" : tool.ready ? "verification needed" : "not ready"}
             </p>
             <p className="font-mono text-xs">{tool.path ?? "No executable resolved"}</p>
@@ -113,9 +116,11 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           <p role="status">
             {busy === "install"
               ? "Installing and verifying tools…"
-              : busy === "save"
-                ? "Saving paths and verifying tools…"
-                : "Verifying tools…"}
+              : busy === "install-unity"
+                ? "Installing Unity (about 4.5 GB)…"
+                : busy === "save"
+                  ? "Saving paths and verifying tools…"
+                  : "Verifying tools…"}
           </p>
         ) : null}
         {data ? (
@@ -152,6 +157,14 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           >
             Install
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!canInstall || busy !== null || data?.installing}
+            onClick={() => void perform("install-unity")}
+          >
+            Install Unity
+          </Button>
         </div>
       </div>
       <GameToolsKeysSection
@@ -169,6 +182,8 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
     </SettingsSection>
   );
 }
+
+const TOOL_NAMES = { blender: "Blender", godot: "Godot", uv: "uv", unity: "Unity" } as const;
 
 const KEY_ROWS = [
   {

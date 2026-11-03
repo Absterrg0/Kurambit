@@ -18,6 +18,15 @@ import {
   GameBlenderAssetsImportInput,
   GameBlenderAssetsImportResult,
   GameCheckResult,
+  GameUnityConsoleInput,
+  GameUnityEditInput,
+  GameUnityEvalInput,
+  GameUnityPlayInput,
+  GameUnityRecompileResult,
+  GameUnityScreenshotInput,
+  GameUnityScreenshotResult,
+  GameUnityTextResult,
+  GameUnityToolsResult,
   GameOperationFailure,
   GameRunRoundDetail,
   GameRunStatusResult,
@@ -52,7 +61,7 @@ void Context;
 void Fiber;
 /**
  * Run threads from the GameRun production loop get play-level tools only
- * (status, check, import, export, explore, game_bot_*, game_blender_*).
+ * (status, check, import, export, explore, game_bot_*, game_blender_*, game_unity_*).
  * Everything else hides from them through this check.
  */
 const isGameRunThread = () => {
@@ -123,7 +132,7 @@ const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   description:
-    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
+    "Download a library asset into the live Blender scene (pinned mcp-for-blender import_asset, adapted). Afterwards the .blend source is saved in the game (art/blender/live.blend) and a GLB is exported under <engine dir>/assets/blender/ (godot/ or web/; unity/Assets/Blender/ for Unity) that the game can load; run game_import after. Polyhaven textures need applyTo object names to be used, otherwise the material is unused. Imported models arrive at arbitrary scale: check the reported bounding box, put them on the ground, and look at them.",
   parameters: GameBlenderAssetsImportInput,
   success: GameBlenderAssetsImportResult,
   failure,
@@ -134,7 +143,7 @@ const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 const BlenderExportTool = Tool.make("game_blender_export", {
   description:
-    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb. The .blend source is saved in the game with the export. Run game_import after.",
+    "Export the live Blender scene (or the named objects) as a GLB under the game's engine directory (godot/ or web/, the manifest's godotProject) that the game can load: pass objects to export only those, or nothing to export every mesh. Defaults to <engine dir>/assets/blender/scene.glb (unity/Assets/Blender/scene.glb for Unity). The .blend source is saved in the game with the export. Run game_import after.",
   parameters: GameBlenderExportInput,
   success: GameBlenderExportResult,
   failure,
@@ -144,6 +153,82 @@ const BlenderExportTool = Tool.make("game_blender_export", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
 export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
+const UnityToolsTool = Tool.make("game_unity_tools", {
+  description:
+    "List the editing tools of this Unity game's live editor (Unity's official `unity mcp`): scene, GameObject, component, prefab, material, settings and lighting tools, each with its input schema. Call one with game_unity_edit. The first game_unity_* call opens the editor on a private display, which can take a few minutes on a fresh project.",
+  success: GameUnityToolsResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const UnityEditTool = Tool.make("game_unity_edit", {
+  description:
+    "Call one editing tool from game_unity_tools in this Unity game's live editor, such as gameobject_create, gameobject_set_transform, component_add, component_set_field, script_attach or scene_get_hierarchy, with its arguments. Open scenes are saved after every call. Never hand-edit .unity, .prefab or .asset YAML; edit through this.",
+  parameters: GameUnityEditInput,
+  success: GameUnityTextResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const UnityEvalTool = Tool.make("game_unity_eval", {
+  description:
+    "Evaluate C# in this Unity game's live editor on its main thread (Pipeline script eval); `return <value>;` sends a value back. UnityEngine and UnityEditor are available, and in play mode the running game is reachable. Use it for anything the editing tools do not cover; save scenes you change with UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes().",
+  parameters: GameUnityEvalInput,
+  success: GameUnityTextResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const UnityRecompileTool = Tool.make("game_unity_recompile", {
+  description:
+    "Import changed files and recompile this Unity game's scripts in the live editor. Returns every C# compiler error with file and line. Run it after writing C# and fix errors before anything else.",
+  success: GameUnityRecompileResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const UnityPlayTool = Tool.make("game_unity_play", {
+  description:
+    "Enter (start) or leave (stop) play mode in this Unity game's live editor, for a quick look with game_unity_screenshot, game_unity_console or game_unity_eval. Real playtests with input use game_explore_*.",
+  parameters: GameUnityPlayInput,
+  success: GameUnityTextResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+const UnityConsoleTool = Tool.make("game_unity_console", {
+  description:
+    "Read recent console entries of this Unity game's live editor, with stack traces. level is a minimum severity (log, warn, error).",
+  parameters: GameUnityConsoleInput,
+  success: GameUnityTextResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
+  description:
+    "See this Unity game's Game view through its main camera as one image (Pipeline capture game_view, camera source). Works in and out of play mode; Screen Space Overlay UI only shows in game_explore_* pictures.",
+  parameters: GameUnityScreenshotInput,
+  success: GameUnityScreenshotResult,
+  failure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, visibleToRunThreads);
+export const GameUnityScreenshotToolkit = Toolkit.make(GameUnityScreenshotTool);
 const ImportTool = Tool.make("game_import", {
   description:
     "Run a real headless engine import in this thread's game. Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, import errors or nonzero exit, with stdout/stderr and log path. Fix failures before export.",
@@ -334,6 +419,12 @@ export const GameToolkit = Toolkit.make(
   BlenderAssetsSearchTool,
   BlenderAssetsImportTool,
   BlenderExportTool,
+  UnityToolsTool,
+  UnityEditTool,
+  UnityEvalTool,
+  UnityRecompileTool,
+  UnityPlayTool,
+  UnityConsoleTool,
   ImportTool,
   CheckTool,
   ExportTool,
