@@ -448,6 +448,33 @@ describe("parallel samples", () => {
     expect(state.rounds[0]?.kept).toBe(true);
   });
 
+  it("gives a build played well short of the other one catch-up turn, once", () => {
+    const uneven =
+      (cand: number, best: number): Responder =>
+      (step, state) =>
+        step.kind === "role" && step.role.startsWith("sample") && step.read.length === 0
+          ? done(step, {
+              evidence: {
+                ...goodEvidence,
+                nominalMs: step.prompt.includes("You used about")
+                  ? 100_000
+                  : step.at === "cand"
+                    ? cand
+                    : best,
+              },
+            })
+          : roundResponder("A", "B")(step, state);
+    const short = drive(atRound(), uneven(70_000, 110_000), (s) => s.rounds.length === 1);
+    // Both plays, the candidate's catch-up turn, both write-ups.
+    expect(short.steps.filter((s) => s === "sample")).toHaveLength(5);
+    expect(short.logs.some((l) => /plays on: 70 s against 110 s/.test(l))).toBe(true);
+    const close = drive(atRound(), uneven(95_000, 110_000), (s) => s.rounds.length === 1);
+    expect(close.steps.filter((s) => s === "sample")).toHaveLength(4);
+    // A floor turn already spent is the one extra turn: no second catch-up.
+    const floored = drive(atRound(), uneven(10_000, 118_000), (s) => s.rounds.length === 1);
+    expect(floored.steps.filter((s) => s === "sample")).toHaveLength(5);
+  });
+
   it("replays an unusable sample on its own build only", () => {
     const ats: Array<string | null> = [];
     let candPlays = 0;

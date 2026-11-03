@@ -373,6 +373,36 @@ const nodeCounts = (f: BotFact): string =>
     ? ""
     : ` Scene nodes: ${f.perf.nodesStart} at boot, ${f.perf.nodesPeak} at peak, ${f.perf.nodesEnd} at the end; ${f.perf.orphansEnd} orphan nodes (out of the tree, not freed) at the end. A build that reached more of the game is expected to have more nodes; many orphans, or nodes far above what the visible play needs, suggest something spawned and was not freed.`;
 
+// Judges discount a verdict when one build was played much longer than the
+// other. A sample about to write up that played well short of the other
+// side's finished play takes its one extra turn now (the same neutral prompt
+// as the floor's), unless it already had one.
+const CATCH_UP_MS = 20_000;
+const catchUp = (samples: ReadonlyArray<Sample>, logs: string[]): ReadonlyArray<Sample> => {
+  let out = samples;
+  for (const side of ["x", "y"] as const) {
+    const mi = out.findLastIndex((s) => s.side === side);
+    const oi = out.findLastIndex((s) => s.side !== side);
+    if (mi < 0 || oi < 0) continue;
+    const mine = out[mi]!;
+    const other = out[oi]!;
+    if (mine.phase !== "write" || mine.extra) continue;
+    if (other.phase !== "write" && other.phase !== "done") continue;
+    const played = mine.evidence?.nominalMs ?? 0;
+    const theirs = other.evidence?.nominalMs ?? 0;
+    if (
+      theirs - played > Math.max(CATCH_UP_MS, theirs * 0.25) &&
+      played < Roles.SAMPLE_INPUT_MS - CATCH_UP_MS
+    ) {
+      logs.push(
+        `sample ${mine.label} plays on: ${Math.round(played / 1000)} s against ${Math.round(theirs / 1000)} s`,
+      );
+      out = out.with(mi, { ...mine, phase: "more", extra: true });
+    }
+  }
+  return out;
+};
+
 // One play turn of one side's sample: its first play, the floor's one extra
 // turn, or the write-up. Both sides get the same prompt, caps and input budget.
 const sampleStep = (
@@ -391,6 +421,7 @@ const sampleStep = (
       notes: "",
       evidence: null,
       sheet: "",
+      extra: false,
     };
     const step = role(id, {
       role: `sample-${s.label}`,
@@ -591,8 +622,9 @@ const applyCompare = (
               ...s,
               thread: res.threadId,
               // Evidence is cumulative per thread, so the second turn adds to it.
-              phase:
-                res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS ? "more" : "write",
+              ...(res.evidence !== null && res.evidence.nominalMs < PLAY_FLOOR_MS
+                ? { phase: "more" as const, extra: true }
+                : { phase: "write" as const }),
               evidence: res.evidence,
             }
           : s.phase === "more"
@@ -607,7 +639,7 @@ const applyCompare = (
     if (res.kind === "failed") logs.push(`sample ${s.label} could not finish: ${res.reason}`);
     if (next.phase === "done" && !usable(next))
       logs.push(`play sample ${s.label} lacked usable hands-on evidence`);
-    return { ...c, samples: c.samples.with(si, next) };
+    return { ...c, samples: catchUp(c.samples.with(si, next), logs) };
   }
   const ji = c.judges.findIndex((j) => j.phase !== "done");
   if (ji < 0) return c;

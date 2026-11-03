@@ -215,6 +215,9 @@ const Sample = Schema.Struct({
   evidence: Schema.NullOr(Evidence),
   // The sheet of this player's own frames, game-relative; "" when it has none.
   sheet: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // True once this sample was given its one extra play turn (the floor's, or
+  // catching up with the other build's exposure).
+  extra: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type Sample = typeof Sample.Type;
 
