@@ -68,10 +68,12 @@ card "m=join" 1080 1920 instagram/story-join.png
 wall "t=paper" 1584 396 linkedin/banner-profile.png
 wall "t=paper&rows=2" 1128 191 linkedin/banner-company.png
 wall "t=paper&rows=9" 2560 1440 youtube/banner.png
-card "m=make" 1280 640 github/social-preview.png
-
-# The link card, which the site serves as ../site/og.png.
-card "m=make" 1200 630 web/og.png
+# The link card, on vermilion to stand out in a feed; the site serves it as
+# ../site/og.png. GitHub's social preview and the README banner are the same.
+wall "t=shu&copy=1&sub=1&size=0.14" 1200 630 web/og.png
+wall "copy=1&sub=1&size=0.14" 1200 630 web/og-paper.png
+wall "t=dark&copy=1&sub=1&size=0.14" 1200 630 web/og-dark.png
+wall "t=shu&copy=1&sub=1&size=0.14" 1280 640 github/social-preview.png
 
 find "$kit" -path "$kit/src" -prune -o -path "$kit/logo" -prune -o -name "*.png" -print0 |
   xargs -0 python3 -c '

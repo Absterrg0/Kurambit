@@ -121,6 +121,9 @@ shelf template draws the headers and banners.
 | [github](brand/github)       | Repository social preview                      | 1280×640             |
 | [web](brand/web)             | The link card                                  | 1200×630             |
 
+The link card is printed on vermilion: in a feed of white and black it is the one thing that
+stands out, and it matches the seal avatar. Use the paper or dark card where vermilion would clash.
+
 Use the **seal** avatar everywhere a picture is cropped round: vermilion is the one colour that
 stands out in a feed. Pair it with the paper X header. The posts run in order: make, tell, played,
 better, agents, join.

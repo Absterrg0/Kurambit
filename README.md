@@ -1,11 +1,8 @@
-<p align="center">
-  <img src="assets/brand/kurambit-mark.png" alt="Kurambit" width="160" />
-</p>
+<a href="https://kurambit.com/"><img src="apps/marketing/brand/github/social-preview.jpg" alt="Kurambit. Nobody made the game you want. So make it." /></a>
 
 <h1 align="center">Kurambit</h1>
 
 <p align="center">
-  <strong>Nobody made the game you want. So make it.</strong><br />
   Open source · local first · bring your own coding agent
 </p>
 
