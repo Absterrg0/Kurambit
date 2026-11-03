@@ -5,18 +5,19 @@
     <title>Kurambit avatar</title>
     <link rel="stylesheet" href="kit.css" />
     <style>
-      /* Profile pictures are cropped to a circle: the head sits in its
-         middle, small enough that ears and ruff stay clear of the rim. */
+      /* Profile pictures are cropped to a circle. The bust (cut from the full
+         fox in kurambit-mark.png) fades out into the chest instead of ending
+         in a hard edge, and sits in the middle clear of the rim. */
       .head {
         position: absolute;
         left: 50%;
-        top: 50%;
-        width: var(--size, 66%);
-        height: var(--size, 66%);
+        top: 57%;
+        width: var(--size, 94%);
+        height: var(--size, 94%);
         transform: translate(-50%, -50%);
         background: var(--fox);
-        -webkit-mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
-        mask: url("../../../../assets/brand/kurambit-head.png") center / contain no-repeat;
+        -webkit-mask: url("fox-bust.png") center / contain no-repeat;
+        mask: url("fox-bust.png") center / contain no-repeat;
       }
 
       :root {
