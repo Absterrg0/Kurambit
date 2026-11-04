@@ -231,6 +231,24 @@ const handlers = {
         .pipe(Effect.mapError(runFailure));
     }),
   ),
+  game_run_decide: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      return yield* runs
+        .runDecide({ threadId: scope.thread.threadId, ...input })
+        .pipe(Effect.mapError(runFailure));
+    }),
+  ),
+  game_run_profile: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      return yield* runs
+        .runProfile(scope.thread.threadId, input.profile)
+        .pipe(Effect.mapError(runFailure));
+    }),
+  ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
 /**

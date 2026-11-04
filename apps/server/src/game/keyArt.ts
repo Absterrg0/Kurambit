@@ -11,14 +11,20 @@ const NAMED = /key[ -]?art\b[\s\S]{0,300}?[`(]([^`()\s]{1,200}\.(?:png|jpe?g|web
 /**
  * The game's key art as a game-relative path, only when it resolves to a
  * non-empty file inside the game's real root: the 16:9 title art the art step saves,
- * else the key art VISION.md names. A link leading out of the game is refused.
+ * else the key art VISION.md names (that one first when `from` is "vision": the
+ * title art is the template's placeholder until the art step). A link leading
+ * out of the game is refused.
  */
-export const findKeyArt = async (root: string, lane: string): Promise<string | null> => {
+export const findKeyArt = async (
+  root: string,
+  lane: string,
+  from: "title" | "vision" = "title",
+): Promise<string | null> => {
   const base = await NodeFSP.realpath(root).catch(() => null);
   if (base === null) return null;
   const vision = await NodeFSP.readFile(NodePath.join(base, "VISION.md"), "utf8").catch(() => "");
   const named = NAMED.exec(vision.slice(0, 20_000))?.[1]?.trim() ?? "";
-  const candidates = [`${laneUi(lane)}/title_bg.png`];
+  const candidates = from === "title" ? [`${laneUi(lane)}/title_bg.png`] : [];
   if (IMAGE.test(named) && !NodePath.isAbsolute(named)) candidates.push(named);
   for (const candidate of candidates) {
     const real = await NodeFSP.realpath(NodePath.join(base, candidate)).catch(() => null);

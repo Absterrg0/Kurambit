@@ -2,7 +2,14 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { GameBotDecider, GameBotPerf, RunId, ThreadId } from "@kurambit/contracts";
+import {
+  GameBotDecider,
+  GameBotPerf,
+  GameRunDecisionKind,
+  GameRunProfile,
+  RunId,
+  ThreadId,
+} from "@kurambit/contracts";
 
 const Verdict = Schema.Struct({
   order: Schema.String,
@@ -269,6 +276,53 @@ const PairStep = Schema.Struct({
   results: Schema.Array(Schema.Struct({ id: Schema.Number, result: HalfResult })),
 });
 
+// A creator decision in a Guided run: what the creator's agent presents and the
+// answers the run accepts. The policy names what it knows; the executor adds
+// files it resolves on disk (the key art) and drops evidence that is missing.
+const Decision = Schema.Struct({
+  id: Schema.String,
+  kind: GameRunDecisionKind,
+  ask: Schema.String,
+  // Game-relative files to show, with what each one is.
+  evidence: Schema.Array(Schema.Struct({ label: Schema.String, path: Schema.String })),
+  // What to say beside the files: the pitches' branches, the ladder.
+  text: Schema.String,
+  answers: Schema.Array(
+    Schema.Struct({
+      answer: Schema.String,
+      means: Schema.String,
+      // The prototype branch a pick answer continues from.
+      branch: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  // The answer the run takes when nobody answers in time; one of `answers`.
+  fallback: Schema.String,
+  waitMs: Schema.Number,
+});
+export type Decision = typeof Decision.Type;
+
+const DecideStep = Schema.Struct({
+  kind: Schema.Literal("decide"),
+  id: Schema.Number,
+  decision: Decision,
+  // When the creator's chat was woken; null until then.
+  sent: Schema.NullOr(Schema.Number),
+  // When the default fires: set once the message reaches the creator's agent, so a
+  // busy chat does not spend the wait. A resume waits out what is left.
+  deadline: Schema.NullOr(Schema.Number),
+});
+export type DecideStep = typeof DecideStep.Type;
+
+/** A decision the run took, by the creator's answer or its own default. */
+const Decided = Schema.Struct({
+  id: Schema.String,
+  kind: GameRunDecisionKind,
+  answer: Schema.String,
+  notes: Schema.String,
+  by: Schema.Literals(["creator", "default"]),
+});
+export type Decided = typeof Decided.Type;
+
 const Step = Schema.Union([
   RoleStep,
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GitOp }),
@@ -281,6 +335,7 @@ const Step = Schema.Union([
     files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
   }),
   PairStep,
+  DecideStep,
 ]);
 export type Step = typeof Step.Type;
 export type RoleStep = typeof RoleStep.Type;
@@ -418,7 +473,7 @@ export type Round = typeof Round.Type;
 
 const Picked = Schema.Struct({
   branch: Schema.String,
-  how: Schema.Literals(["won", "selected", "only-booted"]),
+  how: Schema.Literals(["won", "selected", "only-booted", "creator"]),
   comparison: Schema.NullOr(Schema.String),
 });
 export type Picked = typeof Picked.Type;
@@ -427,20 +482,25 @@ const Task = Schema.Union([
   Schema.TaggedStruct("init", {}),
   Schema.TaggedStruct("stage", {
     name: Schema.Literals(["vision", "plan", "art", "build"]),
-    // The art stage alone passes through an independent review and at most one redo.
-    phase: Schema.Literals(["role", "review", "redo", "commit", "boot", "reject"]),
+    // The art stage alone passes through an independent review and at most one redo;
+    // "revise" is a vision or plan turn on the creator's notes.
+    phase: Schema.Literals(["role", "review", "redo", "revise", "commit", "boot", "reject"]),
     thread: Schema.NullOr(ThreadId),
     block: Schema.NullOr(Block),
     sha: Schema.String,
     why: Schema.String,
-    // The art director's defect list, the redo's direction. Older run.json files have none.
+    // The art director's defect list or the creator's notes, the redo's direction.
+    // Older run.json files have none.
     review: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   }),
   Schema.TaggedStruct("proto", {
+    // Counts across pairs: a creator's retry builds prototypes 2 and 3.
     i: Schema.Number,
     phase: Schema.Literals(["role", "commit", "boot", "keep", "reject"]),
     branch: Schema.String,
     why: Schema.String,
+    // The creator's notes for a retried pair. Older run.json files have none.
+    notes: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   }),
   Schema.TaggedStruct("pick", {
     phase: Schema.Literals(["compare", "select", "adopt"]),
@@ -470,12 +530,21 @@ const Task = Schema.Union([
     candidate: Schema.String,
     phase: Schema.Literals(["restore", "trunk"]),
   }),
+  // A Guided run waits for the creator here; the step carries the decision.
+  Schema.TaggedStruct("decide", { decision: Decision }),
 ]);
 export type Task = typeof Task.Type;
 
 const RunState = Schema.Struct({
   version: Schema.Literal(3),
   runId: Schema.String,
+  // Older run.json files decided everything themselves.
+  profile: GameRunProfile.pipe(Schema.withDecodingDefaultKey(Effect.succeed("autopilot"))),
+  // The creator decisions this run took, in order. Older run.json files have none.
+  decided: Schema.Array(Decided).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  // The creator's notes for the first full build, from a prototype pick that
+  // asked to take something from the other one. Older run.json files have none.
+  buildNotes: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   brief: Schema.String,
   artDirection: Schema.String,
   budgetMinutes: Schema.NullOr(Schema.Number),
@@ -553,6 +622,7 @@ export const parseJournal = (text: string): RoundRecord[] =>
 
 export type NewRunInput = {
   readonly runId: string;
+  readonly profile: RunState["profile"];
   readonly brief: string;
   readonly artDirection: string;
   readonly budgetMinutes: number | null;
@@ -568,6 +638,8 @@ export const freshState = (
 ): RunState => ({
   version: 3,
   ...input,
+  decided: [],
+  buildNotes: "",
   stage: "starting",
   ending: null,
   stallStreak: 0,
@@ -621,6 +693,7 @@ export const loadState = (runText: string | null, journalText: string): Loaded =
   const state = freshState(
     {
       runId: old.runId,
+      profile: "autopilot",
       brief: old.brief,
       artDirection: old.artDirection ?? "",
       budgetMinutes: old.budgetMinutes ?? null,

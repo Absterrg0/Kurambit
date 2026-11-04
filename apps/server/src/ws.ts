@@ -1815,6 +1815,19 @@ const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.gameRunProfile]: ({ threadId, profile }) =>
+          gameRun.runProfile(threadId, profile).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GameOperationError({
+                  operation: "game-run-profile",
+                  path: String(threadId),
+                  reason: "command-failed",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          ),
         [WS_METHODS.gameRunRound]: ({ threadId, round }) =>
           gameRun.roundDetail(threadId, round).pipe(
             Effect.mapError(
