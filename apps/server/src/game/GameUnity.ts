@@ -851,9 +851,7 @@ const make = Effect.gen(function* () {
           // The errors are what the agent acts on; the log repeats each one
           // several times and its tail often ends past them.
           const errors = [
-            ...new Set(
-              (yield* editorLog(root)).match(/^[^\n]*error CS\d{4}:[^\n]*$/gm) ?? [],
-            ),
+            ...new Set((yield* editorLog(root)).match(/^[^\n]*error CS\d{4}:[^\n]*$/gm) ?? []),
           ].slice(0, 6);
           const compile =
             errors.length > 0 || /error CS\d{4}/.test(tail)
