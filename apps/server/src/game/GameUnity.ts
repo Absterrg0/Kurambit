@@ -784,7 +784,7 @@ const make = Effect.gen(function* () {
         const xvfbPid = xvfb.pid;
         yield* remember({ xvfbPid });
         const logPath = NodePath.join(homeDir, "editor.log");
-        const editorPid = yield* Effect.sync(() => {
+        const editor = yield* Effect.sync(() => {
           // The editor leads its own process group so a stop takes its
           // asset-import workers and shader compilers with it.
           const child = NodeChildProcess.spawn(
@@ -809,24 +809,37 @@ const make = Effect.gen(function* () {
             },
           );
           child.unref();
-          return child.pid;
+          return child;
         });
+        const editorPid = editor.pid;
         if (editorPid === undefined) return yield* fail("The Unity editor did not start.", "io");
         yield* remember({ editorPid });
-        const ready = yield* runCli(
-          root,
-          unity.cli,
-          [
-            "status",
-            "--until-ready",
-            "--project-path",
-            projectDir,
-            "--timeout",
-            String(READY_TIMEOUT_S),
-          ],
-          { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
+        // A batchmode editor that cannot open the project (compile errors, a
+        // licence refusal) exits within seconds; the CLI would still wait out
+        // its whole timeout for an editor that is gone.
+        const exited = Effect.callback<null>((resume) => {
+          const done = () => resume(Effect.succeed(null));
+          if (editor.exitCode !== null || editor.signalCode !== null) return done();
+          editor.once("exit", done);
+          return Effect.sync(() => editor.off("exit", done));
+        });
+        const ready = yield* Effect.raceFirst(
+          runCli(
+            root,
+            unity.cli,
+            [
+              "status",
+              "--until-ready",
+              "--project-path",
+              projectDir,
+              "--timeout",
+              String(READY_TIMEOUT_S),
+            ],
+            { operation: "unity-ready", timeoutMs: (READY_TIMEOUT_S + 30) * 1000 },
+          ),
+          exited,
         );
-        if (!ready.ok || !alive(editorPid)) {
+        if (ready === null || !ready.ok || !alive(editorPid)) {
           const tail = yield* logTail(root);
           if (UNITY_LICENSE_FAILURE.test(tail))
             return yield* fail(
@@ -838,10 +851,12 @@ const make = Effect.gen(function* () {
               "license-missing",
             );
           const compile = /error CS\d{4}/.test(tail)
-            ? " The project has C# compile errors, so the editor stayed in Safe Mode; fix them (see the log) and retry."
+            ? " The project has C# compile errors, so the editor could not open it; fix them (see the log) and retry."
             : "";
           return yield* fail(
-            `The Unity editor did not become ready (${ready.errorCode ?? `exit ${ready.process.exitCode}`}: ${ready.errorMessage ?? "no answer"}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`,
+            ready === null
+              ? `The Unity editor exited before it was ready (exit ${editor.exitCode ?? editor.signalCode}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`
+              : `The Unity editor did not become ready (${ready.errorCode ?? `exit ${ready.process.exitCode}`}: ${ready.errorMessage ?? "no answer"}).${compile} Editor log: ${logPath}\n${tail.slice(-1500)}`,
           );
         }
         // A batchmode editor starts on an untitled scene; edits, saves and the
