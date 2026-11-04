@@ -192,7 +192,12 @@ scene or a `Resources/` asset references, so an `AssetPostprocessor` points
 `Kurambit/Resources/ShellAssets.asset` at the fixed files the art step writes (title art, font,
 click sound, credits) and sets `Assets/UI/icon.png` as the player icon when they import. The
 template's URP assets are committed as a player build re-saves them; an older serialization
-would make every new game's first build change its sources and fail the identity check.
+would make every new game's first build change its sources and fail the identity check. The
+first cold import still empties the URP global settings' runtime list until that first build
+restores it, so the sources differ only between those two moments; player preparation caches
+under the settled sources. Domain reload stays on (`EditorSettings` enter-play-mode options
+off): the kits keep static state, and a second play session in one editor would otherwise
+reach objects the previous session destroyed.
 The three.js starter carries the same shell in `web/shell/`: it owns the render loop and calls
 the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
 so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the

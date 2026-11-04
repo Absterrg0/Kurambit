@@ -128,7 +128,11 @@ public sealed partial class GameState : MonoBehaviour
         foreach (var field in KeptFields()) keptStart[field] = Copy(field, field.GetValue(this));
         progressLoaded = true;
         if (!File.Exists(ProgressPath)) return;
-        if (!(Kurambit.Json.Parse(File.ReadAllText(ProgressPath)) is Dictionary<string, object> saved)) return;
+        string text;
+        // An unreadable file must not stop the shell from starting; the next save replaces it.
+        try { text = File.ReadAllText(ProgressPath); }
+        catch (Exception error) { Debug.LogWarning($"Saved progress could not be read: {error.Message}"); return; }
+        if (!(Kurambit.Json.Parse(text) is Dictionary<string, object> saved)) return;
         foreach (var field in KeptFields())
         {
             if (!saved.TryGetValue(field.Name, out var raw) || raw == null) continue;

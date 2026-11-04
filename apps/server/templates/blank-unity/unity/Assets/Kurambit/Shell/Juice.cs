@@ -76,6 +76,9 @@ internal sealed class JuiceRunner : MonoBehaviour
     private readonly Dictionary<Transform, Coroutine> scaling = new Dictionary<Transform, Coroutine>();
     private readonly Dictionary<Transform, Vector3> restScale = new Dictionary<Transform, Vector3>();
     private readonly Dictionary<Renderer, Coroutine> flashing = new Dictionary<Renderer, Coroutine>();
+    // The colour before the first of overlapping flashes: a second flash must
+    // fade back to it, not to the half-white tint the first one left.
+    private readonly Dictionary<Renderer, Color> flashBase = new Dictionary<Renderer, Color>();
     private MaterialPropertyBlock block;
 
     private void OnEnable()
@@ -178,7 +181,8 @@ internal sealed class JuiceRunner : MonoBehaviour
         block ??= new MaterialPropertyBlock();
         var sprite = renderer as SpriteRenderer;
         var material = renderer.sharedMaterial;
-        var baseColour = sprite != null ? sprite.color
+        if (sprite != null && !flashBase.ContainsKey(renderer)) flashBase[renderer] = sprite.color;
+        var baseColour = sprite != null ? flashBase[renderer]
             : material != null && material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor")
             : material != null && material.HasProperty("_Color") ? material.color : Color.white;
         var property = material != null && material.HasProperty("_BaseColor") ? "_BaseColor" : "_Color";
@@ -199,6 +203,7 @@ internal sealed class JuiceRunner : MonoBehaviour
         if (sprite != null) sprite.color = baseColour;
         else renderer.SetPropertyBlock(null);
         flashing.Remove(renderer);
+        flashBase.Remove(renderer);
     }
 
     public void Burst(Vector3 position, Color colour, int count, float speed)
