@@ -101,10 +101,16 @@ const lastBotRun = async (root: string, after: number): Promise<RoleDone["bot"]>
   return { file: row.file, decider: row.decider === "jev" ? "jev" : "policy" };
 };
 
-export const runRole = Effect.fn("GameRun.runRole")(function* (
+export const runRole: (
   deps: RoleDeps,
   ctx: RoleContext,
   step: RoleStep,
+  fresh?: boolean,
+) => Effect.Effect<StepResult, RoleRunError> = Effect.fn("GameRun.runRole")(function* (
+  deps: RoleDeps,
+  ctx: RoleContext,
+  step: RoleStep,
+  fresh = false,
 ) {
   const { threads } = deps;
   const { projectId, root } = ctx;
@@ -256,7 +262,9 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
     const own = blank ?? sample;
     const launched = yield* deps.launches
       .launch({
-        commandId: CommandId.make(`studio:${ctx.runId}:${step.id}${gone ? ":relaunch" : ""}`),
+        commandId: CommandId.make(
+          `studio:${ctx.runId}:${step.id}${fresh ? ":fresh" : gone ? ":relaunch" : ""}`,
+        ),
         projectId,
         title: step.title,
         modelSelection: ctx.selection,
@@ -313,7 +321,8 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
 
   type Waited =
     | { readonly kind: "run"; readonly run: OrchestrationV2Run | null; readonly timedOut: boolean }
-    | Extract<StepResult, { kind: "ended" | "failed" }>;
+    | Extract<StepResult, { kind: "ended" | "failed" }>
+    | { readonly kind: "fresh" };
   const waitLoop = Effect.gen(function* () {
     let retries = 0;
     let memoryWaits = 0;
@@ -397,6 +406,13 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
         if (instant) {
           if (!(yield* workspaceOk(live)))
             return { kind: "failed", reason: "worktree was not provisioned" } satisfies Waited;
+          // A thread with history can be refused by its own provider session
+          // (reasoning issued under an earlier quota or key it no longer
+          // accepts), and every resend fails the same way. A role in the game
+          // folder continues once in a fresh thread: its work is in the files.
+          // A provider that is really down fails there too and ends the run.
+          if (target !== null && retries === 0 && step.at === null && !fresh)
+            return { kind: "fresh" } satisfies Waited;
           const reason =
             failure === null
               ? "run failed with no provider message"
@@ -418,6 +434,15 @@ export const runRole = Effect.fn("GameRun.runRole")(function* (
   }).pipe(Effect.onInterrupt(() => stop(live).pipe(Effect.ignore)));
   const waited = yield* waitLoop;
   if (waited.kind === "ended") return waited;
+  if (waited.kind === "fresh") {
+    yield* ctx.log(`${step.role}: thread ${live} fails at once; continuing in a fresh thread`);
+    return yield* runRole(
+      deps,
+      ctx,
+      { ...step, attached: null, thread: null, prompt: `${CONTINUE}\n\n${step.prompt}` },
+      true,
+    );
+  }
   const release =
     step.at !== null &&
     (step.release || waited.kind === "failed" || (waited.timedOut && budgetBound()));
