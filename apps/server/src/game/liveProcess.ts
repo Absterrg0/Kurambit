@@ -35,7 +35,8 @@ export const memoryShortfall = async (
   what: string,
   neededMb: number,
   env: string,
-): Promise<string | null> => shortfallDetail(what, neededMb, process.env[env], memoryAvailable());
+): Promise<string | null> =>
+  shortfallDetail(what, neededMb, process.env[env], await memoryAvailable());
 
 /**
  * Below this much available memory an idle live editor is closed. The kernel
@@ -47,7 +48,7 @@ const IDLE_MEMORY_FLOOR = 1024 * MB;
 
 /** Available memory in MB while it is under the idle floor, else null. */
 export const underIdleMemoryFloor = async (): Promise<number | null> => {
-  const available = memoryAvailable();
+  const available = await memoryAvailable();
   return available < IDLE_MEMORY_FLOOR ? Math.round(available / MB) : null;
 };
 
