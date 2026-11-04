@@ -335,6 +335,25 @@ export const GameRunSteerResult = Schema.Struct({
 });
 export type GameRunSteerResult = typeof GameRunSteerResult.Type;
 
+export const GameRunChecksResult = Schema.Struct({
+  /** The rung scored (its position in the ladder), null when the run has none open. */
+  rung: Schema.NullOr(Schema.Number),
+  is: Schema.String,
+  results: Schema.Array(
+    Schema.Struct({
+      /** The check's number in the rung. */
+      check: Schema.Number,
+      what: Schema.String,
+      pass: Schema.Boolean,
+      evidence: Schema.String,
+      /** The scenario's last frame, "" when none was taken. */
+      frame: Schema.String,
+    }),
+  ),
+  message: Schema.String,
+});
+export type GameRunChecksResult = typeof GameRunChecksResult.Type;
+
 export const GameRunDecideInput = Schema.Struct({
   threadId: ThreadId,
   decisionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),

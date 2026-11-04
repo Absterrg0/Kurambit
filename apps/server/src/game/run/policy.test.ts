@@ -150,7 +150,12 @@ const roundResponder =
   (
     v1: string,
     v2: string,
-    opts: { bootOk?: boolean; changed?: boolean; bot?: (sha: string) => Policy.StepResult } = {},
+    opts: {
+      bootOk?: boolean;
+      changed?: boolean;
+      bot?: (sha: string) => Policy.StepResult;
+      checks?: (k: number, state: State.RunState) => boolean;
+    } = {},
   ): Responder =>
   (step, state) => {
     if (step.kind === "git") {
@@ -162,6 +167,24 @@ const roundResponder =
     if (step.kind === "boot")
       return { kind: "boot", ok: opts.bootOk ?? true, detail: "check failed" };
     if (step.kind === "facts") return { kind: "facts", jev: false, code: "facts." };
+    if (step.kind === "checks") {
+      // By default every state check of the rung passes; opts.checks scripts failures.
+      const rung = state.ladder?.rungs.find((x) => x.id === step.rung);
+      const results = (rung?.checks ?? []).flatMap((c, k) =>
+        c.kind === "state"
+          ? [
+              {
+                k,
+                what: c.what,
+                pass: opts.checks?.(k, state) ?? true,
+                evidence: "read",
+                frame: "",
+              },
+            ]
+          : [],
+      );
+      return { kind: "checks", results };
+    }
     if (step.kind === "note") return { kind: "note" };
     if (step.kind === "decide")
       return { kind: "decided", answer: step.decision.fallback, notes: "", by: "default" };
@@ -1110,7 +1133,9 @@ describe("ladder", () => {
     const first = oneRound(atLadder({ next: "the jump sticks" }), respond);
     expect(first.logs).toContain("round 1 builds rung 1 of 4: the game has part 1");
     expect(blocks[0]).toContain("the game has part 1");
-    expect(blocks[0]).toContain("part 1 starts (observed by: probe value started)");
+    expect(blocks[0]).toContain(
+      "part 1 starts (look check, judged by a tester: probe value started)",
+    );
     // The last review is a ledger beside the rung, never the goal.
     expect(blocks[0]).toContain("the jump sticks");
     const record = first.state.rounds[0]!;
@@ -1200,6 +1225,75 @@ describe("ladder", () => {
     expect(no.state.shipNoReasons).toContain("the ending is abrupt");
     expect(no.state.rounds).toHaveLength(landed.state.rounds.length);
     expect(drive(landed.state, ship("YES"), (s) => s.ending !== null).state.ending).toBe("ready");
+  });
+
+  describe("state checks scored by the harness", () => {
+    // Rung 1's first check becomes a state check; its second stays a look check.
+    const withState = () => {
+      const ladder = fresh();
+      const [first, ...rest] = ladder.rungs;
+      const state = { what: "part 1 starts", kind: "state" as const, expect: "started == true" };
+      return { ...ladder, rungs: [{ ...first!, checks: [state, first!.checks[1]!] }, ...rest] };
+    };
+    const record = (passes: ReadonlyArray<boolean>) => {
+      const prompts: Array<{ role: string; prompt: string }> = [];
+      let call = 0;
+      const respond = ladderResponder("A", "B", [false, true], (step, state) => {
+        if (step.kind === "role") prompts.push({ role: step.role, prompt: step.prompt });
+        if (step.kind !== "checks") return undefined;
+        const pass = passes[Math.min(call++, passes.length - 1)]!;
+        return roundResponder("A", "B", { checks: () => pass })(step, state);
+      });
+      return { prompts, respond };
+    };
+
+    it("scores state checks after boot and lets the tester judge only the look checks", () => {
+      const { prompts, respond } = record([true]);
+      const one = oneRound(atLadder({ ladder: withState() }), respond);
+      expect(one.steps).toContain("checks");
+      expect(one.logs).toContain("round 1: the harness's state checks: 1 PASS");
+      const tester = prompts.find((p) => p.role.startsWith("tester"))!.prompt;
+      expect(tester).toContain("do not re-verify");
+      // The tester declared check 1 FAIL; the harness's PASS stands for a state check.
+      expect(one.state.rounds[0]?.rung?.checks.map((c) => c.pass)).toEqual([true, true]);
+      expect(one.state.rounds[0]?.kept).toBe(true);
+    });
+
+    it("gives the same builder a fix turn when a state check fails, then scores again", () => {
+      const { prompts, respond } = record([false, true]);
+      const one = oneRound(atLadder({ ladder: withState() }), respond);
+      expect(one.logs).toContain("round 1: fix turn 1 of 2 for the failed state checks");
+      const fix = prompts.filter((p) => p.role.startsWith("builder")).at(-1)!.prompt;
+      expect(fix).toContain("These failed:");
+      expect(fix).toContain("game_run_checks");
+      expect(one.steps.filter((x) => x === "checks")).toHaveLength(2);
+      expect(one.state.rounds[0]?.kept).toBe(true);
+    });
+
+    it("fails the round on its facts after the fix turns, with no tester or judges", () => {
+      const { prompts, respond } = record([false]);
+      const one = oneRound(atLadder({ ladder: withState() }), respond);
+      expect(one.steps.filter((x) => x === "checks")).toHaveLength(3);
+      expect(prompts.some((p) => p.role.startsWith("tester"))).toBe(false);
+      expect(one.steps).not.toContain("sample");
+      expect(one.state.rounds[0]?.kept).toBe(false);
+      expect(one.state.rounds[0]?.rung?.checks[0]?.evidence).toBe("read");
+      expect(one.state.rounds[0]?.rung?.checks[1]?.evidence).toContain("not tested");
+    });
+
+    it("refuses a ladder whose state check cannot be scored", () => {
+      const bad = JSON.stringify({
+        rungs: [1, 2, 3, 4].map((i) => ({
+          is: `part ${i}`,
+          checks: [
+            { what: "a", kind: "state", expect: i === 2 ? "zone is high" : "zone >= 1" },
+            { what: "b", kind: "look", how: "look" },
+          ],
+        })),
+      });
+      const parsed = State.parseLadder(bad);
+      expect("error" in parsed && parsed.error).toContain("rung 2 check 1");
+    });
   });
 
   it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {

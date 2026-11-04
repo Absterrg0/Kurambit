@@ -39,7 +39,7 @@ export const LADDER_FILE = ".studio/ladder.json";
 export const RUNG_CHANGE_FILE = ".studio/rung-change.json";
 
 // The ladder's content is the model's; the order below is a usual one, not a rule.
-const LADDER_ASK = `Then write ${LADDER_FILE}: the ladder from this build to a game with the shape of a Steam demo, inside the scope the brief asks for, as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]} with 4 to 7 rungs in build order. Each rung's "is" is one sentence: what the game IS once that rung is built, something a player notices in the first minute (a mechanic working end to end, a new area or level, a way to win and to lose, a flow from title to ending, feel and audio). Each rung has 2 to 4 checks: "what" is a sentence a player could verify, "how" is how to observe it (a game state value, HUD text, a bot reaching a place or state, a screenshot showing something). A usual order: the core loop playable end to end; a complete first area with a way to win and to lose; progression (more areas or rising challenge); title, flow and ending; feel, juice and audio. Each round of the run builds one rung and is kept only when its checks pass, so make every rung a real step a round can build, and no rung for what already works. Polish is not a rung: the run polishes after the ladder.`;
+const LADDER_ASK = `Then write ${LADDER_FILE}: the ladder from this build to a game with the shape of a Steam demo, inside the scope the brief asks for, as JSON {"rungs":[{"is":"...","checks":[...]}]} with 4 to 7 rungs in build order. Each rung's "is" is one sentence: what the game IS once that rung is built, something a player notices in the first minute (a mechanic working end to end, a new area or level, a way to win and to lose, a flow from title to ending, feel and audio). Each rung has 2 to 4 checks; "what" is a sentence a player could verify. Make every check you can a state check, which the harness scores itself by playing a short scenario and reading the game's state: {"what":"...","kind":"state","from":"play" or "title","setup":"<a target the game's setState accepts, to start the scenario there; omit to start where the game starts>","input":[{"hold":"<key>","ms":<n>},{"press":"<key>"},{"wait":<ms>}] (at most 20 s in all; omit when none),"expect":"<state key> <== != >= <= > <> <number, true, false or "text">"}. expect may join up to four terms with and, use delta(<key>) for how much a value changed during the scenario, and hud contains "text" for text on screen; the keys are the game's own GameState values, which the builder makes the game report. Only what needs eyes or taste is a look check, judged by a tester from play: {"what":"...","kind":"look","how":"<what to look at and when>"}. A usual order: the core loop playable end to end; a complete first area with a way to win and to lose; progression (more areas or rising challenge); title, flow and ending; feel, juice and audio. Each round of the run builds one rung and is kept only when its checks pass, so make every rung a real step a round can build, and no rung for what already works. Polish is not a rung: the run polishes after the ladder.`;
 
 export const stage = (name: "vision" | "plan" | "art", lane: string): string => {
   if (name === "vision")
@@ -91,8 +91,32 @@ export const ladderFix = (error: string): string =>
     ? `You ended your turn before writing the plan. Write PLAN.md now if it does not exist yet (the game's structure, what makes the core good, what done means), then ${LADDER_FILE}. ${LADDER_ASK} You may only write PLAN.md and ${LADDER_FILE}.`
     : `${LADDER_FILE} does not have the ladder's shape: ${error}\nRewrite it as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}: 4 to 7 rungs, each with a non-empty "is" and 2 to 4 checks, each with a non-empty "what" and "how". Keep your rungs; fix the shape. You may only write ${LADDER_FILE}.`;
 
+const scenario = (c: Rung["checks"][number]): string =>
+  [
+    c.from === "title" ? "from the title" : "in a run",
+    c.setup === undefined ? null : `after setState "${c.setup}"`,
+    (c.input ?? []).length === 0 ? null : `input ${JSON.stringify(c.input)}`,
+  ]
+    .filter((x) => x !== null)
+    .join(", ");
+const lookCount = (rung: Pick<Rung, "checks">): number =>
+  rung.checks.filter((c) => c.kind !== "state").length;
+
+/** The builder's fix turn after the harness's state checks failed on its build. */
+export const fixChecks = (
+  failed: ReadonlyArray<{ readonly k: number; readonly what: string; readonly evidence: string }>,
+  rung: Pick<Rung, "checks">,
+): string =>
+  `The harness booted your build and played the rung's state checks. These failed:\n${failed.map((c) => `${c.k + 1}. ${c.what}: ${c.evidence}`).join("\n")}\nThe checks as written:\n${checkList(rung)}\nFix the game so each holds in play: a value the game reports no key for must be exposed in its GameState under that name, and a setup target must be accepted by the game's setState. Run game_run_checks to score them yourself before you stop. Do not edit the ladder or the checks.`;
+
 const checkList = (rung: Pick<Rung, "checks">): string =>
-  rung.checks.map((c, i) => `${i + 1}. ${c.what} (observed by: ${c.how})`).join("\n");
+  rung.checks
+    .map((c, i) =>
+      c.kind === "state"
+        ? `${i + 1}. ${c.what} (state check, scored by the harness: ${scenario(c)}, then expect ${c.expect})`
+        : `${i + 1}. ${c.what} (look check, judged by a tester: ${c.how ?? ""})`,
+    )
+    .join("\n");
 
 /**
  * In a Guided run the creator chooses between the prototypes, so each one plays
@@ -132,7 +156,7 @@ export const rungDirection = (
   continuing: boolean,
   lane: string,
 ): string =>
-  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: expose the state it reads as a game state value, show its HUD text, make its place or state reachable by a bot. Keep what works now working.${lastTry.length === 0 ? "" : continuing ? `\nThe last round built this rung and did not land it: ${lastTry} Its work is your starting point: keep what passed working and finish what failed, making each failed check reachable and observable in play.` : `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.`}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${lane}/; notes, bots and skill files do not count.`;
+  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: for a state check, the game must report each key its expect reads in its GameState, and accept its setup target through setState; for a look check, make what it names show on screen. Run game_run_checks to score the state checks on your build as you go, and stop only when they pass. Keep what works now working.${lastTry.length === 0 ? "" : continuing ? `\nThe last round built this rung and did not land it: ${lastTry} Its work is your starting point: keep what passed working and finish what failed, making each failed check reachable and observable in play.` : `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.`}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${lane}/; notes, bots and skill files do not count.`;
 
 const concreteAsk = (lane: string) =>
   `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane}/; notes, bots and skill files do not count.`;
@@ -181,7 +205,7 @@ export const testerPlay = (
   const checks =
     rung === null
       ? ""
-      : `This build is meant to be: ${rung.is} Verify each of its checks by playing, with a bot where a check says so, and note for each what you did, the values you read and the frame that shows it:\n${checkList(rung)}\nSessions start with no saved data; for a check that something survives a relaunch, change it in a session started with saves keep, close it, and read it back in a second saves keep session.\n${lastTry.length > 0 ? `This build continues a try that failed: ${lastTry} Set up the situation each check that failed there needs and verify it directly; confirm the checks that passed still hold.\n` : ""}`;
+      : `This build is meant to be: ${rung.is} ${lookCount(rung) === 0 ? "The harness already scored every check of this rung by play; do not re-verify them. Play the build freely for what checks cannot see." : `The harness already scored its state checks by play (do not re-verify them); verify each look check by playing, and note for each what you did and the frame that shows it:`}\n${checkList(rung)}\nSessions start with no saved data; for a check that something survives a relaunch, change it in a session started with saves keep, close it, and read it back in a second saves keep session.\n${lastTry.length > 0 ? `This build continues a try that failed: ${lastTry} Set up the situation each check that failed there needs and verify it directly; confirm the checks that passed still hold.\n` : ""}`;
   return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${checks}${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`;
 };
 
@@ -189,7 +213,9 @@ export const testerWrite = (n: number, move: string, rung: Rung | null = null): 
   `Stop playing, now write it. Read .studio/tester-${n}.md. Rewrite the notes file so it states what you did and felt in your own words: decisions, fail, boredom, wanting another go, and your main complaint first. ${
     rung === null
       ? `Prior flaw for this round: ${move} State whether it is fixed, partly fixed, or unchanged, with what you did and the furthest state you reached.`
-      : `Then end the file with each check, in order, as a line alone, CHECK 1: PASS or CHECK 1: FAIL, followed by its evidence on the next lines: what you did, the values you read, the frame that shows it. PASS only what you saw happen in play; what the code says does not count, and a check you could not verify is FAIL. The checks:\n${checkList(rung)}\n`
+      : lookCount(rung) === 0
+        ? "The harness scored every check of this rung; write no CHECK lines.\n"
+        : `Then end the file with each look check, by its number, as a line alone, CHECK <number>: PASS or CHECK <number>: FAIL, followed by its evidence on the next lines: what you did, what you saw, the frame that shows it. PASS only what you saw happen in play; what the code says does not count, and a check you could not verify is FAIL. Write no line for state checks: the harness scored those. The checks:\n${checkList(rung)}\n`
   }You may only write that notes file.`;
 
 // T28's testers ran zero bots each; one plain follow-up asks for the run.

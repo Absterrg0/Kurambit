@@ -222,6 +222,13 @@ const handlers = {
       return detail;
     }),
   ),
+  game_run_checks: McpToolAccess.actsAsCaller(() =>
+    Effect.gen(function* () {
+      const scope = yield* caller;
+      const runs = yield* GameRun.GameRun;
+      return yield* runs.runChecks(scope.thread.threadId).pipe(Effect.mapError(runFailure));
+    }),
+  ),
   game_run_steer: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* caller;

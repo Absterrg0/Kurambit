@@ -3,7 +3,8 @@
 import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
-import { BLANK, parseLadder, parseRungChange } from "./state.ts";
+import { BLANK, isStateCheck, parseLadder, parseRungChange } from "./state.ts";
+import type { CheckOutcome } from "./checkRunner.ts";
 import type {
   Block,
   BotFact,
@@ -120,6 +121,7 @@ export type StepResult =
   | { readonly kind: "git"; readonly git: GitOutcome }
   | { readonly kind: "boot"; readonly ok: boolean; readonly detail: string }
   | { readonly kind: "facts"; readonly jev: boolean; readonly code: string }
+  | { readonly kind: "checks"; readonly results: ReadonlyArray<CheckOutcome> }
   | { readonly kind: "bot"; readonly fact: Omit<BotFact, "side"> }
   | { readonly kind: "note" }
   | {
@@ -304,6 +306,10 @@ const retryFrom = (state: RunState, rung: Rung): string | null => {
   if (result.outcome !== "failed" || !result.checks.some((c) => c.pass)) return null;
   return last.branch.length > 0 ? last.branch : null;
 };
+
+// Fix turns a builder gets in one round when state checks fail, and how long each runs.
+const MAX_FIXES = 2;
+const FIX_MS = 12 * MIN;
 
 const lastTryOf = (state: RunState, r: Round): string => {
   const rung = rungOf(state, r);
@@ -1284,6 +1290,8 @@ const newRound = (state: RunState, now: number): Round => {
     testerNotes: "",
     rung: null,
     continued: false,
+    stateChecks: [],
+    fixes: 0,
     checks: [],
     cmp: null,
     outcome: "",
@@ -1600,6 +1608,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       return toTrunk(r.branch);
     case "boot":
       return go({ kind: "boot", id });
+    case "checks":
+      return go({ kind: "checks", id, rung: r.rung! });
     case "reject":
       return reject(r.branch, r.record.note ?? "");
     case "tester-facts":
@@ -2148,8 +2158,12 @@ const applyRound = (
         now,
         logs,
       );
-    case "boot":
-      if (res.kind === "boot" && res.ok) return at({ phase: "tester-facts" });
+    case "boot": {
+      const rung = rungOf(s, r);
+      if (res.kind === "boot" && res.ok)
+        return at({
+          phase: rung !== null && rung.checks.some(isStateCheck) ? "checks" : "tester-facts",
+        });
       return at({
         phase: "reject",
         record: {
@@ -2157,6 +2171,59 @@ const applyRound = (
           note: `boot failed: ${res.kind === "boot" ? res.detail : "unknown"}`.slice(0, 300),
         },
       });
+    }
+    case "checks": {
+      const rung = rungOf(s, r)!;
+      const results =
+        res.kind === "checks"
+          ? res.results
+          : rung.checks.flatMap((c, k) =>
+              c.kind === "state"
+                ? [{ k, what: c.what, pass: false, evidence: "the checks did not run", frame: "" }]
+                : [],
+            );
+      const stateChecks = results.map(({ k, pass, evidence, frame }) => ({
+        k,
+        pass,
+        evidence,
+        frame,
+      }));
+      const failed = results.filter((c) => !c.pass);
+      logs.push(
+        `round ${r.n}: the harness's state checks: ${results.map((c) => `${c.k + 1} ${c.pass ? "PASS" : "FAIL"}`).join(", ")}`,
+      );
+      if (failed.length === 0) return at({ phase: "tester-facts", stateChecks });
+      // The same builder fixes what the checks showed, in this round, while its
+      // context is warm: a failed fact costs minutes, not the round.
+      if (r.fixes < MAX_FIXES && r.block !== null && remaining(s, now) > ROUND_RESERVE_MS) {
+        logs.push(
+          `round ${r.n}: fix turn ${r.fixes + 1} of ${MAX_FIXES} for the failed state checks`,
+        );
+        return at({
+          phase: "block",
+          stateChecks,
+          fixes: r.fixes + 1,
+          block: {
+            ...r.block,
+            direction: Roles.fixChecks(failed, rung),
+            msLeft: FIX_MS,
+            quiet: 0,
+            turns: Math.max(1, r.block.turns),
+          },
+        });
+      }
+      // Out of fix turns: the round fails on its facts, without a tester or judges.
+      const checks = rung.checks.map((c, k) => {
+        const scored = stateChecks.find((x) => x.k === k);
+        return {
+          what: c.what,
+          pass: scored?.pass ?? false,
+          evidence: scored?.evidence ?? "not tested: the state checks failed first",
+        };
+      });
+      logs.push(`round ${r.n}: the state checks still fail after ${r.fixes} fix turns`);
+      return at({ phase: "restore", stateChecks, checks });
+    }
     case "reject":
       return stallRound(
         s,
@@ -2194,19 +2261,34 @@ const applyRound = (
         (res.kind === "done" && (res.evidence?.executedInputSteps ?? 0) > 0) ||
         (res.kind === "done" && res.botsAfter > r.botsBefore) ||
         r.bot !== null;
-      const declared = rung === null ? [] : parseChecks(testerNotes, rung);
+      // State checks were scored by the harness; the tester's lines count for look checks only.
+      const isState = (k: number) => rung?.checks[k]?.kind === "state";
+      const declared = (rung === null ? [] : parseChecks(testerNotes, rung)).map((check, k) => {
+        const scored = r.stateChecks.find((x) => x.k === k);
+        return isState(k)
+          ? {
+              what: check.what,
+              pass: scored?.pass ?? false,
+              evidence: scored?.evidence ?? "not scored",
+            }
+          : check;
+      });
       const checks = played
         ? declared
-        : declared.map((check) => ({
-            ...check,
-            pass: false,
-            evidence:
-              `no play on record for the tester (no explore input, no bot run); ${check.evidence}`.slice(
-                0,
-                400,
-              ),
-          }));
-      if (rung !== null && !played && declared.some((check) => check.pass))
+        : declared.map((check, k) =>
+            isState(k)
+              ? check
+              : {
+                  ...check,
+                  pass: false,
+                  evidence:
+                    `no play on record for the tester (no explore input, no bot run); ${check.evidence}`.slice(
+                      0,
+                      400,
+                    ),
+                },
+          );
+      if (rung !== null && !played && declared.some((check, k) => check.pass && !isState(k)))
         logs.push(
           `round ${r.n}: the tester declared passes without any play on record; not counted`,
         );

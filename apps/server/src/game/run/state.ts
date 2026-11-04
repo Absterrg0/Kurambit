@@ -10,6 +10,7 @@ import {
   RunId,
   ThreadId,
 } from "@kurambit/contracts";
+import { MAX_INPUT_MS, inputMs, parseExpect } from "./checks.ts";
 
 const Verdict = Schema.Struct({
   order: Schema.String,
@@ -21,7 +22,25 @@ export type Verdict = typeof Verdict.Type;
 // ── The demo ladder. The plan role writes `.studio/ladder.json`; code checks
 // only its shape, the rungs are the model's judgment.
 const Line = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(600));
-const RungCheck = Schema.Struct({ what: Line, how: Line });
+const CheckInput = Schema.Union([
+  Schema.Struct({ hold: Schema.String.check(Schema.isNonEmpty()), ms: Schema.Number }),
+  Schema.Struct({ press: Schema.String.check(Schema.isNonEmpty()) }),
+  Schema.Struct({ wait: Schema.Number }),
+]);
+// A "state" check is a scenario and an expectation code scores (checks.ts); a
+// "look" check (the default, and every check of an older ladder) is judged by a
+// tester from play, as `how` says.
+const RungCheck = Schema.Struct({
+  what: Line,
+  how: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
+  kind: Schema.optionalKey(Schema.Literals(["state", "look"])),
+  from: Schema.optionalKey(Schema.Literals(["play", "title"])),
+  setup: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))),
+  input: Schema.optionalKey(Schema.Array(CheckInput).check(Schema.isMaxLength(30))),
+  expect: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+});
+export type RungCheck = typeof RungCheck.Type;
+export const isStateCheck = (c: RungCheck): boolean => c.kind === "state";
 const rungFields = {
   is: Line,
   checks: Schema.Array(RungCheck).check(Schema.isMinLength(2), Schema.isMaxLength(4)),
@@ -61,6 +80,24 @@ const decodeLadderFile = Schema.decodeUnknownResult(Schema.fromJsonString(Ladder
 });
 const decodeRungChange = Schema.decodeUnknownResult(Schema.fromJsonString(RungChange));
 
+/** What is wrong with one check beyond its JSON shape, or null. */
+const checkProblem = (c: RungCheck, where: string): string | null => {
+  if (c.kind !== "state")
+    return (c.how ?? "").trim().length === 0 ? `${where}: a look check needs "how"` : null;
+  if (c.expect === undefined) return `${where}: a state check needs "expect"`;
+  const parsed = parseExpect(c.expect);
+  if ("error" in parsed) return `${where}: ${parsed.error}`;
+  const input = c.input ?? [];
+  if (input.some((s) => ("ms" in s && !(s.ms > 0)) || ("wait" in s && !(s.wait >= 0))))
+    return `${where}: input times are positive milliseconds`;
+  if (inputMs(input) > MAX_INPUT_MS)
+    return `${where}: input adds up to more than ${MAX_INPUT_MS / 1000} s of game time`;
+  return null;
+};
+const rungProblem = (r: { readonly checks: ReadonlyArray<RungCheck> }, where: string) =>
+  r.checks.map((c, k) => checkProblem(c, `${where} check ${k + 1}`)).find((x) => x !== null) ??
+  null;
+
 /** The plan's ladder file as a fresh ladder, or what is wrong with its shape. */
 export const parseLadder = (
   text: string,
@@ -68,6 +105,10 @@ export const parseLadder = (
   if (text.trim().length === 0) return { error: "the file is missing or empty" };
   const decoded = decodeLadderFile(text);
   if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 1500) };
+  const problem = decoded.success.rungs
+    .map((r, i) => rungProblem(r, `rung ${i + 1}`))
+    .find((x) => x !== null);
+  if (problem !== undefined && problem !== null) return { error: problem };
   return {
     ladder: {
       rungs: decoded.success.rungs.map((r, i) => ({
@@ -92,6 +133,8 @@ export const parseRungChange = (
   if (text.trim().length === 0) return null;
   const decoded = decodeRungChange(text);
   if (Result.isFailure(decoded)) return { error: decoded.failure.message.slice(0, 300) };
+  const problem = rungProblem(decoded.success, "the rung");
+  if (problem !== null) return { error: problem };
   const { why, ...rung } = decoded.success;
   return { rung: { id, ...rung, status: "todo", fails: 0, back: false, why, from: "reviewer" } };
 };
@@ -334,6 +377,8 @@ const Step = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("git"), id: Schema.Number, op: GitOp }),
   Schema.Struct({ kind: Schema.Literal("boot"), id: Schema.Number }),
   Schema.Struct({ kind: Schema.Literal("facts"), id: Schema.Number }),
+  // Score a rung's state checks on the build that is checked out now.
+  Schema.Struct({ kind: Schema.Literal("checks"), id: Schema.Number, rung: Schema.Number }),
   BotStep,
   Schema.Struct({
     kind: Schema.Literal("note"),
@@ -449,6 +494,7 @@ const RoundPhase = Schema.Literals([
   "stall",
   "boot",
   "reject",
+  "checks",
   "tester-facts",
   "tester",
   "tester-write",
@@ -484,6 +530,17 @@ const Round = Schema.TaggedStruct("round", {
   rung: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   // A rung retry that started from the previous try's branch, not from the best.
   continued: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  // The harness's scoring of the rung's state checks on the latest build (index into the rung's checks).
+  stateChecks: Schema.Array(
+    Schema.Struct({
+      k: Schema.Number,
+      pass: Schema.Boolean,
+      evidence: Schema.String,
+      frame: Schema.String,
+    }),
+  ).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  // Fix turns the builder got this round after state checks failed.
+  fixes: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
   // The tester's pass or fail per check, once it wrote them.
   checks: Schema.Array(
     Schema.Struct({ what: Schema.String, pass: Schema.Boolean, evidence: Schema.String }),

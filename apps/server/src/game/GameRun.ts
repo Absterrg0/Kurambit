@@ -31,6 +31,7 @@ import {
   type GameRunRoundDetail,
   type GameRunStartInput,
   type GameRunStatusResult,
+  type GameRunChecksResult,
   type GameRunSteerResult,
   type ModelSelection,
   type ProjectId,
@@ -44,6 +45,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameService from "./GameService.ts";
 import { CREATOR_SESSION_SECTION } from "./scaffold.ts";
+import { CHECK_BOT_DIR, runStateChecks } from "./run/checkRunner.ts";
 import * as Templates from "./templates.ts";
 import { runBotFact } from "./run/botFacts.ts";
 import { artAssetFacts, reviewerFacts } from "./run/facts.ts";
@@ -91,6 +93,7 @@ const RUN_STATE_IGNORES = [
   ".studio/ship.md",
   ".studio/art-review.md",
   ".studio/ladder.json",
+  `${CHECK_BOT_DIR}/`,
   ".studio/rung-change.json",
   ".studio/exports.json",
   ".studio/final-video.json",
@@ -329,6 +332,10 @@ const summarize = (res: Policy.StepResult): string => {
   if (res.kind === "boot") return `boot ${res.ok ? "clean" : `failed: ${res.detail}`}`;
   if (res.kind === "ended" || res.kind === "failed") return `${res.kind}: ${res.reason}`;
   if (res.kind === "decided") return `decided ${res.answer} (${res.by})`;
+  if (res.kind === "checks")
+    return res.results
+      .map((c) => `check ${c.k + 1} ${c.pass ? "PASS" : "FAIL"}: ${c.evidence}`)
+      .join(" | ");
   if (res.kind === "bot")
     return `bot ${res.fact.ending} after ${res.fact.seconds.toFixed(0)}s ${JSON.stringify(res.fact.final)} ${res.fact.note}`.trim();
   return res.kind;
@@ -375,6 +382,8 @@ export class GameRun extends Context.Service<
       threadId: ThreadId,
       text: string,
     ) => Effect.Effect<GameRunSteerResult, GameRunError>;
+    /** Scores the open rung's state checks on the build in the game root now. */
+    readonly runChecks: (threadId: ThreadId) => Effect.Effect<GameRunChecksResult, GameRunError>;
     /**
      * One round's evidence, read on demand. `videoFile` is the canonical bot
      * video inside the game's builds/logs, for the transport to mint a URL.
@@ -764,6 +773,12 @@ export const layer = Layer.effect(
                 code: yield* Effect.promise(() => reviewerFacts(root, state.lane)),
               } as const;
             });
+          case "checks": {
+            const rung = state.ladder?.rungs.find((x) => x.id === step.rung);
+            return (
+              rung === undefined ? Effect.succeed([]) : runStateChecks(d.deps.game, root, rung)
+            ).pipe(Effect.map((results) => ({ kind: "checks", results }) as const));
+          }
           case "bot":
             return runBotFact(d.deps, { root, runId: state.runId, log }, step);
           case "decide":
@@ -1288,6 +1303,44 @@ export const layer = Layer.effect(
       } satisfies GameRunSteerResult;
     });
 
+    const runChecks = Effect.fn("GameRun.runChecks")(function* (threadId: ThreadId) {
+      const { root } = yield* resolveGame(threadId);
+      const loaded = yield* load(root);
+      const state = loaded.kind === "v3" ? loaded.state : null;
+      const ladder = state?.ladder ?? null;
+      // The rung the round in progress builds, else the next open one.
+      const current =
+        state?.task._tag === "round" && state.task.rung !== null ? state.task.rung : null;
+      const rung =
+        ladder?.rungs.find((x) => x.id === current) ??
+        ladder?.rungs.find((x) => x.status === "todo") ??
+        null;
+      if (ladder === null || rung === null)
+        return {
+          rung: null,
+          is: "",
+          results: [],
+          message: "The run has no open rung to score.",
+        } satisfies GameRunChecksResult;
+      const outcomes = yield* runStateChecks(game, root, rung);
+      const passed = outcomes.filter((o) => o.pass).length;
+      return {
+        rung: ladder.rungs.indexOf(rung) + 1,
+        is: rung.is,
+        results: outcomes.map((o) => ({
+          check: o.k + 1,
+          what: o.what,
+          pass: o.pass,
+          evidence: o.evidence,
+          frame: o.frame,
+        })),
+        message:
+          outcomes.length === 0
+            ? "This rung has no state checks; its checks are look checks a tester judges."
+            : `${passed} of ${outcomes.length} state checks pass on the build in the game folder now.`,
+      } satisfies GameRunChecksResult;
+    });
+
     const refuse = (operation: string, path: string, reason: string, detail: string) =>
       new GameRunError({ operation, path, reason, detail });
 
@@ -1506,6 +1559,7 @@ export const layer = Layer.effect(
       runDecide,
       runProfile,
       runSteer,
+      runChecks,
       roundDetail,
       pickDetail,
       restoreRound,
