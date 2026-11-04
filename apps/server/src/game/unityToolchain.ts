@@ -162,6 +162,8 @@ export type UnityEditorChoice<C extends UnityEditorCandidate> =
     }
   | { readonly kind: "unsupported"; readonly candidate: C }
   | { readonly kind: "unknown-version"; readonly candidate: C }
+  /** Every usable editor is older than the project: opening would downgrade it. */
+  | { readonly kind: "older-than-project"; readonly candidate: C; readonly project: UnityVersion }
   | { readonly kind: "none" };
 
 /**
@@ -186,6 +188,12 @@ export const pickUnityEditor = <C extends UnityEditorCandidate>(
       ? undefined
       : supported.find((candidate) => compareUnityVersions(candidate.version!, project) === 0);
   const chosen = exact ?? supported[0];
+  if (
+    chosen !== undefined &&
+    project !== null &&
+    compareUnityVersions(chosen.version!, project) < 0
+  )
+    return { kind: "older-than-project", candidate: chosen, project };
   if (chosen !== undefined)
     return {
       kind: "picked",

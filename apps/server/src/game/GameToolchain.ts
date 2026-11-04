@@ -332,6 +332,12 @@ const make = Effect.gen(function* () {
       });
     },
   );
+  // uv is plumbing: unless the user named one, a missing, old or broken uv
+  // on PATH is replaced by the pinned fetch, which the probe then finds first.
+  const fetchesUv = (found: Probe) =>
+    linuxX64 &&
+    found.kind !== "ok" &&
+    (found.kind === "missing" || (found.source !== "settings" && found.source !== "env"));
   const binaryStatus = (tool: BinaryTool) =>
     Effect.gen(function* () {
       const found = yield* probe(tool);
@@ -342,7 +348,7 @@ const make = Effect.gen(function* () {
           path: found.kind === "missing" ? null : found.path,
           version: found.kind === "missing" || found.version === "unknown" ? null : found.version,
           source: found.kind === "missing" ? null : found.source,
-          ...(tool === "uv" && found.kind === "missing" && linuxX64
+          ...(tool === "uv" && fetchesUv(found)
             ? {
                 status: "ready" as const,
                 message: `Kurambit fetches uv ${UV_VERSION} the first time the live Blender view needs it.`,
@@ -466,7 +472,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* probe("uv");
       if (found.kind === "ok") return found.path;
-      if (found.kind !== "missing" || !linuxX64) return (yield* executable("uv")).path;
+      if (!fetchesUv(found)) return (yield* executable("uv")).path;
       yield* fetchUv;
       return (yield* executable("uv")).path;
     }),
@@ -626,6 +632,12 @@ const make = Effect.gen(function* () {
         return yield* unityMissing(
           choice.candidate.editor,
           `Kurambit cannot tell which Unity version ${choice.candidate.editor} is: it reads the version from the folder the editor is installed in, the way Unity Hub names it (for example .../${UNITY_MIN_VERSION}/Editor/Unity). Point at an editor Unity Hub installed.`,
+          "wrong-version",
+        );
+      if (choice.kind === "older-than-project")
+        return yield* unityMissing(
+          choice.candidate.editor,
+          `This game's Unity project was saved by Unity ${choice.project.text}, newer than the newest usable editor here (${choice.candidate.version?.text} at ${choice.candidate.editor}); opening it there could break it. Add Unity ${choice.project.text} or later in Unity Hub. ${getUnity}`,
           "wrong-version",
         );
       if (choice.kind === "unsupported")

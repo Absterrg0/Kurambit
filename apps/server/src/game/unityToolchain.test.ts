@@ -59,6 +59,10 @@ describe("Unity editor selection", () => {
       version: "6000.7.1f1",
       upgrades: "6000.6.9f1",
     });
+    // A project newer than every editor would be downgraded: refused.
+    expect(picked(pickUnityEditor(candidates, parseUnityVersion("6000.8.0f1")))).toBe(
+      "older-than-project",
+    );
   });
 
   it("refuses editors below the floor or outside Unity 6, and an explicit path wins alone", () => {
