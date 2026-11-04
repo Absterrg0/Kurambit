@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import { CommandId, MessageId, type ThreadId } from "@kurambit/contracts";
 import { findKeyArt } from "../keyArt.ts";
 import * as Policy from "./policy.ts";
+import { LADDER_FILE } from "./roles.ts";
 import type { RoleDeps } from "./roleRunner.ts";
 import type { DecideStep, Decided, Decision } from "./state.ts";
 
@@ -28,6 +29,9 @@ const SUMMARY: Record<Decision["kind"], string> = {
   prototype: "The production run asks which prototype to keep",
   ladder: "The production run asks about the ladder",
 };
+// The creator's run is still presenting in these states; any other has handed the
+// question to the user ("waiting" is the agent asking them itself).
+const PRESENTING = new Set(["preparing", "queued", "starting", "running"]);
 // How often a question queued behind a busy chat checks whether it reached the agent.
 const DELIVERY_CHECK = Duration.seconds(5);
 
@@ -81,7 +85,7 @@ export const decideStep = (
   // agent had even begun. DECISION_DELIVERY_MS bounds this wait.
   const delivered = deps.threads.getThreadRecords(ctx.creator, ["runs"]).pipe(
     Effect.map(({ runs }) => runs.find((run) => run.userMessageId === messageId)),
-    Effect.map((run) => run !== undefined && run.status !== "queued" && run.status !== "running"),
+    Effect.map((run) => run !== undefined && !PRESENTING.has(run.status)),
     Effect.orElseSucceed(() => false),
   );
 
@@ -172,8 +176,17 @@ export const decideStep = (
     Effect.flatMap((answer) => Deferred.succeed(ctx.answer, answer)),
     Effect.andThen(Deferred.await(ctx.answer)),
   );
+  // The run holds an edited ladder in its state; the file is what the creator and
+  // every role read, so it shows the same ladder. game_run_decide validated it.
+  const mirrorLadder = (answer: Answer) =>
+    step.decision.kind === "ladder" && answer.answer === "edit"
+      ? Effect.tryPromise(() =>
+          NodeFSP.writeFile(NodePath.join(ctx.root, LADDER_FILE), answer.notes),
+        ).pipe(Effect.ignore)
+      : Effect.void;
   return Effect.raceFirst(Deferred.await(ctx.answer), settle).pipe(
     Effect.tap(() => dropQueued),
+    Effect.tap(mirrorLadder),
     Effect.map((answer): Policy.StepResult => ({ kind: "decided", ...answer })),
   );
 };
