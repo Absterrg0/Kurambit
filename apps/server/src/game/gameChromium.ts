@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError, THREE_VIEWPORT } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
+import { HOST_OS } from "./processHost.ts";
 
 export const KURAMBIT_CHROME_OVERRIDE = "KURAMBIT_CHROME";
 
@@ -18,11 +19,35 @@ export const findChromium = async (): Promise<string | null> => {
     });
     if (hit !== null) return hit;
   }
-  for (const name of ["google-chrome", "chromium", "chromium-browser"]) {
+  for (const name of ["google-chrome", "chromium", "chromium-browser", "chrome"]) {
     const hit = await findExecutable(name, { pathEnv });
     if (hit !== null) return hit;
   }
+  // Windows and macOS put browsers in fixed install folders, not on PATH.
+  for (const path of chromiumInstalls()) {
+    const hit = await findExecutable(NodePath.basename(path), {
+      pathEnv: NodePath.dirname(path),
+    });
+    if (hit !== null) return hit;
+  }
   return null;
+};
+
+const chromiumInstalls = (): ReadonlyArray<string> => {
+  if (HOST_OS === "darwin")
+    return [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+  if (HOST_OS !== "win32") return [];
+  const roots = [
+    process.env.PROGRAMFILES,
+    process.env["PROGRAMFILES(X86)"],
+    process.env.LOCALAPPDATA,
+  ];
+  return roots
+    .filter((root): root is string => root !== undefined && root !== "")
+    .map((root) => NodePath.win32.join(root, "Google", "Chrome", "Application", "chrome.exe"));
 };
 
 export const chromiumLaunchArgs = (): readonly string[] => [

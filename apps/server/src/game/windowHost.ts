@@ -4,17 +4,28 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
 import type { GameViewport } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import { spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { HOST_OS, spawnOwned, type OwnedProcess } from "./processHost.ts";
 
 /**
  * What the harness needs from an OS to show a game: a window the game draws
  * into, that the user never sees and that never takes focus. Pictures, video
  * and input all come from inside the engine, so this is the whole visual
- * contract. Linux gives every launch its own Xvfb display, never the user's.
+ * contract.
+ *
+ * - Linux gives every launch its own Xvfb display, never the user's.
+ * - Windows and macOS have no private display a user app can make (a virtual
+ *   monitor needs a driver; macOS's API is private), so the window opens on
+ *   the user's desktop at {@link OFFSCREEN_POSITION}, never minimized: a
+ *   minimized Godot window stops drawing. Placing it is the launched
+ *   program's part, since every engine says it differently.
  */
 export interface WindowHost {
-  /** "private-display": a display of its own (Xvfb). */
-  readonly kind: "private-display";
+  /**
+   * "private-display": a display of its own (Xvfb); the command needs no
+   * placement. "offscreen": the user's desktop; the command must place its
+   * own window at OFFSCREEN_POSITION and not take focus.
+   */
+  readonly kind: "private-display" | "offscreen";
   /** Starts `command` with a window of `viewport`'s size, and whatever the window needs. */
   readonly launch: (command: WindowCommand, viewport: GameViewport) => Promise<HostedWindow>;
 }
@@ -149,12 +160,37 @@ const xvfbHost = (xvfb: string): WindowHost => ({
   },
 });
 
+/** Far outside any monitor arrangement, as Genex ships for Godot on Windows and macOS. */
+export const OFFSCREEN_POSITION = { x: -10_000, y: -10_000 } as const;
+
+/** The command itself, owning its tree; its arguments place its window. */
+const offscreenHost: WindowHost = {
+  kind: "offscreen",
+  launch: async (command) => {
+    const owned = spawnOwned(command.executable, command.args, {
+      env: command.env,
+      cwd: command.cwd,
+      stdio: command.stdio,
+      tree: true,
+      window: true,
+      token: command.token,
+    });
+    owned.child.unref();
+    return {
+      process: owned,
+      label: "offscreen",
+      stop: (options) => owned.stop({ graceMs: options?.graceMs ?? 3_000 }),
+    };
+  },
+};
+
 /**
  * The window host this machine offers, or null when it has none (Linux
  * without Xvfb): then a native game runs headless where its engine can, or
- * the caller refuses plainly. Never the user's own display.
+ * the caller refuses plainly. Never the user's own display on Linux.
  */
 export const findWindowHost = async (): Promise<WindowHost | null> => {
+  if (HOST_OS === "win32" || HOST_OS === "darwin") return offscreenHost;
   const xvfb = await findXvfb();
   return xvfb === null ? null : xvfbHost(xvfb);
 };

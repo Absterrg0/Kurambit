@@ -1,10 +1,8 @@
 // @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the native editor process, private display and MCP-stdio boundary; wall-clock pids and CLI JSON envelopes are the domain here.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeUtil from "node:util";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -44,7 +42,7 @@ import {
   unityEditorDir,
   unityEditorEnv,
 } from "./unityToolchain.ts";
-import { checkoutOf } from "./unityPlayerCache.ts";
+import { checkoutOf, cloneTree } from "./unityPlayerCache.ts";
 
 const IDLE_MS = 10 * 60_000;
 /**
@@ -379,8 +377,6 @@ export const parseCliEnvelope = (
   return null;
 };
 
-const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
-
 /**
  * Left out of the copy: files that name the editor that wrote them, and the
  * compiled-script state keyed by the main checkout's path. The worktree
@@ -456,9 +452,7 @@ const seedLibrary = async (
     return "a Unity editor has the main checkout open, so its import cache may be mid-write";
   const staging = NodePath.join(scratch, `library-${NodeCrypto.randomUUID()}`);
   try {
-    await execFile("cp", ["-a", "--reflink=auto", "--", source, staging], {
-      timeout: 15 * 60_000,
-    });
+    await cloneTree(source, staging, 15 * 60_000);
     for (const name of LIBRARY_NOT_COPIED)
       await NodeFSP.rm(NodePath.join(staging, name), { recursive: true, force: true });
     await NodeFSP.rename(staging, target);
@@ -809,7 +803,9 @@ const make = Effect.gen(function* () {
                   projectDir,
                   "-logFile",
                   logPath,
-                  "-force-glcore",
+                  // Xvfb offers software OpenGL only; elsewhere the editor
+                  // keeps its default graphics API.
+                  ...(host.kind === "private-display" ? ["-force-glcore"] : []),
                   // Caps the job system's worker threads (the log confirms
                   // "Creating JobQueue using job-worker-count value 2").
                   "-job-worker-count",

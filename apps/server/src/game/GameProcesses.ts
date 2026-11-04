@@ -9,7 +9,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
-import { spawnOwned } from "./processHost.ts";
+import { HOST_OS, spawnOwned } from "./processHost.ts";
 import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
 interface Running {
@@ -36,8 +36,11 @@ export const findExecutable = async (
 ): Promise<string | null> => {
   const candidates: string[] = [];
   if (options.override?.trim()) candidates.push(options.override.trim());
+  // Windows finds programs by extension; PATH holds ffmpeg.exe, not ffmpeg.
+  const names =
+    HOST_OS === "win32" && NodePath.extname(name) === "" ? [`${name}.exe`, name] : [name];
   for (const entry of (options.pathEnv ?? "").split(NodePath.delimiter).filter(Boolean))
-    candidates.push(NodePath.join(entry, name));
+    for (const candidate of names) candidates.push(NodePath.join(entry, candidate));
   for (const candidate of candidates) {
     try {
       await NodeFSP.access(candidate, NodeFSP.constants.X_OK);

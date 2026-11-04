@@ -52,7 +52,7 @@ import {
   type OwnedProcess,
   type ProcessFacts,
 } from "./processHost.ts";
-import { findWindowHost, type HostedWindow } from "./windowHost.ts";
+import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowHost.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 const IDLE_MS = 10 * 60_000;
@@ -607,7 +607,25 @@ const make = Effect.gen(function* () {
             return await host.launch(
               {
                 executable: blender.path,
-                args: [...reopen, "--python", bootPy, "--", token],
+                args: [
+                  ...reopen,
+                  ...(host.kind === "offscreen"
+                    ? // The user's desktop: a window far off every monitor that
+                      // opens behind other windows without taking focus.
+                      [
+                        "--window-geometry",
+                        String(OFFSCREEN_POSITION.x),
+                        String(OFFSCREEN_POSITION.y),
+                        String(BLENDER_WINDOW.width),
+                        String(BLENDER_WINDOW.height),
+                        "--no-window-focus",
+                      ]
+                    : []),
+                  "--python",
+                  bootPy,
+                  "--",
+                  token,
+                ],
                 cwd: root,
                 env: withBinDir({ ...sessionEnv(homeDir), ...addonKeys }, uv.binDir),
                 stdio: ["ignore", logFd, logFd],

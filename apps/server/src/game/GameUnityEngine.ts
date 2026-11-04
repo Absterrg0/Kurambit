@@ -19,6 +19,8 @@ import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { comparedSource, snapshotBuildSource } from "./sourceSnapshot.ts";
 import { UNITY_PROFILE } from "./unityProfile.ts";
+import { HOST_OS } from "./processHost.ts";
+import { UNITY_PLAY } from "./unityPlayerCache.ts";
 
 /** Frames the check lets the main scene run in play mode before it reads the console. */
 const CHECK_FRAMES = 120;
@@ -555,6 +557,14 @@ export const makeUnityBackend = (
             reason: "invalid-input",
             detail: "A Unity session plays a prepared player, and none was given.",
           });
+        if (HOST_OS === "darwin")
+          return yield* new GameOperationError({
+            operation: "Play session",
+            path: input.projectDir,
+            reason: "unsupported-platform",
+            detail:
+              "Kurambit does not play Unity games on macOS yet: it builds and plays Linux and Windows players only. The Unity editor tools still work here.",
+          });
         if (input.window === null)
           return yield* new GameOperationError({
             operation: "Play session",
@@ -580,7 +590,12 @@ export const makeUnityBackend = (
             String(input.viewport.width),
             "-screen-height",
             String(input.viewport.height),
-            "-force-glcore",
+            ...(input.window === "offscreen"
+              ? // The user's desktop and GPU: a borderless window the probe
+                // moves off every monitor without activating it.
+                ["-popupwindow", "-kurambitOffscreen"]
+              : // Xvfb offers software OpenGL only.
+                ["-force-glcore"]),
             "-logFile",
             NodePath.join(input.traceDir, "player.log"),
           ],
@@ -601,7 +616,8 @@ export const makeUnityBackend = (
     player: {
       build: buildPlayer,
       export: exportPlayer,
-      executable: PLAYER_EXECUTABLE,
+      playTarget: UNITY_PLAY.target,
+      executable: UNITY_PLAY.executable,
     },
   };
 };

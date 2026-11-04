@@ -3,22 +3,19 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { UNITY_MIN_VERSION } from "@kurambit/contracts";
 import { engineChildEnv } from "./GameProcesses.ts";
+import { UNITY_CLI_VERSION } from "./plumbingBuilds.ts";
 
-/**
- * Unity's official CLI, which Kurambit fetches itself on first use: it is
- * harness plumbing (the live editor's MCP bridge), not the editor. Pinned by
- * version and by the linux-x64 hash its manifest published.
- */
-export const UNITY_CLI_VERSION = "1.0.0-beta.15";
-export const UNITY_CLI_SHA256 = "cf3ddef260bba536332348bd5570fb80d90a8092784a893b30971f8ebf2a489e";
-export const UNITY_CLI_URL = `https://public-cdn.cloud.unity3d.com/hub/prod/cli/${UNITY_CLI_VERSION}/unity-linux-x64`;
 export const UNITY_DOWNLOAD_URL = "https://unity.com/download";
 
-export const unityCliPaths = (toolsDirectory: string) => {
+/**
+ * Where Unity's official CLI lives once Kurambit fetched it (see
+ * plumbingBuilds): harness plumbing, the live editor's MCP bridge, not the editor.
+ */
+export const unityCliPaths = (toolsDirectory: string, platform: Platform) => {
   const cliDir = NodePath.join(toolsDirectory, `unity-cli-${UNITY_CLI_VERSION}`);
   return {
     cliDir,
-    cli: NodePath.join(cliDir, "unity"),
+    cli: NodePath.join(cliDir, platform === "win32" ? "unity.exe" : "unity"),
     /** The CLI's own HOME for every call (logs, hub-style config), off the user's Hub. */
     installHome: NodePath.join(cliDir, "home"),
   };

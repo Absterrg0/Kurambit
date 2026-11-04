@@ -2,15 +2,24 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { HOST_OS } from "./processHost.ts";
 
 /**
  * Per-run user:// isolation shared by scenario runs, native captures and
- * runtime calibrations. On Linux Godot resolves user:// under XDG data home
- * (usually ~/.local/share/godot/app_userdata/<project>), so a fresh per-run
- * XDG data/config/cache trio isolates saved games without touching the game
- * sources, HOME, or any installed userdata. Callers pass the returned env to
- * exactly one child via GameProcesses; nothing is set globally and no real
- * saved game is ever deleted.
+ * runtime calibrations: the environment that points Godot's data, config and
+ * cache roots into a per-run (or kept) directory, without touching the game
+ * sources or any installed userdata. Callers pass the returned env to exactly
+ * one child via GameProcesses; nothing is set globally and no real saved
+ * game is ever deleted.
+ *
+ * Where Godot reads those roots, from its sources (`get_data_path`,
+ * `get_config_path`, `get_cache_path` in platform/linuxbsd/os_linuxbsd.cpp,
+ * platform/windows/os_windows.cpp and platform/macos/os_macos.mm, 4.5 to
+ * master): Linux and the BSDs honour XDG_DATA_HOME, XDG_CONFIG_HOME and
+ * XDG_CACHE_HOME; Windows reads %APPDATA% for data and config and
+ * %LOCALAPPDATA% for cache; macOS reads $HOME/Library/Application Support and
+ * $HOME/Library/Caches and no XDG variable, so there the child gets its own
+ * HOME. user:// is `<data>/Godot/app_userdata/<project>` everywhere.
  */
 
 export interface NativeUserIsolation {
@@ -73,15 +82,44 @@ export const nativeUserEnv = (
   XDG_CACHE_HOME: cacheDir,
 });
 
-/** The XDG trio under dir, created when missing; nothing is removed. */
+/** Where an OS's Godot puts its data, config and cache roots under `dir`, and the env that says so. */
+export const nativeUserLayout = (
+  dir: string,
+  os: NodeJS.Platform,
+): Omit<NativeUserIsolation, "dir"> => {
+  const join = os === "win32" ? NodePath.win32.join : NodePath.posix.join;
+  if (os === "win32") {
+    const dataDir = join(dir, "data");
+    const cacheDir = join(dir, "cache");
+    return {
+      dataDir,
+      configDir: dataDir,
+      cacheDir,
+      env: { APPDATA: dataDir, LOCALAPPDATA: cacheDir },
+    };
+  }
+  if (os === "darwin") {
+    const home = join(dir, "home");
+    const dataDir = join(home, "Library", "Application Support");
+    return {
+      dataDir,
+      configDir: dataDir,
+      cacheDir: join(home, "Library", "Caches"),
+      env: { HOME: home },
+    };
+  }
+  const dataDir = join(dir, "data");
+  const configDir = join(dir, "config");
+  const cacheDir = join(dir, "cache");
+  return { dataDir, configDir, cacheDir, env: nativeUserEnv(dataDir, configDir, cacheDir) };
+};
+
+/** This OS's isolation under dir, created when missing; nothing is removed. */
 export const nativeUserIsolationAt = async (dir: string): Promise<NativeUserIsolation> => {
-  const dataDir = NodePath.join(dir, "data");
-  const configDir = NodePath.join(dir, "config");
-  const cacheDir = NodePath.join(dir, "cache");
-  await NodeFSP.mkdir(dataDir, { recursive: true });
-  await NodeFSP.mkdir(configDir, { recursive: true });
-  await NodeFSP.mkdir(cacheDir, { recursive: true });
-  return { dir, dataDir, configDir, cacheDir, env: nativeUserEnv(dataDir, configDir, cacheDir) };
+  const layout = nativeUserLayout(dir, HOST_OS);
+  for (const path of new Set([layout.dataDir, layout.configDir, layout.cacheDir]))
+    await NodeFSP.mkdir(path, { recursive: true });
+  return { dir, ...layout };
 };
 
 /**

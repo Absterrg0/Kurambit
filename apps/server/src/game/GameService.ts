@@ -84,7 +84,7 @@ import { WEB_BUILD_DIRECTORY } from "./webBuild.ts";
 
 /**
  * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
- * ffmpeg recording, Xvfb, bot child); a Chromium bot at 630 MB. Its
+ * ffmpeg recording, its display, bot child); a Chromium bot at 630 MB. Its
  * Chromium launches after the memory gate, so two bots admitted together
  * must both fit.
  */

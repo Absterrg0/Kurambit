@@ -159,9 +159,21 @@ gives a game or editor a window it draws into, which the user never sees and whi
 focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
 and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display; the display outlives its command and ends right
 after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
-because its server died takes its display along. Without a window host a native session runs
-headless where its engine can and refuses plainly otherwise; it never falls back to the user's
-display.
+because its server died takes its display along. Windows and macOS give an app no private display
+(a virtual monitor needs a driver there; macOS's API is private), so the window opens on the
+user's desktop far off every monitor, never minimized (a minimized Godot window stops drawing), and
+the launched program places it: Godot by `--position`, the Unity player by its probe
+(`SetWindowPos` without activation), Blender by `--window-geometry` with `--no-window-focus`. No
+capture code differs by OS. Without a window host a native session runs headless where its engine
+can and refuses plainly otherwise; it never falls back to the user's display on Linux.
+
+On Windows, Unity plays a Windows player (macOS plays no Unity game yet). Godot's `user://` is
+isolated through the variables Godot reads on each OS (XDG on Linux, `%APPDATA%` on Windows, `HOME`
+on macOS; see [gameNativeUserDir.ts](../../apps/server/src/game/gameNativeUserDir.ts)). A Unity
+player on Windows keeps PlayerPrefs in the registry, which no environment can move, so its
+sessions share the game's real prefs there. Plumbing Kurambit fetches (uv, the Unity CLI) comes
+from one per-OS/CPU table of official builds with their published SHA-256
+([plumbingBuilds.ts](../../apps/server/src/game/plumbingBuilds.ts)).
 
 ## Tools
 

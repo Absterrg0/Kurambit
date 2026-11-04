@@ -196,7 +196,8 @@ export interface GameEngineBackend {
       ctx: GameEngineContext,
       target: "Linux" | "Windows",
     ) => Effect.Effect<GameActionResult, GameOperationError>;
-    /** The Linux player's file inside a player folder. */
+    /** The player sessions on this machine play: its build target and its file inside a player folder. */
+    readonly playTarget: "Linux" | "Windows";
     readonly executable: string;
   } | null;
 }

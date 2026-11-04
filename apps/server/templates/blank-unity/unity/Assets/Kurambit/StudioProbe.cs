@@ -26,6 +26,7 @@ using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Unity.Collections;
@@ -239,6 +240,8 @@ namespace Kurambit
         {
             var request = RequestPath();
             if (request == null) yield break;
+            var offscreen = HasArgument("-kurambitOffscreen");
+            if (offscreen) PlaceOffscreen();
             Dictionary<string, object> config;
             try
             {
@@ -261,6 +264,8 @@ namespace Kurambit
             mouse.MakeCurrent();
             // Let the main scene run its first frames before the first observation.
             for (var i = 0; i < 5; i++) yield return null;
+            // The player may place its window again while it starts up.
+            if (offscreen) PlaceOffscreen();
             try
             {
                 client = new TcpClient();
@@ -286,6 +291,35 @@ namespace Kurambit
             Send(hello);
             Pause();
         }
+
+#if UNITY_STANDALONE_WIN
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
+#endif
+
+        /// <summary>
+        /// On a desktop the user works in (`-kurambitOffscreen`), the player's
+        /// own window goes far off every monitor without being activated; it
+        /// keeps drawing there, since it is not minimized.
+        /// </summary>
+        private static void PlaceOffscreen()
+        {
+#if UNITY_STANDALONE_WIN
+            var self = GetCurrentProcessId();
+            for (var window = FindWindowEx(IntPtr.Zero, IntPtr.Zero, "UnityWndClass", null);
+                 window != IntPtr.Zero;
+                 window = FindWindowEx(IntPtr.Zero, window, "UnityWndClass", null))
+            {
+                GetWindowThreadProcessId(window, out var owner);
+                // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                if (owner == self) SetWindowPos(window, IntPtr.Zero, -10000, -10000, 0, 0, 0x0001 | 0x0004 | 0x0010);
+            }
+#endif
+        }
+
+        private static bool HasArgument(string name) => Array.IndexOf(Environment.GetCommandLineArgs(), name) >= 0;
 
         private static string RequestPath()
         {
