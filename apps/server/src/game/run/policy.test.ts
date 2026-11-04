@@ -188,11 +188,13 @@ const roundResponder =
     });
   };
 
+// An empty ladder: these rounds are finish rounds, the fix-the-flaw shape.
 const atRound = (patch: Partial<State.RunState> = {}) =>
   base({
     trunk: "main",
     best: "best",
     stage: "build",
+    ladder: { rungs: [], note: "finish rounds only" },
     task: Policy.applyResult(
       base({ stage: "build" }),
       { kind: "git", id: 1, op: { _tag: "init" } },
@@ -994,6 +996,292 @@ describe("blind comparators", () => {
     expect(applied.state.task._tag).not.toBe("pick");
     expect(applied.state.picked).toBeNull();
     expect(applied.state.best).toBe("trunk0");
+  });
+});
+
+describe("ladder", () => {
+  const ladderJson = (n: number) =>
+    JSON.stringify({
+      rungs: Array.from({ length: n }, (_, i) => ({
+        is: `the game has part ${i + 1}`,
+        checks: [
+          { what: `part ${i + 1} starts`, how: "probe value started" },
+          { what: `part ${i + 1} ends`, how: "HUD text" },
+        ],
+      })),
+    });
+  const fresh = () => {
+    const parsed = State.parseLadder(ladderJson(4));
+    if (!("ladder" in parsed)) throw new Error(parsed.error);
+    return parsed.ladder;
+  };
+  const atLadder = (patch: Partial<State.RunState> = {}) => atRound({ ladder: fresh(), ...patch });
+  // The tester declares each check; `pass` says which of the two pass.
+  const ladderResponder =
+    (
+      v1: string,
+      v2: string,
+      pass: [boolean, boolean] = [true, true],
+      extra: ((step: Single, state: State.RunState) => Policy.StepResult | undefined) | null = null,
+    ): Responder =>
+    (step, state) => {
+      const answered = extra?.(step, state);
+      if (answered !== undefined) return answered;
+      if (step.kind === "role" && step.role.startsWith("tester") && step.read.length > 0)
+        return done(step, {
+          files: {
+            [step.read[0]!]:
+              `played it through\nCHECK 1: ${pass[0] ? "PASS" : "FAIL"}\nstarted read true\nCHECK 2: ${pass[1] ? "PASS" : "FAIL"}\nsaw the end text`,
+          },
+        });
+      return roundResponder(v1, v2)(step, state);
+    };
+  const oneRound = (start: State.RunState, respond: Responder) =>
+    drive(start, respond, (s) => s.rounds.length === start.rounds.length + 1);
+
+  it("writes the ladder in the plan stage and gives a wrong shape one fix turn", () => {
+    const atPlan = base({
+      trunk: "main",
+      best: "best",
+      stage: "pick",
+      task: {
+        _tag: "stage",
+        name: "plan",
+        phase: "role",
+        thread: null,
+        block: null,
+        sha: "",
+        why: "",
+        review: "",
+      },
+    });
+    const planWith = (texts: string[]) => {
+      const prompts: string[] = [];
+      const respond: Responder = (step) => {
+        if (step.kind === "git") return gitOk({ sha: "plan", branch: "main", changed: false });
+        if (step.kind !== "role") throw new Error(`unexpected ${step.kind}`);
+        prompts.push(step.prompt);
+        return done(step, {
+          threadId: ThreadId.make("plan-thread"),
+          files: { ".studio/ladder.json": texts.shift() ?? "" },
+        });
+      };
+      const { state } = drive(
+        atPlan,
+        respond,
+        (s) => s.task._tag === "stage" && s.task.name === "art",
+      );
+      return { state, prompts };
+    };
+    const good = planWith([ladderJson(5)]);
+    expect(good.prompts).toHaveLength(1);
+    expect(good.prompts[0]).toContain(".studio/ladder.json");
+    expect(good.state.ladder?.rungs.map((r) => r.status)).toEqual([
+      "todo",
+      "todo",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+    const fixed = planWith([ladderJson(2), ladderJson(4)]);
+    expect(fixed.prompts).toHaveLength(2);
+    expect(fixed.prompts[1]).toContain("4 to 7 rungs");
+    expect(fixed.state.ladder?.rungs).toHaveLength(4);
+    const never = planWith(["{", "{"]);
+    expect(never.state.ladder?.rungs).toEqual([]);
+    expect(never.state.ladder?.note).toContain("no valid ladder");
+  });
+
+  it("builds the next rung, keeps it when its checks pass and judging agrees, and moves on", () => {
+    const blocks: string[] = [];
+    const respond = ladderResponder("A", "B", [true, true], (step) => {
+      if (step.kind === "role" && step.role.startsWith("builder")) {
+        blocks.push(step.prompt);
+        return done(step, { elapsedMs: step.capMs });
+      }
+      return undefined;
+    });
+    const first = oneRound(atLadder({ next: "the jump sticks" }), respond);
+    expect(first.logs).toContain("round 1 builds rung 1 of 4: the game has part 1");
+    expect(blocks[0]).toContain("the game has part 1");
+    expect(blocks[0]).toContain("part 1 starts (observed by: probe value started)");
+    // The last review is a ledger beside the rung, never the goal.
+    expect(blocks[0]).toContain("the jump sticks");
+    const record = first.state.rounds[0]!;
+    expect(record.kept).toBe(true);
+    expect(record.rung?.outcome).toBe("landed");
+    expect(record.rung?.checks.map((c) => c.pass)).toEqual([true, true]);
+    expect(record.rung?.checks[0]?.evidence).toBe("started read true");
+    expect(first.state.ladder?.rungs.map((r) => r.status)).toEqual([
+      "done",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+    const second = oneRound(first.state, respond);
+    expect(blocks.at(-1)).toContain("the game has part 2");
+    expect(second.state.rounds[1]?.rung?.rung).toBe(2);
+  });
+
+  it("keeps a round whose checks pass when judging ties", () => {
+    const { state, logs } = oneRound(atLadder(), ladderResponder("TIE", "TIE"));
+    expect(state.rounds[0]?.kept).toBe(true);
+    expect(state.rounds[0]?.inconclusive).toBeUndefined();
+    expect(state.best).toBe("merged");
+    expect(state.pending).toBeNull();
+    expect(logs.some((line) => line.includes("shows no regression; kept"))).toBe(true);
+  });
+
+  it("does not keep a round whose old build wins both orders, even with its checks passing", () => {
+    const { state } = oneRound(atLadder(), ladderResponder("B", "A"));
+    expect(state.rounds[0]?.kept).toBe(false);
+    expect(state.rounds[0]?.rung?.outcome).toBe("failed");
+  });
+
+  it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {
+    const respond = ladderResponder("A", "B", [true, false]);
+    const one = oneRound(atLadder(), respond);
+    expect(one.steps).not.toContain("sample");
+    expect(one.steps).not.toContain("ff-merge");
+    expect(one.state.rounds[0]?.kept).toBe(false);
+    expect(one.state.rounds[0]?.rung?.outcome).toBe("failed");
+    expect(one.state.rounds[0]?.rung?.why).toContain("part 1 ends");
+    expect(one.state.best).toBe("best");
+    expect(one.state.stallStreak).toBe(0);
+    const two = oneRound(one.state, respond);
+    expect(two.state.rounds[1]?.rung?.outcome).toBe("set-aside");
+    expect(two.state.ladder?.rungs[0]?.status).toBe("set-aside");
+    expect(two.logs.some((line) => line.includes("rung 1 set aside after 2 rounds"))).toBe(true);
+    const three = oneRound(two.state, respond);
+    expect(three.logs).toContain("round 3 builds rung 2 of 4: the game has part 2");
+  });
+
+  it("tells a second attempt at a rung why the first did not land", () => {
+    const blocks: string[] = [];
+    const respond = ladderResponder("A", "B", [false, true], (step) => {
+      if (step.kind === "role" && step.role.startsWith("builder") && step.thread === null)
+        blocks.push(step.prompt);
+      return undefined;
+    });
+    const two = oneRound(oneRound(atLadder(), respond).state, respond);
+    expect(two.state.rounds).toHaveLength(2);
+    expect(blocks[1]).toContain(
+      "did not land it: round 1, branch round-1: checks failed: part 1 starts",
+    );
+  });
+
+  it("brings a set-aside rung back once after the rest of the ladder", () => {
+    const ladder = fresh();
+    const rungs = ladder.rungs.map((r, i) =>
+      i === 1
+        ? { ...r, status: "set-aside" as const, fails: 2, why: "never worked" }
+        : { ...r, status: "done" as const },
+    );
+    const back = oneRound(
+      atLadder({ ladder: { ...ladder, rungs } }),
+      ladderResponder("A", "B", [false, false]),
+    );
+    expect(back.logs.some((line) => line.startsWith("rung 2 comes back"))).toBe(true);
+    expect(back.state.ladder?.rungs[1]?.back).toBe(true);
+    const again = oneRound(back.state, ladderResponder("A", "B", [false, false]));
+    expect(again.state.ladder?.rungs[1]?.status).toBe("set-aside");
+    const finish = oneRound(again.state, ladderResponder("A", "B"));
+    expect(finish.state.rounds.at(-1)?.finish).toBe(true);
+  });
+
+  it("switches to finish rounds when the ladder is done or the budget's last fifth begins", () => {
+    const done4 = fresh();
+    const finished = {
+      ...done4,
+      rungs: done4.rungs.map((r) => ({ ...r, status: "done" as const })),
+    };
+    const { state, logs } = oneRound(
+      atLadder({ ladder: finished, next: "fix the jump\nSTATUS: continue" }),
+      ladderResponder("A", "B"),
+    );
+    expect(logs).toContain("round 1: finish round (the ladder is done)");
+    expect(state.rounds[0]?.finish).toBe(true);
+    expect(state.rounds[0]?.rung).toBeUndefined();
+    expect(state.rounds[0]?.move).toContain("fix the jump");
+    // 200 minutes of budget with 30 left: past the last fifth, rungs open or not.
+    const late = Policy.plan(atLadder({ budgetMinutes: 200, budgetEndsAt: T0 + 30 * MIN }), {
+      now: T0,
+      coin: 0,
+      id: "x",
+    });
+    expect(late.kind === "step" && late.logs).toEqual([
+      "round 1: finish round (the budget's last fifth began)",
+    ]);
+  });
+
+  it("only lets a finish round's review send the game to the ship check", () => {
+    const ready: Responder = (step, state) =>
+      step.kind === "role" && step.role.startsWith("reviewer")
+        ? done(step, {
+            files: {
+              ".studio/next.md": "all good\nSTATUS: ready",
+              [step.read[0] ?? "x"]: "reviewer notes long enough",
+            },
+          })
+        : ladderResponder("A", "B")(step, state);
+    expect(oneRound(atLadder(), ready).state.task._tag).toBe("round");
+    expect(oneRound(atRound(), ready).state.task._tag).toBe("ship");
+  });
+
+  it("puts a reviewer's ladder change in as the next rung, one open at a time", () => {
+    const change = JSON.stringify({
+      why: "the core cannot be played",
+      is: "the core can be played",
+      checks: [
+        { what: "a", how: "b" },
+        { what: "c", how: "d" },
+      ],
+    });
+    const reviewer: Responder = (step, state) =>
+      step.kind === "role" && step.role.startsWith("reviewer") && step.read.length > 0
+        ? done(step, {
+            files: {
+              ".studio/next.md": "- the jump sticks",
+              ".studio/rung-change.json": change,
+              [step.read[0]!]: "reviewer notes long enough",
+            },
+          })
+        : ladderResponder("A", "B", [true, false])(step, state);
+    const one = oneRound(atLadder(), reviewer);
+    expect(one.state.ladder?.rungs.map((r) => r.is)).toEqual([
+      "the core can be played",
+      "the game has part 1",
+      "the game has part 2",
+      "the game has part 3",
+      "the game has part 4",
+    ]);
+    expect(one.state.ladder?.rungs[0]?.id).toBe(5);
+    const two = oneRound(one.state, reviewer);
+    expect(two.logs).toContain("round 2 builds rung 1 of 5: the core can be played");
+    expect(two.state.ladder?.rungs).toHaveLength(5);
+    expect(two.logs.some((line) => line.includes("an earlier one is still open"))).toBe(true);
+  });
+
+  it("writes a ladder first when an older run.json without one reaches its next round", () => {
+    const { ladder: _ladder, ...older } = State.encodeRunState(atLadder());
+    const loaded = State.loadState(JSON.stringify(older), "");
+    if (loaded.kind !== "v3") throw new Error("expected a v3 run");
+    expect(loaded.state.ladder).toBeNull();
+    const planned = Policy.plan(loaded.state, { now: T0, coin: 0, id: "l" });
+    if (planned.kind !== "step" || planned.step.kind !== "role") throw new Error("expected a role");
+    expect(planned.step.role).toBe("plan");
+    expect(planned.step.read).toEqual([".studio/ladder.json"]);
+    const applied = Policy.applyResult(
+      planned.state,
+      planned.step,
+      done(planned.step, { files: { ".studio/ladder.json": ladderJson(4) } }),
+      { now: T0, coin: 0, id: "m" },
+    );
+    expect(applied.state.ladder?.rungs).toHaveLength(4);
+    const next = Policy.plan(applied.state, { now: T0, coin: 0, id: "n" });
+    expect(next.kind === "step" && next.state.task._tag === "round" && next.state.task.rung).toBe(
+      1,
+    );
   });
 });
 

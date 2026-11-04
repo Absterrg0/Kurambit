@@ -13,6 +13,7 @@ import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import {
   GAME_RUN_STAGES,
   gameRunRoleLabel,
+  type GameRunRungRef,
   type GameRunStatusResult,
   type GameRunThreadRef,
   type ModelSelection,
@@ -314,6 +315,8 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         )}
       </section>
 
+      {(status?.ladder.length ?? 0) > 0 ? <RunLadder rungs={status?.ladder ?? []} /> : null}
+
       {(status?.steer.length ?? 0) > 0 ? (
         <section className="space-y-2">
           <h3 className="text-sm font-medium">Waiting for the next round</h3>
@@ -381,6 +384,67 @@ const ENDING: Record<string, string> = {
 };
 const endingLabel = (ending: string | null): string =>
   ending === null ? "Paused" : (ENDING[ending] ?? ending);
+
+const RUNG_STATUS: Record<GameRunRungRef["status"], string> = {
+  todo: "",
+  done: "Landed",
+  "set-aside": "Set aside",
+};
+
+/** The demo ladder in build order: landed rungs checked, the one being built marked. */
+function RunLadder({ rungs }: { rungs: ReadonlyArray<GameRunRungRef> }) {
+  const landed = rungs.filter((rung) => rung.status === "done").length;
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">
+        Ladder{" "}
+        <span className="text-xs font-normal text-muted-foreground">
+          {landed} of {rungs.length} landed
+        </span>
+      </h3>
+      <ol className="space-y-1 rounded-lg border border-border bg-card p-3">
+        {rungs.map((rung, index) => (
+          // oxlint-disable-next-line react/no-array-index-key -- a rung's place is its identity here
+          <li key={index} className="flex items-start gap-2 text-xs">
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              {rung.status === "done" ? (
+                <CheckIcon className="size-3 text-success" aria-hidden />
+              ) : rung.current ? (
+                <span className="size-1.5 rounded-full bg-info" aria-hidden />
+              ) : null}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className={cn(
+                  rung.status === "done" && "text-muted-foreground",
+                  rung.current && "font-medium",
+                  rung.status === "set-aside" && "text-muted-foreground line-through",
+                )}
+              >
+                {index + 1}. {rung.is}
+              </span>
+              {rung.why.length > 0 ? (
+                <span className="block text-2xs text-muted-foreground">
+                  {rung.status === "set-aside" ? "Set aside: " : "Added by the reviewer: "}
+                  {rung.why}
+                </span>
+              ) : null}
+            </span>
+            {RUNG_STATUS[rung.status].length > 0 ? (
+              <Badge size="sm" variant={rung.status === "done" ? "success" : "warning"}>
+                {RUNG_STATUS[rung.status]}
+              </Badge>
+            ) : rung.current ? (
+              <Badge size="sm" variant="info">
+                Building
+              </Badge>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 /** The run's stages in order: done ones checked, the current one marked. */
 function RunPipeline({

@@ -1,6 +1,6 @@
 // Where a run stands, for the creator: its place in the pipeline, what comes
 // next, and how the prototype pick ended. Pure reads of the run record.
-import type { GAME_RUN_STAGES, GameRunPickRef } from "@kurambit/contracts";
+import type { GAME_RUN_STAGES, GameRunPickRef, GameRunRungRef } from "@kurambit/contracts";
 import type { RunState } from "./state.ts";
 
 type Stage = (typeof GAME_RUN_STAGES)[number];
@@ -49,6 +49,8 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
         stage: STAGE.Rounds,
         next: ROUND_NEXT[t.phase] ?? (t.phase.startsWith("review") ? `Round ${t.n + 1}` : "Tester"),
       };
+    case "ladder":
+      return { stage: STAGE.Rounds, next: `Round ${state.rounds.length + 1}` };
     case "ship":
       return { stage: STAGE.Rounds, next: `Ready, or round ${t.n + 1}` };
     case "leave":
@@ -72,4 +74,18 @@ export const pickRef = (state: RunState): GameRunPickRef | null => {
     return { phase: "done", chosen: state.picked.branch, how: state.picked.how, durationMs };
   if (state.pickNotes.length === 0 && state.protos.length === 0) return null;
   return { phase: "done", chosen: null, how: null, durationMs };
+};
+
+/** The ladder in build order, the in-progress round's rung marked. */
+export const ladderRefs = (state: RunState): GameRunRungRef[] => {
+  const t = state.task;
+  const current = t._tag === "round" ? t.rung : null;
+  return (state.ladder?.rungs ?? []).map((rung) => ({
+    is: rung.is,
+    checks: rung.checks.map((check) => check.what),
+    status: rung.status,
+    current: rung.id === current,
+    why: rung.why,
+    from: rung.from,
+  }));
 };

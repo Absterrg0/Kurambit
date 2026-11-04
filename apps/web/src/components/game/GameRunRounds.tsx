@@ -188,10 +188,12 @@ function ComparisonFields({
 function RoundDetail({
   threadRef,
   round,
+  rung,
   live,
 }: {
   threadRef: ScopedThreadRef;
   round: number;
+  rung: GameRunRoundRef["rung"];
   live: boolean;
 }) {
   const query = useEnvironmentQuery(
@@ -264,6 +266,23 @@ function RoundDetail({
         </Field>
       ) : null}
       {detail.note ? <p className="text-2xs text-warning-foreground">{detail.note}</p> : null}
+
+      {rung !== null ? (
+        <Field title="Checks">
+          <ul className="space-y-1">
+            {rung.checks.map((check, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- checks keep the rung's order
+              <li key={index} className="space-y-0.5">
+                <p className="text-2xs">
+                  <span className="font-medium">{check.pass ? "Pass" : "Fail"}</span> · {check.what}
+                </p>
+                {check.evidence ? <LongText text={check.evidence} /> : null}
+              </li>
+            ))}
+          </ul>
+          {rung.why ? <p className="text-2xs text-muted-foreground">{rung.why}</p> : null}
+        </Field>
+      ) : null}
 
       {detail.verdicts.length > 0 ? (
         <Field title="Verdicts">
@@ -406,6 +425,13 @@ export function GameRunRoundRow({
               Steered
             </Badge>
           ) : null}
+          {round.rung !== null ? (
+            <Badge size="sm" variant={round.rung.outcome === "landed" ? "success" : "outline"}>
+              Checks {round.rung.checks.filter((check) => check.pass).length}/
+              {round.rung.checks.length}
+              {round.rung.outcome === "set-aside" ? " · set aside" : ""}
+            </Badge>
+          ) : null}
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
             {firstLine(round.move)}
           </span>
@@ -414,7 +440,9 @@ export function GameRunRoundRow({
           </span>
         </CollapsibleTrigger>
         <CollapsiblePanel animate={false}>
-          {open ? <RoundDetail threadRef={threadRef} round={round.round} live={live} /> : null}
+          {open ? (
+            <RoundDetail threadRef={threadRef} round={round.round} rung={round.rung} live={live} />
+          ) : null}
         </CollapsiblePanel>
       </Collapsible>
     </li>

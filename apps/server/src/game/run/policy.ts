@@ -1,9 +1,9 @@
-// PURE. Every loop decision: stage order, round structure, keep or revert, stalls, the
-// pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
+// PURE. Every loop decision: stage order, the ladder, round structure, keep or revert,
+// stalls, the pending line, ship and budget. No I/O and no clock: time and randomness are inputs.
 import type { GameBotDecider, ThreadId } from "@kurambit/contracts";
 import { laneProfile } from "../engineProfile.ts";
 import * as Roles from "./roles.ts";
-import { BLANK } from "./state.ts";
+import { BLANK, parseLadder, parseRungChange } from "./state.ts";
 import type {
   Block,
   BotFact,
@@ -12,11 +12,15 @@ import type {
   GitOp,
   Half,
   Judge,
+  Ladder,
   PairStep,
   Pending,
   Picked,
   RoleStep,
   Round,
+  RoundRecord,
+  Rung,
+  RungResult,
   RunState,
   Sample,
   Side,
@@ -31,11 +35,14 @@ const MIN = 60_000;
 const PLAY_FLOOR_MS = 60_000;
 const CAP = {
   block: 25 * MIN,
+  // A ladder round builds a whole rung, not one fix.
+  rung: 45 * MIN,
   fullBuild: 40 * MIN,
   retry: 6 * MIN,
   vision: 10 * MIN,
   proto: 8 * MIN,
   plan: 5 * MIN,
+  ladderFix: 4 * MIN,
   art: 20 * MIN,
   artReview: 6 * MIN,
   artRedo: 12 * MIN,
@@ -59,6 +66,12 @@ const FLOOR_MS = 2 * MIN;
 // run only when they leave the build its start.
 const BUILD_RESERVE_MS = 24 * MIN;
 const ART_REVIEW = ".studio/art-review.md";
+const LADDER = Roles.LADDER_FILE;
+const RUNG_CHANGE = Roles.RUNG_CHANGE_FILE;
+// A rung that fails in this many rounds is set aside for the next.
+const RUNG_TRIES = 2;
+// A reviewer's insertions stop growing the ladder past this.
+const LADDER_MAX = 10;
 
 export type Inputs = { readonly now: number; readonly coin: number; readonly id: string };
 
@@ -133,6 +146,28 @@ const parseCompare = (text: string) => lastDeclared(text, /^COMPARE:\s*(A|B|TIE)
 const parseSelect = (text: string) => lastDeclared(text, /^SELECT:\s*(A|B)\s*$/gim);
 const ART_LINE = /^ART:\s*(KEEP|REDO)\s*$/gim;
 const parseArt = (text: string) => lastDeclared(text, ART_LINE);
+// The tester's line per check; the last one for a check wins, a missing one fails.
+const CHECK_LINE = /^CHECK\s+(\d+):\s*(PASS|FAIL)\s*$/i;
+const parseChecks = (text: string, rung: Rung): Round["checks"] => {
+  const lines = text.split("\n").map((line) => line.trim());
+  return rung.checks.map((check, i) => {
+    const at = lines.findLastIndex((line) => CHECK_LINE.exec(line)?.[1] === `${i + 1}`);
+    if (at < 0)
+      return { what: check.what, pass: false, evidence: "the tester declared no CHECK line" };
+    const end = lines.findIndex((line, j) => j > at && CHECK_LINE.test(line));
+    const evidence = lines
+      .slice(at + 1, end < 0 ? undefined : end)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 400);
+    return {
+      what: check.what,
+      pass: CHECK_LINE.exec(lines[at]!)?.[2]?.toUpperCase() === "PASS",
+      evidence,
+    };
+  });
+};
 const reasonsAfter = (text: string, re: RegExp): string => {
   const lines = text.split("\n");
   const at = lines.findLastIndex((line) => re.test(line));
@@ -198,6 +233,161 @@ export const expectedBranch = (state: RunState): string | null => {
   return state.trunk;
 };
 
+// ── The ladder. ───────────────────────────────────────────────────────────
+/** The finish stage also begins with the budget's last fifth, whatever the ladder holds. */
+const lastFifth = (state: RunState, now: number): boolean =>
+  state.budgetMinutes !== null &&
+  state.budgetEndsAt !== null &&
+  remaining(state, now) < (state.budgetMinutes * MIN) / 5;
+
+type RungPick =
+  | {
+      readonly kind: "rung";
+      readonly ladder: Ladder;
+      readonly rung: Rung;
+      readonly logs: ReadonlyArray<string>;
+    }
+  | { readonly kind: "finish"; readonly why: string };
+
+// The first open rung, else a set-aside one back for its one more try, else the finish.
+const pickRung = (ladder: Ladder, state: RunState, now: number): RungPick => {
+  if (ladder.rungs.length === 0)
+    return { kind: "finish", why: ladder.note || "the run has no ladder" };
+  if (lastFifth(state, now)) return { kind: "finish", why: "the budget's last fifth began" };
+  const open = ladder.rungs.find((x) => x.status === "todo");
+  if (open !== undefined) return { kind: "rung", ladder, rung: open, logs: [] };
+  const i = ladder.rungs.findIndex((x) => x.status === "set-aside" && !x.back);
+  if (i < 0) return { kind: "finish", why: "the ladder is done" };
+  const was = ladder.rungs[i]!;
+  const rung: Rung = { ...was, status: "todo", fails: 0, back: true };
+  return {
+    kind: "rung",
+    ladder: { ...ladder, rungs: ladder.rungs.with(i, rung) },
+    rung,
+    logs: [`rung ${i + 1} comes back after the rest of the ladder (set aside: ${was.why})`],
+  };
+};
+
+const rungOf = (state: RunState, r: Pick<Round, "rung">): Rung | null =>
+  r.rung === null ? null : (state.ladder?.rungs.find((x) => x.id === r.rung) ?? null);
+const positionOf = (ladder: Ladder, rung: Rung): number =>
+  ladder.rungs.findIndex((x) => x.id === rung.id) + 1;
+const checkLine = (checks: Round["checks"]): string =>
+  checks.map((c, i) => `${i + 1} ${c.pass ? "PASS" : "FAIL"}`).join(", ");
+const checksPassed = (r: Round, rung: Rung): boolean =>
+  r.checks.length === rung.checks.length && r.checks.every((c) => c.pass);
+const ladderText = (ladder: Ladder, current: number | null): string =>
+  ladder.rungs
+    .map((x, i) => `${i + 1}. [${x.id === current ? "this round" : x.status}] ${x.is}`)
+    .join("\n");
+
+// Why the last round on this rung did not land it, for the next attempt's direction.
+const lastTry = (state: RunState, rung: Rung): string => {
+  const last = state.rounds.findLast((x) => x.rung?.rung === rung.id);
+  return last?.rung === undefined || last.rung.outcome === "landed"
+    ? ""
+    : `round ${last.round}, branch ${last.branch}: ${last.rung.why}`;
+};
+
+type Taken =
+  | { readonly kind: "ladder"; readonly ladder: Ladder }
+  | { readonly kind: "fix"; readonly thread: ThreadId; readonly error: string };
+
+// One fix turn for a ladder of the wrong shape; after it the run goes on without one.
+const takeLadder = (res: StepResult, last: boolean, logs: string[]): Taken => {
+  const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+  if ("ladder" in parsed) {
+    logs.push(
+      `ladder: ${parsed.ladder.rungs.length} rungs`,
+      ...parsed.ladder.rungs.map((x, i) => `  rung ${i + 1}: ${x.is}`),
+    );
+    return { kind: "ladder", ladder: parsed.ladder };
+  }
+  if (!last && res.kind === "done") {
+    logs.push(
+      `ladder: ${LADDER} has the wrong shape; one fix turn (${parsed.error.slice(0, 200)})`,
+    );
+    return { kind: "fix", thread: res.threadId, error: parsed.error };
+  }
+  logs.push(`ladder: no valid ${LADDER} (${parsed.error.slice(0, 200)}); finish rounds only`);
+  return {
+    kind: "ladder",
+    ladder: { rungs: [], note: `the plan wrote no valid ladder: ${parsed.error}`.slice(0, 300) },
+  };
+};
+
+// A round's end settles its rung: landed when kept, else one more failure, and
+// the RUNG_TRIES-th sets it aside so the next rung starts.
+const settleRung = (
+  state: RunState,
+  r: Round,
+  record: RoundRecord,
+  logs: string[],
+): { state: RunState; record: RoundRecord } => {
+  const ladder = state.ladder;
+  const rung = rungOf(state, r);
+  if (ladder === null || rung === null) return { state, record };
+  const tested = r.checks.length > 0;
+  const checks = tested
+    ? r.checks
+    : rung.checks.map((c) => ({ what: c.what, pass: false, evidence: "not tested" }));
+  const failed = checks.filter((c) => !c.pass);
+  const why = record.kept
+    ? ""
+    : (tested && failed.length > 0
+        ? `checks failed: ${failed.map((c) => `${c.what} (${c.evidence || "no evidence"})`).join("; ")}`
+        : (record.note ?? "not kept")
+      ).slice(0, 500);
+  const fails = record.kept ? rung.fails : rung.fails + 1;
+  const outcome = record.kept ? "landed" : fails >= RUNG_TRIES ? "set-aside" : "failed";
+  const k = positionOf(ladder, rung);
+  logs.push(
+    outcome === "landed"
+      ? `round ${r.n}: rung ${k} landed (checks ${checkLine(checks)})`
+      : outcome === "set-aside"
+        ? `round ${r.n}: rung ${k} set aside after ${fails} rounds that did not land it: ${why}`
+        : `round ${r.n}: rung ${k} not landed (${fails} of ${RUNG_TRIES} tries): ${why}`,
+  );
+  const settled: Rung = {
+    ...rung,
+    fails,
+    status: outcome === "landed" ? "done" : outcome === "set-aside" ? "set-aside" : "todo",
+    why: outcome === "set-aside" ? why : rung.why,
+  };
+  const result: RungResult = { rung: rung.id, is: rung.is, checks, outcome, why };
+  return {
+    state: {
+      ...state,
+      ladder: { ...ladder, rungs: ladder.rungs.map((x) => (x.id === rung.id ? settled : x)) },
+    },
+    record: { ...record, rung: result },
+  };
+};
+
+// A reviewer's one ladder change goes in as the next rung; one open at a time.
+const insertRung = (ladder: Ladder, text: string, n: number, logs: string[]): Ladder => {
+  const parsed = parseRungChange(text, Math.max(0, ...ladder.rungs.map((x) => x.id)) + 1);
+  if (parsed === null) return ladder;
+  const refused =
+    "error" in parsed
+      ? `wrong shape (${parsed.error})`
+      : ladder.rungs.some((x) => x.from === "reviewer" && x.status === "todo")
+        ? "an earlier one is still open"
+        : ladder.rungs.length >= LADDER_MAX
+          ? `the ladder already has ${LADDER_MAX} rungs`
+          : null;
+  if (refused !== null || "error" in parsed) {
+    logs.push(`round ${n}: the reviewer's ladder change was not taken: ${refused}`);
+    return ladder;
+  }
+  const at = ladder.rungs.findIndex((x) => x.status === "todo");
+  logs.push(`round ${n}: the reviewer added the next rung (${parsed.rung.why}): ${parsed.rung.is}`);
+  return {
+    ...ladder,
+    rungs: at < 0 ? [...ladder.rungs, parsed.rung] : ladder.rungs.toSpliced(at, 0, parsed.rung),
+  };
+};
+
 // ── Step builders. ────────────────────────────────────────────────────────
 type RoleSpec = Partial<Omit<RoleStep, "kind" | "id" | "role" | "prompt" | "capMs">> &
   Pick<RoleStep, "role" | "prompt" | "capMs">;
@@ -218,6 +408,24 @@ const role = (id: number, spec: RoleSpec): RoleStep => ({
   ...spec,
 });
 const git = (id: number, op: GitOp): Step => ({ kind: "git", id, op });
+const ladderSpec = (t: Extract<Task, { _tag: "ladder" }>): RoleSpec =>
+  t.phase === "write"
+    ? {
+        role: "plan",
+        title: "studio ladder",
+        prompt: Roles.ladderWrite(),
+        capMs: CAP.plan,
+        read: [LADDER],
+        clear: [LADDER],
+      }
+    : {
+        role: "plan",
+        title: "studio ladder",
+        thread: t.thread,
+        prompt: Roles.ladderFix(t.error),
+        capMs: CAP.ladderFix,
+        read: [LADDER],
+      };
 const bit = (coin: number, k: number) => Math.floor(coin * 2 ** (k + 1)) % 2 === 1;
 
 const textOf = (res: RoleDone, file: string): string => {
@@ -751,6 +959,8 @@ const newRound = (state: RunState, now: number): Round => {
     bot: "",
     botDecider: "policy",
     testerNotes: "",
+    rung: null,
+    checks: [],
     cmp: null,
     outcome: "",
     reviewed: "",
@@ -798,7 +1008,15 @@ const afterStage = (state: RunState, done: string, now: number): RunState => {
       return {
         ...state,
         stage: done,
-        task: stageTask("build", newBlock("build", Roles.firstDirection(state.lane), true, ms)),
+        task: stageTask(
+          "build",
+          newBlock(
+            "build",
+            Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null),
+            true,
+            ms,
+          ),
+        ),
       };
   }
   return { ...state, stage: done === "art" ? "build" : done, task: newRound(state, now) };
@@ -818,6 +1036,7 @@ const step = (state: RunState, task: Task, s: Step, logs: ReadonlyArray<string> 
 const roundDirection = (state: RunState) => {
   const prior = state.lastDirection || (state.rounds.at(-1)?.move ?? "");
   const repeating =
+    state.rounds.at(-1)?.rung === undefined &&
     state.steer.length === 0 &&
     state.next.length === 0 &&
     state.rounds.length > 0 &&
@@ -855,6 +1074,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           read: [ART_REVIEW],
           clear: [ART_REVIEW],
         });
+      if (t.phase === "redo" && name === "plan")
+        return act({
+          role: "plan",
+          thread: t.thread,
+          prompt: Roles.ladderFix(t.review),
+          capMs: CAP.ladderFix,
+          read: [LADDER],
+        });
       if (t.phase === "redo")
         return act({
           role: "art",
@@ -865,7 +1092,12 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       if (t.phase === "role")
         return name === "build"
           ? go(blockStep(id, t.block!, lane))
-          : act({ role: name, prompt: Roles.stage(name, lane), capMs: CAP[name] });
+          : act({
+              role: name,
+              prompt: Roles.stage(name, lane),
+              capMs: CAP[name],
+              ...(name === "plan" ? { read: [LADDER], clear: [LADDER] } : {}),
+            });
       if (t.phase === "commit") return run({ _tag: "commit", message: t.name, base: state.best });
       return t.phase === "boot" ? go({ kind: "boot", id }) : reject(t.name, t.why);
     }
@@ -893,6 +1125,8 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       const made = compareStep(id, t.cmp, input, state);
       return go(made.step, { ...t, cmp: made.cmp }, made.logs);
     }
+    case "ladder":
+      return act(ladderSpec(t));
     case "ship":
       return t.phase === "play"
         ? act({
@@ -923,18 +1157,53 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "start": {
       if (state.stallStreak >= 3) return end("stalled");
       if (remaining(state, input.now) < ROUND_RESERVE_MS) return end("budget");
-      const { direction, repeating } = roundDirection(state);
-      const move = direction.slice(0, 300);
+      if (state.ladder === null) {
+        const task: Task = { _tag: "ladder", phase: "write", thread: null, error: "" };
+        return go(role(id, ladderSpec(task)), task, [
+          `round ${n}: the run has no ladder yet; the plan writes one first`,
+        ]);
+      }
       const steer = state.steer.length === 0 ? {} : { steer: state.steer };
+      const start = (from: string | null): GitOp => ({
+        _tag: "start-round",
+        trunk: state.trunk,
+        key: `round-${n}`,
+        from,
+      });
+      const pick = pickRung(state.ladder, state, input.now);
+      if (pick.kind === "finish") {
+        const { direction, repeating } = roundDirection(state);
+        const move = direction.slice(0, 300);
+        const next: Round = {
+          ...r,
+          direction,
+          repeating,
+          move,
+          record: { ...r.record, move, finish: true, ...steer },
+        };
+        return go(git(id, start(state.pending?.branch ?? null)), next, [
+          `round ${n}: finish round (${pick.why})`,
+        ]);
+      }
+      const { ladder, rung } = pick;
+      const k = positionOf(ladder, rung);
+      const total = ladder.rungs.length;
+      const base = Roles.rungDirection(rung, k, total, state.next, lastTry(state, rung), lane);
+      const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
+      const move = `Rung ${k} of ${total}: ${rung.is}`.slice(0, 300);
       const next: Round = {
         ...r,
+        rung: rung.id,
         direction,
-        repeating,
+        repeating: false,
         move,
         record: { ...r.record, move, ...steer },
       };
-      const from = state.pending?.branch ?? null;
-      return run({ _tag: "start-round", trunk: state.trunk, key: `round-${n}`, from }, next);
+      const logs = [...pick.logs, `round ${n} builds rung ${k} of ${total}: ${rung.is}`];
+      // A ladder round starts from the judged best; an open pending line stays on its branch.
+      if (state.pending !== null)
+        logs.push(`round ${n}: pending ${state.pending.branch} stays on its branch`);
+      return step({ ...state, ladder, pending: null }, next, git(id, start(null)), logs);
     }
     case "block":
     case "retry":
@@ -952,9 +1221,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "review-facts":
       return go({ kind: "facts", id });
     case "tester":
-      return tester(Roles.testerPlay(n, r.jev), CAP.tester);
+      return tester(Roles.testerPlay(n, r.jev, rungOf(state, r)), CAP.tester);
     case "tester-write":
-      return tester(Roles.testerWrite(n, r.move), CAP.write, [`.studio/tester-${n}.md`]);
+      return tester(Roles.testerWrite(n, r.move, rungOf(state, r)), CAP.write, [
+        `.studio/tester-${n}.md`,
+      ]);
     case "tester-duty":
       return tester(Roles.BOT_DUTY, CAP.duty, [`.studio/tester-${n}.md`]);
     case "restore":
@@ -972,7 +1243,7 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         role: `reviewer-${n}`,
         prompt: Roles.reviewerPlay(n, r.reviewed, r.facts),
         capMs: CAP.reviewer,
-        clear: [".studio/next.md"],
+        clear: [".studio/next.md", RUNG_CHANGE],
       });
     case "review-write": {
       const [o1, o2] = r.record.verdicts;
@@ -983,6 +1254,18 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           : "rejected/unjudged";
       const verdicts = `${o1?.verdict ?? "NONE"}/${o2?.verdict ?? "NONE"} (${word})`;
       const read = [`.studio/reviewer-${n}.md`, ".studio/next.md"];
+      const rung = rungOf(state, r);
+      if (rung !== null && state.ladder !== null) {
+        const k = positionOf(state.ladder, rung);
+        const built = `it built rung ${k} (${rung.is}); the tester's checks: ${checkLine(r.checks) || "none verified"}; ${r.record.kept ? "kept" : `not kept (${r.record.note ?? ""})`}; judging ${verdicts}.`;
+        return act({
+          role: `reviewer-${n}`,
+          thread: r.thread,
+          prompt: Roles.reviewerLedger(n, built, ladderText(state.ladder, rung.id), r.facts),
+          capMs: CAP.write,
+          read: [...read, RUNG_CHANGE],
+        });
+      }
       return act({
         role: `reviewer-${n}`,
         thread: r.thread,
@@ -1006,10 +1289,15 @@ const stallRound = (
   logs: string[],
 ): RunState => {
   logs.push(`round ${r.n}: ${note}`);
-  const record = { ...r.record, note: noteOf(r, note), durationMs: now - r.startedAt };
+  const settled = settleRung(
+    state,
+    r,
+    { ...r.record, note: noteOf(r, note), durationMs: now - r.startedAt },
+    logs,
+  );
   const next = {
-    ...state,
-    rounds: [...state.rounds, record],
+    ...settled.state,
+    rounds: [...state.rounds, settled.record],
     stallStreak: state.stallStreak + 1,
     lastFailure: `round ${r.n}: ${note}`,
     stage: `round-${r.n}`,
@@ -1129,6 +1417,15 @@ export const applyResult = (
       return out(afterStage({ ...s, trunk: g!.branch, best: g!.sha }, s.stage, now));
     case "stage": {
       const artFits = (cap: number) => fit(s, now, cap, BUILD_RESERVE_MS + FLOOR_MS) >= FLOOR_MS;
+      if (t.name === "plan" && (t.phase === "role" || t.phase === "redo")) {
+        const taken = takeLadder(res, t.phase === "redo", logs);
+        if (taken.kind === "fix")
+          return out({
+            ...s,
+            task: { ...t, phase: "redo", thread: taken.thread, review: taken.error },
+          });
+        return out({ ...s, ladder: taken.ladder, task: { ...t, phase: "commit" } });
+      }
       if (t.phase === "role" && t.name === "art" && res.kind === "done") {
         if (artFits(CAP.artReview))
           return out({ ...s, task: { ...t, phase: "review", thread: res.threadId } });
@@ -1282,6 +1579,15 @@ export const applyResult = (
           .slice(0, 500) ?? "";
       return out({ ...s, shipNoReasons: reasons, task: newRound(s, now) });
     }
+    case "ladder": {
+      const taken = takeLadder(res, t.phase === "fix", logs);
+      if (taken.kind === "fix")
+        return out({
+          ...s,
+          task: { ...t, phase: "fix", thread: taken.thread, error: taken.error },
+        });
+      return out({ ...s, ladder: taken.ladder, task: newRound(s, now) });
+    }
     case "leave":
       if (t.phase === "restore") return out({ ...s, task: { ...t, phase: "trunk" } });
       return out({ ...s, ending: "budget", task: newRound(s, now) });
@@ -1328,7 +1634,7 @@ const applyRound = (
         logs.push(
           `round ${r.n}: refining pending ${pending.branch} against best ${s.best.slice(0, 8)}`,
         );
-      const ms = fit(s, now, CAP.block, ROUND_RESERVE_MS);
+      const ms = fit(s, now, r.rung === null ? CAP.block : CAP.rung, ROUND_RESERVE_MS);
       const round = {
         ...r,
         branch: g!.branch,
@@ -1342,7 +1648,11 @@ const applyRound = (
         ...s,
         pending,
         steer: s.steer.slice(r.record.steer?.length ?? 0),
-        task: { ...round, phase: "block", block: newBlock(`${r.n}`, direction, false, ms) },
+        task: {
+          ...round,
+          phase: "block",
+          block: newBlock(`${r.n}`, direction, r.rung !== null, ms),
+        },
       };
     }
     case "block":
@@ -1370,7 +1680,11 @@ const applyRound = (
           phase: "retry",
           block: newBlock(
             `${r.n}b`,
-            Roles.retryDirection(Roles.roundDirection(r.direction, r.repeating, lane), lane),
+            Roles.retryDirection(
+              Roles.roundDirection(r.direction, r.repeating, lane),
+              lane,
+              r.rung !== null,
+            ),
             false,
             ms,
           ),
@@ -1430,14 +1744,35 @@ const applyRound = (
       }
       const testerNote = testerNotes.split("\n").slice(0, 20).join("\n").slice(0, 600);
       const note = testerNotes.length > 20 ? r.record.note : noteOf(r, "tester write failed");
+      const rung = rungOf(s, r);
+      const checks = rung === null ? [] : parseChecks(testerNotes, rung);
+      if (rung !== null) logs.push(`round ${r.n}: the tester's checks: ${checkLine(checks)}`);
       return at({
         phase: "restore",
         testerNotes,
+        checks,
         ...bot,
         record: { ...r.record, testerNote, ...(note === undefined ? {} : { note }) },
       });
     }
     case "restore": {
+      // A rung whose checks failed is not kept whatever judging says, so it is not judged.
+      const rung = rungOf(s, r);
+      if (rung !== null && !checksPassed(r, rung)) {
+        const why = `rung checks failed (${checkLine(r.checks) || "none verified"})`;
+        logs.push(`round ${r.n}: ${why}; not judged, candidate stays on branch ${r.branch}`);
+        return {
+          ...s,
+          lastFailure: `round ${r.n}: ${why}`,
+          task: {
+            ...r,
+            phase: "outcome",
+            outcome: "drop",
+            reviewed: `the current best (this round's rung failed its checks; its candidate stays on branch ${r.branch} unmerged)`,
+            record: { ...r.record, note: noteOf(r, `${why}; not judged`) },
+          },
+        };
+      }
       // With a budget, judging starts only when both plays and both verdicts fit.
       if (remaining(s, now) < COMPARE_MIN_MS) {
         logs.push(
@@ -1445,7 +1780,10 @@ const applyRound = (
         );
         return { ...s, task: { _tag: "leave", branch: r.branch, candidate: "", phase: "trunk" } };
       }
-      const question = Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
+      const question =
+        rung !== null
+          ? Roles.GATE_QUESTION
+          : Roles.roundQuestion(Roles.roundDirection(r.direction, r.repeating, lane));
       const cmp = newCompare(
         question,
         r.candidate,
@@ -1520,10 +1858,10 @@ const applyRound = (
     case "review-facts":
       return at({ phase: "review", facts: res.kind === "facts" ? res.code : "" });
     case "review":
-      if (res.kind === "done" && res.budgetCut) return finishRound(s, r, null, "budget", now);
+      if (res.kind === "done" && res.budgetCut) return finishRound(s, r, null, "budget", now, logs);
       return res.kind === "done"
         ? at({ phase: "review-write", thread: res.threadId })
-        : finishRound(s, r, null, null, now);
+        : finishRound(s, r, null, null, now, logs);
     case "review-write":
       return finishRound(
         s,
@@ -1531,6 +1869,7 @@ const applyRound = (
         res.kind === "done" ? res : null,
         res.kind === "done" && res.budgetCut ? "budget" : null,
         now,
+        logs,
       );
   }
 };
@@ -1562,6 +1901,19 @@ const classify = (s: RunState, r: Round, gate: string | null, logs: string[]): R
     record: { ...r.record, verdicts, ...record },
   });
   if (kind === "candidate-wins") return { ...s, task: round({ outcome: "merge" }, {}) };
+  // Here a ladder round's checks passed: they carry the signal, and judging only
+  // blocks a build the old one clearly beats.
+  if (r.rung !== null && kind !== "best-wins") {
+    const gate =
+      kind === "unjudged"
+        ? "judging gave no verdict"
+        : `judging ${verdicts[0]!.verdict}/${verdicts[1]!.verdict}`;
+    logs.push(`round ${r.n}: checks pass and ${gate} shows no regression; kept`);
+    return {
+      ...s,
+      task: round({ outcome: "merge" }, { note: noteOf(r, `kept on its checks; ${gate}`) }),
+    };
+  }
   if (kind === "best-wins")
     return {
       ...s,
@@ -1620,26 +1972,33 @@ const finishRound = (
   res: RoleDone | null,
   ending: string | null,
   now: number,
+  logs: string[],
 ): RunState => {
   const reviewerNotes = res === null ? "" : textOf(res, `.studio/reviewer-${r.n}.md`);
   const next = res === null ? "" : (res.files[".studio/next.md"] ?? "").trim().slice(0, 4000);
   let note = r.record.note ?? "";
   if (reviewerNotes.length <= 20) note = `${note} reviewer write failed`.trim();
   if (next.length === 0) note = `${note} reviewer wrote no next.md`.trim();
-  const record = {
-    ...r.record,
-    durationMs: now - r.startedAt,
-    ...(note.length > 0 ? { note } : {}),
-  };
+  const settled = settleRung(
+    s,
+    r,
+    { ...r.record, durationMs: now - r.startedAt, ...(note.length > 0 ? { note } : {}) },
+    logs,
+  );
+  const ladder = settled.state.ladder;
+  const change = res === null ? "" : (res.files[RUNG_CHANGE] ?? "");
   const state: RunState = {
-    ...s,
-    rounds: [...s.rounds, record],
+    ...settled.state,
+    ladder: r.rung === null || ladder === null ? ladder : insertRung(ladder, change, r.n, logs),
+    rounds: [...s.rounds, settled.record],
     stage: `round-${r.n}`,
     next,
     lastDirection: r.direction,
     ending,
   };
+  // Only a finish round's review can send the game to the ship check.
   if (
+    r.rung === null &&
     ending === null &&
     state.stallStreak < 3 &&
     state.steer.length === 0 &&

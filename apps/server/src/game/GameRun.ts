@@ -47,7 +47,7 @@ import { makeGit, restoredPaths } from "./run/git.ts";
 import { bootStep, gitStep } from "./run/steps.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
-import { pickRef, runProgress } from "./run/progress.ts";
+import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
 import { readPickEvidence, readRoundEvidence, roundOutcome } from "./run/roundDetail.ts";
 import { artFacts, modelBlock, spriteBlock } from "./run/roles.ts";
 import { ENGINE_SKILLS, laneProfile } from "./engineProfile.ts";
@@ -82,6 +82,8 @@ const RUN_STATE_IGNORES = [
   ".studio/next.md",
   ".studio/ship.md",
   ".studio/art-review.md",
+  ".studio/ladder.json",
+  ".studio/rung-change.json",
   ".studio/exports.json",
   ".studio/final-video.json",
   ".studio/tester-*.md",
@@ -191,6 +193,8 @@ const currentStep = (state: State.RunState): string => {
       return "Blind pick of the prototypes";
     case "round":
       return `Round ${t.n} · ${t.phase.replace("-", " ")}`;
+    case "ladder":
+      return "Plan · writing the ladder";
     case "ship":
       return `Ship review after round ${t.n}`;
     case "leave":
@@ -207,6 +211,7 @@ const steerWhen = (state: State.RunState | null): string => {
     return `Round ${t.n} is in progress and finishes as planned; round ${t.n + 1} starts with it.`;
   if (t?._tag === "ship")
     return "A ship review is in progress; the next round starts with it before the run can end.";
+  if (t?._tag === "ladder") return "The plan is writing the ladder; the next round starts with it.";
   if (t?._tag === "leave") return "The run is ending at its budget; a resumed run starts with it.";
   return "The run is still making its first build; its first round starts with it.";
 };
@@ -1000,6 +1005,7 @@ export const layer = Layer.effect(
           startedAt: null,
           progress: null,
           pick: null,
+          ladder: [],
           rounds: [],
           steer: [],
           threads: [],
@@ -1025,6 +1031,7 @@ export const layer = Layer.effect(
         startedAt: state.startedAt,
         progress: runProgress(state),
         pick: pickRef(state),
+        ladder: ladderRefs(state),
         rounds: state.rounds.map((r) => ({
           round: r.round,
           move: r.move,
@@ -1037,6 +1044,10 @@ export const layer = Layer.effect(
           durationMs: r.durationMs,
           note: r.note ?? null,
           steer: r.steer ?? [],
+          rung:
+            r.rung === undefined
+              ? null
+              : { is: r.rung.is, checks: r.rung.checks, outcome: r.rung.outcome, why: r.rung.why },
         })),
         steer: [...state.steer, ...queued],
         threads: state.threads,

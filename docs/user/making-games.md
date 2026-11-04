@@ -84,7 +84,7 @@ empty one.
 
 The **Run** tab in the stage drives the whole build: vision, prototypes, a blind pick, plan, art,
 then round after round of building, playtesting and judging until a ship review passes, the
-run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
+budget ends, the run stalls, or you stop it. A new game starts its run on its own. To run again, or to run a game you
 opened, give a one-line brief and an optional budget in minutes, then **Start run**. The status
 line says what the run is doing, how long it has been going and what comes next; the sidebar and
 **Your games** say a game's run is working and on which step. The timeline starts with the
@@ -96,6 +96,16 @@ and the reviewer's direction. Your agent can read the same with `game_run_round`
 what happened in a round. Role threads, grouped by stage and round, link to the sessions that did
 the work. **Stop run** ends it; rejected work stays on its branch.
 
+The plan writes a ladder: four to seven steps from the first playable build to a game shaped like
+a Steam demo (the core loop end to end, a complete first area with a win and a loss, progression,
+a title-to-ending flow, feel and audio), each with checks a player could verify. Each round builds
+the next step. A tester plays it and passes or fails each check, and the round is kept when every
+check passes and the blind judges do not find the old build clearly better. A step that does not
+land in two rounds is set aside and tried once more after the rest. When the ladder is done, or
+the last fifth of the budget begins, rounds turn to fixing the biggest weaknesses and the ship
+review. The **Ladder** list on the Run tab shows which steps landed, which one is being built and
+which were set aside and why; each round shows how many of its checks passed.
+
 To go back to an earlier kept round, stop the run, open the round and choose **Restore this
 round**. The engine project, the art sources under `art/` and `ASSETS.md` return to that build as
 a new commit, so later commits stay in git history, and restoring a later kept round goes forward
@@ -106,7 +116,7 @@ the middle of a round, and while the game has uncommitted changes; it never disc
 While a run is live, steer it instead of editing the game yourself: type what should change into
 **Steer the next round** on the Run tab, or tell your agent in the game's chat, which passes it to
 the run. The round in progress finishes as planned; the next round starts with your note, ahead of
-the reviewer's direction, and the rounds list shows what you asked. When no run is live, your agent
+its ladder step or the reviewer's direction, and the rounds list shows what you asked. When no run is live, your agent
 works on the game directly.
 
 ## Play and revise
