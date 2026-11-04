@@ -210,10 +210,12 @@ The bot still plays both builds: each round's tester rewrites `.studio/bot`, so 
 result is not known to come from the same bot. The reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
 rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
-judged on that flaw, STATUS: ready to the ship review) runs only as finish rounds, once the
-ladder is done or the budget's last fifth begins. The run's end point is evidence, not a round
-count: a finished ladder goes straight to the ship check, and the first finish round that keeps
-nothing ends the run ("plateau"), since a tie or a loss shows nothing more the run can buy. A run.json from before the ladder writes one at
+judged on that flaw) runs only as finish rounds, and only on the creator's ask. The run's end
+point is its goal, not a round count: the ladder bounds the building (two tries per rung, one
+comeback), a finished ladder gets one ship check, and the run ends ("ready" or "done"). Polish past
+that is the creator's call: a game_run_steer note resumes an ended run for one round on it, so no
+tokens go to rounds nobody asked for. A run whose plan never wrote a ladder keeps finish rounds as
+its only work. A run.json from before the ladder writes one at
 its next round start.
 
 Before the

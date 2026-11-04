@@ -432,7 +432,7 @@ const RunRoundTool = Tool.make("game_run_round", {
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
 const RunSteerTool = Tool.make("game_run_steer", {
   description:
-    "Pass the creator's request to this game's live production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. Fails plainly when no run is live: then work on the game directly. Say the creator's request in their words, one request per call.",
+    "Pass the creator's request to this game's production run. The note leads the direction of the run's next round; a round already in progress finishes as planned. A run that has ended (its ladder done, or stopped) resumes for one round on the note, then stops: this is how the creator asks for polish after the run's goal is met. Fails plainly when the game never had a run: then work on the game directly. Say the creator's request in their words, one request per call.",
   parameters: Schema.Struct({
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
   }),

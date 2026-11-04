@@ -151,8 +151,6 @@ const lastDeclared = (text: string, re: RegExp): string | null => {
   const found = [...text.matchAll(re)].at(-1);
   return found === undefined ? null : (found[1] ?? "").toUpperCase();
 };
-const parseStatus = (text: string) =>
-  lastDeclared(text, /^STATUS:\s*(continue|ready)\s*$/gim)?.toLowerCase() ?? null;
 const parseShip = (text: string) => lastDeclared(text, /^SHIP:\s*(YES|NO)\s*$/gim);
 const parseCompare = (text: string) => lastDeclared(text, /^COMPARE:\s*(A|B|TIE)\s*$/gim);
 const parseSelect = (text: string) => lastDeclared(text, /^SELECT:\s*(A|B)\s*$/gim);
@@ -253,12 +251,6 @@ export const expectedBranch = (state: RunState): string | null => {
 };
 
 // ── The ladder. ───────────────────────────────────────────────────────────
-/** The finish stage also begins with the budget's last fifth, whatever the ladder holds. */
-const lastFifth = (state: RunState, now: number): boolean =>
-  state.budgetMinutes !== null &&
-  state.budgetEndsAt !== null &&
-  remaining(state, now) < (state.budgetMinutes * MIN) / 5;
-
 type RungPick =
   | {
       readonly kind: "rung";
@@ -268,15 +260,16 @@ type RungPick =
     }
   | { readonly kind: "finish"; readonly why: string };
 
+const LADDER_DONE = "the ladder is done";
+
 // The first open rung, else a set-aside one back for its one more try, else the finish.
-const pickRung = (ladder: Ladder, state: RunState, now: number): RungPick => {
+const pickRung = (ladder: Ladder): RungPick => {
   if (ladder.rungs.length === 0)
     return { kind: "finish", why: ladder.note || "the run has no ladder" };
-  if (lastFifth(state, now)) return { kind: "finish", why: "the budget's last fifth began" };
   const open = ladder.rungs.find((x) => x.status === "todo");
   if (open !== undefined) return { kind: "rung", ladder, rung: open, logs: [] };
   const i = ladder.rungs.findIndex((x) => x.status === "set-aside" && !x.back);
-  if (i < 0) return { kind: "finish", why: "the ladder is done" };
+  if (i < 0) return { kind: "finish", why: LADDER_DONE };
   const was = ladder.rungs[i]!;
   const rung: Rung = { ...was, status: "todo", fails: 0, back: true };
   return {
@@ -1548,7 +1541,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         key: `round-${n}`,
         from,
       });
-      const pick = pickRung(state.ladder, state, input.now);
+      const pick = pickRung(state.ladder);
+      // Polish is the creator's call: past a finished ladder a round runs only on
+      // their ask. A run whose plan never wrote a ladder has only these rounds.
+      if (pick.kind === "finish" && pick.why === LADDER_DONE && state.steer.length === 0)
+        return end("done");
       if (pick.kind === "finish") {
         const { direction, repeating } = roundDirection(state);
         const move = direction.slice(0, 300);
@@ -2001,7 +1998,14 @@ export const applyResult = (
           .pop()
           ?.trim()
           .slice(0, 500) ?? "";
-      return out({ ...s, shipNoReasons: reasons, task: newRound(s, now) });
+      // The run's goal was the ladder: it ends here with the review's reasons, and
+      // polish runs only when the creator asks (a note sent during the review does).
+      return out({
+        ...s,
+        shipNoReasons: reasons,
+        task: newRound(s, now),
+        ...(s.steer.length === 0 ? { ending: "done" } : {}),
+      });
     }
     case "ladder": {
       const taken = takeLadder(res, t.phase === "fix", logs);
@@ -2495,18 +2499,6 @@ const finishRound = (
   if (r.rung !== null && state.ladder !== null && ladderDone(state.ladder)) {
     logs.push(`round ${r.n}: the ladder is done; the ship check plays the game`);
     return { ...state, task: ship };
-  }
-  if (r.rung === null) {
-    // Polish is paid for only while it measurably improves the game: the first
-    // finish round that keeps nothing ends the run, and the creator can ask for more.
-    if (settled.record.kept !== true) {
-      logs.push(
-        `round ${r.n}: this finish round kept nothing; the run ends here rather than spend more on polish`,
-      );
-      return { ...state, ending: "plateau", task: newRound(state, now) };
-    }
-    // Only a finish round's review can send the game to the ship check.
-    if (state.stallStreak < 3 && parseStatus(next) === "ready") return { ...state, task: ship };
   }
   return { ...state, task: newRound(state, now) };
 };

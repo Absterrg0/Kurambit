@@ -1254,12 +1254,16 @@ export const layer = Layer.effect(
           reason: "empty-note",
           detail: "The note is empty.",
         });
-      if (!active.has(root))
+      const live = active.has(root);
+      // A finished run comes back for a note: the creator's ask is the only thing
+      // that buys rounds past its goal (one round per ask, then it stops again).
+      const ended = live ? null : yield* load(root);
+      if (!live && ended?.kind !== "v3")
         return yield* new GameRunError({
           operation: "run-steer",
           path: root,
           reason: "no-live-run",
-          detail: "No live run for this game. Work on the game directly, or start a run first.",
+          detail: "No run for this game yet. Work on the game directly, or start a run first.",
         });
       const queued = yield* steerLock.withPermits(1)(
         Effect.promise(async () => {
@@ -1268,6 +1272,14 @@ export const layer = Layer.effect(
           return parseSteer((await readText(paths(root).steer)) ?? "").length;
         }),
       );
+      if (!live) {
+        yield* runStart({ threadId, brief: "" });
+        return {
+          pending: queued,
+          message:
+            "The run resumes to work on this note for one round, then stops. Ask again for more.",
+        } satisfies GameRunSteerResult;
+      }
       const loaded = yield* load(root);
       const state = loaded.kind === "v3" ? loaded.state : null;
       return {

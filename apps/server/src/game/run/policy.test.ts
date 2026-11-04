@@ -1178,7 +1178,7 @@ describe("ladder", () => {
     expect(starts.slice(2)).toEqual([null, null]);
   });
 
-  it("plays the ship check once the ladder is done, and ends on a finish round that keeps nothing", () => {
+  it("plays the ship check once the ladder is done, and ends there", () => {
     const ladder = fresh();
     const lastOpen = {
       ...ladder,
@@ -1187,18 +1187,19 @@ describe("ladder", () => {
     const landed = oneRound(atLadder({ ladder: lastOpen }), ladderResponder("A", "B"));
     expect(landed.state.task._tag).toBe("ship");
     expect(landed.logs.some((l) => l.includes("the ladder is done; the ship check"))).toBe(true);
-    // The ship check said no: the run polishes, and a tie keeps nothing, so it ends.
-    const polishing = atLadder({
-      ladder: { ...ladder, rungs: ladder.rungs.map((x) => ({ ...x, status: "done" as const })) },
-      shipNoReasons: "the ending is abrupt",
-    });
-    const tie = oneRound(polishing, ladderResponder("TIE", "TIE"));
-    expect(tie.state.rounds.at(-1)?.kept).toBe(false);
-    expect(tie.state.ending).toBe("plateau");
-    // A finish round that is kept goes on.
-    const kept = oneRound(polishing, ladderResponder("A", "B"));
-    expect(kept.state.rounds.at(-1)?.kept).toBe(true);
-    expect(kept.state.ending).toBeNull();
+    const ship =
+      (verdict: string): Responder =>
+      (step, state) =>
+        step.kind === "role" && step.role.startsWith("ship")
+          ? done(step, {
+              files: { ".studio/ship.md": `played it\nSHIP: ${verdict}\nthe ending is abrupt` },
+            })
+          : ladderResponder("A", "B")(step, state);
+    const no = drive(landed.state, ship("NO"), (s) => s.ending !== null);
+    expect(no.state.ending).toBe("done");
+    expect(no.state.shipNoReasons).toContain("the ending is abrupt");
+    expect(no.state.rounds).toHaveLength(landed.state.rounds.length);
+    expect(drive(landed.state, ship("YES"), (s) => s.ending !== null).state.ending).toBe("ready");
   });
 
   it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {
@@ -1248,47 +1249,35 @@ describe("ladder", () => {
     expect(back.state.ladder?.rungs[1]?.back).toBe(true);
     const again = oneRound(back.state, ladderResponder("A", "B", [false, false]));
     expect(again.state.ladder?.rungs[1]?.status).toBe("set-aside");
-    const finish = oneRound(again.state, ladderResponder("A", "B"));
-    expect(finish.state.rounds.at(-1)?.finish).toBe(true);
+    // Every rung has had its tries: the ladder is done and the ship check plays it.
+    expect(again.state.task._tag).toBe("ship");
   });
 
-  it("switches to finish rounds when the ladder is done or the budget's last fifth begins", () => {
+  it("runs past a finished ladder only on the creator's ask; a late budget keeps building rungs", () => {
     const done4 = fresh();
     const finished = {
       ...done4,
       rungs: done4.rungs.map((r) => ({ ...r, status: "done" as const })),
     };
-    const { state, logs } = oneRound(
-      atLadder({ ladder: finished, next: "fix the jump\nSTATUS: continue" }),
+    const at = { now: T0, coin: 0, id: "x" };
+    expect(Policy.plan(atLadder({ ladder: finished }), at)).toEqual({
+      kind: "end",
+      reason: "done",
+    });
+    const asked = oneRound(
+      atLadder({ ladder: finished, steer: ["fix the jump"] }),
       ladderResponder("A", "B"),
     );
-    expect(logs).toContain("round 1: finish round (the ladder is done)");
-    expect(state.rounds[0]?.finish).toBe(true);
-    expect(state.rounds[0]?.rung).toBeUndefined();
-    expect(state.rounds[0]?.move).toContain("fix the jump");
-    // 200 minutes of budget with 30 left: past the last fifth, rungs open or not.
-    const late = Policy.plan(atLadder({ budgetMinutes: 200, budgetEndsAt: T0 + 30 * MIN }), {
-      now: T0,
-      coin: 0,
-      id: "x",
-    });
-    expect(late.kind === "step" && late.logs).toEqual([
-      "round 1: finish round (the budget's last fifth began)",
-    ]);
-  });
-
-  it("only lets a finish round's review send the game to the ship check", () => {
-    const ready: Responder = (step, state) =>
-      step.kind === "role" && step.role.startsWith("reviewer")
-        ? done(step, {
-            files: {
-              ".studio/next.md": "all good\nSTATUS: ready",
-              [step.read[0] ?? "x"]: "reviewer notes long enough",
-            },
-          })
-        : ladderResponder("A", "B")(step, state);
-    expect(oneRound(atLadder(), ready).state.task._tag).toBe("round");
-    expect(oneRound(atRound(), ready).state.task._tag).toBe("ship");
+    expect(asked.logs).toContain("round 1: finish round (the ladder is done)");
+    expect(asked.state.rounds[0]?.finish).toBe(true);
+    expect(asked.state.rounds[0]?.move).toContain("fix the jump");
+    // One round per ask: with the note used up, the run is done again.
+    expect(Policy.plan(asked.state, at)).toEqual({ kind: "end", reason: "done" });
+    // 200 minutes of budget with 30 left still builds the next rung.
+    const late = Policy.plan(atLadder({ budgetMinutes: 200, budgetEndsAt: T0 + 30 * MIN }), at);
+    expect(late.kind === "step" && late.logs).toContain(
+      "round 1 builds rung 1 of 4: the game has part 1",
+    );
   });
 
   it("puts a reviewer's ladder change in as the next rung, one open at a time", () => {

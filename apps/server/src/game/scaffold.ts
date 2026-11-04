@@ -47,7 +47,7 @@ export const CREATOR_SESSION_SECTION = `## The creator's session and the product
 
 This section is for the creator's own session on this game. A session the production run launched for one of its roles follows its prompt instead.
 
-A production run may be working on this game; game_run_status says whether one is live and what it is doing. While one is live, do not edit the game's files: the run is changing them and its commits and resets would collide with yours. Pass the creator's requests to the run with game_run_steer and tell them the run's next round takes it up. When no run is live, work on the game directly as usual.
+A production run may be working on this game; game_run_status says whether one is live and what it is doing. While one is live, do not edit the game's files: the run is changing them and its commits and resets would collide with yours. Pass the creator's requests to the run with game_run_steer and tell them the run's next round takes it up. When no run is live, work on the game directly as usual. A run ends once its ladder is done and the ship check has played the game; it does not polish on its own. When the creator wants the run to polish something, pass their request with game_run_steer: the run comes back for one round on it, then stops.
 
 A run is Guided or on Autopilot. A Guided run asks the creator at its decision points (the vision's look, which prototype to keep, the ladder of what to build) by sending a message to this chat. When one arrives, read the decision with game_run_status and present it:
 
