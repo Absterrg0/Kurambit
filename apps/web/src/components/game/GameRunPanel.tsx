@@ -13,6 +13,8 @@ import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import {
   GAME_RUN_STAGES,
   gameRunRoleLabel,
+  type GameRunDecision,
+  type GameRunProfile,
   type GameRunRungRef,
   type GameRunStatusResult,
   type GameRunThreadRef,
@@ -45,6 +47,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameElapsed } from "./GameElapsed";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameRunPickRow, GameRunRoundRow } from "./GameRunRounds";
+import { GAME_RUN_PROFILE_HINT, GameRunProfileToggle } from "./GameRunProfileToggle";
 import { formatRunDuration, groupRoleThreads } from "./gameRunView.logic";
 import { useGameLibrary } from "./useGameLibrary";
 
@@ -62,6 +65,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const runStop = useAtomCommand(gameEnvironment.runStop, { reportFailure: false });
   const canSteer = useAtomValue(gameEnvironment.runSteer.permissionAtom(threadRef.environmentId));
   const runSteer = useAtomCommand(gameEnvironment.runSteer, { reportFailure: false });
+  const canSwitch = useAtomValue(
+    gameEnvironment.runProfile.permissionAtom(threadRef.environmentId),
+  );
+  const runProfile = useAtomCommand(gameEnvironment.runProfile, { reportFailure: false });
+  const [startProfile, setStartProfile] = useState<GameRunProfile | null>(null);
   const [note, setNote] = useState("");
   const [steerMessage, setSteerMessage] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
@@ -87,6 +95,8 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
 
   // A run record that is not live can be resumed without a new brief.
   const resumable = status !== null && status.runId !== null && status.ending !== "ready";
+  // A resume keeps the run's own profile unless the creator picks another; a new run is Guided.
+  const profile = startProfile ?? (resumable ? status.profile : null) ?? "guided";
   const start = async () => {
     if (busy || (brief.trim().length === 0 && !resumable)) return;
     setBusy(true);
@@ -97,6 +107,7 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: {
         threadId: threadRef.threadId,
         brief: brief.trim(),
+        profile,
         ...(picked === null ? {} : { provider: picked.instanceId, model: picked.model }),
         ...(budget === undefined || !Number.isFinite(budget) || budget <= 0
           ? {}
@@ -136,6 +147,18 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     setSteerMessage(result.value.message);
     statusQuery.refresh();
   };
+  const switchProfile = async (next: GameRunProfile) => {
+    if (busy || next === status?.profile) return;
+    setBusy(true);
+    setError(null);
+    const result = await runProfile({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, profile: next },
+    });
+    setBusy(false);
+    if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
+    else statusQuery.refresh();
+  };
   const openThread = (id: string) => {
     void navigate({
       to: "/$environmentId/$threadId",
@@ -174,6 +197,11 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             </TooltipTrigger>
             {status?.runId != null ? <TooltipPopup>Run {status.runId}</TooltipPopup> : null}
           </Tooltip>
+          {status?.profile != null ? (
+            <Badge size="sm" variant="outline">
+              {status.profile === "guided" ? "Guided" : "Autopilot"}
+            </Badge>
+          ) : null}
           <Button
             size="xs"
             variant="ghost"
@@ -202,6 +230,9 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             ) : (
               <p className="text-xs text-muted-foreground">{status.message}</p>
             )}
+            {active && status.decision !== null ? (
+              <DecisionLine decision={status.decision} />
+            ) : null}
             {status.progress !== null ? (
               <RunPipeline
                 stage={status.progress.stage}
@@ -234,6 +265,16 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               disabled={busy || !canRun}
               aria-label="Run brief"
             />
+            <div className="flex flex-wrap items-center gap-2">
+              <GameRunProfileToggle
+                value={profile}
+                onChange={setStartProfile}
+                disabled={busy || !canRun}
+              />
+              <span className="text-2xs text-muted-foreground">
+                {GAME_RUN_PROFILE_HINT[profile]}
+              </span>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 Budget (minutes, optional)
@@ -302,6 +343,18 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               </Button>
             </form>
             {steerMessage ? <p className="text-2xs text-muted-foreground">{steerMessage}</p> : null}
+            {status?.profile != null ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <GameRunProfileToggle
+                  value={status.profile}
+                  onChange={(next) => void switchProfile(next)}
+                  disabled={busy || !canSwitch}
+                />
+                <span className="text-2xs text-muted-foreground">
+                  {GAME_RUN_PROFILE_HINT[status.profile]}
+                </span>
+              </div>
+            ) : null}
             <Button
               size="sm"
               variant="outline"
@@ -369,6 +422,25 @@ export function GameRunPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </section>
       ) : null}
     </div>
+  );
+}
+
+const DECISION: Record<GameRunDecision["kind"], string> = {
+  style: "the vision and look",
+  prototype: "which prototype to keep",
+  ladder: "the ladder",
+};
+
+/** What a Guided run waits for. Static: the deadline is a time of day, not a countdown. */
+function DecisionLine({ decision }: { decision: GameRunDecision }) {
+  const deadline = decision.deadline === null ? Number.NaN : Date.parse(decision.deadline);
+  return (
+    <p className="text-xs text-foreground">
+      Waiting for your call on {DECISION[decision.kind]}: answer in the chat.
+      {Number.isFinite(deadline)
+        ? ` If you don't, the run goes on with its own choice at ${new Date(deadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+        : ""}
+    </p>
   );
 }
 

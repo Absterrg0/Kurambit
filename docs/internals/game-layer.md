@@ -145,7 +145,7 @@ editor lifecycle stay with Kurambit's own operations. The live editor runs with 
 worker and `-job-worker-count 2` (the worker count is a per-user setting in
 `UserSettings/EditorUserSettings.asset`, rewritten before every start), because Unity's default
 three import workers cost about 0.7 GB each. Packaging, preview, stop and the
-run's own status, round and steer tools stay outside their catalog.
+run's own status, round, steer, decide and profile tools stay outside their catalog.
 
 `game_blender_render_sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
@@ -160,6 +160,21 @@ session's edits. The game's AGENTS.md tells the creator's agent to pass requests
 `game_run_steer` while one is live; the composer is never rerouted. Notes land in
 `.studio/steer.jsonl`, the driver folds them into `run.json` before each plan and each result, and
 the policy leads the next round's direction with them.
+
+A Guided run's decisions (the vision's look, the prototype, the ladder) happen in that same chat,
+presented by the creator's own agent with whatever visuals it can generate, and answered in free
+text; there are no fixed buttons. The policy plans a `decide` step with what to show, the answers
+it accepts and a default; Autopilot never plans one, and a decide task planned after a switch to
+Autopilot is applied with its default inside `plan`. The driver wakes the creator thread the way
+`DelegatedTaskQuestionReactor` wakes a parent: a `message.dispatch` with
+`queue_after_active`, a command id derived from the run and decision ids (a resume never asks
+twice) and a `game_run` notification source, stored as `background_task` so older clients still
+decode it. The wait starts when that queued message's run leaves the queue, not when it is sent,
+so a busy chat does not spend it; `sent` and `deadline` persist on the in-flight step, so a resume
+waits only what is left, and a question still queued after ten minutes takes the default.
+`game_run_decide` validates the answer against the waiting decision (a ladder edit through
+`parseLadder`) and completes a deferred; a default completes the same deferred, so an answer and a
+timeout racing each other cannot both win. Role threads never see `game_run_decide`.
 
 ## Loop
 

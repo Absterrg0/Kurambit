@@ -55,6 +55,12 @@ export const runProgress = (state: RunState): { stage: number; next: string | nu
       return { stage: STAGE.Rounds, next: `Ready, or round ${t.n + 1}` };
     case "leave":
       return { stage: STAGE.Rounds, next: null };
+    case "decide":
+      return t.decision.kind === "style"
+        ? { stage: STAGE.Vision, next: "Prototypes" }
+        : t.decision.kind === "prototype"
+          ? { stage: STAGE["Blind pick"], next: "Plan" }
+          : { stage: STAGE.Plan, next: "Art" };
   }
 };
 
@@ -67,7 +73,8 @@ export const pickRef = (state: RunState): GameRunPickRef | null => {
     startedAt === undefined || endedAt === undefined
       ? null
       : Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)) || null;
-  if (t._tag === "proto") return { phase: "prototypes", chosen: null, how: null, durationMs: null };
+  if (t._tag === "proto" || (t._tag === "decide" && t.decision.kind === "prototype"))
+    return { phase: "prototypes", chosen: null, how: null, durationMs: null };
   if (t._tag === "pick") return { phase: "comparing", chosen: null, how: null, durationMs: null };
   // Only an adopt that succeeded records what the game became.
   if (state.picked !== null)

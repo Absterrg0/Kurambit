@@ -1066,12 +1066,14 @@ const SubagentNotificationSource = Schema.Struct({
   childThreadId: Schema.optional(ThreadId),
 });
 const CommandNotificationSource = Schema.Struct({ kind: Schema.Literal("command") });
+/** A game's production run asking the creator's chat for a decision. */
+const GameRunNotificationSource = Schema.Struct({ kind: Schema.Literal("game_run") });
 
 /**
- * Sources are stored and sent in the shape clients before `subagent` and `command` existed decode,
- * since they reject a kind they do not know: a command is `background_command`, and a subagent is
- * `background_task` with `work: "subagent"`, a field those clients ignore. Encoding picks the first
- * member that fits, so those come first.
+ * Sources are stored and sent in the shape clients before `subagent`, `command` and `game_run`
+ * existed decode, since they reject a kind they do not know: a command is `background_command`,
+ * and a subagent or a game run is `background_task` with a `work` field those clients ignore.
+ * Encoding picks the first member that fits, so those come first.
  */
 export const OrchestrationV2NotificationSource = kindUnionWithFallback(
   [
@@ -1098,9 +1100,22 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
         })),
       }),
     ),
+    Schema.Struct({
+      kind: Schema.Literal("background_task"),
+      work: Schema.Literal("game_run"),
+    }).pipe(
+      Schema.decodeTo(Schema.toType(GameRunNotificationSource), {
+        decode: SchemaGetter.transform(() => ({ kind: "game_run" as const })),
+        encode: SchemaGetter.transform(() => ({
+          kind: "background_task" as const,
+          work: "game_run" as const,
+        })),
+      }),
+    ),
     Schema.Struct({ kind: Schema.Literal("background_command").transform("command") }),
     SubagentNotificationSource,
     CommandNotificationSource,
+    GameRunNotificationSource,
     Schema.Struct({ kind: Schema.Literal("monitor") }),
     Schema.Struct({ kind: Schema.Literal("background_task") }),
     Schema.Struct({ kind: Schema.Literal("system") }),

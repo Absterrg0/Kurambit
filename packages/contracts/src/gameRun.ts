@@ -3,6 +3,17 @@ import { PositiveInt, ThreadId } from "./baseSchemas.ts";
 
 /** Production loop as a Kurambit service: one game's run from vision to an ending. */
 
+/**
+ * Guided asks the creator at the run's decision points and takes a default when
+ * nobody answers in time; Autopilot decides everything itself.
+ */
+export const GameRunProfile = Schema.Literals(["guided", "autopilot"]);
+export type GameRunProfile = typeof GameRunProfile.Type;
+
+/** The decision points of a Guided run: the vision's style, the prototype, the ladder. */
+export const GameRunDecisionKind = Schema.Literals(["style", "prototype", "ladder"]);
+export type GameRunDecisionKind = typeof GameRunDecisionKind.Type;
+
 export const GameRunStartInput = Schema.Struct({
   threadId: ThreadId,
   /** Required for a new run; empty resumes a stopped run with its own brief. */
@@ -14,6 +25,8 @@ export const GameRunStartInput = Schema.Struct({
   provider: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.String),
   variant: Schema.optionalKey(Schema.String),
+  /** A new run defaults to Guided; a resumed run keeps its own unless one is given. */
+  profile: Schema.optionalKey(GameRunProfile),
 });
 export type GameRunStartInput = typeof GameRunStartInput.Type;
 
@@ -111,9 +124,9 @@ export const GAME_RUN_STAGES = [
 
 /**
  * How the pick chose the prototype the game became: a comparator's win, its
- * selection after a tie, or the only prototype that booted.
+ * selection after a tie, the only prototype that booted, or the creator's pick.
  */
-export const GameRunPickHow = Schema.Literals(["won", "selected", "only-booted"]);
+export const GameRunPickHow = Schema.Literals(["won", "selected", "only-booted", "creator"]);
 export type GameRunPickHow = typeof GameRunPickHow.Type;
 
 /** The prototype pick as a timeline entry; its evidence is read with `game.runPick`. */
@@ -126,9 +139,31 @@ export const GameRunPickRef = Schema.Struct({
 });
 export type GameRunPickRef = typeof GameRunPickRef.Type;
 
+/** A decision a Guided run is waiting on, for any agent to present and answer. */
+export const GameRunDecision = Schema.Struct({
+  id: Schema.String,
+  kind: GameRunDecisionKind,
+  /** What the run asks the creator, in plain words. */
+  ask: Schema.String,
+  /** Files to show the creator, as absolute paths on this machine. */
+  evidence: Schema.Array(Schema.Struct({ label: Schema.String, path: Schema.String })),
+  /** What goes with the files: which prototype is which, the ladder's rungs. */
+  text: Schema.String,
+  answers: Schema.Array(Schema.Struct({ answer: Schema.String, means: Schema.String })),
+  /** The answer the run takes when nobody answers in time. */
+  default: Schema.String,
+  /** When the default fires (ISO); null until the message reached the creator's agent. */
+  deadline: Schema.NullOr(Schema.String),
+});
+export type GameRunDecision = typeof GameRunDecision.Type;
+
 export const GameRunStatusResult = Schema.Struct({
   active: Schema.Boolean,
   runId: Schema.NullOr(Schema.String),
+  /** Null when no run is recorded. */
+  profile: Schema.NullOr(GameRunProfile),
+  /** The decision the run waits on now, null when it waits on none. */
+  decision: Schema.NullOr(GameRunDecision),
   stage: Schema.String,
   /** What the run is doing now (the role or phase in flight), null when no run is recorded. */
   step: Schema.NullOr(Schema.String),
@@ -299,6 +334,29 @@ export const GameRunSteerResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameRunSteerResult = typeof GameRunSteerResult.Type;
+
+export const GameRunDecideInput = Schema.Struct({
+  threadId: ThreadId,
+  decisionId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  answer: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  notes: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20_000))),
+});
+export type GameRunDecideInput = typeof GameRunDecideInput.Type;
+
+export const GameRunDecideResult = Schema.Struct({ message: Schema.String });
+export type GameRunDecideResult = typeof GameRunDecideResult.Type;
+
+export const GameRunProfileInput = Schema.Struct({
+  threadId: ThreadId,
+  profile: GameRunProfile,
+});
+export type GameRunProfileInput = typeof GameRunProfileInput.Type;
+
+export const GameRunProfileResult = Schema.Struct({
+  profile: GameRunProfile,
+  message: Schema.String,
+});
+export type GameRunProfileResult = typeof GameRunProfileResult.Type;
 
 /**
  * A readable name for a run role thread ("tester-3" is "Tester, round 3").

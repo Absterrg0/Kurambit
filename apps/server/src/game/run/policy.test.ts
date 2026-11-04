@@ -19,6 +19,7 @@ const base = (patch: Partial<State.RunState> = {}): State.RunState => ({
   ...State.freshState(
     {
       runId: "run_t",
+      profile: "autopilot",
       brief: "b",
       artDirection: "",
       budgetMinutes: null,
@@ -161,6 +162,8 @@ const roundResponder =
       return { kind: "boot", ok: opts.bootOk ?? true, detail: "check failed" };
     if (step.kind === "facts") return { kind: "facts", jev: false, code: "facts." };
     if (step.kind === "note") return { kind: "note" };
+    if (step.kind === "decide")
+      return { kind: "decided", answer: step.decision.fallback, notes: "", by: "default" };
     if (step.kind === "bot")
       return (
         opts.bot?.(step.sha) ?? {
@@ -1505,5 +1508,262 @@ describe("resume", () => {
     expect(next.task._tag).toBe("round");
     expect(next.trunk).toBe("main");
     expect(State.loadState("{not json", "").kind).toBe("unreadable");
+  });
+});
+
+describe("guided decisions", () => {
+  const ladderJson = (n: number, tag = "part") =>
+    JSON.stringify({
+      rungs: Array.from({ length: n }, (_, i) => ({
+        is: `the game has ${tag} ${i + 1}`,
+        checks: [
+          { what: `${tag} ${i + 1} starts`, how: "probe value" },
+          { what: `${tag} ${i + 1} ends`, how: "HUD text" },
+        ],
+      })),
+    });
+  type Said = { readonly answer: string; readonly notes?: string } | null;
+  // Answers each decision kind in turn; null (or none left) lets the wait run out.
+  const creator =
+    (said: Partial<Record<State.Decision["kind"], Said[]>> = {}, asked: State.Decision[] = []) =>
+    (step: Single, state: State.RunState): Policy.StepResult => {
+      if (step.kind === "decide") {
+        asked.push(step.decision);
+        const next = said[step.decision.kind]?.shift() ?? null;
+        return next === null
+          ? { kind: "decided", answer: step.decision.fallback, notes: "", by: "default" }
+          : { kind: "decided", answer: next.answer, notes: next.notes ?? "", by: "creator" };
+      }
+      if (step.kind === "git" && step.op._tag === "branch-commit")
+        return gitOk({ branch: step.op.name, sha: step.op.name });
+      if (step.kind === "role" && step.role === "plan")
+        return done(step, { files: { ".studio/ladder.json": ladderJson(4) } });
+      return roundResponder("A", "B")(step, state);
+    };
+  const start = (profile: State.RunState["profile"]) => base({ profile });
+  const toRounds = (s: State.RunState) => s.task._tag === "round";
+  const toBuild = (s: State.RunState) => s.task._tag === "stage" && s.task.name === "build";
+
+  it("plans no decide step on Autopilot", () => {
+    const run = drive(start("autopilot"), creator(), toRounds);
+    expect(run.steps).not.toContain("decide");
+    expect(run.state.decided).toEqual([]);
+    expect(run.steps).toContain("sample");
+  });
+
+  it("asks about the style, the prototype and the ladder, and takes each default on a timeout", () => {
+    const asked: State.Decision[] = [];
+    const run = drive(start("guided"), creator({}, asked), toRounds);
+    expect(asked.map((d) => d.kind)).toEqual(["style", "prototype", "ladder"]);
+    expect(run.state.decided.map((d) => [d.kind, d.answer, d.by])).toEqual([
+      ["style", "approve", "default"],
+      ["prototype", "run", "default"],
+      ["ladder", "approve", "default"],
+    ]);
+    // The prototype default is the blind pick.
+    expect(run.steps).toContain("sample");
+    expect(run.state.picked?.how).toBe("won");
+    const proto = asked[1]!;
+    expect(proto.evidence.map((e) => e.path)).toEqual([
+      ".studio/proto-0.md",
+      ".studio/proto-0-frames.jpg",
+      ".studio/proto-1.md",
+      ".studio/proto-1-frames.jpg",
+    ]);
+    expect(proto.answers.map((a) => a.answer)).toEqual(["pick-1", "pick-2", "retry", "run"]);
+    expect(asked[2]!.text).toContain("the game has part 1");
+  });
+
+  it("has each Guided prototype play itself and write its pitch", () => {
+    const prompts: string[] = [];
+    const respond = creator();
+    drive(
+      start("guided"),
+      (step, state) => {
+        if (step.kind === "role" && step.role.startsWith("proto")) {
+          prompts.push(step.prompt);
+          expect(step.sheet).toBe(`.studio/${step.role}-frames.jpg`);
+        }
+        return respond(step, state);
+      },
+      (s) => s.task._tag === "decide" && s.task.decision.kind === "prototype",
+    );
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain(".studio/proto-1.md");
+  });
+
+  it("adopts the creator's pick without a blind comparison and leads the first build with their notes", () => {
+    const run = drive(
+      start("guided"),
+      creator({ prototype: [{ answer: "pick-2", notes: "but with the camera of the first one" }] }),
+      toBuild,
+    );
+    expect(run.steps).not.toContain("sample");
+    expect(run.state.picked).toMatchObject({ branch: "proto-1", how: "creator" });
+    const t = run.state.task;
+    expect(t._tag === "stage" && t.block?.direction).toContain(
+      "but with the camera of the first one",
+    );
+    expect(t._tag === "stage" && t.block?.direction).toContain("proto-0");
+  });
+
+  it("lets the run's blind pick decide on a run answer", () => {
+    const run = drive(start("guided"), creator({ prototype: [{ answer: "run" }] }), toBuild);
+    expect(run.steps).toContain("sample");
+    expect(run.state.decided.find((d) => d.kind === "prototype")?.by).toBe("creator");
+  });
+
+  it("retries the prototypes once with the creator's notes, then takes the default", () => {
+    const asked: State.Decision[] = [];
+    const prompts: string[] = [];
+    const respond = creator(
+      {
+        prototype: [
+          { answer: "retry", notes: "make it faster" },
+          { answer: "retry", notes: "again" },
+        ],
+      },
+      asked,
+    );
+    const run = drive(
+      start("guided"),
+      (step, state) => {
+        if (step.kind === "role" && step.role.startsWith("proto")) prompts.push(step.role);
+        if (step.kind === "role" && step.role === "proto-2")
+          expect(step.prompt).toContain("make it faster");
+        return respond(step, state);
+      },
+      toBuild,
+    );
+    expect(prompts).toEqual(["proto-0", "proto-1", "proto-2", "proto-3"]);
+    const protos = asked.filter((d) => d.kind === "prototype");
+    expect(protos).toHaveLength(2);
+    expect(protos[1]!.answers.map((a) => a.answer)).toEqual(["pick-3", "pick-4", "run"]);
+    expect(protos[1]!.evidence[0]!.path).toBe(".studio/proto-2.md");
+    // The second retry is not an answer any more, so the run takes its default.
+    expect(
+      run.state.decided.filter((d) => d.kind === "prototype").map((d) => [d.answer, d.by]),
+    ).toEqual([
+      ["retry", "creator"],
+      ["run", "default"],
+    ]);
+    expect(run.state.protos.map((p) => p.branch)).toEqual(["proto-2", "proto-3"]);
+  });
+
+  it("redoes the vision once with the creator's notes, then asks again without a redo", () => {
+    const asked: State.Decision[] = [];
+    const visions: string[] = [];
+    const respond = creator(
+      { style: [{ answer: "redo", notes: "pinker, rounder" }, { answer: "approve" }] },
+      asked,
+    );
+    const run = drive(
+      start("guided"),
+      (step, state) => {
+        if (step.kind === "role" && step.role === "vision") visions.push(step.prompt);
+        return respond(step, state);
+      },
+      (s) => s.task._tag === "proto",
+    );
+    expect(visions).toHaveLength(2);
+    expect(visions[1]).toContain("pinker, rounder");
+    const styles = asked.filter((d) => d.kind === "style");
+    expect(styles.map((d) => d.answers.map((a) => a.answer))).toEqual([
+      ["approve", "redo"],
+      ["approve"],
+    ]);
+    expect(run.state.decided.map((d) => d.answer)).toEqual(["redo", "approve"]);
+  });
+
+  it("takes an edited ladder only when it parses, and rewrites once on notes", () => {
+    const asked: State.Decision[] = [];
+    const atLadder = drive(
+      start("guided"),
+      creator({}, asked),
+      (s) => s.task._tag === "decide" && s.task.decision.kind === "ladder",
+    );
+    const t = atLadder.state.task;
+    if (t._tag !== "decide") throw new Error("expected the ladder decision");
+    const refused = Policy.checkAnswer(t.decision, "edit", '{"rungs":[]}');
+    expect("error" in refused && refused.error).toContain("refused");
+    expect("error" in Policy.checkAnswer(t.decision, "maybe", "")).toBe(true);
+    expect("error" in Policy.checkAnswer(t.decision, "rewrite", " ")).toBe(true);
+    const edited = drive(
+      atLadder.state,
+      creator({ ladder: [{ answer: "Edit", notes: ladderJson(5, "mine") }] }),
+      (s) => s.task._tag === "stage" && s.task.name === "art",
+    );
+    expect(edited.state.ladder?.rungs.map((r) => r.is)[4]).toBe("the game has mine 5");
+
+    const plans: string[] = [];
+    const respond = creator({ ladder: [{ answer: "rewrite", notes: "boss fight sooner" }] }, asked);
+    const rewritten = drive(
+      atLadder.state,
+      (step, state) => {
+        if (step.kind === "role" && step.role === "plan") {
+          plans.push(step.prompt);
+          return done(step, { files: { ".studio/ladder.json": ladderJson(6, "boss") } });
+        }
+        return respond(step, state);
+      },
+      (s) => s.task._tag === "stage" && s.task.name === "art",
+    );
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toContain("boss fight sooner");
+    expect(rewritten.state.ladder?.rungs).toHaveLength(6);
+    expect(asked.at(-1)?.answers.map((a) => a.answer)).toEqual(["approve", "edit"]);
+  });
+
+  it("decides itself once switched to Autopilot before the question went out", () => {
+    const atStyle = drive(start("guided"), creator(), (s) => s.task._tag === "decide");
+    const planned = Policy.plan(
+      { ...atStyle.state, profile: "autopilot" },
+      { now: T0, coin: 0.3, id: "x" },
+    );
+    if (planned.kind !== "step") throw new Error("expected a step");
+    expect(planned.step.kind).not.toBe("decide");
+    expect(planned.state.decided.at(-1)).toMatchObject({ kind: "style", by: "default" });
+  });
+
+  it("waits out only what is left of a resumed wait, and never forever", () => {
+    const atStyle = drive(start("guided"), creator(), (s) => s.task._tag === "decide");
+    const planned = Policy.plan(atStyle.state, { now: T0, coin: 0.3, id: "x" });
+    if (planned.kind !== "step" || planned.step.kind !== "decide")
+      throw new Error("expected the decide step");
+    const step = planned.step;
+    expect(Policy.decisionWait(step, T0)).toEqual({ kind: "send" });
+    const sent = { ...step, sent: T0 };
+    expect(Policy.decisionWait(sent, T0 + MIN)).toEqual({ kind: "deliver" });
+    expect(Policy.decisionWait(sent, T0 + Policy.DECISION_DELIVERY_MS)).toEqual({
+      kind: "default",
+    });
+    const waiting = { ...sent, deadline: T0 + Policy.DECISION_WAIT_MS };
+    // A restart persists the step; the resumed run reads it back from run.json.
+    const saved = JSON.stringify(State.encodeRunState({ ...planned.state, inFlight: waiting }));
+    const loaded = State.loadState(saved, "");
+    if (loaded.kind !== "v3" || loaded.state.inFlight?.kind !== "decide")
+      throw new Error("expected the step back");
+    expect(Policy.plan(loaded.state, { now: T0, coin: 0, id: "y" })).toMatchObject({
+      step: { kind: "decide" },
+    });
+    expect(Policy.decisionWait(loaded.state.inFlight, T0 + MIN)).toEqual({
+      kind: "wait",
+      ms: Policy.DECISION_WAIT_MS - MIN,
+    });
+    expect(Policy.decisionWait(loaded.state.inFlight, T0 + Policy.DECISION_WAIT_MS)).toEqual({
+      kind: "default",
+    });
+  });
+
+  it("loads an older run.json as Autopilot with no decisions", () => {
+    const {
+      profile: _profile,
+      decided: _decided,
+      buildNotes: _notes,
+      ...old
+    } = State.encodeRunState(base({ profile: "guided" }));
+    const loaded = State.loadState(JSON.stringify(old), "");
+    expect(loaded.kind === "v3" && loaded.state.profile).toBe("autopilot");
+    expect(loaded.kind === "v3" && loaded.state.decided).toEqual([]);
   });
 });

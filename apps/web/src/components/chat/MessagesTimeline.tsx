@@ -5106,6 +5106,8 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
         return "zap";
       case "system":
         return "kurambit";
+      case "game_run":
+        return "message-circle";
       default:
         source satisfies never;
         return "zap";

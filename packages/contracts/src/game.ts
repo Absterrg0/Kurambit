@@ -3,6 +3,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
+import { GameRunProfile } from "./gameRun.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -453,6 +454,8 @@ export const GameCreateInput = Schema.Struct({
   engine: Schema.optionalKey(GameEngineId),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
+  /** How the game's first run decides; omitted means Guided. */
+  profile: Schema.optionalKey(GameRunProfile),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
 export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });

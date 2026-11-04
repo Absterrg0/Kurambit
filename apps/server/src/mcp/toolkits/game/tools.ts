@@ -35,6 +35,10 @@ import {
   GameRunRoundDetail,
   GameRunStatusResult,
   GameRunSteerResult,
+  GameRunDecideInput,
+  GameRunDecideResult,
+  GameRunProfile,
+  GameRunProfileResult,
   GameStatus,
   GameExploreStartInput,
   GameExploreActInput,
@@ -405,7 +409,7 @@ const runDependencies = [
 ];
 const RunStatusTool = Tool.make("game_run_status", {
   description:
-    "Whether this game's production run is live, what it is doing now (step), its rounds with verdicts and the creator notes waiting for the next round. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
+    "Whether this game's production run is live, what it is doing now (step), its profile (guided or autopilot), its rounds with verdicts and the creator notes waiting for the next round. While a Guided run waits for the creator, decision holds what to present: the evidence files (absolute paths), what goes with them, the answers the run accepts, its default and when the default fires; record the creator's answer with game_run_decide. Read-only. While a run is live, do not edit the game's files; pass the creator's requests to it with game_run_steer.",
   success: GameRunStatusResult,
   failure,
   failureMode: "return",
@@ -433,6 +437,32 @@ const RunSteerTool = Tool.make("game_run_steer", {
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4000)),
   }),
   success: GameRunSteerResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const RunDecideTool = Tool.make("game_run_decide", {
+  description:
+    "Record the creator's answer to the decision this game's Guided production run is waiting on (game_run_status shows it). decisionId is the decision's id; answer is one of its answers (for a prototype pick-<n>, retry or run; for the style approve or redo; for the ladder approve, edit or rewrite). notes carries the creator's own words: what to take from the other prototype, what to change on a redo, retry or rewrite (required there), or for a ladder edit the full ladder JSON. An answer that does not fit is refused with the reason, so fix it and call again. Only after the creator answered; when nobody does, the run takes its default by itself.",
+  parameters: Schema.Struct({
+    decisionId: GameRunDecideInput.fields.decisionId,
+    answer: GameRunDecideInput.fields.answer,
+    notes: GameRunDecideInput.fields.notes,
+  }),
+  success: GameRunDecideResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const RunProfileTool = Tool.make("game_run_profile", {
+  description:
+    "Switch this game's live production run between guided (it asks the creator in this chat at its decision points and takes a default when nobody answers in time) and autopilot (it decides everything itself; a question it is waiting on takes its default now). Only when the creator asks for it.",
+  parameters: Schema.Struct({ profile: GameRunProfile }),
+  success: GameRunProfileResult,
   failure,
   failureMode: "return",
   dependencies: runDependencies,
@@ -470,4 +500,6 @@ export const GameToolkit = Toolkit.make(
   RunStatusTool,
   RunRoundTool,
   RunSteerTool,
+  RunDecideTool,
+  RunProfileTool,
 );

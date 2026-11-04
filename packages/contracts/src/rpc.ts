@@ -5,6 +5,8 @@ import {
   GameRunStatusResult,
   GameRunSteerInput,
   GameRunSteerResult,
+  GameRunProfileInput,
+  GameRunProfileResult,
   GameRunRoundInput,
   GameRunRoundDetail,
   GameRunPickInput,
@@ -349,6 +351,7 @@ export const WS_METHODS = {
   gameRunStatus: "game.runStatus",
   gameRunStop: "game.runStop",
   gameRunSteer: "game.runSteer",
+  gameRunProfile: "game.runProfile",
   gameRunRound: "game.runRound",
   gameRunPick: "game.runPick",
   gameRunRestore: "game.runRestore",
@@ -1478,6 +1481,11 @@ const WsGameRunSteerRpc = Rpc.make(WS_METHODS.gameRunSteer, {
   success: GameRunSteerResult,
   error: gameError,
 });
+const WsGameRunProfileRpc = Rpc.make(WS_METHODS.gameRunProfile, {
+  payload: GameRunProfileInput,
+  success: GameRunProfileResult,
+  error: gameError,
+});
 const WsGameRunRoundRpc = Rpc.make(WS_METHODS.gameRunRound, {
   payload: GameRunRoundInput,
   success: GameRunRoundDetail,
@@ -1516,6 +1524,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameRunStatusRpc,
   WsGameRunStopRpc,
   WsGameRunSteerRpc,
+  WsGameRunProfileRpc,
   WsGameRunRoundRpc,
   WsGameRunPickRpc,
   WsGameRunRestoreRpc,

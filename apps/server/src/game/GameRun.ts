@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -20,6 +21,11 @@ import {
   gameRunRoleLabel,
   type GameCreateInput,
   type GameProjectResult,
+  type GameRunDecideInput,
+  type GameRunDecideResult,
+  type GameRunDecision,
+  type GameRunProfile,
+  type GameRunProfileResult,
   type GameRunPickDetail,
   type GameRunRestoreResult,
   type GameRunRoundDetail,
@@ -45,6 +51,7 @@ import { finishExports } from "./run/finish.ts";
 import { waitOutLowMemory } from "./run/lowMemory.ts";
 import { makeGit, restoredPaths } from "./run/git.ts";
 import { bootStep, gitStep } from "./run/steps.ts";
+import { decideStep, type Answer } from "./run/decideStep.ts";
 import * as Policy from "./run/policy.ts";
 import { releaseWorktree, runRole, type RoleDeps } from "./run/roleRunner.ts";
 import { ladderRefs, pickRef, runProgress } from "./run/progress.ts";
@@ -91,6 +98,8 @@ const RUN_STATE_IGNORES = [
   ".studio/worktrees/",
   ".studio/comparisons/",
   ".studio/play-*.md",
+  ".studio/proto-*.md",
+  ".studio/proto-*-frames.jpg",
   ".studio/round-state.json",
   "PICK-NOTES.md",
   "JUDGE-NOTES.md",
@@ -175,6 +184,41 @@ const parseSteer = (text: string): string[] =>
     }
   });
 
+const fallbackOf = (decision: State.Decision): Answer => ({
+  answer: decision.fallback,
+  notes: "",
+  by: "default",
+});
+
+// A game made before the decision protocol has the older creator section; it is replaced whole.
+const CREATOR_HEADING = "## The creator's session and the production run";
+const withCreatorSection = (agents: string): string => {
+  if (agents.includes("game_run_decide")) return agents;
+  const at = agents.indexOf(CREATOR_HEADING);
+  if (at < 0) return `${agents.trimEnd()}\n\n${CREATOR_SESSION_SECTION}`;
+  const after = agents.indexOf("\n## ", at + CREATOR_HEADING.length);
+  return `${agents.slice(0, at)}${CREATOR_SESSION_SECTION}${after < 0 ? "" : agents.slice(after)}`;
+};
+
+// The question a live run waits on, with its evidence as absolute paths. A question
+// still queued behind a busy chat states when its wait would end if it arrived now.
+const decisionOf = (root: string, state: State.RunState): GameRunDecision | null => {
+  const step = state.inFlight;
+  if (step?.kind !== "decide") return null;
+  const d = step.decision;
+  const deadline = step.deadline ?? (step.sent === null ? null : Date.now() + d.waitMs);
+  return {
+    id: d.id,
+    kind: d.kind,
+    ask: d.ask,
+    evidence: d.evidence.map((e) => ({ label: e.label, path: NodePath.join(root, e.path) })),
+    text: d.text,
+    answers: d.answers.map((a) => ({ answer: a.answer, means: a.means })),
+    default: d.fallback,
+    deadline: deadline === null ? null : new Date(deadline).toISOString(),
+  };
+};
+
 const currentStep = (state: State.RunState): string => {
   const t = state.task;
   const step = state.inFlight?.kind === "pair" ? state.inFlight.halves[0] : state.inFlight;
@@ -199,7 +243,15 @@ const currentStep = (state: State.RunState): string => {
       return `Ship review after round ${t.n}`;
     case "leave":
       return "Wrapping up at the budget";
+    case "decide":
+      return `Waiting for the creator: ${DECISION_LABEL[t.decision.kind]}`;
   }
+};
+
+const DECISION_LABEL: Record<State.Decision["kind"], string> = {
+  style: "the vision and look",
+  prototype: "which prototype to keep",
+  ladder: "the ladder",
 };
 
 // When a note takes effect: a round's direction is fixed once it starts.
@@ -262,6 +314,7 @@ const describe = (step: State.Step): string => {
     return `step ${step.id}: ${step.role}${step.thread === null ? "" : " (follow-up)"}${step.at === null ? "" : ` at ${step.at.slice(0, 12)}`}`;
   if (step.kind === "git") return `step ${step.id}: git ${step.op._tag}`;
   if (step.kind === "bot") return `step ${step.id}: bot ${step.file} at ${step.sha.slice(0, 12)}`;
+  if (step.kind === "decide") return `step ${step.id}: ask the creator (${step.decision.id})`;
   return `step ${step.id}: ${step.kind}`;
 };
 const summarize = (res: Policy.StepResult): string => {
@@ -270,12 +323,21 @@ const summarize = (res: Policy.StepResult): string => {
     return `git ok=${res.git.ok} ${res.git.branch} ${res.git.sha.slice(0, 8)} ${res.git.detail}`.trim();
   if (res.kind === "boot") return `boot ${res.ok ? "clean" : `failed: ${res.detail}`}`;
   if (res.kind === "ended" || res.kind === "failed") return `${res.kind}: ${res.reason}`;
+  if (res.kind === "decided") return `decided ${res.answer} (${res.by})`;
   if (res.kind === "bot")
     return `bot ${res.fact.ending} after ${res.fact.seconds.toFixed(0)}s ${JSON.stringify(res.fact.final)} ${res.fact.note}`.trim();
   return res.kind;
 };
 
-type RunSlot = { fiber: Fiber.Fiber<void, never> | null; runId: string; stop: boolean };
+type RunSlot = {
+  fiber: Fiber.Fiber<void, never> | null;
+  runId: string;
+  stop: boolean;
+  // A profile switch the driver takes at its next step.
+  profile: GameRunProfile | null;
+  // The decision the driver waits on; an answer completes it.
+  waiting: { readonly decision: State.Decision; readonly answer: Deferred.Deferred<Answer> } | null;
+};
 
 export class GameRun extends Context.Service<
   GameRun,
@@ -294,6 +356,15 @@ export class GameRun extends Context.Service<
     readonly runStop: (
       threadId: ThreadId,
     ) => Effect.Effect<{ stopped: boolean; message: string }, GameRunError>;
+    /** The creator's answer to the decision the live run waits on; refused when it does not fit. */
+    readonly runDecide: (
+      input: GameRunDecideInput,
+    ) => Effect.Effect<GameRunDecideResult, GameRunError>;
+    /** Switches the live run between Guided and Autopilot from its next step. */
+    readonly runProfile: (
+      threadId: ThreadId,
+      profile: GameRunProfile,
+    ) => Effect.Effect<GameRunProfileResult, GameRunError>;
     /** Queue a creator note for the live run's next round. Fails when no run is live. */
     readonly runSteer: (
       threadId: ThreadId,
@@ -496,8 +567,7 @@ export const layer = Layer.effect(
         const before = (await readText(NodePath.join(root, "AGENTS.md"))) ?? "";
         let agents = before.replace(STALE_SKILLS, "");
         if (!agents.includes(SKILLS_HEADING)) agents = `${agents}${SKILLS_LINE}`;
-        if (!agents.includes("game_run_steer"))
-          agents = `${agents.trimEnd()}\n\n${CREATOR_SESSION_SECTION}`;
+        agents = withCreatorSection(agents);
         if (agents !== before) await NodeFSP.writeFile(NodePath.join(root, "AGENTS.md"), agents);
         const ignore = (await readText(NodePath.join(root, ".gitignore"))) ?? "";
         const present = new Set(ignore.split("\n").map((line) => line.trim()));
@@ -516,6 +586,7 @@ export const layer = Layer.effect(
       readonly deps: RoleDeps;
       readonly selection: ModelSelection;
       readonly runtimeMode: Parameters<RoleDeps["launches"]["launch"]>[0]["runtimeMode"];
+      readonly slot: RunSlot;
     };
 
     const drive = Effect.fn("GameRun.drive")(function* (d: Drive, initial: State.RunState) {
@@ -551,6 +622,14 @@ export const layer = Layer.effect(
           yield* Effect.promise(() => NodeFSP.rm(paths(root).steer, { force: true }));
         }),
       );
+      const takeProfile = Effect.suspend(() => {
+        const profile = d.slot.profile;
+        d.slot.profile = null;
+        if (profile === null || profile === state.profile) return Effect.void;
+        return save({ ...state, profile }).pipe(
+          Effect.andThen(log(`creator switched the run to ${profile}`)),
+        );
+      });
       const inputs = (): Policy.Inputs => ({
         now: Date.now(),
         coin: NodeCrypto.randomInt(2 ** 30) / 2 ** 30,
@@ -681,6 +760,27 @@ export const layer = Layer.effect(
             });
           case "bot":
             return runBotFact(d.deps, { root, runId: state.runId, log }, step);
+          case "decide":
+            return Effect.gen(function* () {
+              const answer = yield* Deferred.make<Answer>();
+              d.slot.waiting = { decision: step.decision, answer };
+              // Read after the wait is visible: runProfile either sees it or left its switch here.
+              if ((d.slot.profile ?? state.profile) === "autopilot")
+                yield* Deferred.succeed(answer, fallbackOf(step.decision));
+              return yield* decideStep(
+                d.deps,
+                {
+                  root,
+                  lane: state.lane,
+                  runId: state.runId,
+                  creator: d.creator,
+                  answer,
+                  log,
+                  update: (next) => save({ ...state, inFlight: next }),
+                },
+                step,
+              ).pipe(Effect.ensuring(Effect.sync(() => void (d.slot.waiting = null))));
+            });
           case "note":
             return Effect.promise(async () => {
               for (const file of step.files)
@@ -743,6 +843,7 @@ export const layer = Layer.effect(
         for (;;) {
           if (yield* stopRequested(root)) return yield* save({ ...state, ending: "stopped" });
           yield* takeSteer;
+          yield* takeProfile;
           const planned = Policy.plan(state, inputs());
           if (planned.kind === "end") {
             yield* log(`run ended: ${planned.reason}`);
@@ -758,6 +859,7 @@ export const layer = Layer.effect(
             yield* log(`  ${summarize(result)}`);
             // Again before the result lands: a ship verdict must see a note sent during its turn.
             yield* takeSteer;
+            yield* takeProfile;
             applied = Policy.applyResult(state, state.inFlight ?? planned.step, result, inputs());
           }
           for (const line of applied.logs) yield* log(line);
@@ -861,6 +963,7 @@ export const layer = Layer.effect(
               }),
           ending: null,
           creator: input.threadId,
+          profile: input.profile ?? prior.profile,
           ...(loaded.kind === "legacy" ? { next } : {}),
         };
         if (loaded.kind === "legacy")
@@ -883,6 +986,7 @@ export const layer = Layer.effect(
           ...State.freshState(
             {
               runId: `run_${Date.now().toString(36)}${NodeCrypto.randomBytes(3).toString("hex")}`,
+              profile: input.profile ?? "guided",
               brief: input.brief,
               artDirection: input.artDirection ?? "",
               budgetMinutes: input.budgetMinutes ?? null,
@@ -935,6 +1039,7 @@ export const layer = Layer.effect(
         deps,
         selection: selectionFor(current, state),
         runtimeMode: projection.thread.runtimeMode,
+        slot,
       };
       slot.runId = state.runId;
       // The loop outlives this request, so it gets its own scope. Fork and
@@ -975,7 +1080,7 @@ export const layer = Layer.effect(
           loaded.kind === "v3" || loaded.kind === "legacy" ? loaded.state.stage : "running";
         return { runId: existing.runId, root: target.root, stage, resumed: true };
       }
-      const slot: RunSlot = { fiber: null, runId: "", stop: false };
+      const slot: RunSlot = { fiber: null, runId: "", stop: false, profile: null, waiting: null };
       active.set(target.root, slot);
       return yield* startClaimed(input, target, slot).pipe(
         Effect.onExit(() =>
@@ -999,6 +1104,8 @@ export const layer = Layer.effect(
         return {
           active: false,
           runId: null,
+          profile: null,
+          decision: null,
           stage: "none",
           step: null,
           ending: null,
@@ -1022,9 +1129,12 @@ export const layer = Layer.effect(
       const failure = state.lastFailure.length > 0 ? ` Last failure: ${state.lastFailure}` : "";
       const step = running ? currentStep(state) : null;
       const queued = parseSteer((yield* Effect.promise(() => readText(paths(root).steer))) ?? "");
+      const slot = active.get(root);
       return {
         active: running,
         runId: state.runId,
+        profile: slot?.profile ?? state.profile,
+        decision: running ? decisionOf(root, state) : null,
         stage: state.stage,
         step,
         ending,
@@ -1052,9 +1162,11 @@ export const layer = Layer.effect(
         steer: [...state.steer, ...queued],
         threads: state.threads,
         message:
-          ending === null
-            ? `${step ?? state.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`
-            : `The run ended: ${ending}.${failure}`,
+          ending !== null
+            ? `The run ended: ${ending}.${failure}`
+            : running && state.inFlight?.kind === "decide"
+              ? `Waiting for the creator's answer on ${DECISION_LABEL[state.inFlight.decision.kind]}; answer in the game's chat.`
+              : `${step ?? state.stage}, ${state.rounds.length} round${state.rounds.length === 1 ? "" : "s"} done.${failure}`,
       } satisfies GameRunStatusResult;
     });
 
@@ -1071,6 +1183,58 @@ export const layer = Layer.effect(
         message:
           "The run was stopped. Rejected work stays on its branch; the folder holds all state.",
       };
+    });
+
+    const runDecide = Effect.fn("GameRun.runDecide")(function* (input: GameRunDecideInput) {
+      const { root } = yield* resolveGame(input.threadId);
+      const no = (reason: string, detail: string) => refuse("run-decide", root, reason, detail);
+      const waiting = active.get(root)?.waiting ?? null;
+      if (waiting === null)
+        return yield* no(
+          "no-decision",
+          "The run is not waiting for a decision now; it may have taken its default already. game_run_status shows where it stands.",
+        );
+      if (waiting.decision.id !== input.decisionId)
+        return yield* no(
+          "stale-decision",
+          `Decision ${input.decisionId} is not the one waiting; the run waits on ${waiting.decision.id}.`,
+        );
+      const checked = Policy.checkAnswer(waiting.decision, input.answer, input.notes ?? "");
+      if ("error" in checked) return yield* no("invalid-answer", checked.error);
+      const answer: Answer = { ...checked, by: "creator" };
+      if (!(yield* Deferred.succeed(waiting.answer, answer)))
+        return yield* no("already-decided", "The run already took an answer for this decision.");
+      yield* logLine(root, `creator answered ${waiting.decision.id}: ${checked.answer}`);
+      return {
+        message: `Recorded: ${checked.answer}. The run goes on with it; game_run_status shows its next step.`,
+      } satisfies GameRunDecideResult;
+    });
+
+    const runProfile = Effect.fn("GameRun.runProfile")(function* (
+      threadId: ThreadId,
+      profile: GameRunProfile,
+    ) {
+      const { root } = yield* resolveGame(threadId);
+      const slot = active.get(root);
+      if (slot === undefined)
+        return yield* refuse(
+          "run-profile",
+          root,
+          "no-live-run",
+          "No live run for this game. Start or resume the run with the profile you want.",
+        );
+      slot.profile = profile;
+      // Nobody needs to answer an Autopilot run: the waiting question takes its default now.
+      const waiting = slot.waiting;
+      if (profile === "autopilot" && waiting !== null)
+        yield* Deferred.succeed(waiting.answer, fallbackOf(waiting.decision));
+      return {
+        profile,
+        message:
+          profile === "guided"
+            ? "The run is Guided from its next decision point: it asks in the chat and takes its default when nobody answers."
+            : "The run is on Autopilot: it decides everything itself from now on.",
+      } satisfies GameRunProfileResult;
     });
 
     const runSteer = Effect.fn("GameRun.runSteer")(function* (threadId: ThreadId, text: string) {
@@ -1287,6 +1451,7 @@ export const layer = Layer.effect(
         threadId: created.threadId,
         brief: input.brief,
         ...(input.artDirection === undefined ? {} : { artDirection: input.artDirection }),
+        ...(input.profile === undefined ? {} : { profile: input.profile }),
       }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("game run did not start after create", { reason: cause.message }),
@@ -1319,6 +1484,8 @@ export const layer = Layer.effect(
       createGame,
       runStatus,
       runStop,
+      runDecide,
+      runProfile,
       runSteer,
       roundDetail,
       pickDetail,

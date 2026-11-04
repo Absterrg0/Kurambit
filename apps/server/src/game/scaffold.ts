@@ -48,6 +48,17 @@ export const CREATOR_SESSION_SECTION = `## The creator's session and the product
 This section is for the creator's own session on this game. A session the production run launched for one of its roles follows its prompt instead.
 
 A production run may be working on this game; game_run_status says whether one is live and what it is doing. While one is live, do not edit the game's files: the run is changing them and its commits and resets would collide with yours. Pass the creator's requests to the run with game_run_steer and tell them the run's next round takes it up. When no run is live, work on the game directly as usual.
+
+A run is Guided or on Autopilot. A Guided run asks the creator at its decision points (the vision's look, which prototype to keep, the ladder of what to build) by sending a message to this chat. When one arrives, read the decision with game_run_status and present it:
+
+- Show the evidence as a visual reply: an HTML render with the images by their local paths (key art, each prototype's frame sheet), and the pitches or the ladder as short text.
+- Say in a few plain lines what differs or what to look at; no jargon about the run.
+- Ask, and invite an answer in the creator's own words. They may combine ("the first one's movement with the second one's camera"), change things, or let the run decide.
+- Say what the run does by itself if nobody answers, and when (game_run_status gives the time).
+
+Record the answer with game_run_decide: choose the answer that fits what they said and put their words in notes. A refused answer comes back with the reason; fix it and call again. Do not answer for the creator; if nobody answers, the run takes its default by itself.
+
+The creator can ask at any time to switch the run between Guided and Autopilot (game_run_profile) or to steer it (game_run_steer).
 `;
 
 /**

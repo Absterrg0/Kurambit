@@ -231,6 +231,7 @@ const PICK_NOTE: Record<Picked["how"], string | null> = {
   won: null,
   selected: "The comparator called it a tie, then selected this one to continue from.",
   "only-booted": "Only one prototype booted, so it was adopted without a comparison.",
+  creator: "The creator picked this prototype after seeing both.",
 };
 
 /**

@@ -8,6 +8,9 @@ import type {
   Block,
   BotFact,
   Compare,
+  DecideStep,
+  Decided,
+  Decision,
   Evidence,
   GitOp,
   Half,
@@ -115,7 +118,13 @@ export type StepResult =
   | { readonly kind: "boot"; readonly ok: boolean; readonly detail: string }
   | { readonly kind: "facts"; readonly jev: boolean; readonly code: string }
   | { readonly kind: "bot"; readonly fact: Omit<BotFact, "side"> }
-  | { readonly kind: "note" };
+  | { readonly kind: "note" }
+  | {
+      readonly kind: "decided";
+      readonly answer: string;
+      readonly notes: string;
+      readonly by: Decided["by"];
+    };
 
 export type Planned =
   | {
@@ -393,6 +402,241 @@ const insertRung = (ladder: Ladder, text: string, n: number, logs: string[]): La
     ...ladder,
     rungs: at < 0 ? [...ladder.rungs, parsed.rung] : ladder.rungs.toSpliced(at, 0, parsed.rung),
   };
+};
+
+// ── Creator decisions (Guided). ───────────────────────────────────────────
+/** How long a Guided run waits for an answer once its question reached the creator's agent. */
+export const DECISION_WAIT_MS = 3 * MIN;
+/** How long a question may wait behind a busy creator chat before the run takes its default. */
+export const DECISION_DELIVERY_MS = 10 * MIN;
+// Answers that send work back once; each needs the creator's notes.
+const ONCE = { style: "redo", prototype: "retry", ladder: "rewrite" } as const;
+
+const protoFiles = (i: number) => ({
+  pitch: `.studio/proto-${i}.md`,
+  sheet: `.studio/proto-${i}-frames.jpg`,
+});
+const protoName = (i: number) => `Prototype ${i + 1}`;
+const usedOnce = (s: RunState, kind: Decision["kind"]) =>
+  s.decided.some((d) => d.kind === kind && d.answer === ONCE[kind]);
+const decisionId = (s: RunState, kind: Decision["kind"]) => `${kind}-${s.decided.length + 1}`;
+
+const styleDecision = (s: RunState): Decision => ({
+  id: decisionId(s, "style"),
+  kind: "style",
+  ask: "Is this the look and the game the creator wants before the prototypes start?",
+  evidence: [{ label: "Vision", path: "VISION.md" }],
+  text: "",
+  answers: [
+    { answer: "approve", means: "Keep this vision and look; the run builds two prototypes next." },
+    ...(usedOnce(s, "style")
+      ? []
+      : [
+          {
+            answer: "redo",
+            means:
+              "The vision is made once more with the creator's notes (required), then asked again.",
+          },
+        ]),
+  ],
+  fallback: "approve",
+  waitMs: DECISION_WAIT_MS,
+});
+
+const prototypeDecision = (
+  s: RunState,
+  booted: ReadonlyArray<{ readonly branch: string; readonly i: number }>,
+): Decision => ({
+  id: decisionId(s, "prototype"),
+  kind: "prototype",
+  ask: "Which prototype should the game continue from?",
+  evidence: booted.flatMap((p) => [
+    { label: `${protoName(p.i)}: its pitch`, path: protoFiles(p.i).pitch },
+    { label: `${protoName(p.i)}: frames from its own play`, path: protoFiles(p.i).sheet },
+  ]),
+  text: booted.map((p) => `${protoName(p.i)} is on branch ${p.branch}.`).join("\n"),
+  answers: [
+    ...booted.map((p) => ({
+      answer: `pick-${p.i + 1}`,
+      means: `Continue from ${protoName(p.i)}. Notes, if any, say what to take from the other one; they lead the first full build.`,
+      branch: p.branch,
+    })),
+    ...(usedOnce(s, "prototype")
+      ? []
+      : [
+          {
+            answer: "retry",
+            means:
+              "One more pair of prototypes, made with the creator's notes (required), then asked again.",
+          },
+        ]),
+    { answer: "run", means: "Let the run's blind comparison of the two pick." },
+  ],
+  fallback: "run",
+  waitMs: DECISION_WAIT_MS,
+});
+
+const ladderDecision = (s: RunState, ladder: Ladder): Decision => ({
+  id: decisionId(s, "ladder"),
+  kind: "ladder",
+  ask: "Is this the ladder the creator wants the run to build, rung by rung?",
+  evidence: [
+    { label: "Plan", path: "PLAN.md" },
+    { label: "Ladder", path: LADDER },
+  ],
+  text: ladder.rungs
+    .map((r, i) => `${i + 1}. ${r.is}\n${r.checks.map((c) => `   - ${c.what}`).join("\n")}`)
+    .join("\n"),
+  answers: [
+    { answer: "approve", means: "Build this ladder as written." },
+    {
+      answer: "edit",
+      means:
+        'Replace the ladder: notes hold the full ladder as JSON {"rungs":[{"is":"...","checks":[{"what":"...","how":"..."}]}]}, 4 to 7 rungs with 2 to 4 checks each.',
+    },
+    ...(usedOnce(s, "ladder")
+      ? []
+      : [
+          {
+            answer: "rewrite",
+            means:
+              "The plan rewrites the ladder once with the creator's notes (required), then asks again.",
+          },
+        ]),
+  ],
+  fallback: "approve",
+  waitMs: DECISION_WAIT_MS,
+});
+
+/** The creator's answer as the run takes it, or why it is refused. */
+export const checkAnswer = (
+  d: Decision,
+  answer: string,
+  notes: string,
+): { readonly answer: string; readonly notes: string } | { readonly error: string } => {
+  const a = answer.trim().toLowerCase();
+  const n = notes.trim();
+  if (!d.answers.some((x) => x.answer === a))
+    return {
+      error: `"${answer}" is not an answer to decision ${d.id}; answer one of: ${d.answers.map((x) => x.answer).join(", ")}.`,
+    };
+  if (a === ONCE[d.kind] && n.length === 0)
+    return { error: `${a} needs notes: what the creator wants changed, in their words.` };
+  if (d.kind === "ladder" && a === "edit") {
+    const parsed = parseLadder(n);
+    if ("error" in parsed) return { error: `The ladder in notes was refused: ${parsed.error}` };
+    return { answer: a, notes: n };
+  }
+  return { answer: a, notes: n.slice(0, 4000) };
+};
+
+export type DecisionWait =
+  | { readonly kind: "send" }
+  | { readonly kind: "deliver" }
+  | { readonly kind: "wait"; readonly ms: number }
+  | { readonly kind: "default" };
+
+/** Where a decide step's wait stands: a resumed step waits only what is left of it. */
+export const decisionWait = (step: DecideStep, now: number): DecisionWait => {
+  if (step.sent === null) return { kind: "send" };
+  if (step.deadline === null)
+    return now - step.sent >= DECISION_DELIVERY_MS ? { kind: "default" } : { kind: "deliver" };
+  return step.deadline > now ? { kind: "wait", ms: step.deadline - now } : { kind: "default" };
+};
+
+// The blind pick of the booted prototypes, as an Autopilot run (or a creator's "run") takes it.
+const startPick = (
+  s: RunState,
+  booted: ReadonlyArray<string>,
+  input: Inputs,
+  logs: string[],
+): RunState => {
+  const pick = (cmp: Compare, chosen: string, phase: "compare" | "adopt"): RunState => ({
+    ...s,
+    task: { _tag: "pick", phase, cmp, chosen, notes: "", comparison: "" },
+  });
+  if (booted.length >= 2) {
+    // Labels, play order and report presentation are randomized independently.
+    const [a, b] = bit(input.coin, 0) ? [booted[1]!, booted[0]!] : [booted[0]!, booted[1]!];
+    return pick(newCompare(Roles.PICK_QUESTION, a, b, bit(input.coin, 1), ["x"]), "", "compare");
+  }
+  if (booted.length === 1) return pick(newCompare("", "", "", true, []), booted[0]!, "adopt");
+  logs.push("pick: no prototype booted; building from trunk");
+  return proceed(s, "pick", input.now);
+};
+
+/** A decision's answer, or its default when `taken` is null, moves the run on. */
+const decide = (
+  state: RunState,
+  d: Decision,
+  taken: { readonly answer: string; readonly notes: string; readonly by: Decided["by"] } | null,
+  input: Inputs,
+  logs: string[],
+): RunState => {
+  // Anything the checks would refuse is the default: the run never stops on an answer.
+  const checked = taken === null ? null : checkAnswer(d, taken.answer, taken.notes);
+  const ok = checked !== null && "answer" in checked && taken !== null;
+  const answer = ok ? checked.answer : d.fallback;
+  const notes = ok ? checked.notes : "";
+  const by = ok ? taken.by : "default";
+  logs.push(
+    by === "creator"
+      ? `creator decided ${d.kind}: ${answer}${notes.length > 0 ? ` (${notes.slice(0, 200)})` : ""}`
+      : `${d.kind}: no answer from the creator; the run takes its default, ${answer}`,
+  );
+  const s: RunState = {
+    ...state,
+    decided: [...state.decided, { id: d.id, kind: d.kind, answer, notes, by }],
+  };
+  switch (d.kind) {
+    case "style":
+      return answer === "redo"
+        ? { ...s, task: { ...stageTask("vision"), phase: "revise", review: notes } }
+        : proceed(s, "vision", input.now);
+    case "ladder": {
+      if (answer === "rewrite")
+        return { ...s, task: { ...stageTask("plan"), phase: "revise", review: notes } };
+      const edited = answer === "edit" ? parseLadder(notes) : null;
+      return proceed(
+        edited !== null && "ladder" in edited ? { ...s, ladder: edited.ladder } : s,
+        "plan",
+        input.now,
+      );
+    }
+    case "prototype": {
+      if (answer === "retry") {
+        const retries = s.decided.filter((x) => x.kind === "prototype" && x.answer === "retry");
+        return { ...s, protos: [], task: { ...protoTask(2 * retries.length), notes } };
+      }
+      const chosen = d.answers.find((x) => x.answer === answer)?.branch;
+      if (answer === "run" || chosen === undefined)
+        return startPick(
+          s,
+          s.protos.filter((p) => p.booted).map((p) => p.branch),
+          input,
+          logs,
+        );
+      const others = d.answers.flatMap((x) =>
+        x.branch === undefined || x.branch === chosen ? [] : [x.branch],
+      );
+      return {
+        ...s,
+        pickNotes: "",
+        buildNotes:
+          notes.length > 0
+            ? `The creator picked this prototype and asked to take this from the other one (branch ${others.join(", ")}; read its code with git show): ${notes}`
+            : "",
+        task: {
+          _tag: "pick",
+          phase: "adopt",
+          cmp: newCompare("", "", "", true, []),
+          chosen,
+          notes: "",
+          comparison: "",
+        },
+      };
+    }
+  }
 };
 
 // ── Step builders. ────────────────────────────────────────────────────────
@@ -987,7 +1231,7 @@ const newRound = (state: RunState, now: number): Round => {
 const stageTask = (
   name: "vision" | "plan" | "art" | "build",
   block: Block | null = null,
-): Task => ({
+): Extract<Task, { _tag: "stage" }> => ({
   _tag: "stage",
   name,
   phase: "role",
@@ -998,15 +1242,35 @@ const stageTask = (
   review: "",
 });
 
-// Stages before rounds; the stage label names the last one finished.
+// Stages before rounds; the stage label names the last one finished. A Guided
+// run asks the creator after the vision and after the plan.
 const afterStage = (state: RunState, done: string, now: number): RunState => {
+  if (state.profile === "guided" && done === "vision")
+    return { ...state, stage: done, task: { _tag: "decide", decision: styleDecision(state) } };
+  if (state.profile === "guided" && done === "plan" && state.ladder !== null) {
+    const ladder = state.ladder;
+    if (ladder.rungs.length > 0)
+      return {
+        ...state,
+        stage: done,
+        task: { _tag: "decide", decision: ladderDecision(state, ladder) },
+      };
+  }
+  return proceed(state, done, now);
+};
+
+const protoTask = (i: number): Extract<Task, { _tag: "proto" }> => ({
+  _tag: "proto",
+  i,
+  phase: "role",
+  branch: "",
+  why: "",
+  notes: "",
+});
+
+const proceed = (state: RunState, done: string, now: number): RunState => {
   if (done === "starting") return { ...state, task: stageTask("vision") };
-  if (done === "vision")
-    return {
-      ...state,
-      stage: done,
-      task: { _tag: "proto", i: 0, phase: "role", branch: "", why: "" },
-    };
+  if (done === "vision") return { ...state, stage: done, task: protoTask(0) };
   if (done === "pick") return { ...state, stage: done, task: stageTask("plan") };
   if (done === "plan") return { ...state, stage: done, task: stageTask("art") };
   if (done === "art") {
@@ -1019,7 +1283,7 @@ const afterStage = (state: RunState, done: string, now: number): RunState => {
           "build",
           newBlock(
             "build",
-            Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null),
+            Roles.firstDirection(state.lane, state.ladder?.rungs[0] ?? null, state.buildNotes),
             true,
             ms,
           ),
@@ -1081,6 +1345,15 @@ export const plan = (state: RunState, input: Inputs): Planned => {
           read: [ART_REVIEW],
           clear: [ART_REVIEW],
         });
+      if (t.phase === "revise")
+        return name === "plan"
+          ? act({
+              role: "plan",
+              prompt: Roles.ladderRevise(t.review),
+              capMs: CAP.plan,
+              read: [LADDER],
+            })
+          : act({ role: name, prompt: Roles.visionRevise(t.review, lane), capMs: CAP.vision });
       if (t.phase === "redo" && name === "plan")
         return act({
           role: "plan",
@@ -1110,6 +1383,16 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     }
     case "proto": {
       const name = `proto-${t.i}`;
+      if (t.phase === "role" && state.profile === "guided") {
+        const files = protoFiles(t.i);
+        return act({
+          role: name,
+          prompt: Roles.proto(lane, { pitch: files.pitch, notes: t.notes }),
+          capMs: CAP.proto,
+          clear: [files.pitch, files.sheet],
+          sheet: files.sheet,
+        });
+      }
       if (t.phase === "role")
         return act({ role: name, prompt: Roles.proto(lane), capMs: CAP.proto });
       if (t.phase === "commit") return run({ _tag: "branch-commit", name, message: name });
@@ -1153,6 +1436,14 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       return t.phase === "restore"
         ? run({ _tag: "restore-commit", sha: t.candidate, message: t.branch })
         : toTrunk(t.branch);
+    case "decide": {
+      if (state.profile === "guided")
+        return go({ kind: "decide", id, decision: t.decision, sent: null, deadline: null });
+      // Switched to Autopilot before the question went out: the run decides itself.
+      const logs: string[] = [];
+      const next = plan(decide(state, t.decision, null, input, logs), input);
+      return next.kind === "step" ? { ...next, logs: [...logs, ...(next.logs ?? [])] } : next;
+    }
     case "round":
       break;
   }
@@ -1422,8 +1713,31 @@ export const applyResult = (
   switch (t._tag) {
     case "init":
       return out(afterStage({ ...s, trunk: g!.branch, best: g!.sha }, s.stage, now));
+    case "decide":
+      return out(
+        decide(
+          s,
+          t.decision,
+          res.kind === "decided" ? { answer: res.answer, notes: res.notes, by: res.by } : null,
+          input,
+          logs,
+        ),
+      );
     case "stage": {
       const artFits = (cap: number) => fit(s, now, cap, BUILD_RESERVE_MS + FLOOR_MS) >= FLOOR_MS;
+      // The creator's rewrite keeps the old ladder when the new one has the wrong shape.
+      if (t.name === "plan" && t.phase === "revise") {
+        const parsed = parseLadder(res.kind === "done" ? (res.files[LADDER] ?? "") : "");
+        if ("ladder" in parsed) logs.push(`ladder rewritten: ${parsed.ladder.rungs.length} rungs`);
+        else
+          logs.push(`ladder rewrite not taken (${parsed.error.slice(0, 200)}); keeping the ladder`);
+        return out({
+          ...s,
+          ladder: "ladder" in parsed ? parsed.ladder : s.ladder,
+          task: { ...t, phase: "commit" },
+        });
+      }
+      if (t.phase === "revise") return out({ ...s, task: { ...t, phase: "commit" } });
       if (t.name === "plan" && (t.phase === "role" || t.phase === "redo")) {
         const taken = takeLadder(res, t.phase === "redo", logs);
         if (taken.kind === "fix")
@@ -1485,29 +1799,25 @@ export const applyResult = (
         return out({ ...s, task: { ...t, phase: res.ok ? "keep" : "reject", why: res.detail } });
       // Only prototypes that booted compete or become the base.
       const protos = [...s.protos, { branch: t.branch, booted: t.phase === "keep" }];
-      if (t.i === 0)
+      if (t.i % 2 === 0)
+        return out({ ...s, protos, task: { ...protoTask(t.i + 1), notes: t.notes } });
+      const booted = protos.flatMap((p, k) =>
+        p.booted ? [{ branch: p.branch, i: t.i - 1 + k }] : [],
+      );
+      if (s.profile === "guided" && booted.length >= 2)
         return out({
           ...s,
           protos,
-          task: { _tag: "proto", i: 1, phase: "role", branch: "", why: "" },
+          task: { _tag: "decide", decision: prototypeDecision(s, booted) },
         });
-      const booted = protos.filter((p) => p.booted).map((p) => p.branch);
-      const pick = (cmp: Compare, chosen: string, phase: "compare" | "adopt"): RunState => ({
-        ...s,
-        protos,
-        task: { _tag: "pick", phase, cmp, chosen, notes: "", comparison: "" },
-      });
-      if (booted.length >= 2) {
-        // Labels, play order and report presentation are randomized independently.
-        const [a, b] = bit(input.coin, 0) ? [booted[1]!, booted[0]!] : [booted[0]!, booted[1]!];
-        return out(
-          pick(newCompare(Roles.PICK_QUESTION, a, b, bit(input.coin, 1), ["x"]), "", "compare"),
-        );
-      }
-      if (booted.length === 1)
-        return out(pick(newCompare("", "", "", true, []), booted[0]!, "adopt"));
-      logs.push("pick: no prototype booted; building from trunk");
-      return out(afterStage({ ...s, protos }, "pick", now));
+      return out(
+        startPick(
+          { ...s, protos },
+          booted.map((p) => p.branch),
+          input,
+          logs,
+        ),
+      );
     }
     case "pick": {
       if (t.phase === "adopt") {
@@ -1517,9 +1827,18 @@ export const applyResult = (
             : `pick ${t.chosen} not adopted (${g!.detail}); staying on best`,
         );
         // A lone booted prototype has no comparison; only a tie's selection leaves notes on the task.
+        const creator =
+          t.cmp.x === "" &&
+          s.decided.findLast((d) => d.kind === "prototype")?.answer.startsWith("pick-") === true;
         const picked: Picked = {
           branch: t.chosen,
-          how: t.cmp.x === "" ? "only-booted" : t.notes !== "" ? "selected" : "won",
+          how: creator
+            ? "creator"
+            : t.cmp.x === ""
+              ? "only-booted"
+              : t.notes !== ""
+                ? "selected"
+                : "won",
           comparison: t.comparison === "" ? null : t.comparison,
         };
         return out(

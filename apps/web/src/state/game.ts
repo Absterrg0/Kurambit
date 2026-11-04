@@ -103,6 +103,10 @@ export const gameEnvironment = {
     label: "game:runSteer",
     tag: WS_METHODS.gameRunSteer,
   }),
+  runProfile: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runProfile",
+    tag: WS_METHODS.gameRunProfile,
+  }),
   events: gameEvents,
   create: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:create",

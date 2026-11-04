@@ -94,11 +94,30 @@ export const ladderFix = (error: string): string =>
 const checkList = (rung: Pick<Rung, "checks">): string =>
   rung.checks.map((c, i) => `${i + 1}. ${c.what} (observed by: ${c.how})`).join("\n");
 
-export const proto = (lane: string): string =>
-  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. Do not use subagents. Do not commit.`;
+/**
+ * In a Guided run the creator chooses between the prototypes, so each one plays
+ * itself once (its frames become the creator's sheet) and pitches itself in two lines.
+ */
+export const proto = (
+  lane: string,
+  guided: { readonly pitch: string; readonly notes: string } | null = null,
+): string =>
+  `${wholeBuildRule(lane)}${SKILL_LINE}Read the brief first. Build the smallest playable core loop in ./${lane} on this branch with placeholder art only: something winnable and losable. ${laneProfile(lane).run.prompts.shell}Keep the boot clean. ${
+    guided === null
+      ? ""
+      : `${guided.notes.length > 0 ? `The creator saw an earlier pair of prototypes and asked for this: ${guided.notes}\n` : ""}The creator chooses between this prototype and another one. Before you finish, play your build once with game_explore_start/act/close, so the creator sees its frames. Then write ${guided.pitch}: two lines in plain words, what this version tries and how it feels to play. `
+  }Do not use subagents. Do not commit.`;
 
-export const firstDirection = (lane: string, first: Rung | null = null): string =>
-  `Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${laneProfile(lane).run.prompts.shell}${first === null ? "" : `Aim at the ladder's first rung (${LADDER_FILE}), which the first round checks: the game IS ${first.is} Its checks:\n${checkList(first)}\nMake each check observable the way it says. `}End with something a player notices in the first minute; game files under ${lane}/ only.`;
+/** The vision once more, on the creator's notes about the key art and VISION.md. */
+export const visionRevise = (notes: string, lane: string): string =>
+  `${stage("vision", lane)}\n\nVISION.md and its key art exist already. The creator looked at them and asked for this:\n${notes}\nRevise VISION.md and render the key art again to answer it, keeping what the creator did not ask to change; name the new key art in VISION.md.`;
+
+/** The plan's ladder once more, on the creator's notes. */
+export const ladderRevise = (notes: string): string =>
+  `${TOOL_RULE}The creator read the ladder in ${LADDER_FILE} and asked for this:\n${notes}\nRewrite ${LADDER_FILE} to answer it, keeping the shape: ${LADDER_ASK} Update PLAN.md where the change makes it wrong. You may only write PLAN.md and ${LADDER_FILE}. Do not use subagents. Do not commit.`;
+
+export const firstDirection = (lane: string, first: Rung | null = null, creator = ""): string =>
+  `${creator.length > 0 ? `${creator}\n` : ""}Read VISION.md and PLAN.md first. Continue from what is on main (the picked prototype where one was merged): extend its code, do not restart from blank. Build the most important playable part: the full loop, a way to win and lose, sound from the start, using the files in ${laneAssets(lane)} for every visual and sound. Load every visual and sound through the ASSETS.md file-to-use map so each file lands where it was made for. Organize as a normal small project a stranger can read and continue: domain scenes/scripts beside presentation, rules and state separate. ${laneProfile(lane).run.prompts.shell}${first === null ? "" : `Aim at the ladder's first rung (${LADDER_FILE}), which the first round checks: the game IS ${first.is} Its checks:\n${checkList(first)}\nMake each check observable the way it says. `}End with something a player notices in the first minute; game files under ${lane}/ only.`;
 
 /**
  * A ladder round's direction: the rung, then the reviewer's ledger. A rung that
