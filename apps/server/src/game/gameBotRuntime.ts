@@ -382,7 +382,12 @@ export const makeJev = () => {
 
 export type Jev = ReturnType<typeof makeJev>;
 
-/** Frames for the result: one still every 5 wall seconds, at most 8 spread over the run. */
+/**
+ * Frames for the result: one still every 5 wall seconds, at most 8 spread over
+ * the run, and always the run's last screen (`END_FRAME`, taken before the game
+ * quits), where its ending is: a 5-second grid alone misses it.
+ */
+export const END_FRAME = "frame-end.png";
 export const extractRunFrames = async (
   ffmpeg: string,
   videoPath: string,
@@ -394,42 +399,40 @@ export const extractRunFrames = async (
   if (!present) return [];
   const framesDir = NodePath.join(runDir, "frames");
   await NodeFSP.mkdir(framesDir, { recursive: true });
-  await new Promise<void>((resolve) => {
-    const child = NodeChildProcess.spawn(
-      ffmpeg,
-      ["-y", "-i", videoPath, "-vf", "fps=1/5", NodePath.join(framesDir, "frame-%03d.png")],
-      {
-        env: headlessEnv(),
-        stdio: "ignore",
-      },
-    );
-    child.once("exit", () => resolve());
-    child.once("error", () => resolve());
-    setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* gone */
-      }
-      resolve();
-    }, 120_000).unref?.();
-  });
+  const runFfmpeg = (args: ReadonlyArray<string>) =>
+    new Promise<void>((resolve) => {
+      const child = NodeChildProcess.spawn(ffmpeg, args, { env: headlessEnv(), stdio: "ignore" });
+      child.once("exit", () => resolve());
+      child.once("error", () => resolve());
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* gone */
+        }
+        resolve();
+      }, 120_000).unref?.();
+    });
+  await runFfmpeg([
+    "-y",
+    "-i",
+    videoPath,
+    "-vf",
+    "fps=1/5",
+    NodePath.join(framesDir, "frame-%03d.png"),
+  ]);
   const files = await NodeFSP.readdir(framesDir).catch(() => [] as string[]);
-  const pngs = files
-    .filter((file) => file.endsWith(".png"))
+  const grid = files
+    .filter((file) => /^frame-\d+\.png$/.test(file))
     .sort()
     .map((file) => NodePath.join(framesDir, file));
-  if (pngs.length === 0) return [];
-  if (pngs.length <= GAME_BOT_BOUNDS.maxFrames) return pngs;
+  const end = files.includes(END_FRAME) ? [NodePath.join(framesDir, END_FRAME)] : [];
+  const room = GAME_BOT_BOUNDS.maxFrames - end.length;
+  if (grid.length <= room) return [...grid, ...end];
   const picked: string[] = [];
-  for (let i = 0; i < GAME_BOT_BOUNDS.maxFrames; i++) {
-    const index = Math.min(
-      pngs.length - 1,
-      Math.floor(((i + 0.5) * pngs.length) / GAME_BOT_BOUNDS.maxFrames),
-    );
-    picked.push(pngs[index]!);
-  }
-  return [...new Set(picked)];
+  for (let i = 0; i < room; i++)
+    picked.push(grid[Math.min(grid.length - 1, Math.floor(((i + 0.5) * grid.length) / room))]!);
+  return [...new Set(picked), ...end];
 };
 
 /** Stills extraction runs fixed ffmpeg args on already-written video: allowlisted engine base only. */

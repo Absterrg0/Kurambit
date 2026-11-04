@@ -19,6 +19,7 @@ import {
   asGameState,
   asNumber,
   createLineReader,
+  END_FRAME,
   extractRunFrames,
   frozenScreenFinding,
   killPid,
@@ -31,6 +32,8 @@ import {
 } from "./gameBotRuntime.ts";
 import { parseLine, type PlaySession } from "./playSession.ts";
 
+const END_SETTLE_MS = 1500;
+
 /** What an engine's launch hands the bot run: the session, and how its picture is kept. */
 export interface BotLaunch {
   readonly play: PlaySession;
@@ -38,6 +41,8 @@ export interface BotLaunch {
   readonly onTick: (tick: number) => Promise<void>;
   /** Finalizes the run's video once play ended. */
   readonly finishVideo: () => Promise<void>;
+  /** Writes the screen as it is now; best effort. */
+  readonly snapshot: (path: string) => Promise<void>;
   /** Ends everything the launch started. Idempotent. */
   readonly stop: () => Promise<void>;
 }
@@ -560,6 +565,14 @@ export const playBot = async (
       note: stopped() ? "The run was stopped." : `Wall budget of ${args.seconds}s ended.`,
       evidence: {},
     };
+    // The run's last screen (often its ending) is kept before the game quits: the
+    // video's tail is recorded after the window is gone. A bot that reported an
+    // outcome gets a moment first, since games show their end screen after a beat.
+    if (childDone !== null) await sleep(END_SETTLE_MS);
+    await NodeFSP.mkdir(NodePath.join(args.runDir, "frames"), { recursive: true }).catch(
+      () => undefined,
+    );
+    await launch.snapshot(NodePath.join(args.runDir, "frames", END_FRAME)).catch(() => undefined);
     await play.close();
     await sleep(500);
     await launch.finishVideo();

@@ -81,7 +81,13 @@ export const launchProcessBot = async (input: {
       alive: () => child.exitCode === null && child.signalCode === null && !session.stopped,
     });
     const shown = display;
-    return { play, onTick: async () => undefined, finishVideo: shown.finishVideo, stop };
+    return {
+      play,
+      onTick: async () => undefined,
+      finishVideo: shown.finishVideo,
+      snapshot: shown.snapshot,
+      stop,
+    };
   } catch (error) {
     await stop();
     throw stoppedError(session, error);
@@ -134,6 +140,7 @@ export const launchPageBot = async (input: {
       shots += 1;
       await play.still(NodePath.join(framesDir, `shot-${String(shots).padStart(4, "0")}.png`));
     },
+    snapshot: (path) => play.still(path),
     finishVideo: async () => {
       if (shots === 0) return;
       await new Promise<void>((resolve) => {

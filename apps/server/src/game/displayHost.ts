@@ -201,9 +201,41 @@ export const openRecordedDisplay = async (input: {
     await release();
     throw error;
   }
+  const { width, height } = input.viewport;
+  const snapshot = (path: string): Promise<void> =>
+    new Promise<void>((resolve) => {
+      const child = NodeChildProcess.spawn(
+        input.ffmpeg,
+        [
+          "-y",
+          "-f",
+          "x11grab",
+          "-video_size",
+          `${width}x${height}`,
+          "-i",
+          `:${display}`,
+          "-frames:v",
+          "1",
+          path,
+        ],
+        { env: engineChildEnv(), stdio: "ignore" },
+      );
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve();
+      }, 10_000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      child.once("exit", done);
+      child.once("error", done);
+    });
   return {
     /** The DISPLAY value a process plays on. */
     display: `:${display}`,
+    /** One picture of the display as it is now. */
+    snapshot,
     /** Finalizes the video; the display stays up for the processes still on it. */
     finishVideo,
     /** Finalizes the video if it still runs, then ends the display. */
