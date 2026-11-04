@@ -34,6 +34,8 @@ another app, such as a text editor, while it runs.
    under the game's `.studio/saves/godot/`.
 8. **Blender stays hidden.** The first `game_blender_*` call opens no visible Blender window and
    takes no focus.
+9. **Memory is read right.** No session or bot run is refused as `low-memory` while Activity
+   Monitor shows several GB of memory available (its Memory tab, with little memory pressure).
 
 ## Why each check exists
 
@@ -56,6 +58,9 @@ another app, such as a text editor, while it runs.
   `__CFBundleIdentifier`, which skips the Dock step. Since macOS 14 activation is cooperative, so
   the request alone should not take focus from the app in front. On macOS 13 and earlier it may.
   Check 2 tests both.
+- Node's `os.freemem()` counts only free pages on macOS (libuv `src/unix/darwin.c`), and macOS
+  keeps memory full of inactive and purgeable pages, so Kurambit reads `vm_stat` there instead.
+  Check 9 tests it.
 - Godot puts `user://` under `$HOME/Library/Application Support` on macOS and reads no XDG
   variable (`platform/macos/os_macos.mm`), so a play session gets its own `HOME`. Check 7 tests it.
 
