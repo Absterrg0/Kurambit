@@ -107,6 +107,30 @@ const CONTINUABLE = new Set([
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones your role needs)";
+/** Each lane's engine skill; a role told to read every skill must not get another engine's rules. */
+const ENGINE_SKILLS: Record<string, string> = {
+  godot: "godot-game",
+  web: "three",
+  unity: "unity",
+};
+
+const keepLaneSkill = async (skills: string, lane: string) => {
+  const own = ENGINE_SKILLS[lane];
+  if (own === undefined) return;
+  const others = Object.values(ENGINE_SKILLS).filter((name) => name !== own);
+  await Promise.all(
+    others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
+  );
+  const index = NodePath.join(skills, "AGENTS.md");
+  const text = await NodeFSP.readFile(index, "utf8").catch(() => null);
+  if (text === null) return;
+  const kept = text
+    .split("\n")
+    .filter((line) => !others.some((name) => line.startsWith(`- \`${name}\``)))
+    .join("\n");
+  await NodeFSP.writeFile(index, kept);
+};
+
 const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
 const STALE_SKILLS =
   /\n*## Studio skills \(read the ones your role needs\)\n\nSkill pack in \.\/studio-skills, one line each:[^\n]*\n/;
@@ -423,6 +447,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     // own work while earlier builds were made under different guidance.
     const ensureScaffold = (
       root: string,
+      lane: string,
       untrack: (p: ReadonlyArray<string>) => Effect.Effect<void>,
       fresh: boolean,
     ) =>
@@ -443,10 +468,12 @@ export const layer = (options: { readonly stateDir: string }) => {
             () => true,
             () => false,
           );
-          if (fresh || !present)
-            await NodeFSP.cp(from, to, { recursive: true }).catch(() => undefined);
+          if (!fresh && present) return false;
+          await NodeFSP.cp(from, to, { recursive: true }).catch(() => undefined);
+          return true;
         };
-        await copy(NodePath.join(templates, "studio"), NodePath.join(root, "studio-skills"));
+        const skills = NodePath.join(root, "studio-skills");
+        if (await copy(NodePath.join(templates, "studio"), skills)) await keepLaneSkill(skills, lane);
         await copy(
           NodePath.join(templates, "bot-kit"),
           NodePath.join(root, ".studio", "bot", "kit"),
@@ -693,7 +720,7 @@ export const layer = (options: { readonly stateDir: string }) => {
         });
 
       const loop = Effect.gen(function* () {
-        yield* ensureScaffold(root, git.untrack, state.seq === 0);
+        yield* ensureScaffold(root, state.lane, git.untrack, state.seq === 0);
         // Resume: put the tree where the next step expects it. A git step in
         // flight re-runs instead (every op is safe to repeat).
         const expected = Policy.expectedBranch(state);
