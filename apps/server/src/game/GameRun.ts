@@ -798,8 +798,28 @@ export const layer = (options: { readonly stateDir: string }) => {
         ),
       );
       // Exports need the memory a low-memory ending says is missing.
-      if (state.ending !== "stopped" && state.ending !== "failed" && state.ending !== "low-memory")
+      if (
+        state.ending !== "stopped" &&
+        state.ending !== "failed" &&
+        state.ending !== "low-memory"
+      ) {
+        // An ending mid-round (a usage limit, a provider outage) leaves the
+        // round's branch checked out with its unfinished work. The export is of
+        // the best build: that work is committed to its branch (a resume enters
+        // it again) and trunk is checked out first.
+        if (state.trunk.length > 0) {
+          const parked = yield* gitStep(d.deps.game, git, root, {
+            _tag: "to-trunk",
+            trunk: state.trunk,
+            message: `unfinished: the run ended (${state.ending})`,
+          }).pipe(Effect.option);
+          if (Option.isNone(parked) || !parked.value.git.ok)
+            yield* log(
+              `finishExports: could not return to ${state.trunk}; exporting where HEAD is`,
+            );
+        }
         yield* finishExports(root, d.creator, d.deps.game, log).pipe(Effect.ignore);
+      }
     });
 
     const startClaimed = Effect.fn("GameRun.startClaimed")(function* (
