@@ -298,6 +298,22 @@ const ladderText = (ladder: Ladder, current: number | null): string =>
     .join("\n");
 
 // Why the last round on this rung did not land it, for the next attempt's direction.
+// A retry right after a try that booted and passed some of its checks grows that
+// work instead of rebuilding from the best: trunk has not moved since, and the
+// blind gate still judges the result against the best.
+const retryFrom = (state: RunState, rung: Rung): string | null => {
+  const last = state.rounds.at(-1);
+  const result = last?.rung;
+  if (last === undefined || result === undefined || result.rung !== rung.id) return null;
+  if (result.outcome !== "failed" || !result.checks.some((c) => c.pass)) return null;
+  return last.branch.length > 0 ? last.branch : null;
+};
+
+const lastTryOf = (state: RunState, r: Round): string => {
+  const rung = rungOf(state, r);
+  return rung === null ? "" : lastTry(state, rung);
+};
+
 const lastTry = (state: RunState, rung: Rung): string => {
   const last = state.rounds.findLast((x) => x.rung?.rung === rung.id);
   return last?.rung === undefined || last.rung.outcome === "landed"
@@ -1211,6 +1227,7 @@ const newRound = (state: RunState, now: number): Round => {
     botDecider: "policy",
     testerNotes: "",
     rung: null,
+    continued: false,
     checks: [],
     cmp: null,
     outcome: "",
@@ -1486,7 +1503,16 @@ export const plan = (state: RunState, input: Inputs): Planned => {
       const { ladder, rung } = pick;
       const k = positionOf(ladder, rung);
       const total = ladder.rungs.length;
-      const base = Roles.rungDirection(rung, k, total, state.next, lastTry(state, rung), lane);
+      const from = retryFrom(state, rung);
+      const base = Roles.rungDirection(
+        rung,
+        k,
+        total,
+        state.next,
+        lastTry(state, rung),
+        from !== null,
+        lane,
+      );
       const direction = state.steer.length === 0 ? base : Roles.steered(state.steer, base);
       const move = `Rung ${k} of ${total}: ${rung.is}`.slice(0, 300);
       const next: Round = {
@@ -1498,10 +1524,11 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         record: { ...r.record, move, ...steer },
       };
       const logs = [...pick.logs, `round ${n} builds rung ${k} of ${total}: ${rung.is}`];
-      // A ladder round starts from the judged best; an open pending line stays on its branch.
+      // A ladder round starts from the judged best (or the try it retries); an open
+      // pending line stays on its branch.
       if (state.pending !== null)
         logs.push(`round ${n}: pending ${state.pending.branch} stays on its branch`);
-      return step({ ...state, ladder, pending: null }, next, git(id, start(null)), logs);
+      return step({ ...state, ladder, pending: null }, next, git(id, start(from)), logs);
     }
     case "block":
     case "retry":
@@ -1519,7 +1546,10 @@ export const plan = (state: RunState, input: Inputs): Planned => {
     case "review-facts":
       return go({ kind: "facts", id });
     case "tester":
-      return tester(Roles.testerPlay(n, r.jev, rungOf(state, r)), CAP.tester);
+      return tester(
+        Roles.testerPlay(n, r.jev, rungOf(state, r), r.continued ? lastTryOf(state, r) : ""),
+        CAP.tester,
+      );
     case "tester-write":
       return tester(Roles.testerWrite(n, r.move, rungOf(state, r)), CAP.write, [
         `.studio/tester-${n}.md`,
@@ -1961,10 +1991,13 @@ const applyRound = (
           `round ${r.n}: refining pending ${pending.branch} against best ${s.best.slice(0, 8)}`,
         );
       const ms = fit(s, now, r.rung === null ? CAP.block : CAP.rung, ROUND_RESERVE_MS);
+      const continued = r.rung !== null && g!.entered === true;
+      if (continued) logs.push(`round ${r.n}: continues the last try's work`);
       const round = {
         ...r,
         branch: g!.branch,
         base: g!.sha,
+        continued,
         record: { ...r.record, branch: g!.branch },
       };
       if (ms < FLOOR_MS) return leaveRound({ ...s, pending }, round);
@@ -2004,9 +2037,10 @@ const applyRound = (
       // round stalling; there is nothing to judge, so its checks decide.
       if (r.rung !== null && r.phase === "commit") {
         logs.push(`round ${r.n}: no game-code change; verifying the rung on the current build`);
+        // A continued try's build is its starting point, which the gate still judges.
         return at({
           phase: "boot",
-          candidate: s.best,
+          candidate: r.continued ? r.base : s.best,
           record: { ...r.record, note: noteOf(r, "no change; rung verified on the current build") },
         });
       }

@@ -459,6 +459,8 @@ const Round = Schema.TaggedStruct("round", {
   // The ladder rung this round builds (an index into the ladder), null for a finish
   // round. Older run.json files have none.
   rung: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  // A rung retry that started from the previous try's branch, not from the best.
+  continued: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   // The tester's pass or fail per check, once it wrote them.
   checks: Schema.Array(
     Schema.Struct({ what: Schema.String, pass: Schema.Boolean, evidence: Schema.String }),

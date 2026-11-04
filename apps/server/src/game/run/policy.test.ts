@@ -1141,6 +1141,36 @@ describe("ladder", () => {
     expect(state.rounds[0]?.rung?.outcome).toBe("failed");
   });
 
+  it("retries a rung from the last try's branch when that try passed some checks", () => {
+    const starts: Array<string | null> = [];
+    const prompts: string[] = [];
+    const respond = ladderResponder("A", "B", [true, false], (step) => {
+      if (step.kind === "git" && step.op._tag === "start-round") {
+        starts.push(step.op.from);
+        return gitOk({
+          branch: `round-${starts.length}`,
+          sha: "best",
+          entered: step.op.from !== null,
+        });
+      }
+      if (step.kind === "role") prompts.push(step.prompt);
+      return undefined;
+    });
+    const one = oneRound(atLadder(), respond);
+    const two = oneRound(one.state, respond);
+    expect(starts).toEqual([null, "round-1"]);
+    expect(two.logs).toContain("round 2: continues the last try's work");
+    expect(prompts.some((p) => p.includes("Its work is your starting point"))).toBe(true);
+    expect(prompts.some((p) => p.includes("This build continues a try that failed"))).toBe(true);
+    // A try that passed nothing starts again from the best.
+    const none = ladderResponder("A", "B", [false, false], (step) => {
+      if (step.kind === "git" && step.op._tag === "start-round") starts.push(step.op.from);
+      return undefined;
+    });
+    oneRound(oneRound(atLadder(), none).state, none);
+    expect(starts.slice(2)).toEqual([null, null]);
+  });
+
   it("does not keep or judge a round whose checks fail, and sets the rung aside after two", () => {
     const respond = ladderResponder("A", "B", [true, false]);
     const one = oneRound(atLadder(), respond);

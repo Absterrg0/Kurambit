@@ -129,9 +129,10 @@ export const rungDirection = (
   total: number,
   ledger: string,
   lastTry: string,
+  continuing: boolean,
   lane: string,
 ): string =>
-  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: expose the state it reads as a game state value, show its HUD text, make its place or state reachable by a bot. Keep what works now working.${lastTry.length > 0 ? `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.` : ""}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${lane}/; notes, bots and skill files do not count.`;
+  `This round builds rung ${k} of ${total} of the ladder in ${LADDER_FILE}. After it the game IS: ${rung.is}\nThe round is kept only when a tester verifies each of these checks in play:\n${checkList(rung)}\nRead VISION.md and PLAN.md first, then build the rung as one playable whole, end to end, in the game's own code and assets. Make every check observable the way it says: expose the state it reads as a game state value, show its HUD text, make its place or state reachable by a bot. Keep what works now working.${lastTry.length === 0 ? "" : continuing ? `\nThe last round built this rung and did not land it: ${lastTry} Its work is your starting point: keep what passed working and finish what failed, making each failed check reachable and observable in play.` : `\nAn earlier round built this rung and did not land it: ${lastTry} Start from what is on main and do not repeat that.`}${ledger.length > 0 ? `\nAlongside the rung, never instead of it, clear what you can of the last review's ledger (bugs, rough edges, DO NOT REGRESS):\n${ledger}` : ""}\nWork in game files under ${lane}/; notes, bots and skill files do not count.`;
 
 const concreteAsk = (lane: string) =>
   `Make the smallest change that fixes the named top play flaw, including a deeper rule or system change when needed. Avoid filler and length targets. Work in game files under ${lane}/; notes, bots and skill files do not count.`;
@@ -168,14 +169,19 @@ export const builderMore = (minutes: number, direction: string): string =>
 
 // The service records every bot run itself in .studio/bot-results.jsonl, so
 // the tester never appends there. With a Jev key the tester also explores.
-export const testerPlay = (n: number, jev: boolean, rung: Rung | null = null): string => {
+export const testerPlay = (
+  n: number,
+  jev: boolean,
+  rung: Rung | null = null,
+  lastTry = "",
+): string => {
   const bots = jev
     ? "Write TWO bots under .studio/bot/: a win bot (goal: win or reach the ending; decider jev when the game suits fast decisions, else policy; run it with game_bot_run, seconds 60) and an exploration bot (goal: try everything; options covering the mechanics broadly, preferring what has not been tried, edge cases and limits; no goal of winning; see the run types in .studio/bot/kit/KIT-GUIDE.md; run it with game_bot_run mode explore, decider jev, seconds 40, runs 3). The service records every run and writes .studio/player-report.md; do not append to .studio/bot-results.jsonl yourself. A note without bot runs does not count."
     : "You must also write or update a bot file under .studio/bot/ for this game and run it at least once with game_bot_run (decider policy unless the game needs jev). The service records every run in .studio/bot-results.jsonl; do not append there yourself. A note without a bot run does not count.";
   const checks =
     rung === null
       ? ""
-      : `This build is meant to be: ${rung.is} Verify each of its checks by playing, with a bot where a check says so, and note for each what you did, the values you read and the frame that shows it:\n${checkList(rung)}\nSessions start with no saved data; for a check that something survives a relaunch, change it in a session started with saves keep, close it, and read it back in a second saves keep session.\n`;
+      : `This build is meant to be: ${rung.is} Verify each of its checks by playing, with a bot where a check says so, and note for each what you did, the values you read and the frame that shows it:\n${checkList(rung)}\nSessions start with no saved data; for a check that something survives a relaunch, change it in a session started with saves keep, close it, and read it back in a second saves keep session.\n${lastTry.length > 0 ? `This build continues a try that failed: ${lastTry} Set up the situation each check that failed there needs and verify it directly; confirm the checks that passed still hold.\n` : ""}`;
   return `${PLAYBOOK}${PLAYTEST_LINE}Play the game in this folder freely: start it with game_explore_start (default target), get past the menu, push as far as you can, try to win and to lose. ${checks}${bots} Play roughly, not gently. After every couple of plays, append what you did and felt to .studio/tester-${n}.md, main complaint first. You may only write that notes file and .studio/bot/ files; do not change game files. Do not use subagents.`;
 };
 
