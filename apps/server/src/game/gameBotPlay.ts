@@ -167,6 +167,7 @@ export const playBot = async (
     const picks: Array<{ t: number; name: string; via: string; randomized: boolean }> = [];
     const offered: Array<{ t: number; options: string[] }> = [];
     const setStates: Array<{ t: number; target: string; values: unknown }> = [];
+    const refusedSetStates: Array<{ t: number; target: string }> = [];
     const samples: Array<{ t: number; pos: [number, number, number] | null; state: unknown }> = [];
     const jevLog: Array<{ t: number; failure: string }> = [];
     const jevLatencies: Array<{ ms: number; warm: boolean }> = [];
@@ -533,8 +534,12 @@ export const playBot = async (
           typeof spec.values === "object" && spec.values !== null && !Array.isArray(spec.values)
             ? (spec.values as Record<string, unknown>)
             : {};
+        if (!can.has("setState")) {
+          refusedSetStates.push({ t, target: spec.target });
+          continue;
+        }
         setStates.push({ t, target: spec.target, values: spec.values ?? null });
-        if (can.has("setState")) await play.setState(spec.target, values);
+        await play.setState(spec.target, values);
       }
       const clicks: Click[] = [];
       for (const raw of answer.clicks) {
@@ -608,6 +613,7 @@ export const playBot = async (
       policyNote,
       usedSetState,
       setStates,
+      ...(refusedSetStates.length > 0 ? { refusedSetStates } : {}),
       ...(can.has("ui") ? {} : { skippedIdClicks }),
       picks,
       offered: offered.slice(0, 400),
@@ -641,6 +647,9 @@ export const playBot = async (
         ? ""
         : `Scene nodes ${perf.nodesStart} start, ${perf.nodesPeak} peak, ${perf.nodesEnd} end; ${perf.orphansEnd} orphans. `) +
       (usedSetState ? "Used explicit set-state writes (not pure play)." : "Pure input play.") +
+      (refusedSetStates.length > 0
+        ? ` ${refusedSetStates.length} set-state write(s) refused and never sent: this game's runner takes no state writes, so reach that state by playing.`
+        : "") +
       (skippedIdClicks > 0
         ? ` ${skippedIdClicks} id-click(s) skipped: this game's runner has no control tree.`
         : "") +
