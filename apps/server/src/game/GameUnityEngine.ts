@@ -330,19 +330,31 @@ export const makeUnityBackend = (
             () => false,
           ),
         );
+        // Unity still reports "Succeeded" when scene objects lost their
+        // scripts, and that player runs a game whose behaviour is gone (it
+        // boots, nothing moves). Every sample and bot would play it, so it
+        // is a failed build, named in Unity's own words.
+        const detached = Array.isArray(report["warnings"])
+          ? report["warnings"]
+              .map((entry) => String((entry as Record<string, unknown> | null)?.["message"] ?? ""))
+              .filter((message) => message.includes("is missing or no valid script is attached"))
+          : [];
         const succeeded =
           report["status"] === "completed" &&
           ours(report) &&
           report["result"] === "Succeeded" &&
-          present;
+          present &&
+          detached.length === 0;
         return asResult(
           last.process,
           succeeded,
           succeeded
             ? `Unity ${input.preset} player built.`
-            : !ours(report)
-              ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
-              : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
+            : detached.length > 0 && ours(report) && report["result"] === "Succeeded"
+              ? `The Unity ${input.preset} build lost scripts on ${detached.length} scene object(s), so the player would not run them; fix the scripts or their references and rebuild:\n${[...new Set(detached)].slice(0, 6).join("\n")}`
+              : !ours(report)
+                ? `The Unity ${input.preset} build ended without its own report (status ${String(report["status"] ?? "none")}, build ${String(report["buildId"] ?? "none")}, expected ${String(buildId ?? input.outputPath)}).`
+                : `The Unity ${input.preset} build failed (${String(report["result"] ?? report["status"] ?? "no status")}): ${buildErrors(report["errors"]).slice(0, 1500)}`,
           input.outputPath,
         );
       }).pipe(
