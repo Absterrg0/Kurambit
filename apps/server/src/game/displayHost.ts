@@ -1,16 +1,13 @@
-// @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off -- The private display host: Xvfb, ffmpeg x11grab and display locks, by pid and by number.
-import * as NodeFS from "node:fs";
+// @effect-diagnostics globalTimers:off globalDate:off nodeBuiltinImport:off -- The private display host: Xvfb and display locks, by pid and by number.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
-import * as NodePath from "node:path";
 import type { GameViewport } from "@kurambit/contracts";
 import { engineChildEnv, findExecutable } from "./GameProcesses.ts";
-import { runOwned, spawnOwned, type OwnedProcess } from "./processHost.ts";
+import { spawnOwned, type OwnedProcess } from "./processHost.ts";
 
 /**
  * Where game processes get a screen: a private X display, never the user's.
- * Pictures and video come from here, not from an engine. Linux uses Xvfb and
- * ffmpeg today.
+ * Linux uses Xvfb; pictures and video come from the engine.
  */
 
 /** PATH discovery for xvfb-run, including the user-space fallback for hosts without one. */
@@ -99,37 +96,21 @@ const waitDisplay = async (n: number, timeoutMs: number): Promise<boolean> => {
   return false;
 };
 
-// A child that ignores its first signal (ffmpeg stuck on a dead display, a
-// wedged Xvfb) would outlive the run, so the stop escalates to SIGKILL.
-const stopChild = async (
-  owned: OwnedProcess | undefined,
-  first: NodeJS.Signals,
-  graceMs: number,
-): Promise<void> => owned?.stop({ first, graceMs });
-
 /**
- * One private display recorded to one video: Xvfb on a free display number
- * and a continuous ffmpeg x11grab of it. Per-tick screenshots never happen
- * (that capped T20 at ~1 Hz); the video is the picture. `track` receives each
- * pid so a stop can end them by number.
+ * One private display: Xvfb on a free display number, for a process that
+ * plays on it. Pictures and video come from the engine, never the display.
+ * `track` receives the display server so a stop can end it.
  */
-export const openRecordedDisplay = async (input: {
+export const openPrivateDisplay = async (input: {
   readonly xvfb: string;
-  readonly ffmpeg: string;
   readonly viewport: GameViewport;
-  readonly videoPath: string;
-  readonly logDir: string;
   readonly track: (owned: OwnedProcess) => void;
 }) => {
   const display = await pickDisplay();
   if (display === null) throw new Error("No free private X display.");
   let xvfb: OwnedProcess | undefined;
-  let ffmpeg: OwnedProcess | undefined;
-  // SIGINT lets ffmpeg finalize the mp4.
-  const finishVideo = (): Promise<void> => stopChild(ffmpeg, "SIGINT", 15_000);
   const release = async (): Promise<void> => {
-    await finishVideo();
-    await stopChild(xvfb, "SIGTERM", 3000);
+    await xvfb?.stop({ graceMs: 3000 });
     claimed.delete(display);
   };
   try {
@@ -143,61 +124,14 @@ export const openRecordedDisplay = async (input: {
     input.track(xvfb);
     if (!(await waitDisplay(display, 15_000)))
       throw new Error("The private display did not start.");
-    const log = NodeFS.openSync(NodePath.join(input.logDir, "ffmpeg.log"), "w");
-    ffmpeg = spawnOwned(
-      input.ffmpeg,
-      [
-        "-y",
-        "-f",
-        "x11grab",
-        "-video_size",
-        `${width}x${height}`,
-        "-framerate",
-        "12",
-        "-i",
-        `:${display}`,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-pix_fmt",
-        "yuv420p",
-        input.videoPath,
-      ],
-      { env: engineChildEnv(), stdio: ["ignore", log, log], tree: false },
-    );
-    input.track(ffmpeg);
   } catch (error) {
     await release();
     throw error;
   }
-  const { width, height } = input.viewport;
-  const snapshot = async (path: string): Promise<void> => {
-    await runOwned(
-      input.ffmpeg,
-      [
-        "-y",
-        "-f",
-        "x11grab",
-        "-video_size",
-        `${width}x${height}`,
-        "-i",
-        `:${display}`,
-        "-frames:v",
-        "1",
-        path,
-      ],
-      { env: engineChildEnv(), timeoutMs: 10_000 },
-    );
-  };
   return {
     /** The DISPLAY value a process plays on. */
     display: `:${display}`,
-    /** One picture of the display as it is now. */
-    snapshot,
-    /** Finalizes the video; the display stays up for the processes still on it. */
-    finishVideo,
-    /** Finalizes the video if it still runs, then ends the display. */
+    /** Ends the display. */
     release,
   };
 };

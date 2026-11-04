@@ -74,10 +74,22 @@ const writeKeptStorage = async (path: string, entries: KeptEntries): Promise<voi
   await NodeFSP.rename(partial, path);
 };
 
-export interface WebPlaySession extends PlaySession {
-  /** Writes the page's current picture: the browser is its own display host. */
-  readonly still: (path: string) => Promise<void>;
-}
+export type WebPlaySession = PlaySession;
+
+/**
+ * Counts the page's animation frames: the engine-side frame counter of a
+ * browser game, which stops when the page's main thread does.
+ */
+const FRAME_COUNTER = `(() => {
+  let frames = 0;
+  const raf = window.requestAnimationFrame.bind(window);
+  const count = () => {
+    frames += 1;
+    raf(count);
+  };
+  raf(count);
+  Object.defineProperty(window, "__kurambitFrames", { get: () => frames });
+})()`;
 
 /**
  * The browser host of the play-session protocol: headless Chromium on a
@@ -131,6 +143,7 @@ export const openWebPlaySession = async (input: {
             },
           }),
     });
+    await context.addInitScript(FRAME_COUNTER);
     const page = await context.newPage();
     const pending: GameConsoleMessage[] = [];
     let dropped = 0;
@@ -179,9 +192,15 @@ export const openWebPlaySession = async (input: {
       dropped = 0;
       return { messages, truncated };
     };
+    // The page's frame count as of the last state read; frames carry it.
+    let pageFrames = 0;
     const readState = async (): Promise<Record<string, unknown> | null> => {
-      const raw: unknown = await page.evaluate(READ_STUDIO_STATE).catch(() => null);
-      return typeof raw === "string" ? parseLine(raw) : null;
+      const raw: unknown = await page
+        .evaluate(`[${READ_STUDIO_STATE}, window.__kurambitFrames ?? 0]`)
+        .catch(() => null);
+      if (!Array.isArray(raw)) return null;
+      if (typeof raw[1] === "number") pageFrames = raw[1];
+      return typeof raw[0] === "string" ? parseLine(raw[0]) : null;
     };
     let booted = false;
     try {
@@ -308,15 +327,38 @@ export const openWebPlaySession = async (input: {
     let realtimeStart = 0;
     let ticks = 0;
     const keysDown = new Set<string>();
+    let screencast: Awaited<ReturnType<typeof context.newCDPSession>> | null = null;
     const session: WebPlaySession = {
-      protocol: 1,
-      capabilities: new Set(["realtime", "setState"]),
+      protocol: 2,
+      capabilities: new Set(["realtime", "setState", "frames"]),
       boot: { probe: bootProbe, consoleMessages: bootConsole.messages },
       bootPerf: null,
       act,
-      realtime: async () => {
+      realtime: async (frames) => {
         realtimeStart = Date.now();
         tickStart = 0;
+        if (frames === undefined) return;
+        // The compositor's own frames, as the page drew them; a page that
+        // draws nothing new sends none, and the video repeats its last one.
+        const cdp = await context.newCDPSession(page);
+        screencast = cdp;
+        cdp.on("Page.screencastFrame", (event) => {
+          void cdp
+            .send("Page.screencastFrameAck", { sessionId: event.sessionId })
+            .catch(() => undefined);
+          frames.onFrame({
+            frame: pageFrames,
+            t: (Date.now() - realtimeStart) / 1000,
+            jpeg: Buffer.from(event.data, "base64"),
+          });
+        });
+        const width = Math.min(frames.width, input.width);
+        await cdp.send("Page.startScreencast", {
+          format: "jpeg",
+          quality: 75,
+          maxWidth: width,
+          maxHeight: Math.round((input.height * width) / input.width),
+        });
       },
       nextTick: async () => {
         const wait = tickStart + TICK_MS - Date.now();
@@ -369,10 +411,13 @@ export const openWebPlaySession = async (input: {
         const call = `(${STUDIO_SET_STATE})(${JSON.stringify({ target, values })})`;
         await page.evaluate(call).catch(() => false);
       },
-      still: async (path) => {
-        await page.screenshot({ path }).catch(() => undefined);
-      },
+      still: (path) =>
+        page.screenshot({ path }).then(
+          () => true,
+          () => false,
+        ),
       close: async () => {
+        await screencast?.send("Page.stopScreencast").catch(() => undefined);
         try {
           if (keptStorage !== null) {
             // Leaving the page fires pagehide as closing the tab would, so a game

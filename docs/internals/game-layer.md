@@ -139,10 +139,19 @@ reports are shared; an engine adds only how a session launches.
   the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
   id-clicks are skipped and counted.
 
-Process runners connect out to a loopback port with a per-session token. Pictures and video belong
-to the display host ([displayHost.ts](../../apps/server/src/game/displayHost.ts)), not the engine:
-exploration runs under `xvfb-run` and the runner writes each act's picture; a bot run gets its own
-Xvfb display recorded by ffmpeg x11grab, and the browser host stitches one still per second.
+Process runners connect out to a loopback port with a per-session token, and quit when that
+connection closes. Pictures and video belong to the engine, never the OS: each act's picture is
+written by the runner, and from protocol 2 a bot run asks `realtime` for frames, which the runner
+streams as JPEGs of its back buffer after draw (Godot: the viewport texture after
+`frame_post_draw`; Unity: `CaptureScreenshotIntoRenderTexture` downscaled on the GPU and read back
+with `AsyncGPUReadback`; the browser: the CDP screencast). Each frame carries the engine's own
+drawn-frame counter. [frameVideo.ts](../../apps/server/src/game/frameVideo.ts) pipes them into one
+ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new one, so a game that
+draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the video with
+each frame's counter, game time and arrival (the evidence route is `engine-frames`). The run's end
+frame is the runner's own `still`. A protocol 1 runner (an older game's Unity probe) still plays,
+without video. The display host ([displayHost.ts](../../apps/server/src/game/displayHost.ts)) only
+gives the game a window it draws into.
 
 ## Tools
 

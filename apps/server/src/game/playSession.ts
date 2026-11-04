@@ -39,8 +39,14 @@ export interface PlaySession {
     screenshotPath: string | null,
     signal?: AbortSignal,
   ) => Promise<PlayActObservation>;
-  /** Lets the game run at normal speed for the rest of the session and starts the ticks. */
-  readonly realtime: () => Promise<void>;
+  /**
+   * Lets the game run at normal speed for the rest of the session and starts
+   * the ticks; with `frames` (runners with that capability) the engine's
+   * pictures go to `frames.onFrame` as they arrive.
+   */
+  readonly realtime: (frames?: PlayFrameRequest) => Promise<void>;
+  /** Writes the picture as it is now to `path`; false when it could not. Runners with `frames`. */
+  readonly still: (path: string) => Promise<boolean>;
   /** The next tick observation as the runner sent it, or null when none came in time. */
   readonly nextTick: (timeoutMs: number) => Promise<Record<string, unknown> | null>;
   readonly input: (input: {
@@ -53,6 +59,21 @@ export interface PlaySession {
   readonly setState: (target: string, values: Record<string, unknown>) => Promise<void>;
   /** Asks the runner to quit and lets go of the connection. Idempotent. */
   readonly close: () => Promise<void>;
+}
+
+/** One engine picture from the real-time stream. */
+export interface PlayFrame {
+  /** The engine's own count of drawn frames. */
+  readonly frame: number;
+  /** Game seconds since real-time play began. */
+  readonly t: number;
+  readonly jpeg: Buffer;
+}
+
+export interface PlayFrameRequest {
+  readonly fps: number;
+  readonly width: number;
+  readonly onFrame: (frame: PlayFrame) => void;
 }
 
 export interface PlayObservation {
@@ -220,14 +241,44 @@ export const parseLine = (line: string): Record<string, unknown> | null => {
   }
 };
 
-/** Lines from a socket, awaited one at a time with a deadline. */
+const FRAME_PREFIX = '{"op":"frame"';
+
+/**
+ * A frame line's picture, bounded; null for anything malformed. Frames are
+ * the largest and most frequent lines, so they skip schema decoding.
+ */
+const frameOf = (line: string): PlayFrame | null => {
+  const record = parseLine(line);
+  if (record === null || typeof record["jpeg"] !== "string") return null;
+  const frame = asNumber(record["frame"]);
+  const t = asNumber(record["t"]);
+  if (frame === null || t === null || record["jpeg"].length > 8 * 1024 * 1024) return null;
+  return { frame, t, jpeg: Buffer.from(record["jpeg"], "base64") };
+};
+
+/**
+ * Lines from a socket, awaited one at a time with a deadline. Frame lines
+ * never queue: they go to `onFrame` as they arrive (or are dropped while no
+ * one asked for frames), so a stream of pictures never delays an act's
+ * reply or a tick.
+ */
 const lineQueue = (socket: NodeNet.Socket) => {
   let buffer = "";
+  const ready: string[] = [];
   let closed = false;
   let wake: (() => void) | null = null;
+  let onFrame: ((frame: PlayFrame) => void) | null = null;
   socket.setEncoding("utf8");
   socket.on("data", (chunk: string) => {
     buffer += chunk;
+    for (let index = buffer.indexOf("\n"); index >= 0; index = buffer.indexOf("\n")) {
+      const line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      if (line.startsWith(FRAME_PREFIX)) {
+        const frame = onFrame === null ? null : frameOf(line);
+        if (frame !== null) onFrame?.(frame);
+      } else ready.push(line);
+    }
     wake?.();
   });
   const onClose = () => {
@@ -236,13 +287,7 @@ const lineQueue = (socket: NodeNet.Socket) => {
   };
   socket.on("close", onClose);
   socket.on("error", onClose);
-  const take = (): string | null => {
-    const index = buffer.indexOf("\n");
-    if (index < 0) return null;
-    const line = buffer.slice(0, index);
-    buffer = buffer.slice(index + 1);
-    return line;
-  };
+  const take = (): string | null => ready.shift() ?? null;
   /** One line, "closed" when the runner is gone, or "timeout". */
   const next = (timeoutMs: number, signal?: AbortSignal): Promise<string | "closed" | "timeout"> =>
     new Promise((resolve, reject) => {
@@ -266,7 +311,13 @@ const lineQueue = (socket: NodeNet.Socket) => {
         else if (closed) finish("closed");
       };
     });
-  return { next, closed: () => closed };
+  return {
+    next,
+    closed: () => closed,
+    frames: (sink: ((frame: PlayFrame) => void) | null) => {
+      onFrame = sink;
+    },
+  };
 };
 
 const decodeHandshake = Schema.decodeUnknownOption(PlaySessionHandshake);
@@ -319,7 +370,25 @@ const socketSession = (
         return sanitizeObservation(record);
       }
     },
-    realtime: async () => send({ op: "realtime" }),
+    realtime: async (frames) => {
+      if (frames !== undefined && capabilities.has("frames")) {
+        lines.frames(frames.onFrame);
+        send({ op: "realtime", frames: { fps: frames.fps, width: frames.width } });
+      } else send({ op: "realtime" });
+    },
+    still: async (path) => {
+      if (!capabilities.has("frames")) return false;
+      const id = nextId++;
+      send({ op: "still", id, path });
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const line = await lines.next(deadline - Date.now());
+        if (line === "timeout" || line === "closed") return false;
+        const record = parseLine(line.trim());
+        if (record !== null && replyOf(record) && record["id"] === id)
+          return record["ok"] === true && record["screenshot"] === true;
+      }
+    },
     nextTick: async (timeoutMs) => {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
@@ -335,6 +404,7 @@ const socketSession = (
     close: async () => {
       if (closed) return;
       closed = true;
+      lines.frames(null);
       // The quit line is flushed with end(); whoever launched the runner ends
       // its process tree if it lingers.
       if (!socket.destroyed)

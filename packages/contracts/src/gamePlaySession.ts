@@ -19,21 +19,36 @@ import {
  * the game paused between them, until a `realtime` command lets the game run
  * at normal speed and the runner streams one tick observation every 100 ms
  * while continuous held input steers it. Quit ends either phase.
+ *
+ * Protocol 2 adds the engine's own pictures: asked in `realtime`, a runner
+ * streams `frame` messages (its back buffer after draw, with its own drawn
+ * frame counter) that the harness records as the bot video, and answers
+ * `still` with a full-size picture. Every runner quits when its connection
+ * closes, so a harness that dies leaves no game running.
  */
-export const PLAY_SESSION_PROTOCOL = 1;
+export const PLAY_SESSION_PROTOCOL = 2;
+/** Every protocol a runner may speak; protocol 1 runners (older games' Unity probes) play without frames. */
+export const PlaySessionProtocol = Schema.Literals([1, 2]);
 
 /**
  * What a runner can do beyond acts of the shared playtest steps. A runner
  * without `realtime` cannot carry a bot; without `ui` its acts take no ui
  * steps and its bots' id-clicks are skipped; without `inspect` no inspect
- * steps; without `setState` a bot's state writes are refused.
+ * steps; without `setState` a bot's state writes are refused; without
+ * `frames` a bot run has no video and no end picture.
  */
-export const PlaySessionCapability = Schema.Literals(["realtime", "ui", "inspect", "setState"]);
+export const PlaySessionCapability = Schema.Literals([
+  "realtime",
+  "ui",
+  "inspect",
+  "setState",
+  "frames",
+]);
 export type PlaySessionCapability = typeof PlaySessionCapability.Type;
 
 /** The file a process runner reads at start (its path is the runner's argument). */
 export const PlaySessionRequest = Schema.Struct({
-  protocol: Schema.Literal(PLAY_SESSION_PROTOCOL),
+  protocol: PlaySessionProtocol,
   port: Schema.Int,
   token: Schema.String,
   /** Godot only: the isolated user:// root the runner must find itself under. */
@@ -73,7 +88,7 @@ const TickProbe = Schema.Struct({
 
 const helloHead = {
   op: Schema.Literal("hello"),
-  protocol: Schema.Literal(PLAY_SESSION_PROTOCOL),
+  protocol: PlaySessionProtocol,
   token: Schema.String,
   engine: Schema.String,
   capabilities: Schema.Array(PlaySessionCapability),
@@ -123,14 +138,34 @@ export const PlaySessionActReply = Schema.Struct({
 });
 export type PlaySessionActReply = typeof PlaySessionActReply.Type;
 
-/** Runner to harness: the answer to a setState or quit. */
+/** Runner to harness: the answer to a setState, still or quit. */
 export const PlaySessionCommandReply = Schema.Struct({
   op: Schema.Literal("reply"),
   id: Schema.Int,
   ok: Schema.Boolean,
   error: Schema.optionalKey(Schema.String),
   applied: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** A still's answer: whether the picture was written. */
+  screenshot: Schema.optionalKey(Schema.Boolean),
 });
+
+/**
+ * Runner to harness during real-time play, when `realtime` asked for frames:
+ * the game's picture as drawn, downscaled to the asked width. `frame` is the
+ * engine's own count of drawn frames, so a renderer that stalls shows as
+ * stalled even while the stream goes on.
+ */
+export const PlaySessionFrame = Schema.Struct({
+  op: Schema.Literal("frame"),
+  frame: Schema.Int,
+  /** Game seconds since real-time play began. */
+  t: Schema.Number,
+  width: Schema.Int,
+  height: Schema.Int,
+  /** The picture, a base64 JPEG. */
+  jpeg: Schema.String,
+});
+export type PlaySessionFrame = typeof PlaySessionFrame.Type;
 
 /**
  * Runner to harness, every 100 ms of real-time play: the bot runner's view.
@@ -179,8 +214,15 @@ export const PlaySessionCommand = Schema.Union([
     steps: Schema.Array(GameExploreStep),
     screenshotPath: Schema.NullOr(Schema.String),
   }),
-  /** Releases the hold for good and starts the tick stream. */
-  Schema.Struct({ op: Schema.Literal("realtime") }),
+  /**
+   * Releases the hold for good and starts the tick stream; with `frames`, a
+   * runner with that capability also streams `frame` messages at about `fps`,
+   * no wider than `width`.
+   */
+  Schema.Struct({
+    op: Schema.Literal("realtime"),
+    frames: Schema.optionalKey(Schema.Struct({ fps: Schema.Int, width: Schema.Int })),
+  }),
   /**
    * Continuous input: exactly these keys stay down until the next input,
    * taps press and release once (about 170 ms), clicks land at once.
@@ -198,6 +240,8 @@ export const PlaySessionCommand = Schema.Union([
     target: Schema.String,
     values: Schema.Record(Schema.String, Schema.Unknown),
   }),
+  /** Writes the picture as it is now to `path` (a PNG) and replies (runners with `frames`). */
+  Schema.Struct({ op: Schema.Literal("still"), id: Schema.Int, path: Schema.String }),
   Schema.Struct({ op: Schema.Literal("quit"), id: Schema.Int }),
 ]);
 export type PlaySessionCommand = typeof PlaySessionCommand.Type;

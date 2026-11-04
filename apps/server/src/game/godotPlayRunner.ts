@@ -89,6 +89,10 @@ var _tick := 0
 var _sweep_tick := 0
 var _held: Dictionary = {}
 var _tap_releases: Array = []
+var _frame_ms := 0
+var _frame_width := 0
+var _next_frame_ms := 0
+var _frame_pending := false
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -170,6 +174,7 @@ func _serve() -> void:
 		dead_pump = 0
 		await _pump()
 		_tick_taps()
+		_request_frame()
 		since_tick += 1
 		if since_tick >= tick_every:
 			since_tick = 0
@@ -209,18 +214,27 @@ func _handle(line: String) -> void:
 		_send(await _run_act(msg))
 	elif op == "realtime":
 		_realtime = true
+		var frames = msg.get("frames", null)
+		if typeof(frames) == TYPE_DICTIONARY and DisplayServer.get_name() != "headless":
+			_frame_ms = maxi(1, roundi(1000.0 / maxf(1.0, float(frames.get("fps", 12)))))
+			_frame_width = maxi(16, int(frames.get("width", 960)))
+	elif op == "still":
+		_send({"op": "reply", "id": msg.get("id", 0), "ok": true, "screenshot": await _still(msg.get("path", null))})
 	elif op == "input" and _realtime:
 		await _apply_input(msg)
 	elif op == "setState":
 		_send(_apply_set_state(msg))
 
 func _hello() -> Dictionary:
+	var capabilities := ["realtime", "ui", "inspect", "setState"]
+	if DisplayServer.get_name() != "headless":
+		capabilities.append("frames")
 	return {
 		"op": "hello",
-		"protocol": 1,
+		"protocol": 2,
 		"token": _token,
 		"engine": "godot",
-		"capabilities": ["realtime", "ui", "inspect", "setState"],
+		"capabilities": capabilities,
 		"physicsHz": _physics_hz,
 		"probe": _read_probe(ACT_TEXT_ENTRIES),
 		"screenText": _read_screen_text(ACT_TEXT_ENTRIES),
@@ -490,7 +504,49 @@ func _take_screenshot(path: Variant) -> bool:
 		return false
 	return img.save_png(path as String) == OK
 
+# The picture after the frame's draw, so a still shows what the game drew.
+func _still(path: Variant) -> bool:
+	await RenderingServer.frame_post_draw
+	return _take_screenshot(path)
+
 # --- real-time play (never blocks; the game keeps running) ---
+
+# At most one capture waits for the next draw; the stream runs on wall time,
+# so a game that draws slower than the asked rate sends what it drew.
+func _request_frame() -> void:
+	if _frame_ms <= 0 or _frame_pending:
+		return
+	var now := Time.get_ticks_msec()
+	if now < _next_frame_ms:
+		return
+	_next_frame_ms = maxi(_next_frame_ms + _frame_ms, now)
+	_frame_pending = true
+	RenderingServer.frame_post_draw.connect(_send_frame, CONNECT_ONE_SHOT)
+
+func _send_frame() -> void:
+	_frame_pending = false
+	var tex = root.get_texture()
+	if tex == null:
+		return
+	var img := tex.get_image()
+	if img == null or img.is_empty():
+		return
+	if img.get_width() > _frame_width:
+		img.resize(_frame_width, maxi(1, roundi(float(img.get_height()) * _frame_width / img.get_width())), Image.INTERPOLATE_BILINEAR)
+	var frames := Engine.get_physics_frames() - _start_physics
+	var frame := {
+		"op": "frame",
+		"frame": Engine.get_frames_drawn(),
+		"t": float(frames) / float(_physics_hz),
+		"width": img.get_width(),
+		"height": img.get_height(),
+		"jpeg": Marshalls.raw_to_base64(img.save_jpg_to_buffer(0.75)),
+	}
+	if _peer.get_status() != 2:
+		return
+	# Unsorted keys keep "op" first, which is how the harness tells a frame
+	# from every other line without parsing it.
+	_peer.put_data((JSON.stringify(frame, "", false) + "\n").to_utf8_buffer())
 
 func _pump() -> void:
 	_peer.poll()
