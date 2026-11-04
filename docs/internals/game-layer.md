@@ -116,8 +116,9 @@ reports are shared; an engine adds only how a session launches.
   the server writes under the game's ignored `builds/logs/` for each session, so it always matches
   the server.
 - Unity's runner is `Assets/Kurambit/StudioProbe.cs` inside the game, because a player only runs
-  code it was built with. The harness owns that file: a fresh production run copies it from the
-  template (`profile.run.harnessFiles`), and its first commit carries it. A game whose probe predates
+  code it was built with. The harness owns that file: a new production run copies it from the
+  template (`profile.run.harnessFiles`) right after init and commits it alone on trunk, so it never
+  rides in (or is rejected with) a role's commit. A game whose probe predates
   the versioned protocol still explores (it reads as protocol 0, acts only) but refuses bots with a
   message saying so, until a fresh run refreshes it.
 - three.js has no runner process. The browser host speaks the protocol to the page through the
