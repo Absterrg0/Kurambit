@@ -210,7 +210,13 @@ const GitOp = Schema.Union([
   }),
   Schema.TaggedStruct("to-trunk", { trunk: Schema.String, message: Schema.String }),
   Schema.TaggedStruct("adopt", { trunk: Schema.String, sha: Schema.String, label: Schema.String }),
-  Schema.TaggedStruct("ff-merge", { trunk: Schema.String, branch: Schema.String }),
+  Schema.TaggedStruct("ff-merge", {
+    trunk: Schema.String,
+    branch: Schema.String,
+    // The build of the blind play the run holds, checked against the merged tip; "" checks none.
+    // Older run.json files have none.
+    played: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  }),
   Schema.TaggedStruct("restore-commit", { sha: Schema.String, message: Schema.String }),
 ]);
 export type GitOp = typeof GitOp.Type;
@@ -414,8 +420,25 @@ const Compare = Schema.Struct({
   // Why the comparators got no bot facts although the round had a bot; "" when they did.
   botWithheld: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   judges: Schema.Array(Judge),
+  // The side whose sample is an earlier round's play of the same build, not played here.
+  // Older run.json files have none.
+  reused: Schema.NullOr(
+    Schema.Struct({ side: Side, round: Schema.Number, branch: Schema.String }),
+  ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
 });
 export type Compare = typeof Compare.Type;
+
+// The best build's own blind play, kept so the next gate under the same
+// question and sample budget plays only the candidate.
+const Played = Schema.Struct({
+  sha: Schema.String,
+  question: Schema.String,
+  budget: Schema.String,
+  round: Schema.Number,
+  branch: Schema.String,
+  sample: Sample,
+});
+export type Played = typeof Played.Type;
 
 const RoundPhase = Schema.Literals([
   "start",
@@ -583,6 +606,8 @@ const RunState = Schema.Struct({
   // The creator thread that started the run, so a server restart can resume
   // it with the same model and runtime mode. Older run.json files have none.
   creator: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // Older run.json files have none: their next gate plays both builds.
+  played: Schema.NullOr(Played).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   task: Task,
   inFlight: Schema.NullOr(Step),
 });
@@ -663,6 +688,7 @@ export const freshState = (
   ladder: null,
   steer: [],
   creator: "",
+  played: null,
   task: { _tag: "init" },
   inFlight: null,
 });
