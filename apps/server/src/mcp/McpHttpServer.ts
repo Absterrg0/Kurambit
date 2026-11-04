@@ -30,7 +30,6 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contra
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
-import * as GameRun from "../game/GameRun.ts";
 import * as GameService from "../game/GameService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -147,8 +146,8 @@ const looksLikeProviderToken = (token: string) => token.length > 0 && !token.inc
 
 const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
-  const clients = yield* Effect.serviceOption(McpClientAuthenticator);
-  const runs = yield* Effect.serviceOption(GameRun.GameRun);
+  const clients = yield* McpClientAuthenticator;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -158,9 +157,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         : "";
     const invocation =
       (yield* registry.resolve(token)) ??
-      (Option.isSome(clients) && token.length > 0
-        ? yield* clients.value.authenticate(request)
-        : undefined);
+      (token.length > 0 ? yield* clients.authenticate(request) : undefined);
     if (!invocation) {
       yield* Effect.logWarning("rejected MCP request with an unusable credential", {
         reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
@@ -168,13 +165,18 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       return unauthorized({
         request,
         presentedToken: token.length > 0,
-        offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
+        offerOAuth: !looksLikeProviderToken(token),
       });
     }
+    // An unreadable record counts as a run thread: hiding tools from a creator
+    // chat for one call is a lesser harm than telling a blind judge which build is which.
     const gameRunRole =
-      invocation.thread !== undefined && Option.isSome(runs)
-        ? yield* runs.value.toolRole(invocation.thread)
-        : null;
+      invocation.thread === undefined
+        ? null
+        : yield* threads.getThreadRecords(invocation.thread.threadId, []).pipe(
+            Effect.map(({ thread }) => (thread.launchedBy === "game_run" ? "run" : null)),
+            Effect.orElseSucceed(() => "run" as const),
+          );
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,

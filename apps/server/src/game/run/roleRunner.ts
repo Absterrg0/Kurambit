@@ -46,7 +46,7 @@ export type RoleDeps = {
   readonly launches: ThreadLaunch.ThreadLaunchService["Service"];
   readonly threads: ThreadManagement.ThreadManagementService["Service"];
   readonly game: GameService.GameService["Service"];
-  readonly vcs: GitWorkflow.GitWorkflowService["Service"] | null;
+  readonly vcs: GitWorkflow.GitWorkflowService["Service"];
 };
 export type RoleContext = {
   readonly root: string;
@@ -284,6 +284,7 @@ export const runRole: (
         initialMessage: { text: step.prompt, attachments: [] },
         createdBy: "user",
         creationSource: "server",
+        launchedBy: "game_run",
         ...(creatorLive ? { parentThreadId: ctx.creator } : {}),
       })
       .pipe(Effect.option);
@@ -519,7 +520,6 @@ const stepWorktree = (
 ) =>
   Effect.gen(function* () {
     const vcs = deps.vcs;
-    if (vcs === null) return null;
     const branch = `studio-wt/${ctx.runId}-${step.id}`;
     yield* vcs.pruneWorktrees({ cwd: ctx.root }).pipe(Effect.ignore);
     const refs = yield* vcs.listRefs({
@@ -624,12 +624,10 @@ const removeBlank = (
   ctx: RoleContext,
   blank: { readonly path: string; readonly branch: string },
 ) =>
-  deps.vcs === null
-    ? Effect.void
-    : Effect.gen(function* () {
-        yield* deps.vcs!.removeWorktree({ cwd: ctx.root, path: blank.path, force: true });
-        yield* deps.vcs!.deleteLocalBranch({ cwd: ctx.root, refName: blank.branch, force: true });
-      }).pipe(Effect.ignore);
+  Effect.gen(function* () {
+    yield* deps.vcs.removeWorktree({ cwd: ctx.root, path: blank.path, force: true });
+    yield* deps.vcs.deleteLocalBranch({ cwd: ctx.root, refName: blank.branch, force: true });
+  }).pipe(Effect.ignore);
 
 // T3 removes a thread's worktree the way the client does after deleting a
 // thread: the checkout goes, then the thread forgets it, then its branch.
@@ -644,10 +642,8 @@ export const releaseWorktree = (
   Effect.gen(function* () {
     const shell = yield* deps.threads.getThreadShell(threadId);
     if (shell === null || shell.worktreePath === null) return;
-    if (deps.vcs === null || shell.activeRunId !== null)
-      return yield* ctx.log(
-        `worktree ${shell.worktreePath} kept (${deps.vcs === null ? "no git service" : "role still running"})`,
-      );
+    if (shell.activeRunId !== null)
+      return yield* ctx.log(`worktree ${shell.worktreePath} kept (role still running)`);
     yield* deps.game.closeLiveEditors(shell.worktreePath);
     yield* deps.vcs.removeWorktree({ cwd: ctx.root, path: shell.worktreePath, force: true });
     yield* deps.threads.dispatch({

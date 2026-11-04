@@ -35,13 +35,29 @@ import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
+const roleThread = ThreadId.make("thread-role");
+const unreadableThread = ThreadId.make("thread-unreadable");
+
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GameService.GameService)({}),
-  Layer.mock(GameRun.GameRun)({ toolRole: () => Effect.succeed(null) }),
+  Layer.mock(GameRun.GameRun)({}),
+  Layer.mock(McpHttpServer.McpClientAuthenticator)({
+    authenticate: () => Effect.succeed(undefined),
+  }),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.empty,
-  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+  Layer.mock(ThreadManagementService.ThreadManagementService)({
+    getThreadRecords: (threadId) =>
+      threadId === unreadableThread
+        ? Effect.fail(
+            new Orchestrator.OrchestratorProjectionError({ threadId, cause: "unreadable" }),
+          )
+        : // Only the thread record is read; the rest of a real one is beside the point here.
+          Effect.succeed({
+            thread: threadId === roleThread ? { launchedBy: "game_run" } : {},
+          } as never),
+  }),
   Layer.mock(ProviderRegistry.ProviderRegistry)({}),
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({}),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
@@ -83,62 +99,73 @@ const ToolsListPayload = Schema.fromJsonString(
 );
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 
+const serveMcp = HttpRouter.serve(
+  McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
+  { disableListenLog: true, disableLogger: true },
+).pipe(
+  Layer.provide(
+    Layer.mock(ServerEnvironment.ServerEnvironment)({
+      getEnvironmentId: Effect.succeed("environment-scratch" as never),
+    }),
+  ),
+  Layer.provide(PreviewAutomationBroker.layer),
+  Layer.provide(PreviewBrowser.layer),
+  Layer.provide(layerStubServices),
+  Layer.build,
+);
+
+const listTools = Effect.fn("test.listTools")(function* (threadId: ThreadId) {
+  const credential = yield* McpSessionRegistry.issueActiveMcpCredential({
+    threadId,
+    providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+  });
+  expect(credential).toBeDefined();
+
+  const httpClient = yield* HttpClient.HttpClient;
+  const auth = credential!.config.authorizationHeader;
+  const initResponse = yield* httpClient.post("/mcp", {
+    headers: {
+      accept: "application/json, text/event-stream",
+      authorization: auth,
+    },
+    body: HttpBody.text(
+      `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"scratch","version":"1.0.0"}}}`,
+      "application/json",
+    ),
+  });
+  expect(initResponse.status).toBe(200);
+  const sessionId = initResponse.headers["mcp-session-id"];
+
+  const listResponse = yield* httpClient.post("/mcp", {
+    headers: {
+      accept: "application/json, text/event-stream",
+      authorization: auth,
+      "mcp-protocol-version": "2025-06-18",
+      ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+    },
+    body: HttpBody.text(
+      `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+      "application/json",
+    ),
+  });
+  const bodyText = yield* listResponse.text;
+  const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
+  return payload.result.tools;
+});
+
+const layerTestRuntime = Layer.mergeAll(
+  NodeHttpServer.layerTest,
+  ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-worktree-mcp-" }).pipe(
+    Layer.provide(NodeServices.layer),
+  ),
+  NodeServices.layer,
+);
+
 it.effect("production mcp layer lists worktree tools over http", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
-      yield* HttpRouter.serve(layerRoutes, {
-        disableListenLog: true,
-        disableLogger: true,
-      }).pipe(
-        Layer.provide(
-          Layer.mock(ServerEnvironment.ServerEnvironment)({
-            getEnvironmentId: Effect.succeed("environment-scratch" as never),
-          }),
-        ),
-        Layer.provide(PreviewAutomationBroker.layer),
-        Layer.provide(PreviewBrowser.layer),
-        Layer.provide(layerStubServices),
-        Layer.build,
-      );
-
-      const registry = McpSessionRegistry.issueActiveMcpCredential({
-        threadId: ThreadId.make("thread-scratch"),
-        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
-      });
-      const credential = yield* registry;
-      expect(credential).toBeDefined();
-
-      const httpClient = yield* HttpClient.HttpClient;
-      const auth = credential!.config.authorizationHeader;
-      const initResponse = yield* httpClient.post("/mcp", {
-        headers: {
-          accept: "application/json, text/event-stream",
-          authorization: auth,
-        },
-        body: HttpBody.text(
-          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"scratch","version":"1.0.0"}}}`,
-          "application/json",
-        ),
-      });
-      expect(initResponse.status).toBe(200);
-      const sessionId = initResponse.headers["mcp-session-id"];
-
-      const listResponse = yield* httpClient.post("/mcp", {
-        headers: {
-          accept: "application/json, text/event-stream",
-          authorization: auth,
-          "mcp-protocol-version": "2025-06-18",
-          ...(sessionId ? { "mcp-session-id": sessionId } : {}),
-        },
-        body: HttpBody.text(
-          `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-          "application/json",
-        ),
-      });
-      const bodyText = yield* listResponse.text;
-      const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
-      const tools = payload.result.tools;
+      yield* serveMcp;
+      const tools = yield* listTools(ThreadId.make("thread-scratch"));
       const toolNames = tools.map((tool) => tool.name);
       expect(toolNames).toContain("kurambit_worktree_handoff");
       expect(toolNames).toContain("kurambit_worktree_status");
@@ -176,15 +203,37 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
       }
     }),
-  ).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        NodeHttpServer.layerTest,
-        ServerConfig.layerTest(process.cwd(), { prefix: "kurambit-worktree-mcp-" }).pipe(
-          Layer.provide(NodeServices.layer),
-        ),
-        NodeServices.layer,
-      ),
-    ),
-  ),
+  ).pipe(Effect.provide(layerTestRuntime)),
+);
+
+// Blind judging rests on this: a sample or comparator that could list threads,
+// worktrees or projects could tell which build is which.
+it.effect("a production run's role thread gets no thread, worktree or project tools", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* serveMcp;
+      const hidden = [
+        "kurambit_thread_launch",
+        "kurambit_thread_search",
+        "kurambit_worktree_status",
+        "kurambit_worktree_handoff",
+        "kurambit_project_list",
+        "delegate_task",
+        "game_run_steer",
+      ];
+      const names = (threadId: ThreadId) =>
+        Effect.map(listTools(threadId), (tools) => tools.map((tool) => tool.name));
+
+      const creator = yield* names(ThreadId.make("thread-creator"));
+      for (const name of hidden) expect(creator).toContain(name);
+
+      const role = yield* names(roleThread);
+      for (const name of hidden) expect(role).not.toContain(name);
+      expect(role).toContain("game_status");
+
+      // A record that cannot be read fails closed.
+      const unreadable = yield* names(unreadableThread);
+      for (const name of hidden) expect(unreadable).not.toContain(name);
+    }),
+  ).pipe(Effect.provide(layerTestRuntime)),
 );

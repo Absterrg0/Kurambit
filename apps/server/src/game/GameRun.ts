@@ -334,36 +334,20 @@ export class GameRun extends Context.Service<
     ) => Effect.Effect<GameRunRestoreResult, GameRunError>;
     /** At server start: resume every run a restart cut off (no ending, no stop request). */
     readonly resumeInterrupted: () => Effect.Effect<void>;
-    /** MCP catalog role: "run" for threads this service launched, else null. */
-    readonly toolRole: (caller: { readonly threadId: ThreadId }) => Effect.Effect<"run" | null>;
   }
 >()("kurambit/game/GameRun") {}
 
-export const layer = (options: { readonly stateDir: string }) => {
-  const callerFile = (threadId: string): string =>
-    NodePath.join(options.stateDir, "game-run-callers", `${encodeURIComponent(threadId)}.json`);
-
-  // Game services resolve at call time from the request scope (as MCP handlers
-  // do), so this layer only needs its state directory and never constrains
-  // the server's layer order.
-  const need = <S>(option: Effect.Effect<Option.Option<S>>, path: string, name: string) =>
-    Effect.flatMap(option, (found) =>
-      Option.isSome(found)
-        ? Effect.succeed(found.value)
-        : Effect.fail(
-            new GameRunError({
-              operation: "resolve-service",
-              path,
-              reason: "service-unavailable",
-              detail: `${name} is not in scope for this call.`,
-            }),
-          ),
-    );
-
-  // Game operations are this server's own in-memory record and push, with no
-  // dependencies of their own, so the layer takes them at build time: the run
-  // records its live step there for the library.
-  const build = (operations: GameOperations.GameOperations["Service"]) => {
+export const layer = Layer.effect(
+  GameRun,
+  Effect.gen(function* () {
+    const operations = yield* GameOperations.GameOperations;
+    const projects = yield* GameProjectService.GameProjectService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const game = yield* GameService.GameService;
+    const vcs = yield* GitWorkflow.GitWorkflowService;
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    const deps: RoleDeps = { launches, threads, game, vcs };
     // One slot per game root, claimed before runStart's first yield so two
     // starts can never both fork a loop.
     const active = new Map<string, RunSlot>();
@@ -374,16 +358,6 @@ export const layer = (options: { readonly stateDir: string }) => {
     const steerLock = Semaphore.makeUnsafe(1);
 
     const resolveGame = Effect.fn("GameRun.resolveGame")(function* (threadId: ThreadId) {
-      const projects = yield* need(
-        Effect.serviceOption(GameProjectService.GameProjectService),
-        threadId,
-        "Game projects",
-      );
-      const threads = yield* need(
-        Effect.serviceOption(ThreadManagement.ThreadManagementService),
-        threadId,
-        "Thread management",
-      );
       const root = yield* projects.resolve(threadId).pipe(
         Effect.mapError(
           (cause) =>
@@ -403,7 +377,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           reason: "project-not-found",
           detail: "The thread is gone.",
         });
-      return { root, projectId: shell.projectId, projects, threads };
+      return { root, projectId: shell.projectId };
     });
 
     const load = (root: string) =>
@@ -495,18 +469,11 @@ export const layer = (options: { readonly stateDir: string }) => {
           );
       }).pipe(Effect.ignore, Effect.andThen(untrack(RUN_STATE_IGNORES)));
 
-    const markRoleThread = (threadId: ThreadId) =>
-      Effect.promise(async () => {
-        await NodeFSP.mkdir(NodePath.dirname(callerFile(threadId)), { recursive: true });
-        await NodeFSP.writeFile(callerFile(threadId), '{"role":"run"}\n');
-      }).pipe(Effect.ignore);
-
     type Drive = {
       readonly root: string;
       readonly projectId: ProjectId;
       readonly creator: ThreadId;
       readonly deps: RoleDeps;
-      readonly secrets: ServerSecretStore.ServerSecretStore["Service"] | null;
       readonly selection: ModelSelection;
       readonly runtimeMode: Parameters<RoleDeps["launches"]["launch"]>[0]["runtimeMode"];
     };
@@ -566,7 +533,6 @@ export const layer = (options: { readonly stateDir: string }) => {
             if (step === null || role === undefined) return;
             const attached = { ...role, attached: { threadId, runId } };
             const fresh = !state.threads.some((t) => t.threadId === threadId);
-            if (fresh) yield* markRoleThread(threadId);
             yield* save({
               ...state,
               inFlight:
@@ -663,14 +629,11 @@ export const layer = (options: { readonly stateDir: string }) => {
             return bootStep(d.deps.game, { creator: d.creator, root, lane: state.lane, log });
           case "facts":
             return Effect.gen(function* () {
-              const jev =
-                d.secrets === null
-                  ? false
-                  : Option.isSome(
-                      yield* d.secrets
-                        .get("game-bot-jev-api-key")
-                        .pipe(Effect.orElseSucceed(() => Option.none())),
-                    );
+              const jev = Option.isSome(
+                yield* secrets
+                  .get("game-bot-jev-api-key")
+                  .pipe(Effect.orElseSucceed(() => Option.none())),
+              );
               return {
                 kind: "facts",
                 jev,
@@ -827,7 +790,7 @@ export const layer = (options: { readonly stateDir: string }) => {
       target: Effect.Success<ReturnType<typeof resolveGame>>,
       slot: RunSlot,
     ) {
-      const { root, projectId, projects, threads } = target;
+      const { root, projectId } = target;
       // A start is an intent to run: a stale stop request would end it at once.
       yield* Effect.promise(() => NodeFSP.rm(paths(root).stop, { force: true }));
       const loaded = yield* load(root);
@@ -926,25 +889,11 @@ export const layer = (options: { readonly stateDir: string }) => {
         budgetEndsAt:
           state.budgetMinutes === null ? null : Date.now() + state.budgetMinutes * 60_000,
       };
-      const deps: RoleDeps = {
-        launches: yield* need(
-          Effect.serviceOption(ThreadLaunch.ThreadLaunchService),
-          root,
-          "Thread launching",
-        ),
-        threads,
-        game: yield* need(Effect.serviceOption(GameService.GameService), root, "Game service"),
-        vcs: Option.getOrNull(yield* Effect.serviceOption(GitWorkflow.GitWorkflowService)),
-      };
-      const secrets = Option.getOrNull(
-        yield* Effect.serviceOption(ServerSecretStore.ServerSecretStore),
-      );
       const drives: Drive = {
         root,
         projectId,
         creator: input.threadId,
         deps,
-        secrets,
         selection: selectionFor(current, state),
         runtimeMode: projection.thread.runtimeMode,
       };
@@ -1139,7 +1088,7 @@ export const layer = (options: { readonly stateDir: string }) => {
           "round-not-found",
           `Round ${round} is not recorded; the run has ${loaded.state.rounds.length} finished round${loaded.state.rounds.length === 1 ? "" : "s"}.`,
         );
-      const manifest = yield* target.projects.read(target.root).pipe(Effect.option);
+      const manifest = yield* projects.read(target.root).pipe(Effect.option);
       const lane = Option.isSome(manifest) ? manifest.value.godotProject : loaded.state.lane;
       const trunk = loaded.state.trunk.length > 0 ? loaded.state.trunk : "main";
       return { ...target, loaded, state: loaded.state, record, lane: lane || "godot", trunk };
@@ -1243,8 +1192,7 @@ export const layer = (options: { readonly stateDir: string }) => {
             message: `Round ${round}'s build (${what}) is already the game's current build.`,
           } satisfies GameRunRestoreResult;
         // Closed first, so no live editor saves its in-memory scene over the restored files.
-        const game = yield* Effect.serviceOption(GameService.GameService);
-        if (Option.isSome(game)) yield* game.value.closeLiveEditors(root);
+        yield* game.closeLiveEditors(root);
         const restored = yield* git.restoreBuild(sha, `restore round ${round} (creator)`);
         if (!(yield* git.sameBuild(sha)))
           return yield* no(
@@ -1286,23 +1234,8 @@ export const layer = (options: { readonly stateDir: string }) => {
       );
     });
 
-    const toolRole = (caller: { readonly threadId: ThreadId }): Effect.Effect<"run" | null> =>
-      Effect.promise(async () =>
-        (await readText(callerFile(caller.threadId)))?.includes('"run"') === true
-          ? ("run" as const)
-          : null,
-      );
-
     const createGame = Effect.fn("GameRun.createGame")(function* (input: GameCreateInput) {
-      const projects = yield* Effect.serviceOption(GameProjectService.GameProjectService);
-      if (Option.isNone(projects))
-        return yield* new GameOperationError({
-          operation: "create-game",
-          path: input.name,
-          reason: "io",
-          detail: "Game projects are not in scope for this call.",
-        });
-      const created = yield* projects.value.create(input);
+      const created = yield* projects.create(input);
       // The game exists either way; a run that cannot start shows as not
       // started in the Run tab, where the creator can start it again.
       yield* runStart({
@@ -1320,9 +1253,7 @@ export const layer = (options: { readonly stateDir: string }) => {
     // A live run's state has no ending; a creator's stop leaves the stop file,
     // so neither a stopped nor a finished run comes back on its own.
     const resumeInterrupted = Effect.fn("GameRun.resumeInterrupted")(function* () {
-      const projects = yield* Effect.serviceOption(GameProjectService.GameProjectService);
-      if (Option.isNone(projects)) return;
-      const games = yield* projects.value.list().pipe(Effect.orElseSucceed(() => []));
+      const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
       for (const game of games) {
         if (active.has(game.root) || (yield* stopRequested(game.root))) continue;
         const loaded = yield* load(game.root);
@@ -1348,13 +1279,6 @@ export const layer = (options: { readonly stateDir: string }) => {
       pickDetail,
       restoreRound,
       resumeInterrupted,
-      toolRole,
     });
-  };
-  return Layer.effect(
-    GameRun,
-    Effect.gen(function* () {
-      return build(yield* GameOperations.GameOperations);
-    }),
-  );
-};
+  }),
+);

@@ -496,18 +496,8 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
-const layerGameServices = Layer.mergeAll(GameService.layer).pipe(
-  // The production loop resolves its game services at call time from the
-  // request scope, so it only needs its state directory at build time and can
-  // sit anywhere in this chain.
-  Layer.provideMerge(
-    Layer.unwrap(
-      Effect.gen(function* () {
-        const config = yield* ServerConfig.ServerConfig;
-        return GameRun.layer({ stateDir: config.stateDir });
-      }),
-    ),
-  ),
+const layerGameServices = GameRun.layer.pipe(
+  Layer.provideMerge(GameService.layer),
   Layer.provideMerge(GameProjectService.layer),
   Layer.provideMerge(GameOperations.layer),
   Layer.provideMerge(GameToolchain.layer),
