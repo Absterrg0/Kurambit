@@ -35,6 +35,8 @@ import {
   GameRunRoundDetail,
   GameRunStatusResult,
   GameRunChecksResult,
+  GameRunStartResult,
+  GameRunStopResult,
   GameRunSteerResult,
   GameRunDecideInput,
   GameRunDecideResult,
@@ -468,6 +470,33 @@ const RunDecideTool = Tool.make("game_run_decide", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+const RunStartTool = Tool.make("game_run_start", {
+  description:
+    "Start this game's production run, or resume a stopped or ended one, when the creator asks. A new run needs the creator's brief; an empty brief resumes the existing run where it left off (an ended run whose ladder is done stays done; pass the creator's polish request with game_run_steer instead). budgetMinutes and profile (guided or autopilot) only when the creator gives them. The run plays in its own threads; tell the creator it started and that they can watch it on the Run tab.",
+  parameters: Schema.Struct({
+    brief: Schema.String.check(Schema.isMaxLength(8000)),
+    budgetMinutes: Schema.optionalKey(Schema.Number),
+    profile: Schema.optionalKey(GameRunProfile),
+  }),
+  success: GameRunStartResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+
+const RunStopTool = Tool.make("game_run_stop", {
+  description:
+    "Stop this game's live production run when the creator asks. The run finishes saving its current step and can be resumed later with game_run_start and an empty brief.",
+  success: GameRunStopResult,
+  failure,
+  failureMode: "return",
+  dependencies: runDependencies,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, hiddenFromRunThreads);
+
 const RunProfileTool = Tool.make("game_run_profile", {
   description:
     "Switch this game's live production run between guided (it asks the creator in this chat at its decision points and takes a default when nobody answers in time) and autopilot (it decides everything itself; a question it is waiting on takes its default now). Only when the creator asks for it.",
@@ -511,6 +540,8 @@ export const GameToolkit = Toolkit.make(
   RunRoundTool,
   RunSteerTool,
   RunChecksTool,
+  RunStartTool,
+  RunStopTool,
   RunDecideTool,
   RunProfileTool,
 );
