@@ -328,7 +328,7 @@ describe("rounds", () => {
     expect(state.stallStreak).toBe(1);
   });
 
-  it("ends the builder block after two turns without a source change", () => {
+  it("ends the builder block on a turn without a source change", () => {
     const quiet: Responder = (step, state) =>
       step.kind === "role" && step.role.startsWith("builder")
         ? done(step, { sourceBefore: "same", sourceAfter: "same", elapsedMs: 1000 })
@@ -338,7 +338,7 @@ describe("rounds", () => {
       quiet,
       (s) => s.task._tag === "round" && s.task.phase === "boot",
     );
-    expect(steps.filter((s) => s === "builder")).toHaveLength(2);
+    expect(steps.filter((s) => s === "builder")).toHaveLength(1);
   });
 
   it("asks the tester for a bot run once when none was recorded", () => {
@@ -1162,6 +1162,10 @@ describe("ladder", () => {
     expect(two.logs).toContain("round 2: continues the last try's work");
     expect(prompts.some((p) => p.includes("Its work is your starting point"))).toBe(true);
     expect(prompts.some((p) => p.includes("This build continues a try that failed"))).toBe(true);
+    // The reviewer reads the round's play evidence in one turn instead of replaying the build.
+    const reviews = prompts.filter((p) => p.includes(".studio/next.md as a ledger"));
+    expect(reviews).toHaveLength(2);
+    expect(reviews.every((p) => p.includes("do not play it again"))).toBe(true);
     // A try that passed nothing starts again from the best.
     const none = ladderResponder("A", "B", [false, false], (step) => {
       if (step.kind === "git" && step.op._tag === "start-round") starts.push(step.op.from);

@@ -195,8 +195,11 @@ judging is only a regression gate: a round whose checks pass is kept unless the 
 both orders (ties, splits and missing verdicts keep it). A round whose checks fail is not judged
 at all, since no verdict could keep it, and its work stays on its branch. Any round that does not
 land its rung (failed checks, a regression, a boot failure, no change) counts against the rung;
-the second sets it aside with its reason, and set-aside rungs come back once after the rest. The
-reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
+the second sets it aside with its reason, and set-aside rungs come back once after the rest. A
+run never pays twice for the same work: a retry right after a try that passed some checks grows
+that try's branch (the gate still judges it against the best), a builder turn that changes no game
+file ends its block, and a rung round's reviewer writes from the tester's and blind players'
+evidence instead of replaying the build. The reviewer's next.md is a ledger of bugs and DO NOT REGRESS that the builder clears beside the
 rung, never a round's goal; the reviewer may add one rung through `.studio/rung-change.json`
 when something blocks the ladder, one open at a time. The old round shape (the review's top flaw,
 judged on that flaw, STATUS: ready to the ship review) runs only as finish rounds, once the

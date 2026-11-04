@@ -725,7 +725,7 @@ const blockStep = (id: number, b: Block, lane: string): Step =>
     source: true,
   });
 
-/** A finished turn may need follow-up, but two turns without a game-file change end the block. */
+/** A finished turn may need follow-up, but a turn without a game-file change ends the block. */
 const advanceBlock = (b: Block, res: RoleDone): { block: Block; over: boolean } => {
   const prev = b.turns === 0 ? res.sourceBefore : b.source;
   const quiet = res.sourceAfter.length > 0 && res.sourceAfter === prev ? b.quiet + 1 : 0;
@@ -738,7 +738,7 @@ const advanceBlock = (b: Block, res: RoleDone): { block: Block; over: boolean } 
     turns: b.turns + 1,
     msLeft,
   };
-  return { block, over: quiet >= 2 || res.timedOut || msLeft < FLOOR_MS };
+  return { block, over: quiet >= 1 || res.timedOut || msLeft < FLOOR_MS };
 };
 
 // ── Blind comparison. ─────────────────────────────────────────────────────
@@ -1588,9 +1588,9 @@ export const plan = (state: RunState, input: Inputs): Planned => {
         const built = `it built rung ${k} (${rung.is}); the tester's checks: ${checkLine(r.checks) || "none verified"}; ${r.record.kept ? "kept" : `not kept (${r.record.note ?? ""})`}; judging ${verdicts}.`;
         return act({
           role: `reviewer-${n}`,
-          thread: r.thread,
           prompt: Roles.reviewerLedger(n, built, ladderText(state.ladder, rung.id), r.facts),
-          capMs: CAP.write,
+          capMs: CAP.reviewer,
+          clear: [".studio/next.md", RUNG_CHANGE],
           read: [...read, RUNG_CHANGE],
         });
       }
@@ -2019,8 +2019,8 @@ const applyRound = (
       if (res.kind !== "done")
         return at({ phase: r.phase === "block" ? "commit" : "retry-commit" });
       const stepped = advanceBlock(r.block!, res);
-      if (stepped.block.quiet >= 2)
-        logs.push(`builder ${r.block!.tag}: finished after two turns without a game-file change`);
+      if (stepped.block.quiet >= 1)
+        logs.push(`builder ${r.block!.tag}: done (a turn changed no game files)`);
       if (!stepped.over) return at({ block: stepped.block });
       return at({ block: stepped.block, phase: r.phase === "block" ? "commit" : "retry-commit" });
     }
@@ -2260,8 +2260,14 @@ const applyRound = (
           : { reviewed: `the candidate on branch ${r.branch} (cannot reach ${s.trunk})` }),
       });
     }
-    case "review-facts":
-      return at({ phase: "review", facts: res.kind === "facts" ? res.code : "" });
+    case "review-facts": {
+      const facts = res.kind === "facts" ? res.code : "";
+      // A rung round's build was just played by its tester and blind players; the
+      // reviewer writes the ledger from their evidence instead of playing it again.
+      return r.rung !== null
+        ? at({ phase: "review-write", facts, thread: null })
+        : at({ phase: "review", facts });
+    }
     case "review":
       if (res.kind === "done" && res.budgetCut) return finishRound(s, r, null, "budget", now, logs);
       return res.kind === "done"
