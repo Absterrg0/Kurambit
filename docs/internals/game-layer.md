@@ -164,7 +164,9 @@ because its server died takes its display along. Windows and macOS give an app n
 user's desktop far off every monitor, never minimized (a minimized Godot window stops drawing), and
 the launched program places it: Godot by `--position`, the Unity player by its probe
 (`SetWindowPos` without activation), Blender by `--window-geometry` with `--no-window-focus`. No
-capture code differs by OS. Without a window host a native session runs headless where its engine
+capture code differs by OS. macOS stops Godot drawing in a window it counts as occluded, so there
+the runner registers an additional output to keep frames coming; what a Mac tester must confirm
+is in [macos-play-check.md](../operations/macos-play-check.md). Without a window host a native session runs headless where its engine
 can and refuses plainly otherwise; it never falls back to the user's display on Linux.
 
 On Windows, Unity plays a Windows player (macOS plays no Unity game yet). Godot's `user://` is

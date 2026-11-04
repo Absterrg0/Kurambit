@@ -118,6 +118,11 @@ func _initialize() -> void:
 	# Window initialization without ticking autoloads first.
 	root.set_deferred("size", Vector2i(int(ProjectSettings.get_setting("display/window/size/viewport_width", 1152)), int(ProjectSettings.get_setting("display/window/size/viewport_height", 648))))
 	OS.add_logger(_errors)
+	# macOS stops drawing a window it counts as occluded, and a window placed
+	# off every monitor may count; an additional output keeps the frames (and
+	# so the pictures and the video) coming. Godot documents it for exactly this.
+	if OS.get_name() == "macOS" and DisplayServer.get_name() != "headless":
+		DisplayServer.register_additional_output(self)
 	await _serve()
 	OS.remove_logger(_errors)
 	quit(0)

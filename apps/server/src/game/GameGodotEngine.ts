@@ -26,6 +26,18 @@ import type { GameEngineBackend } from "./GameEngine.ts";
 import { GODOT_PROFILE } from "./godotProfile.ts";
 import { planWindowsPreset } from "./windowsPreset.ts";
 import { OFFSCREEN_POSITION } from "./windowHost.ts";
+import { HOST_OS } from "./processHost.ts";
+
+/** The CFBundleIdentifier of the macOS app bundle an executable lives in; null outside one. */
+const macBundleId = async (executable: string): Promise<string | null> => {
+  const at = executable.lastIndexOf(".app/Contents/MacOS/");
+  if (at < 0) return null;
+  const plist = await NodeFSP.readFile(
+    `${executable.slice(0, at)}.app/Contents/Info.plist`,
+    "utf8",
+  ).catch(() => "");
+  return /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1] ?? null;
+};
 
 const decodeCheckResult = Schema.decodeUnknownSync(RawCheckResult);
 
@@ -121,6 +133,13 @@ export const makeGodotBackend = (
         ...isolation.env,
       };
       for (const name of GameProcesses.DISPLAY_VARIABLES) delete env[name];
+      // Godot launched outside LaunchServices on macOS re-activates itself
+      // through the Dock to get its window registered, which takes focus from
+      // the user; with its bundle id in the environment it skips that.
+      if (input.window === "offscreen" && HOST_OS === "darwin") {
+        const bundleId = yield* Effect.promise(() => macBundleId(binary.path));
+        if (bundleId !== null) env.__CFBundleIdentifier = bundleId;
+      }
       const size = `${input.viewport.width}x${input.viewport.height}`;
       const runner = ["--path", input.projectDir, "--script", scriptPath, "--", input.requestPath];
       const window =
